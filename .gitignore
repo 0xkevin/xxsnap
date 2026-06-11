@@ -1,0 +1,12 @@
+build/
+.build/
+DerivedData/
+*.xcworkspace
+*.xcuserstate
+*.moved-aside
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+xcuserdata/
+.DS_Store

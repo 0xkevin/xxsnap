@@ -1,0 +1,70 @@
+import AppKit
+import XCTest
+@testable import Snipory
+
+final class WindowSelectionStateTests: XCTestCase {
+    func testBestWindowAtPointIgnoresTinyAndOffscreenWindows() {
+        let candidates = [
+            WindowSelectionCandidate(id: 1, ownerPID: 10, layer: 0, alpha: 1, bounds: NSRect(x: 0, y: 0, width: 20, height: 20), name: "tiny"),
+            WindowSelectionCandidate(id: 2, ownerPID: 11, layer: 0, alpha: 1, bounds: NSRect(x: 100, y: 100, width: 240, height: 180), name: "chat"),
+            WindowSelectionCandidate(id: 3, ownerPID: 12, layer: 0, alpha: 1, bounds: NSRect(x: 500, y: 500, width: 240, height: 180), name: "other"),
+        ]
+
+        let selected = WindowSelectionState.bestWindow(
+            at: NSPoint(x: 150, y: 150),
+            candidates: candidates,
+            desktopFrame: NSRect(x: 0, y: 0, width: 800, height: 600),
+            currentProcessID: 99
+        )
+
+        XCTAssertEqual(selected?.id, 2)
+    }
+
+    func testBestWindowFallsThroughToLowerWindowWhenPointIsOutsideFrontWindow() {
+        let candidates = [
+            WindowSelectionCandidate(id: 1, ownerPID: 10, layer: 0, alpha: 1, bounds: NSRect(x: 100, y: 100, width: 260, height: 180), name: "front"),
+            WindowSelectionCandidate(id: 2, ownerPID: 11, layer: 0, alpha: 1, bounds: NSRect(x: 0, y: 0, width: 800, height: 600), name: "behind"),
+        ]
+
+        let selected = WindowSelectionState.bestWindow(
+            at: NSPoint(x: 20, y: 20),
+            candidates: candidates,
+            desktopFrame: NSRect(x: 0, y: 0, width: 800, height: 600),
+            currentProcessID: 99
+        )
+
+        XCTAssertEqual(selected?.id, 2)
+    }
+
+    func testBestWindowPrefersTopmostCandidateOrderOverWindowArea() {
+        let candidates = [
+            WindowSelectionCandidate(id: 1, ownerPID: 10, layer: 0, alpha: 1, bounds: NSRect(x: 120, y: 120, width: 500, height: 400), name: "front"),
+            WindowSelectionCandidate(id: 2, ownerPID: 11, layer: 0, alpha: 1, bounds: NSRect(x: 200, y: 200, width: 120, height: 90), name: "behind"),
+        ]
+
+        let selected = WindowSelectionState.bestWindow(
+            at: NSPoint(x: 240, y: 230),
+            candidates: candidates,
+            desktopFrame: NSRect(x: 0, y: 0, width: 800, height: 600),
+            currentProcessID: 99
+        )
+
+        XCTAssertEqual(selected?.id, 1)
+    }
+
+    func testBestWindowIgnoresCurrentAppOverlayWindow() {
+        let candidates = [
+            WindowSelectionCandidate(id: 1, ownerPID: 99, layer: 0, alpha: 1, bounds: NSRect(x: 0, y: 0, width: 800, height: 600), name: "Snipory"),
+            WindowSelectionCandidate(id: 2, ownerPID: 10, layer: 0, alpha: 1, bounds: NSRect(x: 80, y: 90, width: 320, height: 240), name: "target"),
+        ]
+
+        let selected = WindowSelectionState.bestWindow(
+            at: NSPoint(x: 120, y: 120),
+            candidates: candidates,
+            desktopFrame: NSRect(x: 0, y: 0, width: 800, height: 600),
+            currentProcessID: 99
+        )
+
+        XCTAssertEqual(selected?.id, 2)
+    }
+}
