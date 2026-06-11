@@ -216,6 +216,7 @@ private final class SelectionOverlayView: NSView {
         case selecting
         case annotating
         case drawingShape
+        case draggingToolbar
         case draggingCornerRadius
         case movingShape
         case movingSelection
@@ -339,6 +340,10 @@ private final class SelectionOverlayView: NSView {
     private var movingSelectionStartRect: NSRect?
     private var movingSelectionPointerOffset = NSPoint.zero
     private var movingSelectionBounds: NSRect?
+    private var movingSelectionStartAnnotationRects: [NSRect] = []
+    private var mainToolbarOffset = NSSize.zero
+    private var toolbarDragStartPoint: NSPoint?
+    private var toolbarDragStartOffset = NSSize.zero
     private var activeResizeHandle: ShapeResizeHandle?
     private var resizingAnnotationStartRect: NSRect?
     private var activeSelectionResizeHandle: SelectionToolbarState.OverlayResizeHandle?
@@ -439,7 +444,7 @@ private final class SelectionOverlayView: NSView {
             pendingWindowSelectionRect = hoveredWindowRect?.contains(point) == true ? hoveredWindowRect : nil
             selectionStartPoint = point
             selectionCurrentPoint = point
-        case .annotating, .drawingShape, .draggingCornerRadius, .movingShape, .movingSelection, .resizingShape, .resizingSelection:
+        case .annotating, .drawingShape, .draggingToolbar, .draggingCornerRadius, .movingShape, .movingSelection, .resizingShape, .resizingSelection:
             handleAnnotatingMouseDown(at: point)
         }
 
@@ -458,11 +463,20 @@ private final class SelectionOverlayView: NSView {
             selectionCurrentPoint = point
         case .drawingShape:
             shapeCurrentPoint = clamp(point, to: bounds)
+        case .draggingToolbar:
+            updateDraggingToolbar(to: point)
         case .annotating:
-            shapeStartPoint = shapeStartPoint ?? clamp(point, to: bounds)
-            shapeCurrentPoint = clamp(point, to: bounds)
-            interactionMode = .drawingShape
-            NSLog("snipory overlay recovered drawing from drag point=(%.0f, %.0f)", point.x, point.y)
+            if isShapeToolActive {
+                shapeStartPoint = shapeStartPoint ?? clamp(point, to: bounds)
+                shapeCurrentPoint = clamp(point, to: bounds)
+                interactionMode = .drawingShape
+                NSLog("snipory overlay recovered drawing from drag point=(%.0f, %.0f)", point.x, point.y)
+            } else {
+                startSelectionMoveIfPossible(at: point)
+                if interactionMode == .movingSelection {
+                    updateMovingSelection(to: point)
+                }
+            }
         case .draggingCornerRadius:
             updateCornerRadius(from: point)
         case .movingShape:
@@ -482,6 +496,10 @@ private final class SelectionOverlayView: NSView {
         let point = convert(event.locationInWindow, from: nil)
         updateHoverState(at: point)
         updateColorSampler(at: point)
+        if isMainToolbarDragPoint(point) {
+            NSCursor.sniporyMove.set()
+            return
+        }
         setCursor(
             SelectionToolbarState.overlayCursorStyle(
                 isSelecting: interactionMode == .selecting,
@@ -541,6 +559,10 @@ private final class SelectionOverlayView: NSView {
             }
             shapeStartPoint = nil
             shapeCurrentPoint = nil
+            interactionMode = .annotating
+        case .draggingToolbar:
+            updateDraggingToolbar(to: point)
+            commitToolbarDrag()
             interactionMode = .annotating
         case .draggingCornerRadius:
             updateCornerRadius(from: point)
@@ -876,6 +898,10 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func handleAnnotatingMouseDown(at point: NSPoint) {
+        if startToolbarDragIfPossible(at: point) {
+            return
+        }
+
         if let button = toolbarButton(at: point) {
             guard isToolbarButtonEnabled(button) else {
                 return
@@ -932,22 +958,7 @@ private final class SelectionOverlayView: NSView {
             needsDisplay = true
             return
         case .selectionMove:
-            guard let lockedSelectionRect else {
-                break
-            }
-            NSCursor.sniporyMove.set()
-            movingSelectionStartRect = lockedSelectionRect.standardized
-            movingSelectionPointerOffset = NSPoint(
-                x: point.x - lockedSelectionRect.minX,
-                y: point.y - lockedSelectionRect.minY
-            )
-            movingSelectionBounds = screenBounds(containing: lockedSelectionRect)
-            sampledPointerPoint = nil
-            sampledColor = nil
-            interactionMode = .movingSelection
-            selectedAnnotationIndex = nil
-            showsStrokeStyleMenu = false
-            showsCornerRadiusPanel = false
+            startSelectionMoveIfPossible(at: point)
             needsDisplay = true
             return
         case .none:
@@ -972,10 +983,7 @@ private final class SelectionOverlayView: NSView {
     private func perform(_ button: ToolbarButton) {
         switch button {
         case .rectangle:
-            isShapeToolActive = true
-            activeShapeKind = .rectangle
-            currentShapeKind = .rectangle
-            currentStyle.strokeWidth = 2
+            toggleShapeTool(.rectangle)
             showsStrokeStyleMenu = false
             showsCornerRadiusPanel = false
         case .undo:
@@ -993,6 +1001,27 @@ private final class SelectionOverlayView: NSView {
         }
 
         needsDisplay = true
+    }
+
+    private func toggleShapeTool(_ shape: CaptureAnnotationKind) {
+        activeShapeKind = SelectionToolbarState.toggledPrimaryShapeTool(current: activeShapeKind, defaultShape: shape)
+        isShapeToolActive = activeShapeKind != nil
+        if let activeShapeKind {
+            currentShapeKind = activeShapeKind
+            currentStyle.strokeWidth = 2
+        } else {
+            selectedAnnotationIndex = nil
+        }
+        shapeStartPoint = nil
+        shapeCurrentPoint = nil
+    }
+
+    private func activateShapeTool(_ shape: CaptureAnnotationKind) {
+        activeShapeKind = shape
+        currentShapeKind = shape
+        isShapeToolActive = true
+        shapeStartPoint = nil
+        shapeCurrentPoint = nil
     }
 
     private func showPlaceholder(for button: ToolbarButton) {
@@ -1094,9 +1123,7 @@ private final class SelectionOverlayView: NSView {
         let rectangleButton = rectangleModeButtonRect(in: optionsRect)
         let rectangleDisclosureRect = rectangleDisclosureHitRect(in: rectangleButton)
         if rectangleDisclosureRect.contains(point) {
-            isShapeToolActive = true
-            activeShapeKind = .rectangle
-            currentShapeKind = .rectangle
+            activateShapeTool(.rectangle)
             applyCurrentStyleToSelectedAnnotation()
             showsCornerRadiusPanel.toggle()
             showsStrokeStyleMenu = false
@@ -1104,16 +1131,13 @@ private final class SelectionOverlayView: NSView {
         }
 
         if rectangleButton.contains(point) {
-            isShapeToolActive = true
-            activeShapeKind = .rectangle
-            currentShapeKind = .rectangle
+            activateShapeTool(.rectangle)
             applyCurrentStyleToSelectedAnnotation()
             return true
         }
 
         if ellipseModeButtonRect(in: optionsRect).contains(point) {
-            isShapeToolActive = true
-            currentShapeKind = .ellipse
+            activateShapeTool(.ellipse)
             showsCornerRadiusPanel = false
             applyCurrentStyleToSelectedAnnotation()
             return true
@@ -1229,9 +1253,7 @@ private final class SelectionOverlayView: NSView {
 
         selectedAnnotationIndex = index
         let annotation = annotations[index]
-        currentShapeKind = annotation.kind
-        activeShapeKind = annotation.kind
-        isShapeToolActive = true
+        activateShapeTool(annotation.kind)
         currentStyle = annotation.style
     }
 
@@ -1327,6 +1349,49 @@ private final class SelectionOverlayView: NSView {
         movingSelectionStartRect = nil
         movingSelectionBounds = nil
         movingSelectionPointerOffset = .zero
+        movingSelectionStartAnnotationRects.removeAll()
+        needsDisplay = true
+    }
+
+    private func startToolbarDragIfPossible(at point: NSPoint) -> Bool {
+        guard isMainToolbarDragPoint(point) else {
+            return false
+        }
+
+        NSCursor.sniporyMove.set()
+        toolbarDragStartPoint = point
+        toolbarDragStartOffset = mainToolbarOffset
+        interactionMode = .draggingToolbar
+        showsStrokeStyleMenu = false
+        showsCornerRadiusPanel = false
+        return true
+    }
+
+    private func updateDraggingToolbar(to point: NSPoint) {
+        guard
+            let selectionRect,
+            let toolbarDragStartPoint,
+            let baseToolbar = baseMainToolbarRect(for: selectionRect)
+        else {
+            return
+        }
+
+        let requestedOffset = NSSize(
+            width: toolbarDragStartOffset.width + point.x - toolbarDragStartPoint.x,
+            height: toolbarDragStartOffset.height + point.y - toolbarDragStartPoint.y
+        )
+        let layoutBounds = mainToolbarLayoutBounds(for: selectionRect)
+        let dragged = SelectionToolbarState.draggedToolbarRect(
+            baseRect: baseToolbar,
+            offset: requestedOffset,
+            inside: layoutBounds
+        )
+        mainToolbarOffset = NSSize(width: dragged.minX - baseToolbar.minX, height: dragged.minY - baseToolbar.minY)
+    }
+
+    private func commitToolbarDrag() {
+        toolbarDragStartPoint = nil
+        toolbarDragStartOffset = .zero
         needsDisplay = true
     }
 
@@ -1376,12 +1441,32 @@ private final class SelectionOverlayView: NSView {
 
         return SelectionToolbarState.shouldStartSelectionMove(
             isShapeToolActive: isShapeToolActive,
-            hasAnnotations: !annotations.isEmpty,
             pointer: point,
             selectionRect: lockedSelectionRect,
             screenBounds: screenBounds(containing: lockedSelectionRect),
             selectionResizeHandle: selectionResizeHandle(at: point)
         )
+    }
+
+    private func startSelectionMoveIfPossible(at point: NSPoint) {
+        guard shouldStartSelectionMove(at: point), let lockedSelectionRect else {
+            return
+        }
+
+        NSCursor.sniporyMove.set()
+        movingSelectionStartRect = lockedSelectionRect.standardized
+        movingSelectionStartAnnotationRects = annotations.map { overlayRect(fromLocalAnnotationRect: $0.rect) }
+        movingSelectionPointerOffset = NSPoint(
+            x: point.x - lockedSelectionRect.minX,
+            y: point.y - lockedSelectionRect.minY
+        )
+        movingSelectionBounds = screenBounds(containing: lockedSelectionRect)
+        sampledPointerPoint = nil
+        sampledColor = nil
+        interactionMode = .movingSelection
+        selectedAnnotationIndex = nil
+        showsStrokeStyleMenu = false
+        showsCornerRadiusPanel = false
     }
 
     private func updateMovingShape(to point: NSPoint) {
@@ -1416,6 +1501,16 @@ private final class SelectionOverlayView: NSView {
             pointerOffset: movingSelectionPointerOffset,
             inside: movingSelectionBounds
         )
+
+        if let lockedSelectionRect {
+            let preservedRects = SelectionToolbarState.localAnnotationRectsPreservingOverlayPositions(
+                movingSelectionStartAnnotationRects,
+                selectionRect: lockedSelectionRect
+            )
+            for index in annotations.indices where preservedRects.indices.contains(index) {
+                annotations[index].rect = preservedRects[index]
+            }
+        }
     }
 
     private func updateResizingShape(to point: NSPoint) {
@@ -1685,7 +1780,7 @@ private final class SelectionOverlayView: NSView {
             return
         }
 
-        drawPanel(toolbar, opaque: true)
+        drawPanel(toolbar, opaque: true, alpha: 0.9)
         drawMainToolbarSeparators(in: toolbar)
 
         for (button, rect) in toolbarButtonRects(in: toolbar) {
@@ -1977,7 +2072,7 @@ private final class SelectionOverlayView: NSView {
             return
         }
 
-        drawPanel(optionsRect, opaque: true)
+        drawPanel(optionsRect, opaque: true, alpha: 0.9)
         drawOptionsToolbarSeparators(in: optionsRect)
 
         for (index, rect) in strokeWidthRects(in: optionsRect).enumerated() {
@@ -2073,7 +2168,7 @@ private final class SelectionOverlayView: NSView {
             return
         }
 
-        drawPanel(panel, opaque: true)
+        drawPanel(panel, opaque: true, alpha: 0.9)
 
         let labelAttributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 11),
@@ -2170,8 +2265,9 @@ private final class SelectionOverlayView: NSView {
         drawToolbarImage(named: "palette-tool", in: rect, template: false, enabled: true, inset: 0)
     }
 
-    private func drawPanel(_ rect: NSRect, opaque: Bool = false) {
-        (opaque ? NSColor.windowBackgroundColor : NSColor.windowBackgroundColor.withAlphaComponent(0.96)).setFill()
+    private func drawPanel(_ rect: NSRect, opaque: Bool = false, alpha: CGFloat? = nil) {
+        let fillAlpha = alpha ?? (opaque ? 1 : 0.96)
+        NSColor.windowBackgroundColor.withAlphaComponent(fillAlpha).setFill()
         NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6).fill()
         NSColor.separatorColor.setStroke()
         let border = NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6)
@@ -2410,7 +2506,31 @@ private final class SelectionOverlayView: NSView {
             return nil
         }
 
-        return toolbarButtonRects(in: toolbar).first(where: { $0.1.contains(point) })?.0
+        return toolbarButtonRects(in: toolbar)
+            .first(where: { $0.0 != .settings && $0.1.contains(point) })?
+            .0
+    }
+
+    private func isMainToolbarDragPoint(_ point: NSPoint) -> Bool {
+        guard
+            let selectionRect,
+            let toolbar = mainToolbarRect(for: selectionRect),
+            toolbar.contains(point)
+        else {
+            return false
+        }
+
+        if mainToolbarDragHandleRect(in: toolbar).contains(point) {
+            return true
+        }
+
+        return toolbarButtonRects(in: toolbar)
+            .filter { $0.0 != .settings }
+            .allSatisfy { !$0.1.insetBy(dx: -2, dy: -2).contains(point) }
+    }
+
+    private func mainToolbarDragHandleRect(in toolbar: NSRect) -> NSRect {
+        toolbarButtonRects(in: toolbar).first(where: { $0.0 == .settings })?.1 ?? .zero
     }
 
     private func toolbarButtonRects(in toolbar: NSRect) -> [(ToolbarButton, NSRect)] {
@@ -2506,16 +2626,42 @@ private final class SelectionOverlayView: NSView {
     private func buttonMatchesCurrentTool(_ button: ToolbarButton) -> Bool {
         switch button {
         case .rectangle:
-            return activeShapeKind == .rectangle
+            return isShapeToolActive
         default:
             return false
         }
     }
 
     private func mainToolbarRect(for selectionRect: NSRect) -> NSRect? {
+        guard let base = baseMainToolbarRect(for: selectionRect) else {
+            return nil
+        }
+
+        return SelectionToolbarState.draggedToolbarRect(
+            baseRect: base,
+            offset: mainToolbarOffset,
+            inside: mainToolbarLayoutBounds(for: selectionRect)
+        )
+    }
+
+    private func baseMainToolbarRect(for selectionRect: NSRect) -> NSRect? {
         let visibleSelectionRect = selectionRect.intersection(safeLayoutBounds)
         let anchor = visibleSelectionRect.isNull || visibleSelectionRect.isEmpty ? selectionRect : visibleSelectionRect
-        return toolbarRect(size: NSSize(width: mainToolbarWidth(), height: 28), anchoredTo: anchor)
+        let layoutBounds = mainToolbarLayoutBounds(for: selectionRect)
+        return SelectionToolbarState.toolbarRect(
+            size: NSSize(width: mainToolbarWidth(), height: 28),
+            anchoredTo: anchor,
+            inside: layoutBounds,
+            allowsInsidePlacement: isFullScreenSelection(selectionRect)
+        )
+    }
+
+    private func mainToolbarLayoutBounds(for selectionRect: NSRect) -> NSRect {
+        isFullScreenSelection(selectionRect) ? safeLayoutBounds : screenBounds(containing: selectionRect)
+    }
+
+    private func isFullScreenSelection(_ selectionRect: NSRect) -> Bool {
+        SelectionToolbarState.isFullScreenSelection(selectionRect, in: screenBounds(containing: selectionRect))
     }
 
     private func isToolbarOrPanelPoint(_ point: NSPoint) -> Bool {

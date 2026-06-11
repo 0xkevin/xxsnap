@@ -55,6 +55,10 @@ enum SelectionToolbarState {
         isPrimaryShapeToolActive
     }
 
+    static func toggledPrimaryShapeTool(current: CaptureAnnotationKind?, defaultShape: CaptureAnnotationKind) -> CaptureAnnotationKind? {
+        current == nil ? defaultShape : nil
+    }
+
     static func tooltipTitle(for identifier: String) -> String? {
         [
             "rectangle": "形状标注",
@@ -74,7 +78,6 @@ enum SelectionToolbarState {
             "save": "保存",
             "copy": "复制到剪切板",
             "scroll": "滚动截图",
-            "settings": "更多设置",
             "strokeWidthThin": "细线",
             "strokeWidthMedium": "中线",
             "strokeWidthThick": "粗线",
@@ -281,21 +284,52 @@ enum SelectionToolbarState {
         }
     }
 
-    static func toolbarRect(size: NSSize, anchoredTo anchor: NSRect, inside bounds: NSRect) -> NSRect {
+    static func toolbarRect(size: NSSize, anchoredTo anchor: NSRect, inside bounds: NSRect, allowsInsidePlacement: Bool = true) -> NSRect {
         let gap: CGFloat = 8
         let safeBounds = bounds.insetBy(dx: gap, dy: gap)
-        let candidates = [
+        let outsideCandidates = [
             NSRect(x: anchor.maxX - size.width, y: anchor.minY - gap - size.height, width: size.width, height: size.height),
             NSRect(x: anchor.maxX - size.width, y: anchor.maxY + gap, width: size.width, height: size.height),
+            NSRect(x: anchor.maxX + gap, y: anchor.minY + gap, width: size.width, height: size.height),
+            NSRect(x: anchor.maxX + gap, y: anchor.maxY - gap - size.height, width: size.width, height: size.height),
+            NSRect(x: anchor.minX - gap - size.width, y: anchor.minY + gap, width: size.width, height: size.height),
+            NSRect(x: anchor.minX - gap - size.width, y: anchor.maxY - gap - size.height, width: size.width, height: size.height),
+        ]
+        let insideCandidates = [
             NSRect(x: anchor.maxX - size.width - gap, y: anchor.minY + gap, width: size.width, height: size.height),
             NSRect(x: anchor.maxX - size.width - gap, y: anchor.maxY - gap - size.height, width: size.width, height: size.height),
         ]
+        let candidates = allowsInsidePlacement ? outsideCandidates + insideCandidates : outsideCandidates
 
         for rect in candidates where safeBounds.contains(rect) {
             return rect
         }
 
+        if !allowsInsidePlacement {
+            for rect in outsideCandidates {
+                let clamped = clamp(rect: rect, inside: safeBounds)
+                if !clamped.intersects(anchor) {
+                    return clamped
+                }
+            }
+        }
+
         return clamp(rect: candidates[0], inside: safeBounds)
+    }
+
+    static func isFullScreenSelection(_ selectionRect: NSRect, in screenBounds: NSRect, tolerance: CGFloat = 1) -> Bool {
+        let selection = selectionRect.standardized
+        let screen = screenBounds.standardized
+        return abs(selection.minX - screen.minX) <= tolerance
+            && abs(selection.minY - screen.minY) <= tolerance
+            && abs(selection.width - screen.width) <= tolerance
+            && abs(selection.height - screen.height) <= tolerance
+    }
+
+    static func draggedToolbarRect(baseRect: NSRect, offset: NSSize, inside bounds: NSRect) -> NSRect {
+        let gap: CGFloat = 8
+        let requested = baseRect.offsetBy(dx: offset.width, dy: offset.height)
+        return clamp(rect: requested, inside: bounds.insetBy(dx: gap, dy: gap))
     }
 
     static func popoverRect(size: NSSize, anchoredTo anchor: NSRect, inside bounds: NSRect) -> NSRect {
@@ -353,7 +387,6 @@ enum SelectionToolbarState {
 
     static func shouldStartSelectionMove(
         isShapeToolActive: Bool,
-        hasAnnotations: Bool,
         pointer: NSPoint,
         selectionRect: NSRect?,
         screenBounds: NSRect,
@@ -361,7 +394,6 @@ enum SelectionToolbarState {
     ) -> Bool {
         guard
             !isShapeToolActive,
-            !hasAnnotations,
             selectionResizeHandle == nil,
             let selectionRect
         else {
@@ -488,6 +520,10 @@ enum SelectionToolbarState {
             width: overlayRect.width,
             height: overlayRect.height
         )
+    }
+
+    static func localAnnotationRectsPreservingOverlayPositions(_ overlayRects: [NSRect], selectionRect: NSRect) -> [NSRect] {
+        overlayRects.map { localAnnotationRect(fromOverlayRect: $0, selectionRect: selectionRect) }
     }
 
     static func shapeBorderContains(point: NSPoint, rect: NSRect, kind: CaptureAnnotationKind, cornerRadius: CGFloat, hitOutset: CGFloat = 6) -> Bool {

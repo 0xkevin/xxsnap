@@ -41,6 +41,19 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertFalse(SelectionToolbarState.shouldShowOptionsToolbar(isPrimaryShapeToolActive: false))
     }
 
+    func testPrimaryShapeToolSelectionTogglesOffWhenAnyShapeToolIsActive() {
+        XCTAssertEqual(
+            SelectionToolbarState.toggledPrimaryShapeTool(current: nil, defaultShape: .rectangle),
+            .rectangle
+        )
+        XCTAssertNil(
+            SelectionToolbarState.toggledPrimaryShapeTool(current: .rectangle, defaultShape: .rectangle)
+        )
+        XCTAssertNil(
+            SelectionToolbarState.toggledPrimaryShapeTool(current: .ellipse, defaultShape: .rectangle)
+        )
+    }
+
     func testFillPreviewUsesNeutralGrayWithoutFill() {
         let style = CaptureAnnotationStyle()
 
@@ -165,6 +178,54 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(toolbar.minY, visibleBounds.minY + 8)
     }
 
+    func testToolbarRectStaysOutsideMaximizedButNotFullScreenSelection() {
+        let screenBounds = NSRect(x: 0, y: 0, width: 800, height: 600)
+        let maximizedSelection = NSRect(x: 0, y: 40, width: 800, height: 520)
+        let toolbar = SelectionToolbarState.toolbarRect(
+            size: NSSize(width: 520, height: 30),
+            anchoredTo: maximizedSelection,
+            inside: screenBounds,
+            allowsInsidePlacement: false
+        )
+
+        XCTAssertFalse(toolbar.intersects(maximizedSelection))
+        XCTAssertTrue(screenBounds.insetBy(dx: 8, dy: 8).contains(toolbar))
+    }
+
+    func testToolbarRectUsesSideSpaceForTallNonFullScreenSelection() {
+        let screenBounds = NSRect(x: 0, y: 0, width: 800, height: 600)
+        let tallSelection = NSRect(x: 0, y: 0, width: 560, height: 600)
+        let toolbar = SelectionToolbarState.toolbarRect(
+            size: NSSize(width: 180, height: 30),
+            anchoredTo: tallSelection,
+            inside: screenBounds,
+            allowsInsidePlacement: false
+        )
+
+        XCTAssertGreaterThanOrEqual(toolbar.minX, tallSelection.maxX)
+        XCTAssertFalse(toolbar.intersects(tallSelection))
+        XCTAssertTrue(screenBounds.insetBy(dx: 8, dy: 8).contains(toolbar))
+    }
+
+    func testFullScreenSelectionUsesScreenFrameNotVisibleFrame() {
+        let screenBounds = NSRect(x: 0, y: 0, width: 800, height: 600)
+        let maximizedSelection = NSRect(x: 0, y: 40, width: 800, height: 520)
+
+        XCTAssertFalse(SelectionToolbarState.isFullScreenSelection(maximizedSelection, in: screenBounds))
+        XCTAssertTrue(SelectionToolbarState.isFullScreenSelection(screenBounds, in: screenBounds))
+    }
+
+    func testDraggedToolbarRectAppliesOffsetAndClampsInsideBounds() {
+        let dragged = SelectionToolbarState.draggedToolbarRect(
+            baseRect: NSRect(x: 100, y: 120, width: 220, height: 28),
+            offset: NSSize(width: 500, height: -200),
+            inside: NSRect(x: 0, y: 0, width: 480, height: 320)
+        )
+
+        XCTAssertEqual(dragged.maxX, 472, accuracy: 0.1)
+        XCTAssertEqual(dragged.minY, 8, accuracy: 0.1)
+    }
+
     func testPopoverRectPrefersBelowAnchorWithoutCoveringIt() {
         let anchor = NSRect(x: 600, y: 420, width: 12, height: 12)
         let popover = SelectionToolbarState.popoverRect(
@@ -197,6 +258,35 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(
             SelectionToolbarState.localAnnotationRect(fromOverlayRect: overlayRect, selectionRect: selection),
             NSRect(x: -50, y: -20, width: 300, height: 180)
+        )
+    }
+
+    func testLocalAnnotationRectKeepsOverlayPositionWhenSelectionMoves() {
+        let movedSelection = NSRect(x: 160, y: 130, width: 200, height: 120)
+        let existingOverlayRect = NSRect(x: 130, y: 140, width: 80, height: 50)
+
+        XCTAssertEqual(
+            SelectionToolbarState.localAnnotationRect(fromOverlayRect: existingOverlayRect, selectionRect: movedSelection),
+            NSRect(x: -30, y: 10, width: 80, height: 50)
+        )
+    }
+
+    func testLocalAnnotationRectsPreserveOverlayPositionsWhenSelectionMoves() {
+        let movedSelection = NSRect(x: 160, y: 130, width: 200, height: 120)
+        let existingOverlayRects = [
+            NSRect(x: 130, y: 140, width: 80, height: 50),
+            NSRect(x: 220, y: 180, width: 40, height: 30),
+        ]
+
+        XCTAssertEqual(
+            SelectionToolbarState.localAnnotationRectsPreservingOverlayPositions(
+                existingOverlayRects,
+                selectionRect: movedSelection
+            ),
+            [
+                NSRect(x: -30, y: 10, width: 80, height: 50),
+                NSRect(x: 60, y: 50, width: 40, height: 30),
+            ]
         )
     }
 
@@ -385,7 +475,15 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertTrue(
             SelectionToolbarState.shouldStartSelectionMove(
                 isShapeToolActive: false,
-                hasAnnotations: false,
+                pointer: NSPoint(x: 160, y: 140),
+                selectionRect: selection,
+                screenBounds: screenBounds,
+                selectionResizeHandle: nil
+            )
+        )
+        XCTAssertFalse(
+            SelectionToolbarState.shouldStartSelectionMove(
+                isShapeToolActive: true,
                 pointer: NSPoint(x: 160, y: 140),
                 selectionRect: selection,
                 screenBounds: screenBounds,
@@ -395,7 +493,6 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertFalse(
             SelectionToolbarState.shouldStartSelectionMove(
                 isShapeToolActive: false,
-                hasAnnotations: false,
                 pointer: NSPoint(x: 82, y: 140),
                 selectionRect: selection,
                 screenBounds: screenBounds,
@@ -405,7 +502,6 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertFalse(
             SelectionToolbarState.shouldStartSelectionMove(
                 isShapeToolActive: false,
-                hasAnnotations: false,
                 pointer: NSPoint(x: 320, y: 240),
                 selectionRect: screenBounds,
                 screenBounds: screenBounds,
@@ -432,6 +528,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "rectangle"), "形状标注")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "save"), "保存")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "copy"), "复制到剪切板")
+        XCTAssertNil(SelectionToolbarState.tooltipTitle(for: "settings"))
     }
 
     func testTooltipRectStaysInsideVisibleBounds() {
