@@ -1,7 +1,7 @@
 import AppKit
 
 enum SelectionToolbarState {
-    static let colorSamplerCopyHintText = "按c复制HEX颜色值"
+    static let colorSamplerCopyHintText = L10n(language: .zhHans).text(.colorSamplerCopyHex)
     static let colorSamplerCopySuccessText = "复制成功"
     static let colorSamplerCopySuccessDuration: TimeInterval = 1.2
     static let colorSamplerCopySuccessTextColor = NSColor.systemGreen
@@ -70,7 +70,6 @@ enum SelectionToolbarState {
             "number": "序号",
             "magnifier": "放大镜",
             "eraser": "橡皮擦",
-            "ocr": "OCR",
             "undo": "撤销",
             "redo": "重做",
             "cancel": "取消",
@@ -99,25 +98,42 @@ enum SelectionToolbarState {
 
     static func colorSwatchRects(in optionsRect: NSRect, paletteCount: Int) -> [NSRect] {
         (0...paletteCount).map { index in
-            let columns = max(1, Int(ceil(Double(paletteCount) / 2.0)))
+            let rows = colorSwatchRowCount(paletteCount: paletteCount)
+            let columns = colorSwatchColumnCount(paletteCount: paletteCount)
             if index == paletteCount {
+                let customSize = customColorSwatchSize(paletteCount: paletteCount)
                 return NSRect(
                     x: optionsRect.minX + 325 + CGFloat(columns) * 16 + 2,
-                    y: optionsRect.minY + 4,
-                    width: 32,
-                    height: 32
+                    y: optionsRect.midY - customSize / 2,
+                    width: customSize,
+                    height: customSize
                 )
             }
 
             let column = index % columns
-            let row = index / columns
+            let row = rows == 1 ? 0 : index / columns
+            let firstRowY = rows == 1 ? optionsRect.midY - 6 : optionsRect.minY + 23
             return NSRect(
                 x: optionsRect.minX + 325 + CGFloat(column) * 16,
-                y: optionsRect.minY + 23 - CGFloat(row) * 16,
+                y: firstRowY - CGFloat(row) * 16,
                 width: 12,
                 height: 12
             )
         }
+    }
+
+    static func optionsToolbarWidth(paletteCount: Int) -> CGFloat {
+        let clampedCount = min(
+            AppSettings.maximumPaletteVisibleCount,
+            max(AppSettings.minimumPaletteVisibleCount, paletteCount)
+        )
+        let columns = colorSwatchColumnCount(paletteCount: clampedCount)
+        let customSize = customColorSwatchSize(paletteCount: clampedCount)
+        return 325 + CGFloat(columns) * 16 + customSize + 13
+    }
+
+    static func optionsToolbarHeight(paletteCount: Int) -> CGFloat {
+        colorSwatchRowCount(paletteCount: paletteCount) == 1 ? 30 : 40
     }
 
     static func swatchHitTarget(at point: NSPoint, in optionsRect: NSRect, paletteCount: Int) -> SwatchSelection? {
@@ -135,6 +151,19 @@ enum SelectionToolbarState {
         }
 
         return nil
+    }
+
+    private static func colorSwatchRowCount(paletteCount: Int) -> Int {
+        paletteCount <= 10 ? 1 : 2
+    }
+
+    private static func colorSwatchColumnCount(paletteCount: Int) -> Int {
+        let rows = colorSwatchRowCount(paletteCount: paletteCount)
+        return max(1, Int(ceil(Double(max(0, paletteCount)) / Double(rows))))
+    }
+
+    private static func customColorSwatchSize(paletteCount: Int) -> CGFloat {
+        colorSwatchRowCount(paletteCount: paletteCount) == 1 ? 20 : 32
     }
 
     static func strokeStyleMenuItemRects(in menu: NSRect, itemCount: Int) -> [NSRect] {
@@ -475,11 +504,106 @@ enum SelectionToolbarState {
         let x = max(0, min(cgImage.width - 1, x))
         let y = max(0, min(cgImage.height - 1, y))
         let bitmap = NSBitmapImageRep(cgImage: cgImage)
+        return sampleColor(atPixelX: x, y: y, in: bitmap)
+    }
+
+    static func sampleColor(atPixelX x: Int, y: Int, in bitmap: NSBitmapImageRep) -> NSColor? {
+        let x = max(0, min(bitmap.pixelsWide - 1, x))
+        let y = max(0, min(bitmap.pixelsHigh - 1, y))
+        if let rawColor = rawSampleColor(atPixelX: x, y: y, in: bitmap) {
+            return rawColor
+        }
         guard let color = bitmap.colorAt(x: x, y: y) else {
             return nil
         }
 
-        return color.usingColorSpace(.deviceRGB) ?? color
+        return color.usingColorSpace(.sRGB) ?? color
+    }
+
+    static func colorSamplerDebugDescription(atPixelX x: Int, y: Int, in bitmap: NSBitmapImageRep, color: NSColor) -> String {
+        let x = max(0, min(bitmap.pixelsWide - 1, x))
+        let y = max(0, min(bitmap.pixelsHigh - 1, y))
+        var pixel = [Int](repeating: 0, count: max(bitmap.samplesPerPixel, 4))
+        if bitmap.samplesPerPixel > 0 {
+            bitmap.getPixel(&pixel, atX: x, y: y)
+        }
+        let colorSpaceName = (bitmap.colorSpace.cgColorSpace?.name as String?) ?? bitmap.colorSpace.localizedName ?? "unknown"
+        return "pixel=(\(x),\(y)) size=\(bitmap.pixelsWide)x\(bitmap.pixelsHigh) spp=\(bitmap.samplesPerPixel) bps=\(bitmap.bitsPerSample) format=\(bitmap.bitmapFormat.rawValue) alphaFirst=\(bitmap.bitmapFormat.contains(.alphaFirst)) colorSpace=\(colorSpaceName) raw=\(pixel) hex=\(colorSamplerHexString(for: color)) rgb=\(colorSamplerRgbString(for: color))"
+    }
+
+    private static func rawSampleColor(atPixelX x: Int, y: Int, in bitmap: NSBitmapImageRep) -> NSColor? {
+        guard
+            bitmap.samplesPerPixel >= 3,
+            bitmap.bitsPerSample > 0,
+            bitmap.colorSpace.colorSpaceModel == .rgb,
+            !bitmap.bitmapFormat.contains(.floatingPointSamples)
+        else {
+            return nil
+        }
+
+        var pixel = [Int](repeating: 0, count: bitmap.samplesPerPixel)
+        bitmap.getPixel(&pixel, atX: x, y: y)
+
+        let maxSample = CGFloat((1 << min(bitmap.bitsPerSample, 16)) - 1)
+        guard maxSample > 0 else {
+            return nil
+        }
+
+        let usesAlphaFirstLayout = bitmap.bitmapFormat.contains(.alphaFirst) && bitmap.samplesPerPixel >= 4
+        let redIndex = usesAlphaFirstLayout ? 1 : 0
+        let greenIndex = usesAlphaFirstLayout ? 2 : 1
+        let blueIndex = usesAlphaFirstLayout ? 3 : 2
+        let alphaIndex = usesAlphaFirstLayout ? 0 : 3
+
+        let red = min(1, max(0, CGFloat(pixel[redIndex]) / maxSample))
+        let green = min(1, max(0, CGFloat(pixel[greenIndex]) / maxSample))
+        let blue = min(1, max(0, CGFloat(pixel[blueIndex]) / maxSample))
+        let alpha = bitmap.hasAlpha && bitmap.samplesPerPixel >= 4
+            ? min(1, max(0, CGFloat(pixel[alphaIndex]) / maxSample))
+            : 1
+
+        let sourceColor = NSColor(
+            colorSpace: colorSpaceForRawByteSample(from: bitmap),
+            components: [red, green, blue, alpha],
+            count: 4
+        )
+        return sourceColor.usingColorSpace(.sRGB) ?? sourceColor
+    }
+
+    private static func colorSpaceForRawByteSample(from bitmap: NSBitmapImageRep) -> NSColorSpace {
+        if let colorSpaceName = bitmap.colorSpace.cgColorSpace?.name {
+            if colorSpaceName == CGColorSpace.displayP3 as CFString {
+                return bitmap.colorSpace
+            }
+            return .sRGB
+        }
+
+        if bitmap.colorSpace.cgColorSpace != nil {
+            return bitmap.colorSpace
+        }
+
+        return .sRGB
+    }
+
+    static func colorSamplerHexString(for color: NSColor) -> String {
+        let rgb = srgbColor(color)
+        let red = Int(round(rgb.redComponent * 255))
+        let green = Int(round(rgb.greenComponent * 255))
+        let blue = Int(round(rgb.blueComponent * 255))
+        return String(format: "#%02X%02X%02X", red, green, blue)
+    }
+
+    static func colorSamplerRgbString(for color: NSColor) -> String {
+        let rgb = srgbColor(color)
+        let red = Int(round(rgb.redComponent * 255))
+        let green = Int(round(rgb.greenComponent * 255))
+        let blue = Int(round(rgb.blueComponent * 255))
+        return "\(red), \(green), \(blue)"
+    }
+
+    private static func srgbColor(_ color: NSColor) -> NSColor {
+        let converted = color.usingColorSpace(.sRGB) ?? color
+        return converted.withAlphaComponent(1)
     }
 
     static func toggledColorSamplerCopyMode(from mode: ColorSamplerCopyMode) -> ColorSamplerCopyMode {
@@ -491,12 +615,12 @@ enum SelectionToolbarState {
         }
     }
 
-    static func colorSamplerCopyHintText(for mode: ColorSamplerCopyMode) -> String {
+    static func colorSamplerCopyHintText(for mode: ColorSamplerCopyMode, l10n: L10n = L10n(language: .zhHans)) -> String {
         switch mode {
         case .hex:
-            return colorSamplerCopyHintText
+            return l10n.text(.colorSamplerCopyHex)
         case .rgb:
-            return "按c复制RGB颜色值"
+            return l10n.text(.colorSamplerCopyRgb)
         }
     }
 

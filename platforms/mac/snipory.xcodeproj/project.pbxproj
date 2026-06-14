@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		05CEC7466E057958CE3CE4BF /* Snipory.png in Resources */ = {isa = PBXBuildFile; fileRef = B15EB30CA37A8A3AED1B2DB5 /* Snipory.png */; };
 		068F434726A258DE4495D96F /* ScreenCaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC718A8357E919E784904AA5 /* ScreenCaptureService.swift */; };
+		0A1000000000000000000101 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A2000000000000000000101 /* AppSettings.swift */; };
 		19868DD4F6E19C18FBBCAE68 /* StatusItemController.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBF00FB88662247431477F5A /* StatusItemController.swift */; };
 		1A20E4B4E38D57381D8EC600 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3A23399B1B58D8CC2B2C600C /* Assets.xcassets */; };
 		1CECA707C780B7F57A8AECDD /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4323006F140A5D3DDF3FBF6C /* AppDelegate.swift */; };
@@ -45,9 +46,11 @@
 		98DC0775E5D01936345232AF /* SelectionToolbarState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C481769F063E9EF9FEEE610 /* SelectionToolbarState.swift */; };
 		9CE91AA5402D98AA9402A57D /* CaptureControlWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B961C891511CF1C3A36BF94 /* CaptureControlWindowController.swift */; };
 		A4D5B6C7D8E9F00112233445 /* WindowSelectionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4D5B6C7D8E9F00112233444 /* WindowSelectionState.swift */; };
+		AA1000000000000000000101 /* AppSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA2000000000000000000101 /* AppSettingsTests.swift */; };
 		B8C9D4D1DC1778BDFB33A316 /* SniporyMacTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2E10CC369C7C3E6EA843F7E /* SniporyMacTests.swift */; };
 		DBFDF2DD4E15E443EBB56BFB /* SelectionToolbarStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96D2185BFBB68A209A4EC854 /* SelectionToolbarStateTests.swift */; };
 		DEAD00112233445566778899 /* WindowSelectionStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEAD00112233445566778898 /* WindowSelectionStateTests.swift */; };
+		F00D00000000000000000001 /* ScreenCaptureServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00D00000000000000000002 /* ScreenCaptureServiceTests.swift */; };
 		E7736E5B99B8A87FCB8B8946 /* Snipory.icns in Resources */ = {isa = PBXBuildFile; fileRef = 1040CAE1C1701C9281F6E1A9 /* Snipory.icns */; };
 		F6971C97D8915DB6D0FCA3BA /* save-to-file.svg in Resources */ = {isa = PBXBuildFile; fileRef = F704F9104BE6802CEC4F2085 /* save-to-file.svg */; };
 		FBEA02E9272CFBDE9DF809E3 /* CaptureAnnotationRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D45EF99FC6FF0166D72A823 /* CaptureAnnotationRenderer.swift */; };
@@ -65,6 +68,7 @@
 
 /* Begin PBXFileReference section */
 		1040CAE1C1701C9281F6E1A9 /* Snipory.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = Snipory.icns; sourceTree = "<group>"; };
+		0A2000000000000000000101 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		14F52F4319DA5DC78CCE2424 /* CaptureToolbarWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureToolbarWindowController.swift; sourceTree = "<group>"; };
 		1805321D215C129C76E7F3B5 /* CaptureCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureCoordinator.swift; sourceTree = "<group>"; };
 		3A23399B1B58D8CC2B2C600C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -104,12 +108,14 @@
 		96D2185BFBB68A209A4EC854 /* SelectionToolbarStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectionToolbarStateTests.swift; sourceTree = "<group>"; };
 		AC718A8357E919E784904AA5 /* ScreenCaptureService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenCaptureService.swift; sourceTree = "<group>"; };
 		A4D5B6C7D8E9F00112233444 /* WindowSelectionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowSelectionState.swift; sourceTree = "<group>"; };
+		AA2000000000000000000101 /* AppSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettingsTests.swift; sourceTree = "<group>"; };
 		B15EB30CA37A8A3AED1B2DB5 /* Snipory.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = Snipory.png; sourceTree = "<group>"; };
 		B4BF8470EE83627EFF602ADE /* SnapshotExportBridge.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = SnapshotExportBridge.mm; sourceTree = "<group>"; };
 		C02B9A90102EEFA0B9149448 /* PermissionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionCoordinator.swift; sourceTree = "<group>"; };
 		DAAF5CD9C4F22E9086249B8B /* pin-to-screen.svg */ = {isa = PBXFileReference; path = "pin-to-screen.svg"; sourceTree = "<group>"; };
 		EBF00FB88662247431477F5A /* StatusItemController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusItemController.swift; sourceTree = "<group>"; };
 		DEAD00112233445566778898 /* WindowSelectionStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowSelectionStateTests.swift; sourceTree = "<group>"; };
+		F00D00000000000000000002 /* ScreenCaptureServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenCaptureServiceTests.swift; sourceTree = "<group>"; };
 		F2E10CC369C7C3E6EA843F7E /* SniporyMacTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SniporyMacTests.swift; sourceTree = "<group>"; };
 		F704F9104BE6802CEC4F2085 /* save-to-file.svg */ = {isa = PBXFileReference; path = "save-to-file.svg"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -129,6 +135,8 @@
 			isa = PBXGroup;
 			children = (
 				7C4E8D096F7569B92854E279 /* manual-capture-checklist.md */,
+				AA2000000000000000000101 /* AppSettingsTests.swift */,
+				F00D00000000000000000002 /* ScreenCaptureServiceTests.swift */,
 				96D2185BFBB68A209A4EC854 /* SelectionToolbarStateTests.swift */,
 				F2E10CC369C7C3E6EA843F7E /* SniporyMacTests.swift */,
 				DEAD00112233445566778898 /* WindowSelectionStateTests.swift */,
@@ -170,6 +178,7 @@
 			isa = PBXGroup;
 			children = (
 				4323006F140A5D3DDF3FBF6C /* AppDelegate.swift */,
+				0A2000000000000000000101 /* AppSettings.swift */,
 				7B961C891511CF1C3A36BF94 /* CaptureControlWindowController.swift */,
 				1805321D215C129C76E7F3B5 /* CaptureCoordinator.swift */,
 				5E2030ECF367D3A1687A8A8E /* main.swift */,
@@ -373,6 +382,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AA1000000000000000000101 /* AppSettingsTests.swift in Sources */,
+				F00D00000000000000000001 /* ScreenCaptureServiceTests.swift in Sources */,
 				DBFDF2DD4E15E443EBB56BFB /* SelectionToolbarStateTests.swift in Sources */,
 				B8C9D4D1DC1778BDFB33A316 /* SniporyMacTests.swift in Sources */,
 				DEAD00112233445566778899 /* WindowSelectionStateTests.swift in Sources */,
@@ -384,6 +395,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				1CECA707C780B7F57A8AECDD /* AppDelegate.swift in Sources */,
+				0A1000000000000000000101 /* AppSettings.swift in Sources */,
 				FBEA02E9272CFBDE9DF809E3 /* CaptureAnnotationRenderer.swift in Sources */,
 				9CE91AA5402D98AA9402A57D /* CaptureControlWindowController.swift in Sources */,
 				475D310E1B9052AF5396D13A /* CaptureCoordinator.swift in Sources */,

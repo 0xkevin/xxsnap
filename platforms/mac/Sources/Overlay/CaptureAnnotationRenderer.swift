@@ -71,46 +71,90 @@ enum CaptureAnnotationRenderer {
             return image
         }
 
-        let renderedImage = NSImage(size: image.size)
-        renderedImage.lockFocus()
-        NSGraphicsContext.current?.shouldAntialias = true
-        image.draw(in: NSRect(origin: .zero, size: image.size))
-
-        for annotation in annotations {
-            draw(annotation)
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            return image
         }
 
-        renderedImage.unlockFocus()
-        return renderedImage
+        let colorSpace = cgImage.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!
+        guard let context = CGContext(
+            data: nil,
+            width: cgImage.width,
+            height: cgImage.height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            return image
+        }
+
+        context.interpolationQuality = .none
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: cgImage.width, height: cgImage.height))
+
+        let scaleX = CGFloat(cgImage.width) / max(image.size.width, 1)
+        let scaleY = CGFloat(cgImage.height) / max(image.size.height, 1)
+        for annotation in annotations {
+            draw(annotation, in: context, scaleX: scaleX, scaleY: scaleY)
+        }
+
+        guard let renderedImage = context.makeImage() else {
+            return image
+        }
+
+        return NSImage(cgImage: renderedImage, size: image.size)
     }
 
-    private static func draw(_ annotation: CaptureAnnotation) {
+    private static func draw(_ annotation: CaptureAnnotation, in context: CGContext, scaleX: CGFloat, scaleY: CGFloat) {
+        let lineScale = (scaleX + scaleY) / 2
         let rect = annotation.rect.standardized.insetBy(dx: annotation.style.strokeWidth / 2, dy: annotation.style.strokeWidth / 2)
-        let path: NSBezierPath
+        let pixelRect = CGRect(
+            x: rect.minX * scaleX,
+            y: rect.minY * scaleY,
+            width: rect.width * scaleX,
+            height: rect.height * scaleY
+        )
+        let path = CGMutablePath()
 
         switch annotation.kind {
         case .rectangle where annotation.style.cornerRadius > 0:
-            path = NSBezierPath(
-                roundedRect: rect,
-                xRadius: annotation.style.cornerRadius,
-                yRadius: annotation.style.cornerRadius
+            path.addRoundedRect(
+                in: pixelRect,
+                cornerWidth: annotation.style.cornerRadius * scaleX,
+                cornerHeight: annotation.style.cornerRadius * scaleY
             )
         case .rectangle:
-            path = NSBezierPath(rect: rect)
+            path.addRect(pixelRect)
         case .ellipse:
-            path = NSBezierPath(ovalIn: rect)
+            path.addEllipse(in: pixelRect)
         }
 
+        context.saveGState()
+        context.addPath(path)
         if annotation.style.fillEnabled {
-            annotation.style.fillColor.setFill()
-            path.fill()
+            context.setFillColor(cgColor(annotation.style.fillColor))
+            context.fillPath()
         }
 
-        annotation.style.strokeColor.setStroke()
-        path.lineWidth = annotation.style.strokeWidth
-        path.lineJoinStyle = .round
-        path.lineCapStyle = .round
-        path.setLineDash(annotation.style.strokePattern.dashPattern, count: annotation.style.strokePattern.dashPattern.count, phase: 0)
-        path.stroke()
+        context.addPath(path)
+        context.setStrokeColor(cgColor(annotation.style.strokeColor))
+        context.setLineWidth(annotation.style.strokeWidth * lineScale)
+        context.setLineJoin(.round)
+        context.setLineCap(.round)
+        context.setLineDash(
+            phase: 0,
+            lengths: annotation.style.strokePattern.dashPattern.map { $0 * lineScale }
+        )
+        context.strokePath()
+        context.restoreGState()
+    }
+
+    private static func cgColor(_ color: NSColor) -> CGColor {
+        let rgb = color.usingColorSpace(.sRGB) ?? color
+        return CGColor(
+            srgbRed: rgb.redComponent,
+            green: rgb.greenComponent,
+            blue: rgb.blueComponent,
+            alpha: rgb.alphaComponent
+        )
     }
 }

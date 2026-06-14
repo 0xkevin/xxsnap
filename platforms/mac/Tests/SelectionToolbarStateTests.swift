@@ -96,6 +96,52 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(customSlot.minY, optionsRect.minY + 4)
     }
 
+    func testCompactColorSwatchesUseSingleRowAndShortToolbar() {
+        let optionsRect = NSRect(x: 100, y: 100, width: 422, height: 30)
+        let swatches = SelectionToolbarState.colorSwatchRects(in: optionsRect, paletteCount: 4)
+        let customSlot = swatches.last!
+
+        XCTAssertEqual(SelectionToolbarState.optionsToolbarHeight(paletteCount: 4), 30)
+        XCTAssertEqual(SelectionToolbarState.optionsToolbarWidth(paletteCount: 4), 422)
+        XCTAssertEqual(swatches.count, 5)
+        XCTAssertTrue(swatches[0..<4].allSatisfy { $0.minY == optionsRect.minY + 9 })
+        XCTAssertEqual(customSlot.width, 20)
+        XCTAssertEqual(customSlot.height, 20)
+        XCTAssertEqual(customSlot.minY, optionsRect.minY + 5)
+    }
+
+    func testDefaultPalettePutsFrequentRedFirstInRequestedTwoRowColors() {
+        let hexColors = SelectionOverlayWindow.defaultPaletteColors.map {
+            SelectionToolbarState.colorSamplerHexString(for: $0)
+        }
+
+        XCTAssertEqual(
+            hexColors,
+            [
+                "#FF001A",
+                "#8A8A8A",
+                "#000000",
+                "#A3000D",
+                "#FF7E06",
+                "#FFF300",
+                "#00BE4E",
+                "#00B0EF",
+                "#3C53D7",
+                "#BB4AB0",
+                "#FFFFFF",
+                "#CACACA",
+                "#CE815D",
+                "#FFB2D0",
+                "#FFCC00",
+                "#F5E7B5",
+                "#B3EB00",
+                "#8EE1EE",
+                "#6F9EC8",
+                "#D0C6EC",
+            ]
+        )
+    }
+
     func testPaletteLastGraySwatchDoesNotTriggerCustomPalette() {
         let optionsRect = NSRect(x: 100, y: 100, width: 510, height: 40)
         let swatches = SelectionToolbarState.colorSwatchRects(in: optionsRect, paletteCount: 20)
@@ -118,6 +164,14 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertNil(
             SelectionToolbarState.swatchHitTarget(at: NSPoint(x: customSlot.maxX + 4, y: customSlot.midY), in: optionsRect, paletteCount: 20)
         )
+    }
+
+    func testOptionsToolbarWidthShrinksWhenPaletteCountIsReduced() {
+        let fullPaletteWidth = SelectionToolbarState.optionsToolbarWidth(paletteCount: 20)
+        let compactPaletteWidth = SelectionToolbarState.optionsToolbarWidth(paletteCount: 8)
+
+        XCTAssertEqual(fullPaletteWidth, 530)
+        XCTAssertLessThan(compactPaletteWidth, fullPaletteWidth)
     }
 
     func testStrokeMenuHitTargetSelectsEveryMenuItem() {
@@ -528,6 +582,8 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "rectangle"), "形状标注")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "save"), "保存")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "copy"), "复制到剪切板")
+        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "scroll"), "滚动截图")
+        XCTAssertNil(SelectionToolbarState.tooltipTitle(for: "ocr"))
         XCTAssertNil(SelectionToolbarState.tooltipTitle(for: "settings"))
     }
 
@@ -625,13 +681,15 @@ final class SelectionToolbarStateTests: XCTestCase {
         )
     }
 
-    func testColorSamplerCopyHintUsesLowercaseCAndHexText() {
-        XCTAssertEqual(SelectionToolbarState.colorSamplerCopyHintText, "按c复制HEX颜色值")
+    func testColorSamplerCopyHintUsesUppercaseCWithSpacingAndHexText() {
+        XCTAssertEqual(SelectionToolbarState.colorSamplerCopyHintText, "按 C 复制HEX颜色值")
     }
 
     func testColorSamplerCopyHintFollowsCopyMode() {
-        XCTAssertEqual(SelectionToolbarState.colorSamplerCopyHintText(for: .hex), "按c复制HEX颜色值")
-        XCTAssertEqual(SelectionToolbarState.colorSamplerCopyHintText(for: .rgb), "按c复制RGB颜色值")
+        let l10n = L10n(language: .zhHans)
+
+        XCTAssertEqual(SelectionToolbarState.colorSamplerCopyHintText(for: .hex, l10n: l10n), "按 C 复制HEX颜色值")
+        XCTAssertEqual(SelectionToolbarState.colorSamplerCopyHintText(for: .rgb, l10n: l10n), "按 C 复制RGB颜色值")
     }
 
     func testColorSamplerCopySuccessFeedbackText() {
@@ -723,7 +781,92 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(color?.blueComponent ?? -1, 1, accuracy: 0.01)
     }
 
-    private func makeTestImage(width: Int, height: Int, pixels: [UInt8], bitmapInfo: UInt32) -> CGImage {
+    func testColorSamplerReadsRawRgbWithoutColorSpaceShifting() {
+        let pixels: [UInt8] = [
+            255, 0, 26, 255,
+        ]
+        let cgImage = makeTestImage(
+            width: 1,
+            height: 1,
+            pixels: pixels,
+            bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue,
+            colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!
+        )
+
+        let color = SelectionToolbarState.sampleColor(atPixelX: 0, y: 0, in: cgImage)
+
+        XCTAssertEqual(color?.redComponent ?? -1, 1, accuracy: 0.001)
+        XCTAssertEqual(color?.greenComponent ?? -1, 0, accuracy: 0.001)
+        XCTAssertEqual(color?.blueComponent ?? -1, CGFloat(26) / 255, accuracy: 0.001)
+    }
+
+    func testColorSamplerReadsAlphaFirstBitmapWithoutTurningRedYellow() {
+        let pixels: [UInt8] = [
+            26, 0, 255, 255,
+        ]
+        let cgImage = makeTestImage(
+            width: 1,
+            height: 1,
+            pixels: pixels,
+            bitmapInfo: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue,
+            colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!
+        )
+
+        let color = SelectionToolbarState.sampleColor(atPixelX: 0, y: 0, in: cgImage)
+
+        XCTAssertEqual(color?.redComponent ?? -1, 1, accuracy: 0.001)
+        XCTAssertEqual(color?.greenComponent ?? -1, 0, accuracy: 0.001)
+        XCTAssertEqual(color?.blueComponent ?? -1, CGFloat(26) / 255, accuracy: 0.001)
+    }
+
+    func testColorSamplerDoesNotColorMatchGenericRgbByteSamples() {
+        let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: 1,
+            pixelsHigh: 1,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .calibratedRGB,
+            bytesPerRow: 4,
+            bitsPerPixel: 32
+        )!
+        var pixel = [255, 0, 26, 255]
+        bitmap.setPixel(&pixel, atX: 0, y: 0)
+
+        let color = SelectionToolbarState.sampleColor(atPixelX: 0, y: 0, in: bitmap)
+
+        XCTAssertEqual(color.map(SelectionToolbarState.colorSamplerHexString(for:)), "#FF001A")
+    }
+
+    func testColorSamplerConvertsDisplayP3PixelsToSrgb() {
+        let pixels: [UInt8] = [
+            45, 51, 234, 255,
+        ]
+        let cgImage = makeTestImage(
+            width: 1,
+            height: 1,
+            pixels: pixels,
+            bitmapInfo: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue,
+            colorSpace: CGColorSpace(name: CGColorSpace.displayP3)!
+        )
+
+        let color = SelectionToolbarState.sampleColor(atPixelX: 0, y: 0, in: cgImage)
+
+        XCTAssertEqual(color?.redComponent ?? -1, 1, accuracy: 0.001)
+        XCTAssertEqual(color?.greenComponent ?? -1, 0, accuracy: 0.001)
+        XCTAssertEqual(color?.blueComponent ?? -1, CGFloat(26) / 255, accuracy: 0.002)
+        XCTAssertEqual(color.map(SelectionToolbarState.colorSamplerHexString(for:)), "#FF001A")
+    }
+
+    private func makeTestImage(
+        width: Int,
+        height: Int,
+        pixels: [UInt8],
+        bitmapInfo: UInt32,
+        colorSpace: CGColorSpace = CGColorSpaceCreateDeviceRGB()
+    ) -> CGImage {
         let data = Data(pixels)
         let provider = CGDataProvider(data: data as CFData)!
         return CGImage(
@@ -732,7 +875,7 @@ final class SelectionToolbarStateTests: XCTestCase {
             bitsPerComponent: 8,
             bitsPerPixel: 32,
             bytesPerRow: width * 4,
-            space: CGColorSpaceCreateDeviceRGB(),
+            space: colorSpace,
             bitmapInfo: CGBitmapInfo(rawValue: bitmapInfo),
             provider: provider,
             decode: nil,

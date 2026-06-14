@@ -22,3 +22,4 @@ $ open -n /Users/kevin/Projects/open-source/Snipory/snipory-v2/build/xcode-deriv
 $ pgrep -af "Snipory.app/Contents/MacOS/Snipory"
 ```
 
+https://github.com/Snipaste/feedback/wiki/PRO

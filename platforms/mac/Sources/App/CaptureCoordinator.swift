@@ -8,6 +8,7 @@ final class CaptureCoordinator {
     private var lastCapture: NSImage?
     private let permissionCoordinator: PermissionCoordinator
     private let screenCaptureService: ScreenCaptureService
+    private let settingsStore: SettingsStore
     private var captureTask: Task<Void, Never>?
     private var startTask: Task<Void, Never>?
     private var overlayWindow: SelectionOverlayWindow?
@@ -16,10 +17,12 @@ final class CaptureCoordinator {
 
     init(
         permissionCoordinator: PermissionCoordinator,
-        screenCaptureService: ScreenCaptureService
+        screenCaptureService: ScreenCaptureService,
+        settingsStore: SettingsStore = SettingsStore()
     ) {
         self.permissionCoordinator = permissionCoordinator
         self.screenCaptureService = screenCaptureService
+        self.settingsStore = settingsStore
     }
 
     convenience init() {
@@ -69,7 +72,12 @@ final class CaptureCoordinator {
                 frozenDesktopImage = nil
             }
 
-            let overlayWindow = SelectionOverlayWindow(backgroundImage: backgroundImage) { [weak self] result in
+            let settings = settingsStore.load()
+            let overlayWindow = SelectionOverlayWindow(
+                backgroundImage: backgroundImage,
+                settings: settings,
+                featureGate: FeatureGate(license: settings.license)
+            ) { [weak self] result in
                 self?.handleSelection(result)
             }
 
@@ -160,7 +168,7 @@ final class CaptureCoordinator {
         }
     }
 
-    private static func crop(image: NSImage, rect: NSRect) -> NSImage? {
+    static func crop(image: NSImage, rect: NSRect) -> NSImage? {
         let normalizedRect = rect.standardized
         guard !normalizedRect.isEmpty else {
             return nil
@@ -172,16 +180,26 @@ final class CaptureCoordinator {
             return nil
         }
 
-        let cropped = NSImage(size: clippedRect.size)
-        cropped.lockFocus()
-        image.draw(
-            in: NSRect(origin: .zero, size: clippedRect.size),
-            from: clippedRect,
-            operation: .copy,
-            fraction: 1
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            return nil
+        }
+
+        let scaleX = CGFloat(cgImage.width) / max(image.size.width, 1)
+        let scaleY = CGFloat(cgImage.height) / max(image.size.height, 1)
+        let pixelRect = CGRect(
+            x: clippedRect.minX * scaleX,
+            y: (image.size.height - clippedRect.maxY) * scaleY,
+            width: clippedRect.width * scaleX,
+            height: clippedRect.height * scaleY
         )
-        cropped.unlockFocus()
-        return cropped
+        .integral
+        .intersection(CGRect(x: 0, y: 0, width: cgImage.width, height: cgImage.height))
+
+        guard !pixelRect.isEmpty, let croppedImage = cgImage.cropping(to: pixelRect) else {
+            return nil
+        }
+
+        return NSImage(cgImage: croppedImage, size: clippedRect.size)
     }
 
     @discardableResult

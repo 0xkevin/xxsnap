@@ -1,8 +1,31 @@
 import AppKit
+import CoreVideo
 import ScreenCaptureKit
 
 @MainActor
 final class ScreenCaptureService {
+    static func makeScreenshotConfiguration(width: Int, height: Int) -> SCStreamConfiguration {
+        let configuration = SCStreamConfiguration()
+        configuration.width = max(1, width)
+        configuration.height = max(1, height)
+        configuration.pixelFormat = kCVPixelFormatType_32BGRA
+        configuration.scalesToFit = false
+        if #available(macOS 15.0, *) {
+            configuration.captureDynamicRange = .SDR
+        }
+        return configuration
+    }
+
+    static func retagScreenshotImage(_ image: CGImage, colorSpace: CGColorSpace) -> CGImage {
+        image.copy(colorSpace: colorSpace) ?? image
+    }
+
+    static func includeSystemChrome(in filter: SCContentFilter) {
+        if #available(macOS 14.2, *) {
+            filter.includeMenuBar = true
+        }
+    }
+
     func captureDesktopImage() async throws -> NSImage {
         let desktopFrame = NSScreen.screens.reduce(into: NSRect.null) { partialResult, screen in
             partialResult = partialResult.union(screen.frame)
@@ -15,28 +38,56 @@ final class ScreenCaptureService {
         let currentProcessID = pid_t(NSRunningApplication.current.processIdentifier)
         let excludedApplications = shareableContent.applications.filter { $0.processID == currentProcessID }
 
+        let targets = displayTargets(from: shareableContent.displays)
+        if targets.count == 1, let target = targets.first {
+            let filter = SCContentFilter(
+                display: target.display,
+                excludingApplications: excludedApplications,
+                exceptingWindows: []
+            )
+            Self.includeSystemChrome(in: filter)
+
+            let configuration = Self.makeScreenshotConfiguration(
+                width: Int(ceil(target.display.frame.width * target.scale)),
+                height: Int(ceil(target.display.frame.height * target.scale))
+            )
+
+            let capturedImage = try await SCScreenshotManager.captureImage(
+                contentFilter: filter,
+                configuration: configuration
+            )
+            let cgImage = Self.retagScreenshotImage(capturedImage, colorSpace: target.colorSpace)
+
+            return NSImage(
+                cgImage: cgImage,
+                size: NSSize(width: target.display.frame.width, height: target.display.frame.height)
+            )
+        }
+
         let snapshot = NSImage(size: desktopFrame.size)
         snapshot.lockFocus()
         NSGraphicsContext.current?.shouldAntialias = true
         NSColor.clear.setFill()
         NSRect(origin: .zero, size: desktopFrame.size).fill()
 
-        for target in displayTargets(from: shareableContent.displays) {
+        for target in targets {
             let filter = SCContentFilter(
                 display: target.display,
                 excludingApplications: excludedApplications,
                 exceptingWindows: []
             )
+            Self.includeSystemChrome(in: filter)
 
-            let configuration = SCStreamConfiguration()
-            configuration.width = max(1, Int(ceil(target.display.frame.width * target.scale)))
-            configuration.height = max(1, Int(ceil(target.display.frame.height * target.scale)))
-            configuration.scalesToFit = false
+            let configuration = Self.makeScreenshotConfiguration(
+                width: Int(ceil(target.display.frame.width * target.scale)),
+                height: Int(ceil(target.display.frame.height * target.scale))
+            )
 
-            let cgImage = try await SCScreenshotManager.captureImage(
+            let capturedImage = try await SCScreenshotManager.captureImage(
                 contentFilter: filter,
                 configuration: configuration
             )
+            let cgImage = Self.retagScreenshotImage(capturedImage, colorSpace: target.colorSpace)
 
             let image = NSImage(
                 cgImage: cgImage,
@@ -78,6 +129,7 @@ final class ScreenCaptureService {
             excludingApplications: excludedApplications,
             exceptingWindows: []
         )
+        Self.includeSystemChrome(in: filter)
 
         let relativeRect = CGRect(
             x: clippedSelection.minX - target.display.frame.minX,
@@ -86,16 +138,17 @@ final class ScreenCaptureService {
             height: clippedSelection.height
         )
 
-        let configuration = SCStreamConfiguration()
+        let configuration = Self.makeScreenshotConfiguration(
+            width: Int(ceil(relativeRect.width * target.scale)),
+            height: Int(ceil(relativeRect.height * target.scale))
+        )
         configuration.sourceRect = relativeRect
-        configuration.width = max(1, Int(ceil(relativeRect.width * target.scale)))
-        configuration.height = max(1, Int(ceil(relativeRect.height * target.scale)))
-        configuration.scalesToFit = false
 
-        let cgImage = try await SCScreenshotManager.captureImage(
+        let capturedImage = try await SCScreenshotManager.captureImage(
             contentFilter: filter,
             configuration: configuration
         )
+        let cgImage = Self.retagScreenshotImage(capturedImage, colorSpace: target.colorSpace)
 
         return NSImage(
             cgImage: cgImage,
@@ -108,6 +161,7 @@ private extension ScreenCaptureService {
     struct DisplayTarget {
         let display: SCDisplay
         let scale: CGFloat
+        let colorSpace: CGColorSpace
     }
 
     func displayTargets(from displays: [SCDisplay]) -> [DisplayTarget] {
@@ -119,7 +173,8 @@ private extension ScreenCaptureService {
                 return nil
             }
 
-            return DisplayTarget(display: display, scale: screen.backingScaleFactor)
+            let colorSpace = CGDisplayCopyColorSpace(CGDirectDisplayID(displayIDValue.uint32Value))
+            return DisplayTarget(display: display, scale: screen.backingScaleFactor, colorSpace: colorSpace)
         }
     }
 

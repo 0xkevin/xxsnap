@@ -67,4 +67,50 @@ final class WindowSelectionStateTests: XCTestCase {
 
         XCTAssertEqual(selected?.id, 2)
     }
+
+    func testBestWindowSelectsMacOSMenuBarSystemLayer() {
+        let candidates = [
+            WindowSelectionCandidate(id: 1, ownerPID: 170, layer: 24, alpha: 1, bounds: NSRect(x: 0, y: 563, width: 900, height: 37), name: "Menubar"),
+            WindowSelectionCandidate(id: 2, ownerPID: 10, layer: 0, alpha: 1, bounds: NSRect(x: 0, y: 48, width: 900, height: 515), name: "app"),
+        ]
+
+        let selected = WindowSelectionState.bestWindow(
+            at: NSPoint(x: 420, y: 580),
+            candidates: candidates,
+            desktopFrame: NSRect(x: 0, y: 0, width: 900, height: 600),
+            currentProcessID: 99
+        )
+
+        XCTAssertEqual(selected?.id, 1)
+    }
+
+    func testBestWindowSelectsMacOSDockStripSystemLayer() {
+        let candidates = [
+            WindowSelectionCandidate(id: 1, ownerPID: 449, layer: 20, alpha: 1, bounds: NSRect(x: 0, y: 0, width: 900, height: 48), name: "Dock"),
+            WindowSelectionCandidate(id: 2, ownerPID: 10, layer: 0, alpha: 1, bounds: NSRect(x: 0, y: 48, width: 900, height: 515), name: "app"),
+        ]
+
+        let selected = WindowSelectionState.bestWindow(
+            at: NSPoint(x: 420, y: 24),
+            candidates: candidates,
+            desktopFrame: NSRect(x: 0, y: 0, width: 900, height: 600),
+            currentProcessID: 99
+        )
+
+        XCTAssertEqual(selected?.id, 1)
+    }
+
+    func testSystemUICandidatesUseVisibleFrameInsetsForMenuBarAndDock() {
+        let candidates = WindowSelectionState.systemUICandidates(
+            screenFrames: [NSRect(x: 0, y: 0, width: 900, height: 600)],
+            visibleFrames: [NSRect(x: 0, y: 48, width: 900, height: 515)],
+            desktopFrame: NSRect(x: 0, y: 0, width: 900, height: 600)
+        )
+
+        XCTAssertEqual(candidates.map(\.name), ["Menubar", "Dock"])
+        XCTAssertEqual(candidates.map(\.bounds), [
+            NSRect(x: 0, y: 563, width: 900, height: 37),
+            NSRect(x: 0, y: 0, width: 900, height: 48),
+        ])
+    }
 }

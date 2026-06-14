@@ -83,10 +83,38 @@ private extension NSCursor {
 }
 
 final class SelectionOverlayWindow: NSWindow {
+    static let defaultPaletteColors: [NSColor] = [
+        paletteColor(0xFF001A),
+        paletteColor(0x8A8A8A),
+        paletteColor(0x000000),
+        paletteColor(0xA3000D),
+        paletteColor(0xFF7E06),
+        paletteColor(0xFFF300),
+        paletteColor(0x00BE4E),
+        paletteColor(0x00B0EF),
+        paletteColor(0x3C53D7),
+        paletteColor(0xBB4AB0),
+        paletteColor(0xFFFFFF),
+        paletteColor(0xCACACA),
+        paletteColor(0xCE815D),
+        paletteColor(0xFFB2D0),
+        paletteColor(0xFFCC00),
+        paletteColor(0xF5E7B5),
+        paletteColor(0xB3EB00),
+        paletteColor(0x8EE1EE),
+        paletteColor(0x6F9EC8),
+        paletteColor(0xD0C6EC),
+    ]
+
     private let selectionHandler: (CaptureSelectionResult?) -> Void
     private var didCompleteSelection = false
 
-    init(backgroundImage: NSImage?, selectionHandler: @escaping (CaptureSelectionResult?) -> Void) {
+    init(
+        backgroundImage: NSImage?,
+        settings: AppSettings = .default,
+        featureGate: FeatureGate = FeatureGate(license: LicenseState()),
+        selectionHandler: @escaping (CaptureSelectionResult?) -> Void
+    ) {
         let frame = Self.desktopFrame()
 
         self.selectionHandler = selectionHandler
@@ -106,7 +134,12 @@ final class SelectionOverlayWindow: NSWindow {
         level = .screenSaver
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
 
-        let overlayView = SelectionOverlayView(frame: NSRect(origin: .zero, size: frame.size), backgroundImage: backgroundImage)
+        let overlayView = SelectionOverlayView(
+            frame: NSRect(origin: .zero, size: frame.size),
+            backgroundImage: backgroundImage,
+            settings: settings,
+            featureGate: featureGate
+        )
         overlayView.selectionDidFinish = { [weak self] result in
             self?.completeSelection(with: result)
         }
@@ -189,16 +222,29 @@ final class SelectionOverlayWindow: NSWindow {
 
         return frame
     }
+
+    private static func paletteColor(_ hex: UInt32) -> NSColor {
+        NSColor(
+            srgbRed: CGFloat((hex >> 16) & 0xFF) / 255,
+            green: CGFloat((hex >> 8) & 0xFF) / 255,
+            blue: CGFloat(hex & 0xFF) / 255,
+            alpha: 1
+        )
+    }
 }
 
 private final class SelectionOverlayView: NSView {
     var selectionDidFinish: ((CaptureSelectionResult?) -> Void)?
     private let backgroundImage: NSImage?
     private let backgroundBitmap: NSBitmapImageRep?
+    private let settings: AppSettings
+    private let featureGate: FeatureGate
     private let colorSamplerSize = NSSize(width: 184, height: 188)
 
-    init(frame frameRect: NSRect, backgroundImage: NSImage?) {
+    init(frame frameRect: NSRect, backgroundImage: NSImage?, settings: AppSettings, featureGate: FeatureGate) {
         self.backgroundImage = backgroundImage
+        self.settings = settings
+        self.featureGate = featureGate
         if let cgImage = backgroundImage?.cgImage(forProposedRect: nil, context: nil, hints: nil) {
             self.backgroundBitmap = NSBitmapImageRep(cgImage: cgImage)
         } else {
@@ -234,7 +280,6 @@ private final class SelectionOverlayView: NSView {
         case number
         case magnifier
         case eraser
-        case ocr
         case undo
         case redo
         case cancel
@@ -298,28 +343,10 @@ private final class SelectionOverlayView: NSView {
         }
     }
 
-    private let colors: [NSColor] = [
-        NSColor(calibratedRed: 0 / 255, green: 0 / 255, blue: 0 / 255, alpha: 1),
-        NSColor(calibratedRed: 116 / 255, green: 116 / 255, blue: 115 / 255, alpha: 1),
-        NSColor(calibratedRed: 112 / 255, green: 25 / 255, blue: 25 / 255, alpha: 1),
-        NSColor(calibratedRed: 209 / 255, green: 54 / 255, blue: 41 / 255, alpha: 1),
-        NSColor(calibratedRed: 233 / 255, green: 124 / 255, blue: 50 / 255, alpha: 1),
-        NSColor(calibratedRed: 250 / 255, green: 241 / 255, blue: 56 / 255, alpha: 1),
-        NSColor(calibratedRed: 76 / 255, green: 164 / 255, blue: 74 / 255, alpha: 1),
-        NSColor(calibratedRed: 70 / 255, green: 148 / 255, blue: 224 / 255, alpha: 1),
-        NSColor(calibratedRed: 62 / 255, green: 62 / 255, blue: 192 / 255, alpha: 1),
-        NSColor(calibratedRed: 141 / 255, green: 70 / 255, blue: 151 / 255, alpha: 1),
-        NSColor(calibratedRed: 255 / 255, green: 255 / 255, blue: 255 / 255, alpha: 1),
-        NSColor(calibratedRed: 187 / 255, green: 188 / 255, blue: 186 / 255, alpha: 1),
-        NSColor(calibratedRed: 164 / 255, green: 114 / 255, blue: 81 / 255, alpha: 1),
-        NSColor(calibratedRed: 240 / 255, green: 169 / 255, blue: 193 / 255, alpha: 1),
-        NSColor(calibratedRed: 242 / 255, green: 197 / 255, blue: 50 / 255, alpha: 1),
-        NSColor(calibratedRed: 234 / 255, green: 225 / 255, blue: 171 / 255, alpha: 1),
-        NSColor(calibratedRed: 182 / 255, green: 223 / 255, blue: 56 / 255, alpha: 1),
-        NSColor(calibratedRed: 159 / 255, green: 209 / 255, blue: 230 / 255, alpha: 1),
-        NSColor(calibratedRed: 109 / 255, green: 133 / 255, blue: 180 / 255, alpha: 1),
-        NSColor(calibratedRed: 192 / 255, green: 184 / 255, blue: 225 / 255, alpha: 1),
-    ]
+    private let colors = SelectionOverlayWindow.defaultPaletteColors
+    private var visiblePaletteCount: Int {
+        min(colors.count, settings.paletteVisibleCount)
+    }
     private var windowCandidates: [WindowSelectionCandidate] = []
     private var hoveredWindowRect: NSRect?
     private var displayedWindowRect: NSRect?
@@ -847,7 +874,7 @@ private final class SelectionOverlayView: NSView {
         }
 
         for (index, rect) in colorSwatchRects(in: optionsRect).enumerated() where rect.insetBy(dx: -4, dy: -4).contains(point) {
-            if index == colors.count, let title = SelectionToolbarState.tooltipTitle(for: "customColor") {
+            if index == visiblePaletteCount, let title = SelectionToolbarState.tooltipTitle(for: "customColor") {
                 return (title, rect)
             }
             return nil
@@ -876,8 +903,6 @@ private final class SelectionOverlayView: NSView {
             return "magnifier"
         case .eraser:
             return "eraser"
-        case .ocr:
-            return "ocr"
         case .undo:
             return "undo"
         case .redo:
@@ -996,7 +1021,7 @@ private final class SelectionOverlayView: NSView {
             finish(action: .save)
         case .cancel:
             selectionDidFinish?(nil)
-        case .pin, .polyline, .pen, .marker, .mosaic, .text, .number, .magnifier, .eraser, .ocr, .scroll, .settings:
+        case .pin, .polyline, .pen, .marker, .mosaic, .text, .number, .magnifier, .eraser, .scroll, .settings:
             showPlaceholder(for: button)
         }
 
@@ -1045,8 +1070,6 @@ private final class SelectionOverlayView: NSView {
             label = "放大镜"
         case .eraser:
             label = "橡皮擦"
-        case .ocr:
-            label = "OCR"
         case .scroll:
             label = "滚动截图"
         case .settings:
@@ -1149,7 +1172,7 @@ private final class SelectionOverlayView: NSView {
             return true
         }
 
-        if let swatch = SelectionToolbarState.swatchHitTarget(at: point, in: optionsRect, paletteCount: colors.count) {
+        if let swatch = SelectionToolbarState.swatchHitTarget(at: point, in: optionsRect, paletteCount: visiblePaletteCount) {
             switch swatch {
             case .custom:
                 NSLog("snipory overlay custom color swatch clicked")
@@ -1158,6 +1181,9 @@ private final class SelectionOverlayView: NSView {
                 isCustomColorSwatchActive = true
                 toggleCustomColorPanel()
             case let .palette(index):
+                guard colors.indices.contains(index) else {
+                    return true
+                }
                 let color = opaqueColor(colors[index])
                 currentStyle.strokeColor = color
                 currentStyle.fillColor = color
@@ -1794,12 +1820,14 @@ private final class SelectionOverlayView: NSView {
 
     private func drawMainToolbarSeparators(in toolbar: NSRect) {
         let buttonRects = Dictionary(uniqueKeysWithValues: toolbarButtonRects(in: toolbar))
-        let separators: [(ToolbarButton, ToolbarButton)] = [
-            (.eraser, .ocr),
-            (.ocr, .undo),
+        var separators: [(ToolbarButton, ToolbarButton)] = [
             (.redo, .cancel),
-            (.copy, .scroll),
         ]
+        if featureGate.isEnabled(.scrollCapture) {
+            separators.insert(contentsOf: [(.eraser, .scroll), (.scroll, .undo)], at: 0)
+        } else {
+            separators.insert((.eraser, .undo), at: 0)
+        }
 
         NSColor.tertiaryLabelColor.withAlphaComponent(0.5).setFill()
 
@@ -1944,7 +1972,10 @@ private final class SelectionOverlayView: NSView {
         let copyText = NSMutableAttributedString(
             string: isShowingCopySuccess
                 ? SelectionToolbarState.colorSamplerCopySuccessText
-                : SelectionToolbarState.colorSamplerCopyHintText(for: colorSamplerCopyMode),
+                : SelectionToolbarState.colorSamplerCopyHintText(
+                    for: colorSamplerCopyMode,
+                    l10n: L10n(language: settings.language)
+                ),
             attributes: copyHintAttributes
         )
         if !isShowingCopySuccess {
@@ -2226,7 +2257,7 @@ private final class SelectionOverlayView: NSView {
 
     private func drawColorSwatches(in optionsRect: NSRect) {
         for (index, rect) in colorSwatchRects(in: optionsRect).enumerated() {
-            let isCustomSlot = index == colors.count
+            let isCustomSlot = index == visiblePaletteCount
             let color = isCustomSlot ? nil : colors[index]
             let selected: Bool
             if let color {
@@ -2281,6 +2312,9 @@ private final class SelectionOverlayView: NSView {
         }
 
         sampledColor = color
+        if let sampledPointerPoint {
+            logColorSamplerDebug(at: sampledPointerPoint, color: color)
+        }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(colorSamplerDisplayValue(for: color), forType: .string)
         showColorSamplerCopySuccess()
@@ -2303,11 +2337,7 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func hexString(for color: NSColor) -> String {
-        let rgb = opaqueColor(color).usingColorSpace(.deviceRGB) ?? opaqueColor(color)
-        let red = Int(round(rgb.redComponent * 255))
-        let green = Int(round(rgb.greenComponent * 255))
-        let blue = Int(round(rgb.blueComponent * 255))
-        return String(format: "#%02X%02X%02X", red, green, blue)
+        SelectionToolbarState.colorSamplerHexString(for: color)
     }
 
     private func sampleColor(at point: NSPoint) -> NSColor? {
@@ -2317,6 +2347,23 @@ private final class SelectionOverlayView: NSView {
 
         let pixel = bitmapPixelPoint(for: point, in: backgroundBitmap)
         return sampleColor(atPixelX: pixel.x, y: pixel.y, in: backgroundBitmap)
+    }
+
+    private func logColorSamplerDebug(at point: NSPoint, color: NSColor) {
+        guard let backgroundBitmap else {
+            return
+        }
+
+        let pixel = bitmapPixelPoint(for: point, in: backgroundBitmap)
+        NSLog(
+            "snipory color sampler %@",
+            SelectionToolbarState.colorSamplerDebugDescription(
+                atPixelX: pixel.x,
+                y: pixel.y,
+                in: backgroundBitmap,
+                color: color
+            )
+        )
     }
 
     private func bitmapPixelPoint(for point: NSPoint, in bitmap: NSBitmapImageRep) -> (x: Int, y: Int) {
@@ -2329,21 +2376,11 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func sampleColor(atPixelX x: Int, y: Int, in bitmap: NSBitmapImageRep) -> NSColor? {
-        let x = max(0, min(bitmap.pixelsWide - 1, x))
-        let y = max(0, min(bitmap.pixelsHigh - 1, y))
-        guard let color = bitmap.colorAt(x: x, y: y) else {
-            return nil
-        }
-
-        return color.usingColorSpace(.deviceRGB) ?? color
+        SelectionToolbarState.sampleColor(atPixelX: x, y: y, in: bitmap)
     }
 
     private func rgbString(for color: NSColor) -> String {
-        let rgb = opaqueColor(color).usingColorSpace(.deviceRGB) ?? opaqueColor(color)
-        let red = Int(round(rgb.redComponent * 255))
-        let green = Int(round(rgb.greenComponent * 255))
-        let blue = Int(round(rgb.blueComponent * 255))
-        return "\(red), \(green), \(blue)"
+        SelectionToolbarState.colorSamplerRgbString(for: color)
     }
 
     private func drawToolbarButton(_ rect: NSRect, symbol: String?, selected: Bool, enabled: Bool) {
@@ -2544,7 +2581,7 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func mainToolbarButtons() -> [ToolbarButton] {
-        [
+        var buttons: [ToolbarButton] = [
             .rectangle,
             .polyline,
             .pen,
@@ -2554,21 +2591,25 @@ private final class SelectionOverlayView: NSView {
             .number,
             .magnifier,
             .eraser,
-            .ocr,
+        ]
+        if featureGate.isEnabled(.scrollCapture) {
+            buttons.append(.scroll)
+        }
+        buttons.append(contentsOf: [
             .undo,
             .redo,
             .cancel,
             .pin,
             .save,
             .copy,
-            .scroll,
             .settings,
-        ]
+        ])
+        return buttons
     }
 
     private func mainToolbarExtraGap(after button: ToolbarButton) -> CGFloat {
         switch button {
-        case .eraser, .ocr, .redo, .copy:
+        case .eraser, .scroll, .redo:
             return 8
         default:
             return 0
@@ -2602,8 +2643,6 @@ private final class SelectionOverlayView: NSView {
             return "toolbar-zoom-in-tool"
         case .eraser:
             return "toolbar-eraser-tool"
-        case .ocr:
-            return "toolbar-ocr-recognition"
         case .undo:
             return enabled ? "toolbar-undo-enabled" : "toolbar-undo-disabled"
         case .redo:
@@ -2693,7 +2732,13 @@ private final class SelectionOverlayView: NSView {
             return nil
         }
 
-        return toolbarRect(size: NSSize(width: 530, height: 40), anchoredTo: toolbar)
+        return toolbarRect(
+            size: NSSize(
+                width: SelectionToolbarState.optionsToolbarWidth(paletteCount: visiblePaletteCount),
+                height: SelectionToolbarState.optionsToolbarHeight(paletteCount: visiblePaletteCount)
+            ),
+            anchoredTo: toolbar
+        )
     }
 
     private var cornerRadiusPanelRect: NSRect? {
@@ -2715,7 +2760,12 @@ private final class SelectionOverlayView: NSView {
 
     private func strokeWidthRects(in optionsRect: NSRect) -> [NSRect] {
         (0..<3).map { index in
-            NSRect(x: optionsRect.minX + 6 + CGFloat(index) * 24, y: optionsRect.minY + 10, width: 20, height: 20)
+            NSRect(
+                x: optionsRect.minX + 6 + CGFloat(index) * 24,
+                y: optionControlY(in: optionsRect),
+                width: 20,
+                height: 20
+            )
         }
     }
 
@@ -2724,19 +2774,23 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func fillToggleRect(in optionsRect: NSRect) -> NSRect {
-        NSRect(x: optionsRect.minX + 86, y: optionsRect.minY + 10, width: 20, height: 20)
+        NSRect(x: optionsRect.minX + 86, y: optionControlY(in: optionsRect), width: 20, height: 20)
     }
 
     private func rectangleModeButtonRect(in optionsRect: NSRect) -> NSRect {
-        NSRect(x: optionsRect.minX + 126, y: optionsRect.minY + 10, width: 26, height: 20)
+        NSRect(x: optionsRect.minX + 126, y: optionControlY(in: optionsRect), width: 26, height: 20)
     }
 
     private func ellipseModeButtonRect(in optionsRect: NSRect) -> NSRect {
-        NSRect(x: optionsRect.minX + 158, y: optionsRect.minY + 10, width: 22, height: 20)
+        NSRect(x: optionsRect.minX + 158, y: optionControlY(in: optionsRect), width: 22, height: 20)
     }
 
     private func strokeStyleFieldRect(in optionsRect: NSRect) -> NSRect {
-        NSRect(x: optionsRect.minX + 200, y: optionsRect.minY + 10, width: 102, height: 20)
+        NSRect(x: optionsRect.minX + 200, y: optionControlY(in: optionsRect), width: 102, height: 20)
+    }
+
+    private func optionControlY(in optionsRect: NSRect) -> CGFloat {
+        optionsRect.midY - 10
     }
 
     private func strokeStyleMenuRect(in optionsRect: NSRect) -> NSRect {
@@ -2774,7 +2828,7 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func colorSwatchRects(in optionsRect: NSRect) -> [NSRect] {
-        SelectionToolbarState.colorSwatchRects(in: optionsRect, paletteCount: colors.count)
+        SelectionToolbarState.colorSwatchRects(in: optionsRect, paletteCount: visiblePaletteCount)
     }
 
     private func cornerRadiusValueRect(in panel: NSRect) -> NSRect {
