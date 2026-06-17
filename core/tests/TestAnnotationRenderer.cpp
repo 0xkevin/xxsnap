@@ -99,6 +99,37 @@ private slots:
         QCOMPARE(snipory::core::AnnotationRenderer::dashPatternForStrokePattern(snipory::core::AnnotationStrokePattern::DashLong), QVector<qreal>({8.0, 4.0}));
         QCOMPARE(snipory::core::AnnotationRenderer::dashPatternForStrokePattern(snipory::core::AnnotationStrokePattern::DashNarrow), QVector<qreal>({4.0, 2.0}));
         QCOMPARE(snipory::core::AnnotationRenderer::dashPatternForStrokePattern(snipory::core::AnnotationStrokePattern::DashLongShort), QVector<qreal>({8.0, 3.0, 2.0, 3.0}));
+        QCOMPARE(snipory::core::AnnotationRenderer::dashPatternForStrokePattern(snipory::core::AnnotationStrokePattern::SketchSolid), QVector<qreal>({}));
+        QCOMPARE(snipory::core::AnnotationRenderer::dashPatternForStrokePattern(snipory::core::AnnotationStrokePattern::SketchDashed), QVector<qreal>({8.0, 4.0}));
+    }
+
+    void sketchStrokePatternsRenderDifferentlyFromMechanicalStrokes()
+    {
+        QVERIFY(renderSignature(snipory::core::AnnotationStrokePattern::SketchSolid)
+            != renderSignature(snipory::core::AnnotationStrokePattern::Solid));
+        QVERIFY(renderSignature(snipory::core::AnnotationStrokePattern::SketchDashed)
+            != renderSignature(snipory::core::AnnotationStrokePattern::DashLong));
+    }
+
+private:
+    static QByteArray renderSignature(snipory::core::AnnotationStrokePattern pattern)
+    {
+        QImage image(QSize(80, 50), QImage::Format_ARGB32_Premultiplied);
+        image.fill(Qt::transparent);
+
+        snipory::core::AnnotationStyle style;
+        style.strokeColor = QColor(Qt::black);
+        style.strokeWidth = 2;
+        style.strokePattern = pattern;
+
+        QPainter painter(&image);
+        snipory::core::AnnotationRenderer::drawShape(
+            painter,
+            snipory::core::ShapeAnnotation::rectangle(QRect(12, 12, 56, 26), style)
+        );
+        painter.end();
+
+        return QByteArray(reinterpret_cast<const char *>(image.constBits()), image.sizeInBytes());
     }
 };
 

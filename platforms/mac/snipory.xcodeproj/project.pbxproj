@@ -20,19 +20,19 @@
 		5A2E0B4091194E6A3ACD13F4 /* pin-to-screen.svg in Resources */ = {isa = PBXBuildFile; fileRef = DAAF5CD9C4F22E9086249B8B /* pin-to-screen.svg */; };
 		799529247B5FE216AC005054 /* copy-to-clipboard.svg in Resources */ = {isa = PBXBuildFile; fileRef = 6E80C61CF95B125F94C53BFF /* copy-to-clipboard.svg */; };
 		83A53DB8294D8365D7DDEE23 /* CaptureToolbarWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14F52F4319DA5DC78CCE2424 /* CaptureToolbarWindowController.swift */; };
-		A10000000000000000000001 /* arrow-line.png in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* arrow-line.png */; };
-		A10000000000000000000002 /* pencil-tool.png in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* pencil-tool.png */; };
+		A10000000000000000000001 /* arrow-line.svg in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* arrow-line.svg */; };
+		A10000000000000000000002 /* pencil-tool.svg in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* pencil-tool.svg */; };
 		A10000000000000000000003 /* highlighter-tool.png in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* highlighter-tool.png */; };
 		A10000000000000000000004 /* number-sequence.png in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004 /* number-sequence.png */; };
 		A10000000000000000000005 /* ocr-recognition.png in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000005 /* ocr-recognition.png */; };
 		A10000000000000000000006 /* scroll-capture.png in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* scroll-capture.png */; };
-		A10000000000000000000007 /* settings-more.png in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* settings-more.png */; };
+		A10000000000000000000007 /* settings-more.svg in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* settings-more.svg */; };
 		A10000000000000000000008 /* palette-tool.png in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* palette-tool.png */; };
 		A10000000000000000000009 /* save-to-file.png in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000009 /* save-to-file.png */; };
 		A10000000000000000000010 /* copy-to-clipboard.png in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000010 /* copy-to-clipboard.png */; };
 		A10000000000000000000011 /* pin-to-screen.png in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* pin-to-screen.png */; };
-		A10000000000000000000012 /* shape-marker.png in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000012 /* shape-marker.png */; };
-		A10000000000000000000013 /* mosaic-tool.png in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000013 /* mosaic-tool.png */; };
+		A10000000000000000000012 /* shape-marker.svg in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000012 /* shape-marker.svg */; };
+		A10000000000000000000013 /* mosaic-tool.svg in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000013 /* mosaic-tool.svg */; };
 		A10000000000000000000014 /* text-tool.png in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000014 /* text-tool.png */; };
 		A10000000000000000000015 /* zoom-in-tool.png in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000015 /* zoom-in-tool.png */; };
 		A10000000000000000000016 /* eraser-tool.png in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000016 /* eraser-tool.png */; };
@@ -81,19 +81,19 @@
 		6FE4B44872D15A2E4001A279 /* sniporyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = sniporyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		7B961C891511CF1C3A36BF94 /* CaptureControlWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureControlWindowController.swift; sourceTree = "<group>"; };
 		7BF7EB0393B0FB4F8C803F5C /* snipory.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = snipory.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		A20000000000000000000001 /* arrow-line.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "arrow-line.png"; sourceTree = "<group>"; };
-		A20000000000000000000002 /* pencil-tool.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "pencil-tool.png"; sourceTree = "<group>"; };
+		A20000000000000000000001 /* arrow-line.svg */ = {isa = PBXFileReference; path = "arrow-line.svg"; sourceTree = "<group>"; };
+		A20000000000000000000002 /* pencil-tool.svg */ = {isa = PBXFileReference; path = "pencil-tool.svg"; sourceTree = "<group>"; };
 		A20000000000000000000003 /* highlighter-tool.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "highlighter-tool.png"; sourceTree = "<group>"; };
 		A20000000000000000000004 /* number-sequence.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "number-sequence.png"; sourceTree = "<group>"; };
 		A20000000000000000000005 /* ocr-recognition.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "ocr-recognition.png"; sourceTree = "<group>"; };
 		A20000000000000000000006 /* scroll-capture.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "scroll-capture.png"; sourceTree = "<group>"; };
-		A20000000000000000000007 /* settings-more.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "settings-more.png"; sourceTree = "<group>"; };
+		A20000000000000000000007 /* settings-more.svg */ = {isa = PBXFileReference; path = "settings-more.svg"; sourceTree = "<group>"; };
 		A20000000000000000000008 /* palette-tool.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "palette-tool.png"; sourceTree = "<group>"; };
 		A20000000000000000000009 /* save-to-file.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "save-to-file.png"; sourceTree = "<group>"; };
 		A20000000000000000000010 /* copy-to-clipboard.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "copy-to-clipboard.png"; sourceTree = "<group>"; };
 		A20000000000000000000011 /* pin-to-screen.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "pin-to-screen.png"; sourceTree = "<group>"; };
-		A20000000000000000000012 /* shape-marker.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "shape-marker.png"; sourceTree = "<group>"; };
-		A20000000000000000000013 /* mosaic-tool.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "mosaic-tool.png"; sourceTree = "<group>"; };
+		A20000000000000000000012 /* shape-marker.svg */ = {isa = PBXFileReference; path = "shape-marker.svg"; sourceTree = "<group>"; };
+		A20000000000000000000013 /* mosaic-tool.svg */ = {isa = PBXFileReference; path = "mosaic-tool.svg"; sourceTree = "<group>"; };
 		A20000000000000000000014 /* text-tool.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "text-tool.png"; sourceTree = "<group>"; };
 		A20000000000000000000015 /* zoom-in-tool.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "zoom-in-tool.png"; sourceTree = "<group>"; };
 		A20000000000000000000016 /* eraser-tool.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "eraser-tool.png"; sourceTree = "<group>"; };
@@ -230,19 +230,19 @@
 		FE504306AA18B1891E6A3559 /* Icons */ = {
 			isa = PBXGroup;
 			children = (
-				A20000000000000000000001 /* arrow-line.png */,
-				A20000000000000000000002 /* pencil-tool.png */,
+				A20000000000000000000001 /* arrow-line.svg */,
+				A20000000000000000000002 /* pencil-tool.svg */,
 				A20000000000000000000003 /* highlighter-tool.png */,
 				A20000000000000000000004 /* number-sequence.png */,
 				A20000000000000000000005 /* ocr-recognition.png */,
 				A20000000000000000000006 /* scroll-capture.png */,
-				A20000000000000000000007 /* settings-more.png */,
+				A20000000000000000000007 /* settings-more.svg */,
 				A20000000000000000000008 /* palette-tool.png */,
 				A20000000000000000000009 /* save-to-file.png */,
 				A20000000000000000000010 /* copy-to-clipboard.png */,
 				A20000000000000000000011 /* pin-to-screen.png */,
-				A20000000000000000000012 /* shape-marker.png */,
-				A20000000000000000000013 /* mosaic-tool.png */,
+				A20000000000000000000012 /* shape-marker.svg */,
+				A20000000000000000000013 /* mosaic-tool.svg */,
 				A20000000000000000000014 /* text-tool.png */,
 				A20000000000000000000015 /* zoom-in-tool.png */,
 				A20000000000000000000016 /* eraser-tool.png */,
@@ -343,19 +343,19 @@
 				799529247B5FE216AC005054 /* copy-to-clipboard.svg in Resources */,
 				5A2E0B4091194E6A3ACD13F4 /* pin-to-screen.svg in Resources */,
 				F6971C97D8915DB6D0FCA3BA /* save-to-file.svg in Resources */,
-				A10000000000000000000001 /* arrow-line.png in Resources */,
-				A10000000000000000000002 /* pencil-tool.png in Resources */,
+				A10000000000000000000001 /* arrow-line.svg in Resources */,
+				A10000000000000000000002 /* pencil-tool.svg in Resources */,
 				A10000000000000000000003 /* highlighter-tool.png in Resources */,
 				A10000000000000000000004 /* number-sequence.png in Resources */,
 				A10000000000000000000005 /* ocr-recognition.png in Resources */,
 				A10000000000000000000006 /* scroll-capture.png in Resources */,
-				A10000000000000000000007 /* settings-more.png in Resources */,
+				A10000000000000000000007 /* settings-more.svg in Resources */,
 				A10000000000000000000008 /* palette-tool.png in Resources */,
 				A10000000000000000000009 /* save-to-file.png in Resources */,
 				A10000000000000000000010 /* copy-to-clipboard.png in Resources */,
 				A10000000000000000000011 /* pin-to-screen.png in Resources */,
-				A10000000000000000000012 /* shape-marker.png in Resources */,
-				A10000000000000000000013 /* mosaic-tool.png in Resources */,
+				A10000000000000000000012 /* shape-marker.svg in Resources */,
+				A10000000000000000000013 /* mosaic-tool.svg in Resources */,
 				A10000000000000000000014 /* text-tool.png in Resources */,
 				A10000000000000000000015 /* zoom-in-tool.png in Resources */,
 				A10000000000000000000016 /* eraser-tool.png in Resources */,

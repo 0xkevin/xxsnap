@@ -37,6 +37,58 @@ enum SelectionToolbarState {
         case outside
     }
 
+    enum ArrowTypeMenuSelection: Equatable {
+        case item(Int)
+        case menuBackground
+        case outside
+    }
+
+    enum OptionsToolbarMode: Equatable {
+        case shape
+        case arrowLine
+    }
+
+    struct OptionsToolbarLayout: Equatable {
+        var strokeWidths: [NSRect]
+        var fillToggle: NSRect?
+        var rectangleMode: NSRect?
+        var ellipseMode: NSRect?
+        var strokeStyle: NSRect
+        var startArrowType: NSRect?
+        var endArrowType: NSRect?
+        var colorSwatches: [NSRect]
+    }
+
+    struct ArrowLineActivationState {
+        var style: CaptureAnnotationStyle
+        var startArrowType: CaptureArrowType
+        var endArrowType: CaptureArrowType
+    }
+
+    enum ArrowTypeEndpoint: Equatable {
+        case start
+        case end
+    }
+
+    struct ArrowTypePair: Equatable {
+        var start: CaptureArrowType
+        var end: CaptureArrowType
+    }
+
+    enum ArrowLineHitTarget: Equatable {
+        case start
+        case end
+        case control
+        case body
+        case none
+    }
+
+    struct StrokePatternOption: Equatable {
+        var pattern: CaptureStrokePattern
+        var requiresPremiumAccess: Bool
+        var isEnabled: Bool
+    }
+
     enum OverlayCursorStyle: Equatable {
         case arrow
         case crosshair
@@ -59,10 +111,27 @@ enum SelectionToolbarState {
         current == nil ? defaultShape : nil
     }
 
+    static func styleForPrimaryShapeToolActivation(
+        currentStyle: CaptureAnnotationStyle,
+        paletteColors: [NSColor]
+    ) -> CaptureAnnotationStyle {
+        var style = currentStyle
+        let shouldUseDefaultPaletteColor = styleUsesDefaultInitialColors(currentStyle)
+        style.strokeWidth = 2
+
+        if shouldUseDefaultPaletteColor, let firstPaletteColor = paletteColors.first {
+            let color = srgbColor(firstPaletteColor)
+            style.strokeColor = color
+            style.fillColor = color
+        }
+
+        return style
+    }
+
     static func tooltipTitle(for identifier: String) -> String? {
         [
             "rectangle": "形状标注",
-            "polyline": "直线",
+            "polyline": "箭头线",
             "pen": "画笔",
             "marker": "标记",
             "mosaic": "马赛克",
@@ -84,8 +153,30 @@ enum SelectionToolbarState {
             "shapeRectangle": "方形",
             "shapeEllipse": "圆形",
             "strokeStyle": "线条类型",
+            "startArrowType": "开始箭头",
+            "endArrowType": "结束箭头",
             "customColor": "自定义颜色",
         ][identifier]
+    }
+
+    static func toolbarIconInset(for resourceName: String) -> CGFloat {
+        switch resourceName {
+        case "arrow-line":
+            return 0
+        case "text-tool":
+            return 0
+        default:
+            return 2
+        }
+    }
+
+    static func usesFixedColorToolbarIconResource(_ resourceName: String) -> Bool {
+        switch resourceName {
+        case "undo-enabled", "undo-disabled", "redo-enabled", "redo-disabled", "mosaic-tool":
+            return true
+        default:
+            return false
+        }
     }
 
     static func fillPreviewStyle(currentShapeKind: CaptureAnnotationKind, currentStyle: CaptureAnnotationStyle) -> FillPreviewStyle {
@@ -96,14 +187,83 @@ enum SelectionToolbarState {
         )
     }
 
-    static func colorSwatchRects(in optionsRect: NSRect, paletteCount: Int) -> [NSRect] {
+    static func strokePatternOptions(canUsePremiumStrokePatterns: Bool) -> [StrokePatternOption] {
+        CaptureStrokePattern.allCases.map { pattern in
+            StrokePatternOption(
+                pattern: pattern,
+                requiresPremiumAccess: pattern.requiresPremiumAccess,
+                isEnabled: !pattern.requiresPremiumAccess || canUsePremiumStrokePatterns
+            )
+        }
+    }
+
+    static func arrowLineActivationState(
+        currentStyle: CaptureAnnotationStyle,
+        paletteColors: [NSColor]
+    ) -> ArrowLineActivationState {
+        ArrowLineActivationState(
+            style: styleForPrimaryShapeToolActivation(currentStyle: currentStyle, paletteColors: paletteColors),
+            startArrowType: .none,
+            endArrowType: .normal
+        )
+    }
+
+    static func arrowTypesAfterSelection(
+        currentStart: CaptureArrowType,
+        currentEnd: CaptureArrowType,
+        selectedType: CaptureArrowType,
+        endpoint: ArrowTypeEndpoint
+    ) -> ArrowTypePair {
+        var next = ArrowTypePair(start: currentStart, end: currentEnd)
+
+        switch endpoint {
+        case .start:
+            next.start = selectedType
+            if requiresSingleEndedArrowSelection(selectedType)
+                || (selectedType != .none && requiresSingleEndedArrowSelection(next.end)) {
+                next.end = .none
+            }
+        case .end:
+            next.end = selectedType
+            if requiresSingleEndedArrowSelection(selectedType)
+                || (selectedType != .none && requiresSingleEndedArrowSelection(next.start)) {
+                next.start = .none
+            }
+        }
+
+        return next
+    }
+
+    static func optionsToolbarLayout(
+        in optionsRect: NSRect,
+        paletteCount: Int,
+        mode: OptionsToolbarMode
+    ) -> OptionsToolbarLayout {
+        OptionsToolbarLayout(
+            strokeWidths: strokeWidthRects(in: optionsRect),
+            fillToggle: mode == .shape ? fillToggleRect(in: optionsRect) : nil,
+            rectangleMode: mode == .shape ? rectangleModeButtonRect(in: optionsRect) : nil,
+            ellipseMode: mode == .shape ? ellipseModeButtonRect(in: optionsRect) : nil,
+            strokeStyle: mode == .shape ? strokeStyleFieldRect(in: optionsRect) : arrowLineStrokeStyleFieldRect(in: optionsRect),
+            startArrowType: mode == .arrowLine ? startArrowTypeFieldRect(in: optionsRect, mode: mode) : nil,
+            endArrowType: mode == .arrowLine ? endArrowTypeFieldRect(in: optionsRect, mode: mode) : nil,
+            colorSwatches: colorSwatchRects(in: optionsRect, paletteCount: paletteCount, mode: mode)
+        )
+    }
+
+    static func colorSwatchRects(
+        in optionsRect: NSRect,
+        paletteCount: Int,
+        mode: OptionsToolbarMode = .shape
+    ) -> [NSRect] {
         (0...paletteCount).map { index in
             let rows = colorSwatchRowCount(paletteCount: paletteCount)
             let columns = colorSwatchColumnCount(paletteCount: paletteCount)
+            let startX = colorSwatchStartXOffset(mode: mode)
             if index == paletteCount {
                 let customSize = customColorSwatchSize(paletteCount: paletteCount)
                 return NSRect(
-                    x: optionsRect.minX + 325 + CGFloat(columns) * 16 + 2,
+                    x: optionsRect.minX + startX + CGFloat(columns) * 16 + 2,
                     y: optionsRect.midY - customSize / 2,
                     width: customSize,
                     height: customSize
@@ -114,7 +274,7 @@ enum SelectionToolbarState {
             let row = rows == 1 ? 0 : index / columns
             let firstRowY = rows == 1 ? optionsRect.midY - 6 : optionsRect.minY + 23
             return NSRect(
-                x: optionsRect.minX + 325 + CGFloat(column) * 16,
+                x: optionsRect.minX + startX + CGFloat(column) * 16,
                 y: firstRowY - CGFloat(row) * 16,
                 width: 12,
                 height: 12
@@ -122,22 +282,42 @@ enum SelectionToolbarState {
         }
     }
 
-    static func optionsToolbarWidth(paletteCount: Int) -> CGFloat {
+    static func optionsToolbarWidth(paletteCount: Int, mode: OptionsToolbarMode = .shape) -> CGFloat {
         let clampedCount = min(
             AppSettings.maximumPaletteVisibleCount,
             max(AppSettings.minimumPaletteVisibleCount, paletteCount)
         )
         let columns = colorSwatchColumnCount(paletteCount: clampedCount)
         let customSize = customColorSwatchSize(paletteCount: clampedCount)
-        return 325 + CGFloat(columns) * 16 + customSize + 13
+        return colorSwatchStartXOffset(mode: mode) + CGFloat(columns) * 16 + customSize + 13
     }
 
     static func optionsToolbarHeight(paletteCount: Int) -> CGFloat {
         colorSwatchRowCount(paletteCount: paletteCount) == 1 ? 30 : 40
     }
 
-    static func swatchHitTarget(at point: NSPoint, in optionsRect: NSRect, paletteCount: Int) -> SwatchSelection? {
-        let rects = colorSwatchRects(in: optionsRect, paletteCount: paletteCount)
+    static func arrowTypeSampleRect(in rect: NSRect, pointsRight: Bool) -> NSRect {
+        let sampleWidth = min(CGFloat(22), max(8, rect.width - 8))
+        let sampleHeight = max(8, rect.height)
+        return NSRect(
+            x: rect.minX + min(6, max(0, (rect.width - sampleWidth) / 2)),
+            y: rect.midY - sampleHeight / 2,
+            width: sampleWidth,
+            height: sampleHeight
+        )
+    }
+
+    static func arrowTypeDisclosureRect(in field: NSRect) -> NSRect {
+        NSRect(x: field.maxX - 10, y: field.midY - 2.5, width: 6, height: 4)
+    }
+
+    static func swatchHitTarget(
+        at point: NSPoint,
+        in optionsRect: NSRect,
+        paletteCount: Int,
+        mode: OptionsToolbarMode = .shape
+    ) -> SwatchSelection? {
+        let rects = colorSwatchRects(in: optionsRect, paletteCount: paletteCount, mode: mode)
         guard let customRect = rects.last else {
             return nil
         }
@@ -166,6 +346,76 @@ enum SelectionToolbarState {
         colorSwatchRowCount(paletteCount: paletteCount) == 1 ? 20 : 32
     }
 
+    private static func colorSwatchStartXOffset(mode: OptionsToolbarMode) -> CGFloat {
+        switch mode {
+        case .shape:
+            return 325
+        case .arrowLine:
+            return 318
+        }
+    }
+
+    static func strokeWidthRects(in optionsRect: NSRect) -> [NSRect] {
+        (0..<3).map { index in
+            NSRect(
+                x: optionsRect.minX + 6 + CGFloat(index) * 24,
+                y: optionControlY(in: optionsRect),
+                width: 20,
+                height: 20
+            )
+        }
+    }
+
+    static func fillToggleRect(in optionsRect: NSRect) -> NSRect {
+        NSRect(x: optionsRect.minX + 86, y: optionControlY(in: optionsRect), width: 20, height: 20)
+    }
+
+    static func rectangleModeButtonRect(in optionsRect: NSRect) -> NSRect {
+        NSRect(x: optionsRect.minX + 126, y: optionControlY(in: optionsRect), width: 26, height: 20)
+    }
+
+    static func ellipseModeButtonRect(in optionsRect: NSRect) -> NSRect {
+        NSRect(x: optionsRect.minX + 158, y: optionControlY(in: optionsRect), width: 22, height: 20)
+    }
+
+    static func strokeStyleFieldRect(in optionsRect: NSRect) -> NSRect {
+        NSRect(x: optionsRect.minX + 200, y: optionControlY(in: optionsRect), width: 102, height: 20)
+    }
+
+    static func startArrowTypeFieldRect(in optionsRect: NSRect) -> NSRect {
+        startArrowTypeFieldRect(in: optionsRect, mode: .shape)
+    }
+
+    static func endArrowTypeFieldRect(in optionsRect: NSRect) -> NSRect {
+        endArrowTypeFieldRect(in: optionsRect, mode: .shape)
+    }
+
+    private static func arrowLineStrokeStyleFieldRect(in optionsRect: NSRect) -> NSRect {
+        NSRect(x: optionsRect.minX + 92, y: optionControlY(in: optionsRect), width: 94, height: 20)
+    }
+
+    private static func startArrowTypeFieldRect(in optionsRect: NSRect, mode: OptionsToolbarMode) -> NSRect {
+        switch mode {
+        case .shape:
+            return NSRect(x: optionsRect.minX + 312, y: optionControlY(in: optionsRect), width: 42, height: 20)
+        case .arrowLine:
+            return NSRect(x: optionsRect.minX + 204, y: optionControlY(in: optionsRect), width: 42, height: 20)
+        }
+    }
+
+    private static func endArrowTypeFieldRect(in optionsRect: NSRect, mode: OptionsToolbarMode) -> NSRect {
+        switch mode {
+        case .shape:
+            return NSRect(x: optionsRect.minX + 360, y: optionControlY(in: optionsRect), width: 42, height: 20)
+        case .arrowLine:
+            return NSRect(x: optionsRect.minX + 252, y: optionControlY(in: optionsRect), width: 42, height: 20)
+        }
+    }
+
+    private static func optionControlY(in optionsRect: NSRect) -> CGFloat {
+        optionsRect.midY - 10
+    }
+
     static func strokeStyleMenuItemRects(in menu: NSRect, itemCount: Int) -> [NSRect] {
         (0..<itemCount).map { index in
             NSRect(x: menu.minX + 4, y: menu.maxY - 28 - CGFloat(index) * 24, width: menu.width - 8, height: 20)
@@ -181,6 +431,43 @@ enum SelectionToolbarState {
             return .item(index)
         }
         return .menuBackground
+    }
+
+    static func arrowTypeMenuItemRects(in menu: NSRect, itemCount: Int) -> [NSRect] {
+        (0..<itemCount).map { index in
+            NSRect(x: menu.minX + 4, y: menu.maxY - 28 - CGFloat(index) * 24, width: menu.width - 8, height: 20)
+        }
+    }
+
+    static func arrowTypeMenuHitTarget(at point: NSPoint, in menu: NSRect, itemCount: Int) -> ArrowTypeMenuSelection {
+        guard menu.contains(point) else {
+            return .outside
+        }
+
+        for (index, rect) in arrowTypeMenuItemRects(in: menu, itemCount: itemCount).enumerated() where rect.contains(point) {
+            return .item(index)
+        }
+        return .menuBackground
+    }
+
+    static func arrowLineHitTarget(
+        at point: NSPoint,
+        line: CaptureArrowLine,
+        hitOutset: CGFloat = 7
+    ) -> ArrowLineHitTarget {
+        if distance(from: point, to: line.start) <= hitOutset {
+            return .start
+        }
+        if distance(from: point, to: line.end) <= hitOutset {
+            return .end
+        }
+        if distance(from: point, to: line.control) <= hitOutset {
+            return .control
+        }
+        if distanceFromQuadraticCurve(point: point, line: line, sampleCount: 32) <= hitOutset {
+            return .body
+        }
+        return .none
     }
 
     static func overlayCursorStyle(
@@ -606,6 +893,71 @@ enum SelectionToolbarState {
         return converted.withAlphaComponent(1)
     }
 
+    private static func styleUsesDefaultInitialColors(_ style: CaptureAnnotationStyle) -> Bool {
+        let defaultStyle = CaptureAnnotationStyle()
+        return colorsMatch(style.strokeColor, defaultStyle.strokeColor)
+            && colorsMatch(style.fillColor, defaultStyle.fillColor)
+    }
+
+    private static func colorsMatch(_ lhs: NSColor, _ rhs: NSColor) -> Bool {
+        let left = srgbColor(lhs)
+        let right = srgbColor(rhs)
+        return abs(left.redComponent - right.redComponent) < 0.001
+            && abs(left.greenComponent - right.greenComponent) < 0.001
+            && abs(left.blueComponent - right.blueComponent) < 0.001
+    }
+
+    private static func requiresSingleEndedArrowSelection(_ type: CaptureArrowType) -> Bool {
+        switch type {
+        case .solidArrow, .hollowArrow:
+            return true
+        case .none, .bar, .dot, .diamond, .normal:
+            return false
+        }
+    }
+
+    private static func distanceFromQuadraticCurve(point: NSPoint, line: CaptureArrowLine, sampleCount: Int) -> CGFloat {
+        guard sampleCount > 1 else {
+            return distanceFromSegment(point: point, start: line.start, end: line.end)
+        }
+
+        var nearest = CGFloat.greatestFiniteMagnitude
+        var previous = line.start
+        for index in 1...sampleCount {
+            let t = CGFloat(index) / CGFloat(sampleCount)
+            let current = quadraticPoint(start: line.start, control: line.control, end: line.end, t: t)
+            nearest = min(nearest, distanceFromSegment(point: point, start: previous, end: current))
+            previous = current
+        }
+        return nearest
+    }
+
+    static func quadraticPoint(start: NSPoint, control: NSPoint, end: NSPoint, t: CGFloat) -> NSPoint {
+        let u = 1 - t
+        return NSPoint(
+            x: u * u * start.x + 2 * u * t * control.x + t * t * end.x,
+            y: u * u * start.y + 2 * u * t * control.y + t * t * end.y
+        )
+    }
+
+    private static func distanceFromSegment(point: NSPoint, start: NSPoint, end: NSPoint) -> CGFloat {
+        let dx = end.x - start.x
+        let dy = end.y - start.y
+        let lengthSquared = dx * dx + dy * dy
+        guard lengthSquared > 0 else {
+            return distance(from: point, to: start)
+        }
+
+        let rawT = ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared
+        let t = min(1, max(0, rawT))
+        let projection = NSPoint(x: start.x + t * dx, y: start.y + t * dy)
+        return distance(from: point, to: projection)
+    }
+
+    private static func distance(from lhs: NSPoint, to rhs: NSPoint) -> CGFloat {
+        hypot(lhs.x - rhs.x, lhs.y - rhs.y)
+    }
+
     static func toggledColorSamplerCopyMode(from mode: ColorSamplerCopyMode) -> ColorSamplerCopyMode {
         switch mode {
         case .hex:
@@ -683,6 +1035,8 @@ enum SelectionToolbarState {
 
     private static func shapePath(in rect: NSRect, kind: CaptureAnnotationKind, cornerRadius: CGFloat) -> NSBezierPath {
         switch kind {
+        case .arrowLine:
+            NSBezierPath()
         case .rectangle where cornerRadius > 0:
             NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius)
         case .rectangle:

@@ -42,10 +42,13 @@ final class AppSettingsTests: XCTestCase {
     func testFeatureGateKeepsTrialFullyOpenAndRestrictsFreeCoreFeatures() {
         XCTAssertTrue(FeatureGate(license: LicenseState(plan: .trial)).isEnabled(.scrollCapture))
         XCTAssertTrue(FeatureGate(license: LicenseState(plan: .trial)).isEnabled(.ocr))
+        XCTAssertTrue(FeatureGate(license: LicenseState(plan: .trial)).isEnabled(.sketchStrokePatterns))
         XCTAssertTrue(FeatureGate(license: LicenseState(plan: .free)).isEnabled(.customPalette))
         XCTAssertFalse(FeatureGate(license: LicenseState(plan: .free)).isEnabled(.scrollCapture))
         XCTAssertFalse(FeatureGate(license: LicenseState(plan: .free)).isEnabled(.ocr))
+        XCTAssertFalse(FeatureGate(license: LicenseState(plan: .free)).isEnabled(.sketchStrokePatterns))
         XCTAssertTrue(FeatureGate(license: LicenseState(plan: .pro)).isEnabled(.scrollCapture))
+        XCTAssertTrue(FeatureGate(license: LicenseState(plan: .pro)).isEnabled(.sketchStrokePatterns))
     }
 
     func testL10nDefaultsToChineseAndSupportsEnglish() {

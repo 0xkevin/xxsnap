@@ -240,6 +240,11 @@ private final class SelectionOverlayView: NSView {
     private let settings: AppSettings
     private let featureGate: FeatureGate
     private let colorSamplerSize = NSSize(width: 184, height: 188)
+    private var strokePatternOptions: [SelectionToolbarState.StrokePatternOption] {
+        SelectionToolbarState.strokePatternOptions(
+            canUsePremiumStrokePatterns: featureGate.isEnabled(.sketchStrokePatterns)
+        )
+    }
 
     init(frame frameRect: NSRect, backgroundImage: NSImage?, settings: AppSettings, featureGate: FeatureGate) {
         self.backgroundImage = backgroundImage
@@ -267,6 +272,7 @@ private final class SelectionOverlayView: NSView {
         case movingShape
         case movingSelection
         case resizingShape
+        case resizingArrowLine
         case resizingSelection
     }
 
@@ -343,6 +349,11 @@ private final class SelectionOverlayView: NSView {
         }
     }
 
+    private enum ArrowTypeField {
+        case start
+        case end
+    }
+
     private let colors = SelectionOverlayWindow.defaultPaletteColors
     private var visiblePaletteCount: Int {
         min(colors.count, settings.paletteVisibleCount)
@@ -363,27 +374,36 @@ private final class SelectionOverlayView: NSView {
     private var redoAnnotations: [CaptureAnnotation] = []
     private var selectedAnnotationIndex: Int?
     private var movingAnnotationStartRect: NSRect?
+    private var movingAnnotationStartArrowLine: CaptureArrowLine?
     private var movingAnnotationOffset = NSPoint.zero
     private var movingSelectionStartRect: NSRect?
     private var movingSelectionPointerOffset = NSPoint.zero
     private var movingSelectionBounds: NSRect?
     private var movingSelectionStartAnnotationRects: [NSRect] = []
+    private var movingSelectionStartAnnotations: [CaptureAnnotation] = []
     private var mainToolbarOffset = NSSize.zero
     private var toolbarDragStartPoint: NSPoint?
     private var toolbarDragStartOffset = NSSize.zero
     private var activeResizeHandle: ShapeResizeHandle?
     private var resizingAnnotationStartRect: NSRect?
+    private var activeArrowLineHandle: SelectionToolbarState.ArrowLineHitTarget?
+    private var resizingArrowLineStart: CaptureArrowLine?
     private var activeSelectionResizeHandle: SelectionToolbarState.OverlayResizeHandle?
     private var resizingSelectionStartRect: NSRect?
     private var resizingSelectionStartAnnotationRects: [NSRect] = []
+    private var resizingSelectionStartAnnotations: [CaptureAnnotation] = []
     private var currentShapeKind = CaptureAnnotationKind.rectangle
     private var activeShapeKind: CaptureAnnotationKind?
     private var isShapeToolActive = false
     private var currentStyle = CaptureAnnotationStyle()
+    private var currentStartArrowType = CaptureArrowType.none
+    private var currentEndArrowType = CaptureArrowType.normal
     private var customColor: NSColor?
     private var isCustomColorSwatchActive = false
     private var showsCornerRadiusPanel = false
     private var showsStrokeStyleMenu = false
+    private var showsStartArrowTypeMenu = false
+    private var showsEndArrowTypeMenu = false
     private var sampledPointerPoint: NSPoint?
     private var sampledColor: NSColor?
     private var colorSamplerCopyMode: SelectionToolbarState.ColorSamplerCopyMode = .hex
@@ -459,6 +479,12 @@ private final class SelectionOverlayView: NSView {
         if showsStrokeStyleMenu {
             drawStrokeStyleMenu(for: selectionRect)
         }
+        if showsStartArrowTypeMenu {
+            drawArrowTypeMenu(field: .start)
+        }
+        if showsEndArrowTypeMenu {
+            drawArrowTypeMenu(field: .end)
+        }
         drawTooltipIfNeeded()
     }
 
@@ -471,7 +497,8 @@ private final class SelectionOverlayView: NSView {
             pendingWindowSelectionRect = hoveredWindowRect?.contains(point) == true ? hoveredWindowRect : nil
             selectionStartPoint = point
             selectionCurrentPoint = point
-        case .annotating, .drawingShape, .draggingToolbar, .draggingCornerRadius, .movingShape, .movingSelection, .resizingShape, .resizingSelection:
+            updateColorSampler(at: point)
+        case .annotating, .drawingShape, .draggingToolbar, .draggingCornerRadius, .movingShape, .movingSelection, .resizingShape, .resizingArrowLine, .resizingSelection:
             handleAnnotatingMouseDown(at: point)
         }
 
@@ -488,6 +515,7 @@ private final class SelectionOverlayView: NSView {
             }
             hoveredWindowRect = nil
             selectionCurrentPoint = point
+            updateColorSampler(at: point)
         case .drawingShape:
             shapeCurrentPoint = clamp(point, to: bounds)
         case .draggingToolbar:
@@ -512,6 +540,8 @@ private final class SelectionOverlayView: NSView {
             updateMovingSelection(to: point)
         case .resizingShape:
             updateResizingShape(to: point)
+        case .resizingArrowLine:
+            updateResizingArrowLine(to: point)
         case .resizingSelection:
             updateResizingSelection(to: point)
         }
@@ -525,6 +555,17 @@ private final class SelectionOverlayView: NSView {
         updateColorSampler(at: point)
         if isMainToolbarDragPoint(point) {
             NSCursor.sniporyMove.set()
+            return
+        }
+        if interactionMode == .annotating, let arrowHit = arrowLineHitTarget(at: point) {
+            switch arrowHit.target {
+            case .start, .end:
+                NSCursor.resizeLeftRight.set()
+            case .control, .body:
+                NSCursor.sniporyMove.set()
+            case .none:
+                break
+            }
             return
         }
         setCursor(
@@ -575,7 +616,7 @@ private final class SelectionOverlayView: NSView {
             NSLog("snipory overlay selection locked rect=(%.0f, %.0f, %.0f, %.0f)", selectionRect.minX, selectionRect.minY, selectionRect.width, selectionRect.height)
         case .drawingShape:
             shapeCurrentPoint = clamp(point, to: bounds)
-            if let draft = draftAnnotation, draft.rect.width >= 8, draft.rect.height >= 8 {
+            if let draft = draftAnnotation, isUsableDraftAnnotation(draft) {
                 annotations.append(draft)
                 selectedAnnotationIndex = annotations.indices.last
                 currentShapeKind = draft.kind
@@ -604,6 +645,11 @@ private final class SelectionOverlayView: NSView {
         case .resizingShape:
             commitSelectedShapePreview()
             activeResizeHandle = nil
+            interactionMode = .annotating
+        case .resizingArrowLine:
+            commitSelectedShapePreview()
+            activeArrowLineHandle = nil
+            resizingArrowLineStart = nil
             interactionMode = .annotating
         case .resizingSelection:
             commitSelectionResize()
@@ -722,12 +768,32 @@ private final class SelectionOverlayView: NSView {
     }
 
     private var colorSamplerSelectionRect: NSRect? {
-        lockedSelectionRect ?? displayedWindowRect ?? hoveredWindowRect
+        lockedSelectionRect ?? selectionRect ?? displayedWindowRect ?? hoveredWindowRect
     }
 
     private var draftAnnotation: CaptureAnnotation? {
         guard let shapeStartPoint, let shapeCurrentPoint, lockedSelectionRect != nil else {
             return nil
+        }
+
+        if currentShapeKind == .arrowLine {
+            let overlayLine = CaptureArrowLine(
+                start: shapeStartPoint,
+                end: shapeCurrentPoint,
+                control: NSPoint(
+                    x: (shapeStartPoint.x + shapeCurrentPoint.x) / 2,
+                    y: (shapeStartPoint.y + shapeCurrentPoint.y) / 2
+                ),
+                startArrowType: currentStartArrowType,
+                endArrowType: currentEndArrowType
+            )
+            let localLine = localArrowLine(fromOverlayArrowLine: overlayLine)
+            return CaptureAnnotation(
+                kind: .arrowLine,
+                rect: localLine.boundingRect,
+                style: currentStyle,
+                arrowLine: localLine
+            )
         }
 
         let rect = NSRect(
@@ -738,6 +804,14 @@ private final class SelectionOverlayView: NSView {
         )
 
         return CaptureAnnotation(kind: currentShapeKind, rect: localAnnotationRect(from: rect), style: currentStyle)
+    }
+
+    private func isUsableDraftAnnotation(_ annotation: CaptureAnnotation) -> Bool {
+        if annotation.kind == .arrowLine, let arrowLine = annotation.arrowLine {
+            return hypot(arrowLine.end.x - arrowLine.start.x, arrowLine.end.y - arrowLine.start.y) >= 8
+        }
+
+        return annotation.rect.width >= 8 && annotation.rect.height >= 8
     }
 
     private func updateHoverState(at point: NSPoint) {
@@ -847,33 +921,45 @@ private final class SelectionOverlayView: NSView {
         guard let optionsRect = optionsToolbarRect else {
             return nil
         }
+        let layout = optionsToolbarLayout(in: optionsRect)
 
-        for (index, rect) in strokeWidthRects(in: optionsRect).enumerated() where rect.contains(point) {
+        for (index, rect) in layout.strokeWidths.enumerated() where rect.contains(point) {
             let identifiers = ["strokeWidthThin", "strokeWidthMedium", "strokeWidthThick"]
             return (SelectionToolbarState.tooltipTitle(for: identifiers[index]) ?? "线条粗细", rect)
         }
 
-        let fillRect = fillToggleRect(in: optionsRect)
-        if fillRect.contains(point), let title = SelectionToolbarState.tooltipTitle(for: "fill") {
+        if let fillRect = layout.fillToggle,
+           fillRect.contains(point),
+           let title = SelectionToolbarState.tooltipTitle(for: "fill") {
             return (title, fillRect)
         }
 
-        let rectangleButton = shapeModeBackgroundRect(for: rectangleModeButtonRect(in: optionsRect))
-        if rectangleButton.contains(point), let title = SelectionToolbarState.tooltipTitle(for: "shapeRectangle") {
-            return (title, rectangleButton)
+        if let rectangleMode = layout.rectangleMode {
+            let rectangleButton = shapeModeBackgroundRect(for: rectangleMode)
+            if rectangleButton.contains(point), let title = SelectionToolbarState.tooltipTitle(for: "shapeRectangle") {
+                return (title, rectangleButton)
+            }
         }
 
-        let ellipseButton = ellipseModeButtonRect(in: optionsRect)
-        if ellipseButton.contains(point), let title = SelectionToolbarState.tooltipTitle(for: "shapeEllipse") {
+        if let ellipseButton = layout.ellipseMode,
+           ellipseButton.contains(point),
+           let title = SelectionToolbarState.tooltipTitle(for: "shapeEllipse") {
             return (title, ellipseButton)
         }
 
-        let strokeStyle = strokeStyleFieldRect(in: optionsRect)
-        if strokeStyle.contains(point), let title = SelectionToolbarState.tooltipTitle(for: "strokeStyle") {
-            return (title, strokeStyle)
+        if layout.strokeStyle.contains(point), let title = SelectionToolbarState.tooltipTitle(for: "strokeStyle") {
+            return (title, layout.strokeStyle)
         }
 
-        for (index, rect) in colorSwatchRects(in: optionsRect).enumerated() where rect.insetBy(dx: -4, dy: -4).contains(point) {
+        if let startArrowType = layout.startArrowType, startArrowType.contains(point) {
+            return (SelectionToolbarState.tooltipTitle(for: "startArrowType") ?? "开始箭头", startArrowType)
+        }
+
+        if let endArrowType = layout.endArrowType, endArrowType.contains(point) {
+            return (SelectionToolbarState.tooltipTitle(for: "endArrowType") ?? "结束箭头", endArrowType)
+        }
+
+        for (index, rect) in layout.colorSwatches.enumerated() where rect.insetBy(dx: -4, dy: -4).contains(point) {
             if index == visiblePaletteCount, let title = SelectionToolbarState.tooltipTitle(for: "customColor") {
                 return (title, rect)
             }
@@ -935,11 +1021,41 @@ private final class SelectionOverlayView: NSView {
             return
         }
 
-        if handleCornerRadiusPanelClick(at: point) || handleStrokeStyleMenuClick(at: point) || handleOptionsClick(at: point) {
+        if handleCornerRadiusPanelClick(at: point)
+            || handleStrokeStyleMenuClick(at: point)
+            || handleArrowTypeMenuClick(at: point)
+            || handleOptionsClick(at: point) {
             return
         }
 
         guard lockedSelectionRect != nil else {
+            return
+        }
+
+        if let arrowHit = arrowLineHitTarget(at: point) {
+            NSCursor.sniporyMove.set()
+            selectAnnotation(at: arrowHit.index)
+            switch arrowHit.target {
+            case .start, .end, .control:
+                activeArrowLineHandle = arrowHit.target
+                resizingArrowLineStart = overlayArrowLine(fromLocalArrowLine: annotations[arrowHit.index].arrowLine)
+                interactionMode = .resizingArrowLine
+            case .body:
+                movingAnnotationStartRect = overlayRect(fromLocalAnnotationRect: annotations[arrowHit.index].rect)
+                movingAnnotationStartArrowLine = overlayArrowLine(fromLocalArrowLine: annotations[arrowHit.index].arrowLine)
+                movingAnnotationOffset = NSPoint(
+                    x: point.x - (movingAnnotationStartRect?.minX ?? point.x),
+                    y: point.y - (movingAnnotationStartRect?.minY ?? point.y)
+                )
+                interactionMode = .movingShape
+            case .none:
+                break
+            }
+            showsStrokeStyleMenu = false
+            showsCornerRadiusPanel = false
+            showsStartArrowTypeMenu = false
+            showsEndArrowTypeMenu = false
+            needsDisplay = true
             return
         }
 
@@ -963,6 +1079,7 @@ private final class SelectionOverlayView: NSView {
             NSCursor.sniporyMove.set()
             selectAnnotation(at: hitIndex)
             movingAnnotationStartRect = overlayRect(fromLocalAnnotationRect: annotations[hitIndex].rect)
+            movingAnnotationStartArrowLine = overlayArrowLine(fromLocalArrowLine: annotations[hitIndex].arrowLine)
             movingAnnotationOffset = NSPoint(
                 x: point.x - (movingAnnotationStartRect?.minX ?? point.x),
                 y: point.y - (movingAnnotationStartRect?.minY ?? point.y)
@@ -976,6 +1093,7 @@ private final class SelectionOverlayView: NSView {
             activeSelectionResizeHandle = handle
             resizingSelectionStartRect = lockedSelectionRect?.standardized
             resizingSelectionStartAnnotationRects = annotations.map { overlayRect(fromLocalAnnotationRect: $0.rect) }
+            resizingSelectionStartAnnotations = annotations
             interactionMode = .resizingSelection
             selectedAnnotationIndex = nil
             showsStrokeStyleMenu = false
@@ -1011,6 +1129,14 @@ private final class SelectionOverlayView: NSView {
             toggleShapeTool(.rectangle)
             showsStrokeStyleMenu = false
             showsCornerRadiusPanel = false
+            showsStartArrowTypeMenu = false
+            showsEndArrowTypeMenu = false
+        case .polyline:
+            toggleShapeTool(.arrowLine)
+            showsStrokeStyleMenu = false
+            showsCornerRadiusPanel = false
+            showsStartArrowTypeMenu = false
+            showsEndArrowTypeMenu = false
         case .undo:
             undoLastAnnotation()
         case .redo:
@@ -1021,7 +1147,7 @@ private final class SelectionOverlayView: NSView {
             finish(action: .save)
         case .cancel:
             selectionDidFinish?(nil)
-        case .pin, .polyline, .pen, .marker, .mosaic, .text, .number, .magnifier, .eraser, .scroll, .settings:
+        case .pin, .pen, .marker, .mosaic, .text, .number, .magnifier, .eraser, .scroll, .settings:
             showPlaceholder(for: button)
         }
 
@@ -1029,13 +1155,31 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func toggleShapeTool(_ shape: CaptureAnnotationKind) {
-        activeShapeKind = SelectionToolbarState.toggledPrimaryShapeTool(current: activeShapeKind, defaultShape: shape)
+        activeShapeKind = activeShapeKind == shape ? nil : shape
         isShapeToolActive = activeShapeKind != nil
         if let activeShapeKind {
             currentShapeKind = activeShapeKind
-            currentStyle.strokeWidth = 2
+            if activeShapeKind == .arrowLine {
+                let activation = SelectionToolbarState.arrowLineActivationState(
+                    currentStyle: currentStyle,
+                    paletteColors: colors
+                )
+                currentStyle = activation.style
+                currentStartArrowType = activation.startArrowType
+                currentEndArrowType = activation.endArrowType
+                showsCornerRadiusPanel = false
+            } else {
+                currentStyle = SelectionToolbarState.styleForPrimaryShapeToolActivation(
+                    currentStyle: currentStyle,
+                    paletteColors: colors
+                )
+            }
         } else {
             selectedAnnotationIndex = nil
+            showsCornerRadiusPanel = false
+            showsStrokeStyleMenu = false
+            showsStartArrowTypeMenu = false
+            showsEndArrowTypeMenu = false
         }
         shapeStartPoint = nil
         shapeCurrentPoint = nil
@@ -1045,6 +1189,9 @@ private final class SelectionOverlayView: NSView {
         activeShapeKind = shape
         currentShapeKind = shape
         isShapeToolActive = true
+        if shape == .arrowLine {
+            showsCornerRadiusPanel = false
+        }
         shapeStartPoint = nil
         shapeCurrentPoint = nil
     }
@@ -1055,7 +1202,7 @@ private final class SelectionOverlayView: NSView {
         case .pin:
             label = "贴图"
         case .polyline:
-            label = "线条"
+            label = "箭头线"
         case .pen:
             label = "画笔"
         case .marker:
@@ -1129,55 +1276,78 @@ private final class SelectionOverlayView: NSView {
         guard let optionsRect = optionsToolbarRect else {
             return false
         }
+        let layout = optionsToolbarLayout(in: optionsRect)
 
-        for (index, rect) in strokeWidthRects(in: optionsRect).enumerated() where rect.contains(point) {
+        for (index, rect) in layout.strokeWidths.enumerated() where rect.contains(point) {
             currentStyle.strokeWidth = CGFloat([2, 4, 6][index])
             applyCurrentStyleToSelectedAnnotation()
             return true
         }
 
-        let fillRect = fillToggleRect(in: optionsRect)
-        if fillRect.contains(point) {
+        if let fillRect = layout.fillToggle, fillRect.contains(point) {
             currentStyle.fillEnabled.toggle()
             applyCurrentStyleToSelectedAnnotation()
             return true
         }
 
-        let rectangleButton = rectangleModeButtonRect(in: optionsRect)
-        let rectangleDisclosureRect = rectangleDisclosureHitRect(in: rectangleButton)
-        if rectangleDisclosureRect.contains(point) {
-            activateShapeTool(.rectangle)
-            applyCurrentStyleToSelectedAnnotation()
-            showsCornerRadiusPanel.toggle()
-            showsStrokeStyleMenu = false
-            return true
+        if let rectangleButton = layout.rectangleMode {
+            let rectangleDisclosureRect = rectangleDisclosureHitRect(in: rectangleButton)
+            if rectangleDisclosureRect.contains(point) {
+                activateShapeTool(.rectangle)
+                applyCurrentStyleToSelectedAnnotation()
+                showsCornerRadiusPanel.toggle()
+                showsStrokeStyleMenu = false
+                showsStartArrowTypeMenu = false
+                showsEndArrowTypeMenu = false
+                return true
+            }
+
+            if rectangleButton.contains(point) {
+                activateShapeTool(.rectangle)
+                applyCurrentStyleToSelectedAnnotation()
+                return true
+            }
         }
 
-        if rectangleButton.contains(point) {
-            activateShapeTool(.rectangle)
-            applyCurrentStyleToSelectedAnnotation()
-            return true
-        }
-
-        if ellipseModeButtonRect(in: optionsRect).contains(point) {
+        if let ellipseButton = layout.ellipseMode, ellipseButton.contains(point) {
             activateShapeTool(.ellipse)
             showsCornerRadiusPanel = false
             applyCurrentStyleToSelectedAnnotation()
             return true
         }
 
-        if strokeStyleFieldRect(in: optionsRect).contains(point) {
+        if layout.strokeStyle.contains(point) {
             showsStrokeStyleMenu.toggle()
+            showsCornerRadiusPanel = false
+            showsStartArrowTypeMenu = false
+            showsEndArrowTypeMenu = false
+            return true
+        }
+
+        if let startArrowType = layout.startArrowType, startArrowType.contains(point) {
+            showsStartArrowTypeMenu.toggle()
+            showsEndArrowTypeMenu = false
+            showsStrokeStyleMenu = false
             showsCornerRadiusPanel = false
             return true
         }
 
-        if let swatch = SelectionToolbarState.swatchHitTarget(at: point, in: optionsRect, paletteCount: visiblePaletteCount) {
+        if let endArrowType = layout.endArrowType, endArrowType.contains(point) {
+            showsEndArrowTypeMenu.toggle()
+            showsStartArrowTypeMenu = false
+            showsStrokeStyleMenu = false
+            showsCornerRadiusPanel = false
+            return true
+        }
+
+        if let swatch = SelectionToolbarState.swatchHitTarget(at: point, in: optionsRect, paletteCount: visiblePaletteCount, mode: optionsToolbarMode) {
             switch swatch {
             case .custom:
                 NSLog("snipory overlay custom color swatch clicked")
                 showsStrokeStyleMenu = false
                 showsCornerRadiusPanel = false
+                showsStartArrowTypeMenu = false
+                showsEndArrowTypeMenu = false
                 isCustomColorSwatchActive = true
                 toggleCustomColorPanel()
             case let .palette(index):
@@ -1191,6 +1361,8 @@ private final class SelectionOverlayView: NSView {
                 isCustomColorSwatchActive = false
                 closeCustomColorPanel()
                 applyCurrentStyleToSelectedAnnotation()
+                showsStartArrowTypeMenu = false
+                showsEndArrowTypeMenu = false
             }
             return true
         }
@@ -1198,6 +1370,8 @@ private final class SelectionOverlayView: NSView {
         if !optionsRect.contains(point) {
             showsStrokeStyleMenu = false
             showsCornerRadiusPanel = false
+            showsStartArrowTypeMenu = false
+            showsEndArrowTypeMenu = false
             return false
         }
 
@@ -1210,14 +1384,77 @@ private final class SelectionOverlayView: NSView {
         }
 
         let menu = strokeStyleMenuRect(in: optionsRect)
-        switch SelectionToolbarState.strokeMenuHitTarget(at: point, in: menu, itemCount: CaptureStrokePattern.allCases.count) {
+        let options = strokePatternOptions
+        switch SelectionToolbarState.strokeMenuHitTarget(at: point, in: menu, itemCount: options.count) {
         case let .item(index):
-            let pattern = CaptureStrokePattern.allCases[index]
-            currentStyle.strokePattern = pattern
+            guard options.indices.contains(index) else {
+                return true
+            }
+            let option = options[index]
+            guard option.isEnabled else {
+                return true
+            }
+            currentStyle.strokePattern = option.pattern
             applyCurrentStyleToSelectedAnnotation()
             showsStrokeStyleMenu = false
             needsDisplay = true
-            NSLog("snipory overlay selected stroke pattern=%ld", pattern.rawValue)
+            NSLog("snipory overlay selected stroke pattern=%ld", option.pattern.rawValue)
+            return true
+        case .menuBackground:
+            return true
+        case .outside:
+            return false
+        }
+    }
+
+    private func handleArrowTypeMenuClick(at point: NSPoint) -> Bool {
+        guard showsStartArrowTypeMenu || showsEndArrowTypeMenu, let optionsRect = optionsToolbarRect else {
+            return false
+        }
+
+        if showsStartArrowTypeMenu, handleArrowTypeMenuClick(at: point, field: .start, optionsRect: optionsRect) {
+            return true
+        }
+
+        if showsEndArrowTypeMenu, handleArrowTypeMenuClick(at: point, field: .end, optionsRect: optionsRect) {
+            return true
+        }
+
+        return false
+    }
+
+    private func handleArrowTypeMenuClick(at point: NSPoint, field: ArrowTypeField, optionsRect: NSRect) -> Bool {
+        let menu = arrowTypeMenuRect(in: optionsRect, field: field)
+        let options = CaptureArrowType.allCases
+        switch SelectionToolbarState.arrowTypeMenuHitTarget(at: point, in: menu, itemCount: options.count) {
+        case let .item(index):
+            guard options.indices.contains(index) else {
+                return true
+            }
+            switch field {
+            case .start:
+                let pair = SelectionToolbarState.arrowTypesAfterSelection(
+                    currentStart: currentStartArrowType,
+                    currentEnd: currentEndArrowType,
+                    selectedType: options[index],
+                    endpoint: .start
+                )
+                currentStartArrowType = pair.start
+                currentEndArrowType = pair.end
+                showsStartArrowTypeMenu = false
+            case .end:
+                let pair = SelectionToolbarState.arrowTypesAfterSelection(
+                    currentStart: currentStartArrowType,
+                    currentEnd: currentEndArrowType,
+                    selectedType: options[index],
+                    endpoint: .end
+                )
+                currentStartArrowType = pair.start
+                currentEndArrowType = pair.end
+                showsEndArrowTypeMenu = false
+            }
+            applyCurrentStyleToSelectedAnnotation()
+            needsDisplay = true
             return true
         case .menuBackground:
             return true
@@ -1281,6 +1518,10 @@ private final class SelectionOverlayView: NSView {
         let annotation = annotations[index]
         activateShapeTool(annotation.kind)
         currentStyle = annotation.style
+        if let arrowLine = annotation.arrowLine {
+            currentStartArrowType = arrowLine.startArrowType
+            currentEndArrowType = arrowLine.endArrowType
+        }
     }
 
     private func applyCurrentStyleToSelectedAnnotation() {
@@ -1288,8 +1529,17 @@ private final class SelectionOverlayView: NSView {
             return
         }
 
-        annotations[selectedAnnotationIndex].kind = currentShapeKind
         annotations[selectedAnnotationIndex].style = currentStyle
+        if annotations[selectedAnnotationIndex].kind == .arrowLine {
+            if var arrowLine = annotations[selectedAnnotationIndex].arrowLine {
+                arrowLine.startArrowType = currentStartArrowType
+                arrowLine.endArrowType = currentEndArrowType
+                annotations[selectedAnnotationIndex].arrowLine = arrowLine
+                annotations[selectedAnnotationIndex].rect = arrowLine.boundingRect
+            }
+        } else if currentShapeKind != .arrowLine {
+            annotations[selectedAnnotationIndex].kind = currentShapeKind
+        }
         redoAnnotations.removeAll()
         needsDisplay = true
     }
@@ -1358,7 +1608,10 @@ private final class SelectionOverlayView: NSView {
 
     private func commitSelectedShapePreview() {
         movingAnnotationStartRect = nil
+        movingAnnotationStartArrowLine = nil
         resizingAnnotationStartRect = nil
+        resizingArrowLineStart = nil
+        activeArrowLineHandle = nil
         redoAnnotations.removeAll()
         needsDisplay = true
     }
@@ -1367,6 +1620,7 @@ private final class SelectionOverlayView: NSView {
         activeSelectionResizeHandle = nil
         resizingSelectionStartRect = nil
         resizingSelectionStartAnnotationRects.removeAll()
+        resizingSelectionStartAnnotations.removeAll()
         redoAnnotations.removeAll()
         needsDisplay = true
     }
@@ -1376,6 +1630,7 @@ private final class SelectionOverlayView: NSView {
         movingSelectionBounds = nil
         movingSelectionPointerOffset = .zero
         movingSelectionStartAnnotationRects.removeAll()
+        movingSelectionStartAnnotations.removeAll()
         needsDisplay = true
     }
 
@@ -1431,6 +1686,13 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func annotationBorderContains(_ point: NSPoint, for annotation: CaptureAnnotation) -> Bool {
+        if annotation.kind == .arrowLine {
+            guard let arrowLine = overlayArrowLine(fromLocalArrowLine: annotation.arrowLine) else {
+                return false
+            }
+            return SelectionToolbarState.arrowLineHitTarget(at: point, line: arrowLine) == .body
+        }
+
         let rect = overlayRect(fromLocalAnnotationRect: annotation.rect).standardized
         return SelectionToolbarState.shapeBorderContains(
             point: point,
@@ -1444,10 +1706,26 @@ private final class SelectionOverlayView: NSView {
         guard let annotation = selectedAnnotation else {
             return nil
         }
+        guard annotation.kind != .arrowLine else {
+            return nil
+        }
 
         let rect = overlayRect(fromLocalAnnotationRect: annotation.rect)
         for handle in ShapeResizeHandle.allCases where handleRect(for: rect, handle: handle, kind: annotation.kind).insetBy(dx: -3, dy: -3).contains(point) {
             return handle
+        }
+        return nil
+    }
+
+    private func arrowLineHitTarget(at point: NSPoint) -> (index: Int, target: SelectionToolbarState.ArrowLineHitTarget)? {
+        for index in annotations.indices.reversed() where annotations[index].kind == .arrowLine {
+            guard let arrowLine = overlayArrowLine(fromLocalArrowLine: annotations[index].arrowLine) else {
+                continue
+            }
+            let target = SelectionToolbarState.arrowLineHitTarget(at: point, line: arrowLine)
+            if target != .none {
+                return (index, target)
+            }
         }
         return nil
     }
@@ -1482,6 +1760,7 @@ private final class SelectionOverlayView: NSView {
         NSCursor.sniporyMove.set()
         movingSelectionStartRect = lockedSelectionRect.standardized
         movingSelectionStartAnnotationRects = annotations.map { overlayRect(fromLocalAnnotationRect: $0.rect) }
+        movingSelectionStartAnnotations = annotations
         movingSelectionPointerOffset = NSPoint(
             x: point.x - lockedSelectionRect.minX,
             y: point.y - lockedSelectionRect.minY
@@ -1510,6 +1789,16 @@ private final class SelectionOverlayView: NSView {
             width: movingAnnotationStartRect.width,
             height: movingAnnotationStartRect.height
         )
+        if let movingAnnotationStartArrowLine {
+            let dx = requested.minX - movingAnnotationStartRect.minX
+            let dy = requested.minY - movingAnnotationStartRect.minY
+            let movedOverlayLine = offsetArrowLine(movingAnnotationStartArrowLine, dx: dx, dy: dy)
+            let localLine = localArrowLine(fromOverlayArrowLine: movedOverlayLine)
+            annotations[selectedAnnotationIndex].arrowLine = localLine
+            annotations[selectedAnnotationIndex].rect = localLine.boundingRect
+            return
+        }
+
         annotations[selectedAnnotationIndex].rect = localAnnotationRect(from: requested)
     }
 
@@ -1534,7 +1823,15 @@ private final class SelectionOverlayView: NSView {
                 selectionRect: lockedSelectionRect
             )
             for index in annotations.indices where preservedRects.indices.contains(index) {
-                annotations[index].rect = preservedRects[index]
+                if movingSelectionStartAnnotations.indices.contains(index),
+                   let arrowLine = movingSelectionStartAnnotations[index].arrowLine {
+                    let overlayLine = overlayArrowLine(fromLocalArrowLine: arrowLine, selectionRect: movingSelectionStartRect)
+                    let localLine = localArrowLine(fromOverlayArrowLine: overlayLine, selectionRect: lockedSelectionRect)
+                    annotations[index].arrowLine = localLine
+                    annotations[index].rect = localLine.boundingRect
+                } else {
+                    annotations[index].rect = preservedRects[index]
+                }
             }
         }
     }
@@ -1590,6 +1887,37 @@ private final class SelectionOverlayView: NSView {
         }
     }
 
+    private func updateResizingArrowLine(to point: NSPoint) {
+        guard
+            let selectedAnnotationIndex,
+            annotations.indices.contains(selectedAnnotationIndex),
+            var resizingArrowLineStart,
+            let activeArrowLineHandle
+        else {
+            return
+        }
+
+        let clampedPoint = clamp(point, to: bounds)
+        switch activeArrowLineHandle {
+        case .start:
+            resizingArrowLineStart.start = clampedPoint
+        case .end:
+            resizingArrowLineStart.end = clampedPoint
+        case .control:
+            resizingArrowLineStart.control = clampedPoint
+        case .body, .none:
+            return
+        }
+
+        guard hypot(resizingArrowLineStart.end.x - resizingArrowLineStart.start.x, resizingArrowLineStart.end.y - resizingArrowLineStart.start.y) >= 4 else {
+            return
+        }
+
+        let localLine = localArrowLine(fromOverlayArrowLine: resizingArrowLineStart)
+        annotations[selectedAnnotationIndex].arrowLine = localLine
+        annotations[selectedAnnotationIndex].rect = localLine.boundingRect
+    }
+
     private func updateResizingSelection(to point: NSPoint) {
         guard
             let activeSelectionResizeHandle,
@@ -1610,10 +1938,18 @@ private final class SelectionOverlayView: NSView {
 
         lockedSelectionRect = resized
         for index in annotations.indices where resizingSelectionStartAnnotationRects.indices.contains(index) {
-            annotations[index].rect = SelectionToolbarState.localAnnotationRect(
-                fromOverlayRect: resizingSelectionStartAnnotationRects[index],
-                selectionRect: resized
-            )
+            if resizingSelectionStartAnnotations.indices.contains(index),
+               let arrowLine = resizingSelectionStartAnnotations[index].arrowLine {
+                let overlayLine = overlayArrowLine(fromLocalArrowLine: arrowLine, selectionRect: resizingSelectionStartRect)
+                let localLine = localArrowLine(fromOverlayArrowLine: overlayLine, selectionRect: resized)
+                annotations[index].arrowLine = localLine
+                annotations[index].rect = localLine.boundingRect
+            } else {
+                annotations[index].rect = SelectionToolbarState.localAnnotationRect(
+                    fromOverlayRect: resizingSelectionStartAnnotationRects[index],
+                    selectionRect: resized
+                )
+            }
         }
     }
 
@@ -1737,10 +2073,19 @@ private final class SelectionOverlayView: NSView {
         }
 
         drawAnnotation(draftAnnotation, inOverlay: true)
-        drawResizeHandles(for: overlayRect(fromLocalAnnotationRect: draftAnnotation.rect), kind: draftAnnotation.kind)
+        if draftAnnotation.kind == .arrowLine {
+            drawSelectedAnnotationOutline(draftAnnotation)
+        } else {
+            drawResizeHandles(for: overlayRect(fromLocalAnnotationRect: draftAnnotation.rect), kind: draftAnnotation.kind)
+        }
     }
 
     private func drawAnnotation(_ annotation: CaptureAnnotation, inOverlay: Bool) {
+        if annotation.kind == .arrowLine {
+            drawArrowLineAnnotation(annotation, inOverlay: inOverlay)
+            return
+        }
+
         let rect = inOverlay ? overlayRect(fromLocalAnnotationRect: annotation.rect) : annotation.rect
         let insetRect = rect.standardized.insetBy(dx: annotation.style.strokeWidth / 2, dy: annotation.style.strokeWidth / 2)
         let path: NSBezierPath
@@ -1756,6 +2101,8 @@ private final class SelectionOverlayView: NSView {
             path = NSBezierPath(rect: insetRect)
         case .ellipse:
             path = NSBezierPath(ovalIn: insetRect)
+        case .arrowLine:
+            return
         }
 
         if annotation.style.fillEnabled {
@@ -1763,15 +2110,144 @@ private final class SelectionOverlayView: NSView {
             path.fill()
         }
 
+        let strokePath = annotation.style.strokePattern.isSketch
+            ? CaptureSketchStrokePath.bezierPath(
+                kind: annotation.kind,
+                rect: insetRect,
+                cornerRadius: annotation.style.cornerRadius,
+                lineWidth: annotation.style.strokeWidth
+            )
+            : path
         annotation.style.strokeColor.setStroke()
-        path.lineWidth = annotation.style.strokeWidth
-        path.lineJoinStyle = .round
-        path.lineCapStyle = .round
-        path.setLineDash(annotation.style.strokePattern.dashPattern, count: annotation.style.strokePattern.dashPattern.count, phase: 0)
-        path.stroke()
+        strokePath.lineWidth = annotation.style.strokeWidth
+        strokePath.lineJoinStyle = .round
+        strokePath.lineCapStyle = .round
+        strokePath.setLineDash(
+            annotation.style.strokePattern.dashPattern,
+            count: annotation.style.strokePattern.dashPattern.count,
+            phase: 0
+        )
+        strokePath.stroke()
+    }
+
+    private func drawArrowLineAnnotation(_ annotation: CaptureAnnotation, inOverlay: Bool) {
+        guard let arrowLine = inOverlay
+            ? overlayArrowLine(fromLocalArrowLine: annotation.arrowLine)
+            : annotation.arrowLine
+        else {
+            return
+        }
+
+        let startDirection = direction(
+            from: arrowLine.control,
+            to: arrowLine.start,
+            fallbackFrom: arrowLine.end,
+            fallbackTo: arrowLine.start
+        )
+        let endDirection = direction(
+            from: arrowLine.control,
+            to: arrowLine.end,
+            fallbackFrom: arrowLine.start,
+            fallbackTo: arrowLine.end
+        )
+
+        let usesVectorBody = CaptureArrowVectorGeometry.isVectorArrow(arrowLine.startArrowType)
+            || CaptureArrowVectorGeometry.isVectorArrow(arrowLine.endArrowType)
+
+        if CaptureArrowVectorGeometry.isVectorArrow(arrowLine.endArrowType) {
+            annotation.style.strokeColor.setFill()
+            if let vectorPath = CaptureArrowVectorGeometry.bezierPathAlongCurve(
+                for: arrowLine.endArrowType,
+                start: arrowLine.start,
+                control: arrowLine.control,
+                end: arrowLine.end,
+                strokeWidth: annotation.style.strokeWidth
+            ) {
+                vectorPath.path.fill()
+            }
+        }
+
+        if !usesVectorBody {
+            let bodyStart = arrowLine.startArrowType == .normal
+                ? CaptureArrowVectorGeometry.pointAlongCurve(
+                    start: arrowLine.end,
+                    control: arrowLine.control,
+                    end: arrowLine.start,
+                    distanceFromEnd: CaptureArrowVectorGeometry.normalArrowHeadInset(for: annotation.style.strokeWidth)
+                )
+                : arrowLine.start
+            let bodyEnd = arrowLine.endArrowType == .normal
+                ? CaptureArrowVectorGeometry.pointAlongCurve(
+                    start: arrowLine.start,
+                    control: arrowLine.control,
+                    end: arrowLine.end,
+                    distanceFromEnd: CaptureArrowVectorGeometry.normalArrowHeadInset(for: annotation.style.strokeWidth)
+                )
+                : arrowLine.end
+            let path = annotation.style.strokePattern.isSketch
+                ? CaptureSketchStrokePath.sampleQuadraticCurve(
+                    from: bodyStart,
+                    control: arrowLine.control,
+                    to: bodyEnd,
+                    lineWidth: annotation.style.strokeWidth
+                )
+                : NSBezierPath()
+            if !annotation.style.strokePattern.isSketch {
+                path.move(to: bodyStart)
+                appendQuadraticCurve(to: path, start: bodyStart, control: arrowLine.control, end: bodyEnd)
+            }
+
+            annotation.style.strokeColor.setStroke()
+            path.lineWidth = annotation.style.strokeWidth
+            path.lineJoinStyle = .round
+            path.lineCapStyle = .round
+            path.setLineDash(
+                annotation.style.strokePattern.dashPattern,
+                count: annotation.style.strokePattern.dashPattern.count,
+                phase: 0
+            )
+            path.stroke()
+        }
+
+        if CaptureArrowVectorGeometry.isVectorArrow(arrowLine.startArrowType) {
+            annotation.style.strokeColor.setFill()
+            if let vectorPath = CaptureArrowVectorGeometry.bezierPathAlongCurve(
+                for: arrowLine.startArrowType,
+                start: arrowLine.end,
+                control: arrowLine.control,
+                end: arrowLine.start,
+                strokeWidth: annotation.style.strokeWidth
+            ) {
+                vectorPath.path.fill()
+            }
+        }
+        if !CaptureArrowVectorGeometry.isVectorArrow(arrowLine.startArrowType) {
+            drawArrowHead(
+                type: arrowLine.startArrowType,
+                tip: arrowLine.start,
+                direction: startDirection,
+                color: annotation.style.strokeColor,
+                lineWidth: annotation.style.strokeWidth
+            )
+        }
+
+        if !CaptureArrowVectorGeometry.isVectorArrow(arrowLine.endArrowType) {
+            drawArrowHead(
+                type: arrowLine.endArrowType,
+                tip: arrowLine.end,
+                direction: endDirection,
+                color: annotation.style.strokeColor,
+                lineWidth: annotation.style.strokeWidth
+            )
+        }
     }
 
     private func drawSelectedAnnotationOutline(_ annotation: CaptureAnnotation) {
+        if annotation.kind == .arrowLine {
+            drawSelectedArrowLineOutline(annotation)
+            return
+        }
+
         let rect = overlayRect(fromLocalAnnotationRect: annotation.rect)
         NSColor.systemBlue.setStroke()
         let outline = annotation.kind == .ellipse ? NSBezierPath(ovalIn: rect) : NSBezierPath(rect: rect)
@@ -1779,6 +2255,46 @@ private final class SelectionOverlayView: NSView {
         outline.setLineDash([4, 3], count: 2, phase: 0)
         outline.stroke()
         drawResizeHandles(for: rect, kind: annotation.kind)
+    }
+
+    private func drawSelectedArrowLineOutline(_ annotation: CaptureAnnotation) {
+        guard let arrowLine = overlayArrowLine(fromLocalArrowLine: annotation.arrowLine) else {
+            return
+        }
+
+        let outline = NSBezierPath()
+        outline.move(to: arrowLine.start)
+        appendQuadraticCurve(to: outline, start: arrowLine.start, control: arrowLine.control, end: arrowLine.end)
+        NSColor.systemBlue.setStroke()
+        outline.lineWidth = 1.2
+        outline.setLineDash([4, 3], count: 2, phase: 0)
+        outline.stroke()
+
+        drawArrowLineHandle(at: arrowLine.start, radius: 4)
+        drawArrowLineHandle(at: arrowLine.end, radius: 4)
+        drawArrowLineHandle(at: arrowLine.control, radius: 3.5)
+    }
+
+    private func appendQuadraticCurve(to path: NSBezierPath, start: NSPoint, control: NSPoint, end: NSPoint) {
+        let firstControl = NSPoint(
+            x: start.x + (control.x - start.x) * 2 / 3,
+            y: start.y + (control.y - start.y) * 2 / 3
+        )
+        let secondControl = NSPoint(
+            x: end.x + (control.x - end.x) * 2 / 3,
+            y: end.y + (control.y - end.y) * 2 / 3
+        )
+        path.curve(to: end, controlPoint1: firstControl, controlPoint2: secondControl)
+    }
+
+    private func drawArrowLineHandle(at point: NSPoint, radius: CGFloat) {
+        let rect = NSRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2)
+        NSColor.systemBlue.setFill()
+        NSColor.white.setStroke()
+        let path = NSBezierPath(ovalIn: rect)
+        path.fill()
+        path.lineWidth = 1
+        path.stroke()
     }
 
     private func drawResizeHandles(for rect: NSRect, kind: CaptureAnnotationKind) {
@@ -2103,10 +2619,11 @@ private final class SelectionOverlayView: NSView {
             return
         }
 
+        let layout = optionsToolbarLayout(in: optionsRect)
         drawPanel(optionsRect, opaque: true, alpha: 0.9)
         drawOptionsToolbarSeparators(in: optionsRect)
 
-        for (index, rect) in strokeWidthRects(in: optionsRect).enumerated() {
+        for (index, rect) in layout.strokeWidths.enumerated() {
             let width = CGFloat([2, 4, 6][index])
             drawToolbarButton(optionButtonBackgroundRect(for: rect), symbol: nil, selected: currentStyle.strokeWidth == width, enabled: true)
             (currentStyle.strokeWidth == width ? NSColor.controlAccentColor : NSColor.labelColor).setStroke()
@@ -2118,25 +2635,40 @@ private final class SelectionOverlayView: NSView {
             line.stroke()
         }
 
-        drawFillToggle(in: optionsRect)
-        drawShapeModeButtons(in: optionsRect)
+        if optionsToolbarMode == .shape {
+            drawFillToggle(in: optionsRect)
+            drawShapeModeButtons(in: optionsRect)
+        } else {
+            drawArrowTypeFields(in: optionsRect)
+        }
         drawStrokeStyleField(in: optionsRect)
         drawColorSwatches(in: optionsRect)
     }
 
     private func drawOptionsToolbarSeparators(in optionsRect: NSRect) {
-        let fill = optionButtonBackgroundRect(for: fillToggleRect(in: optionsRect))
-        let rectangle = shapeModeBackgroundRect(for: rectangleModeButtonRect(in: optionsRect))
-        let ellipse = optionButtonBackgroundRect(for: ellipseModeButtonRect(in: optionsRect))
-        let strokeStyle = strokeStyleFieldRect(in: optionsRect)
-        let firstSwatchMinX = colorSwatchRects(in: optionsRect).map { $0.minX }.min()
+        let layout = optionsToolbarLayout(in: optionsRect)
+        let firstSwatchMinX = layout.colorSwatches.map { $0.minX }.min()
+        var separatorXs: [CGFloat] = []
 
-        var separatorXs: [CGFloat] = [
-            fill.maxX + (rectangle.minX - fill.maxX) / 2,
-            ellipse.maxX + (strokeStyle.minX - ellipse.maxX) / 2,
-        ]
-        if let firstSwatchMinX {
-            separatorXs.append(strokeStyle.maxX + (firstSwatchMinX - strokeStyle.maxX) / 2)
+        switch optionsToolbarMode {
+        case .shape:
+            if let fill = layout.fillToggle, let rectangle = layout.rectangleMode, let ellipse = layout.ellipseMode {
+                separatorXs.append(optionButtonBackgroundRect(for: fill).maxX + (shapeModeBackgroundRect(for: rectangle).minX - optionButtonBackgroundRect(for: fill).maxX) / 2)
+                separatorXs.append(optionButtonBackgroundRect(for: ellipse).maxX + (layout.strokeStyle.minX - optionButtonBackgroundRect(for: ellipse).maxX) / 2)
+            }
+            if let firstSwatchMinX {
+                separatorXs.append(layout.strokeStyle.maxX + (firstSwatchMinX - layout.strokeStyle.maxX) / 2)
+            }
+        case .arrowLine:
+            if let lastStrokeWidth = layout.strokeWidths.last {
+                separatorXs.append(lastStrokeWidth.maxX + (layout.strokeStyle.minX - lastStrokeWidth.maxX) / 2)
+            }
+            if let startArrowType = layout.startArrowType {
+                separatorXs.append(layout.strokeStyle.maxX + (startArrowType.minX - layout.strokeStyle.maxX) / 2)
+            }
+            if let endArrowType = layout.endArrowType, let firstSwatchMinX {
+                separatorXs.append(endArrowType.maxX + (firstSwatchMinX - endArrowType.maxX) / 2)
+            }
         }
 
         NSColor.tertiaryLabelColor.withAlphaComponent(0.5).setFill()
@@ -2158,15 +2690,41 @@ private final class SelectionOverlayView: NSView {
         NSColor.separatorColor.setStroke()
         NSBezierPath(roundedRect: field, xRadius: 4, yRadius: 4).stroke()
 
-        let sample = NSBezierPath()
-        sample.move(to: NSPoint(x: field.minX + 10, y: field.midY))
-        sample.line(to: NSPoint(x: field.maxX - 22, y: field.midY))
-        NSColor.labelColor.setStroke()
-        sample.lineWidth = 2
-        sample.lineCapStyle = .round
-        sample.setLineDash(currentStyle.strokePattern.dashPattern, count: currentStyle.strokePattern.dashPattern.count, phase: 0)
-        sample.stroke()
+        drawStrokePatternSample(
+            currentStyle.strokePattern,
+            from: NSPoint(x: field.minX + 10, y: field.midY),
+            to: NSPoint(x: field.maxX - 22, y: field.midY),
+            color: .labelColor
+        )
         drawTriangle(in: NSRect(x: field.maxX - 16, y: field.midY - 3, width: 7, height: 5), color: .labelColor)
+    }
+
+    private func drawArrowTypeFields(in optionsRect: NSRect) {
+        guard
+            let startField = optionsToolbarLayout(in: optionsRect).startArrowType,
+            let endField = optionsToolbarLayout(in: optionsRect).endArrowType
+        else {
+            return
+        }
+
+        drawArrowTypeField(currentStartArrowType, in: startField, pointsRight: false)
+        drawArrowTypeField(currentEndArrowType, in: endField, pointsRight: true)
+    }
+
+    private func drawArrowTypeField(_ type: CaptureArrowType, in field: NSRect, pointsRight: Bool) {
+        NSColor.controlBackgroundColor.setFill()
+        NSBezierPath(roundedRect: field, xRadius: 4, yRadius: 4).fill()
+        NSColor.separatorColor.setStroke()
+        NSBezierPath(roundedRect: field, xRadius: 4, yRadius: 4).stroke()
+
+        drawArrowTypeSample(
+            type,
+            in: SelectionToolbarState.arrowTypeSampleRect(in: field, pointsRight: pointsRight),
+            pointsRight: pointsRight,
+            color: .labelColor,
+            lineWidth: 1.6
+        )
+        drawTriangle(in: SelectionToolbarState.arrowTypeDisclosureRect(in: field), color: .labelColor)
     }
 
     private func drawStrokeStyleMenu(for selectionRect: NSRect) {
@@ -2177,21 +2735,231 @@ private final class SelectionOverlayView: NSView {
         let menu = strokeStyleMenuRect(in: options)
         drawPanel(menu)
 
-        for (index, pattern) in CaptureStrokePattern.allCases.enumerated() {
+        for (index, option) in strokePatternOptions.enumerated() {
+            let pattern = option.pattern
             let item = strokeStyleMenuItemRects(in: menu)[index]
             let selected = pattern == currentStyle.strokePattern
+            drawToolbarButton(item, symbol: nil, selected: selected, enabled: option.isEnabled)
+
+            let strokeColor = selected ? NSColor.controlAccentColor : NSColor.labelColor
+            drawStrokePatternSample(
+                pattern,
+                from: NSPoint(x: item.minX + 10, y: item.midY),
+                to: NSPoint(x: item.maxX - 10, y: item.midY),
+                color: option.isEnabled ? strokeColor : NSColor.disabledControlTextColor
+            )
+        }
+    }
+
+    private func drawArrowTypeMenu(field: ArrowTypeField) {
+        guard let options = optionsToolbarRect else {
+            return
+        }
+
+        let menu = arrowTypeMenuRect(in: options, field: field)
+        drawPanel(menu)
+        let selectedType = field == .start ? currentStartArrowType : currentEndArrowType
+        let pointsRight = field == .end
+
+        for (index, type) in CaptureArrowType.allCases.enumerated() {
+            let item = arrowTypeMenuItemRects(in: menu)[index]
+            let selected = type == selectedType
             drawToolbarButton(item, symbol: nil, selected: selected, enabled: true)
 
-            let sample = NSBezierPath()
-            sample.move(to: NSPoint(x: item.minX + 10, y: item.midY))
-            sample.line(to: NSPoint(x: item.maxX - 10, y: item.midY))
-            let strokeColor = selected ? NSColor.controlAccentColor : NSColor.labelColor
-            strokeColor.setStroke()
-            sample.lineWidth = 2
-            sample.lineCapStyle = .round
-            sample.setLineDash(pattern.dashPattern, count: pattern.dashPattern.count, phase: 0)
-            sample.stroke()
+            let color = selected ? NSColor.controlAccentColor : NSColor.labelColor
+            drawArrowTypeSample(
+                type,
+                in: SelectionToolbarState.arrowTypeSampleRect(in: item.insetBy(dx: 8, dy: 4), pointsRight: pointsRight),
+                pointsRight: pointsRight,
+                color: color,
+                lineWidth: 1.8
+            )
         }
+    }
+
+    private func drawArrowTypeSample(
+        _ type: CaptureArrowType,
+        in rect: NSRect,
+        pointsRight: Bool,
+        color: NSColor,
+        lineWidth: CGFloat
+    ) {
+        if type == .normal || type == .solidArrow || type == .hollowArrow {
+            let scale = max(0.6, min((rect.width - 2) / 16, (rect.height - 2) / 8))
+            let direction: CGFloat = pointsRight ? 1 : -1
+            let tip = NSPoint(x: rect.midX + direction * 8 * scale, y: rect.midY)
+            color.setFill()
+            guard
+                let vectorPath = CaptureArrowVectorGeometry.bezierPath(
+                    for: type,
+                    tip: tip,
+                    direction: CGVector(dx: direction, dy: 0),
+                    scale: scale
+                )
+            else {
+                return
+            }
+            vectorPath.path.fill()
+            return
+        }
+
+        let start = pointsRight
+            ? NSPoint(x: rect.minX, y: rect.midY)
+            : NSPoint(x: rect.maxX, y: rect.midY)
+        let end = pointsRight
+            ? NSPoint(x: rect.maxX - 5, y: rect.midY)
+            : NSPoint(x: rect.minX + 5, y: rect.midY)
+        let body = NSBezierPath()
+        body.move(to: start)
+        body.line(to: end)
+
+        color.setStroke()
+        body.lineWidth = lineWidth
+        body.lineCapStyle = .round
+        body.lineJoinStyle = .round
+        body.stroke()
+        drawArrowHead(type: type, tip: end, pointsRight: pointsRight, color: color, lineWidth: lineWidth)
+    }
+
+    private func drawArrowHead(type: CaptureArrowType, tip: NSPoint, pointsRight: Bool, color: NSColor, lineWidth: CGFloat) {
+        guard type != .none else {
+            return
+        }
+
+        let direction: CGFloat = pointsRight ? 1 : -1
+        color.setStroke()
+        color.setFill()
+        switch type {
+        case .none:
+            return
+        case .bar:
+            let capHalfWidth = max(4, lineWidth * 2.1)
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: tip.x, y: tip.y + capHalfWidth))
+            path.line(to: NSPoint(x: tip.x, y: tip.y - capHalfWidth))
+            path.lineWidth = max(1.5, lineWidth)
+            path.lineCapStyle = .butt
+            path.stroke()
+        case .dot:
+            let radius = max(3, lineWidth * 1.45)
+            NSBezierPath(ovalIn: NSRect(x: tip.x - radius, y: tip.y - radius, width: radius * 2, height: radius * 2)).fill()
+        case .diamond:
+            let diamondLength = max(8, lineWidth * 3.4)
+            let diamondHalfWidth = max(3.5, lineWidth * 1.6)
+            let center = NSPoint(x: tip.x - direction * diamondLength * 0.5, y: tip.y)
+            let back = NSPoint(x: tip.x - direction * diamondLength, y: tip.y)
+            let path = NSBezierPath()
+            path.move(to: tip)
+            path.line(to: NSPoint(x: center.x, y: center.y + diamondHalfWidth))
+            path.line(to: back)
+            path.line(to: NSPoint(x: center.x, y: center.y - diamondHalfWidth))
+            path.close()
+            path.fill()
+        case .normal, .solidArrow, .hollowArrow:
+            return
+        }
+    }
+
+    private func drawArrowHead(
+        type: CaptureArrowType,
+        tip: NSPoint,
+        direction: CGVector,
+        color: NSColor,
+        lineWidth: CGFloat
+    ) {
+        guard type != .none else {
+            return
+        }
+
+        let perp = CGVector(dx: -direction.dy, dy: direction.dx)
+        color.setStroke()
+        color.setFill()
+        switch type {
+        case .none:
+            return
+        case .bar:
+            let capHalfWidth = max(5, lineWidth * 2.1)
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: tip.x + perp.dx * capHalfWidth, y: tip.y + perp.dy * capHalfWidth))
+            path.line(to: NSPoint(x: tip.x - perp.dx * capHalfWidth, y: tip.y - perp.dy * capHalfWidth))
+            path.lineWidth = max(1.5, lineWidth)
+            path.lineCapStyle = .butt
+            path.stroke()
+        case .dot:
+            let radius = max(3.5, lineWidth * 1.45)
+            NSBezierPath(ovalIn: NSRect(x: tip.x - radius, y: tip.y - radius, width: radius * 2, height: radius * 2)).fill()
+        case .diamond:
+            let diamondLength = max(10, lineWidth * 3.3)
+            let diamondHalfWidth = max(4, lineWidth * 1.5)
+            let center = NSPoint(x: tip.x - direction.dx * diamondLength * 0.5, y: tip.y - direction.dy * diamondLength * 0.5)
+            let back = NSPoint(x: tip.x - direction.dx * diamondLength, y: tip.y - direction.dy * diamondLength)
+            let path = NSBezierPath()
+            path.move(to: tip)
+            path.line(to: NSPoint(x: center.x + perp.dx * diamondHalfWidth, y: center.y + perp.dy * diamondHalfWidth))
+            path.line(to: back)
+            path.line(to: NSPoint(x: center.x - perp.dx * diamondHalfWidth, y: center.y - perp.dy * diamondHalfWidth))
+            path.close()
+            path.fill()
+        case .normal, .solidArrow, .hollowArrow:
+            guard
+                let vectorPath = CaptureArrowVectorGeometry.bezierPath(
+                    for: type,
+                    tip: tip,
+                    direction: direction,
+                    scale: max(0.8, lineWidth / 2),
+                    minimumTemplateX: 11.45
+                )
+            else {
+                return
+            }
+            vectorPath.path.fill()
+        }
+    }
+
+    private func direction(from point: NSPoint, to tip: NSPoint, fallbackFrom: NSPoint, fallbackTo: NSPoint) -> CGVector {
+        let dx = tip.x - point.x
+        let dy = tip.y - point.y
+        let length = hypot(dx, dy)
+        if length > 0.001 {
+            return CGVector(dx: dx / length, dy: dy / length)
+        }
+
+        let fallbackDx = fallbackTo.x - fallbackFrom.x
+        let fallbackDy = fallbackTo.y - fallbackFrom.y
+        let fallbackLength = hypot(fallbackDx, fallbackDy)
+        guard fallbackLength > 0.001 else {
+            return CGVector(dx: 1, dy: 0)
+        }
+        return CGVector(dx: fallbackDx / fallbackLength, dy: fallbackDy / fallbackLength)
+    }
+
+    private func trimmedPoint(_ point: NSPoint, direction: CGVector, inset: CGFloat) -> NSPoint {
+        guard inset > 0 else {
+            return point
+        }
+        return NSPoint(x: point.x - direction.dx * inset, y: point.y - direction.dy * inset)
+    }
+
+    private func drawStrokePatternSample(
+        _ pattern: CaptureStrokePattern,
+        from start: NSPoint,
+        to end: NSPoint,
+        color: NSColor
+    ) {
+        let sample = pattern.isSketch
+            ? CaptureSketchStrokePath.sampleLine(from: start, to: end, lineWidth: 2)
+            : NSBezierPath()
+        if !pattern.isSketch {
+            sample.move(to: start)
+            sample.line(to: end)
+        }
+
+        color.setStroke()
+        sample.lineWidth = 2
+        sample.lineCapStyle = .round
+        sample.lineJoinStyle = .round
+        sample.setLineDash(pattern.dashPattern, count: pattern.dashPattern.count, phase: 0)
+        sample.stroke()
     }
 
     private func drawCornerRadiusPanel(for selectionRect: NSRect) {
@@ -2400,7 +3168,7 @@ private final class SelectionOverlayView: NSView {
 
         let resourceName = name.replacingOccurrences(of: "toolbar-", with: "")
         let imageInset = toolbarIconInset(for: resourceName)
-        let usesFixedColorResource = fixedColorToolbarIconResources.contains(resourceName)
+        let usesFixedColorResource = SelectionToolbarState.usesFixedColorToolbarIconResource(resourceName)
         if drawToolbarImage(named: resourceName, in: rect, template: !usesFixedColorResource, enabled: enabled, inset: imageInset)
             || drawToolbarImage(named: name, in: rect, template: !usesFixedColorResource, enabled: enabled, inset: imageInset) {
             return
@@ -2416,21 +3184,13 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func toolbarIconInset(for resourceName: String) -> CGFloat {
-        resourceName == "text-tool" ? 0 : 2
-    }
-
-    private var fixedColorToolbarIconResources: Set<String> {
-        [
-            "undo-enabled",
-            "undo-disabled",
-            "redo-enabled",
-            "redo-disabled",
-        ]
+        SelectionToolbarState.toolbarIconInset(for: resourceName)
     }
 
     @discardableResult
     private func drawToolbarImage(named name: String, in rect: NSRect, template: Bool, enabled: Bool, inset: CGFloat = 3) -> Bool {
         let resource = NSImage(named: name)
+            ?? Bundle.main.url(forResource: name, withExtension: "svg").flatMap(NSImage.init(contentsOf:))
             ?? Bundle.main.url(forResource: name, withExtension: "png").flatMap(NSImage.init(contentsOf:))
         if let image = resource {
             image.isTemplate = template
@@ -2665,7 +3425,9 @@ private final class SelectionOverlayView: NSView {
     private func buttonMatchesCurrentTool(_ button: ToolbarButton) -> Bool {
         switch button {
         case .rectangle:
-            return isShapeToolActive
+            return isShapeToolActive && currentShapeKind != .arrowLine
+        case .polyline:
+            return isShapeToolActive && currentShapeKind == .arrowLine
         default:
             return false
         }
@@ -2720,7 +3482,27 @@ private final class SelectionOverlayView: NSView {
             return true
         }
 
+        if showsStartArrowTypeMenu, let optionsToolbarRect, arrowTypeMenuRect(in: optionsToolbarRect, field: .start).contains(point) {
+            return true
+        }
+
+        if showsEndArrowTypeMenu, let optionsToolbarRect, arrowTypeMenuRect(in: optionsToolbarRect, field: .end).contains(point) {
+            return true
+        }
+
         return false
+    }
+
+    private var optionsToolbarMode: SelectionToolbarState.OptionsToolbarMode {
+        currentShapeKind == .arrowLine ? .arrowLine : .shape
+    }
+
+    private func optionsToolbarLayout(in optionsRect: NSRect) -> SelectionToolbarState.OptionsToolbarLayout {
+        SelectionToolbarState.optionsToolbarLayout(
+            in: optionsRect,
+            paletteCount: visiblePaletteCount,
+            mode: optionsToolbarMode
+        )
     }
 
     private var optionsToolbarRect: NSRect? {
@@ -2734,7 +3516,7 @@ private final class SelectionOverlayView: NSView {
 
         return toolbarRect(
             size: NSSize(
-                width: SelectionToolbarState.optionsToolbarWidth(paletteCount: visiblePaletteCount),
+                width: SelectionToolbarState.optionsToolbarWidth(paletteCount: visiblePaletteCount, mode: optionsToolbarMode),
                 height: SelectionToolbarState.optionsToolbarHeight(paletteCount: visiblePaletteCount)
             ),
             anchoredTo: toolbar
@@ -2742,7 +3524,7 @@ private final class SelectionOverlayView: NSView {
     }
 
     private var cornerRadiusPanelRect: NSRect? {
-        guard let options = optionsToolbarRect else {
+        guard optionsToolbarMode == .shape, let options = optionsToolbarRect else {
             return nil
         }
 
@@ -2759,14 +3541,7 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func strokeWidthRects(in optionsRect: NSRect) -> [NSRect] {
-        (0..<3).map { index in
-            NSRect(
-                x: optionsRect.minX + 6 + CGFloat(index) * 24,
-                y: optionControlY(in: optionsRect),
-                width: 20,
-                height: 20
-            )
-        }
+        SelectionToolbarState.strokeWidthRects(in: optionsRect)
     }
 
     private func optionButtonBackgroundRect(for rect: NSRect) -> NSRect {
@@ -2774,19 +3549,19 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func fillToggleRect(in optionsRect: NSRect) -> NSRect {
-        NSRect(x: optionsRect.minX + 86, y: optionControlY(in: optionsRect), width: 20, height: 20)
+        SelectionToolbarState.fillToggleRect(in: optionsRect)
     }
 
     private func rectangleModeButtonRect(in optionsRect: NSRect) -> NSRect {
-        NSRect(x: optionsRect.minX + 126, y: optionControlY(in: optionsRect), width: 26, height: 20)
+        SelectionToolbarState.rectangleModeButtonRect(in: optionsRect)
     }
 
     private func ellipseModeButtonRect(in optionsRect: NSRect) -> NSRect {
-        NSRect(x: optionsRect.minX + 158, y: optionControlY(in: optionsRect), width: 22, height: 20)
+        SelectionToolbarState.ellipseModeButtonRect(in: optionsRect)
     }
 
     private func strokeStyleFieldRect(in optionsRect: NSRect) -> NSRect {
-        NSRect(x: optionsRect.minX + 200, y: optionControlY(in: optionsRect), width: 102, height: 20)
+        optionsToolbarLayout(in: optionsRect).strokeStyle
     }
 
     private func optionControlY(in optionsRect: NSRect) -> CGFloat {
@@ -2795,7 +3570,7 @@ private final class SelectionOverlayView: NSView {
 
     private func strokeStyleMenuRect(in optionsRect: NSRect) -> NSRect {
         let field = strokeStyleFieldRect(in: optionsRect)
-        let itemCount = max(1, CaptureStrokePattern.allCases.count)
+        let itemCount = max(1, strokePatternOptions.count)
         let height = CGFloat(itemCount) * 24 + 8
         return SelectionToolbarState.popoverRect(
             size: NSSize(width: field.width, height: height),
@@ -2805,7 +3580,28 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func strokeStyleMenuItemRects(in menu: NSRect) -> [NSRect] {
-        SelectionToolbarState.strokeStyleMenuItemRects(in: menu, itemCount: CaptureStrokePattern.allCases.count)
+        SelectionToolbarState.strokeStyleMenuItemRects(in: menu, itemCount: strokePatternOptions.count)
+    }
+
+    private func arrowTypeMenuRect(in optionsRect: NSRect, field: ArrowTypeField) -> NSRect {
+        let layout = optionsToolbarLayout(in: optionsRect)
+        let anchor: NSRect
+        switch field {
+        case .start:
+            anchor = layout.startArrowType ?? .zero
+        case .end:
+            anchor = layout.endArrowType ?? .zero
+        }
+        let itemCount = CaptureArrowType.allCases.count
+        return SelectionToolbarState.popoverRect(
+            size: NSSize(width: 58, height: CGFloat(itemCount) * 24 + 8),
+            anchoredTo: anchor,
+            inside: safeLayoutBounds
+        )
+    }
+
+    private func arrowTypeMenuItemRects(in menu: NSRect) -> [NSRect] {
+        SelectionToolbarState.arrowTypeMenuItemRects(in: menu, itemCount: CaptureArrowType.allCases.count)
     }
 
     private func shapeModeBackgroundRect(for button: NSRect) -> NSRect {
@@ -2828,7 +3624,7 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func colorSwatchRects(in optionsRect: NSRect) -> [NSRect] {
-        SelectionToolbarState.colorSwatchRects(in: optionsRect, paletteCount: visiblePaletteCount)
+        SelectionToolbarState.colorSwatchRects(in: optionsRect, paletteCount: visiblePaletteCount, mode: optionsToolbarMode)
     }
 
     private func cornerRadiusValueRect(in panel: NSRect) -> NSRect {
@@ -2855,6 +3651,24 @@ private final class SelectionOverlayView: NSView {
         return SelectionToolbarState.localAnnotationRect(fromOverlayRect: overlayRect, selectionRect: lockedSelectionRect)
     }
 
+    private func localArrowLine(fromOverlayArrowLine arrowLine: CaptureArrowLine) -> CaptureArrowLine {
+        guard let lockedSelectionRect else {
+            return arrowLine
+        }
+
+        return localArrowLine(fromOverlayArrowLine: arrowLine, selectionRect: lockedSelectionRect)
+    }
+
+    private func localArrowLine(fromOverlayArrowLine arrowLine: CaptureArrowLine, selectionRect: NSRect) -> CaptureArrowLine {
+        CaptureArrowLine(
+            start: localPoint(fromOverlayPoint: arrowLine.start, selectionRect: selectionRect),
+            end: localPoint(fromOverlayPoint: arrowLine.end, selectionRect: selectionRect),
+            control: localPoint(fromOverlayPoint: arrowLine.control, selectionRect: selectionRect),
+            startArrowType: arrowLine.startArrowType,
+            endArrowType: arrowLine.endArrowType
+        )
+    }
+
     private func overlayRect(fromLocalAnnotationRect localRect: NSRect) -> NSRect {
         guard let lockedSelectionRect else {
             return localRect
@@ -2865,6 +3679,42 @@ private final class SelectionOverlayView: NSView {
             y: lockedSelectionRect.minY + localRect.minY,
             width: localRect.width,
             height: localRect.height
+        )
+    }
+
+    private func overlayArrowLine(fromLocalArrowLine arrowLine: CaptureArrowLine?) -> CaptureArrowLine? {
+        guard let arrowLine, let lockedSelectionRect else {
+            return arrowLine
+        }
+
+        return overlayArrowLine(fromLocalArrowLine: arrowLine, selectionRect: lockedSelectionRect)
+    }
+
+    private func overlayArrowLine(fromLocalArrowLine arrowLine: CaptureArrowLine, selectionRect: NSRect) -> CaptureArrowLine {
+        CaptureArrowLine(
+            start: overlayPoint(fromLocalPoint: arrowLine.start, selectionRect: selectionRect),
+            end: overlayPoint(fromLocalPoint: arrowLine.end, selectionRect: selectionRect),
+            control: overlayPoint(fromLocalPoint: arrowLine.control, selectionRect: selectionRect),
+            startArrowType: arrowLine.startArrowType,
+            endArrowType: arrowLine.endArrowType
+        )
+    }
+
+    private func localPoint(fromOverlayPoint point: NSPoint, selectionRect: NSRect) -> NSPoint {
+        NSPoint(x: point.x - selectionRect.minX, y: point.y - selectionRect.minY)
+    }
+
+    private func overlayPoint(fromLocalPoint point: NSPoint, selectionRect: NSRect) -> NSPoint {
+        NSPoint(x: selectionRect.minX + point.x, y: selectionRect.minY + point.y)
+    }
+
+    private func offsetArrowLine(_ arrowLine: CaptureArrowLine, dx: CGFloat, dy: CGFloat) -> CaptureArrowLine {
+        CaptureArrowLine(
+            start: NSPoint(x: arrowLine.start.x + dx, y: arrowLine.start.y + dy),
+            end: NSPoint(x: arrowLine.end.x + dx, y: arrowLine.end.y + dy),
+            control: NSPoint(x: arrowLine.control.x + dx, y: arrowLine.control.y + dy),
+            startArrowType: arrowLine.startArrowType,
+            endArrowType: arrowLine.endArrowType
         )
     }
 

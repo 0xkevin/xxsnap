@@ -106,6 +106,7 @@ enum Feature: String, Codable, Equatable {
     case customPalette
     case customFont
     case customHotkeys
+    case sketchStrokePatterns
 }
 
 struct FeatureGate {
@@ -117,7 +118,7 @@ struct FeatureGate {
             return true
         case .free:
             switch feature {
-            case .scrollCapture, .ocr:
+            case .scrollCapture, .ocr, .sketchStrokePatterns:
                 return false
             case .customPalette, .customFont, .customHotkeys:
                 return true

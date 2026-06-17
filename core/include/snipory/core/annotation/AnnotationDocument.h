@@ -15,7 +15,9 @@ enum class AnnotationStrokePattern {
     Solid,
     DashLong,
     DashNarrow,
-    DashLongShort
+    DashLongShort,
+    SketchSolid,
+    SketchDashed
 };
 
 struct AnnotationStyle final {

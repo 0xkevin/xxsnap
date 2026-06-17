@@ -10,6 +10,7 @@ final class ScreenCaptureService {
         configuration.height = max(1, height)
         configuration.pixelFormat = kCVPixelFormatType_32BGRA
         configuration.scalesToFit = false
+        configuration.showsCursor = false
         if #available(macOS 15.0, *) {
             configuration.captureDynamicRange = .SDR
         }

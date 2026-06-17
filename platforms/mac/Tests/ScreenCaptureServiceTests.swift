@@ -13,6 +13,7 @@ final class ScreenCaptureServiceTests: XCTestCase {
         XCTAssertEqual(configuration.width, 320)
         XCTAssertEqual(configuration.height, 200)
         XCTAssertEqual(configuration.pixelFormat, kCVPixelFormatType_32BGRA)
+        XCTAssertFalse(configuration.showsCursor)
         let colorSpaceName = configuration.colorSpaceName as String?
         XCTAssertTrue(colorSpaceName == nil || colorSpaceName?.isEmpty == true)
         XCTAssertFalse(configuration.scalesToFit)
@@ -74,9 +75,11 @@ final class ScreenCaptureServiceTests: XCTestCase {
         let samplePoint = NSPoint(x: windowFrame.midX, y: windowFrame.midY)
         let pixelX = Int((samplePoint.x - display.frame.minX) * scale)
         let pixelY = Int((display.frame.maxY - samplePoint.y) * scale)
-        let color = SelectionToolbarState.sampleColor(atPixelX: pixelX, y: pixelY, in: taggedImage)
+        let color = try XCTUnwrap(SelectionToolbarState.sampleColor(atPixelX: pixelX, y: pixelY, in: taggedImage))
 
-        XCTAssertEqual(color.map(SelectionToolbarState.colorSamplerHexString(for:)), "#FF001A")
+        XCTAssertEqual(color.redComponent, 1, accuracy: 2 / 255)
+        XCTAssertEqual(color.greenComponent, 0, accuracy: 2 / 255)
+        XCTAssertEqual(color.blueComponent, CGFloat(26) / 255, accuracy: 2 / 255)
     }
 
     @MainActor

@@ -41,6 +41,245 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertFalse(SelectionToolbarState.shouldShowOptionsToolbar(isPrimaryShapeToolActive: false))
     }
 
+    func testToolbarIconInsetsRenderArrowLineLargerThanDefaultIcons() {
+        XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "arrow-line"), 0)
+        XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "pencil-tool"), 2)
+        XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "text-tool"), 0)
+    }
+
+    func testCurrentColorToolbarIconsUseTemplateTint() {
+        XCTAssertFalse(SelectionToolbarState.usesFixedColorToolbarIconResource("pencil-tool"))
+        XCTAssertFalse(SelectionToolbarState.usesFixedColorToolbarIconResource("arrow-line"))
+        XCTAssertTrue(SelectionToolbarState.usesFixedColorToolbarIconResource("mosaic-tool"))
+        XCTAssertTrue(SelectionToolbarState.usesFixedColorToolbarIconResource("undo-enabled"))
+    }
+
+    func testPolylineTooltipUsesArrowLineLabel() {
+        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "polyline"), "箭头线")
+    }
+
+    func testArrowTypeTooltipTitlesOmitTypeSuffix() {
+        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "startArrowType"), "开始箭头")
+        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "endArrowType"), "结束箭头")
+    }
+
+    func testOptionsToolbarLayoutSwitchesShapeAndArrowControls() {
+        let optionsRect = NSRect(x: 100, y: 100, width: 640, height: 40)
+        let shapeLayout = SelectionToolbarState.optionsToolbarLayout(
+            in: optionsRect,
+            paletteCount: 8,
+            mode: .shape
+        )
+        let arrowLayout = SelectionToolbarState.optionsToolbarLayout(
+            in: optionsRect,
+            paletteCount: 8,
+            mode: .arrowLine
+        )
+
+        XCTAssertNotNil(shapeLayout.fillToggle)
+        XCTAssertNotNil(shapeLayout.rectangleMode)
+        XCTAssertNotNil(shapeLayout.ellipseMode)
+        XCTAssertNil(shapeLayout.startArrowType)
+        XCTAssertNil(shapeLayout.endArrowType)
+
+        XCTAssertNil(arrowLayout.fillToggle)
+        XCTAssertNil(arrowLayout.rectangleMode)
+        XCTAssertNil(arrowLayout.ellipseMode)
+        XCTAssertNotNil(arrowLayout.startArrowType)
+        XCTAssertNotNil(arrowLayout.endArrowType)
+        XCTAssertGreaterThan(arrowLayout.colorSwatches.first!.minX, arrowLayout.endArrowType!.maxX)
+    }
+
+    func testArrowOptionsToolbarWidthShrinksWhenShapeOnlyControlsAreHidden() {
+        XCTAssertLessThan(
+            SelectionToolbarState.optionsToolbarWidth(paletteCount: 8, mode: .arrowLine),
+            SelectionToolbarState.optionsToolbarWidth(paletteCount: 8, mode: .shape)
+        )
+    }
+
+    func testArrowOptionsToolbarCompactsFieldsAfterStrokeWidths() {
+        let optionsRect = NSRect(x: 100, y: 100, width: 480, height: 40)
+        let layout = SelectionToolbarState.optionsToolbarLayout(
+            in: optionsRect,
+            paletteCount: 8,
+            mode: .arrowLine
+        )
+
+        XCTAssertLessThanOrEqual(layout.strokeStyle.minX - layout.strokeWidths.last!.maxX, 22)
+        XCTAssertEqual(layout.startArrowType?.width, 42)
+        XCTAssertEqual(layout.endArrowType?.width, 42)
+        XCTAssertLessThan(layout.endArrowType!.maxX, layout.colorSwatches.first!.minX)
+    }
+
+    func testArrowOptionsToolbarLeavesSeparatorSpacingAroundArrowTypeFields() {
+        let optionsRect = NSRect(x: 100, y: 100, width: 480, height: 40)
+        let arrowLayout = SelectionToolbarState.optionsToolbarLayout(
+            in: optionsRect,
+            paletteCount: 8,
+            mode: .arrowLine
+        )
+        let shapeLayout = SelectionToolbarState.optionsToolbarLayout(
+            in: optionsRect,
+            paletteCount: 8,
+            mode: .shape
+        )
+
+        let strokeWidthToStyleGap = arrowLayout.strokeStyle.minX - arrowLayout.strokeWidths.last!.maxX
+        XCTAssertGreaterThanOrEqual(arrowLayout.startArrowType!.minX - arrowLayout.strokeStyle.maxX, strokeWidthToStyleGap)
+
+        let shapeSeparatorX = shapeLayout.strokeStyle.maxX + (shapeLayout.colorSwatches.first!.minX - shapeLayout.strokeStyle.maxX) / 2
+        let arrowSeparatorX = arrowLayout.endArrowType!.maxX + (arrowLayout.colorSwatches.first!.minX - arrowLayout.endArrowType!.maxX) / 2
+        let separatorWidth: CGFloat = 1.5
+        let selectedSwatchExpansion: CGFloat = 3
+        let shapeSeparatorToSelectedSwatchGap = shapeLayout.colorSwatches.first!.minX - selectedSwatchExpansion - (floor(shapeSeparatorX) + 0.25 + separatorWidth)
+        let arrowSeparatorToSelectedSwatchGap = arrowLayout.colorSwatches.first!.minX - selectedSwatchExpansion - (floor(arrowSeparatorX) + 0.25 + separatorWidth)
+
+        XCTAssertEqual(arrowSeparatorToSelectedSwatchGap, shapeSeparatorToSelectedSwatchGap, accuracy: 0.5)
+    }
+
+    func testArrowTypeFieldsAndMenuUseConsistentSampleWidth() {
+        let optionsRect = NSRect(x: 100, y: 100, width: 480, height: 40)
+        let layout = SelectionToolbarState.optionsToolbarLayout(
+            in: optionsRect,
+            paletteCount: 8,
+            mode: .arrowLine
+        )
+        let menu = NSRect(x: 120, y: 80, width: 58, height: CGFloat(CaptureArrowType.allCases.count) * 24 + 8)
+        let item = SelectionToolbarState.arrowTypeMenuItemRects(in: menu, itemCount: CaptureArrowType.allCases.count)[4]
+
+        let fieldSample = SelectionToolbarState.arrowTypeSampleRect(in: layout.endArrowType!, pointsRight: true)
+        let fieldDisclosure = SelectionToolbarState.arrowTypeDisclosureRect(in: layout.endArrowType!)
+        let menuSample = SelectionToolbarState.arrowTypeSampleRect(in: item.insetBy(dx: 8, dy: 4), pointsRight: true)
+
+        XCTAssertEqual(fieldSample.width, 22)
+        XCTAssertEqual(menuSample.width, fieldSample.width)
+        XCTAssertGreaterThanOrEqual(fieldDisclosure.minX - fieldSample.maxX, 3)
+        XCTAssertLessThanOrEqual(fieldDisclosure.maxX, layout.endArrowType!.maxX - 3)
+    }
+
+    func testArrowTypeMenuHitTargetSelectsEveryMenuItem() {
+        let itemCount = CaptureArrowType.allCases.count
+        let menu = NSRect(x: 120, y: 80, width: 180, height: CGFloat(itemCount) * 24 + 8)
+
+        for (index, rect) in SelectionToolbarState.arrowTypeMenuItemRects(in: menu, itemCount: itemCount).enumerated() {
+            XCTAssertEqual(
+                SelectionToolbarState.arrowTypeMenuHitTarget(
+                    at: NSPoint(x: rect.midX, y: rect.midY),
+                    in: menu,
+                    itemCount: itemCount
+                ),
+                .item(index)
+            )
+        }
+    }
+
+    func testArrowTypeOptionsMatchCompactIconMenu() {
+        XCTAssertEqual(
+            CaptureArrowType.allCases.map(\.title),
+            [
+                "没有箭头的实线",
+                "普通箭头线",
+                "实心箭头线",
+                "空心箭头线",
+                "菱形箭头线",
+                "端帽箭头线",
+                "圆点箭头线",
+            ]
+        )
+        XCTAssertFalse(CaptureArrowType.allCases.map(\.title).contains("手绘箭头线"))
+    }
+
+    func testDefaultArrowLineActivationUsesFirstPaletteColorAndExpectedArrowTypes() {
+        let state = SelectionToolbarState.arrowLineActivationState(
+            currentStyle: CaptureAnnotationStyle(),
+            paletteColors: SelectionOverlayWindow.defaultPaletteColors
+        )
+
+        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: state.style.strokeColor), "#FF001A")
+        XCTAssertEqual(state.style.strokeWidth, 2)
+        XCTAssertEqual(state.startArrowType, .none)
+        XCTAssertEqual(state.endArrowType, .normal)
+    }
+
+    func testSpecialArrowTypesCanOnlyBeSelectedOnOneEnd() {
+        XCTAssertEqual(
+            SelectionToolbarState.arrowTypesAfterSelection(
+                currentStart: .normal,
+                currentEnd: .normal,
+                selectedType: .solidArrow,
+                endpoint: .start
+            ),
+            SelectionToolbarState.ArrowTypePair(start: .solidArrow, end: .none)
+        )
+        XCTAssertEqual(
+            SelectionToolbarState.arrowTypesAfterSelection(
+                currentStart: .normal,
+                currentEnd: .normal,
+                selectedType: .hollowArrow,
+                endpoint: .end
+            ),
+            SelectionToolbarState.ArrowTypePair(start: .none, end: .hollowArrow)
+        )
+    }
+
+    func testChangingOtherEndClearsExistingSpecialArrowType() {
+        XCTAssertEqual(
+            SelectionToolbarState.arrowTypesAfterSelection(
+                currentStart: .solidArrow,
+                currentEnd: .none,
+                selectedType: .bar,
+                endpoint: .end
+            ),
+            SelectionToolbarState.ArrowTypePair(start: .none, end: .bar)
+        )
+        XCTAssertEqual(
+            SelectionToolbarState.arrowTypesAfterSelection(
+                currentStart: .none,
+                currentEnd: .hollowArrow,
+                selectedType: .dot,
+                endpoint: .start
+            ),
+            SelectionToolbarState.ArrowTypePair(start: .dot, end: .none)
+        )
+    }
+
+    func testRegularArrowTypesStillSupportBothEnds() {
+        XCTAssertEqual(
+            SelectionToolbarState.arrowTypesAfterSelection(
+                currentStart: .diamond,
+                currentEnd: .bar,
+                selectedType: .normal,
+                endpoint: .start
+            ),
+            SelectionToolbarState.ArrowTypePair(start: .normal, end: .bar)
+        )
+        XCTAssertEqual(
+            SelectionToolbarState.arrowTypesAfterSelection(
+                currentStart: .normal,
+                currentEnd: .dot,
+                selectedType: .diamond,
+                endpoint: .end
+            ),
+            SelectionToolbarState.ArrowTypePair(start: .normal, end: .diamond)
+        )
+    }
+
+    func testArrowLineHitTargetDistinguishesHandlesAndBody() {
+        let line = CaptureArrowLine(
+            start: NSPoint(x: 10, y: 10),
+            end: NSPoint(x: 110, y: 10),
+            control: NSPoint(x: 60, y: 60),
+            startArrowType: .none,
+            endArrowType: .normal
+        )
+
+        XCTAssertEqual(SelectionToolbarState.arrowLineHitTarget(at: NSPoint(x: 10, y: 10), line: line), .start)
+        XCTAssertEqual(SelectionToolbarState.arrowLineHitTarget(at: NSPoint(x: 110, y: 10), line: line), .end)
+        XCTAssertEqual(SelectionToolbarState.arrowLineHitTarget(at: NSPoint(x: 60, y: 60), line: line), .control)
+        XCTAssertEqual(SelectionToolbarState.arrowLineHitTarget(at: NSPoint(x: 60, y: 34), line: line), .body)
+        XCTAssertEqual(SelectionToolbarState.arrowLineHitTarget(at: NSPoint(x: 60, y: 90), line: line), .none)
+    }
+
     func testPrimaryShapeToolSelectionTogglesOffWhenAnyShapeToolIsActive() {
         XCTAssertEqual(
             SelectionToolbarState.toggledPrimaryShapeTool(current: nil, defaultShape: .rectangle),
@@ -52,6 +291,32 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertNil(
             SelectionToolbarState.toggledPrimaryShapeTool(current: .ellipse, defaultShape: .rectangle)
         )
+    }
+
+    func testPrimaryShapeToolActivationUsesFirstPaletteColorWhenStyleIsStillDefault() {
+        let style = SelectionToolbarState.styleForPrimaryShapeToolActivation(
+            currentStyle: CaptureAnnotationStyle(),
+            paletteColors: SelectionOverlayWindow.defaultPaletteColors
+        )
+
+        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: style.strokeColor), "#FF001A")
+        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: style.fillColor), "#FF001A")
+        XCTAssertEqual(style.strokeWidth, 2)
+    }
+
+    func testPrimaryShapeToolActivationPreservesUserChosenColor() {
+        var currentStyle = CaptureAnnotationStyle()
+        currentStyle.strokeColor = NSColor(srgbRed: 0, green: 1, blue: 0, alpha: 1)
+        currentStyle.fillColor = NSColor(srgbRed: 0, green: 1, blue: 0, alpha: 1)
+
+        let style = SelectionToolbarState.styleForPrimaryShapeToolActivation(
+            currentStyle: currentStyle,
+            paletteColors: SelectionOverlayWindow.defaultPaletteColors
+        )
+
+        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: style.strokeColor), "#00FF00")
+        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: style.fillColor), "#00FF00")
+        XCTAssertEqual(style.strokeWidth, 2)
     }
 
     func testFillPreviewUsesNeutralGrayWithoutFill() {
@@ -174,12 +439,33 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertLessThan(compactPaletteWidth, fullPaletteWidth)
     }
 
-    func testStrokeMenuHitTargetSelectsEveryMenuItem() {
-        let menu = NSRect(x: 120, y: 80, width: 102, height: 104)
+    func testStrokePatternOptionsReserveSketchLinesForPremiumAccess() {
+        let freeOptions = SelectionToolbarState.strokePatternOptions(canUsePremiumStrokePatterns: false)
 
-        for (index, rect) in SelectionToolbarState.strokeStyleMenuItemRects(in: menu, itemCount: 4).enumerated() {
+        XCTAssertEqual(
+            freeOptions.map(\.pattern),
+            [.solid, .dashLong, .dashNarrow, .dashLongShort, .sketchSolid, .sketchDashed]
+        )
+        XCTAssertEqual(
+            freeOptions.filter(\.requiresPremiumAccess).map(\.pattern),
+            [.sketchSolid, .sketchDashed]
+        )
+        XCTAssertEqual(
+            freeOptions.filter { !$0.isEnabled }.map(\.pattern),
+            [.sketchSolid, .sketchDashed]
+        )
+
+        let premiumOptions = SelectionToolbarState.strokePatternOptions(canUsePremiumStrokePatterns: true)
+        XCTAssertTrue(premiumOptions.allSatisfy(\.isEnabled))
+    }
+
+    func testStrokeMenuHitTargetSelectsEveryMenuItem() {
+        let itemCount = SelectionToolbarState.strokePatternOptions(canUsePremiumStrokePatterns: true).count
+        let menu = NSRect(x: 120, y: 80, width: 102, height: CGFloat(itemCount) * 24 + 8)
+
+        for (index, rect) in SelectionToolbarState.strokeStyleMenuItemRects(in: menu, itemCount: itemCount).enumerated() {
             XCTAssertEqual(
-                SelectionToolbarState.strokeMenuHitTarget(at: NSPoint(x: rect.midX, y: rect.midY), in: menu, itemCount: 4),
+                SelectionToolbarState.strokeMenuHitTarget(at: NSPoint(x: rect.midX, y: rect.midY), in: menu, itemCount: itemCount),
                 .item(index)
             )
         }
@@ -667,6 +953,30 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertTrue(visibleBounds.insetBy(dx: 8, dy: 8).contains(sampler))
         XCTAssertLessThan(sampler.minX, 790)
         XCTAssertGreaterThan(sampler.minY, 30)
+    }
+
+    func testColorSamplerRectPrefersPointerLowerRightWhenSpaceAllows() {
+        let sampler = SelectionToolbarState.colorSamplerRect(
+            size: NSSize(width: 168, height: 122),
+            pointer: NSPoint(x: 120, y: 360),
+            inside: NSRect(x: 0, y: 0, width: 800, height: 600)
+        )
+
+        XCTAssertEqual(sampler.origin.x, 134)
+        XCTAssertEqual(sampler.origin.y, 224)
+    }
+
+    func testColorSamplerCanUseInProgressSelectionRect() {
+        let currentSelection = NSRect(x: 100, y: 100, width: 120, height: 80)
+
+        XCTAssertTrue(
+            SelectionToolbarState.shouldShowColorSampler(
+                isShapeToolActive: false,
+                hasAnnotations: false,
+                pointer: NSPoint(x: currentSelection.maxX, y: currentSelection.maxY),
+                selectionRect: currentSelection
+            )
+        )
     }
 
     func testColorSamplerToggleModeSwitchesBetweenHexAndRgb() {
