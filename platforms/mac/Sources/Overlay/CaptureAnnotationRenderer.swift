@@ -86,6 +86,7 @@ enum CaptureArrowVectorGeometry {
     ]
     private static let hollowArrowMiterLimit: CGFloat = 4
     private static let hollowArrowTailMiterLimit: CGFloat = 24
+    private static let hollowArrowTailCapX: CGFloat = 5.2
 
     static func bodyInset(for type: CaptureArrowType, strokeWidth: CGFloat) -> CGFloat {
         guard isVectorArrow(type) else {
@@ -414,12 +415,30 @@ enum CaptureArrowVectorGeometry {
             return nil
         }
 
-        return stretchedArrowFilled2Path(start: start, control: control, end: end, strokeWidth: strokeWidth)?.copy(
+        guard let outline = stretchedArrowFilled2Path(start: start, control: control, end: end, strokeWidth: strokeWidth)?.copy(
             strokingWithWidth: max(1, strokeWidth * 0.5),
             lineCap: .butt,
             lineJoin: .miter,
             miterLimit: hollowArrowTailMiterLimit
-        )
+        ) else {
+            return nil
+        }
+
+        let path = CGMutablePath()
+        path.addPath(outline)
+        if let tailCap = clippedSubpath(arrowFilled2Polygon, maximumX: hollowArrowTailCapX) {
+            let totalDistance = last.distance
+            let scale = min(max(0.8, strokeWidth / 2), max(0.2, totalDistance / (arrowFilled2TipX - arrowFilled2TailX)))
+            appendStretchedArrowFilled2Subpath(
+                to: path,
+                points: tailCap,
+                frames: frames,
+                totalDistance: totalDistance,
+                scale: scale,
+                insetScale: 1
+            )
+        }
+        return path
     }
 
     private static func appendStretchedArrowFilled2Subpath(
@@ -453,6 +472,25 @@ enum CaptureArrowVectorGeometry {
             path.addLine(to: stretchedArrowFilled2Point(point, frames: frames, totalDistance: totalDistance, scale: scale, insetScale: insetScale))
         }
         lowerBodyEdge.reversed().forEach { path.addLine(to: $0) }
+        path.closeSubpath()
+    }
+
+    private static func appendStretchedArrowFilled2Subpath(
+        to path: CGMutablePath,
+        points: [CGPoint],
+        frames: [CurveFrame],
+        totalDistance: CGFloat,
+        scale: CGFloat,
+        insetScale: CGFloat
+    ) {
+        guard let first = points.first else {
+            return
+        }
+
+        path.move(to: stretchedArrowFilled2Point(first, frames: frames, totalDistance: totalDistance, scale: scale, insetScale: insetScale))
+        points.dropFirst().forEach { point in
+            path.addLine(to: stretchedArrowFilled2Point(point, frames: frames, totalDistance: totalDistance, scale: scale, insetScale: insetScale))
+        }
         path.closeSubpath()
     }
 
@@ -803,6 +841,36 @@ enum CaptureArrowVectorGeometry {
                 }
                 output.append(current)
             } else if previousInside, let intersection = verticalIntersection(from: previous, to: current, atX: minimumX) {
+                output.append(intersection)
+            }
+
+            previous = current
+            previousInside = currentInside
+        }
+
+        guard output.count >= 3 else {
+            return nil
+        }
+        return output
+    }
+
+    private static func clippedSubpath(_ subpath: [CGPoint], maximumX: CGFloat) -> [CGPoint]? {
+        guard subpath.count >= 3 else {
+            return nil
+        }
+
+        var output: [CGPoint] = []
+        var previous = subpath[subpath.count - 1]
+        var previousInside = previous.x <= maximumX
+
+        for current in subpath {
+            let currentInside = current.x <= maximumX
+            if currentInside {
+                if !previousInside, let intersection = verticalIntersection(from: previous, to: current, atX: maximumX) {
+                    output.append(intersection)
+                }
+                output.append(current)
+            } else if previousInside, let intersection = verticalIntersection(from: previous, to: current, atX: maximumX) {
                 output.append(intersection)
             }
 

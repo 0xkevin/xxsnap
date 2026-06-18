@@ -453,6 +453,38 @@ final class SniporyMacTests: XCTestCase {
         )
     }
 
+    func testDiagonalStartHollowArrowTailDoesNotExposeFlatCut() throws {
+        let image = try makeBitmapImage(
+            pointSize: NSSize(width: 220, height: 220),
+            pixelWidth: 220,
+            pixelHeight: 220,
+            fill: .white
+        )
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = .systemRed
+        style.strokeWidth = 4
+
+        let arrowLine = CaptureArrowLine(
+            start: NSPoint(x: 40, y: 180),
+            end: NSPoint(x: 180, y: 40),
+            control: NSPoint(x: 100, y: 34),
+            startArrowType: .hollowArrow,
+            endArrowType: .none
+        )
+        let arrow = CaptureAnnotation(kind: .arrowLine, rect: arrowLine.boundingRect, style: style, arrowLine: arrowLine)
+        let rendered = CaptureAnnotationRenderer.render(image: image, annotations: [arrow])
+
+        let tailRuns = try (39...46).map { y in
+            try averageRedRunLength(in: rendered, y: y, xRange: 130...210)
+        }
+
+        XCTAssertLessThanOrEqual(
+            tailRuns.max() ?? 0,
+            24,
+            "diagonal start hollow arrow tail should not expose a long flat cut: \(tailRuns)"
+        )
+    }
+
     func testHollowArrowHeadShoulderSpreadsLikeSnipasteReference() throws {
         let shoulderSpan = try arrowTransverseSpanAtLengthFraction(type: .hollowArrow, strokeWidth: 4, fraction: 0.90)
 
