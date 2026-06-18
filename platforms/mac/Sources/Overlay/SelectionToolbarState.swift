@@ -103,6 +103,15 @@ enum SelectionToolbarState {
 
     static let defaultFillPreviewColor = NSColor.systemGray
 
+    static func strokeWidthValues(for mode: OptionsToolbarMode) -> [CGFloat] {
+        switch mode {
+        case .shape:
+            return [2, 4, 7]
+        case .arrowLine:
+            return [3, 4, 6]
+        }
+    }
+
     static func shouldShowOptionsToolbar(isPrimaryShapeToolActive: Bool) -> Bool {
         isPrimaryShapeToolActive
     }
@@ -117,7 +126,8 @@ enum SelectionToolbarState {
     ) -> CaptureAnnotationStyle {
         var style = currentStyle
         let shouldUseDefaultPaletteColor = styleUsesDefaultInitialColors(currentStyle)
-        style.strokeWidth = 2
+        style.strokeWidth = strokeWidthValues(for: .shape)[1]
+        style.cornerRadius = 5
 
         if shouldUseDefaultPaletteColor, let firstPaletteColor = paletteColors.first {
             let color = srgbColor(firstPaletteColor)
@@ -201,8 +211,10 @@ enum SelectionToolbarState {
         currentStyle: CaptureAnnotationStyle,
         paletteColors: [NSColor]
     ) -> ArrowLineActivationState {
-        ArrowLineActivationState(
-            style: styleForPrimaryShapeToolActivation(currentStyle: currentStyle, paletteColors: paletteColors),
+        var style = styleForPrimaryShapeToolActivation(currentStyle: currentStyle, paletteColors: paletteColors)
+        style.strokeWidth = strokeWidthValues(for: .arrowLine)[1]
+        return ArrowLineActivationState(
+            style: style,
             startArrowType: .none,
             endArrowType: .normal
         )

@@ -196,9 +196,14 @@ final class SelectionToolbarStateTests: XCTestCase {
         )
 
         XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: state.style.strokeColor), "#FF001A")
-        XCTAssertEqual(state.style.strokeWidth, 2)
+        XCTAssertEqual(state.style.strokeWidth, 4)
         XCTAssertEqual(state.startArrowType, .none)
         XCTAssertEqual(state.endArrowType, .normal)
+    }
+
+    func testShapeAndArrowToolbarsUseSeparateStrokeWidthOptions() {
+        XCTAssertEqual(SelectionToolbarState.strokeWidthValues(for: .shape), [2, 4, 7])
+        XCTAssertEqual(SelectionToolbarState.strokeWidthValues(for: .arrowLine), [3, 4, 6])
     }
 
     func testSpecialArrowTypesCanOnlyBeSelectedOnOneEnd() {
@@ -301,7 +306,8 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: style.strokeColor), "#FF001A")
         XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: style.fillColor), "#FF001A")
-        XCTAssertEqual(style.strokeWidth, 2)
+        XCTAssertEqual(style.strokeWidth, 4)
+        XCTAssertEqual(style.cornerRadius, 5)
     }
 
     func testPrimaryShapeToolActivationPreservesUserChosenColor() {
@@ -316,7 +322,8 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: style.strokeColor), "#00FF00")
         XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: style.fillColor), "#00FF00")
-        XCTAssertEqual(style.strokeWidth, 2)
+        XCTAssertEqual(style.strokeWidth, 4)
+        XCTAssertEqual(style.cornerRadius, 5)
     }
 
     func testFillPreviewUsesNeutralGrayWithoutFill() {

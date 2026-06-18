@@ -1277,9 +1277,10 @@ private final class SelectionOverlayView: NSView {
             return false
         }
         let layout = optionsToolbarLayout(in: optionsRect)
+        let strokeWidths = SelectionToolbarState.strokeWidthValues(for: optionsToolbarMode)
 
         for (index, rect) in layout.strokeWidths.enumerated() where rect.contains(point) {
-            currentStyle.strokeWidth = CGFloat([2, 4, 6][index])
+            currentStyle.strokeWidth = strokeWidths[index]
             applyCurrentStyleToSelectedAnnotation()
             return true
         }
@@ -2623,8 +2624,9 @@ private final class SelectionOverlayView: NSView {
         drawPanel(optionsRect, opaque: true, alpha: 0.9)
         drawOptionsToolbarSeparators(in: optionsRect)
 
+        let strokeWidths = SelectionToolbarState.strokeWidthValues(for: optionsToolbarMode)
         for (index, rect) in layout.strokeWidths.enumerated() {
-            let width = CGFloat([2, 4, 6][index])
+            let width = strokeWidths[index]
             drawToolbarButton(optionButtonBackgroundRect(for: rect), symbol: nil, selected: currentStyle.strokeWidth == width, enabled: true)
             (currentStyle.strokeWidth == width ? NSColor.controlAccentColor : NSColor.labelColor).setStroke()
             let line = NSBezierPath()
