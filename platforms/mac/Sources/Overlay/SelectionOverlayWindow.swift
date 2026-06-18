@@ -370,11 +370,13 @@ private final class SelectionOverlayView: NSView {
     private var lockedSelectionRect: NSRect?
     private var shapeStartPoint: NSPoint?
     private var shapeCurrentPoint: NSPoint?
+    private var brushDraftPoints: [NSPoint] = []
     private var annotations: [CaptureAnnotation] = []
     private var redoAnnotations: [CaptureAnnotation] = []
     private var selectedAnnotationIndex: Int?
     private var movingAnnotationStartRect: NSRect?
     private var movingAnnotationStartArrowLine: CaptureArrowLine?
+    private var movingAnnotationStartBrushPath: CaptureBrushPath?
     private var movingAnnotationOffset = NSPoint.zero
     private var movingSelectionStartRect: NSRect?
     private var movingSelectionPointerOffset = NSPoint.zero
@@ -517,13 +519,20 @@ private final class SelectionOverlayView: NSView {
             selectionCurrentPoint = point
             updateColorSampler(at: point)
         case .drawingShape:
-            shapeCurrentPoint = clamp(point, to: bounds)
+            let clampedPoint = clamp(point, to: bounds)
+            shapeCurrentPoint = clampedPoint
+            appendBrushDraftPointIfNeeded(clampedPoint)
         case .draggingToolbar:
             updateDraggingToolbar(to: point)
         case .annotating:
             if isShapeToolActive {
-                shapeStartPoint = shapeStartPoint ?? clamp(point, to: bounds)
-                shapeCurrentPoint = clamp(point, to: bounds)
+                let clampedPoint = clamp(point, to: bounds)
+                shapeStartPoint = shapeStartPoint ?? clampedPoint
+                shapeCurrentPoint = clampedPoint
+                if currentShapeKind == .brush, brushDraftPoints.isEmpty {
+                    brushDraftPoints = [shapeStartPoint ?? clampedPoint, clampedPoint]
+                }
+                appendBrushDraftPointIfNeeded(clampedPoint)
                 interactionMode = .drawingShape
                 NSLog("snipory overlay recovered drawing from drag point=(%.0f, %.0f)", point.x, point.y)
             } else {
@@ -615,7 +624,9 @@ private final class SelectionOverlayView: NSView {
             updateColorSampler(at: point)
             NSLog("snipory overlay selection locked rect=(%.0f, %.0f, %.0f, %.0f)", selectionRect.minX, selectionRect.minY, selectionRect.width, selectionRect.height)
         case .drawingShape:
-            shapeCurrentPoint = clamp(point, to: bounds)
+            let clampedPoint = clamp(point, to: bounds)
+            shapeCurrentPoint = clampedPoint
+            appendBrushDraftPointIfNeeded(clampedPoint)
             if let draft = draftAnnotation, isUsableDraftAnnotation(draft) {
                 annotations.append(draft)
                 selectedAnnotationIndex = annotations.indices.last
@@ -627,6 +638,7 @@ private final class SelectionOverlayView: NSView {
             }
             shapeStartPoint = nil
             shapeCurrentPoint = nil
+            brushDraftPoints.removeAll()
             interactionMode = .annotating
         case .draggingToolbar:
             updateDraggingToolbar(to: point)
@@ -776,6 +788,17 @@ private final class SelectionOverlayView: NSView {
             return nil
         }
 
+        if currentShapeKind == .brush {
+            let overlayPath = CaptureBrushPath(points: brushDraftPoints.isEmpty ? [shapeStartPoint, shapeCurrentPoint] : brushDraftPoints)
+            let localPath = localBrushPath(fromOverlayBrushPath: overlayPath)
+            return CaptureAnnotation(
+                kind: .brush,
+                rect: localPath.boundingRect,
+                style: currentStyle,
+                brushPath: localPath
+            )
+        }
+
         if currentShapeKind == .arrowLine {
             let overlayLine = CaptureArrowLine(
                 start: shapeStartPoint,
@@ -809,6 +832,9 @@ private final class SelectionOverlayView: NSView {
     private func isUsableDraftAnnotation(_ annotation: CaptureAnnotation) -> Bool {
         if annotation.kind == .arrowLine, let arrowLine = annotation.arrowLine {
             return hypot(arrowLine.end.x - arrowLine.start.x, arrowLine.end.y - arrowLine.start.y) >= 8
+        }
+        if annotation.kind == .brush {
+            return (annotation.brushPath?.points.count ?? 0) >= 2
         }
 
         return annotation.rect.width >= 8 && annotation.rect.height >= 8
@@ -1080,6 +1106,7 @@ private final class SelectionOverlayView: NSView {
             selectAnnotation(at: hitIndex)
             movingAnnotationStartRect = overlayRect(fromLocalAnnotationRect: annotations[hitIndex].rect)
             movingAnnotationStartArrowLine = overlayArrowLine(fromLocalArrowLine: annotations[hitIndex].arrowLine)
+            movingAnnotationStartBrushPath = overlayBrushPath(fromLocalBrushPath: annotations[hitIndex].brushPath)
             movingAnnotationOffset = NSPoint(
                 x: point.x - (movingAnnotationStartRect?.minX ?? point.x),
                 y: point.y - (movingAnnotationStartRect?.minY ?? point.y)
@@ -1119,6 +1146,7 @@ private final class SelectionOverlayView: NSView {
         selectedAnnotationIndex = nil
         shapeStartPoint = point
         shapeCurrentPoint = point
+        brushDraftPoints = currentShapeKind == .brush ? [point] : []
         interactionMode = .drawingShape
         NSLog("snipory overlay drawing started point=(%.0f, %.0f)", point.x, point.y)
     }
@@ -1137,6 +1165,12 @@ private final class SelectionOverlayView: NSView {
             showsCornerRadiusPanel = false
             showsStartArrowTypeMenu = false
             showsEndArrowTypeMenu = false
+        case .pen:
+            toggleShapeTool(.brush)
+            showsStrokeStyleMenu = false
+            showsCornerRadiusPanel = false
+            showsStartArrowTypeMenu = false
+            showsEndArrowTypeMenu = false
         case .undo:
             undoLastAnnotation()
         case .redo:
@@ -1147,7 +1181,7 @@ private final class SelectionOverlayView: NSView {
             finish(action: .save)
         case .cancel:
             selectionDidFinish?(nil)
-        case .pin, .pen, .marker, .mosaic, .text, .number, .magnifier, .eraser, .scroll, .settings:
+        case .pin, .marker, .mosaic, .text, .number, .magnifier, .eraser, .scroll, .settings:
             showPlaceholder(for: button)
         }
 
@@ -1168,6 +1202,12 @@ private final class SelectionOverlayView: NSView {
                 currentStartArrowType = activation.startArrowType
                 currentEndArrowType = activation.endArrowType
                 showsCornerRadiusPanel = false
+            } else if activeShapeKind == .brush {
+                currentStyle = SelectionToolbarState.brushActivationStyle(
+                    currentStyle: currentStyle,
+                    paletteColors: colors
+                )
+                showsCornerRadiusPanel = false
             } else {
                 currentStyle = SelectionToolbarState.styleForPrimaryShapeToolActivation(
                     currentStyle: currentStyle,
@@ -1183,17 +1223,19 @@ private final class SelectionOverlayView: NSView {
         }
         shapeStartPoint = nil
         shapeCurrentPoint = nil
+        brushDraftPoints.removeAll()
     }
 
     private func activateShapeTool(_ shape: CaptureAnnotationKind) {
         activeShapeKind = shape
         currentShapeKind = shape
         isShapeToolActive = true
-        if shape == .arrowLine {
+        if shape == .arrowLine || shape == .brush {
             showsCornerRadiusPanel = false
         }
         shapeStartPoint = nil
         shapeCurrentPoint = nil
+        brushDraftPoints.removeAll()
     }
 
     private func showPlaceholder(for button: ToolbarButton) {
@@ -1501,6 +1543,17 @@ private final class SelectionOverlayView: NSView {
         applyCurrentStyleToSelectedAnnotation()
     }
 
+    private func appendBrushDraftPointIfNeeded(_ point: NSPoint) {
+        guard currentShapeKind == .brush else {
+            return
+        }
+
+        if let last = brushDraftPoints.last, hypot(point.x - last.x, point.y - last.y) < 1.5 {
+            return
+        }
+        brushDraftPoints.append(point)
+    }
+
     private var selectedAnnotation: CaptureAnnotation? {
         guard let selectedAnnotationIndex, annotations.indices.contains(selectedAnnotationIndex) else {
             return nil
@@ -1538,7 +1591,7 @@ private final class SelectionOverlayView: NSView {
                 annotations[selectedAnnotationIndex].arrowLine = arrowLine
                 annotations[selectedAnnotationIndex].rect = arrowLine.boundingRect
             }
-        } else if currentShapeKind != .arrowLine {
+        } else if SelectionToolbarState.annotationKindSupportsPostDrawEditing(annotations[selectedAnnotationIndex].kind) {
             annotations[selectedAnnotationIndex].kind = currentShapeKind
         }
         redoAnnotations.removeAll()
@@ -1610,6 +1663,7 @@ private final class SelectionOverlayView: NSView {
     private func commitSelectedShapePreview() {
         movingAnnotationStartRect = nil
         movingAnnotationStartArrowLine = nil
+        movingAnnotationStartBrushPath = nil
         resizingAnnotationStartRect = nil
         resizingArrowLineStart = nil
         activeArrowLineHandle = nil
@@ -1707,7 +1761,7 @@ private final class SelectionOverlayView: NSView {
         guard let annotation = selectedAnnotation else {
             return nil
         }
-        guard annotation.kind != .arrowLine else {
+        guard annotation.kind != .arrowLine, SelectionToolbarState.annotationKindSupportsPostDrawEditing(annotation.kind) else {
             return nil
         }
 
@@ -1799,6 +1853,15 @@ private final class SelectionOverlayView: NSView {
             annotations[selectedAnnotationIndex].rect = localLine.boundingRect
             return
         }
+        if let movingAnnotationStartBrushPath {
+            let dx = requested.minX - movingAnnotationStartRect.minX
+            let dy = requested.minY - movingAnnotationStartRect.minY
+            let movedOverlayPath = offsetBrushPath(movingAnnotationStartBrushPath, dx: dx, dy: dy)
+            let localPath = localBrushPath(fromOverlayBrushPath: movedOverlayPath)
+            annotations[selectedAnnotationIndex].brushPath = localPath
+            annotations[selectedAnnotationIndex].rect = localPath.boundingRect
+            return
+        }
 
         annotations[selectedAnnotationIndex].rect = localAnnotationRect(from: requested)
     }
@@ -1830,6 +1893,12 @@ private final class SelectionOverlayView: NSView {
                     let localLine = localArrowLine(fromOverlayArrowLine: overlayLine, selectionRect: lockedSelectionRect)
                     annotations[index].arrowLine = localLine
                     annotations[index].rect = localLine.boundingRect
+                } else if movingSelectionStartAnnotations.indices.contains(index),
+                          let brushPath = movingSelectionStartAnnotations[index].brushPath {
+                    let overlayPath = overlayBrushPath(fromLocalBrushPath: brushPath, selectionRect: movingSelectionStartRect)
+                    let localPath = localBrushPath(fromOverlayBrushPath: overlayPath, selectionRect: lockedSelectionRect)
+                    annotations[index].brushPath = localPath
+                    annotations[index].rect = localPath.boundingRect
                 } else {
                     annotations[index].rect = preservedRects[index]
                 }
@@ -1945,6 +2014,12 @@ private final class SelectionOverlayView: NSView {
                 let localLine = localArrowLine(fromOverlayArrowLine: overlayLine, selectionRect: resized)
                 annotations[index].arrowLine = localLine
                 annotations[index].rect = localLine.boundingRect
+            } else if resizingSelectionStartAnnotations.indices.contains(index),
+                      let brushPath = resizingSelectionStartAnnotations[index].brushPath {
+                let overlayPath = overlayBrushPath(fromLocalBrushPath: brushPath, selectionRect: resizingSelectionStartRect)
+                let localPath = localBrushPath(fromOverlayBrushPath: overlayPath, selectionRect: resized)
+                annotations[index].brushPath = localPath
+                annotations[index].rect = localPath.boundingRect
             } else {
                 annotations[index].rect = SelectionToolbarState.localAnnotationRect(
                     fromOverlayRect: resizingSelectionStartAnnotationRects[index],
@@ -2062,7 +2137,7 @@ private final class SelectionOverlayView: NSView {
     private func drawAnnotations() {
         for (index, annotation) in annotations.enumerated() {
             drawAnnotation(annotation, inOverlay: true)
-            if selectedAnnotationIndex == index {
+            if selectedAnnotationIndex == index, SelectionToolbarState.annotationKindSupportsPostDrawEditing(annotation.kind) {
                 drawSelectedAnnotationOutline(annotation)
             }
         }
@@ -2076,7 +2151,7 @@ private final class SelectionOverlayView: NSView {
         drawAnnotation(draftAnnotation, inOverlay: true)
         if draftAnnotation.kind == .arrowLine {
             drawSelectedAnnotationOutline(draftAnnotation)
-        } else {
+        } else if SelectionToolbarState.annotationKindSupportsPostDrawEditing(draftAnnotation.kind) {
             drawResizeHandles(for: overlayRect(fromLocalAnnotationRect: draftAnnotation.rect), kind: draftAnnotation.kind)
         }
     }
@@ -2084,6 +2159,10 @@ private final class SelectionOverlayView: NSView {
     private func drawAnnotation(_ annotation: CaptureAnnotation, inOverlay: Bool) {
         if annotation.kind == .arrowLine {
             drawArrowLineAnnotation(annotation, inOverlay: inOverlay)
+            return
+        }
+        if annotation.kind == .brush {
+            drawBrushPathAnnotation(annotation, inOverlay: inOverlay)
             return
         }
 
@@ -2102,7 +2181,7 @@ private final class SelectionOverlayView: NSView {
             path = NSBezierPath(rect: insetRect)
         case .ellipse:
             path = NSBezierPath(ovalIn: insetRect)
-        case .arrowLine:
+        case .arrowLine, .brush:
             return
         }
 
@@ -2129,6 +2208,35 @@ private final class SelectionOverlayView: NSView {
             phase: 0
         )
         strokePath.stroke()
+    }
+
+    private func drawBrushPathAnnotation(_ annotation: CaptureAnnotation, inOverlay: Bool) {
+        guard let brushPath = inOverlay
+            ? overlayBrushPath(fromLocalBrushPath: annotation.brushPath)
+            : annotation.brushPath,
+            !brushPath.points.isEmpty
+        else {
+            return
+        }
+
+        let path = NSBezierPath()
+        path.move(to: brushPath.points[0])
+        if brushPath.points.count == 1 {
+            path.line(to: NSPoint(x: brushPath.points[0].x + 0.01, y: brushPath.points[0].y + 0.01))
+        } else {
+            brushPath.points.dropFirst().forEach { path.line(to: $0) }
+        }
+
+        annotation.style.strokeColor.setStroke()
+        path.lineWidth = annotation.style.strokeWidth
+        path.lineJoinStyle = .round
+        path.lineCapStyle = .round
+        path.setLineDash(
+            annotation.style.strokePattern.dashPattern,
+            count: annotation.style.strokePattern.dashPattern.count,
+            phase: 0
+        )
+        path.stroke()
     }
 
     private func drawArrowLineAnnotation(_ annotation: CaptureAnnotation, inOverlay: Bool) {
@@ -2248,6 +2356,10 @@ private final class SelectionOverlayView: NSView {
             drawSelectedArrowLineOutline(annotation)
             return
         }
+        if annotation.kind == .brush {
+            drawSelectedBrushPathOutline(annotation)
+            return
+        }
 
         let rect = overlayRect(fromLocalAnnotationRect: annotation.rect)
         NSColor.systemBlue.setStroke()
@@ -2274,6 +2386,20 @@ private final class SelectionOverlayView: NSView {
         drawArrowLineHandle(at: arrowLine.start, radius: 4)
         drawArrowLineHandle(at: arrowLine.end, radius: 4)
         drawArrowLineHandle(at: arrowLine.control, radius: 3.5)
+    }
+
+    private func drawSelectedBrushPathOutline(_ annotation: CaptureAnnotation) {
+        guard let brushPath = overlayBrushPath(fromLocalBrushPath: annotation.brushPath), !brushPath.points.isEmpty else {
+            return
+        }
+
+        let outline = NSBezierPath()
+        outline.move(to: brushPath.points[0])
+        brushPath.points.dropFirst().forEach { outline.line(to: $0) }
+        NSColor.systemBlue.setStroke()
+        outline.lineWidth = max(1.2, annotation.style.strokeWidth + 2)
+        outline.setLineDash([4, 3], count: 2, phase: 0)
+        outline.stroke()
     }
 
     private func appendQuadraticCurve(to path: NSBezierPath, start: NSPoint, control: NSPoint, end: NSPoint) {
@@ -2637,11 +2763,14 @@ private final class SelectionOverlayView: NSView {
             line.stroke()
         }
 
-        if optionsToolbarMode == .shape {
+        switch optionsToolbarMode {
+        case .shape:
             drawFillToggle(in: optionsRect)
             drawShapeModeButtons(in: optionsRect)
-        } else {
+        case .arrowLine:
             drawArrowTypeFields(in: optionsRect)
+        case .brush:
+            break
         }
         drawStrokeStyleField(in: optionsRect)
         drawColorSwatches(in: optionsRect)
@@ -2670,6 +2799,13 @@ private final class SelectionOverlayView: NSView {
             }
             if let endArrowType = layout.endArrowType, let firstSwatchMinX {
                 separatorXs.append(endArrowType.maxX + (firstSwatchMinX - endArrowType.maxX) / 2)
+            }
+        case .brush:
+            if let lastStrokeWidth = layout.strokeWidths.last {
+                separatorXs.append(lastStrokeWidth.maxX + (layout.strokeStyle.minX - lastStrokeWidth.maxX) / 2)
+            }
+            if let firstSwatchMinX {
+                separatorXs.append(layout.strokeStyle.maxX + (firstSwatchMinX - layout.strokeStyle.maxX) / 2)
             }
         }
 
@@ -3427,9 +3563,11 @@ private final class SelectionOverlayView: NSView {
     private func buttonMatchesCurrentTool(_ button: ToolbarButton) -> Bool {
         switch button {
         case .rectangle:
-            return isShapeToolActive && currentShapeKind != .arrowLine
+            return isShapeToolActive && (currentShapeKind == .rectangle || currentShapeKind == .ellipse)
         case .polyline:
             return isShapeToolActive && currentShapeKind == .arrowLine
+        case .pen:
+            return isShapeToolActive && currentShapeKind == .brush
         default:
             return false
         }
@@ -3496,7 +3634,14 @@ private final class SelectionOverlayView: NSView {
     }
 
     private var optionsToolbarMode: SelectionToolbarState.OptionsToolbarMode {
-        currentShapeKind == .arrowLine ? .arrowLine : .shape
+        switch currentShapeKind {
+        case .arrowLine:
+            return .arrowLine
+        case .brush:
+            return .brush
+        case .rectangle, .ellipse:
+            return .shape
+        }
     }
 
     private func optionsToolbarLayout(in optionsRect: NSRect) -> SelectionToolbarState.OptionsToolbarLayout {
@@ -3671,6 +3816,20 @@ private final class SelectionOverlayView: NSView {
         )
     }
 
+    private func localBrushPath(fromOverlayBrushPath brushPath: CaptureBrushPath) -> CaptureBrushPath {
+        guard let lockedSelectionRect else {
+            return brushPath
+        }
+
+        return localBrushPath(fromOverlayBrushPath: brushPath, selectionRect: lockedSelectionRect)
+    }
+
+    private func localBrushPath(fromOverlayBrushPath brushPath: CaptureBrushPath, selectionRect: NSRect) -> CaptureBrushPath {
+        CaptureBrushPath(
+            points: brushPath.points.map { localPoint(fromOverlayPoint: $0, selectionRect: selectionRect) }
+        )
+    }
+
     private func overlayRect(fromLocalAnnotationRect localRect: NSRect) -> NSRect {
         guard let lockedSelectionRect else {
             return localRect
@@ -3702,6 +3861,20 @@ private final class SelectionOverlayView: NSView {
         )
     }
 
+    private func overlayBrushPath(fromLocalBrushPath brushPath: CaptureBrushPath?) -> CaptureBrushPath? {
+        guard let brushPath, let lockedSelectionRect else {
+            return brushPath
+        }
+
+        return overlayBrushPath(fromLocalBrushPath: brushPath, selectionRect: lockedSelectionRect)
+    }
+
+    private func overlayBrushPath(fromLocalBrushPath brushPath: CaptureBrushPath, selectionRect: NSRect) -> CaptureBrushPath {
+        CaptureBrushPath(
+            points: brushPath.points.map { overlayPoint(fromLocalPoint: $0, selectionRect: selectionRect) }
+        )
+    }
+
     private func localPoint(fromOverlayPoint point: NSPoint, selectionRect: NSRect) -> NSPoint {
         NSPoint(x: point.x - selectionRect.minX, y: point.y - selectionRect.minY)
     }
@@ -3718,6 +3891,45 @@ private final class SelectionOverlayView: NSView {
             startArrowType: arrowLine.startArrowType,
             endArrowType: arrowLine.endArrowType
         )
+    }
+
+    private func offsetBrushPath(_ brushPath: CaptureBrushPath, dx: CGFloat, dy: CGFloat) -> CaptureBrushPath {
+        CaptureBrushPath(
+            points: brushPath.points.map { NSPoint(x: $0.x + dx, y: $0.y + dy) }
+        )
+    }
+
+    private func brushPathContains(_ point: NSPoint, path: CaptureBrushPath, hitOutset: CGFloat) -> Bool {
+        guard let first = path.points.first else {
+            return false
+        }
+        if path.points.count == 1 {
+            return distance(from: point, to: first) <= hitOutset
+        }
+
+        for (start, end) in zip(path.points, path.points.dropFirst()) {
+            if distanceFromSegment(point: point, start: start, end: end) <= hitOutset {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func distanceFromSegment(point: NSPoint, start: NSPoint, end: NSPoint) -> CGFloat {
+        let dx = end.x - start.x
+        let dy = end.y - start.y
+        let lengthSquared = dx * dx + dy * dy
+        guard lengthSquared > 0.0001 else {
+            return distance(from: point, to: start)
+        }
+
+        let t = max(0, min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared))
+        let projection = NSPoint(x: start.x + t * dx, y: start.y + t * dy)
+        return distance(from: point, to: projection)
+    }
+
+    private func distance(from first: NSPoint, to second: NSPoint) -> CGFloat {
+        hypot(first.x - second.x, first.y - second.y)
     }
 
     private func resizeHandleCenters(for rect: NSRect, kind: CaptureAnnotationKind) -> [NSPoint] {

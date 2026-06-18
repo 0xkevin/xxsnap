@@ -9,6 +9,7 @@ enum CaptureAnnotationKind {
     case rectangle
     case ellipse
     case arrowLine
+    case brush
 }
 
 enum CaptureArrowType: Int, CaseIterable {
@@ -62,6 +63,28 @@ struct CaptureArrowLine: Equatable {
         let maxX = max(start.x, end.x, control.x)
         let minY = min(start.y, end.y, control.y)
         let maxY = max(start.y, end.y, control.y)
+        return NSRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+}
+
+struct CaptureBrushPath: Equatable {
+    var points: [NSPoint]
+
+    var boundingRect: NSRect {
+        guard let first = points.first else {
+            return .zero
+        }
+
+        var minX = first.x
+        var maxX = first.x
+        var minY = first.y
+        var maxY = first.y
+        for point in points.dropFirst() {
+            minX = min(minX, point.x)
+            maxX = max(maxX, point.x)
+            minY = min(minY, point.y)
+            maxY = max(maxY, point.y)
+        }
         return NSRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
     }
 }
@@ -970,6 +993,7 @@ struct CaptureAnnotation {
     var rect: NSRect
     var style: CaptureAnnotationStyle
     var arrowLine: CaptureArrowLine?
+    var brushPath: CaptureBrushPath?
 }
 
 struct CaptureSelectionResult {
@@ -1024,6 +1048,10 @@ enum CaptureAnnotationRenderer {
             drawArrowLine(annotation, in: context, scaleX: scaleX, scaleY: scaleY, lineScale: lineScale)
             return
         }
+        if annotation.kind == .brush {
+            drawBrushPath(annotation, in: context, scaleX: scaleX, scaleY: scaleY, lineScale: lineScale)
+            return
+        }
 
         let rect = annotation.rect.standardized.insetBy(dx: annotation.style.strokeWidth / 2, dy: annotation.style.strokeWidth / 2)
         let pixelRect = CGRect(
@@ -1045,7 +1073,7 @@ enum CaptureAnnotationRenderer {
             path.addRect(pixelRect)
         case .ellipse:
             path.addEllipse(in: pixelRect)
-        case .arrowLine:
+        case .arrowLine, .brush:
             return
         }
 
@@ -1077,6 +1105,42 @@ enum CaptureAnnotationRenderer {
             phase: 0,
             lengths: annotation.style.strokePattern.dashPattern.map { $0 * lineScale }
         )
+        context.strokePath()
+        context.restoreGState()
+    }
+
+    private static func drawBrushPath(
+        _ annotation: CaptureAnnotation,
+        in context: CGContext,
+        scaleX: CGFloat,
+        scaleY: CGFloat,
+        lineScale: CGFloat
+    ) {
+        guard let brushPath = annotation.brushPath, !brushPath.points.isEmpty else {
+            return
+        }
+
+        context.saveGState()
+        context.setStrokeColor(cgColor(annotation.style.strokeColor))
+        context.setLineWidth(annotation.style.strokeWidth * lineScale)
+        context.setLineJoin(.round)
+        context.setLineCap(.round)
+        context.setLineDash(
+            phase: 0,
+            lengths: annotation.style.strokePattern.dashPattern.map { $0 * lineScale }
+        )
+
+        let path = CGMutablePath()
+        let first = pixelPoint(brushPath.points[0], scaleX: scaleX, scaleY: scaleY)
+        path.move(to: first)
+        if brushPath.points.count == 1 {
+            path.addLine(to: CGPoint(x: first.x + 0.01, y: first.y + 0.01))
+        } else {
+            for point in brushPath.points.dropFirst() {
+                path.addLine(to: pixelPoint(point, scaleX: scaleX, scaleY: scaleY))
+            }
+        }
+        context.addPath(path)
         context.strokePath()
         context.restoreGState()
     }
@@ -1372,7 +1436,7 @@ enum CaptureSketchStrokePath {
         }
 
         switch kind {
-        case .arrowLine:
+        case .arrowLine, .brush:
             return []
         case .ellipse:
             return ellipsePoints(in: rect)

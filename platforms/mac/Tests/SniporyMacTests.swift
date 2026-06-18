@@ -51,6 +51,68 @@ final class SniporyMacTests: XCTestCase {
         XCTAssertNotEqual(try rgbaBytes(in: rendered), try rgbaBytes(in: image))
     }
 
+    func testAnnotationRendererDrawsBrushPathOntoImage() throws {
+        let image = try makeBitmapImage(
+            pointSize: NSSize(width: 80, height: 50),
+            pixelWidth: 80,
+            pixelHeight: 50,
+            fill: .white
+        )
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = .systemRed
+        style.strokeWidth = 5
+
+        let rendered = CaptureAnnotationRenderer.render(
+            image: image,
+            annotations: [
+                CaptureAnnotation(
+                    kind: .brush,
+                    rect: NSRect(x: -12, y: 14, width: 80, height: 18),
+                    style: style,
+                    brushPath: CaptureBrushPath(points: [
+                        NSPoint(x: -12, y: 14),
+                        NSPoint(x: 20, y: 24),
+                        NSPoint(x: 68, y: 32),
+                    ])
+                ),
+            ]
+        )
+
+        XCTAssertEqual(rendered.size, image.size)
+        XCTAssertGreaterThan(redPixelCount(in: rendered, within: NSRect(x: 0, y: 10, width: 76, height: 28)), 80)
+    }
+
+    func testBrushPathStrokePatternChangesRenderedPixels() throws {
+        let image = try makeBitmapImage(
+            pointSize: NSSize(width: 120, height: 40),
+            pixelWidth: 120,
+            pixelHeight: 40,
+            fill: .white
+        )
+        var solidStyle = CaptureAnnotationStyle()
+        solidStyle.strokeColor = .systemRed
+        solidStyle.strokeWidth = 5
+
+        var dashedStyle = solidStyle
+        dashedStyle.strokePattern = .dashLong
+
+        let brushPath = CaptureBrushPath(points: [
+            NSPoint(x: 8, y: 20),
+            NSPoint(x: 60, y: 20),
+            NSPoint(x: 112, y: 20),
+        ])
+        let solid = CaptureAnnotationRenderer.render(
+            image: image,
+            annotations: [CaptureAnnotation(kind: .brush, rect: brushPath.boundingRect, style: solidStyle, brushPath: brushPath)]
+        )
+        let dashed = CaptureAnnotationRenderer.render(
+            image: image,
+            annotations: [CaptureAnnotation(kind: .brush, rect: brushPath.boundingRect, style: dashedStyle, brushPath: brushPath)]
+        )
+
+        XCTAssertNotEqual(try rgbaBytes(in: solid), try rgbaBytes(in: dashed))
+    }
+
     func testSvg2ArrowVectorsMatchReferenceIcons() throws {
         let image = try makeBitmapImage(
             pointSize: NSSize(width: 64, height: 48),

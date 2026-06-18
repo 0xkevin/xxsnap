@@ -46,6 +46,7 @@ enum SelectionToolbarState {
     enum OptionsToolbarMode: Equatable {
         case shape
         case arrowLine
+        case brush
     }
 
     struct OptionsToolbarLayout: Equatable {
@@ -109,6 +110,8 @@ enum SelectionToolbarState {
             return [2, 4, 7]
         case .arrowLine:
             return [3, 4, 6]
+        case .brush:
+            return [3, 5, 7]
         }
     }
 
@@ -220,6 +223,28 @@ enum SelectionToolbarState {
         )
     }
 
+    static func brushActivationStyle(
+        currentStyle: CaptureAnnotationStyle,
+        paletteColors: [NSColor]
+    ) -> CaptureAnnotationStyle {
+        var style = currentStyle
+        let shouldUseDefaultPaletteColor = styleUsesDefaultInitialColors(currentStyle)
+        style.strokeWidth = strokeWidthValues(for: .brush)[1]
+        style.fillEnabled = false
+
+        if shouldUseDefaultPaletteColor, let firstPaletteColor = paletteColors.first {
+            let color = srgbColor(firstPaletteColor)
+            style.strokeColor = color
+            style.fillColor = color
+        }
+
+        return style
+    }
+
+    static func annotationKindSupportsPostDrawEditing(_ kind: CaptureAnnotationKind) -> Bool {
+        kind != .brush
+    }
+
     static func arrowTypesAfterSelection(
         currentStart: CaptureArrowType,
         currentEnd: CaptureArrowType,
@@ -256,7 +281,7 @@ enum SelectionToolbarState {
             fillToggle: mode == .shape ? fillToggleRect(in: optionsRect) : nil,
             rectangleMode: mode == .shape ? rectangleModeButtonRect(in: optionsRect) : nil,
             ellipseMode: mode == .shape ? ellipseModeButtonRect(in: optionsRect) : nil,
-            strokeStyle: mode == .shape ? strokeStyleFieldRect(in: optionsRect) : arrowLineStrokeStyleFieldRect(in: optionsRect),
+            strokeStyle: mode == .shape ? strokeStyleFieldRect(in: optionsRect) : compactStrokeStyleFieldRect(in: optionsRect),
             startArrowType: mode == .arrowLine ? startArrowTypeFieldRect(in: optionsRect, mode: mode) : nil,
             endArrowType: mode == .arrowLine ? endArrowTypeFieldRect(in: optionsRect, mode: mode) : nil,
             colorSwatches: colorSwatchRects(in: optionsRect, paletteCount: paletteCount, mode: mode)
@@ -364,6 +389,8 @@ enum SelectionToolbarState {
             return 325
         case .arrowLine:
             return 318
+        case .brush:
+            return 210
         }
     }
 
@@ -402,7 +429,7 @@ enum SelectionToolbarState {
         endArrowTypeFieldRect(in: optionsRect, mode: .shape)
     }
 
-    private static func arrowLineStrokeStyleFieldRect(in optionsRect: NSRect) -> NSRect {
+    private static func compactStrokeStyleFieldRect(in optionsRect: NSRect) -> NSRect {
         NSRect(x: optionsRect.minX + 92, y: optionControlY(in: optionsRect), width: 94, height: 20)
     }
 
@@ -412,6 +439,8 @@ enum SelectionToolbarState {
             return NSRect(x: optionsRect.minX + 312, y: optionControlY(in: optionsRect), width: 42, height: 20)
         case .arrowLine:
             return NSRect(x: optionsRect.minX + 204, y: optionControlY(in: optionsRect), width: 42, height: 20)
+        case .brush:
+            return .zero
         }
     }
 
@@ -421,6 +450,8 @@ enum SelectionToolbarState {
             return NSRect(x: optionsRect.minX + 360, y: optionControlY(in: optionsRect), width: 42, height: 20)
         case .arrowLine:
             return NSRect(x: optionsRect.minX + 252, y: optionControlY(in: optionsRect), width: 42, height: 20)
+        case .brush:
+            return .zero
         }
     }
 
@@ -1047,7 +1078,7 @@ enum SelectionToolbarState {
 
     private static func shapePath(in rect: NSRect, kind: CaptureAnnotationKind, cornerRadius: CGFloat) -> NSBezierPath {
         switch kind {
-        case .arrowLine:
+        case .arrowLine, .brush:
             NSBezierPath()
         case .rectangle where cornerRadius > 0:
             NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius)

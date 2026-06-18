@@ -204,6 +204,43 @@ final class SelectionToolbarStateTests: XCTestCase {
     func testShapeAndArrowToolbarsUseSeparateStrokeWidthOptions() {
         XCTAssertEqual(SelectionToolbarState.strokeWidthValues(for: .shape), [2, 4, 7])
         XCTAssertEqual(SelectionToolbarState.strokeWidthValues(for: .arrowLine), [3, 4, 6])
+        XCTAssertEqual(SelectionToolbarState.strokeWidthValues(for: .brush), [3, 5, 7])
+    }
+
+    func testBrushActivationUsesFirstPaletteColorAndMediumWidth() {
+        let style = SelectionToolbarState.brushActivationStyle(
+            currentStyle: CaptureAnnotationStyle(),
+            paletteColors: SelectionOverlayWindow.defaultPaletteColors
+        )
+
+        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: style.strokeColor), "#FF001A")
+        XCTAssertEqual(style.strokeWidth, 5)
+        XCTAssertFalse(style.fillEnabled)
+    }
+
+    func testBrushOptionsToolbarShowsStrokeStyleAndColorsOnly() {
+        let optionsRect = NSRect(x: 100, y: 100, width: 420, height: 40)
+        let layout = SelectionToolbarState.optionsToolbarLayout(
+            in: optionsRect,
+            paletteCount: 8,
+            mode: .brush
+        )
+
+        XCTAssertEqual(layout.strokeWidths.count, 3)
+        XCTAssertNil(layout.fillToggle)
+        XCTAssertNil(layout.rectangleMode)
+        XCTAssertNil(layout.ellipseMode)
+        XCTAssertNil(layout.startArrowType)
+        XCTAssertNil(layout.endArrowType)
+        XCTAssertGreaterThan(layout.strokeStyle.minX, layout.strokeWidths.last!.maxX)
+        XCTAssertGreaterThan(layout.colorSwatches.first!.minX, layout.strokeStyle.maxX)
+    }
+
+    func testBrushAnnotationsAreNotEditableAfterDrawing() {
+        XCTAssertTrue(SelectionToolbarState.annotationKindSupportsPostDrawEditing(.rectangle))
+        XCTAssertTrue(SelectionToolbarState.annotationKindSupportsPostDrawEditing(.ellipse))
+        XCTAssertTrue(SelectionToolbarState.annotationKindSupportsPostDrawEditing(.arrowLine))
+        XCTAssertFalse(SelectionToolbarState.annotationKindSupportsPostDrawEditing(.brush))
     }
 
     func testSpecialArrowTypesCanOnlyBeSelectedOnOneEnd() {
