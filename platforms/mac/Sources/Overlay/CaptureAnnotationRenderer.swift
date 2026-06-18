@@ -85,6 +85,7 @@ enum CaptureArrowVectorGeometry {
         CGPoint(x: 4, y: 12.0457356),
     ]
     private static let hollowArrowMiterLimit: CGFloat = 4
+    private static let hollowArrowTailMiterLimit: CGFloat = 24
 
     static func bodyInset(for type: CaptureArrowType, strokeWidth: CGFloat) -> CGFloat {
         guard isVectorArrow(type) else {
@@ -417,7 +418,7 @@ enum CaptureArrowVectorGeometry {
             strokingWithWidth: max(1, strokeWidth * 0.5),
             lineCap: .butt,
             lineJoin: .miter,
-            miterLimit: hollowArrowMiterLimit
+            miterLimit: hollowArrowTailMiterLimit
         )
     }
 

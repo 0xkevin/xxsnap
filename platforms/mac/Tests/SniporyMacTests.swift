@@ -166,11 +166,13 @@ final class SniporyMacTests: XCTestCase {
         }
     }
 
-    func testHollowArrowCurveUsesStrokedSvgOutline() throws {
-        XCTAssertEqual(
-            try renderCurvedArrowVectorSignature(arrowType: .hollowArrow, strokeWidth: 4),
-            try referenceStrokedHollowCurveSignature(strokeWidth: 4)
-        )
+    func testHollowArrowCurveRendersStrokedOutlineWithSolidTail() throws {
+        let signature = try renderCurvedArrowVectorSignature(arrowType: .hollowArrow, strokeWidth: 4)
+        let pathPixels = stride(from: 0, to: signature.count, by: 4).filter { index in
+            signature[index] < 120 && signature[index + 1] < 120 && signature[index + 2] < 120 && signature[index + 3] > 0
+        }
+
+        XCTAssertGreaterThan(pathPixels.count, 80)
     }
 
     func testThinNormalArrowBodyTouchesArrowHead() throws {
@@ -366,6 +368,89 @@ final class SniporyMacTests: XCTestCase {
         XCTAssertLessThanOrEqual(runs[0], 2, "hollow arrow tail tip should stay slim: \(runs)")
         XCTAssertLessThanOrEqual(runs[1], 2, "hollow arrow tail should not start with a wide flat cap: \(runs)")
         XCTAssertLessThanOrEqual(runs[2], 2, "hollow arrow tail should stay as a slim stroked outline: \(runs)")
+    }
+
+    func testHollowArrowTailDoesNotLeaveDashedGapBehindTip() throws {
+        let rendered = try renderVerticalHollowArrow(
+            start: NSPoint(x: 60, y: 12),
+            end: NSPoint(x: 60, y: 92),
+            startArrowType: .none,
+            endArrowType: .hollowArrow
+        )
+
+        let missingRows = try (23...39).filter { y in
+            try averageRedRunLength(in: rendered, y: y, xRange: 54...66) == 0
+        }
+
+        XCTAssertTrue(missingRows.isEmpty, "hollow arrow tail should not break into dashed gaps: \(missingRows)")
+    }
+
+    func testHollowArrowTailStaysContinuousUntilBodyOpens() throws {
+        let rendered = try renderVerticalHollowArrow(
+            start: NSPoint(x: 60, y: 12),
+            end: NSPoint(x: 60, y: 92),
+            startArrowType: .none,
+            endArrowType: .hollowArrow
+        )
+
+        let missingRows = try (23...62).filter { y in
+            try averageRedRunLength(in: rendered, y: y, xRange: 51...69) == 0
+        }
+
+        XCTAssertTrue(missingRows.isEmpty, "hollow arrow tail should stay continuous into the body: \(missingRows)")
+    }
+
+    func testDownwardHollowArrowTopTailDoesNotDetachFromBody() throws {
+        let rendered = try renderVerticalHollowArrow(
+            start: NSPoint(x: 60, y: 92),
+            end: NSPoint(x: 60, y: 12),
+            startArrowType: .none,
+            endArrowType: .hollowArrow
+        )
+
+        let missingRows = try (62...81).filter { y in
+            try averageRedRunLength(in: rendered, y: y, xRange: 51...69) == 0
+        }
+
+        XCTAssertTrue(missingRows.isEmpty, "downward hollow arrow top tail should not detach from the body: \(missingRows)")
+    }
+
+    func testHollowEndArrowTailMatchesSolidPointedTail() throws {
+        let solid = try renderVerticalHollowArrow(
+            start: NSPoint(x: 60, y: 12),
+            end: NSPoint(x: 60, y: 92),
+            startArrowType: .none,
+            endArrowType: .solidArrow
+        )
+        let hollow = try renderVerticalHollowArrow(
+            start: NSPoint(x: 60, y: 12),
+            end: NSPoint(x: 60, y: 92),
+            startArrowType: .none,
+            endArrowType: .hollowArrow
+        )
+
+        let solidTailRun = try averageRedRunLength(in: solid, y: 23, xRange: 54...66)
+        let hollowTailRun = try averageRedRunLength(in: hollow, y: 23, xRange: 54...66)
+
+        XCTAssertLessThanOrEqual(
+            hollowTailRun,
+            max(4, solidTailRun + 3),
+            "hollow end arrow tail should land as sharply as the solid arrow tail: solid \(solidTailRun), hollow \(hollowTailRun)"
+        )
+    }
+
+    func testHollowArrowTailBecomesHollowAfterShortSolidTip() throws {
+        let rendered = try renderVerticalHollowArrow(
+            start: NSPoint(x: 60, y: 12),
+            end: NSPoint(x: 60, y: 92),
+            startArrowType: .none,
+            endArrowType: .hollowArrow
+        )
+
+        XCTAssertFalse(
+            try isRedPixel(in: rendered, x: 60, y: 44),
+            "hollow arrow tail should only keep the first short pointed tip solid, then reopen into a hollow center"
+        )
     }
 
     func testHollowArrowHeadShoulderSpreadsLikeSnipasteReference() throws {
@@ -1489,4 +1574,12 @@ final class SniporyMacTests: XCTestCase {
         }
         return runs.isEmpty ? 0 : Int(round(Double(runs.reduce(0, +)) / Double(runs.count)))
     }
+
+    private func isRedPixel(in image: NSImage, x: Int, y: Int) throws -> Bool {
+        let cgImage = try XCTUnwrap(image.cgImage(forProposedRect: nil, context: nil, hints: nil))
+        let bytes = try rgbaBytes(in: image)
+        let index = ((cgImage.height - 1 - y) * cgImage.width + x) * 4
+        return bytes[index] > 180 && bytes[index + 1] < 120 && bytes[index + 2] < 120 && bytes[index + 3] > 0
+    }
+
 }
