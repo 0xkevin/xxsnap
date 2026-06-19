@@ -775,9 +775,15 @@ private final class SelectionOverlayView: NSView {
     }
 
     override func resetCursorRects() {
-        addCursorRect(bounds, cursor: interactionMode == .selecting ? .crosshair : .arrow)
+        let cursor: NSCursor
+        if isShapeToolActive && currentShapeKind == .brush {
+            cursor = NSCursor.sniporyBrush
+        } else {
+            cursor = interactionMode == .selecting ? .crosshair : .arrow
+        }
+        addCursorRect(bounds, cursor: cursor)
         if let lockedSelectionRect {
-            addCursorRect(lockedSelectionRect, cursor: .crosshair)
+            addCursorRect(lockedSelectionRect, cursor: cursor)
         }
     }
 

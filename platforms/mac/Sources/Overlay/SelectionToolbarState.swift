@@ -539,16 +539,6 @@ enum SelectionToolbarState {
             return .move
         }
 
-        // In brush mode, show brush cursor inside the selection.
-        // Outside the selection, show normal arrow (not crosshair).
-        if currentShapeKind == .brush {
-            if isInsideSelection {
-                return .brush
-            }
-            // Already passed toolbar/panel/annotation-border checks above,
-            // so this is just the user's mouse hovering outside the frame.
-            return .arrow
-        }
         if isSelecting || isInsideSelection {
             return .crosshair
         }
