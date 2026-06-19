@@ -53,6 +53,44 @@ private extension NSCursor {
         return NSCursor(image: image, hotSpot: NSPoint(x: size.width / 2, y: size.height / 2))
     }()
 
+    static let sniporyBrush: NSCursor = {
+        let size = NSSize(width: 24, height: 24)
+        let iconSize: CGFloat = 18
+        let inset: CGFloat = (size.width - iconSize) / 2
+
+        // Try loading from pencil-tool.svg resource
+        if let svgUrl = Bundle.main.url(forResource: "pencil-tool", withExtension: "svg"),
+           let image = NSImage(contentsOf: svgUrl) {
+            let scaled = NSImage(size: size)
+            scaled.lockFocus()
+            NSGraphicsContext.current?.imageInterpolation = .high
+            image.draw(
+                in: NSRect(x: inset, y: inset, width: iconSize, height: iconSize),
+                from: NSRect.zero,
+                operation: .copy,
+                fraction: 1.0
+            )
+            scaled.unlockFocus()
+            return NSCursor(image: scaled, hotSpot: NSPoint(x: size.width / 2, y: size.height / 2))
+        }
+
+        // Fallback: draw a simple pencil icon using SF Symbols
+        if let symbol = NSImage(
+            systemSymbolName: "pencil",
+            accessibilityDescription: "Brush"
+        )?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 18, weight: .medium)) {
+            let image = NSImage(size: size)
+            image.lockFocus()
+            NSGraphicsContext.current?.imageInterpolation = .high
+            symbol.draw(in: NSRect(x: inset, y: inset, width: iconSize, height: iconSize))
+            image.unlockFocus()
+            return NSCursor(image: image, hotSpot: NSPoint(x: size.width / 2, y: size.height / 2))
+        }
+
+        // Ultimate fallback: standard arrow
+        return NSCursor.arrow
+    }()
+
     static func drawMoveCursor(into path: NSBezierPath, offset: NSPoint) {
         let center = NSPoint(x: 14 + offset.x, y: 14 + offset.y)
         path.move(to: NSPoint(x: center.x, y: 4 + offset.y))
@@ -584,7 +622,8 @@ private final class SelectionOverlayView: NSView {
                 resizeHandle: interactionMode == .annotating ? resizeHandle(at: point)?.toolbarStateHandle : nil,
                 selectionResizeHandle: interactionMode == .annotating ? selectionResizeHandle(at: point) : nil,
                 isAnnotationBorder: interactionMode == .annotating && annotationIndexForBorder(at: point) != nil,
-                isInsideSelection: colorSamplerSelectionRect?.standardized.contains(point) == true
+                isInsideSelection: colorSamplerSelectionRect?.standardized.contains(point) == true,
+                currentShapeKind: currentShapeKind
             )
         )
     }
@@ -759,6 +798,8 @@ private final class SelectionOverlayView: NSView {
             NSCursor.frameResize(position: .bottomLeft, directions: .all).set()
         case .resizeBottomRight:
             NSCursor.frameResize(position: .bottomRight, directions: .all).set()
+        case .brush:
+            NSCursor.sniporyBrush.set()
         }
     }
 

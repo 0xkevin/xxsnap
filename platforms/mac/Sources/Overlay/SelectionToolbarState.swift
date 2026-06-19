@@ -100,6 +100,7 @@ enum SelectionToolbarState {
         case resizeTopRight
         case resizeBottomLeft
         case resizeBottomRight
+        case brush
     }
 
     static let defaultFillPreviewColor = NSColor.systemGray
@@ -519,7 +520,8 @@ enum SelectionToolbarState {
         resizeHandle: OverlayResizeHandle?,
         selectionResizeHandle: OverlayResizeHandle?,
         isAnnotationBorder: Bool,
-        isInsideSelection: Bool
+        isInsideSelection: Bool,
+        currentShapeKind: CaptureAnnotationKind = .rectangle
     ) -> OverlayCursorStyle {
         if isToolbarOrPanelPoint {
             return .arrow
@@ -538,6 +540,9 @@ enum SelectionToolbarState {
         }
 
         if isSelecting || isInsideSelection {
+            if currentShapeKind == .brush {
+                return .brush
+            }
             return .crosshair
         }
 
