@@ -55,6 +55,9 @@ private extension NSCursor {
 
     static let sniporyBrush: NSCursor = {
         let size = NSSize(width: 24, height: 24)
+        // Hot spot at the pencil tip (lower-left area of the icon).
+        // This ensures the drawn line follows the tip, not the cursor center.
+        let tipHotSpot = NSPoint(x: 6, y: 18)
         let iconSize: CGFloat = 18
         let inset: CGFloat = (size.width - iconSize) / 2
 
@@ -71,7 +74,7 @@ private extension NSCursor {
                 fraction: 1.0
             )
             scaled.unlockFocus()
-            return NSCursor(image: scaled, hotSpot: NSPoint(x: size.width / 2, y: size.height / 2))
+            return NSCursor(image: scaled, hotSpot: tipHotSpot)
         }
 
         // Fallback: draw a simple pencil icon using SF Symbols
@@ -84,7 +87,7 @@ private extension NSCursor {
             NSGraphicsContext.current?.imageInterpolation = .high
             symbol.draw(in: NSRect(x: inset, y: inset, width: iconSize, height: iconSize))
             image.unlockFocus()
-            return NSCursor(image: image, hotSpot: NSPoint(x: size.width / 2, y: size.height / 2))
+            return NSCursor(image: image, hotSpot: tipHotSpot)
         }
 
         // Ultimate fallback: standard arrow

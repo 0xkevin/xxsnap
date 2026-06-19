@@ -539,10 +539,12 @@ enum SelectionToolbarState {
             return .move
         }
 
+        // In brush mode, show brush cursor anywhere inside the selection
+        // (not on toolbar/panel, not on annotation border, not on resize handles).
+        if currentShapeKind == .brush && isInsideSelection {
+            return .brush
+        }
         if isSelecting || isInsideSelection {
-            if currentShapeKind == .brush {
-                return .brush
-            }
             return .crosshair
         }
 
