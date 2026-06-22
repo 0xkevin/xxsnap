@@ -318,9 +318,9 @@ enum SelectionToolbarState {
 
     static func annotationKindSupportsPostDrawEditing(_ kind: CaptureAnnotationKind) -> Bool {
         switch kind {
-        case .rectangle, .ellipse, .arrowLine:
+        case .rectangle, .ellipse, .arrowLine, .marker:
             return true
-        case .brush, .marker:
+        case .brush:
             return false
         }
     }
@@ -1193,7 +1193,11 @@ enum SelectionToolbarState {
         )
     }
 
-    private static func distanceFromSegment(point: NSPoint, start: NSPoint, end: NSPoint) -> CGFloat {
+    static func markerLineContains(point: NSPoint, line: CaptureMarkerLine, hitOutset: CGFloat) -> Bool {
+        distanceFromSegment(point: point, start: line.start, end: line.end) <= hitOutset
+    }
+
+    static func distanceFromSegment(point: NSPoint, start: NSPoint, end: NSPoint) -> CGFloat {
         let dx = end.x - start.x
         let dy = end.y - start.y
         let lengthSquared = dx * dx + dy * dy

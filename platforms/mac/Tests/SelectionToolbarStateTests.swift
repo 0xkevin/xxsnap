@@ -915,6 +915,87 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(markerLine.end.y, 50, accuracy: 0.1)
     }
 
+    func testOverlayWindowMovesSelectedMarkerLineWithoutAddingAnnotation() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.marker)
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseDragged(to: NSPoint(x: 220, y: 180))
+        window.test_mouseUp(at: NSPoint(x: 220, y: 180))
+
+        guard let original = window.test_markerLine(at: 0) else {
+            return XCTFail("Expected marker annotation")
+        }
+
+        window.test_mouseDown(at: NSPoint(x: 180, y: 165))
+        window.test_mouseDragged(to: NSPoint(x: 210, y: 185))
+        window.test_mouseUp(at: NSPoint(x: 210, y: 185))
+
+        guard let moved = window.test_markerLine(at: 0) else {
+            return XCTFail("Expected moved marker annotation")
+        }
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(window.test_selectedAnnotationKind, .marker)
+        XCTAssertEqual(moved.start.x, original.start.x + 30, accuracy: 0.1)
+        XCTAssertEqual(moved.start.y, original.start.y + 20, accuracy: 0.1)
+        XCTAssertEqual(moved.end.x, original.end.x + 30, accuracy: 0.1)
+        XCTAssertEqual(moved.end.y, original.end.y + 20, accuracy: 0.1)
+    }
+
+    func testMarkerAnnotationStyleCanEditButGeometryCannotResizeAfterDrawing() {
+        XCTAssertTrue(SelectionToolbarState.annotationKindSupportsPostDrawEditing(.marker))
+        XCTAssertFalse(SelectionToolbarState.annotationKindSupportsGeometryEditing(.marker))
+    }
+
+    func testOverlayWindowDeleteKeyRemovesSelectedMarker() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.marker)
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseDragged(to: NSPoint(x: 220, y: 180))
+        window.test_mouseUp(at: NSPoint(x: 220, y: 180))
+        window.test_mouseDown(at: NSPoint(x: 180, y: 165))
+        window.test_mouseUp(at: NSPoint(x: 180, y: 165))
+
+        XCTAssertEqual(window.test_selectedAnnotationKind, .marker)
+        window.test_keyDown(keyCode: 51)
+
+        XCTAssertEqual(window.test_annotationCount, 0)
+        XCTAssertNil(window.test_selectedAnnotationKind)
+    }
+
+    func testOverlayWindowMarkerOptionsToolbarEditsSelectedMarkerStyle() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.marker)
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseDragged(to: NSPoint(x: 220, y: 180))
+        window.test_mouseUp(at: NSPoint(x: 220, y: 180))
+        window.test_mouseDown(at: NSPoint(x: 180, y: 165))
+        window.test_mouseUp(at: NSPoint(x: 180, y: 165))
+
+        guard let strokeWidthPoint = window.test_optionsStrokeWidthPoint(at: 2),
+              let colorPoint = window.test_optionsPaletteColorPoint(at: 0) else {
+            return XCTFail("Expected marker options toolbar controls")
+        }
+
+        window.test_mouseDown(at: strokeWidthPoint)
+        window.test_mouseUp(at: strokeWidthPoint)
+        window.test_mouseDown(at: colorPoint)
+        window.test_mouseUp(at: colorPoint)
+
+        guard let style = window.test_annotationStyle(at: 0) else {
+            return XCTFail("Expected marker annotation style")
+        }
+        XCTAssertEqual(window.test_optionsToolbarMode, .marker)
+        XCTAssertEqual(style.strokeWidth, 22)
+        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: style.strokeColor), "#FF001A")
+        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: style.fillColor), "#FF001A")
+    }
+
     func testSnappedMarkerEndPointKeepsRawPointWithoutShift() {
         let rawEnd = NSPoint(x: 64, y: 34)
 
@@ -988,6 +1069,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertTrue(SelectionToolbarState.annotationKindSupportsPostDrawEditing(.rectangle))
         XCTAssertTrue(SelectionToolbarState.annotationKindSupportsPostDrawEditing(.ellipse))
         XCTAssertTrue(SelectionToolbarState.annotationKindSupportsPostDrawEditing(.arrowLine))
+        XCTAssertTrue(SelectionToolbarState.annotationKindSupportsPostDrawEditing(.marker))
         XCTAssertFalse(SelectionToolbarState.annotationKindSupportsPostDrawEditing(.brush))
     }
 

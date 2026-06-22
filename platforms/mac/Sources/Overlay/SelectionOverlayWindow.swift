@@ -398,6 +398,18 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_markerToolbarButtonPoint()
     }
 
+    func test_optionsStrokeWidthPoint(at index: Int) -> NSPoint? {
+        (contentView as? SelectionOverlayView)?.test_optionsStrokeWidthPoint(at: index)
+    }
+
+    func test_optionsPaletteColorPoint(at index: Int) -> NSPoint? {
+        (contentView as? SelectionOverlayView)?.test_optionsPaletteColorPoint(at: index)
+    }
+
+    func test_annotationStyle(at index: Int) -> CaptureAnnotationStyle? {
+        (contentView as? SelectionOverlayView)?.test_annotationStyle(at: index)
+    }
+
     var test_selectedAnnotationKind: CaptureAnnotationKind? {
         (contentView as? SelectionOverlayView)?.test_selectedAnnotationKind
     }
@@ -674,6 +686,7 @@ private final class SelectionOverlayView: NSView {
     private var movingAnnotationStartRect: NSRect?
     private var movingAnnotationStartArrowLine: CaptureArrowLine?
     private var movingAnnotationStartBrushPath: CaptureBrushPath?
+    private var movingAnnotationStartMarkerLine: CaptureMarkerLine?
     private var movingAnnotationOffset = NSPoint.zero
     private var movingSelectionStartRect: NSRect?
     private var movingSelectionPointerOffset = NSPoint.zero
@@ -1658,6 +1671,7 @@ private final class SelectionOverlayView: NSView {
         movingAnnotationStartRect = overlayRect(fromLocalAnnotationRect: annotations[index].rect)
         movingAnnotationStartArrowLine = overlayArrowLine(fromLocalArrowLine: annotations[index].arrowLine)
         movingAnnotationStartBrushPath = overlayBrushPath(fromLocalBrushPath: annotations[index].brushPath)
+        movingAnnotationStartMarkerLine = overlayMarkerLine(fromLocalMarkerLine: annotations[index].markerLine)
         movingAnnotationOffset = NSPoint(
             x: point.x - (movingAnnotationStartRect?.minX ?? point.x),
             y: point.y - (movingAnnotationStartRect?.minY ?? point.y)
@@ -1881,6 +1895,37 @@ private final class SelectionOverlayView: NSView {
             return nil
         }
         return NSPoint(x: rect.midX, y: rect.midY)
+    }
+
+    func test_optionsStrokeWidthPoint(at index: Int) -> NSPoint? {
+        guard let optionsToolbarRect else {
+            return nil
+        }
+        let layout = optionsToolbarLayout(in: optionsToolbarRect)
+        guard layout.strokeWidths.indices.contains(index) else {
+            return nil
+        }
+        let rect = layout.strokeWidths[index]
+        return NSPoint(x: rect.midX, y: rect.midY)
+    }
+
+    func test_optionsPaletteColorPoint(at index: Int) -> NSPoint? {
+        guard let optionsToolbarRect else {
+            return nil
+        }
+        let rects = colorSwatchRects(in: optionsToolbarRect)
+        guard rects.indices.contains(index) else {
+            return nil
+        }
+        let rect = rects[index]
+        return NSPoint(x: rect.midX, y: rect.midY)
+    }
+
+    func test_annotationStyle(at index: Int) -> CaptureAnnotationStyle? {
+        guard annotations.indices.contains(index) else {
+            return nil
+        }
+        return annotations[index].style
     }
 
     var test_selectedAnnotationKind: CaptureAnnotationKind? {
@@ -2335,6 +2380,9 @@ private final class SelectionOverlayView: NSView {
             currentStartArrowType = arrowLine.startArrowType
             currentEndArrowType = arrowLine.endArrowType
         }
+        if annotation.kind == .marker {
+            invalidateCursorRectsAndRefresh()
+        }
     }
 
     private func applyCurrentStyleToSelectedAnnotation() {
@@ -2436,6 +2484,7 @@ private final class SelectionOverlayView: NSView {
         movingAnnotationStartRect = nil
         movingAnnotationStartArrowLine = nil
         movingAnnotationStartBrushPath = nil
+        movingAnnotationStartMarkerLine = nil
         resizingAnnotationStartRect = nil
         resizingArrowLineStart = nil
         activeArrowLineHandle = nil
@@ -2530,6 +2579,13 @@ private final class SelectionOverlayView: NSView {
                 return false
             }
             return brushPathContains(point, path: brushPath, hitOutset: max(6, annotation.style.strokeWidth / 2 + 4))
+        }
+        if annotation.kind == .marker {
+            guard let markerLine = overlayMarkerLine(fromLocalMarkerLine: annotation.markerLine) else {
+                return false
+            }
+            let hitOutset = max(8, annotation.style.strokeWidth / 2 + 4)
+            return SelectionToolbarState.markerLineContains(point: point, line: markerLine, hitOutset: hitOutset)
         }
 
         let rect = overlayRect(fromLocalAnnotationRect: annotation.rect).standardized
@@ -2690,6 +2746,15 @@ private final class SelectionOverlayView: NSView {
             let localPath = localBrushPath(fromOverlayBrushPath: movedOverlayPath)
             annotations[selectedAnnotationIndex].brushPath = localPath
             annotations[selectedAnnotationIndex].rect = localPath.boundingRect
+            return
+        }
+        if let movingAnnotationStartMarkerLine {
+            let dx = requested.minX - movingAnnotationStartRect.minX
+            let dy = requested.minY - movingAnnotationStartRect.minY
+            let movedOverlayLine = offsetMarkerLine(movingAnnotationStartMarkerLine, dx: dx, dy: dy)
+            let localLine = localMarkerLine(fromOverlayMarkerLine: movedOverlayLine)
+            annotations[selectedAnnotationIndex].markerLine = localLine
+            annotations[selectedAnnotationIndex].rect = localLine.boundingRect
             return
         }
 
@@ -3041,7 +3106,7 @@ private final class SelectionOverlayView: NSView {
         drawAnnotation(draftAnnotation, inOverlay: true)
         if draftAnnotation.kind == .arrowLine {
             drawSelectedAnnotationOutline(draftAnnotation)
-        } else if SelectionToolbarState.annotationKindSupportsPostDrawEditing(draftAnnotation.kind) {
+        } else if SelectionToolbarState.annotationKindSupportsGeometryEditing(draftAnnotation.kind) {
             drawResizeHandles(for: overlayRect(fromLocalAnnotationRect: draftAnnotation.rect), kind: draftAnnotation.kind)
         }
     }
@@ -4868,6 +4933,13 @@ private final class SelectionOverlayView: NSView {
         )
     }
 
+    private func offsetMarkerLine(_ markerLine: CaptureMarkerLine, dx: CGFloat, dy: CGFloat) -> CaptureMarkerLine {
+        CaptureMarkerLine(
+            start: NSPoint(x: markerLine.start.x + dx, y: markerLine.start.y + dy),
+            end: NSPoint(x: markerLine.end.x + dx, y: markerLine.end.y + dy)
+        )
+    }
+
     private func brushPathContains(_ point: NSPoint, path: CaptureBrushPath, hitOutset: CGFloat) -> Bool {
         guard let first = path.points.first else {
             return false
@@ -4877,24 +4949,11 @@ private final class SelectionOverlayView: NSView {
         }
 
         for (start, end) in zip(path.points, path.points.dropFirst()) {
-            if distanceFromSegment(point: point, start: start, end: end) <= hitOutset {
+            if SelectionToolbarState.distanceFromSegment(point: point, start: start, end: end) <= hitOutset {
                 return true
             }
         }
         return false
-    }
-
-    private func distanceFromSegment(point: NSPoint, start: NSPoint, end: NSPoint) -> CGFloat {
-        let dx = end.x - start.x
-        let dy = end.y - start.y
-        let lengthSquared = dx * dx + dy * dy
-        guard lengthSquared > 0.0001 else {
-            return distance(from: point, to: start)
-        }
-
-        let t = max(0, min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared))
-        let projection = NSPoint(x: start.x + t * dx, y: start.y + t * dy)
-        return distance(from: point, to: projection)
     }
 
     private func distance(from first: NSPoint, to second: NSPoint) -> CGFloat {
