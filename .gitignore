@@ -1,5 +1,6 @@
 build/
 .build/
+.worktrees/
 DerivedData/
 *.xcworkspace
 *.xcuserstate
