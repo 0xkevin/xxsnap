@@ -731,6 +731,21 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(SelectionToolbarState.strokeWidthValues(for: .brush), [3, 5, 7])
     }
 
+    func testShapeArrowBrushAndMarkerToolbarsUseDistinctStrokeWidthOptions() {
+        XCTAssertEqual(SelectionToolbarState.strokeWidthValues(for: .shape), [2, 4, 7])
+        XCTAssertEqual(SelectionToolbarState.strokeWidthValues(for: .arrowLine), [3, 4, 6])
+        XCTAssertEqual(SelectionToolbarState.strokeWidthValues(for: .brush), [3, 5, 7])
+        XCTAssertEqual(SelectionToolbarState.strokeWidthValues(for: .marker), [14, 18, 22])
+    }
+
+    func testMarkerToolSelectionDoesNotChangeBrushDefaults() {
+        XCTAssertEqual(SelectionToolbarState.strokeWidthValues(for: .brush), [3, 5, 7])
+        XCTAssertEqual(
+            SelectionToolbarState.strokePatternOptions(canUsePremiumStrokePatterns: true, mode: .brush).map(\.pattern),
+            [.solid, .dashLong, .dashNarrow, .dashLongShort]
+        )
+    }
+
     func testBrushActivationUsesFirstPaletteColorAndMediumWidth() {
         let style = SelectionToolbarState.brushActivationStyle(
             currentStyle: CaptureAnnotationStyle(),
