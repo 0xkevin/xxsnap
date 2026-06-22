@@ -864,6 +864,126 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertFalse(window.test_showsEndArrowTypeMenu)
     }
 
+    func testOverlayWindowDraggingMarkerCreatesLocalMarkerAnnotation() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.marker)
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseDragged(to: NSPoint(x: 220, y: 180))
+        window.test_mouseUp(at: NSPoint(x: 220, y: 180))
+
+        guard let markerLine = window.test_markerLine(at: 0) else {
+            return XCTFail("Expected marker annotation")
+        }
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(window.test_selectedAnnotationKind, .marker)
+        XCTAssertEqual(markerLine.start.x, 40, accuracy: 0.1)
+        XCTAssertEqual(markerLine.start.y, 50, accuracy: 0.1)
+        XCTAssertEqual(markerLine.end.x, 120, accuracy: 0.1)
+        XCTAssertEqual(markerLine.end.y, 80, accuracy: 0.1)
+    }
+
+    func testOverlayWindowIgnoresShortMarkerDragsUnderEightPoints() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.marker)
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseDragged(to: NSPoint(x: 146, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 146, y: 150))
+
+        XCTAssertEqual(window.test_annotationCount, 0)
+        XCTAssertNil(window.test_markerLine(at: 0))
+    }
+
+    func testOverlayWindowShiftDraggingMarkerSnapsToNearestAxisOrDiagonal() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.marker)
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseDragged(to: NSPoint(x: 204, y: 170), modifierFlags: [.shift])
+        window.test_mouseUp(at: NSPoint(x: 204, y: 170), modifierFlags: [.shift])
+
+        guard let markerLine = window.test_markerLine(at: 0) else {
+            return XCTFail("Expected marker annotation")
+        }
+        XCTAssertEqual(markerLine.start.x, 40, accuracy: 0.1)
+        XCTAssertEqual(markerLine.start.y, 50, accuracy: 0.1)
+        XCTAssertEqual(markerLine.end.x, 104, accuracy: 0.1)
+        XCTAssertEqual(markerLine.end.y, 50, accuracy: 0.1)
+    }
+
+    func testSnappedMarkerEndPointKeepsRawPointWithoutShift() {
+        let rawEnd = NSPoint(x: 64, y: 34)
+
+        let snapped = SelectionToolbarState.snappedMarkerEndPoint(
+            start: .zero,
+            rawEnd: rawEnd,
+            isShiftPressed: false
+        )
+
+        XCTAssertEqual(snapped.x, rawEnd.x, accuracy: 0.1)
+        XCTAssertEqual(snapped.y, rawEnd.y, accuracy: 0.1)
+    }
+
+    func testSnappedMarkerEndPointUsesNearestHorizontalVerticalOrDiagonalWithShift() {
+        let horizontal = SelectionToolbarState.snappedMarkerEndPoint(
+            start: .zero,
+            rawEnd: NSPoint(x: 64, y: 20),
+            isShiftPressed: true
+        )
+        XCTAssertEqual(horizontal.x, 64, accuracy: 0.1)
+        XCTAssertEqual(horizontal.y, 0, accuracy: 0.1)
+
+        let vertical = SelectionToolbarState.snappedMarkerEndPoint(
+            start: .zero,
+            rawEnd: NSPoint(x: 12, y: 64),
+            isShiftPressed: true
+        )
+        XCTAssertEqual(vertical.x, 0, accuracy: 0.1)
+        XCTAssertEqual(vertical.y, 64, accuracy: 0.1)
+
+        let diagonal = SelectionToolbarState.snappedMarkerEndPoint(
+            start: .zero,
+            rawEnd: NSPoint(x: 42, y: 38),
+            isShiftPressed: true
+        )
+        XCTAssertEqual(diagonal.x, diagonal.y, accuracy: 0.1)
+    }
+
+    func testMarkerToolbarButtonClickActivatesMarkerMode() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.rectangle)
+        window.test_setStrokeStyleMenuVisible(true)
+        window.test_setArrowTypeMenusVisible(start: true, end: true)
+
+        guard let point = window.test_markerToolbarButtonPoint() else {
+            return XCTFail("Expected visible marker toolbar button")
+        }
+        window.test_mouseDown(at: point)
+        window.test_mouseUp(at: point)
+
+        XCTAssertEqual(window.test_optionsToolbarMode, .marker)
+        XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: 150, y: 150)), .marker)
+        XCTAssertFalse(window.test_showsStrokeStyleMenu)
+        XCTAssertFalse(window.test_showsStartArrowTypeMenu)
+        XCTAssertFalse(window.test_showsEndArrowTypeMenu)
+    }
+
+    func testMarkerToolbarButtonSelectedStateWorksWhenMarkerIsActive() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+
+        XCTAssertFalse(window.test_markerToolbarButtonIsSelected)
+
+        window.test_activateShapeTool(.marker)
+
+        XCTAssertTrue(window.test_markerToolbarButtonIsSelected)
+    }
+
     func testBrushAnnotationStyleIsNotEditableAfterDrawing() {
         XCTAssertTrue(SelectionToolbarState.annotationKindSupportsPostDrawEditing(.rectangle))
         XCTAssertTrue(SelectionToolbarState.annotationKindSupportsPostDrawEditing(.ellipse))

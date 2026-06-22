@@ -109,6 +109,7 @@ enum SelectionToolbarState {
         case resizeBottomRight
         case rotationHandle
         case brush
+        case marker
     }
 
     static let defaultFillPreviewColor = NSColor.systemGray
@@ -281,6 +282,38 @@ enum SelectionToolbarState {
         style.strokePattern = .solid
         style.fillEnabled = false
         return style
+    }
+
+    static func snappedMarkerEndPoint(start: NSPoint, rawEnd: NSPoint, isShiftPressed: Bool) -> NSPoint {
+        guard isShiftPressed else {
+            return rawEnd
+        }
+
+        let dx = rawEnd.x - start.x
+        let dy = rawEnd.y - start.y
+        guard hypot(dx, dy) >= 0.001 else {
+            return rawEnd
+        }
+
+        let directions = [
+            NSPoint(x: 1, y: 0),
+            NSPoint(x: sqrt(0.5), y: sqrt(0.5)),
+            NSPoint(x: 0, y: 1),
+            NSPoint(x: -sqrt(0.5), y: sqrt(0.5)),
+            NSPoint(x: -1, y: 0),
+            NSPoint(x: -sqrt(0.5), y: -sqrt(0.5)),
+            NSPoint(x: 0, y: -1),
+            NSPoint(x: sqrt(0.5), y: -sqrt(0.5)),
+        ]
+        let best = directions.max { lhs, rhs in
+            (dx * lhs.x + dy * lhs.y) < (dx * rhs.x + dy * rhs.y)
+        } ?? directions[0]
+        let projectedLength = dx * best.x + dy * best.y
+
+        return NSPoint(
+            x: start.x + best.x * projectedLength,
+            y: start.y + best.y * projectedLength
+        )
     }
 
     static func annotationKindSupportsPostDrawEditing(_ kind: CaptureAnnotationKind) -> Bool {
@@ -703,8 +736,11 @@ enum SelectionToolbarState {
             return overlayCursorStyle(for: selectionResizeHandle)
         }
 
-        if isShapeToolActive, currentShapeKind == .brush {
-            return isInsideSelection ? .brush : .arrow
+        if isShapeToolActive, currentShapeKind == .brush || currentShapeKind == .marker {
+            guard isInsideSelection else {
+                return .arrow
+            }
+            return currentShapeKind == .brush ? .brush : .marker
         }
 
         if isShapeToolActive {
@@ -1220,7 +1256,7 @@ enum SelectionToolbarState {
     }
 
     static func shapeBorderContains(point: NSPoint, rect: NSRect, kind: CaptureAnnotationKind, cornerRadius: CGFloat, hitOutset: CGFloat = 6) -> Bool {
-        guard kind != .arrowLine, kind != .brush else {
+        guard kind != .arrowLine, kind != .brush, kind != .marker else {
             return false
         }
 
