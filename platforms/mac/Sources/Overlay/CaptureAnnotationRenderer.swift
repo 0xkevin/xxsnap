@@ -1154,7 +1154,6 @@ enum CaptureAnnotationRenderer {
         }
 
         context.saveGState()
-        context.setBlendMode(.copy)
         context.setStrokeColor(cgColor(annotation.style.strokeColor.withAlphaComponent(markerOpacity)))
         context.setLineWidth(annotation.style.strokeWidth * lineScale)
         context.setLineJoin(.round)

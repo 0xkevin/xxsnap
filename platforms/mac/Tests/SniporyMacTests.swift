@@ -119,11 +119,12 @@ final class SniporyMacTests: XCTestCase {
         style.strokeWidth = 18
 
         let marker = CaptureMarkerLine(start: NSPoint(x: 20, y: 30), end: NSPoint(x: 90, y: 30))
+        let backgroundColor = NSColor(srgbRed: 100 / 255, green: 120 / 255, blue: 140 / 255, alpha: 1)
         let image = try makeBitmapImage(
             pointSize: NSSize(width: 120, height: 80),
             pixelWidth: 120,
             pixelHeight: 80,
-            fill: .white
+            fill: backgroundColor
         )
         let rendered = CaptureAnnotationRenderer.render(
             image: image,
@@ -132,11 +133,10 @@ final class SniporyMacTests: XCTestCase {
 
         let pixel = try rgbaPixel(in: rendered, x: 55, y: 30)
         XCTAssertNotNil(pixel)
-        XCTAssertLessThan(pixel!.red, 255)
-        XCTAssertGreaterThan(pixel!.green, pixel!.red)
-        XCTAssertGreaterThan(pixel!.alpha, 160)
-        XCTAssertLessThan(pixel!.alpha, 170)
-        XCTAssertLessThan(pixel!.alpha, 255)
+        XCTAssertEqual(pixel!.alpha, 255)
+        XCTAssertEqual(Double(pixel!.red), 173, accuracy: 2)
+        XCTAssertEqual(Double(pixel!.green), 197, accuracy: 2)
+        XCTAssertEqual(Double(pixel!.blue), 158, accuracy: 2)
     }
 
     func testAnnotationRendererPreservesImageDimensionsWhenDrawingMarker() throws {
