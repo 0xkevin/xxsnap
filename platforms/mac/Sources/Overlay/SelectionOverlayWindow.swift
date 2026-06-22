@@ -169,7 +169,7 @@ private extension NSCursor {
         return NSCursor.arrow
     }()
 
-    static let sniporyMarker: NSCursor = {
+    static func sniporyMarker(color: NSColor) -> NSCursor {
         let size = NSSize(width: 24, height: 24)
         let center = NSPoint(x: size.width / 2, y: size.height / 2)
         let image = NSImage(size: size)
@@ -177,12 +177,12 @@ private extension NSCursor {
 
         NSColor.white.withAlphaComponent(0.92).setFill()
         NSBezierPath(ovalIn: NSRect(x: center.x - 6, y: center.y - 6, width: 12, height: 12)).fill()
-        SelectionToolbarState.defaultMarkerColor.withAlphaComponent(0.95).setFill()
+        color.withAlphaComponent(0.95).setFill()
         NSBezierPath(ovalIn: NSRect(x: center.x - 4, y: center.y - 4, width: 8, height: 8)).fill()
 
         image.unlockFocus()
         return NSCursor(image: image, hotSpot: center)
-    }()
+    }
 
     static func drawMoveCursor(into path: NSBezierPath, offset: NSPoint) {
         let center = NSPoint(x: 14 + offset.x, y: 14 + offset.y)
@@ -1133,7 +1133,7 @@ private final class SelectionOverlayView: NSView {
             return NSCursor.sniporyBrush
         }
         if currentShapeKind == .marker {
-            return NSCursor.sniporyMarker
+            return NSCursor.sniporyMarker(color: currentStyle.strokeColor)
         }
         return NSCursor.crosshair
     }
@@ -1213,7 +1213,7 @@ private final class SelectionOverlayView: NSView {
         case .brush:
             NSCursor.sniporyBrush.set()
         case .marker:
-            NSCursor.sniporyMarker.set()
+            NSCursor.sniporyMarker(color: currentStyle.strokeColor).set()
         }
     }
 
@@ -2121,6 +2121,7 @@ private final class SelectionOverlayView: NSView {
                 isCustomColorSwatchActive = false
                 closeCustomColorPanel()
                 applyCurrentStyleToSelectedAnnotation()
+                invalidateMarkerCursorIfNeeded()
                 showsStartArrowTypeMenu = false
                 showsEndArrowTypeMenu = false
             }
@@ -2393,7 +2394,16 @@ private final class SelectionOverlayView: NSView {
         currentStyle.strokeColor = color
         currentStyle.fillColor = color
         applyCurrentStyleToSelectedAnnotation()
+        invalidateMarkerCursorIfNeeded()
         needsDisplay = true
+    }
+
+    private func invalidateMarkerCursorIfNeeded() {
+        guard isShapeToolActive, currentShapeKind == .marker else {
+            return
+        }
+
+        invalidateCursorRectsAndRefresh()
     }
 
     private func closeCustomColorPanel() {
