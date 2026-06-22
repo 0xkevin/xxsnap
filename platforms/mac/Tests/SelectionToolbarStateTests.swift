@@ -772,6 +772,43 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertGreaterThan(layout.colorSwatches.first!.minX, layout.strokeStyle.maxX)
     }
 
+    func testMarkerStrokeWidthValuesUseHighlighterSizes() {
+        XCTAssertEqual(SelectionToolbarState.strokeWidthValues(for: .marker), [14, 18, 22])
+    }
+
+    func testMarkerActivationUsesDefaultHighlighterStyle() {
+        var current = CaptureAnnotationStyle()
+        current.strokeColor = .systemRed
+        current.fillColor = .systemRed
+        current.strokeWidth = 4
+        current.strokePattern = .dashLong
+        current.fillEnabled = true
+
+        let style = SelectionToolbarState.markerActivationStyle(currentStyle: current)
+
+        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: style.strokeColor), "#D4EEA7")
+        XCTAssertEqual(style.strokeWidth, 18)
+        XCTAssertEqual(style.strokePattern, .solid)
+        XCTAssertFalse(style.fillEnabled)
+    }
+
+    func testMarkerOptionsToolbarShowsWidthAndColorsOnly() {
+        let optionsRect = NSRect(x: 100, y: 100, width: 360, height: 40)
+        let layout = SelectionToolbarState.optionsToolbarLayout(
+            in: optionsRect,
+            paletteCount: 8,
+            mode: .marker
+        )
+
+        XCTAssertEqual(layout.strokeWidths.count, 3)
+        XCTAssertNil(layout.fillToggle)
+        XCTAssertNil(layout.rectangleMode)
+        XCTAssertNil(layout.ellipseMode)
+        XCTAssertNil(layout.startArrowType)
+        XCTAssertNil(layout.endArrowType)
+        XCTAssertGreaterThan(layout.colorSwatches.first!.minX, layout.strokeWidths.last!.maxX)
+    }
+
     func testBrushAnnotationStyleIsNotEditableAfterDrawing() {
         XCTAssertTrue(SelectionToolbarState.annotationKindSupportsPostDrawEditing(.rectangle))
         XCTAssertTrue(SelectionToolbarState.annotationKindSupportsPostDrawEditing(.ellipse))

@@ -47,6 +47,7 @@ enum SelectionToolbarState {
         case shape
         case arrowLine
         case brush
+        case marker
     }
 
     struct OptionsToolbarLayout: Equatable {
@@ -111,6 +112,7 @@ enum SelectionToolbarState {
     }
 
     static let defaultFillPreviewColor = NSColor.systemGray
+    static let defaultMarkerColor = NSColor(srgbRed: 212 / 255, green: 238 / 255, blue: 167 / 255, alpha: 1)
 
     static func strokeWidthValues(for mode: OptionsToolbarMode) -> [CGFloat] {
         switch mode {
@@ -120,6 +122,8 @@ enum SelectionToolbarState {
             return [3, 4, 6]
         case .brush:
             return [3, 5, 7]
+        case .marker:
+            return [14, 18, 22]
         }
     }
 
@@ -216,6 +220,8 @@ enum SelectionToolbarState {
         switch mode {
         case .brush:
             patterns = [.solid, .dashLong, .dashNarrow, .dashLongShort]
+        case .marker:
+            patterns = [.solid]
         case .shape, .arrowLine:
             patterns = CaptureStrokePattern.allCases
         }
@@ -260,6 +266,16 @@ enum SelectionToolbarState {
             style.fillColor = color
         }
 
+        return style
+    }
+
+    static func markerActivationStyle(currentStyle: CaptureAnnotationStyle) -> CaptureAnnotationStyle {
+        var style = currentStyle
+        style.strokeColor = defaultMarkerColor
+        style.fillColor = defaultMarkerColor
+        style.strokeWidth = strokeWidthValues(for: .marker)[1]
+        style.strokePattern = .solid
+        style.fillEnabled = false
         return style
     }
 
@@ -435,6 +451,8 @@ enum SelectionToolbarState {
             return 318
         case .brush:
             return 210
+        case .marker:
+            return 98
         }
     }
 
@@ -483,7 +501,7 @@ enum SelectionToolbarState {
             return NSRect(x: optionsRect.minX + 312, y: optionControlY(in: optionsRect), width: 42, height: 20)
         case .arrowLine:
             return NSRect(x: optionsRect.minX + 204, y: optionControlY(in: optionsRect), width: 42, height: 20)
-        case .brush:
+        case .brush, .marker:
             return .zero
         }
     }
@@ -494,7 +512,7 @@ enum SelectionToolbarState {
             return NSRect(x: optionsRect.minX + 360, y: optionControlY(in: optionsRect), width: 42, height: 20)
         case .arrowLine:
             return NSRect(x: optionsRect.minX + 252, y: optionControlY(in: optionsRect), width: 42, height: 20)
-        case .brush:
+        case .brush, .marker:
             return .zero
         }
     }

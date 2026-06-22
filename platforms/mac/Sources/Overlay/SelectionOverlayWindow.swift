@@ -3475,7 +3475,7 @@ private final class SelectionOverlayView: NSView {
             drawShapeModeButtons(in: optionsRect)
         case .arrowLine:
             drawArrowTypeFields(in: optionsRect)
-        case .brush:
+        case .brush, .marker:
             break
         }
         drawStrokeStyleField(in: optionsRect)
@@ -3512,6 +3512,10 @@ private final class SelectionOverlayView: NSView {
             }
             if let firstSwatchMinX {
                 separatorXs.append(layout.strokeStyle.maxX + (firstSwatchMinX - layout.strokeStyle.maxX) / 2)
+            }
+        case .marker:
+            if let lastStrokeWidth = layout.strokeWidths.last, let firstSwatchMinX {
+                separatorXs.append(lastStrokeWidth.maxX + (firstSwatchMinX - lastStrokeWidth.maxX) / 2)
             }
         }
 
