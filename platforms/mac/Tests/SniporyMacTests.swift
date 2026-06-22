@@ -113,6 +113,54 @@ final class SniporyMacTests: XCTestCase {
         XCTAssertNotEqual(try rgbaBytes(in: solid), try rgbaBytes(in: dashed))
     }
 
+    func testAnnotationRendererDrawsMarkerLineOntoImageWithFixedOpacity() throws {
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = NSColor(srgbRed: 212 / 255, green: 238 / 255, blue: 167 / 255, alpha: 1)
+        style.strokeWidth = 18
+
+        let marker = CaptureMarkerLine(start: NSPoint(x: 20, y: 30), end: NSPoint(x: 90, y: 30))
+        let image = try makeBitmapImage(
+            pointSize: NSSize(width: 120, height: 80),
+            pixelWidth: 120,
+            pixelHeight: 80,
+            fill: .white
+        )
+        let rendered = CaptureAnnotationRenderer.render(
+            image: image,
+            annotations: [CaptureAnnotation(kind: .marker, rect: marker.boundingRect, style: style, markerLine: marker)]
+        )
+
+        let pixel = try rgbaPixel(in: rendered, x: 55, y: 30)
+        XCTAssertNotNil(pixel)
+        XCTAssertLessThan(pixel!.red, 255)
+        XCTAssertGreaterThan(pixel!.green, pixel!.red)
+        XCTAssertGreaterThan(pixel!.alpha, 160)
+        XCTAssertLessThan(pixel!.alpha, 170)
+        XCTAssertLessThan(pixel!.alpha, 255)
+    }
+
+    func testAnnotationRendererPreservesImageDimensionsWhenDrawingMarker() throws {
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = NSColor(srgbRed: 212 / 255, green: 238 / 255, blue: 167 / 255, alpha: 1)
+        style.strokeWidth = 22
+
+        let marker = CaptureMarkerLine(start: NSPoint(x: -20, y: 20), end: NSPoint(x: 140, y: 20))
+        let image = try makeBitmapImage(
+            pointSize: NSSize(width: 120, height: 80),
+            pixelWidth: 120,
+            pixelHeight: 80,
+            fill: .white
+        )
+        let rendered = CaptureAnnotationRenderer.render(
+            image: image,
+            annotations: [CaptureAnnotation(kind: .marker, rect: marker.boundingRect, style: style, markerLine: marker)]
+        )
+
+        XCTAssertEqual(rendered.size, image.size)
+        XCTAssertEqual(rendered.representations.first?.pixelsWide, image.representations.first?.pixelsWide)
+        XCTAssertEqual(rendered.representations.first?.pixelsHigh, image.representations.first?.pixelsHigh)
+    }
+
     func testDashPatternSpacingScalesWithStrokeWidth() {
         let thin = CaptureStrokePattern.dashLong.dashPattern(strokeWidth: 2)
         let thick = CaptureStrokePattern.dashLong.dashPattern(strokeWidth: 7)

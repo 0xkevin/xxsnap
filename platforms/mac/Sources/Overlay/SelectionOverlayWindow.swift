@@ -2140,6 +2140,8 @@ private final class SelectionOverlayView: NSView {
             return kind == .arrowLine
         case .brush:
             return kind == .brush
+        case .marker:
+            return kind == .marker
         case .rectangle, .ellipse:
             return kind == .rectangle || kind == .ellipse
         }
@@ -2874,7 +2876,7 @@ private final class SelectionOverlayView: NSView {
             path = NSBezierPath(rect: insetRect)
         case .ellipse:
             path = NSBezierPath(ovalIn: insetRect)
-        case .arrowLine, .brush:
+        case .arrowLine, .brush, .marker:
             return
         }
 
@@ -4344,6 +4346,8 @@ private final class SelectionOverlayView: NSView {
         case .arrowLine:
             return .arrowLine
         case .brush:
+            return .brush
+        case .marker:
             return .brush
         case .rectangle, .ellipse:
             return .shape

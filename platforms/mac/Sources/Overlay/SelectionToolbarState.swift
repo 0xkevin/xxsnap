@@ -271,7 +271,7 @@ enum SelectionToolbarState {
         switch kind {
         case .rectangle, .ellipse:
             return true
-        case .arrowLine, .brush:
+        case .arrowLine, .brush, .marker:
             return false
         }
     }
@@ -1218,7 +1218,7 @@ enum SelectionToolbarState {
 
     private static func shapePath(in rect: NSRect, kind: CaptureAnnotationKind, cornerRadius: CGFloat) -> NSBezierPath {
         switch kind {
-        case .arrowLine, .brush:
+        case .arrowLine, .brush, .marker:
             NSBezierPath()
         case .rectangle where cornerRadius > 0:
             NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius)
