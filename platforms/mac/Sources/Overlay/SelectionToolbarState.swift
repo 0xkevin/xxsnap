@@ -264,7 +264,12 @@ enum SelectionToolbarState {
     }
 
     static func annotationKindSupportsPostDrawEditing(_ kind: CaptureAnnotationKind) -> Bool {
-        kind != .brush
+        switch kind {
+        case .rectangle, .ellipse, .arrowLine:
+            return true
+        case .brush, .marker:
+            return false
+        }
     }
 
     static func annotationKindSupportsGeometryEditing(_ kind: CaptureAnnotationKind) -> Bool {
