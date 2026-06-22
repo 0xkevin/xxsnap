@@ -806,7 +806,18 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertNil(layout.ellipseMode)
         XCTAssertNil(layout.startArrowType)
         XCTAssertNil(layout.endArrowType)
+        XCTAssertEqual(layout.strokeStyle, .zero)
         XCTAssertGreaterThan(layout.colorSwatches.first!.minX, layout.strokeWidths.last!.maxX)
+        for strokeWidth in layout.strokeWidths {
+            XCTAssertFalse(layout.colorSwatches.contains { $0.intersects(strokeWidth) })
+        }
+    }
+
+    func testOverlayWindowUsesMarkerOptionsToolbarModeForMarkerShape() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_activateShapeTool(.marker)
+
+        XCTAssertEqual(window.test_optionsToolbarMode, .marker)
     }
 
     func testBrushAnnotationStyleIsNotEditableAfterDrawing() {
@@ -1355,6 +1366,15 @@ final class SelectionToolbarStateTests: XCTestCase {
         )
 
         XCTAssertEqual(options.map(\.pattern), [.solid, .dashLong, .dashNarrow, .dashLongShort])
+    }
+
+    func testMarkerStrokePatternOptionsOnlyUseSolidLine() {
+        let options = SelectionToolbarState.strokePatternOptions(
+            canUsePremiumStrokePatterns: true,
+            mode: .marker
+        )
+
+        XCTAssertEqual(options.map(\.pattern), [.solid])
     }
 
     func testShapeAndArrowStrokePatternOptionsKeepSketchLines() {

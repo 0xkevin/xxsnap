@@ -341,7 +341,7 @@ enum SelectionToolbarState {
             fillToggle: mode == .shape ? fillToggleRect(in: optionsRect) : nil,
             rectangleMode: mode == .shape ? rectangleModeButtonRect(in: optionsRect) : nil,
             ellipseMode: mode == .shape ? ellipseModeButtonRect(in: optionsRect) : nil,
-            strokeStyle: mode == .shape ? strokeStyleFieldRect(in: optionsRect) : compactStrokeStyleFieldRect(in: optionsRect),
+            strokeStyle: strokeStyleRect(in: optionsRect, mode: mode),
             startArrowType: mode == .arrowLine ? startArrowTypeFieldRect(in: optionsRect, mode: mode) : nil,
             endArrowType: mode == .arrowLine ? endArrowTypeFieldRect(in: optionsRect, mode: mode) : nil,
             colorSwatches: colorSwatchRects(in: optionsRect, paletteCount: paletteCount, mode: mode)
@@ -493,6 +493,17 @@ enum SelectionToolbarState {
 
     private static func compactStrokeStyleFieldRect(in optionsRect: NSRect) -> NSRect {
         NSRect(x: optionsRect.minX + 92, y: optionControlY(in: optionsRect), width: 94, height: 20)
+    }
+
+    private static func strokeStyleRect(in optionsRect: NSRect, mode: OptionsToolbarMode) -> NSRect {
+        switch mode {
+        case .shape:
+            return strokeStyleFieldRect(in: optionsRect)
+        case .arrowLine, .brush:
+            return compactStrokeStyleFieldRect(in: optionsRect)
+        case .marker:
+            return .zero
+        }
     }
 
     private static func startArrowTypeFieldRect(in optionsRect: NSRect, mode: OptionsToolbarMode) -> NSRect {

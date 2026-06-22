@@ -387,6 +387,10 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_currentStrokePattern
     }
 
+    var test_optionsToolbarMode: SelectionToolbarState.OptionsToolbarMode? {
+        (contentView as? SelectionOverlayView)?.test_optionsToolbarMode
+    }
+
     var test_selectedBrushEndpointMarkers: [NSPoint] {
         (contentView as? SelectionOverlayView)?.test_selectedBrushEndpointMarkers ?? []
     }
@@ -1760,6 +1764,10 @@ private final class SelectionOverlayView: NSView {
 
     var test_currentStrokePattern: CaptureStrokePattern {
         currentStyle.strokePattern
+    }
+
+    var test_optionsToolbarMode: SelectionToolbarState.OptionsToolbarMode {
+        optionsToolbarMode
     }
 
     var test_selectedBrushEndpointMarkers: [NSPoint] {
@@ -4352,7 +4360,7 @@ private final class SelectionOverlayView: NSView {
         case .brush:
             return .brush
         case .marker:
-            return .brush
+            return .marker
         case .rectangle, .ellipse:
             return .shape
         }
