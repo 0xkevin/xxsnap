@@ -127,6 +127,10 @@ enum SelectionToolbarState {
         }
     }
 
+    static func showsStrokeStyleField(for mode: OptionsToolbarMode) -> Bool {
+        mode != .marker
+    }
+
     static func shouldShowOptionsToolbar(isPrimaryShapeToolActive: Bool) -> Bool {
         isPrimaryShapeToolActive
     }

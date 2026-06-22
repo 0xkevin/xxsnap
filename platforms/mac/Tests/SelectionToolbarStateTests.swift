@@ -813,6 +813,13 @@ final class SelectionToolbarStateTests: XCTestCase {
         }
     }
 
+    func testMarkerOptionsToolbarDoesNotExposeStrokeStyleField() {
+        XCTAssertFalse(SelectionToolbarState.showsStrokeStyleField(for: .marker))
+        XCTAssertTrue(SelectionToolbarState.showsStrokeStyleField(for: .shape))
+        XCTAssertTrue(SelectionToolbarState.showsStrokeStyleField(for: .arrowLine))
+        XCTAssertTrue(SelectionToolbarState.showsStrokeStyleField(for: .brush))
+    }
+
     func testOverlayWindowUsesMarkerOptionsToolbarModeForMarkerShape() {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_activateShapeTool(.marker)

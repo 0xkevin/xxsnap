@@ -1373,7 +1373,9 @@ private final class SelectionOverlayView: NSView {
             return (title, ellipseButton)
         }
 
-        if layout.strokeStyle.contains(point), let title = SelectionToolbarState.tooltipTitle(for: "strokeStyle") {
+        if SelectionToolbarState.showsStrokeStyleField(for: optionsToolbarMode),
+           layout.strokeStyle.contains(point),
+           let title = SelectionToolbarState.tooltipTitle(for: "strokeStyle") {
             return (title, layout.strokeStyle)
         }
 
@@ -1915,7 +1917,8 @@ private final class SelectionOverlayView: NSView {
             return true
         }
 
-        if layout.strokeStyle.contains(point) {
+        if SelectionToolbarState.showsStrokeStyleField(for: optionsToolbarMode),
+           layout.strokeStyle.contains(point) {
             showsStrokeStyleMenu.toggle()
             showsCornerRadiusPanel = false
             showsStartArrowTypeMenu = false
@@ -1978,7 +1981,11 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func handleStrokeStyleMenuClick(at point: NSPoint) -> Bool {
-        guard showsStrokeStyleMenu, let optionsRect = optionsToolbarRect else {
+        guard
+            showsStrokeStyleMenu,
+            SelectionToolbarState.showsStrokeStyleField(for: optionsToolbarMode),
+            let optionsRect = optionsToolbarRect
+        else {
             return false
         }
 
@@ -3486,7 +3493,9 @@ private final class SelectionOverlayView: NSView {
         case .brush, .marker:
             break
         }
-        drawStrokeStyleField(in: optionsRect)
+        if SelectionToolbarState.showsStrokeStyleField(for: optionsToolbarMode) {
+            drawStrokeStyleField(in: optionsRect)
+        }
         drawColorSwatches(in: optionsRect)
     }
 
@@ -4338,7 +4347,10 @@ private final class SelectionOverlayView: NSView {
             return true
         }
 
-        if showsStrokeStyleMenu, let optionsToolbarRect, strokeStyleMenuRect(in: optionsToolbarRect).contains(point) {
+        if showsStrokeStyleMenu,
+           SelectionToolbarState.showsStrokeStyleField(for: optionsToolbarMode),
+           let optionsToolbarRect,
+           strokeStyleMenuRect(in: optionsToolbarRect).contains(point) {
             return true
         }
 
