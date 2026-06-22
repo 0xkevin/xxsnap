@@ -84,6 +84,12 @@ enum SelectionToolbarState {
         case none
     }
 
+    enum BrushRotationHitTarget: Equatable {
+        case start
+        case end
+        case none
+    }
+
     struct StrokePatternOption: Equatable {
         var pattern: CaptureStrokePattern
         var requiresPremiumAccess: Bool
@@ -100,6 +106,7 @@ enum SelectionToolbarState {
         case resizeTopRight
         case resizeBottomLeft
         case resizeBottomRight
+        case rotationHandle
         case brush
     }
 
@@ -201,12 +208,23 @@ enum SelectionToolbarState {
         )
     }
 
-    static func strokePatternOptions(canUsePremiumStrokePatterns: Bool) -> [StrokePatternOption] {
-        CaptureStrokePattern.allCases.map { pattern in
+    static func strokePatternOptions(
+        canUsePremiumStrokePatterns: Bool,
+        mode: OptionsToolbarMode = .shape
+    ) -> [StrokePatternOption] {
+        let patterns: [CaptureStrokePattern]
+        switch mode {
+        case .brush:
+            patterns = [.solid, .dashLong, .dashNarrow, .dashLongShort]
+        case .shape, .arrowLine:
+            patterns = CaptureStrokePattern.allCases
+        }
+
+        return patterns.map { pattern in
             StrokePatternOption(
                 pattern: pattern,
                 requiresPremiumAccess: pattern.requiresPremiumAccess,
-                isEnabled: !pattern.requiresPremiumAccess || canUsePremiumStrokePatterns
+                isEnabled: true
             )
         }
     }
@@ -230,7 +248,10 @@ enum SelectionToolbarState {
     ) -> CaptureAnnotationStyle {
         var style = currentStyle
         let shouldUseDefaultPaletteColor = styleUsesDefaultInitialColors(currentStyle)
-        style.strokeWidth = strokeWidthValues(for: .brush)[1]
+        style.strokeWidth = strokeWidthValues(for: .brush)[0]
+        if style.strokePattern.isSketch {
+            style.strokePattern = .solid
+        }
         style.fillEnabled = false
 
         if shouldUseDefaultPaletteColor, let firstPaletteColor = paletteColors.first {
@@ -244,6 +265,23 @@ enum SelectionToolbarState {
 
     static func annotationKindSupportsPostDrawEditing(_ kind: CaptureAnnotationKind) -> Bool {
         kind != .brush
+    }
+
+    static func annotationKindSupportsGeometryEditing(_ kind: CaptureAnnotationKind) -> Bool {
+        switch kind {
+        case .rectangle, .ellipse:
+            return true
+        case .arrowLine, .brush:
+            return false
+        }
+    }
+
+    static func updatedSelectedAnnotationStyle(
+        kind: CaptureAnnotationKind,
+        existingStyle: CaptureAnnotationStyle,
+        currentStyle: CaptureAnnotationStyle
+    ) -> CaptureAnnotationStyle {
+        annotationKindSupportsPostDrawEditing(kind) ? currentStyle : existingStyle
     }
 
     static func arrowTypesAfterSelection(
@@ -514,6 +552,93 @@ enum SelectionToolbarState {
         return .none
     }
 
+    static func brushRotationHitTarget(
+        at point: NSPoint,
+        path: CaptureBrushPath,
+        hitOutset: CGFloat = 12
+    ) -> BrushRotationHitTarget {
+        guard path.points.count >= 2, let start = path.points.first, let end = path.points.last else {
+            return .none
+        }
+        if distance(from: point, to: start) <= hitOutset {
+            return .start
+        }
+        if distance(from: point, to: end) <= hitOutset {
+            return .end
+        }
+        return .none
+    }
+
+    static func brushRotationHandleAngle(
+        for handle: BrushRotationHitTarget,
+        path: CaptureBrushPath
+    ) -> CGFloat? {
+        guard path.points.count >= 2 else {
+            return nil
+        }
+
+        let from: NSPoint
+        let to: NSPoint
+        switch handle {
+        case .start:
+            from = path.points[1]
+            to = path.points[0]
+        case .end:
+            from = path.points[path.points.count - 2]
+            to = path.points[path.points.count - 1]
+        case .none:
+            return nil
+        }
+
+        let dx = to.x - from.x
+        let dy = to.y - from.y
+        guard hypot(dx, dy) >= 0.001 else {
+            return nil
+        }
+        return atan2(dy, dx)
+    }
+
+    static func rotatedBrushPath(
+        _ path: CaptureBrushPath,
+        dragging handle: BrushRotationHitTarget,
+        to point: NSPoint
+    ) -> CaptureBrushPath {
+        guard path.points.count >= 2, let start = path.points.first, let end = path.points.last else {
+            return path
+        }
+
+        let fixed: NSPoint
+        let moving: NSPoint
+        switch handle {
+        case .start:
+            fixed = end
+            moving = start
+        case .end:
+            fixed = start
+            moving = end
+        case .none:
+            return path
+        }
+
+        let source = NSPoint(x: moving.x - fixed.x, y: moving.y - fixed.y)
+        let target = NSPoint(x: point.x - fixed.x, y: point.y - fixed.y)
+        let sourceLengthSquared = source.x * source.x + source.y * source.y
+        guard sourceLengthSquared >= 0.001 else {
+            return path
+        }
+
+        let a = (target.x * source.x + target.y * source.y) / sourceLengthSquared
+        let b = (target.y * source.x - target.x * source.y) / sourceLengthSquared
+        return CaptureBrushPath(points: path.points.map { original in
+            let x = original.x - fixed.x
+            let y = original.y - fixed.y
+            return NSPoint(
+                x: fixed.x + a * x - b * y,
+                y: fixed.y + b * x + a * y
+            )
+        })
+    }
+
     static func overlayCursorStyle(
         isSelecting: Bool,
         isToolbarOrPanelPoint: Bool,
@@ -521,6 +646,7 @@ enum SelectionToolbarState {
         selectionResizeHandle: OverlayResizeHandle?,
         isAnnotationBorder: Bool,
         isInsideSelection: Bool,
+        isShapeToolActive: Bool = false,
         currentShapeKind: CaptureAnnotationKind = .rectangle
     ) -> OverlayCursorStyle {
         if isToolbarOrPanelPoint {
@@ -531,19 +657,27 @@ enum SelectionToolbarState {
             return overlayCursorStyle(for: resizeHandle)
         }
 
+        if isAnnotationBorder {
+            return .move
+        }
+
         if let selectionResizeHandle {
             return overlayCursorStyle(for: selectionResizeHandle)
         }
 
-        if isAnnotationBorder {
-            return .move
+        if isShapeToolActive, currentShapeKind == .brush {
+            return isInsideSelection ? .brush : .arrow
+        }
+
+        if isShapeToolActive {
+            return isInsideSelection ? .crosshair : .arrow
         }
 
         if isSelecting || isInsideSelection {
             return .crosshair
         }
 
-        return .crosshair
+        return .arrow
     }
 
     enum OverlayResizeHandle: Equatable {
@@ -607,7 +741,7 @@ enum SelectionToolbarState {
         }
     }
 
-    static func selectionResizeHandle(at point: NSPoint, in rect: NSRect, edgeOutset: CGFloat = 5) -> OverlayResizeHandle? {
+    static func selectionResizeHandle(at point: NSPoint, in rect: NSRect, edgeOutset: CGFloat = 12) -> OverlayResizeHandle? {
         let rect = rect.standardized
         guard rect.width >= 8, rect.height >= 8 else {
             return nil
@@ -1048,6 +1182,10 @@ enum SelectionToolbarState {
     }
 
     static func shapeBorderContains(point: NSPoint, rect: NSRect, kind: CaptureAnnotationKind, cornerRadius: CGFloat, hitOutset: CGFloat = 6) -> Bool {
+        guard kind != .arrowLine, kind != .brush else {
+            return false
+        }
+
         let rect = rect.standardized
         let outer = shapePath(in: rect.insetBy(dx: -hitOutset, dy: -hitOutset), kind: kind, cornerRadius: cornerRadius + hitOutset)
         let inner = shapePath(in: rect.insetBy(dx: hitOutset, dy: hitOutset), kind: kind, cornerRadius: max(0, cornerRadius - hitOutset))

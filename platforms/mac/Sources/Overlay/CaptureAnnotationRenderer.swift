@@ -935,9 +935,9 @@ enum CaptureStrokePattern: Int, CaseIterable {
         case .dashLong:
             return "长虚线线条"
         case .dashNarrow:
-            return "窄虚线线条"
+            return "点状线条"
         case .dashLongShort:
-            return "一长一短的虚线线条"
+            return "一长一点的虚线线条"
         case .sketchSolid:
             return "手绘实线"
         case .sketchDashed:
@@ -964,17 +964,26 @@ enum CaptureStrokePattern: Int, CaseIterable {
     }
 
     var dashPattern: [CGFloat] {
+        dashPattern(strokeWidth: 2)
+    }
+
+    func dashPattern(strokeWidth: CGFloat) -> [CGFloat] {
+        let width = max(strokeWidth, 1)
+        let longDash = max(8, width * 3)
+        let gap = max(4, width * 1.6)
+        let dotGap = max(5, width * 2.2)
+
         switch self {
         case .solid, .sketchSolid:
             return []
         case .dashLong:
-            return [8, 4]
+            return [longDash, gap]
         case .dashNarrow:
-            return [4, 2]
+            return [0.1, dotGap]
         case .dashLongShort:
-            return [8, 3, 2, 3]
+            return [longDash, gap, 0.1, gap]
         case .sketchDashed:
-            return [8, 4]
+            return [longDash, gap]
         }
     }
 }
@@ -1103,7 +1112,9 @@ enum CaptureAnnotationRenderer {
         context.setLineCap(.round)
         context.setLineDash(
             phase: 0,
-            lengths: annotation.style.strokePattern.dashPattern.map { $0 * lineScale }
+            lengths: annotation.style.strokePattern
+                .dashPattern(strokeWidth: annotation.style.strokeWidth)
+                .map { $0 * lineScale }
         )
         context.strokePath()
         context.restoreGState()
@@ -1127,7 +1138,9 @@ enum CaptureAnnotationRenderer {
         context.setLineCap(.round)
         context.setLineDash(
             phase: 0,
-            lengths: annotation.style.strokePattern.dashPattern.map { $0 * lineScale }
+            lengths: annotation.style.strokePattern
+                .dashPattern(strokeWidth: annotation.style.strokeWidth)
+                .map { $0 * lineScale }
         )
 
         let path = CGMutablePath()
@@ -1171,7 +1184,9 @@ enum CaptureAnnotationRenderer {
         context.setLineCap(.round)
         context.setLineDash(
             phase: 0,
-            lengths: annotation.style.strokePattern.dashPattern.map { $0 * lineScale }
+            lengths: annotation.style.strokePattern
+                .dashPattern(strokeWidth: annotation.style.strokeWidth)
+                .map { $0 * lineScale }
         )
 
         let usesVectorBody = CaptureArrowVectorGeometry.isVectorArrow(arrowLine.startArrowType)

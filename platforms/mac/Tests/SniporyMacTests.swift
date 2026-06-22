@@ -113,6 +113,29 @@ final class SniporyMacTests: XCTestCase {
         XCTAssertNotEqual(try rgbaBytes(in: solid), try rgbaBytes(in: dashed))
     }
 
+    func testDashPatternSpacingScalesWithStrokeWidth() {
+        let thin = CaptureStrokePattern.dashLong.dashPattern(strokeWidth: 2)
+        let thick = CaptureStrokePattern.dashLong.dashPattern(strokeWidth: 7)
+
+        XCTAssertGreaterThan(thick[0], thin[0])
+        XCTAssertGreaterThan(thick[1], 7)
+    }
+
+    func testThirdStrokePatternIsDotted() {
+        let dotted = CaptureStrokePattern.dashNarrow.dashPattern(strokeWidth: 6)
+
+        XCTAssertLessThan(dotted[0], 1)
+        XCTAssertGreaterThan(dotted[1], 6)
+    }
+
+    func testFourthStrokePatternIsLongDashDot() {
+        let dashDot = CaptureStrokePattern.dashLongShort.dashPattern(strokeWidth: 6)
+
+        XCTAssertGreaterThan(dashDot[0], 10)
+        XCTAssertLessThan(dashDot[2], 1)
+        XCTAssertEqual(CaptureStrokePattern.dashLongShort.title, "一长一点的虚线线条")
+    }
+
     func testSvg2ArrowVectorsMatchReferenceIcons() throws {
         let image = try makeBitmapImage(
             pointSize: NSSize(width: 64, height: 48),

@@ -27,6 +27,530 @@ final class SelectionToolbarStateTests: XCTestCase {
         wait(for: [didCancel], timeout: 0.5)
     }
 
+    func testOverlayWindowResizesSelectionFromBorderWhileBrushToolIsActive() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 200, height: 120)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateShapeTool(.brush)
+
+        window.test_mouseDown(at: NSPoint(x: selection.maxX + 10, y: selection.midY))
+        window.test_mouseDragged(to: NSPoint(x: selection.maxX + 40, y: selection.midY))
+        window.test_mouseUp(at: NSPoint(x: selection.maxX + 40, y: selection.midY))
+
+        XCTAssertEqual(window.test_lockedSelectionRect?.origin.x, selection.origin.x)
+        XCTAssertEqual(window.test_lockedSelectionRect?.width, selection.width + 40)
+    }
+
+    func testOverlayWindowUsesArrowOutsideSelectionWhileShapeToolIsActive() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 200, height: 120)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateShapeTool(.rectangle)
+
+        guard let toolbarPoint = window.test_mainToolbarDragPoint() else {
+            return XCTFail("Expected toolbar drag point")
+        }
+        XCTAssertFalse(selection.contains(toolbarPoint))
+        XCTAssertEqual(window.test_cursorStyle(at: toolbarPoint), .arrow)
+
+        window.test_activateShapeTool(.arrowLine)
+        XCTAssertEqual(window.test_cursorStyle(at: toolbarPoint), .arrow)
+    }
+
+    func testOverlayWindowUsesDrawingCursorInsideSelectionImmediatelyAfterToolSwitch() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 200, height: 120)
+        let point = NSPoint(x: selection.midX, y: selection.midY)
+        window.test_setLockedSelectionRect(selection)
+
+        window.test_activateShapeTool(.rectangle)
+        XCTAssertEqual(window.test_cursorStyle(at: point), .crosshair)
+
+        window.test_activateShapeTool(.arrowLine)
+        XCTAssertEqual(window.test_cursorStyle(at: point), .crosshair)
+    }
+
+    func testToolSwitchingResetsStrokePatternToFirstOption() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 260, height: 160))
+
+        window.test_setCurrentStrokePattern(.dashLong)
+        window.test_toggleShapeTool(.rectangle)
+        XCTAssertEqual(window.test_currentStrokePattern, .solid)
+
+        window.test_setCurrentStrokePattern(.dashNarrow)
+        window.test_toggleShapeTool(.arrowLine)
+        XCTAssertEqual(window.test_currentStrokePattern, .solid)
+
+        window.test_setCurrentStrokePattern(.dashLongShort)
+        window.test_toggleShapeTool(.brush)
+        XCTAssertEqual(window.test_currentStrokePattern, .solid)
+
+        window.test_setCurrentStrokePattern(.dashLong)
+        window.test_toggleShapeTool(.rectangle)
+        XCTAssertEqual(window.test_currentStrokePattern, .solid)
+    }
+
+    func testOverlayWindowMovesSelectedBrushGeometryWithoutChangingStyle() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.brush)
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 140))
+        window.test_mouseDragged(to: NSPoint(x: 180, y: 180))
+        window.test_mouseUp(at: NSPoint(x: 180, y: 180))
+
+        guard let original = window.test_annotationRect(at: 0) else {
+            return XCTFail("Expected brush annotation")
+        }
+
+        window.test_mouseDown(at: NSPoint(x: 160, y: 160))
+        window.test_mouseDragged(to: NSPoint(x: 190, y: 190))
+        window.test_mouseUp(at: NSPoint(x: 190, y: 190))
+
+        guard let moved = window.test_annotationRect(at: 0) else {
+            return XCTFail("Expected moved brush annotation")
+        }
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(moved.origin.x, original.origin.x + 30, accuracy: 0.1)
+        XCTAssertEqual(moved.origin.y, original.origin.y + 30, accuracy: 0.1)
+        XCTAssertEqual(moved.width, original.width, accuracy: 0.1)
+        XCTAssertEqual(moved.height, original.height, accuracy: 0.1)
+    }
+
+    func testOverlayWindowKeepsMoveCursorWhileDraggingRectangleArrowAndBrush() {
+        let rectangleWindow = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        rectangleWindow.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        rectangleWindow.test_activateShapeTool(.rectangle)
+        rectangleWindow.test_mouseDown(at: NSPoint(x: 140, y: 140))
+        rectangleWindow.test_mouseDragged(to: NSPoint(x: 220, y: 180))
+        rectangleWindow.test_mouseUp(at: NSPoint(x: 220, y: 180))
+        rectangleWindow.test_mouseDown(at: NSPoint(x: 160, y: 140))
+        rectangleWindow.test_mouseDragged(to: NSPoint(x: 170, y: 150))
+        XCTAssertEqual(rectangleWindow.test_cursorStyle(at: NSPoint(x: 170, y: 150)), .move)
+        rectangleWindow.test_mouseUp(at: NSPoint(x: 170, y: 150))
+
+        let arrowWindow = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        arrowWindow.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        arrowWindow.test_activateShapeTool(.arrowLine)
+        arrowWindow.test_mouseDown(at: NSPoint(x: 160, y: 160))
+        arrowWindow.test_mouseDragged(to: NSPoint(x: 240, y: 200))
+        arrowWindow.test_mouseUp(at: NSPoint(x: 240, y: 200))
+        arrowWindow.test_mouseDown(at: NSPoint(x: 190, y: 175))
+        arrowWindow.test_mouseDragged(to: NSPoint(x: 200, y: 185))
+        XCTAssertEqual(arrowWindow.test_cursorStyle(at: NSPoint(x: 200, y: 185)), .move)
+        arrowWindow.test_mouseUp(at: NSPoint(x: 200, y: 185))
+
+        let brushWindow = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        brushWindow.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        brushWindow.test_activateShapeTool(.brush)
+        brushWindow.test_mouseDown(at: NSPoint(x: 170, y: 170))
+        brushWindow.test_mouseDragged(to: NSPoint(x: 210, y: 210))
+        brushWindow.test_mouseUp(at: NSPoint(x: 210, y: 210))
+        brushWindow.test_mouseDown(at: NSPoint(x: 190, y: 190))
+        brushWindow.test_mouseDragged(to: NSPoint(x: 200, y: 200))
+        XCTAssertEqual(brushWindow.test_cursorStyle(at: NSPoint(x: 200, y: 200)), .move)
+        brushWindow.test_mouseUp(at: NSPoint(x: 200, y: 200))
+    }
+
+    func testOverlayWindowMovesBrushAnnotationWhileRectangleToolIsActive() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.brush)
+
+        window.test_mouseDown(at: NSPoint(x: 150, y: 150))
+        window.test_mouseDragged(to: NSPoint(x: 190, y: 190))
+        window.test_mouseUp(at: NSPoint(x: 190, y: 190))
+
+        guard let original = window.test_annotationRect(at: 0) else {
+            return XCTFail("Expected brush annotation")
+        }
+
+        window.test_activateShapeTool(.rectangle)
+        window.test_mouseDown(at: NSPoint(x: 170, y: 170))
+        window.test_mouseDragged(to: NSPoint(x: 200, y: 200))
+        window.test_mouseUp(at: NSPoint(x: 200, y: 200))
+
+        guard let moved = window.test_annotationRect(at: 0) else {
+            return XCTFail("Expected moved brush annotation")
+        }
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(window.test_selectedAnnotationKind, .brush)
+        XCTAssertEqual(moved.origin.x, original.origin.x + 30, accuracy: 0.1)
+        XCTAssertEqual(moved.origin.y, original.origin.y + 30, accuracy: 0.1)
+    }
+
+    func testOverlayWindowDragsSelectedArrowControlPoint() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.arrowLine)
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 140))
+        window.test_mouseDragged(to: NSPoint(x: 220, y: 180))
+        window.test_mouseUp(at: NSPoint(x: 220, y: 180))
+
+        guard let original = window.test_arrowLine(at: 0) else {
+            return XCTFail("Expected arrow annotation")
+        }
+        let control = NSPoint(x: 100 + original.control.x, y: 100 + original.control.y)
+
+        window.test_mouseDown(at: control)
+        window.test_mouseDragged(to: NSPoint(x: control.x, y: control.y + 50))
+        window.test_mouseUp(at: NSPoint(x: control.x, y: control.y + 50))
+
+        guard let updated = window.test_arrowLine(at: 0) else {
+            return XCTFail("Expected updated arrow annotation")
+        }
+        XCTAssertEqual(updated.control.x, original.control.x, accuracy: 0.1)
+        XCTAssertEqual(updated.control.y, original.control.y + 50, accuracy: 0.1)
+    }
+
+    func testOverlayWindowSelectedArrowShowsControlHandles() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.arrowLine)
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 140))
+        window.test_mouseDragged(to: NSPoint(x: 220, y: 180))
+        window.test_mouseUp(at: NSPoint(x: 220, y: 180))
+
+        XCTAssertEqual(window.test_selectedAnnotationKind, .arrowLine)
+        XCTAssertTrue(window.test_selectedAnnotationShowsOutline)
+    }
+
+    func testOverlayWindowDeleteKeyRemovesSelectedAnnotations() {
+        let rectangleWindow = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        rectangleWindow.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        rectangleWindow.test_activateShapeTool(.rectangle)
+        rectangleWindow.test_mouseDown(at: NSPoint(x: 140, y: 140))
+        rectangleWindow.test_mouseDragged(to: NSPoint(x: 220, y: 180))
+        rectangleWindow.test_mouseUp(at: NSPoint(x: 220, y: 180))
+        rectangleWindow.test_mouseDown(at: NSPoint(x: 160, y: 140))
+        rectangleWindow.test_mouseUp(at: NSPoint(x: 160, y: 140))
+        XCTAssertEqual(rectangleWindow.test_selectedAnnotationKind, .rectangle)
+        rectangleWindow.test_keyDown(keyCode: 51)
+        XCTAssertEqual(rectangleWindow.test_annotationCount, 0)
+        XCTAssertNil(rectangleWindow.test_selectedAnnotationKind)
+
+        let ellipseWindow = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        ellipseWindow.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        ellipseWindow.test_activateShapeTool(.ellipse)
+        ellipseWindow.test_mouseDown(at: NSPoint(x: 140, y: 140))
+        ellipseWindow.test_mouseDragged(to: NSPoint(x: 220, y: 180))
+        ellipseWindow.test_mouseUp(at: NSPoint(x: 220, y: 180))
+        ellipseWindow.test_mouseDown(at: NSPoint(x: 160, y: 140))
+        ellipseWindow.test_mouseUp(at: NSPoint(x: 160, y: 140))
+        XCTAssertEqual(ellipseWindow.test_selectedAnnotationKind, .ellipse)
+        ellipseWindow.test_keyDown(keyCode: 51)
+        XCTAssertEqual(ellipseWindow.test_annotationCount, 0)
+        XCTAssertNil(ellipseWindow.test_selectedAnnotationKind)
+
+        let arrowWindow = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        arrowWindow.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        arrowWindow.test_activateShapeTool(.arrowLine)
+        arrowWindow.test_mouseDown(at: NSPoint(x: 140, y: 140))
+        arrowWindow.test_mouseDragged(to: NSPoint(x: 220, y: 180))
+        arrowWindow.test_mouseUp(at: NSPoint(x: 220, y: 180))
+        arrowWindow.test_mouseDown(at: NSPoint(x: 180, y: 160))
+        arrowWindow.test_mouseUp(at: NSPoint(x: 180, y: 160))
+        XCTAssertEqual(arrowWindow.test_selectedAnnotationKind, .arrowLine)
+        arrowWindow.test_keyDown(keyCode: 51)
+        XCTAssertEqual(arrowWindow.test_annotationCount, 0)
+        XCTAssertNil(arrowWindow.test_selectedAnnotationKind)
+
+        let brushWindow = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        brushWindow.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        brushWindow.test_activateShapeTool(.brush)
+        brushWindow.test_mouseDown(at: NSPoint(x: 150, y: 150))
+        brushWindow.test_mouseDragged(to: NSPoint(x: 190, y: 190))
+        brushWindow.test_mouseUp(at: NSPoint(x: 190, y: 190))
+        brushWindow.test_mouseDown(at: NSPoint(x: 170, y: 170))
+        brushWindow.test_mouseUp(at: NSPoint(x: 170, y: 170))
+        XCTAssertEqual(brushWindow.test_selectedAnnotationKind, .brush)
+        brushWindow.test_keyDown(keyCode: 51)
+        XCTAssertEqual(brushWindow.test_annotationCount, 0)
+        XCTAssertNil(brushWindow.test_selectedAnnotationKind)
+    }
+
+    func testOverlayWindowSelectedBrushShowsOnlyEndpointMarkers() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.brush)
+
+        window.test_mouseDown(at: NSPoint(x: 150, y: 150))
+        window.test_mouseDragged(to: NSPoint(x: 170, y: 180))
+        window.test_mouseDragged(to: NSPoint(x: 210, y: 190))
+        window.test_mouseUp(at: NSPoint(x: 240, y: 170))
+        window.test_mouseDown(at: NSPoint(x: 170, y: 180))
+        window.test_mouseUp(at: NSPoint(x: 170, y: 180))
+
+        let markers = window.test_selectedBrushEndpointMarkers
+        XCTAssertEqual(markers.count, 2)
+        XCTAssertEqual(markers[0].x, 150, accuracy: 0.1)
+        XCTAssertEqual(markers[0].y, 150, accuracy: 0.1)
+        XCTAssertEqual(markers[1].x, 240, accuracy: 0.1)
+        XCTAssertEqual(markers[1].y, 170, accuracy: 0.1)
+    }
+
+    func testOverlayWindowShiftDoesNotChangeStraightArrowEndpointDrag() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.arrowLine)
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 140))
+        window.test_mouseDragged(to: NSPoint(x: 220, y: 180))
+        window.test_mouseUp(at: NSPoint(x: 220, y: 180))
+
+        guard let original = window.test_arrowLine(at: 0) else {
+            return XCTFail("Expected arrow annotation")
+        }
+        let end = NSPoint(x: 100 + original.end.x, y: 100 + original.end.y)
+        window.test_mouseDown(at: end)
+        window.test_mouseDragged(to: NSPoint(x: end.x + 30, y: end.y + 40), modifierFlags: [.shift])
+        window.test_mouseUp(at: NSPoint(x: end.x + 30, y: end.y + 40), modifierFlags: [.shift])
+
+        guard let updated = window.test_arrowLine(at: 0) else {
+            return XCTFail("Expected updated arrow annotation")
+        }
+        XCTAssertEqual(updated.end.x, original.end.x + 30, accuracy: 0.1)
+        XCTAssertEqual(updated.end.y, original.end.y + 40, accuracy: 0.1)
+        XCTAssertEqual(updated.control.x, (updated.start.x + updated.end.x) / 2, accuracy: 0.1)
+        XCTAssertEqual(updated.control.y, (updated.start.y + updated.end.y) / 2, accuracy: 0.1)
+    }
+
+    func testOverlayWindowShiftDoesNotChangeCurvedArrowEndpointDrag() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.arrowLine)
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 140))
+        window.test_mouseDragged(to: NSPoint(x: 220, y: 180))
+        window.test_mouseUp(at: NSPoint(x: 220, y: 180))
+
+        guard let original = window.test_arrowLine(at: 0) else {
+            return XCTFail("Expected arrow annotation")
+        }
+        let control = NSPoint(x: 100 + original.control.x, y: 100 + original.control.y)
+        window.test_mouseDown(at: control)
+        window.test_mouseDragged(to: NSPoint(x: control.x, y: control.y + 50))
+        window.test_mouseUp(at: NSPoint(x: control.x, y: control.y + 50))
+
+        guard let curved = window.test_arrowLine(at: 0) else {
+            return XCTFail("Expected curved arrow annotation")
+        }
+        let end = NSPoint(x: 100 + curved.end.x, y: 100 + curved.end.y)
+        window.test_mouseDown(at: end)
+        window.test_mouseDragged(to: NSPoint(x: end.x + 30, y: end.y + 40), modifierFlags: [.shift])
+        window.test_mouseUp(at: NSPoint(x: end.x + 30, y: end.y + 40), modifierFlags: [.shift])
+
+        guard let updated = window.test_arrowLine(at: 0) else {
+            return XCTFail("Expected updated arrow annotation")
+        }
+        XCTAssertEqual(updated.end.x, curved.end.x + 30, accuracy: 0.1)
+        XCTAssertEqual(updated.end.y, curved.end.y + 40, accuracy: 0.1)
+        let curvedMidpoint = NSPoint(x: (curved.start.x + curved.end.x) / 2, y: (curved.start.y + curved.end.y) / 2)
+        let updatedMidpoint = NSPoint(x: (updated.start.x + updated.end.x) / 2, y: (updated.start.y + updated.end.y) / 2)
+        XCTAssertEqual(updated.control.x - updatedMidpoint.x, curved.control.x - curvedMidpoint.x, accuracy: 0.1)
+        XCTAssertEqual(updated.control.y - updatedMidpoint.y, curved.control.y - curvedMidpoint.y, accuracy: 0.1)
+    }
+
+    func testOverlayWindowArrowEndpointUsesVerticalResizeCursor() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.arrowLine)
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 140))
+        window.test_mouseDragged(to: NSPoint(x: 220, y: 180))
+        window.test_mouseUp(at: NSPoint(x: 220, y: 180))
+
+        guard let arrowLine = window.test_arrowLine(at: 0) else {
+            return XCTFail("Expected arrow annotation")
+        }
+
+        let start = NSPoint(x: 100 + arrowLine.start.x, y: 100 + arrowLine.start.y)
+        let end = NSPoint(x: 100 + arrowLine.end.x, y: 100 + arrowLine.end.y)
+        XCTAssertEqual(window.test_cursorStyle(at: start), .resizeUpDown)
+        XCTAssertEqual(window.test_cursorStyle(at: end), .resizeUpDown)
+    }
+
+    func testOverlayWindowBrushEndpointUsesVerticalArrowsCursor() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.brush)
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 140))
+        window.test_mouseDragged(to: NSPoint(x: 180, y: 180))
+        window.test_mouseUp(at: NSPoint(x: 180, y: 180))
+
+        XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: 140, y: 140)), .rotationHandle)
+        XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: 180, y: 180)), .rotationHandle)
+    }
+
+    func testOverlayWindowDraggingBrushEndpointAnchorsOppositeEndAndKeepsVerticalArrowsCursor() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.brush)
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 140))
+        window.test_mouseDragged(to: NSPoint(x: 180, y: 180))
+        window.test_mouseUp(at: NSPoint(x: 180, y: 180))
+
+        guard let original = window.test_brushPath(at: 0) else {
+            return XCTFail("Expected brush annotation")
+        }
+        XCTAssertGreaterThanOrEqual(original.points.count, 2)
+
+        window.test_mouseDown(at: NSPoint(x: 180, y: 180))
+        window.test_mouseDragged(to: NSPoint(x: 210, y: 220))
+        XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: 210, y: 220)), .rotationHandle)
+        window.test_mouseUp(at: NSPoint(x: 210, y: 220))
+
+        guard let updated = window.test_brushPath(at: 0) else {
+            return XCTFail("Expected updated brush annotation")
+        }
+        XCTAssertEqual(updated.points.count, original.points.count)
+        XCTAssertEqual(updated.points.first!.x, original.points.first!.x, accuracy: 0.1)
+        XCTAssertEqual(updated.points.first!.y, original.points.first!.y, accuracy: 0.1)
+        XCTAssertEqual(updated.points.last!.x, 110, accuracy: 0.1)
+        XCTAssertEqual(updated.points.last!.y, 120, accuracy: 0.1)
+    }
+
+    func testOverlayWindowBrushShiftDragDrawsStraightLineAtAnyAngle() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.brush)
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 140))
+        window.test_mouseDragged(to: NSPoint(x: 170, y: 146), modifierFlags: [.shift])
+        window.test_mouseDragged(to: NSPoint(x: 210, y: 132), modifierFlags: [.shift])
+        window.test_mouseUp(at: NSPoint(x: 240, y: 151), modifierFlags: [.shift])
+
+        guard let path = window.test_brushPath(at: 0) else {
+            return XCTFail("Expected brush annotation")
+        }
+
+        XCTAssertEqual(path.points.count, 2)
+        XCTAssertEqual(path.points[0].x, 40, accuracy: 0.1)
+        XCTAssertEqual(path.points[0].y, 40, accuracy: 0.1)
+        XCTAssertEqual(path.points[1].x, 140, accuracy: 0.1)
+        XCTAssertEqual(path.points[1].y, 51, accuracy: 0.1)
+    }
+
+    func testOverlayWindowBrushToolMovesWholeArrowFromControlPointWithoutReshaping() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.arrowLine)
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 140))
+        window.test_mouseDragged(to: NSPoint(x: 220, y: 180))
+        window.test_mouseUp(at: NSPoint(x: 220, y: 180))
+
+        guard let original = window.test_arrowLine(at: 0) else {
+            return XCTFail("Expected arrow annotation")
+        }
+        let control = NSPoint(x: 100 + original.control.x, y: 100 + original.control.y)
+
+        window.test_activateShapeTool(.brush)
+        XCTAssertNil(window.test_selectedAnnotationKind)
+        XCTAssertEqual(window.test_cursorStyle(at: control), .move)
+
+        window.test_mouseDown(at: control)
+        window.test_mouseDragged(to: NSPoint(x: control.x, y: control.y + 50))
+        window.test_mouseUp(at: NSPoint(x: control.x, y: control.y + 50))
+
+        guard let updated = window.test_arrowLine(at: 0) else {
+            return XCTFail("Expected arrow annotation")
+        }
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(window.test_selectedAnnotationKind, .arrowLine)
+        XCTAssertEqual(updated.start.x, original.start.x, accuracy: 0.1)
+        XCTAssertEqual(updated.start.y, original.start.y + 50, accuracy: 0.1)
+        XCTAssertEqual(updated.end.x, original.end.x, accuracy: 0.1)
+        XCTAssertEqual(updated.end.y, original.end.y + 50, accuracy: 0.1)
+        XCTAssertEqual(updated.control.x, original.control.x, accuracy: 0.1)
+        XCTAssertEqual(updated.control.y, original.control.y + 50, accuracy: 0.1)
+    }
+
+    func testOverlayWindowMovesArrowLineBodyWhileBrushToolIsActive() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.arrowLine)
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 140))
+        window.test_mouseDragged(to: NSPoint(x: 220, y: 180))
+        window.test_mouseUp(at: NSPoint(x: 220, y: 180))
+
+        guard let original = window.test_arrowLine(at: 0) else {
+            return XCTFail("Expected arrow annotation")
+        }
+        let body = NSPoint(x: 100 + original.boundingRect.midX, y: 100 + original.boundingRect.midY)
+
+        window.test_activateShapeTool(.brush)
+        window.test_mouseDown(at: body)
+        window.test_mouseDragged(to: NSPoint(x: body.x + 24, y: body.y + 18))
+        window.test_mouseUp(at: NSPoint(x: body.x + 24, y: body.y + 18))
+
+        guard let moved = window.test_arrowLine(at: 0) else {
+            return XCTFail("Expected moved arrow annotation")
+        }
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(window.test_selectedAnnotationKind, .arrowLine)
+        XCTAssertEqual(moved.start.x, original.start.x + 24, accuracy: 0.1)
+        XCTAssertEqual(moved.start.y, original.start.y + 18, accuracy: 0.1)
+        XCTAssertEqual(moved.end.x, original.end.x + 24, accuracy: 0.1)
+        XCTAssertEqual(moved.end.y, original.end.y + 18, accuracy: 0.1)
+        XCTAssertEqual(moved.control.x, original.control.x + 24, accuracy: 0.1)
+        XCTAssertEqual(moved.control.y, original.control.y + 18, accuracy: 0.1)
+    }
+
+    func testOverlayWindowArrowControlPointWinsOverSelectionResizeHandle() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateShapeTool(.arrowLine)
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 140))
+        window.test_mouseDragged(to: NSPoint(x: 220, y: 180))
+        window.test_mouseUp(at: NSPoint(x: 220, y: 180))
+
+        guard let original = window.test_arrowLine(at: 0) else {
+            return XCTFail("Expected arrow annotation")
+        }
+        let initialControl = NSPoint(x: selection.minX + original.control.x, y: selection.minY + original.control.y)
+        let edgeControl = NSPoint(x: selection.maxX - 4, y: initialControl.y)
+        window.test_mouseDown(at: initialControl)
+        window.test_mouseDragged(to: edgeControl)
+        window.test_mouseUp(at: edgeControl)
+
+        window.test_mouseDown(at: edgeControl)
+        window.test_mouseDragged(to: NSPoint(x: edgeControl.x - 40, y: edgeControl.y + 40))
+        window.test_mouseUp(at: NSPoint(x: edgeControl.x - 40, y: edgeControl.y + 40))
+
+        guard let updated = window.test_arrowLine(at: 0) else {
+            return XCTFail("Expected updated arrow annotation")
+        }
+        XCTAssertEqual(window.test_lockedSelectionRect, selection)
+        XCTAssertEqual(updated.control.x, edgeControl.x - selection.minX - 40, accuracy: 0.1)
+        XCTAssertEqual(updated.control.y, edgeControl.y - selection.minY + 40, accuracy: 0.1)
+    }
+
+    func testOverlayWindowUsesBrushCursorAtSelectedBrushBoundsInsteadOfResizeHandle() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.brush)
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 140))
+        window.test_mouseDragged(to: NSPoint(x: 180, y: 180))
+        window.test_mouseUp(at: NSPoint(x: 180, y: 180))
+
+        guard let original = window.test_annotationRect(at: 0) else {
+            return XCTFail("Expected brush annotation")
+        }
+
+        let formerBottomRightHandle = NSPoint(x: 100 + original.maxX - 1, y: 100 + original.minY)
+        XCTAssertEqual(window.test_cursorStyle(at: formerBottomRightHandle), .brush)
+    }
+
     func testDefaultCaptureFilenameIncludesTimestampToSecond() {
         let date = Date(timeIntervalSince1970: 0)
 
@@ -214,8 +738,20 @@ final class SelectionToolbarStateTests: XCTestCase {
         )
 
         XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: style.strokeColor), "#FF001A")
-        XCTAssertEqual(style.strokeWidth, 5)
+        XCTAssertEqual(style.strokeWidth, 3)
         XCTAssertFalse(style.fillEnabled)
+    }
+
+    func testBrushActivationFallsBackToSolidWhenCurrentStrokePatternIsSketchOnly() {
+        var current = CaptureAnnotationStyle()
+        current.strokePattern = .sketchDashed
+
+        let style = SelectionToolbarState.brushActivationStyle(
+            currentStyle: current,
+            paletteColors: SelectionOverlayWindow.defaultPaletteColors
+        )
+
+        XCTAssertEqual(style.strokePattern, .solid)
     }
 
     func testBrushOptionsToolbarShowsStrokeStyleAndColorsOnly() {
@@ -236,11 +772,226 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertGreaterThan(layout.colorSwatches.first!.minX, layout.strokeStyle.maxX)
     }
 
-    func testBrushAnnotationsAreNotEditableAfterDrawing() {
+    func testBrushAnnotationStyleIsNotEditableAfterDrawing() {
         XCTAssertTrue(SelectionToolbarState.annotationKindSupportsPostDrawEditing(.rectangle))
         XCTAssertTrue(SelectionToolbarState.annotationKindSupportsPostDrawEditing(.ellipse))
         XCTAssertTrue(SelectionToolbarState.annotationKindSupportsPostDrawEditing(.arrowLine))
         XCTAssertFalse(SelectionToolbarState.annotationKindSupportsPostDrawEditing(.brush))
+    }
+
+    func testBrushAnnotationGeometryCanMoveButNotResizeAfterDrawing() {
+        XCTAssertTrue(SelectionToolbarState.annotationKindSupportsGeometryEditing(.rectangle))
+        XCTAssertTrue(SelectionToolbarState.annotationKindSupportsGeometryEditing(.ellipse))
+        XCTAssertFalse(SelectionToolbarState.annotationKindSupportsGeometryEditing(.arrowLine))
+        XCTAssertFalse(SelectionToolbarState.annotationKindSupportsGeometryEditing(.brush))
+    }
+
+    func testBrushAnnotationStyleIsFrozenAfterDrawing() {
+        var original = CaptureAnnotationStyle()
+        original.strokeWidth = 5
+        original.strokePattern = .solid
+        original.strokeColor = .systemRed
+
+        var current = CaptureAnnotationStyle()
+        current.strokeWidth = 7
+        current.strokePattern = .dashLong
+        current.strokeColor = .systemBlue
+
+        let applied = SelectionToolbarState.updatedSelectedAnnotationStyle(
+            kind: .brush,
+            existingStyle: original,
+            currentStyle: current
+        )
+
+        XCTAssertEqual(applied.strokeWidth, 5)
+        XCTAssertEqual(applied.strokePattern, .solid)
+        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: applied.strokeColor), "#FF3B30")
+    }
+
+    func testEditableAnnotationStyleUsesCurrentToolbarStyle() {
+        var original = CaptureAnnotationStyle()
+        original.strokeWidth = 4
+        original.strokePattern = .solid
+
+        var current = CaptureAnnotationStyle()
+        current.strokeWidth = 7
+        current.strokePattern = .dashLong
+
+        let applied = SelectionToolbarState.updatedSelectedAnnotationStyle(
+            kind: .rectangle,
+            existingStyle: original,
+            currentStyle: current
+        )
+
+        XCTAssertEqual(applied.strokeWidth, 7)
+        XCTAssertEqual(applied.strokePattern, .dashLong)
+    }
+
+    func testSelectionResizeCursorWinsOverBrushOnSelectionBorder() {
+        XCTAssertEqual(
+            SelectionToolbarState.overlayCursorStyle(
+                isSelecting: false,
+                isToolbarOrPanelPoint: false,
+                resizeHandle: nil,
+                selectionResizeHandle: .topLeft,
+                isAnnotationBorder: false,
+                isInsideSelection: true,
+                isShapeToolActive: true,
+                currentShapeKind: .brush
+            ),
+            .resizeTopLeft
+        )
+    }
+
+    func testBrushCursorStillShowsInsideSelectionAwayFromBorder() {
+        XCTAssertEqual(
+            SelectionToolbarState.overlayCursorStyle(
+                isSelecting: false,
+                isToolbarOrPanelPoint: false,
+                resizeHandle: nil,
+                selectionResizeHandle: nil,
+                isAnnotationBorder: false,
+                isInsideSelection: true,
+                isShapeToolActive: true,
+                currentShapeKind: .brush
+            ),
+            .brush
+        )
+    }
+
+    func testBrushCursorUsesArrowOutsideSelectionAndToolbar() {
+        XCTAssertEqual(
+            SelectionToolbarState.overlayCursorStyle(
+                isSelecting: false,
+                isToolbarOrPanelPoint: false,
+                resizeHandle: nil,
+                selectionResizeHandle: nil,
+                isAnnotationBorder: false,
+                isInsideSelection: false,
+                isShapeToolActive: true,
+                currentShapeKind: .brush
+            ),
+            .arrow
+        )
+
+        XCTAssertEqual(
+            SelectionToolbarState.overlayCursorStyle(
+                isSelecting: false,
+                isToolbarOrPanelPoint: true,
+                resizeHandle: nil,
+                selectionResizeHandle: nil,
+                isAnnotationBorder: false,
+                isInsideSelection: true,
+                isShapeToolActive: true,
+                currentShapeKind: .brush
+            ),
+            .arrow
+        )
+    }
+
+    func testBrushCursorUsesArrowOnToolbarDragArea() {
+        XCTAssertEqual(
+            SelectionToolbarState.overlayCursorStyle(
+                isSelecting: false,
+                isToolbarOrPanelPoint: true,
+                resizeHandle: nil,
+                selectionResizeHandle: nil,
+                isAnnotationBorder: true,
+                isInsideSelection: false,
+                isShapeToolActive: true,
+                currentShapeKind: .brush
+            ),
+            .arrow
+        )
+    }
+
+    func testShapeToolCursorUsesMoveOnAnnotationBorderWhileToolIsActive() {
+        XCTAssertEqual(
+            SelectionToolbarState.overlayCursorStyle(
+                isSelecting: false,
+                isToolbarOrPanelPoint: false,
+                resizeHandle: nil,
+                selectionResizeHandle: nil,
+                isAnnotationBorder: true,
+                isInsideSelection: true,
+                isShapeToolActive: true,
+                currentShapeKind: .rectangle
+            ),
+            .move
+        )
+        XCTAssertEqual(
+            SelectionToolbarState.overlayCursorStyle(
+                isSelecting: false,
+                isToolbarOrPanelPoint: false,
+                resizeHandle: nil,
+                selectionResizeHandle: nil,
+                isAnnotationBorder: true,
+                isInsideSelection: true,
+                isShapeToolActive: true,
+                currentShapeKind: .arrowLine
+            ),
+            .move
+        )
+    }
+
+    func testShapeToolCursorUsesResizeOnAnnotationHandleWhileToolIsActive() {
+        XCTAssertEqual(
+            SelectionToolbarState.overlayCursorStyle(
+                isSelecting: false,
+                isToolbarOrPanelPoint: false,
+                resizeHandle: .topLeft,
+                selectionResizeHandle: nil,
+                isAnnotationBorder: true,
+                isInsideSelection: true,
+                isShapeToolActive: true,
+                currentShapeKind: .rectangle
+            ),
+            .resizeTopLeft
+        )
+        XCTAssertEqual(
+            SelectionToolbarState.overlayCursorStyle(
+                isSelecting: false,
+                isToolbarOrPanelPoint: false,
+                resizeHandle: .right,
+                selectionResizeHandle: nil,
+                isAnnotationBorder: true,
+                isInsideSelection: true,
+                isShapeToolActive: true,
+                currentShapeKind: .arrowLine
+            ),
+            .resizeLeftRight
+        )
+    }
+
+    func testAnnotationResizeCursorWinsOverSelectionResizeWhileDrawingToolIsActive() {
+        XCTAssertEqual(
+            SelectionToolbarState.overlayCursorStyle(
+                isSelecting: false,
+                isToolbarOrPanelPoint: false,
+                resizeHandle: .topLeft,
+                selectionResizeHandle: .right,
+                isAnnotationBorder: true,
+                isInsideSelection: true,
+                isShapeToolActive: true,
+                currentShapeKind: .rectangle
+            ),
+            .resizeTopLeft
+        )
+    }
+
+    func testAnnotatingCursorUsesArrowOutsideSelection() {
+        XCTAssertEqual(
+            SelectionToolbarState.overlayCursorStyle(
+                isSelecting: false,
+                isToolbarOrPanelPoint: false,
+                resizeHandle: nil,
+                selectionResizeHandle: nil,
+                isAnnotationBorder: false,
+                isInsideSelection: false,
+                currentShapeKind: .rectangle
+            ),
+            .arrow
+        )
     }
 
     func testSpecialArrowTypesCanOnlyBeSelectedOnOneEnd() {
@@ -320,6 +1071,70 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(SelectionToolbarState.arrowLineHitTarget(at: NSPoint(x: 60, y: 60), line: line), .control)
         XCTAssertEqual(SelectionToolbarState.arrowLineHitTarget(at: NSPoint(x: 60, y: 34), line: line), .body)
         XCTAssertEqual(SelectionToolbarState.arrowLineHitTarget(at: NSPoint(x: 60, y: 90), line: line), .none)
+    }
+
+    func testBrushRotationHitTargetOnlyUsesPathEndpoints() {
+        let path = CaptureBrushPath(points: [
+            NSPoint(x: 10, y: 10),
+            NSPoint(x: 35, y: 45),
+            NSPoint(x: 60, y: 70),
+            NSPoint(x: 110, y: 10),
+        ])
+
+        XCTAssertEqual(SelectionToolbarState.brushRotationHitTarget(at: NSPoint(x: 10, y: 10), path: path), .start)
+        XCTAssertEqual(SelectionToolbarState.brushRotationHitTarget(at: NSPoint(x: 110, y: 10), path: path), .end)
+        XCTAssertEqual(SelectionToolbarState.brushRotationHitTarget(at: NSPoint(x: 60, y: 70), path: path), .none)
+    }
+
+    func testBrushRotationHandleAngleFollowsEndpointTangent() {
+        let horizontal = CaptureBrushPath(points: [
+            NSPoint(x: 10, y: 10),
+            NSPoint(x: 40, y: 10),
+            NSPoint(x: 70, y: 10),
+        ])
+        XCTAssertEqual(
+            SelectionToolbarState.brushRotationHandleAngle(for: .start, path: horizontal)!,
+            .pi,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            SelectionToolbarState.brushRotationHandleAngle(for: .end, path: horizontal)!,
+            0,
+            accuracy: 0.001
+        )
+
+        let vertical = CaptureBrushPath(points: [
+            NSPoint(x: 10, y: 10),
+            NSPoint(x: 10, y: 40),
+            NSPoint(x: 10, y: 70),
+        ])
+        XCTAssertEqual(
+            SelectionToolbarState.brushRotationHandleAngle(for: .end, path: vertical)!,
+            .pi / 2,
+            accuracy: 0.001
+        )
+    }
+
+    func testDraggingBrushEndpointTransformsWholePathAroundOppositeEndpoint() {
+        let path = CaptureBrushPath(points: [
+            NSPoint(x: 10, y: 10),
+            NSPoint(x: 40, y: 30),
+            NSPoint(x: 70, y: 10),
+        ])
+
+        let moved = SelectionToolbarState.rotatedBrushPath(
+            path,
+            dragging: .end,
+            to: NSPoint(x: 40, y: 40)
+        )
+
+        XCTAssertEqual(moved.points.count, path.points.count)
+        XCTAssertEqual(moved.points[0].x, 10, accuracy: 0.1)
+        XCTAssertEqual(moved.points[0].y, 10, accuracy: 0.1)
+        XCTAssertEqual(moved.points[1].x, 15, accuracy: 0.1)
+        XCTAssertEqual(moved.points[1].y, 35, accuracy: 0.1)
+        XCTAssertEqual(moved.points[2].x, 40, accuracy: 0.1)
+        XCTAssertEqual(moved.points[2].y, 40, accuracy: 0.1)
     }
 
     func testPrimaryShapeToolSelectionTogglesOffWhenAnyShapeToolIsActive() {
@@ -490,17 +1305,33 @@ final class SelectionToolbarStateTests: XCTestCase {
             freeOptions.map(\.pattern),
             [.solid, .dashLong, .dashNarrow, .dashLongShort, .sketchSolid, .sketchDashed]
         )
-        XCTAssertEqual(
-            freeOptions.filter(\.requiresPremiumAccess).map(\.pattern),
-            [.sketchSolid, .sketchDashed]
-        )
-        XCTAssertEqual(
-            freeOptions.filter { !$0.isEnabled }.map(\.pattern),
-            [.sketchSolid, .sketchDashed]
-        )
+        XCTAssertTrue(freeOptions.allSatisfy(\.isEnabled))
 
         let premiumOptions = SelectionToolbarState.strokePatternOptions(canUsePremiumStrokePatterns: true)
         XCTAssertTrue(premiumOptions.allSatisfy(\.isEnabled))
+    }
+
+    func testBrushStrokePatternOptionsHideSketchLines() {
+        let options = SelectionToolbarState.strokePatternOptions(
+            canUsePremiumStrokePatterns: true,
+            mode: .brush
+        )
+
+        XCTAssertEqual(options.map(\.pattern), [.solid, .dashLong, .dashNarrow, .dashLongShort])
+    }
+
+    func testShapeAndArrowStrokePatternOptionsKeepSketchLines() {
+        let shapeOptions = SelectionToolbarState.strokePatternOptions(
+            canUsePremiumStrokePatterns: true,
+            mode: .shape
+        )
+        let arrowOptions = SelectionToolbarState.strokePatternOptions(
+            canUsePremiumStrokePatterns: true,
+            mode: .arrowLine
+        )
+
+        XCTAssertEqual(shapeOptions.map(\.pattern), CaptureStrokePattern.allCases)
+        XCTAssertEqual(arrowOptions.map(\.pattern), CaptureStrokePattern.allCases)
     }
 
     func testStrokeMenuHitTargetSelectsEveryMenuItem() {
@@ -788,6 +1619,19 @@ final class SelectionToolbarStateTests: XCTestCase {
         )
     }
 
+    func testSelectionResizeHandleAcceptsVisibleHandleOutset() {
+        let rect = NSRect(x: 100, y: 100, width: 220, height: 140)
+
+        XCTAssertEqual(
+            SelectionToolbarState.selectionResizeHandle(at: NSPoint(x: rect.maxX + 10, y: rect.midY), in: rect),
+            .right
+        )
+        XCTAssertEqual(
+            SelectionToolbarState.selectionResizeHandle(at: NSPoint(x: rect.midX, y: rect.maxY + 10), in: rect),
+            .top
+        )
+    }
+
     func testSelectionResizeHandleHitsCornersAndIgnoresInterior() {
         let rect = NSRect(x: 100, y: 100, width: 220, height: 140)
 
@@ -804,7 +1648,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         )
     }
 
-    func testAnnotationBorderMouseDownWinsOverSelectionResize() {
+    func testAnnotationMoveMouseDownWinsOverSelectionResize() {
         XCTAssertEqual(
             SelectionToolbarState.annotatingMouseDownTarget(
                 shapeResizeHandle: nil,
