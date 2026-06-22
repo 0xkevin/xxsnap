@@ -827,6 +827,22 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_optionsToolbarMode, .marker)
     }
 
+    func testOverlayWindowMarkerActivationUsesDefaultHighlighterStyle() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_activateShapeTool(.rectangle)
+        window.test_setCurrentStrokePattern(.dashLong)
+
+        window.test_activateShapeTool(.marker)
+
+        guard let style = window.test_currentStyle else {
+            return XCTFail("Expected current marker style")
+        }
+        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: style.strokeColor), "#D4EEA7")
+        XCTAssertEqual(style.strokeWidth, 18)
+        XCTAssertEqual(style.strokePattern, .solid)
+        XCTAssertFalse(style.fillEnabled)
+    }
+
     func testMarkerActivationClearsStaleStrokeStyleMenu() {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_activateShapeTool(.rectangle)
@@ -835,6 +851,17 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_activateShapeTool(.marker)
 
         XCTAssertFalse(window.test_showsStrokeStyleMenu)
+    }
+
+    func testMarkerActivationClearsStaleArrowTypeMenus() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_activateShapeTool(.arrowLine)
+        window.test_setArrowTypeMenusVisible(start: true, end: true)
+
+        window.test_activateShapeTool(.marker)
+
+        XCTAssertFalse(window.test_showsStartArrowTypeMenu)
+        XCTAssertFalse(window.test_showsEndArrowTypeMenu)
     }
 
     func testBrushAnnotationStyleIsNotEditableAfterDrawing() {
