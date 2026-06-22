@@ -827,6 +827,16 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_optionsToolbarMode, .marker)
     }
 
+    func testMarkerActivationClearsStaleStrokeStyleMenu() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_activateShapeTool(.rectangle)
+        window.test_setStrokeStyleMenuVisible(true)
+
+        window.test_activateShapeTool(.marker)
+
+        XCTAssertFalse(window.test_showsStrokeStyleMenu)
+    }
+
     func testBrushAnnotationStyleIsNotEditableAfterDrawing() {
         XCTAssertTrue(SelectionToolbarState.annotationKindSupportsPostDrawEditing(.rectangle))
         XCTAssertTrue(SelectionToolbarState.annotationKindSupportsPostDrawEditing(.ellipse))

@@ -314,6 +314,10 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_setCurrentStrokePattern(pattern)
     }
 
+    func test_setStrokeStyleMenuVisible(_ isVisible: Bool) {
+        (contentView as? SelectionOverlayView)?.test_setStrokeStyleMenuVisible(isVisible)
+    }
+
     func test_beginAnnotatingMouseDown(at point: NSPoint) {
         (contentView as? SelectionOverlayView)?.test_beginAnnotatingMouseDown(at: point)
     }
@@ -389,6 +393,10 @@ final class SelectionOverlayWindow: NSWindow {
 
     var test_optionsToolbarMode: SelectionToolbarState.OptionsToolbarMode? {
         (contentView as? SelectionOverlayView)?.test_optionsToolbarMode
+    }
+
+    var test_showsStrokeStyleMenu: Bool {
+        (contentView as? SelectionOverlayView)?.test_showsStrokeStyleMenu ?? false
     }
 
     var test_selectedBrushEndpointMarkers: [NSPoint] {
@@ -727,7 +735,7 @@ private final class SelectionOverlayView: NSView {
         if showsCornerRadiusPanel {
             drawCornerRadiusPanel(for: selectionRect)
         }
-        if showsStrokeStyleMenu {
+        if showsStrokeStyleMenu, SelectionToolbarState.showsStrokeStyleField(for: optionsToolbarMode) {
             drawStrokeStyleMenu(for: selectionRect)
         }
         if showsStartArrowTypeMenu {
@@ -1643,6 +1651,9 @@ private final class SelectionOverlayView: NSView {
                     paletteColors: colors
                 )
             }
+            if !SelectionToolbarState.showsStrokeStyleField(for: optionsToolbarMode) {
+                showsStrokeStyleMenu = false
+            }
             currentStyle.strokePattern = .solid
         } else {
             selectedAnnotationIndex = nil
@@ -1664,6 +1675,9 @@ private final class SelectionOverlayView: NSView {
         isShapeToolActive = true
         if shape == .arrowLine || shape == .brush {
             showsCornerRadiusPanel = false
+        }
+        if !SelectionToolbarState.showsStrokeStyleField(for: optionsToolbarMode) {
+            showsStrokeStyleMenu = false
         }
         currentStyle.strokePattern = .solid
         clearSelectedAnnotationIfNeededForActiveTool()
@@ -1692,6 +1706,10 @@ private final class SelectionOverlayView: NSView {
 
     func test_setCurrentStrokePattern(_ pattern: CaptureStrokePattern) {
         currentStyle.strokePattern = pattern
+    }
+
+    func test_setStrokeStyleMenuVisible(_ isVisible: Bool) {
+        showsStrokeStyleMenu = isVisible
     }
 
     func test_beginAnnotatingMouseDown(at point: NSPoint) {
@@ -1770,6 +1788,10 @@ private final class SelectionOverlayView: NSView {
 
     var test_optionsToolbarMode: SelectionToolbarState.OptionsToolbarMode {
         optionsToolbarMode
+    }
+
+    var test_showsStrokeStyleMenu: Bool {
+        showsStrokeStyleMenu
     }
 
     var test_selectedBrushEndpointMarkers: [NSPoint] {
