@@ -521,16 +521,20 @@ enum SelectionToolbarState {
         let signedWidth: CGFloat
         let signedHeight: CGFloat
         switch handle {
-        case .topLeft, .left, .bottomLeft:
-            signedWidth = -rawWidth
-        default:
+        case .top, .bottom:
             signedWidth = rawWidth
+        case .left, .right:
+            signedWidth = signedMagnitude(rawWidth, delta: point.x - anchor.x, defaultSign: defaultHorizontalSign(for: handle))
+        case .topLeft, .topRight, .bottomLeft, .bottomRight:
+            signedWidth = signedMagnitude(rawWidth, delta: point.x - anchor.x, defaultSign: defaultHorizontalSign(for: handle))
         }
         switch handle {
-        case .bottomLeft, .bottom, .bottomRight:
-            signedHeight = -rawHeight
-        default:
+        case .left, .right:
             signedHeight = rawHeight
+        case .top, .bottom:
+            signedHeight = signedMagnitude(rawHeight, delta: point.y - anchor.y, defaultSign: defaultVerticalSign(for: handle))
+        case .topLeft, .topRight, .bottomLeft, .bottomRight:
+            signedHeight = signedMagnitude(rawHeight, delta: point.y - anchor.y, defaultSign: defaultVerticalSign(for: handle))
         }
 
         let centerAdjustedAnchor: NSPoint
@@ -558,6 +562,31 @@ enum SelectionToolbarState {
                 width: abs(signedWidth),
                 height: abs(signedHeight)
             )
+        }
+    }
+
+    private static func signedMagnitude(_ magnitude: CGFloat, delta: CGFloat, defaultSign: CGFloat) -> CGFloat {
+        guard delta != 0 else {
+            return magnitude * defaultSign
+        }
+        return magnitude * (delta < 0 ? -1 : 1)
+    }
+
+    private static func defaultHorizontalSign(for handle: OverlayResizeHandle) -> CGFloat {
+        switch handle {
+        case .topLeft, .left, .bottomLeft:
+            return -1
+        default:
+            return 1
+        }
+    }
+
+    private static func defaultVerticalSign(for handle: OverlayResizeHandle) -> CGFloat {
+        switch handle {
+        case .bottomLeft, .bottom, .bottomRight:
+            return -1
+        default:
+            return 1
         }
     }
 

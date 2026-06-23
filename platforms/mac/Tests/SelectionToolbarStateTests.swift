@@ -1989,6 +1989,22 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(resized.maxY, 200, accuracy: 0.1)
     }
 
+    func testLockedAspectRatioSelectionResizeCanFlipPastAnchor() {
+        let start = NSRect(x: 100, y: 100, width: 200, height: 100)
+        let resized = SelectionToolbarState.resizedSelectionRect(
+            from: start,
+            handle: .bottomRight,
+            point: NSPoint(x: 60, y: 240),
+            lockAspectRatio: true
+        )
+
+        XCTAssertEqual(resized.width / resized.height, 2, accuracy: 0.01)
+        XCTAssertEqual(resized.maxX, 100, accuracy: 0.1)
+        XCTAssertEqual(resized.minY, 200, accuracy: 0.1)
+        XCTAssertGreaterThan(resized.width, 8)
+        XCTAssertGreaterThan(resized.height, 8)
+    }
+
     func testPopoverRectPrefersBelowAnchorWithoutCoveringIt() {
         let anchor = NSRect(x: 600, y: 420, width: 12, height: 12)
         let popover = SelectionToolbarState.popoverRect(
@@ -2233,6 +2249,27 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(resized.width / resized.height, 2, accuracy: 0.01)
     }
 
+    func testLockedAspectRatioSelectionDragCanContinueAfterCrossingMinimumSize() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 200, height: 100))
+
+        guard let aspectPoint = window.test_measurementControlPoint(.aspectRatioLock) else {
+            return XCTFail("Expected aspect ratio control")
+        }
+        window.test_mouseDown(at: aspectPoint)
+
+        window.test_mouseDown(at: NSPoint(x: 300, y: 100))
+        window.test_mouseDragged(to: NSPoint(x: 60, y: 240))
+        window.test_mouseUp(at: NSPoint(x: 60, y: 240))
+
+        guard let resized = window.test_lockedSelectionRect else {
+            return XCTFail("Expected locked selection")
+        }
+        XCTAssertEqual(resized.width / resized.height, 2, accuracy: 0.01)
+        XCTAssertEqual(resized.maxX, 100, accuracy: 0.1)
+        XCTAssertEqual(resized.minY, 200, accuracy: 0.1)
+    }
+
     func testClickingRefreshMeasurementControlKeepsSelectionAndRequestsRefresh() {
         let expectation = expectation(description: "refresh requested")
         let window = SelectionOverlayWindow(
@@ -2253,6 +2290,27 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         wait(for: [expectation], timeout: 1)
         XCTAssertEqual(window.test_lockedSelectionRect, selection)
+    }
+
+    func testCaptureRefreshIgnoresSniporyAsRefreshTarget() {
+        XCTAssertFalse(
+            CaptureCoordinator.shouldRefreshTargetApplication(
+                targetBundleIdentifier: "com.snipory.v2.mac",
+                mainBundleIdentifier: "com.snipory.v2.mac"
+            )
+        )
+        XCTAssertFalse(
+            CaptureCoordinator.shouldRefreshTargetApplication(
+                targetBundleIdentifier: nil,
+                mainBundleIdentifier: "com.snipory.v2.mac"
+            )
+        )
+        XCTAssertTrue(
+            CaptureCoordinator.shouldRefreshTargetApplication(
+                targetBundleIdentifier: "com.apple.Safari",
+                mainBundleIdentifier: "com.snipory.v2.mac"
+            )
+        )
     }
 
     func testAnnotationMoveMouseDownWinsOverSelectionResize() {

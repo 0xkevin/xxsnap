@@ -3304,15 +3304,17 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func drawSelectionHandles(_ rect: NSRect) {
+        let radius = min(selectionCornerRadius, rect.width / 2, rect.height / 2)
+        let cornerOffset = radius > 0 ? radius : 0
         let handles = [
-            NSPoint(x: rect.minX, y: rect.maxY),
+            NSPoint(x: rect.minX + cornerOffset, y: rect.maxY - cornerOffset),
             NSPoint(x: rect.midX, y: rect.maxY),
-            NSPoint(x: rect.maxX, y: rect.maxY),
+            NSPoint(x: rect.maxX - cornerOffset, y: rect.maxY - cornerOffset),
             NSPoint(x: rect.minX, y: rect.midY),
             NSPoint(x: rect.maxX, y: rect.midY),
-            NSPoint(x: rect.minX, y: rect.minY),
+            NSPoint(x: rect.minX + cornerOffset, y: rect.minY + cornerOffset),
             NSPoint(x: rect.midX, y: rect.minY),
-            NSPoint(x: rect.maxX, y: rect.minY),
+            NSPoint(x: rect.maxX - cornerOffset, y: rect.minY + cornerOffset),
         ]
 
         NSColor(calibratedRed: 83 / 255, green: 120 / 255, blue: 232 / 255, alpha: 1).setFill()
@@ -3372,12 +3374,19 @@ private final class SelectionOverlayView: NSView {
     private func drawCornerStyleIcon(in rect: NSRect, rounded: Bool) {
         let path = NSBezierPath()
         if rounded {
-            path.move(to: NSPoint(x: rect.minX + 1, y: rect.minY + 1))
+            let inset: CGFloat = 2
+            let radius = min(rect.width, rect.height) * 0.34
+            let start = NSPoint(x: rect.minX + inset, y: rect.minY + inset)
+            let verticalEnd = NSPoint(x: rect.minX + inset, y: rect.maxY - inset - radius)
+            let curveEnd = NSPoint(x: rect.minX + inset + radius, y: rect.maxY - inset)
+            path.move(to: start)
+            path.line(to: verticalEnd)
             path.curve(
-                to: NSPoint(x: rect.maxX - 1, y: rect.maxY - 1),
-                controlPoint1: NSPoint(x: rect.minX + 1, y: rect.maxY - 7),
-                controlPoint2: NSPoint(x: rect.minX + 7, y: rect.maxY - 1)
+                to: curveEnd,
+                controlPoint1: NSPoint(x: verticalEnd.x, y: curveEnd.y),
+                controlPoint2: NSPoint(x: verticalEnd.x, y: curveEnd.y)
             )
+            path.line(to: NSPoint(x: rect.maxX - inset, y: rect.maxY - inset))
         } else {
             path.move(to: NSPoint(x: rect.minX + 1, y: rect.minY + 1))
             path.line(to: NSPoint(x: rect.minX + 1, y: rect.maxY - 1))
@@ -3416,8 +3425,8 @@ private final class SelectionOverlayView: NSView {
 
     private func drawRefreshIcon(in rect: NSRect) {
         let path = NSBezierPath()
-        path.appendArc(withCenter: NSPoint(x: rect.midX, y: rect.midY), radius: rect.width * 0.34, startAngle: 45, endAngle: 205)
-        path.appendArc(withCenter: NSPoint(x: rect.midX, y: rect.midY), radius: rect.width * 0.34, startAngle: 225, endAngle: 25)
+        path.appendArc(withCenter: NSPoint(x: rect.midX, y: rect.midY), radius: rect.width * 0.34, startAngle: 100, endAngle: 190)
+        path.appendArc(withCenter: NSPoint(x: rect.midX, y: rect.midY), radius: rect.width * 0.34, startAngle: 280, endAngle: 10)
 
         NSColor.white.setStroke()
         path.lineWidth = 1.6
@@ -3426,15 +3435,21 @@ private final class SelectionOverlayView: NSView {
         path.stroke()
 
         let topArrow = NSBezierPath()
-        topArrow.move(to: NSPoint(x: rect.minX + 2, y: rect.midY + 2))
-        topArrow.line(to: NSPoint(x: rect.minX + 2, y: rect.midY + 6))
-        topArrow.line(to: NSPoint(x: rect.minX + 6, y: rect.midY + 6))
+        topArrow.move(to: NSPoint(x: rect.minX + 3, y: rect.midY + 3))
+        topArrow.line(to: NSPoint(x: rect.minX + 3, y: rect.midY + 7))
+        topArrow.line(to: NSPoint(x: rect.minX + 7, y: rect.midY + 7))
+        topArrow.lineWidth = 1.6
+        topArrow.lineCapStyle = .round
+        topArrow.lineJoinStyle = .round
         topArrow.stroke()
 
         let bottomArrow = NSBezierPath()
-        bottomArrow.move(to: NSPoint(x: rect.maxX - 2, y: rect.midY - 2))
-        bottomArrow.line(to: NSPoint(x: rect.maxX - 2, y: rect.midY - 6))
-        bottomArrow.line(to: NSPoint(x: rect.maxX - 6, y: rect.midY - 6))
+        bottomArrow.move(to: NSPoint(x: rect.maxX - 3, y: rect.midY - 3))
+        bottomArrow.line(to: NSPoint(x: rect.maxX - 3, y: rect.midY - 7))
+        bottomArrow.line(to: NSPoint(x: rect.maxX - 7, y: rect.midY - 7))
+        bottomArrow.lineWidth = 1.6
+        bottomArrow.lineCapStyle = .round
+        bottomArrow.lineJoinStyle = .round
         bottomArrow.stroke()
     }
 

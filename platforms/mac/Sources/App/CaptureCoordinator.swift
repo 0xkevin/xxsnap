@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 import UniformTypeIdentifiers
 
 @MainActor
@@ -61,6 +62,7 @@ final class CaptureCoordinator {
             defer {
                 self.startTask = nil
             }
+            let refreshTargetApplication = Self.refreshTargetApplication()
 
             let backgroundImage: NSImage?
             do {
@@ -80,6 +82,18 @@ final class CaptureCoordinator {
                 refreshHandler: { [weak self] in
                     guard let self else {
                         return nil
+                    }
+                    let overlayWindow = self.overlayWindow
+                    overlayWindow?.orderOut(nil)
+                    defer {
+                        overlayWindow?.present()
+                    }
+                    await Self.sleepForRefreshInterval(nanoseconds: 120_000_000)
+                    if let refreshTargetApplication {
+                        refreshTargetApplication.activate(options: [])
+                        await Self.sleepForRefreshInterval(nanoseconds: 80_000_000)
+                        Self.sendRefreshShortcut()
+                        await Self.sleepForRefreshInterval(nanoseconds: 600_000_000)
                     }
                     let refreshedImage = try await self.screenCaptureService.captureDesktopImage()
                     self.frozenDesktopImage = refreshedImage
@@ -119,6 +133,47 @@ final class CaptureCoordinator {
     private func openScreenCaptureSettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
             NSWorkspace.shared.open(url)
+        }
+    }
+
+    nonisolated static func shouldRefreshTargetApplication(
+        targetBundleIdentifier: String?,
+        mainBundleIdentifier: String?
+    ) -> Bool {
+        guard let targetBundleIdentifier, !targetBundleIdentifier.isEmpty else {
+            return false
+        }
+        return targetBundleIdentifier != mainBundleIdentifier
+    }
+
+    private static func refreshTargetApplication() -> NSRunningApplication? {
+        let app = NSWorkspace.shared.frontmostApplication
+        guard shouldRefreshTargetApplication(
+            targetBundleIdentifier: app?.bundleIdentifier,
+            mainBundleIdentifier: Bundle.main.bundleIdentifier
+        ) else {
+            return nil
+        }
+        return app
+    }
+
+    private static func sendRefreshShortcut() {
+        guard
+            let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: 15, keyDown: true),
+            let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: 15, keyDown: false)
+        else {
+            return
+        }
+        keyDown.flags = .maskCommand
+        keyUp.flags = .maskCommand
+        keyDown.post(tap: .cghidEventTap)
+        keyUp.post(tap: .cghidEventTap)
+    }
+
+    private static func sleepForRefreshInterval(nanoseconds: UInt64) async {
+        do {
+            try await Task.sleep(nanoseconds: nanoseconds)
+        } catch {
         }
     }
 
