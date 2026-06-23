@@ -962,6 +962,25 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(markerLine.end.y, 80, accuracy: 0.1)
     }
 
+    func testOverlayWindowClickingMarkerCreatesDotAnnotation() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.marker)
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 150))
+
+        guard let markerLine = window.test_markerLine(at: 0) else {
+            return XCTFail("Expected marker dot annotation")
+        }
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(window.test_selectedAnnotationKind, .marker)
+        XCTAssertEqual(markerLine.start.x, 40, accuracy: 0.1)
+        XCTAssertEqual(markerLine.start.y, 50, accuracy: 0.1)
+        XCTAssertEqual(markerLine.end.x, 40, accuracy: 0.1)
+        XCTAssertEqual(markerLine.end.y, 50, accuracy: 0.1)
+    }
+
     func testOverlayWindowIgnoresShortMarkerDragsUnderEightPoints() {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))

@@ -161,6 +161,29 @@ final class SniporyMacTests: XCTestCase {
         XCTAssertEqual(rendered.representations.first?.pixelsHigh, image.representations.first?.pixelsHigh)
     }
 
+    func testAnnotationRendererDrawsZeroLengthMarkerAsDot() throws {
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = SelectionToolbarState.defaultMarkerColor
+        style.strokeWidth = 18
+
+        let marker = CaptureMarkerLine(start: NSPoint(x: 40, y: 40), end: NSPoint(x: 40, y: 40))
+        let image = try makeBitmapImage(
+            pointSize: NSSize(width: 80, height: 80),
+            pixelWidth: 80,
+            pixelHeight: 80,
+            fill: .white
+        )
+        let rendered = CaptureAnnotationRenderer.render(
+            image: image,
+            annotations: [CaptureAnnotation(kind: .marker, rect: marker.boundingRect, style: style, markerLine: marker)]
+        )
+
+        let center = try XCTUnwrap(rgbaPixel(in: rendered, x: 40, y: 40))
+        XCTAssertGreaterThan(center.green, 220)
+        XCTAssertGreaterThan(center.red, 170)
+        XCTAssertLessThan(center.blue, 80)
+    }
+
     func testDashPatternSpacingScalesWithStrokeWidth() {
         let thin = CaptureStrokePattern.dashLong.dashPattern(strokeWidth: 2)
         let thick = CaptureStrokePattern.dashLong.dashPattern(strokeWidth: 7)

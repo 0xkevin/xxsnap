@@ -1353,7 +1353,8 @@ private final class SelectionOverlayView: NSView {
             return hypot(arrowLine.end.x - arrowLine.start.x, arrowLine.end.y - arrowLine.start.y) >= 8
         }
         if annotation.kind == .marker, let markerLine = annotation.markerLine {
-            return hypot(markerLine.end.x - markerLine.start.x, markerLine.end.y - markerLine.start.y) >= 8
+            let length = hypot(markerLine.end.x - markerLine.start.x, markerLine.end.y - markerLine.start.y)
+            return length == 0 || length >= 8
         }
         if annotation.kind == .brush {
             return (annotation.brushPath?.points.count ?? 0) >= 2
