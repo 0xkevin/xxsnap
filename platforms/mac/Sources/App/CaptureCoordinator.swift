@@ -76,7 +76,15 @@ final class CaptureCoordinator {
             let overlayWindow = SelectionOverlayWindow(
                 backgroundImage: backgroundImage,
                 settings: settings,
-                featureGate: FeatureGate(license: settings.license)
+                featureGate: FeatureGate(license: settings.license),
+                refreshHandler: { [weak self] in
+                    guard let self else {
+                        return nil
+                    }
+                    let refreshedImage = try await self.screenCaptureService.captureDesktopImage()
+                    self.frozenDesktopImage = refreshedImage
+                    return refreshedImage
+                }
             ) { [weak self] result in
                 self?.handleSelection(result)
             }

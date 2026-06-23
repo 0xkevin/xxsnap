@@ -1927,6 +1927,68 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(dragged.minY, 8, accuracy: 0.1)
     }
 
+    func testSelectionMeasurementControlLayoutAddsThreeButtonsAfterSizeText() {
+        let selection = NSRect(x: 120, y: 140, width: 300, height: 180)
+        let layout = SelectionToolbarState.measurementControlLayout(
+            anchoredTo: selection,
+            textSize: NSSize(width: 82, height: 15),
+            inside: NSRect(x: 0, y: 0, width: 800, height: 600)
+        )
+
+        XCTAssertGreaterThan(layout.panel.width, 82 + 18)
+        XCTAssertEqual(layout.cornerStyle.width, 20)
+        XCTAssertEqual(layout.aspectRatio.width, 20)
+        XCTAssertEqual(layout.refresh.width, 20)
+        XCTAssertLessThan(layout.label.maxX, layout.cornerStyle.minX)
+        XCTAssertLessThan(layout.cornerStyle.maxX, layout.aspectRatio.minX)
+        XCTAssertLessThan(layout.aspectRatio.maxX, layout.refresh.minX)
+    }
+
+    func testSelectionMeasurementControlHitTestingFindsEachButton() {
+        let selection = NSRect(x: 120, y: 140, width: 300, height: 180)
+        let layout = SelectionToolbarState.measurementControlLayout(
+            anchoredTo: selection,
+            textSize: NSSize(width: 82, height: 15),
+            inside: NSRect(x: 0, y: 0, width: 800, height: 600)
+        )
+
+        XCTAssertEqual(
+            SelectionToolbarState.measurementControl(
+                at: NSPoint(x: layout.cornerStyle.midX, y: layout.cornerStyle.midY),
+                in: layout
+            ),
+            .cornerStyle
+        )
+        XCTAssertEqual(
+            SelectionToolbarState.measurementControl(
+                at: NSPoint(x: layout.aspectRatio.midX, y: layout.aspectRatio.midY),
+                in: layout
+            ),
+            .aspectRatioLock
+        )
+        XCTAssertEqual(
+            SelectionToolbarState.measurementControl(
+                at: NSPoint(x: layout.refresh.midX, y: layout.refresh.midY),
+                in: layout
+            ),
+            .refresh
+        )
+    }
+
+    func testLockedAspectRatioSelectionResizeKeepsStartRatioFromCorner() {
+        let start = NSRect(x: 100, y: 100, width: 200, height: 100)
+        let resized = SelectionToolbarState.resizedSelectionRect(
+            from: start,
+            handle: .bottomRight,
+            point: NSPoint(x: 360, y: 40),
+            lockAspectRatio: true
+        )
+
+        XCTAssertEqual(resized.width / resized.height, 2, accuracy: 0.01)
+        XCTAssertEqual(resized.minX, 100, accuracy: 0.1)
+        XCTAssertEqual(resized.maxY, 200, accuracy: 0.1)
+    }
+
     func testPopoverRectPrefersBelowAnchorWithoutCoveringIt() {
         let anchor = NSRect(x: 600, y: 420, width: 12, height: 12)
         let popover = SelectionToolbarState.popoverRect(
@@ -2132,6 +2194,65 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertNil(
             SelectionToolbarState.selectionResizeHandle(at: NSPoint(x: rect.midX, y: rect.midY), in: rect)
         )
+    }
+
+    func testClickingCornerStyleMeasurementControlTogglesSelectionCornerRadius() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 220, height: 140))
+
+        guard let point = window.test_measurementControlPoint(.cornerStyle) else {
+            return XCTFail("Expected corner style control")
+        }
+        window.test_mouseDown(at: point)
+
+        XCTAssertEqual(window.test_selectionCornerRadius, 8)
+
+        window.test_mouseDown(at: point)
+
+        XCTAssertEqual(window.test_selectionCornerRadius, 0)
+    }
+
+    func testClickingAspectRatioMeasurementControlLocksSelectionResizeRatio() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 200, height: 100))
+
+        guard let aspectPoint = window.test_measurementControlPoint(.aspectRatioLock) else {
+            return XCTFail("Expected aspect ratio control")
+        }
+        window.test_mouseDown(at: aspectPoint)
+
+        XCTAssertTrue(window.test_isSelectionAspectRatioLocked)
+
+        window.test_mouseDown(at: NSPoint(x: 300, y: 100))
+        window.test_mouseDragged(to: NSPoint(x: 360, y: 40))
+        window.test_mouseUp(at: NSPoint(x: 360, y: 40))
+
+        guard let resized = window.test_lockedSelectionRect else {
+            return XCTFail("Expected locked selection")
+        }
+        XCTAssertEqual(resized.width / resized.height, 2, accuracy: 0.01)
+    }
+
+    func testClickingRefreshMeasurementControlKeepsSelectionAndRequestsRefresh() {
+        let expectation = expectation(description: "refresh requested")
+        let window = SelectionOverlayWindow(
+            backgroundImage: nil,
+            refreshHandler: {
+                expectation.fulfill()
+                return nil
+            },
+            selectionHandler: { _ in }
+        )
+        let selection = NSRect(x: 100, y: 100, width: 220, height: 140)
+        window.test_setLockedSelectionRect(selection)
+
+        guard let point = window.test_measurementControlPoint(.refresh) else {
+            return XCTFail("Expected refresh control")
+        }
+        window.test_mouseDown(at: point)
+
+        wait(for: [expectation], timeout: 1)
+        XCTAssertEqual(window.test_lockedSelectionRect, selection)
     }
 
     func testAnnotationMoveMouseDownWinsOverSelectionResize() {

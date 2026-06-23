@@ -259,6 +259,7 @@ final class SelectionOverlayWindow: NSWindow {
         backgroundImage: NSImage?,
         settings: AppSettings = .default,
         featureGate: FeatureGate = FeatureGate(license: LicenseState()),
+        refreshHandler: (() async throws -> NSImage?)? = nil,
         selectionHandler: @escaping (CaptureSelectionResult?) -> Void
     ) {
         let frame = Self.desktopFrame()
@@ -284,7 +285,8 @@ final class SelectionOverlayWindow: NSWindow {
             frame: NSRect(origin: .zero, size: frame.size),
             backgroundImage: backgroundImage,
             settings: settings,
-            featureGate: featureGate
+            featureGate: featureGate,
+            refreshHandler: refreshHandler
         )
         overlayView.selectionDidFinish = { [weak self] result in
             self?.completeSelection(with: result)
@@ -413,6 +415,10 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_markerToolbarButtonPoint()
     }
 
+    func test_measurementControlPoint(_ control: SelectionToolbarState.MeasurementControl) -> NSPoint? {
+        (contentView as? SelectionOverlayView)?.test_measurementControlPoint(control)
+    }
+
     func test_optionsStrokeWidthPoint(at index: Int) -> NSPoint? {
         (contentView as? SelectionOverlayView)?.test_optionsStrokeWidthPoint(at: index)
     }
@@ -439,6 +445,14 @@ final class SelectionOverlayWindow: NSWindow {
 
     var test_lockedSelectionRect: NSRect? {
         (contentView as? SelectionOverlayView)?.test_lockedSelectionRect
+    }
+
+    var test_selectionCornerRadius: CGFloat {
+        (contentView as? SelectionOverlayView)?.test_selectionCornerRadius ?? 0
+    }
+
+    var test_isSelectionAspectRatioLocked: Bool {
+        (contentView as? SelectionOverlayView)?.test_isSelectionAspectRatioLocked ?? false
     }
 
     var test_currentStrokePattern: CaptureStrokePattern? {
@@ -557,10 +571,11 @@ final class SelectionOverlayWindow: NSWindow {
 
 private final class SelectionOverlayView: NSView {
     var selectionDidFinish: ((CaptureSelectionResult?) -> Void)?
-    private let backgroundImage: NSImage?
-    private let backgroundBitmap: NSBitmapImageRep?
+    private var backgroundImage: NSImage?
+    private var backgroundBitmap: NSBitmapImageRep?
     private let settings: AppSettings
     private let featureGate: FeatureGate
+    private let refreshHandler: (() async throws -> NSImage?)?
     private let colorSamplerSize = NSSize(width: 184, height: 188)
     private var strokePatternOptions: [SelectionToolbarState.StrokePatternOption] {
         SelectionToolbarState.strokePatternOptions(
@@ -569,10 +584,17 @@ private final class SelectionOverlayView: NSView {
         )
     }
 
-    init(frame frameRect: NSRect, backgroundImage: NSImage?, settings: AppSettings, featureGate: FeatureGate) {
+    init(
+        frame frameRect: NSRect,
+        backgroundImage: NSImage?,
+        settings: AppSettings,
+        featureGate: FeatureGate,
+        refreshHandler: (() async throws -> NSImage?)?
+    ) {
         self.backgroundImage = backgroundImage
         self.settings = settings
         self.featureGate = featureGate
+        self.refreshHandler = refreshHandler
         if let cgImage = backgroundImage?.cgImage(forProposedRect: nil, context: nil, hints: nil) {
             self.backgroundBitmap = NSBitmapImageRep(cgImage: cgImage)
         } else {
@@ -724,6 +746,9 @@ private final class SelectionOverlayView: NSView {
     private var resizingSelectionStartRect: NSRect?
     private var resizingSelectionStartAnnotationRects: [NSRect] = []
     private var resizingSelectionStartAnnotations: [CaptureAnnotation] = []
+    private var selectionCornerRadius: CGFloat = 0
+    private var isSelectionAspectRatioLocked = false
+    private var isRefreshingSelectionBackground = false
     private var currentShapeKind = CaptureAnnotationKind.rectangle
     private var activeShapeKind: CaptureAnnotationKind?
     private var isShapeToolActive = false
@@ -1564,6 +1589,10 @@ private final class SelectionOverlayView: NSView {
             return
         }
 
+        if handleMeasurementControlClick(at: point) {
+            return
+        }
+
         if let button = toolbarButton(at: point) {
             guard isToolbarButtonEnabled(button) else {
                 return
@@ -1694,6 +1723,66 @@ private final class SelectionOverlayView: NSView {
         brushDraftPoints = currentShapeKind == .brush ? [point] : []
         interactionMode = .drawingShape
         NSLog("snipory overlay drawing started point=(%.0f, %.0f)", point.x, point.y)
+    }
+
+    private func handleMeasurementControlClick(at point: NSPoint) -> Bool {
+        guard let lockedSelectionRect else {
+            return false
+        }
+
+        let layout = measurementControlLayout(for: lockedSelectionRect)
+        guard let control = SelectionToolbarState.measurementControl(at: point, in: layout) else {
+            return false
+        }
+
+        switch control {
+        case .cornerStyle:
+            selectionCornerRadius = selectionCornerRadius > 0 ? 0 : 8
+        case .aspectRatioLock:
+            isSelectionAspectRatioLocked.toggle()
+        case .refresh:
+            refreshSelectionBackground()
+        }
+        showsStrokeStyleMenu = false
+        showsCornerRadiusPanel = false
+        showsStartArrowTypeMenu = false
+        showsEndArrowTypeMenu = false
+        needsDisplay = true
+        return true
+    }
+
+    private func refreshSelectionBackground() {
+        guard !isRefreshingSelectionBackground, let refreshHandler else {
+            return
+        }
+
+        isRefreshingSelectionBackground = true
+        Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+            defer {
+                self.isRefreshingSelectionBackground = false
+                self.needsDisplay = true
+            }
+
+            do {
+                if let image = try await refreshHandler() {
+                    self.updateBackgroundImage(image)
+                }
+            } catch {
+                NSLog("Snipory refresh background failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func updateBackgroundImage(_ image: NSImage?) {
+        backgroundImage = image
+        if let cgImage = image?.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+            backgroundBitmap = NSBitmapImageRep(cgImage: cgImage)
+        } else {
+            backgroundBitmap = nil
+        }
     }
 
     private func draftEndPoint(rawEnd: NSPoint, modifierFlags: NSEvent.ModifierFlags) -> NSPoint {
@@ -1986,6 +2075,23 @@ private final class SelectionOverlayView: NSView {
         return NSPoint(x: rect.midX, y: rect.midY)
     }
 
+    func test_measurementControlPoint(_ control: SelectionToolbarState.MeasurementControl) -> NSPoint? {
+        guard let selectionRect else {
+            return nil
+        }
+        let layout = measurementControlLayout(for: selectionRect)
+        let rect: NSRect
+        switch control {
+        case .cornerStyle:
+            rect = layout.cornerStyle
+        case .aspectRatioLock:
+            rect = layout.aspectRatio
+        case .refresh:
+            rect = layout.refresh
+        }
+        return NSPoint(x: rect.midX, y: rect.midY)
+    }
+
     func test_optionsStrokeWidthPoint(at index: Int) -> NSPoint? {
         guard let optionsToolbarRect else {
             return nil
@@ -2034,6 +2140,14 @@ private final class SelectionOverlayView: NSView {
 
     var test_lockedSelectionRect: NSRect? {
         lockedSelectionRect?.standardized
+    }
+
+    var test_selectionCornerRadius: CGFloat {
+        selectionCornerRadius
+    }
+
+    var test_isSelectionAspectRatioLocked: Bool {
+        isSelectionAspectRatioLocked
     }
 
     var test_currentStrokePattern: CaptureStrokePattern {
@@ -3115,10 +3229,11 @@ private final class SelectionOverlayView: NSView {
             return
         }
 
-        let resized = resizedRect(
+        let resized = SelectionToolbarState.resizedSelectionRect(
             from: resizingSelectionStartRect,
             handle: activeSelectionResizeHandle,
-            point: clamp(point, to: bounds)
+            point: clamp(point, to: bounds),
+            lockAspectRatio: isSelectionAspectRatioLocked
         )
 
         guard resized.width >= 8, resized.height >= 8 else {
@@ -3154,43 +3269,6 @@ private final class SelectionOverlayView: NSView {
         }
     }
 
-    private func resizedRect(from startRect: NSRect, handle: SelectionToolbarState.OverlayResizeHandle, point: NSPoint) -> NSRect {
-        var minX = startRect.minX
-        var maxX = startRect.maxX
-        var minY = startRect.minY
-        var maxY = startRect.maxY
-
-        switch handle {
-        case .topLeft:
-            minX = point.x
-            maxY = point.y
-        case .top:
-            maxY = point.y
-        case .topRight:
-            maxX = point.x
-            maxY = point.y
-        case .left:
-            minX = point.x
-        case .right:
-            maxX = point.x
-        case .bottomLeft:
-            minX = point.x
-            minY = point.y
-        case .bottom:
-            minY = point.y
-        case .bottomRight:
-            maxX = point.x
-            minY = point.y
-        }
-
-        return NSRect(
-            x: min(minX, maxX),
-            y: min(minY, maxY),
-            width: abs(maxX - minX),
-            height: abs(maxY - minY)
-        )
-    }
-
     private func drawOverlay() {
         if let backgroundImage {
             backgroundImage.draw(in: bounds, from: NSRect(origin: .zero, size: backgroundImage.size), operation: .copy, fraction: 1)
@@ -3203,7 +3281,7 @@ private final class SelectionOverlayView: NSView {
         }
 
         let path = NSBezierPath(rect: bounds)
-        path.appendRect(selectionRect)
+        path.append(selectionPath(in: selectionRect))
         path.windingRule = .evenOdd
 
         NSColor.black.withAlphaComponent(0.34).setFill()
@@ -3212,9 +3290,17 @@ private final class SelectionOverlayView: NSView {
 
     private func drawSelectionBorder(_ rect: NSRect) {
         NSColor(calibratedRed: 83 / 255, green: 120 / 255, blue: 232 / 255, alpha: 1).setStroke()
-        let border = NSBezierPath(rect: rect)
+        let border = selectionPath(in: rect)
         border.lineWidth = 2
         border.stroke()
+    }
+
+    private func selectionPath(in rect: NSRect) -> NSBezierPath {
+        guard selectionCornerRadius > 0 else {
+            return NSBezierPath(rect: rect)
+        }
+        let radius = min(selectionCornerRadius, rect.width / 2, rect.height / 2)
+        return NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
     }
 
     private func drawSelectionHandles(_ rect: NSRect) {
@@ -3247,16 +3333,109 @@ private final class SelectionOverlayView: NSView {
             .foregroundColor: NSColor.white,
         ]
         let textSize = NSString(string: label).size(withAttributes: attributes)
-        var labelRect = NSRect(x: rect.minX, y: rect.maxY + 8, width: textSize.width + 18, height: 24)
-        let safeBounds = safeLayoutBounds
-        if labelRect.maxY > safeBounds.maxY - 8 {
-            labelRect.origin.y = rect.minY - 32
-        }
-        labelRect = clamp(rect: labelRect, inside: safeBounds.insetBy(dx: 8, dy: 8))
+        let layout = SelectionToolbarState.measurementControlLayout(
+            anchoredTo: rect,
+            textSize: textSize,
+            inside: safeLayoutBounds
+        )
 
         NSColor(calibratedWhite: 0.12, alpha: 0.86).setFill()
-        NSBezierPath(roundedRect: labelRect, xRadius: 5, yRadius: 5).fill()
-        NSString(string: label).draw(in: labelRect.insetBy(dx: 9, dy: 4), withAttributes: attributes)
+        NSBezierPath(roundedRect: layout.panel, xRadius: 5, yRadius: 5).fill()
+        NSString(string: label).draw(in: layout.label.insetBy(dx: 9, dy: 4), withAttributes: attributes)
+
+        drawMeasurementControlButton(layout.cornerStyle, selected: selectionCornerRadius > 0)
+        drawCornerStyleIcon(in: layout.cornerStyle.insetBy(dx: 2, dy: 2), rounded: selectionCornerRadius > 0)
+        drawMeasurementControlButton(layout.aspectRatio, selected: isSelectionAspectRatioLocked)
+        drawAspectRatioIcon(in: layout.aspectRatio.insetBy(dx: 3, dy: 3), locked: isSelectionAspectRatioLocked)
+        drawMeasurementControlButton(layout.refresh, selected: isRefreshingSelectionBackground)
+        drawRefreshIcon(in: layout.refresh.insetBy(dx: 2, dy: 2))
+    }
+
+    private func measurementControlLayout(for rect: NSRect) -> SelectionToolbarState.MeasurementControlLayout {
+        let label = "\(Int(rect.width)) x \(Int(rect.height))  px"
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: samplerInfoFont(ofSize: 12, weight: .medium),
+            .foregroundColor: NSColor.white,
+        ]
+        return SelectionToolbarState.measurementControlLayout(
+            anchoredTo: rect,
+            textSize: NSString(string: label).size(withAttributes: attributes),
+            inside: safeLayoutBounds
+        )
+    }
+
+    private func drawMeasurementControlButton(_ rect: NSRect, selected: Bool) {
+        (selected ? NSColor.white.withAlphaComponent(0.22) : NSColor.white.withAlphaComponent(0.06)).setFill()
+        NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4).fill()
+    }
+
+    private func drawCornerStyleIcon(in rect: NSRect, rounded: Bool) {
+        let path = NSBezierPath()
+        if rounded {
+            path.move(to: NSPoint(x: rect.minX + 1, y: rect.minY + 1))
+            path.curve(
+                to: NSPoint(x: rect.maxX - 1, y: rect.maxY - 1),
+                controlPoint1: NSPoint(x: rect.minX + 1, y: rect.maxY - 7),
+                controlPoint2: NSPoint(x: rect.minX + 7, y: rect.maxY - 1)
+            )
+        } else {
+            path.move(to: NSPoint(x: rect.minX + 1, y: rect.minY + 1))
+            path.line(to: NSPoint(x: rect.minX + 1, y: rect.maxY - 1))
+            path.line(to: NSPoint(x: rect.maxX - 1, y: rect.maxY - 1))
+        }
+        NSColor.white.setStroke()
+        path.lineWidth = 1.8
+        path.lineCapStyle = .round
+        path.lineJoinStyle = .round
+        path.stroke()
+    }
+
+    private func drawAspectRatioIcon(in rect: NSRect, locked: Bool) {
+        let path = NSBezierPath(roundedRect: rect, xRadius: 2, yRadius: 2)
+        NSColor.white.setStroke()
+        path.lineWidth = 1.2
+        path.stroke()
+
+        let cornerPath = NSBezierPath()
+        cornerPath.move(to: NSPoint(x: rect.minX + 3, y: rect.midY))
+        cornerPath.line(to: NSPoint(x: rect.minX + 3, y: rect.maxY - 3))
+        cornerPath.line(to: NSPoint(x: rect.midX, y: rect.maxY - 3))
+        cornerPath.move(to: NSPoint(x: rect.maxX - 3, y: rect.midY))
+        cornerPath.line(to: NSPoint(x: rect.maxX - 3, y: rect.minY + 3))
+        cornerPath.line(to: NSPoint(x: rect.midX, y: rect.minY + 3))
+        cornerPath.lineWidth = 1.6
+        cornerPath.lineCapStyle = .round
+        cornerPath.lineJoinStyle = .round
+        cornerPath.stroke()
+
+        if locked {
+            NSColor.white.withAlphaComponent(0.18).setFill()
+            NSBezierPath(roundedRect: rect, xRadius: 2, yRadius: 2).fill()
+        }
+    }
+
+    private func drawRefreshIcon(in rect: NSRect) {
+        let path = NSBezierPath()
+        path.appendArc(withCenter: NSPoint(x: rect.midX, y: rect.midY), radius: rect.width * 0.34, startAngle: 45, endAngle: 205)
+        path.appendArc(withCenter: NSPoint(x: rect.midX, y: rect.midY), radius: rect.width * 0.34, startAngle: 225, endAngle: 25)
+
+        NSColor.white.setStroke()
+        path.lineWidth = 1.6
+        path.lineCapStyle = .round
+        path.lineJoinStyle = .round
+        path.stroke()
+
+        let topArrow = NSBezierPath()
+        topArrow.move(to: NSPoint(x: rect.minX + 2, y: rect.midY + 2))
+        topArrow.line(to: NSPoint(x: rect.minX + 2, y: rect.midY + 6))
+        topArrow.line(to: NSPoint(x: rect.minX + 6, y: rect.midY + 6))
+        topArrow.stroke()
+
+        let bottomArrow = NSBezierPath()
+        bottomArrow.move(to: NSPoint(x: rect.maxX - 2, y: rect.midY - 2))
+        bottomArrow.line(to: NSPoint(x: rect.maxX - 2, y: rect.midY - 6))
+        bottomArrow.line(to: NSPoint(x: rect.maxX - 6, y: rect.midY - 6))
+        bottomArrow.stroke()
     }
 
     private func drawAnnotations() {

@@ -61,6 +61,20 @@ enum SelectionToolbarState {
         var colorSwatches: [NSRect]
     }
 
+    enum MeasurementControl: Equatable {
+        case cornerStyle
+        case aspectRatioLock
+        case refresh
+    }
+
+    struct MeasurementControlLayout: Equatable {
+        var panel: NSRect
+        var label: NSRect
+        var cornerStyle: NSRect
+        var aspectRatio: NSRect
+        var refresh: NSRect
+    }
+
     struct ArrowLineActivationState {
         var style: CaptureAnnotationStyle
         var startArrowType: CaptureArrowType
@@ -408,6 +422,143 @@ enum SelectionToolbarState {
             endArrowType: mode == .arrowLine ? endArrowTypeFieldRect(in: optionsRect, mode: mode) : nil,
             colorSwatches: colorSwatchRects(in: optionsRect, paletteCount: paletteCount, mode: mode)
         )
+    }
+
+    static func measurementControlLayout(
+        anchoredTo selectionRect: NSRect,
+        textSize: NSSize,
+        inside safeBounds: NSRect
+    ) -> MeasurementControlLayout {
+        let labelWidth = ceil(textSize.width) + 18
+        let buttonSize: CGFloat = 20
+        let buttonGap: CGFloat = 4
+        let textButtonGap: CGFloat = 7
+        let panelWidth = labelWidth + textButtonGap + buttonSize * 3 + buttonGap * 2 + 7
+        let panelHeight: CGFloat = 24
+        var panel = NSRect(x: selectionRect.minX, y: selectionRect.maxY + 8, width: panelWidth, height: panelHeight)
+        if panel.maxY > safeBounds.maxY - 8 {
+            panel.origin.y = selectionRect.minY - 32
+        }
+        panel = clamp(rect: panel, inside: safeBounds.insetBy(dx: 8, dy: 8))
+
+        let label = NSRect(x: panel.minX, y: panel.minY, width: labelWidth, height: panel.height)
+        let firstButtonX = label.maxX + textButtonGap
+        let buttonY = panel.midY - buttonSize / 2
+        return MeasurementControlLayout(
+            panel: panel,
+            label: label,
+            cornerStyle: NSRect(x: firstButtonX, y: buttonY, width: buttonSize, height: buttonSize),
+            aspectRatio: NSRect(x: firstButtonX + buttonSize + buttonGap, y: buttonY, width: buttonSize, height: buttonSize),
+            refresh: NSRect(x: firstButtonX + (buttonSize + buttonGap) * 2, y: buttonY, width: buttonSize, height: buttonSize)
+        )
+    }
+
+    static func measurementControl(at point: NSPoint, in layout: MeasurementControlLayout) -> MeasurementControl? {
+        if layout.cornerStyle.contains(point) {
+            return .cornerStyle
+        }
+        if layout.aspectRatio.contains(point) {
+            return .aspectRatioLock
+        }
+        if layout.refresh.contains(point) {
+            return .refresh
+        }
+        return nil
+    }
+
+    static func resizedSelectionRect(
+        from startRect: NSRect,
+        handle: OverlayResizeHandle,
+        point: NSPoint,
+        lockAspectRatio: Bool
+    ) -> NSRect {
+        guard lockAspectRatio, startRect.width > 0, startRect.height > 0 else {
+            return resizedRectWithoutAspectLock(from: startRect, handle: handle, point: point)
+        }
+
+        let ratio = startRect.width / startRect.height
+        let anchor: NSPoint
+        switch handle {
+        case .topLeft:
+            anchor = NSPoint(x: startRect.maxX, y: startRect.minY)
+        case .top:
+            anchor = NSPoint(x: startRect.midX, y: startRect.minY)
+        case .topRight:
+            anchor = NSPoint(x: startRect.minX, y: startRect.minY)
+        case .left:
+            anchor = NSPoint(x: startRect.maxX, y: startRect.midY)
+        case .right:
+            anchor = NSPoint(x: startRect.minX, y: startRect.midY)
+        case .bottomLeft:
+            anchor = NSPoint(x: startRect.maxX, y: startRect.maxY)
+        case .bottom:
+            anchor = NSPoint(x: startRect.midX, y: startRect.maxY)
+        case .bottomRight:
+            anchor = NSPoint(x: startRect.minX, y: startRect.maxY)
+        }
+
+        let rawWidth: CGFloat
+        let rawHeight: CGFloat
+        switch handle {
+        case .top, .bottom:
+            rawHeight = abs(point.y - anchor.y)
+            rawWidth = rawHeight * ratio
+        case .left, .right:
+            rawWidth = abs(point.x - anchor.x)
+            rawHeight = rawWidth / ratio
+        case .topLeft, .topRight, .bottomLeft, .bottomRight:
+            let pointWidth = abs(point.x - anchor.x)
+            let pointHeight = abs(point.y - anchor.y)
+            if pointWidth / max(pointHeight, 0.001) > ratio {
+                rawWidth = pointWidth
+                rawHeight = pointWidth / ratio
+            } else {
+                rawHeight = pointHeight
+                rawWidth = pointHeight * ratio
+            }
+        }
+
+        let signedWidth: CGFloat
+        let signedHeight: CGFloat
+        switch handle {
+        case .topLeft, .left, .bottomLeft:
+            signedWidth = -rawWidth
+        default:
+            signedWidth = rawWidth
+        }
+        switch handle {
+        case .bottomLeft, .bottom, .bottomRight:
+            signedHeight = -rawHeight
+        default:
+            signedHeight = rawHeight
+        }
+
+        let centerAdjustedAnchor: NSPoint
+        switch handle {
+        case .top, .bottom:
+            centerAdjustedAnchor = NSPoint(x: anchor.x - signedWidth / 2, y: anchor.y)
+            return NSRect(
+                x: min(centerAdjustedAnchor.x, centerAdjustedAnchor.x + signedWidth),
+                y: min(centerAdjustedAnchor.y, centerAdjustedAnchor.y + signedHeight),
+                width: abs(signedWidth),
+                height: abs(signedHeight)
+            )
+        case .left, .right:
+            centerAdjustedAnchor = NSPoint(x: anchor.x, y: anchor.y - signedHeight / 2)
+            return NSRect(
+                x: min(centerAdjustedAnchor.x, centerAdjustedAnchor.x + signedWidth),
+                y: min(centerAdjustedAnchor.y, centerAdjustedAnchor.y + signedHeight),
+                width: abs(signedWidth),
+                height: abs(signedHeight)
+            )
+        case .topLeft, .topRight, .bottomLeft, .bottomRight:
+            return NSRect(
+                x: min(anchor.x, anchor.x + signedWidth),
+                y: min(anchor.y, anchor.y + signedHeight),
+                width: abs(signedWidth),
+                height: abs(signedHeight)
+            )
+        }
     }
 
     static func colorSwatchRects(
@@ -1079,6 +1230,47 @@ enum SelectionToolbarState {
             height: rect.height
         )
         return clamp(rect: requested, inside: bounds.standardized)
+    }
+
+    private static func resizedRectWithoutAspectLock(
+        from startRect: NSRect,
+        handle: OverlayResizeHandle,
+        point: NSPoint
+    ) -> NSRect {
+        var minX = startRect.minX
+        var maxX = startRect.maxX
+        var minY = startRect.minY
+        var maxY = startRect.maxY
+
+        switch handle {
+        case .topLeft:
+            minX = point.x
+            maxY = point.y
+        case .top:
+            maxY = point.y
+        case .topRight:
+            maxX = point.x
+            maxY = point.y
+        case .left:
+            minX = point.x
+        case .right:
+            maxX = point.x
+        case .bottomLeft:
+            minX = point.x
+            minY = point.y
+        case .bottom:
+            minY = point.y
+        case .bottomRight:
+            maxX = point.x
+            minY = point.y
+        }
+
+        return NSRect(
+            x: min(minX, maxX),
+            y: min(minY, maxY),
+            width: abs(maxX - minX),
+            height: abs(maxY - minY)
+        )
     }
 
     private static func canMoveSelectionRect(_ rect: NSRect, inside bounds: NSRect) -> Bool {
