@@ -17,7 +17,6 @@ final class StatusItemController: NSObject {
     }
 
     @objc func quit() {
-        AppTermination.isUserInitiated = true
         NSApplication.shared.terminate(nil)
     }
 

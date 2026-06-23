@@ -2,6 +2,12 @@ import XCTest
 @testable import Snipory
 
 final class AppSettingsTests: XCTestCase {
+    func testAppDelegateAllowsProgrammaticTerminationForCleanRestarts() {
+        let delegate = AppDelegate()
+
+        XCTAssertEqual(delegate.applicationShouldTerminate(.shared), .terminateNow)
+    }
+
     func testDefaultSettingsUseChineseAndFullPalette() {
         let settings = AppSettings.default
 

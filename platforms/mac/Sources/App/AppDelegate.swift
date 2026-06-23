@@ -1,10 +1,6 @@
 import AppKit
 import Carbon.HIToolbox
 
-enum AppTermination {
-    static var isUserInitiated = false
-}
-
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var captureCoordinator: CaptureCoordinator?
     private var statusItemController: StatusItemController?
@@ -26,10 +22,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard AppTermination.isUserInitiated else {
-            NSLog("snipory blocked non-user termination request")
-            return .terminateCancel
-        }
         return .terminateNow
     }
 

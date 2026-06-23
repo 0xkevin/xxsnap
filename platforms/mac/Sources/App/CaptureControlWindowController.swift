@@ -52,7 +52,6 @@ final class CaptureControlWindowController: NSWindowController {
     }
 
     @objc private func quit() {
-        AppTermination.isUserInitiated = true
         NSApplication.shared.terminate(nil)
     }
 }
