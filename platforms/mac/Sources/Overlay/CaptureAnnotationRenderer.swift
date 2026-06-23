@@ -1029,7 +1029,7 @@ struct CaptureSelectionResult {
 }
 
 enum CaptureAnnotationRenderer {
-    static let markerOpacity: CGFloat = 0.3
+    static let markerOpacity: CGFloat = 0.85
 
     static func render(image: NSImage, annotations: [CaptureAnnotation]) -> NSImage {
         guard !annotations.isEmpty else {
@@ -1154,6 +1154,7 @@ enum CaptureAnnotationRenderer {
         }
 
         context.saveGState()
+        context.setBlendMode(.multiply)
         context.setStrokeColor(cgColor(annotation.style.strokeColor.withAlphaComponent(markerOpacity)))
         context.setLineWidth(annotation.style.strokeWidth * lineScale)
         context.setLineJoin(.round)

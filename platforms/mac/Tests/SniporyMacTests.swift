@@ -113,30 +113,30 @@ final class SniporyMacTests: XCTestCase {
         XCTAssertNotEqual(try rgbaBytes(in: solid), try rgbaBytes(in: dashed))
     }
 
-    func testAnnotationRendererDrawsMarkerLineOntoImageWithFixedOpacity() throws {
+    func testAnnotationRendererDrawsMarkerLineLikeHighlighterWithoutWashingOutDarkText() throws {
         var style = CaptureAnnotationStyle()
-        style.strokeColor = NSColor(srgbRed: 212 / 255, green: 238 / 255, blue: 167 / 255, alpha: 1)
+        style.strokeColor = SelectionToolbarState.defaultMarkerColor
         style.strokeWidth = 18
 
-        let marker = CaptureMarkerLine(start: NSPoint(x: 20, y: 30), end: NSPoint(x: 90, y: 30))
-        let backgroundColor = NSColor(srgbRed: 100 / 255, green: 120 / 255, blue: 140 / 255, alpha: 1)
-        let image = try makeBitmapImage(
-            pointSize: NSSize(width: 120, height: 80),
-            pixelWidth: 120,
-            pixelHeight: 80,
-            fill: backgroundColor
-        )
+        let marker = CaptureMarkerLine(start: NSPoint(x: 10, y: 30), end: NSPoint(x: 110, y: 30))
+        let image = try makeBitmapImageWithBlackTextStripe()
         let rendered = CaptureAnnotationRenderer.render(
             image: image,
             annotations: [CaptureAnnotation(kind: .marker, rect: marker.boundingRect, style: style, markerLine: marker)]
         )
 
-        let pixel = try rgbaPixel(in: rendered, x: 55, y: 30)
-        XCTAssertNotNil(pixel)
-        XCTAssertEqual(pixel!.alpha, 255)
-        XCTAssertEqual(Double(pixel!.red), 134, accuracy: 2)
-        XCTAssertEqual(Double(pixel!.green), 155, accuracy: 2)
-        XCTAssertEqual(Double(pixel!.blue), 148, accuracy: 2)
+        let highlightedWhite = try XCTUnwrap(rgbaPixel(in: rendered, x: 30, y: 30))
+        XCTAssertEqual(highlightedWhite.alpha, 255)
+        XCTAssertGreaterThan(highlightedWhite.red, 245)
+        XCTAssertGreaterThan(highlightedWhite.green, 120)
+        XCTAssertLessThan(highlightedWhite.green, 180)
+        XCTAssertLessThan(highlightedWhite.blue, 80)
+
+        let highlightedText = try XCTUnwrap(rgbaPixel(in: rendered, x: 65, y: 30))
+        XCTAssertEqual(highlightedText.alpha, 255)
+        XCTAssertLessThan(highlightedText.red, 8)
+        XCTAssertLessThan(highlightedText.green, 8)
+        XCTAssertLessThan(highlightedText.blue, 8)
     }
 
     func testAnnotationRendererPreservesImageDimensionsWhenDrawingMarker() throws {
@@ -854,6 +854,27 @@ final class SniporyMacTests: XCTestCase {
         context.fill(CGRect(x: 0, y: 0, width: pixelWidth, height: pixelHeight))
         let cgImage = try XCTUnwrap(context.makeImage())
         return NSImage(cgImage: cgImage, size: pointSize)
+    }
+
+    private func makeBitmapImageWithBlackTextStripe() throws -> NSImage {
+        let colorSpace = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        let context = try XCTUnwrap(
+            CGContext(
+                data: nil,
+                width: 120,
+                height: 80,
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )
+        )
+        context.setFillColor(NSColor.white.cgColor)
+        context.fill(CGRect(x: 0, y: 0, width: 120, height: 80))
+        context.setFillColor(NSColor.black.cgColor)
+        context.fill(CGRect(x: 60, y: 0, width: 12, height: 80))
+        let cgImage = try XCTUnwrap(context.makeImage())
+        return NSImage(cgImage: cgImage, size: NSSize(width: 120, height: 80))
     }
 
     private func renderVerticalHollowArrow(

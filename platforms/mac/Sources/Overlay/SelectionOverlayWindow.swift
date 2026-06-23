@@ -3388,11 +3388,14 @@ private final class SelectionOverlayView: NSView {
         path.move(to: markerLine.start)
         path.line(to: markerLine.end)
 
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current?.cgContext.setBlendMode(.multiply)
         annotation.style.strokeColor.withAlphaComponent(CaptureAnnotationRenderer.markerOpacity).setStroke()
         path.lineWidth = annotation.style.strokeWidth
         path.lineJoinStyle = .round
         path.lineCapStyle = .round
         path.stroke()
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     private func drawArrowLineAnnotation(_ annotation: CaptureAnnotation, inOverlay: Bool) {
