@@ -880,6 +880,47 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertFalse(style.fillEnabled)
     }
 
+    func testOverlayWindowMarkerColorDoesNotLeakIntoOtherShapeTools() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.marker)
+
+        guard let markerBluePoint = window.test_optionsPaletteColorPoint(at: 8) else {
+            return XCTFail("Expected marker palette control")
+        }
+        window.test_mouseDown(at: markerBluePoint)
+        window.test_mouseUp(at: markerBluePoint)
+
+        guard let markerStyle = window.test_currentStyle else {
+            return XCTFail("Expected marker style")
+        }
+        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: markerStyle.strokeColor), "#3C53D7")
+
+        window.test_activateShapeTool(.rectangle)
+        guard let rectangleStyle = window.test_currentStyle else {
+            return XCTFail("Expected rectangle style")
+        }
+        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: rectangleStyle.strokeColor), "#FF001A")
+
+        window.test_activateShapeTool(.arrowLine)
+        guard let arrowStyle = window.test_currentStyle else {
+            return XCTFail("Expected arrow line style")
+        }
+        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: arrowStyle.strokeColor), "#FF001A")
+
+        window.test_activateShapeTool(.brush)
+        guard let brushStyle = window.test_currentStyle else {
+            return XCTFail("Expected brush style")
+        }
+        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: brushStyle.strokeColor), "#FF001A")
+
+        window.test_activateShapeTool(.marker)
+        guard let restoredMarkerStyle = window.test_currentStyle else {
+            return XCTFail("Expected restored marker style")
+        }
+        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: restoredMarkerStyle.strokeColor), "#3C53D7")
+    }
+
     func testMarkerActivationClearsStaleStrokeStyleMenu() {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_activateShapeTool(.rectangle)

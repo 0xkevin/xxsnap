@@ -1029,7 +1029,7 @@ struct CaptureSelectionResult {
 }
 
 enum CaptureAnnotationRenderer {
-    static let markerOpacity: CGFloat = 0.9
+    static let markerOpacity: CGFloat = 0.3
 
     static func render(image: NSImage, annotations: [CaptureAnnotation]) -> NSImage {
         guard !annotations.isEmpty else {

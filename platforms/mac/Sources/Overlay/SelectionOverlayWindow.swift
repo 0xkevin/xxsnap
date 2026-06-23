@@ -728,6 +728,8 @@ private final class SelectionOverlayView: NSView {
     private var activeShapeKind: CaptureAnnotationKind?
     private var isShapeToolActive = false
     private var currentStyle = CaptureAnnotationStyle()
+    private var nonMarkerStyle = CaptureAnnotationStyle()
+    private var markerStyle = SelectionToolbarState.markerActivationStyle(currentStyle: CaptureAnnotationStyle())
     private var currentStartArrowType = CaptureArrowType.none
     private var currentEndArrowType = CaptureArrowType.normal
     private var customColor: NSColor?
@@ -1042,6 +1044,7 @@ private final class SelectionOverlayView: NSView {
                 selectedAnnotationIndex = annotations.indices.last
                 currentShapeKind = draft.kind
                 currentStyle = draft.style
+                rememberCurrentStyleForActiveTool()
                 activeShapeKind = draft.kind
                 redoAnnotations.removeAll()
                 NSLog("snipory overlay added annotation count=%ld rect=(%.0f, %.0f, %.0f, %.0f)", annotations.count, draft.rect.minX, draft.rect.minY, draft.rect.width, draft.rect.height)
@@ -1772,13 +1775,14 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func toggleShapeTool(_ shape: CaptureAnnotationKind) {
+        rememberCurrentStyleForActiveTool()
         activeShapeKind = activeShapeKind == shape ? nil : shape
         isShapeToolActive = activeShapeKind != nil
         if let activeShapeKind {
             currentShapeKind = activeShapeKind
             if activeShapeKind == .arrowLine {
                 let activation = SelectionToolbarState.arrowLineActivationState(
-                    currentStyle: currentStyle,
+                    currentStyle: nonMarkerStyle,
                     paletteColors: colors
                 )
                 currentStyle = activation.style
@@ -1787,19 +1791,20 @@ private final class SelectionOverlayView: NSView {
                 showsCornerRadiusPanel = false
             } else if activeShapeKind == .brush {
                 currentStyle = SelectionToolbarState.brushActivationStyle(
-                    currentStyle: currentStyle,
+                    currentStyle: nonMarkerStyle,
                     paletteColors: colors
                 )
                 showsCornerRadiusPanel = false
             } else if activeShapeKind == .marker {
-                currentStyle = SelectionToolbarState.markerActivationStyle(currentStyle: currentStyle)
+                currentStyle = markerStyle
                 showsCornerRadiusPanel = false
             } else {
                 currentStyle = SelectionToolbarState.styleForPrimaryShapeToolActivation(
-                    currentStyle: currentStyle,
+                    currentStyle: nonMarkerStyle,
                     paletteColors: colors
                 )
             }
+            rememberCurrentStyleForActiveTool()
             if activeShapeKind != .arrowLine {
                 showsStartArrowTypeMenu = false
                 showsEndArrowTypeMenu = false
@@ -1808,6 +1813,7 @@ private final class SelectionOverlayView: NSView {
                 showsStrokeStyleMenu = false
             }
             currentStyle.strokePattern = .solid
+            rememberCurrentStyleForActiveTool()
         } else {
             selectedAnnotationIndex = nil
             showsCornerRadiusPanel = false
@@ -1823,16 +1829,35 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func activateShapeTool(_ shape: CaptureAnnotationKind) {
+        rememberCurrentStyleForActiveTool()
         activeShapeKind = shape
         currentShapeKind = shape
         isShapeToolActive = true
-        if shape == .arrowLine || shape == .brush {
+        if shape == .arrowLine {
+            let activation = SelectionToolbarState.arrowLineActivationState(
+                currentStyle: nonMarkerStyle,
+                paletteColors: colors
+            )
+            currentStyle = activation.style
+            currentStartArrowType = activation.startArrowType
+            currentEndArrowType = activation.endArrowType
             showsCornerRadiusPanel = false
-        }
-        if shape == .marker {
-            currentStyle = SelectionToolbarState.markerActivationStyle(currentStyle: currentStyle)
+        } else if shape == .brush {
+            currentStyle = SelectionToolbarState.brushActivationStyle(
+                currentStyle: nonMarkerStyle,
+                paletteColors: colors
+            )
             showsCornerRadiusPanel = false
+        } else if shape == .marker {
+            currentStyle = markerStyle
+            showsCornerRadiusPanel = false
+        } else {
+            currentStyle = SelectionToolbarState.styleForPrimaryShapeToolActivation(
+                currentStyle: nonMarkerStyle,
+                paletteColors: colors
+            )
         }
+        rememberCurrentStyleForActiveTool()
         if shape != .arrowLine {
             showsStartArrowTypeMenu = false
             showsEndArrowTypeMenu = false
@@ -1841,11 +1866,24 @@ private final class SelectionOverlayView: NSView {
             showsStrokeStyleMenu = false
         }
         currentStyle.strokePattern = .solid
+        rememberCurrentStyleForActiveTool()
         clearSelectedAnnotationIfNeededForActiveTool()
         shapeStartPoint = nil
         shapeCurrentPoint = nil
         brushDraftPoints.removeAll()
         invalidateCursorRectsAndRefresh()
+    }
+
+    private func rememberCurrentStyleForActiveTool() {
+        guard isShapeToolActive else {
+            return
+        }
+
+        if currentShapeKind == .marker {
+            markerStyle = currentStyle
+        } else {
+            nonMarkerStyle = currentStyle
+        }
     }
 
 #if DEBUG
@@ -1867,6 +1905,7 @@ private final class SelectionOverlayView: NSView {
 
     func test_setCurrentStrokePattern(_ pattern: CaptureStrokePattern) {
         currentStyle.strokePattern = pattern
+        rememberCurrentStyleForActiveTool()
     }
 
     func test_setStrokeStyleMenuVisible(_ isVisible: Bool) {
@@ -2133,12 +2172,14 @@ private final class SelectionOverlayView: NSView {
 
         for (index, rect) in layout.strokeWidths.enumerated() where rect.contains(point) {
             currentStyle.strokeWidth = strokeWidths[index]
+            rememberCurrentStyleForActiveTool()
             applyCurrentStyleToSelectedAnnotation()
             return true
         }
 
         if let fillRect = layout.fillToggle, fillRect.contains(point) {
             currentStyle.fillEnabled.toggle()
+            rememberCurrentStyleForActiveTool()
             applyCurrentStyleToSelectedAnnotation()
             return true
         }
@@ -2211,6 +2252,7 @@ private final class SelectionOverlayView: NSView {
                 let color = opaqueColor(colors[index])
                 currentStyle.strokeColor = color
                 currentStyle.fillColor = color
+                rememberCurrentStyleForActiveTool()
                 customColor = nil
                 isCustomColorSwatchActive = false
                 closeCustomColorPanel()
@@ -2254,6 +2296,7 @@ private final class SelectionOverlayView: NSView {
                 return true
             }
             currentStyle.strokePattern = option.pattern
+            rememberCurrentStyleForActiveTool()
             applyCurrentStyleToSelectedAnnotation()
             showsStrokeStyleMenu = false
             needsDisplay = true
@@ -2330,11 +2373,13 @@ private final class SelectionOverlayView: NSView {
         let valueRect = cornerRadiusValueRect(in: panel)
         if cornerRadiusUpRect(in: valueRect).contains(point) {
             currentStyle.cornerRadius = min(30, currentStyle.cornerRadius + 1)
+            rememberCurrentStyleForActiveTool()
             applyCurrentStyleToSelectedAnnotation()
             return true
         }
         if cornerRadiusDownRect(in: valueRect).contains(point) {
             currentStyle.cornerRadius = max(0, currentStyle.cornerRadius - 1)
+            rememberCurrentStyleForActiveTool()
             applyCurrentStyleToSelectedAnnotation()
             return true
         }
@@ -2356,6 +2401,7 @@ private final class SelectionOverlayView: NSView {
         let track = cornerRadiusSliderTrackRect(in: panel, valueRect: valueRect)
         let ratio = min(1, max(0, (point.x - track.minX) / max(1, track.width)))
         currentStyle.cornerRadius = round(ratio * 30)
+        rememberCurrentStyleForActiveTool()
         applyCurrentStyleToSelectedAnnotation()
     }
 
@@ -2425,6 +2471,7 @@ private final class SelectionOverlayView: NSView {
         let annotation = annotations[index]
         activateShapeTool(annotation.kind)
         currentStyle = annotation.style
+        rememberCurrentStyleForActiveTool()
         if let arrowLine = annotation.arrowLine {
             currentStartArrowType = arrowLine.startArrowType
             currentEndArrowType = arrowLine.endArrowType
@@ -2490,6 +2537,7 @@ private final class SelectionOverlayView: NSView {
         isCustomColorSwatchActive = true
         currentStyle.strokeColor = color
         currentStyle.fillColor = color
+        rememberCurrentStyleForActiveTool()
         applyCurrentStyleToSelectedAnnotation()
         invalidateMarkerCursorIfNeeded()
         needsDisplay = true
