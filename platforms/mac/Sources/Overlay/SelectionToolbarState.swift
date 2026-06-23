@@ -113,7 +113,7 @@ enum SelectionToolbarState {
     }
 
     static let defaultFillPreviewColor = NSColor.systemGray
-    static let defaultMarkerColor = NSColor(srgbRed: 255 / 255, green: 127 / 255, blue: 3 / 255, alpha: 1)
+    static let defaultMarkerColor = NSColor(srgbRed: 179 / 255, green: 235 / 255, blue: 0 / 255, alpha: 1)
     static let rotationHandleInset: CGFloat = 14
 
     static func strokeWidthValues(for mode: OptionsToolbarMode) -> [CGFloat] {

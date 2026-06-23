@@ -127,10 +127,10 @@ final class SniporyMacTests: XCTestCase {
 
         let highlightedWhite = try XCTUnwrap(rgbaPixel(in: rendered, x: 30, y: 30))
         XCTAssertEqual(highlightedWhite.alpha, 255)
-        XCTAssertGreaterThan(highlightedWhite.red, 245)
-        XCTAssertGreaterThan(highlightedWhite.green, 120)
-        XCTAssertLessThan(highlightedWhite.green, 180)
+        XCTAssertGreaterThan(highlightedWhite.green, 220)
+        XCTAssertGreaterThan(highlightedWhite.red, 170)
         XCTAssertLessThan(highlightedWhite.blue, 80)
+        XCTAssertGreaterThan(highlightedWhite.green, highlightedWhite.red)
 
         let highlightedText = try XCTUnwrap(rgbaPixel(in: rendered, x: 65, y: 30))
         XCTAssertEqual(highlightedText.alpha, 255)

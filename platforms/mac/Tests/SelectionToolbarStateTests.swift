@@ -810,7 +810,7 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         let style = SelectionToolbarState.markerActivationStyle(currentStyle: current)
 
-        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: style.strokeColor), "#FF7F03")
+        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: style.strokeColor), "#B3EB00")
         XCTAssertEqual(style.strokeWidth, 18)
         XCTAssertEqual(style.strokePattern, .solid)
         XCTAssertFalse(style.fillEnabled)
@@ -874,7 +874,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         guard let style = window.test_currentStyle else {
             return XCTFail("Expected current marker style")
         }
-        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: style.strokeColor), "#FF7F03")
+        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: style.strokeColor), "#B3EB00")
         XCTAssertEqual(style.strokeWidth, 18)
         XCTAssertEqual(style.strokePattern, .solid)
         XCTAssertFalse(style.fillEnabled)
