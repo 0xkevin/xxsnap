@@ -28,7 +28,7 @@ Users can click the `标记` toolbar button and drag across a screenshot to crea
 
 ## Default Style
 
-- Default marker color: `#D4EEA7`.
+- Default marker color: `#FF7F03`.
 - Default marker width: `18`.
 - Available marker widths: `14`, `18`, `22`.
 - Marker opacity is fixed at `65%`.
@@ -110,7 +110,7 @@ Renderer output must preserve the original image dimensions.
 Add focused tests for:
 
 - marker button activation no longer shows the placeholder path;
-- marker default style is `#D4EEA7`, width `18`, fixed opacity `65%`;
+- marker default style is `#FF7F03`, width `18`, fixed opacity `65%`;
 - marker options toolbar shows only width and color controls;
 - marker drag creates a straight marker annotation;
 - `Shift` dragging snaps to horizontal, vertical, or 45-degree directions;

@@ -3747,7 +3747,7 @@ private final class SelectionOverlayView: NSView {
             let line = NSBezierPath()
             line.move(to: NSPoint(x: rect.minX + 4, y: rect.midY))
             line.line(to: NSPoint(x: rect.maxX - 4, y: rect.midY))
-            line.lineWidth = width
+            line.lineWidth = SelectionToolbarState.strokeWidthPreviewLineWidth(for: width, mode: optionsToolbarMode)
             line.lineCapStyle = .round
             line.stroke()
         }

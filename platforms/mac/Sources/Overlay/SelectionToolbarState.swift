@@ -113,7 +113,7 @@ enum SelectionToolbarState {
     }
 
     static let defaultFillPreviewColor = NSColor.systemGray
-    static let defaultMarkerColor = NSColor(srgbRed: 212 / 255, green: 238 / 255, blue: 167 / 255, alpha: 1)
+    static let defaultMarkerColor = NSColor(srgbRed: 255 / 255, green: 127 / 255, blue: 3 / 255, alpha: 1)
 
     static func strokeWidthValues(for mode: OptionsToolbarMode) -> [CGFloat] {
         switch mode {
@@ -126,6 +126,19 @@ enum SelectionToolbarState {
         case .marker:
             return [14, 18, 22]
         }
+    }
+
+    static func strokeWidthPreviewLineWidth(for width: CGFloat, mode: OptionsToolbarMode) -> CGFloat {
+        guard mode == .marker else {
+            return width
+        }
+
+        let markerWidths = strokeWidthValues(for: .marker)
+        let brushWidths = strokeWidthValues(for: .brush)
+        guard let index = markerWidths.firstIndex(of: width), brushWidths.indices.contains(index) else {
+            return width
+        }
+        return brushWidths[index]
     }
 
     static func showsStrokeStyleField(for mode: OptionsToolbarMode) -> Bool {

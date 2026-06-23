@@ -801,10 +801,17 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         let style = SelectionToolbarState.markerActivationStyle(currentStyle: current)
 
-        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: style.strokeColor), "#D4EEA7")
+        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: style.strokeColor), "#FF7F03")
         XCTAssertEqual(style.strokeWidth, 18)
         XCTAssertEqual(style.strokePattern, .solid)
         XCTAssertFalse(style.fillEnabled)
+    }
+
+    func testMarkerToolbarStrokeWidthPreviewUsesScaledBrushLikeWidths() {
+        XCTAssertEqual(SelectionToolbarState.strokeWidthPreviewLineWidth(for: 14, mode: .marker), 3)
+        XCTAssertEqual(SelectionToolbarState.strokeWidthPreviewLineWidth(for: 18, mode: .marker), 5)
+        XCTAssertEqual(SelectionToolbarState.strokeWidthPreviewLineWidth(for: 22, mode: .marker), 7)
+        XCTAssertEqual(SelectionToolbarState.strokeWidthValues(for: .marker), [14, 18, 22])
     }
 
     func testMarkerOptionsToolbarShowsWidthAndColorsOnly() {
@@ -852,7 +859,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         guard let style = window.test_currentStyle else {
             return XCTFail("Expected current marker style")
         }
-        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: style.strokeColor), "#D4EEA7")
+        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: style.strokeColor), "#FF7F03")
         XCTAssertEqual(style.strokeWidth, 18)
         XCTAssertEqual(style.strokePattern, .solid)
         XCTAssertFalse(style.fillEnabled)
