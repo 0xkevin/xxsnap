@@ -2228,6 +2228,47 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_selectionCornerRadius, 0)
     }
 
+    func testRoundedSelectionHidesCornerHandlesAndSquareSelectionShowsThem() {
+        let rect = NSRect(x: 100, y: 120, width: 220, height: 140)
+
+        XCTAssertEqual(
+            SelectionToolbarState.selectionHandlePoints(in: rect, cornerRadius: 0),
+            [
+                NSPoint(x: rect.minX, y: rect.maxY),
+                NSPoint(x: rect.midX, y: rect.maxY),
+                NSPoint(x: rect.maxX, y: rect.maxY),
+                NSPoint(x: rect.minX, y: rect.midY),
+                NSPoint(x: rect.maxX, y: rect.midY),
+                NSPoint(x: rect.minX, y: rect.minY),
+                NSPoint(x: rect.midX, y: rect.minY),
+                NSPoint(x: rect.maxX, y: rect.minY),
+            ]
+        )
+
+        XCTAssertEqual(
+            SelectionToolbarState.selectionHandlePoints(in: rect, cornerRadius: 8),
+            [
+                NSPoint(x: rect.midX, y: rect.maxY),
+                NSPoint(x: rect.minX, y: rect.midY),
+                NSPoint(x: rect.maxX, y: rect.midY),
+                NSPoint(x: rect.midX, y: rect.minY),
+            ]
+        )
+    }
+
+    func testSelectionMeasurementControlSvgResourcesAreBundled() {
+        let resourceNames: [String] = [
+            "border-corner-rounded",
+            "border-corner-square",
+            "aspect-ratio",
+            "aspect-ratio-fill",
+            "refresh",
+        ]
+        resourceNames.forEach { name in
+            XCTAssertNotNil(Bundle.main.url(forResource: name, withExtension: "svg"), "\(name).svg should be bundled")
+        }
+    }
+
     func testClickingAspectRatioMeasurementControlLocksSelectionResizeRatio() {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 200, height: 100))

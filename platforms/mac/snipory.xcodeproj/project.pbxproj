@@ -41,6 +41,11 @@
 		A10000000000000000000019 /* redo-enabled.png in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000019 /* redo-enabled.png */; };
 		A10000000000000000000020 /* redo-disabled.png in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000020 /* redo-disabled.png */; };
 		A10000000000000000000021 /* cancel-capture.png in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000021 /* cancel-capture.png */; };
+		A10000000000000000000022 /* border-corner-rounded.svg in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000022 /* border-corner-rounded.svg */; };
+		A10000000000000000000023 /* border-corner-square.svg in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000023 /* border-corner-square.svg */; };
+		A10000000000000000000024 /* aspect-ratio.svg in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000024 /* aspect-ratio.svg */; };
+		A10000000000000000000025 /* aspect-ratio-fill.svg in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000025 /* aspect-ratio-fill.svg */; };
+		A10000000000000000000026 /* refresh.svg in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000026 /* refresh.svg */; };
 		84667B41B0E72557A55E362F /* manual-capture-checklist.md in Resources */ = {isa = PBXBuildFile; fileRef = 7C4E8D096F7569B92854E279 /* manual-capture-checklist.md */; };
 		8FA898CF544D21E80713D33A /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E2030ECF367D3A1687A8A8E /* main.swift */; };
 		98DC0775E5D01936345232AF /* SelectionToolbarState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C481769F063E9EF9FEEE610 /* SelectionToolbarState.swift */; };
@@ -102,6 +107,11 @@
 		A20000000000000000000019 /* redo-enabled.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "redo-enabled.png"; sourceTree = "<group>"; };
 		A20000000000000000000020 /* redo-disabled.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "redo-disabled.png"; sourceTree = "<group>"; };
 		A20000000000000000000021 /* cancel-capture.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "cancel-capture.png"; sourceTree = "<group>"; };
+		A20000000000000000000022 /* border-corner-rounded.svg */ = {isa = PBXFileReference; path = "../../../border-corner-rounded.svg"; sourceTree = SOURCE_ROOT; };
+		A20000000000000000000023 /* border-corner-square.svg */ = {isa = PBXFileReference; path = "../../../border-corner-square.svg"; sourceTree = SOURCE_ROOT; };
+		A20000000000000000000024 /* aspect-ratio.svg */ = {isa = PBXFileReference; path = "../../../aspect-ratio.svg"; sourceTree = SOURCE_ROOT; };
+		A20000000000000000000025 /* aspect-ratio-fill.svg */ = {isa = PBXFileReference; path = "../../../aspect-ratio-fill.svg"; sourceTree = SOURCE_ROOT; };
+		A20000000000000000000026 /* refresh.svg */ = {isa = PBXFileReference; path = "../../../refresh.svg"; sourceTree = SOURCE_ROOT; };
 		7C4E8D096F7569B92854E279 /* manual-capture-checklist.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "manual-capture-checklist.md"; sourceTree = "<group>"; };
 		81209016EE261C8C7FDA6F7A /* SnapshotExportBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = SnapshotExportBridge.h; sourceTree = "<group>"; };
 		885680910BA419E7EAECDB6C /* SniporyMac-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "SniporyMac-Bridging-Header.h"; sourceTree = "<group>"; };
@@ -251,6 +261,11 @@
 				A20000000000000000000019 /* redo-enabled.png */,
 				A20000000000000000000020 /* redo-disabled.png */,
 				A20000000000000000000021 /* cancel-capture.png */,
+				A20000000000000000000022 /* border-corner-rounded.svg */,
+				A20000000000000000000023 /* border-corner-square.svg */,
+				A20000000000000000000024 /* aspect-ratio.svg */,
+				A20000000000000000000025 /* aspect-ratio-fill.svg */,
+				A20000000000000000000026 /* refresh.svg */,
 				6E80C61CF95B125F94C53BFF /* copy-to-clipboard.svg */,
 				DAAF5CD9C4F22E9086249B8B /* pin-to-screen.svg */,
 				F704F9104BE6802CEC4F2085 /* save-to-file.svg */,
@@ -364,6 +379,11 @@
 				A10000000000000000000019 /* redo-enabled.png in Resources */,
 				A10000000000000000000020 /* redo-disabled.png in Resources */,
 				A10000000000000000000021 /* cancel-capture.png in Resources */,
+				A10000000000000000000022 /* border-corner-rounded.svg in Resources */,
+				A10000000000000000000023 /* border-corner-square.svg in Resources */,
+				A10000000000000000000024 /* aspect-ratio.svg in Resources */,
+				A10000000000000000000025 /* aspect-ratio-fill.svg in Resources */,
+				A10000000000000000000026 /* refresh.svg in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -3304,18 +3304,7 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func drawSelectionHandles(_ rect: NSRect) {
-        let radius = min(selectionCornerRadius, rect.width / 2, rect.height / 2)
-        let cornerOffset = radius > 0 ? radius : 0
-        let handles = [
-            NSPoint(x: rect.minX + cornerOffset, y: rect.maxY - cornerOffset),
-            NSPoint(x: rect.midX, y: rect.maxY),
-            NSPoint(x: rect.maxX - cornerOffset, y: rect.maxY - cornerOffset),
-            NSPoint(x: rect.minX, y: rect.midY),
-            NSPoint(x: rect.maxX, y: rect.midY),
-            NSPoint(x: rect.minX + cornerOffset, y: rect.minY + cornerOffset),
-            NSPoint(x: rect.midX, y: rect.minY),
-            NSPoint(x: rect.maxX - cornerOffset, y: rect.minY + cornerOffset),
-        ]
+        let handles = SelectionToolbarState.selectionHandlePoints(in: rect, cornerRadius: selectionCornerRadius)
 
         NSColor(calibratedRed: 83 / 255, green: 120 / 255, blue: 232 / 255, alpha: 1).setFill()
         NSColor(calibratedWhite: 1, alpha: 0.95).setStroke()
@@ -3346,11 +3335,23 @@ private final class SelectionOverlayView: NSView {
         NSString(string: label).draw(in: layout.label.insetBy(dx: 9, dy: 4), withAttributes: attributes)
 
         drawMeasurementControlButton(layout.cornerStyle, selected: selectionCornerRadius > 0)
-        drawCornerStyleIcon(in: layout.cornerStyle.insetBy(dx: 2, dy: 2), rounded: selectionCornerRadius > 0)
+        drawMeasurementIcon(
+            named: selectionCornerRadius > 0 ? "border-corner-rounded" : "border-corner-square",
+            in: layout.cornerStyle.insetBy(dx: 2, dy: 2)
+        ) {
+            drawCornerStyleIcon(in: layout.cornerStyle.insetBy(dx: 2, dy: 2), rounded: selectionCornerRadius > 0)
+        }
         drawMeasurementControlButton(layout.aspectRatio, selected: isSelectionAspectRatioLocked)
-        drawAspectRatioIcon(in: layout.aspectRatio.insetBy(dx: 3, dy: 3), locked: isSelectionAspectRatioLocked)
+        drawMeasurementIcon(
+            named: isSelectionAspectRatioLocked ? "aspect-ratio-fill" : "aspect-ratio",
+            in: layout.aspectRatio.insetBy(dx: 3, dy: 3)
+        ) {
+            drawAspectRatioIcon(in: layout.aspectRatio.insetBy(dx: 3, dy: 3), locked: isSelectionAspectRatioLocked)
+        }
         drawMeasurementControlButton(layout.refresh, selected: isRefreshingSelectionBackground)
-        drawRefreshIcon(in: layout.refresh.insetBy(dx: 2, dy: 2))
+        drawMeasurementIcon(named: "refresh", in: layout.refresh.insetBy(dx: 2, dy: 2)) {
+            drawRefreshIcon(in: layout.refresh.insetBy(dx: 2, dy: 2))
+        }
     }
 
     private func measurementControlLayout(for rect: NSRect) -> SelectionToolbarState.MeasurementControlLayout {
@@ -3369,6 +3370,19 @@ private final class SelectionOverlayView: NSView {
     private func drawMeasurementControlButton(_ rect: NSRect, selected: Bool) {
         (selected ? NSColor.white.withAlphaComponent(0.22) : NSColor.white.withAlphaComponent(0.06)).setFill()
         NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4).fill()
+    }
+
+    private func drawMeasurementIcon(named name: String, in rect: NSRect, fallback: () -> Void) {
+        guard
+            let url = Bundle.main.url(forResource: name, withExtension: "svg"),
+            let image = NSImage(contentsOf: url)
+        else {
+            fallback()
+            return
+        }
+
+        image.isTemplate = false
+        image.draw(in: rect)
     }
 
     private func drawCornerStyleIcon(in rect: NSRect, rounded: Bool) {

@@ -466,6 +466,28 @@ enum SelectionToolbarState {
         return nil
     }
 
+    static func selectionHandlePoints(in rect: NSRect, cornerRadius: CGFloat) -> [NSPoint] {
+        if cornerRadius > 0 {
+            return [
+                NSPoint(x: rect.midX, y: rect.maxY),
+                NSPoint(x: rect.minX, y: rect.midY),
+                NSPoint(x: rect.maxX, y: rect.midY),
+                NSPoint(x: rect.midX, y: rect.minY),
+            ]
+        }
+
+        return [
+            NSPoint(x: rect.minX, y: rect.maxY),
+            NSPoint(x: rect.midX, y: rect.maxY),
+            NSPoint(x: rect.maxX, y: rect.maxY),
+            NSPoint(x: rect.minX, y: rect.midY),
+            NSPoint(x: rect.maxX, y: rect.midY),
+            NSPoint(x: rect.minX, y: rect.minY),
+            NSPoint(x: rect.midX, y: rect.minY),
+            NSPoint(x: rect.maxX, y: rect.minY),
+        ]
+    }
+
     static func resizedSelectionRect(
         from startRect: NSRect,
         handle: OverlayResizeHandle,
