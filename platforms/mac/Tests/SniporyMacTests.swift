@@ -134,9 +134,9 @@ final class SniporyMacTests: XCTestCase {
         let pixel = try rgbaPixel(in: rendered, x: 55, y: 30)
         XCTAssertNotNil(pixel)
         XCTAssertEqual(pixel!.alpha, 255)
-        XCTAssertEqual(Double(pixel!.red), 173, accuracy: 2)
-        XCTAssertEqual(Double(pixel!.green), 197, accuracy: 2)
-        XCTAssertEqual(Double(pixel!.blue), 158, accuracy: 2)
+        XCTAssertEqual(Double(pixel!.red), 201, accuracy: 2)
+        XCTAssertEqual(Double(pixel!.green), 226, accuracy: 2)
+        XCTAssertEqual(Double(pixel!.blue), 164, accuracy: 2)
     }
 
     func testAnnotationRendererPreservesImageDimensionsWhenDrawingMarker() throws {

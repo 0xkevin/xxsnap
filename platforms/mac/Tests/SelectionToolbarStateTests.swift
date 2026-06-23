@@ -272,7 +272,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertNil(brushWindow.test_selectedAnnotationKind)
     }
 
-    func testOverlayWindowSelectedBrushShowsOnlyEndpointMarkers() {
+    func testOverlayWindowSelectedBrushShowsOnlyInsetEndpointMarkers() {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
         window.test_activateShapeTool(.brush)
@@ -286,10 +286,10 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         let markers = window.test_selectedBrushEndpointMarkers
         XCTAssertEqual(markers.count, 2)
-        XCTAssertEqual(markers[0].x, 150, accuracy: 0.1)
-        XCTAssertEqual(markers[0].y, 150, accuracy: 0.1)
-        XCTAssertEqual(markers[1].x, 240, accuracy: 0.1)
-        XCTAssertEqual(markers[1].y, 170, accuracy: 0.1)
+        XCTAssertEqual(markers[0].x, 157.8, accuracy: 0.1)
+        XCTAssertEqual(markers[0].y, 161.6, accuracy: 0.1)
+        XCTAssertEqual(markers[1].x, 228.4, accuracy: 0.1)
+        XCTAssertEqual(markers[1].y, 177.8, accuracy: 0.1)
     }
 
     func testOverlayWindowShiftDoesNotChangeStraightArrowEndpointDrag() {
@@ -382,8 +382,14 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_mouseDragged(to: NSPoint(x: 180, y: 180))
         window.test_mouseUp(at: NSPoint(x: 180, y: 180))
 
-        XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: 140, y: 140)), .rotationHandle)
-        XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: 180, y: 180)), .rotationHandle)
+        let path = CaptureBrushPath(points: [NSPoint(x: 140, y: 140), NSPoint(x: 180, y: 180)])
+        let startHandle = SelectionToolbarState.brushRotationHandlePoint(for: .start, path: path)!
+        let endHandle = SelectionToolbarState.brushRotationHandlePoint(for: .end, path: path)!
+
+        XCTAssertEqual(window.test_cursorStyle(at: startHandle), .rotationHandle)
+        XCTAssertEqual(window.test_cursorStyle(at: endHandle), .rotationHandle)
+        XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: 140, y: 140)), .brush)
+        XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: 180, y: 180)), .brush)
     }
 
     func testOverlayWindowDraggingBrushEndpointAnchorsOppositeEndAndKeepsVerticalArrowsCursor() {
@@ -400,7 +406,10 @@ final class SelectionToolbarStateTests: XCTestCase {
         }
         XCTAssertGreaterThanOrEqual(original.points.count, 2)
 
-        window.test_mouseDown(at: NSPoint(x: 180, y: 180))
+        let overlayPath = CaptureBrushPath(points: original.points.map { NSPoint(x: $0.x + 100, y: $0.y + 100) })
+        let endHandle = SelectionToolbarState.brushRotationHandlePoint(for: .end, path: overlayPath)!
+
+        window.test_mouseDown(at: endHandle)
         window.test_mouseDragged(to: NSPoint(x: 210, y: 220))
         XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: 210, y: 220)), .rotationHandle)
         window.test_mouseUp(at: NSPoint(x: 210, y: 220))
@@ -814,6 +823,12 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(SelectionToolbarState.strokeWidthValues(for: .marker), [14, 18, 22])
     }
 
+    func testMarkerCursorDotDiameterTracksStrokeWidthWithoutUsingFullHighlighterSize() {
+        XCTAssertEqual(SelectionToolbarState.markerCursorDotDiameter(for: 14), 10)
+        XCTAssertEqual(SelectionToolbarState.markerCursorDotDiameter(for: 18), 13)
+        XCTAssertEqual(SelectionToolbarState.markerCursorDotDiameter(for: 22), 16)
+    }
+
     func testMarkerOptionsToolbarShowsWidthAndColorsOnly() {
         let optionsRect = NSRect(x: 100, y: 100, width: 360, height: 40)
         let layout = SelectionToolbarState.optionsToolbarLayout(
@@ -963,6 +978,58 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(moved.start.y, original.start.y + 20, accuracy: 0.1)
         XCTAssertEqual(moved.end.x, original.end.x + 30, accuracy: 0.1)
         XCTAssertEqual(moved.end.y, original.end.y + 20, accuracy: 0.1)
+    }
+
+    func testOverlayWindowMarkerEndpointHandlesResizeLineWithoutCoveringExactEndpoints() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.marker)
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseDragged(to: NSPoint(x: 220, y: 180))
+        window.test_mouseUp(at: NSPoint(x: 220, y: 180))
+
+        let overlayLine = CaptureMarkerLine(start: NSPoint(x: 140, y: 150), end: NSPoint(x: 220, y: 180))
+        let startHandle = SelectionToolbarState.markerRotationHandlePoint(for: .start, line: overlayLine)!
+
+        XCTAssertEqual(window.test_cursorStyle(at: startHandle), .rotationHandle)
+        XCTAssertEqual(window.test_cursorStyle(at: overlayLine.start), .marker)
+
+        window.test_mouseDown(at: startHandle)
+        window.test_mouseDragged(to: NSPoint(x: 155, y: 130))
+        window.test_mouseUp(at: NSPoint(x: 155, y: 130))
+
+        guard let markerLine = window.test_markerLine(at: 0) else {
+            return XCTFail("Expected marker annotation")
+        }
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(markerLine.start.x, 55, accuracy: 0.1)
+        XCTAssertEqual(markerLine.start.y, 30, accuracy: 0.1)
+        XCTAssertEqual(markerLine.end.x, 120, accuracy: 0.1)
+        XCTAssertEqual(markerLine.end.y, 80, accuracy: 0.1)
+    }
+
+    func testOverlayWindowCanContinueDrawingMarkerFromExistingEndpoint() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.marker)
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseDragged(to: NSPoint(x: 220, y: 180))
+        window.test_mouseUp(at: NSPoint(x: 220, y: 180))
+
+        window.test_mouseDown(at: NSPoint(x: 220, y: 180))
+        window.test_mouseDragged(to: NSPoint(x: 250, y: 180))
+        window.test_mouseUp(at: NSPoint(x: 250, y: 180))
+
+        XCTAssertEqual(window.test_annotationCount, 2)
+        guard let continued = window.test_markerLine(at: 1) else {
+            return XCTFail("Expected continued marker annotation")
+        }
+        XCTAssertEqual(continued.start.x, 120, accuracy: 0.1)
+        XCTAssertEqual(continued.start.y, 80, accuracy: 0.1)
+        XCTAssertEqual(continued.end.x, 150, accuracy: 0.1)
+        XCTAssertEqual(continued.end.y, 80, accuracy: 0.1)
     }
 
     func testMarkerAnnotationStyleCanEditButGeometryCannotResizeAfterDrawing() {
@@ -1389,7 +1456,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(SelectionToolbarState.arrowLineHitTarget(at: NSPoint(x: 60, y: 90), line: line), .none)
     }
 
-    func testBrushRotationHitTargetOnlyUsesPathEndpoints() {
+    func testBrushRotationHitTargetUsesInsetHandlesInsteadOfPathEndpoints() {
         let path = CaptureBrushPath(points: [
             NSPoint(x: 10, y: 10),
             NSPoint(x: 35, y: 45),
@@ -1397,9 +1464,43 @@ final class SelectionToolbarStateTests: XCTestCase {
             NSPoint(x: 110, y: 10),
         ])
 
-        XCTAssertEqual(SelectionToolbarState.brushRotationHitTarget(at: NSPoint(x: 10, y: 10), path: path), .start)
-        XCTAssertEqual(SelectionToolbarState.brushRotationHitTarget(at: NSPoint(x: 110, y: 10), path: path), .end)
+        let startHandle = SelectionToolbarState.brushRotationHandlePoint(for: .start, path: path)!
+        let endHandle = SelectionToolbarState.brushRotationHandlePoint(for: .end, path: path)!
+
+        XCTAssertNotEqual(startHandle, path.points.first)
+        XCTAssertNotEqual(endHandle, path.points.last)
+        XCTAssertEqual(SelectionToolbarState.brushRotationHitTarget(at: NSPoint(x: 10, y: 10), path: path), .none)
+        XCTAssertEqual(SelectionToolbarState.brushRotationHitTarget(at: NSPoint(x: 110, y: 10), path: path), .none)
+        XCTAssertEqual(SelectionToolbarState.brushRotationHitTarget(at: startHandle, path: path), .start)
+        XCTAssertEqual(SelectionToolbarState.brushRotationHitTarget(at: endHandle, path: path), .end)
         XCTAssertEqual(SelectionToolbarState.brushRotationHitTarget(at: NSPoint(x: 60, y: 70), path: path), .none)
+    }
+
+    func testMarkerRotationHitTargetUsesInsetHandlesInsteadOfLineEndpoints() {
+        let line = CaptureMarkerLine(start: NSPoint(x: 10, y: 10), end: NSPoint(x: 110, y: 10))
+
+        XCTAssertEqual(SelectionToolbarState.markerRotationHandlePoint(for: .start, line: line), NSPoint(x: 24, y: 10))
+        XCTAssertEqual(SelectionToolbarState.markerRotationHandlePoint(for: .end, line: line), NSPoint(x: 96, y: 10))
+        XCTAssertEqual(SelectionToolbarState.markerRotationHitTarget(at: line.start, line: line), .none)
+        XCTAssertEqual(SelectionToolbarState.markerRotationHitTarget(at: line.end, line: line), .none)
+        XCTAssertEqual(SelectionToolbarState.markerRotationHitTarget(at: NSPoint(x: 24, y: 10), line: line), .start)
+        XCTAssertEqual(SelectionToolbarState.markerRotationHitTarget(at: NSPoint(x: 96, y: 10), line: line), .end)
+    }
+
+    func testDraggingMarkerEndpointChangesOnlyThatEndpoint() {
+        let line = CaptureMarkerLine(start: NSPoint(x: 10, y: 10), end: NSPoint(x: 110, y: 10))
+
+        let movedStart = SelectionToolbarState.resizedMarkerLine(line, dragging: .start, to: NSPoint(x: 20, y: 35))
+        XCTAssertEqual(movedStart.start.x, 20, accuracy: 0.1)
+        XCTAssertEqual(movedStart.start.y, 35, accuracy: 0.1)
+        XCTAssertEqual(movedStart.end.x, 110, accuracy: 0.1)
+        XCTAssertEqual(movedStart.end.y, 10, accuracy: 0.1)
+
+        let movedEnd = SelectionToolbarState.resizedMarkerLine(line, dragging: .end, to: NSPoint(x: 80, y: 45))
+        XCTAssertEqual(movedEnd.start.x, 10, accuracy: 0.1)
+        XCTAssertEqual(movedEnd.start.y, 10, accuracy: 0.1)
+        XCTAssertEqual(movedEnd.end.x, 80, accuracy: 0.1)
+        XCTAssertEqual(movedEnd.end.y, 45, accuracy: 0.1)
     }
 
     func testBrushRotationHandleAngleFollowsEndpointTangent() {

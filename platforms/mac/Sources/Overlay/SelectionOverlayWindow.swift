@@ -169,16 +169,31 @@ private extension NSCursor {
         return NSCursor.arrow
     }()
 
-    static func sniporyMarker(color: NSColor) -> NSCursor {
+    static func sniporyMarker(color: NSColor, strokeWidth: CGFloat) -> NSCursor {
         let size = NSSize(width: 24, height: 24)
         let center = NSPoint(x: size.width / 2, y: size.height / 2)
+        let diameter = SelectionToolbarState.markerCursorDotDiameter(for: strokeWidth)
         let image = NSImage(size: size)
         image.lockFocus()
 
         NSColor.white.withAlphaComponent(0.92).setFill()
-        NSBezierPath(ovalIn: NSRect(x: center.x - 6, y: center.y - 6, width: 12, height: 12)).fill()
+        NSBezierPath(
+            ovalIn: NSRect(
+                x: center.x - diameter / 2 - 1,
+                y: center.y - diameter / 2 - 1,
+                width: diameter + 2,
+                height: diameter + 2
+            )
+        ).fill()
         color.withAlphaComponent(0.95).setFill()
-        NSBezierPath(ovalIn: NSRect(x: center.x - 4, y: center.y - 4, width: 8, height: 8)).fill()
+        NSBezierPath(
+            ovalIn: NSRect(
+                x: center.x - diameter / 2,
+                y: center.y - diameter / 2,
+                width: diameter,
+                height: diameter
+            )
+        ).fill()
 
         image.unlockFocus()
         return NSCursor(image: image, hotSpot: center)
@@ -581,6 +596,7 @@ private final class SelectionOverlayView: NSView {
         case movingSelection
         case resizingShape
         case resizingArrowLine
+        case resizingMarkerLine
         case rotatingBrush
         case resizingSelection
     }
@@ -700,6 +716,8 @@ private final class SelectionOverlayView: NSView {
     private var resizingAnnotationStartRect: NSRect?
     private var activeArrowLineHandle: SelectionToolbarState.ArrowLineHitTarget?
     private var resizingArrowLineStart: CaptureArrowLine?
+    private var activeMarkerLineHandle: SelectionToolbarState.BrushRotationHitTarget?
+    private var resizingMarkerLineStart: CaptureMarkerLine?
     private var activeBrushRotationHandle: SelectionToolbarState.BrushRotationHitTarget?
     private var rotatingBrushStartPath: CaptureBrushPath?
     private var activeSelectionResizeHandle: SelectionToolbarState.OverlayResizeHandle?
@@ -813,7 +831,7 @@ private final class SelectionOverlayView: NSView {
             selectionStartPoint = point
             selectionCurrentPoint = point
             updateColorSampler(at: point)
-        case .annotating, .drawingShape, .draggingToolbar, .draggingCornerRadius, .movingShape, .movingSelection, .resizingShape, .resizingArrowLine, .rotatingBrush, .resizingSelection:
+        case .annotating, .drawingShape, .draggingToolbar, .draggingCornerRadius, .movingShape, .movingSelection, .resizingShape, .resizingArrowLine, .resizingMarkerLine, .rotatingBrush, .resizingSelection:
             handleAnnotatingMouseDown(at: point)
         }
 
@@ -864,6 +882,8 @@ private final class SelectionOverlayView: NSView {
             updateResizingShape(to: point)
         case .resizingArrowLine:
             updateResizingArrowLine(to: point, modifierFlags: event.modifierFlags)
+        case .resizingMarkerLine:
+            updateResizingMarkerLine(to: point)
         case .rotatingBrush:
             updateRotatingBrush(to: point)
         case .resizingSelection:
@@ -902,6 +922,14 @@ private final class SelectionOverlayView: NSView {
         }
 
         if interactionMode == .rotatingBrush {
+            return .rotationHandle
+        }
+
+        if interactionMode == .resizingMarkerLine {
+            return .rotationHandle
+        }
+
+        if interactionMode == .annotating, markerRotationHitTarget(at: point) != nil {
             return .rotationHandle
         }
 
@@ -1045,6 +1073,11 @@ private final class SelectionOverlayView: NSView {
             activeArrowLineHandle = nil
             resizingArrowLineStart = nil
             interactionMode = .annotating
+        case .resizingMarkerLine:
+            commitSelectedShapePreview()
+            activeMarkerLineHandle = nil
+            resizingMarkerLineStart = nil
+            interactionMode = .annotating
         case .rotatingBrush:
             commitSelectedShapePreview()
             activeBrushRotationHandle = nil
@@ -1146,7 +1179,7 @@ private final class SelectionOverlayView: NSView {
             return NSCursor.sniporyBrush
         }
         if currentShapeKind == .marker {
-            return NSCursor.sniporyMarker(color: currentStyle.strokeColor)
+            return NSCursor.sniporyMarker(color: currentStyle.strokeColor, strokeWidth: currentStyle.strokeWidth)
         }
         return NSCursor.crosshair
     }
@@ -1226,7 +1259,7 @@ private final class SelectionOverlayView: NSView {
         case .brush:
             NSCursor.sniporyBrush.set()
         case .marker:
-            NSCursor.sniporyMarker(color: currentStyle.strokeColor).set()
+            NSCursor.sniporyMarker(color: currentStyle.strokeColor, strokeWidth: currentStyle.strokeWidth).set()
         }
     }
 
@@ -1543,6 +1576,22 @@ private final class SelectionOverlayView: NSView {
         }
 
         guard lockedSelectionRect != nil else {
+            return
+        }
+
+        if let markerHit = markerRotationHitTarget(at: point) {
+            if let angle = markerRotationCursorAngle(for: markerHit.index, target: markerHit.target) {
+                NSCursor.sniporyBrushRotationHandle(angle: angle).set()
+            }
+            selectAnnotation(at: markerHit.index)
+            activeMarkerLineHandle = markerHit.target
+            resizingMarkerLineStart = overlayMarkerLine(fromLocalMarkerLine: annotations[markerHit.index].markerLine)
+            interactionMode = .resizingMarkerLine
+            showsStrokeStyleMenu = false
+            showsCornerRadiusPanel = false
+            showsStartArrowTypeMenu = false
+            showsEndArrowTypeMenu = false
+            needsDisplay = true
             return
         }
 
@@ -2488,6 +2537,8 @@ private final class SelectionOverlayView: NSView {
         resizingAnnotationStartRect = nil
         resizingArrowLineStart = nil
         activeArrowLineHandle = nil
+        resizingMarkerLineStart = nil
+        activeMarkerLineHandle = nil
         rotatingBrushStartPath = nil
         activeBrushRotationHandle = nil
         redoAnnotations.removeAll()
@@ -2578,13 +2629,23 @@ private final class SelectionOverlayView: NSView {
             guard let brushPath = overlayBrushPath(fromLocalBrushPath: annotation.brushPath) else {
                 return false
             }
-            return brushPathContains(point, path: brushPath, hitOutset: max(6, annotation.style.strokeWidth / 2 + 4))
+            let hitOutset = max(6, annotation.style.strokeWidth / 2 + 4)
+            if let start = brushPath.points.first, let end = brushPath.points.last,
+               hypot(point.x - start.x, point.y - start.y) <= hitOutset
+                || hypot(point.x - end.x, point.y - end.y) <= hitOutset {
+                return false
+            }
+            return brushPathContains(point, path: brushPath, hitOutset: hitOutset)
         }
         if annotation.kind == .marker {
             guard let markerLine = overlayMarkerLine(fromLocalMarkerLine: annotation.markerLine) else {
                 return false
             }
             let hitOutset = max(8, annotation.style.strokeWidth / 2 + 4)
+            if hypot(point.x - markerLine.start.x, point.y - markerLine.start.y) <= hitOutset
+                || hypot(point.x - markerLine.end.x, point.y - markerLine.end.y) <= hitOutset {
+                return false
+            }
             return SelectionToolbarState.markerLineContains(point: point, line: markerLine, hitOutset: hitOutset)
         }
 
@@ -2642,6 +2703,46 @@ private final class SelectionOverlayView: NSView {
             }
         }
         return nil
+    }
+
+    private func markerRotationHitTarget(at point: NSPoint) -> (index: Int, target: SelectionToolbarState.BrushRotationHitTarget)? {
+        for index in annotations.indices.reversed() where annotations[index].kind == .marker {
+            guard activeToolCanEdit(annotationKind: annotations[index].kind) else {
+                continue
+            }
+            guard let markerLine = overlayMarkerLine(fromLocalMarkerLine: annotations[index].markerLine) else {
+                continue
+            }
+            let target = SelectionToolbarState.markerRotationHitTarget(at: point, line: markerLine)
+            if target != .none {
+                return (index, target)
+            }
+        }
+        return nil
+    }
+
+    private func markerRotationCursorAngle(
+        for index: Int,
+        target: SelectionToolbarState.BrushRotationHitTarget
+    ) -> CGFloat? {
+        guard annotations.indices.contains(index),
+              let markerLine = overlayMarkerLine(fromLocalMarkerLine: annotations[index].markerLine) else {
+            return nil
+        }
+
+        let from: NSPoint
+        let to: NSPoint
+        switch target {
+        case .start:
+            from = markerLine.end
+            to = markerLine.start
+        case .end:
+            from = markerLine.start
+            to = markerLine.end
+        case .none:
+            return nil
+        }
+        return atan2(to.y - from.y, to.x - from.x)
     }
 
     private func brushRotationCursorAngle(at point: NSPoint) -> CGFloat? {
@@ -2905,6 +3006,33 @@ private final class SelectionOverlayView: NSView {
         let localLine = localArrowLine(fromOverlayArrowLine: updatedLine)
         annotations[selectedAnnotationIndex].arrowLine = localLine
         annotations[selectedAnnotationIndex].rect = localLine.boundingRect
+    }
+
+    private func updateResizingMarkerLine(to point: NSPoint) {
+        guard
+            let selectedAnnotationIndex,
+            annotations.indices.contains(selectedAnnotationIndex),
+            let originalLine = resizingMarkerLineStart,
+            let activeMarkerLineHandle
+        else {
+            return
+        }
+
+        let updatedLine = SelectionToolbarState.resizedMarkerLine(
+            originalLine,
+            dragging: activeMarkerLineHandle,
+            to: clamp(point, to: bounds)
+        )
+        guard hypot(updatedLine.end.x - updatedLine.start.x, updatedLine.end.y - updatedLine.start.y) >= 8 else {
+            return
+        }
+
+        let localLine = localMarkerLine(fromOverlayMarkerLine: updatedLine)
+        annotations[selectedAnnotationIndex].markerLine = localLine
+        annotations[selectedAnnotationIndex].rect = localLine.boundingRect
+        if let angle = markerRotationCursorAngle(for: selectedAnnotationIndex, target: activeMarkerLineHandle) {
+            NSCursor.sniporyBrushRotationHandle(angle: angle).set()
+        }
     }
 
     private func updateRotatingBrush(to point: NSPoint) {
@@ -3341,6 +3469,10 @@ private final class SelectionOverlayView: NSView {
             drawSelectedBrushPathOutline(annotation)
             return
         }
+        if annotation.kind == .marker {
+            drawSelectedMarkerLineOutline(annotation)
+            return
+        }
 
         let rect = overlayRect(fromLocalAnnotationRect: annotation.rect)
         NSColor.systemBlue.setStroke()
@@ -3375,6 +3507,19 @@ private final class SelectionOverlayView: NSView {
         }
     }
 
+    private func drawSelectedMarkerLineOutline(_ annotation: CaptureAnnotation) {
+        guard let markerLine = overlayMarkerLine(fromLocalMarkerLine: annotation.markerLine) else {
+            return
+        }
+
+        [
+            SelectionToolbarState.markerRotationHandlePoint(for: .start, line: markerLine),
+            SelectionToolbarState.markerRotationHandlePoint(for: .end, line: markerLine),
+        ].compactMap { $0 }.forEach { point in
+            drawBrushEndpointHandle(at: point)
+        }
+    }
+
     private func appendQuadraticCurve(to path: NSBezierPath, start: NSPoint, control: NSPoint, end: NSPoint) {
         let firstControl = NSPoint(
             x: start.x + (control.x - start.x) * 2 / 3,
@@ -3404,13 +3549,14 @@ private final class SelectionOverlayView: NSView {
     private func selectedBrushEndpointMarkers(for annotation: CaptureAnnotation) -> [NSPoint] {
         guard annotation.kind == .brush,
               let brushPath = overlayBrushPath(fromLocalBrushPath: annotation.brushPath),
-              let first = brushPath.points.first,
-              let last = brushPath.points.last,
               brushPath.points.count >= 2 else {
             return []
         }
 
-        return [first, last]
+        return [
+            SelectionToolbarState.brushRotationHandlePoint(for: .start, path: brushPath),
+            SelectionToolbarState.brushRotationHandlePoint(for: .end, path: brushPath),
+        ].compactMap { $0 }
     }
 
     private func drawResizeHandles(for rect: NSRect, kind: CaptureAnnotationKind) {

@@ -114,6 +114,7 @@ enum SelectionToolbarState {
 
     static let defaultFillPreviewColor = NSColor.systemGray
     static let defaultMarkerColor = NSColor(srgbRed: 255 / 255, green: 127 / 255, blue: 3 / 255, alpha: 1)
+    static let rotationHandleInset: CGFloat = 14
 
     static func strokeWidthValues(for mode: OptionsToolbarMode) -> [CGFloat] {
         switch mode {
@@ -139,6 +140,17 @@ enum SelectionToolbarState {
             return width
         }
         return brushWidths[index]
+    }
+
+    static func markerCursorDotDiameter(for strokeWidth: CGFloat) -> CGFloat {
+        switch strokeWidth {
+        case ..<16:
+            return 10
+        case ..<20:
+            return 13
+        default:
+            return 16
+        }
     }
 
     static func showsStrokeStyleField(for mode: OptionsToolbarMode) -> Bool {
@@ -641,16 +653,79 @@ enum SelectionToolbarState {
         path: CaptureBrushPath,
         hitOutset: CGFloat = 12
     ) -> BrushRotationHitTarget {
-        guard path.points.count >= 2, let start = path.points.first, let end = path.points.last else {
+        guard path.points.count >= 2 else {
             return .none
         }
-        if distance(from: point, to: start) <= hitOutset {
+        if let start = brushRotationHandlePoint(for: .start, path: path), distance(from: point, to: start) <= hitOutset {
             return .start
         }
-        if distance(from: point, to: end) <= hitOutset {
+        if let end = brushRotationHandlePoint(for: .end, path: path), distance(from: point, to: end) <= hitOutset {
             return .end
         }
         return .none
+    }
+
+    static func brushRotationHandlePoint(
+        for handle: BrushRotationHitTarget,
+        path: CaptureBrushPath,
+        inset: CGFloat = rotationHandleInset
+    ) -> NSPoint? {
+        guard path.points.count >= 2 else {
+            return nil
+        }
+
+        switch handle {
+        case .start:
+            return insetPoint(from: path.points[0], toward: path.points[1], inset: inset)
+        case .end:
+            return insetPoint(from: path.points[path.points.count - 1], toward: path.points[path.points.count - 2], inset: inset)
+        case .none:
+            return nil
+        }
+    }
+
+    static func markerRotationHandlePoint(
+        for handle: BrushRotationHitTarget,
+        line: CaptureMarkerLine,
+        inset: CGFloat = rotationHandleInset
+    ) -> NSPoint? {
+        switch handle {
+        case .start:
+            return insetPoint(from: line.start, toward: line.end, inset: inset)
+        case .end:
+            return insetPoint(from: line.end, toward: line.start, inset: inset)
+        case .none:
+            return nil
+        }
+    }
+
+    static func markerRotationHitTarget(
+        at point: NSPoint,
+        line: CaptureMarkerLine,
+        hitOutset: CGFloat = 12
+    ) -> BrushRotationHitTarget {
+        if let start = markerRotationHandlePoint(for: .start, line: line), distance(from: point, to: start) <= hitOutset {
+            return .start
+        }
+        if let end = markerRotationHandlePoint(for: .end, line: line), distance(from: point, to: end) <= hitOutset {
+            return .end
+        }
+        return .none
+    }
+
+    static func resizedMarkerLine(
+        _ line: CaptureMarkerLine,
+        dragging handle: BrushRotationHitTarget,
+        to point: NSPoint
+    ) -> CaptureMarkerLine {
+        switch handle {
+        case .start:
+            return CaptureMarkerLine(start: point, end: line.end)
+        case .end:
+            return CaptureMarkerLine(start: line.start, end: point)
+        case .none:
+            return line
+        }
     }
 
     static func brushRotationHandleAngle(
@@ -1226,6 +1301,20 @@ enum SelectionToolbarState {
 
     private static func distance(from lhs: NSPoint, to rhs: NSPoint) -> CGFloat {
         hypot(lhs.x - rhs.x, lhs.y - rhs.y)
+    }
+
+    private static func insetPoint(from endpoint: NSPoint, toward neighbor: NSPoint, inset: CGFloat) -> NSPoint {
+        let dx = neighbor.x - endpoint.x
+        let dy = neighbor.y - endpoint.y
+        let length = hypot(dx, dy)
+        guard length >= 0.001 else {
+            return endpoint
+        }
+        let distance = min(inset, length / 2)
+        return NSPoint(
+            x: endpoint.x + dx / length * distance,
+            y: endpoint.y + dy / length * distance
+        )
     }
 
     static func toggledColorSamplerCopyMode(from mode: ColorSamplerCopyMode) -> ColorSamplerCopyMode {
