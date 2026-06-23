@@ -254,6 +254,7 @@ final class SelectionOverlayWindow: NSWindow {
 
     private let selectionHandler: (CaptureSelectionResult?) -> Void
     private var didCompleteSelection = false
+    private var escapeKeyMonitor: Any?
 
     init(
         backgroundImage: NSImage?,
@@ -294,6 +295,13 @@ final class SelectionOverlayWindow: NSWindow {
 
         contentView = overlayView
         acceptsMouseMovedEvents = true
+        installEscapeKeyMonitor()
+    }
+
+    deinit {
+        if let escapeKeyMonitor {
+            NSEvent.removeMonitor(escapeKeyMonitor)
+        }
     }
 
     override var canBecomeKey: Bool {
@@ -309,6 +317,26 @@ final class SelectionOverlayWindow: NSWindow {
         orderFrontRegardless()
         makeKeyAndOrderFront(nil)
         makeFirstResponder(contentView)
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.didCompleteSelection else {
+                return
+            }
+            self.makeKeyAndOrderFront(nil)
+            self.makeFirstResponder(self.contentView)
+        }
+    }
+
+    private func installEscapeKeyMonitor() {
+        escapeKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, !self.didCompleteSelection else {
+                return event
+            }
+            guard event.keyCode == 53 else {
+                return event
+            }
+            self.cancelOperation(nil)
+            return nil
+        }
     }
 
     override func cancelOperation(_ sender: Any?) {
@@ -522,6 +550,10 @@ final class SelectionOverlayWindow: NSWindow {
             return
         }
         didCompleteSelection = true
+        if let escapeKeyMonitor {
+            NSEvent.removeMonitor(escapeKeyMonitor)
+            self.escapeKeyMonitor = nil
+        }
         (contentView as? SelectionOverlayView)?.prepareForCompletion()
         makeFirstResponder(nil)
         orderOut(nil)
@@ -746,9 +778,12 @@ private final class SelectionOverlayView: NSView {
     private var resizingSelectionStartRect: NSRect?
     private var resizingSelectionStartAnnotationRects: [NSRect] = []
     private var resizingSelectionStartAnnotations: [CaptureAnnotation] = []
-    private var selectionCornerRadius: CGFloat = 0
+    private let defaultSelectionCornerRadius: CGFloat = 10
+    private var selectionCornerRadius: CGFloat = 10
     private var isSelectionAspectRatioLocked = false
     private var isRefreshingSelectionBackground = false
+    private var refreshAnimationStartDate: Date?
+    private var refreshAnimationTimer: Timer?
     private var currentShapeKind = CaptureAnnotationKind.rectangle
     private var activeShapeKind: CaptureAnnotationKind?
     private var isShapeToolActive = false
@@ -801,6 +836,7 @@ private final class SelectionOverlayView: NSView {
 
     deinit {
         hoverAnimationTimer?.invalidate()
+        refreshAnimationTimer?.invalidate()
         colorSamplerCopySuccessTimer?.invalidate()
         NSColorPanel.shared.setTarget(nil)
         NSColorPanel.shared.setAction(nil)
@@ -808,6 +844,9 @@ private final class SelectionOverlayView: NSView {
 
     func prepareForCompletion() {
         closeCustomColorPanel()
+        refreshAnimationTimer?.invalidate()
+        refreshAnimationTimer = nil
+        refreshAnimationStartDate = nil
         colorSamplerCopySuccessTimer?.invalidate()
         selectionDidFinish = nil
     }
@@ -1066,7 +1105,7 @@ private final class SelectionOverlayView: NSView {
             appendBrushDraftPointIfNeeded(clampedPoint, modifierFlags: event.modifierFlags)
             if let draft = draftAnnotation, isUsableDraftAnnotation(draft) {
                 annotations.append(draft)
-                selectedAnnotationIndex = annotations.indices.last
+                selectedAnnotationIndex = draft.kind == .brush ? nil : annotations.indices.last
                 currentShapeKind = draft.kind
                 currentStyle = draft.style
                 rememberCurrentStyleForActiveTool()
@@ -1481,15 +1520,33 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func tooltipTarget(at point: NSPoint) -> (text: String, anchor: NSRect)? {
-        guard lockedSelectionRect != nil, let selectionRect, let toolbar = mainToolbarRect(for: selectionRect) else {
+        guard lockedSelectionRect != nil, let selectionRect else {
             return nil
         }
 
-        for (button, rect) in toolbarButtonRects(in: toolbar) where rect.contains(point) {
-            guard let title = SelectionToolbarState.tooltipTitle(for: tooltipIdentifier(for: button)) else {
-                return nil
+        if let toolbar = mainToolbarRect(for: selectionRect) {
+            for (button, rect) in toolbarButtonRects(in: toolbar) where rect.contains(point) {
+                guard let title = SelectionToolbarState.tooltipTitle(for: tooltipIdentifier(for: button)) else {
+                    return nil
+                }
+                return (title, rect)
             }
-            return (title, rect)
+        }
+
+        let measurementLayout = measurementControlLayout(for: selectionRect)
+        if measurementLayout.cornerStyle.contains(point),
+           let title = SelectionToolbarState.tooltipTitle(for: "cornerStyle") {
+            return (title, measurementLayout.cornerStyle)
+        }
+        if measurementLayout.aspectRatio.contains(point) {
+            let identifier = isSelectionAspectRatioLocked ? "aspectRatioLockedOn" : "aspectRatioLockedOff"
+            if let title = SelectionToolbarState.tooltipTitle(for: identifier) {
+                return (title, measurementLayout.aspectRatio)
+            }
+        }
+        if measurementLayout.refresh.contains(point),
+           let title = SelectionToolbarState.tooltipTitle(for: "refreshCapture") {
+            return (title, measurementLayout.refresh)
         }
 
         guard let optionsRect = optionsToolbarRect else {
@@ -1737,7 +1794,7 @@ private final class SelectionOverlayView: NSView {
 
         switch control {
         case .cornerStyle:
-            selectionCornerRadius = selectionCornerRadius > 0 ? 0 : 8
+            selectionCornerRadius = selectionCornerRadius > 0 ? 0 : defaultSelectionCornerRadius
         case .aspectRatioLock:
             isSelectionAspectRatioLocked.toggle()
         case .refresh:
@@ -1747,6 +1804,7 @@ private final class SelectionOverlayView: NSView {
         showsCornerRadiusPanel = false
         showsStartArrowTypeMenu = false
         showsEndArrowTypeMenu = false
+        hoveredTooltip = tooltipTarget(at: point)
         needsDisplay = true
         return true
     }
@@ -1757,12 +1815,14 @@ private final class SelectionOverlayView: NSView {
         }
 
         isRefreshingSelectionBackground = true
+        startRefreshAnimation()
         Task { @MainActor [weak self] in
             guard let self else {
                 return
             }
             defer {
                 self.isRefreshingSelectionBackground = false
+                self.finishRefreshAnimation()
                 self.needsDisplay = true
             }
 
@@ -1774,6 +1834,36 @@ private final class SelectionOverlayView: NSView {
                 NSLog("Snipory refresh background failed: \(error.localizedDescription)")
             }
         }
+    }
+
+    private func startRefreshAnimation() {
+        refreshAnimationStartDate = Date()
+        refreshAnimationTimer?.invalidate()
+        let timer = Timer(timeInterval: 1 / 60, repeats: true) { [weak self] timer in
+            guard let self else {
+                timer.invalidate()
+                return
+            }
+            self.needsDisplay = true
+        }
+        refreshAnimationTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+        needsDisplay = true
+    }
+
+    private func finishRefreshAnimation() {
+        refreshAnimationTimer?.invalidate()
+        refreshAnimationTimer = nil
+        refreshAnimationStartDate = nil
+        needsDisplay = true
+    }
+
+    private var refreshAnimationDegrees: CGFloat {
+        guard let refreshAnimationStartDate else {
+            return 0
+        }
+        let elapsed = Date().timeIntervalSince(refreshAnimationStartDate)
+        return CGFloat(elapsed / 1.4).truncatingRemainder(dividingBy: 1) * 360
     }
 
     private func updateBackgroundImage(_ image: NSImage?) {
@@ -2805,6 +2895,9 @@ private final class SelectionOverlayView: NSView {
                 return false
             }
             let hitOutset = max(8, annotation.style.strokeWidth / 2 + 4)
+            if isZeroLengthMarkerLine(markerLine) {
+                return SelectionToolbarState.markerLineContains(point: point, line: markerLine, hitOutset: hitOutset)
+            }
             if hypot(point.x - markerLine.start.x, point.y - markerLine.start.y) <= hitOutset
                 || hypot(point.x - markerLine.end.x, point.y - markerLine.end.y) <= hitOutset {
                 return false
@@ -2853,17 +2946,18 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func brushRotationHitTarget(at point: NSPoint) -> (index: Int, target: SelectionToolbarState.BrushRotationHitTarget)? {
-        for index in annotations.indices.reversed() where annotations[index].kind == .brush {
-            guard activeToolCanEdit(annotationKind: annotations[index].kind) else {
-                continue
-            }
-            guard let brushPath = overlayBrushPath(fromLocalBrushPath: annotations[index].brushPath) else {
-                continue
-            }
-            let target = SelectionToolbarState.brushRotationHitTarget(at: point, path: brushPath)
-            if target != .none {
-                return (index, target)
-            }
+        guard let selectedAnnotationIndex,
+              annotations.indices.contains(selectedAnnotationIndex),
+              annotations[selectedAnnotationIndex].kind == .brush,
+              activeToolCanEdit(annotationKind: annotations[selectedAnnotationIndex].kind),
+              let brushPath = overlayBrushPath(fromLocalBrushPath: annotations[selectedAnnotationIndex].brushPath)
+        else {
+            return nil
+        }
+
+        let target = SelectionToolbarState.brushRotationHitTarget(at: point, path: brushPath)
+        if target != .none {
+            return (selectedAnnotationIndex, target)
         }
         return nil
     }
@@ -2874,6 +2968,9 @@ private final class SelectionOverlayView: NSView {
                 continue
             }
             guard let markerLine = overlayMarkerLine(fromLocalMarkerLine: annotations[index].markerLine) else {
+                continue
+            }
+            guard !isZeroLengthMarkerLine(markerLine) else {
                 continue
             }
             let target = SelectionToolbarState.markerRotationHitTarget(at: point, line: markerLine)
@@ -2906,6 +3003,10 @@ private final class SelectionOverlayView: NSView {
             return nil
         }
         return atan2(to.y - from.y, to.x - from.x)
+    }
+
+    private func isZeroLengthMarkerLine(_ markerLine: CaptureMarkerLine) -> Bool {
+        hypot(markerLine.end.x - markerLine.start.x, markerLine.end.y - markerLine.start.y) < 0.5
     }
 
     private func brushRotationCursorAngle(at point: NSPoint) -> CGFloat? {
@@ -3333,6 +3434,8 @@ private final class SelectionOverlayView: NSView {
         NSColor(calibratedWhite: 0.12, alpha: 0.86).setFill()
         NSBezierPath(roundedRect: layout.panel, xRadius: 5, yRadius: 5).fill()
         NSString(string: label).draw(in: layout.label.insetBy(dx: 9, dy: 4), withAttributes: attributes)
+        drawMeasurementSeparator(layout.labelSeparator)
+        drawMeasurementSeparator(layout.refreshSeparator)
 
         drawMeasurementControlButton(layout.cornerStyle, selected: selectionCornerRadius > 0)
         drawMeasurementIcon(
@@ -3349,8 +3452,10 @@ private final class SelectionOverlayView: NSView {
             drawAspectRatioIcon(in: layout.aspectRatio.insetBy(dx: 3, dy: 3), locked: isSelectionAspectRatioLocked)
         }
         drawMeasurementControlButton(layout.refresh, selected: isRefreshingSelectionBackground)
-        drawMeasurementIcon(named: "refresh", in: layout.refresh.insetBy(dx: 2, dy: 2)) {
-            drawRefreshIcon(in: layout.refresh.insetBy(dx: 2, dy: 2))
+        drawRotatingMeasurementIcon(in: layout.refresh.insetBy(dx: 2, dy: 2), degrees: refreshAnimationDegrees) {
+            drawMeasurementIcon(named: "refresh", in: layout.refresh.insetBy(dx: 2, dy: 2)) {
+                drawRefreshIcon(in: layout.refresh.insetBy(dx: 2, dy: 2))
+            }
         }
     }
 
@@ -3370,6 +3475,27 @@ private final class SelectionOverlayView: NSView {
     private func drawMeasurementControlButton(_ rect: NSRect, selected: Bool) {
         (selected ? NSColor.white.withAlphaComponent(0.22) : NSColor.white.withAlphaComponent(0.06)).setFill()
         NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4).fill()
+    }
+
+    private func drawMeasurementSeparator(_ rect: NSRect) {
+        NSColor.white.withAlphaComponent(0.22).setFill()
+        NSBezierPath(roundedRect: rect, xRadius: 0.5, yRadius: 0.5).fill()
+    }
+
+    private func drawRotatingMeasurementIcon(in rect: NSRect, degrees: CGFloat, draw: () -> Void) {
+        guard degrees != 0 else {
+            draw()
+            return
+        }
+        let transform = NSAffineTransform()
+        transform.translateX(by: rect.midX, yBy: rect.midY)
+        transform.rotate(byDegrees: degrees)
+        transform.translateX(by: -rect.midX, yBy: -rect.midY)
+
+        NSGraphicsContext.saveGraphicsState()
+        transform.concat()
+        draw()
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     private func drawMeasurementIcon(named name: String, in rect: NSRect, fallback: () -> Void) {
@@ -3599,11 +3725,25 @@ private final class SelectionOverlayView: NSView {
 
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current?.cgContext.setBlendMode(.multiply)
-        annotation.style.strokeColor.withAlphaComponent(CaptureAnnotationRenderer.markerOpacity).setStroke()
-        path.lineWidth = annotation.style.strokeWidth
-        path.lineJoinStyle = .round
-        path.lineCapStyle = .round
-        path.stroke()
+        let markerColor = annotation.style.strokeColor.withAlphaComponent(CaptureAnnotationRenderer.markerOpacity)
+        if isZeroLengthMarkerLine(markerLine) {
+            markerColor.setFill()
+            let radius = annotation.style.strokeWidth / 2
+            NSBezierPath(
+                ovalIn: NSRect(
+                    x: markerLine.start.x - radius,
+                    y: markerLine.start.y - radius,
+                    width: annotation.style.strokeWidth,
+                    height: annotation.style.strokeWidth
+                )
+            ).fill()
+        } else {
+            markerColor.setStroke()
+            path.lineWidth = annotation.style.strokeWidth
+            path.lineJoinStyle = .round
+            path.lineCapStyle = .round
+            path.stroke()
+        }
         NSGraphicsContext.restoreGraphicsState()
     }
 
@@ -3769,6 +3909,9 @@ private final class SelectionOverlayView: NSView {
 
     private func drawSelectedMarkerLineOutline(_ annotation: CaptureAnnotation) {
         guard let markerLine = overlayMarkerLine(fromLocalMarkerLine: annotation.markerLine) else {
+            return
+        }
+        guard !isZeroLengthMarkerLine(markerLine) else {
             return
         }
 

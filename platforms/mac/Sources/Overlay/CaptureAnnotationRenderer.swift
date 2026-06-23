@@ -1161,9 +1161,19 @@ enum CaptureAnnotationRenderer {
         context.setLineCap(.round)
         context.setLineDash(phase: 0, lengths: [])
 
+        let start = pixelPoint(markerLine.start, scaleX: scaleX, scaleY: scaleY)
+        let end = pixelPoint(markerLine.end, scaleX: scaleX, scaleY: scaleY)
+        if hypot(end.x - start.x, end.y - start.y) < 0.5 {
+            let radius = annotation.style.strokeWidth * lineScale / 2
+            context.setFillColor(cgColor(annotation.style.strokeColor.withAlphaComponent(markerOpacity)))
+            context.fillEllipse(in: CGRect(x: start.x - radius, y: start.y - radius, width: radius * 2, height: radius * 2))
+            context.restoreGState()
+            return
+        }
+
         let path = CGMutablePath()
-        path.move(to: pixelPoint(markerLine.start, scaleX: scaleX, scaleY: scaleY))
-        path.addLine(to: pixelPoint(markerLine.end, scaleX: scaleX, scaleY: scaleY))
+        path.move(to: start)
+        path.addLine(to: end)
         context.addPath(path)
         context.strokePath()
         context.restoreGState()

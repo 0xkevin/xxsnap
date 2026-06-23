@@ -84,19 +84,16 @@ final class CaptureCoordinator {
                         return nil
                     }
                     let overlayWindow = self.overlayWindow
-                    overlayWindow?.orderOut(nil)
-                    defer {
-                        overlayWindow?.present()
-                    }
                     await Self.sleepForRefreshInterval(nanoseconds: 120_000_000)
                     if let refreshTargetApplication {
                         refreshTargetApplication.activate(options: [])
                         await Self.sleepForRefreshInterval(nanoseconds: 80_000_000)
-                        Self.sendRefreshShortcut()
+                        Self.sendRefreshShortcut(to: refreshTargetApplication.processIdentifier)
                         await Self.sleepForRefreshInterval(nanoseconds: 600_000_000)
                     }
                     let refreshedImage = try await self.screenCaptureService.captureDesktopImage()
                     self.frozenDesktopImage = refreshedImage
+                    overlayWindow?.present()
                     return refreshedImage
                 }
             ) { [weak self] result in
@@ -157,7 +154,7 @@ final class CaptureCoordinator {
         return app
     }
 
-    private static func sendRefreshShortcut() {
+    private static func sendRefreshShortcut(to processIdentifier: pid_t) {
         guard
             let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: 15, keyDown: true),
             let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: 15, keyDown: false)
@@ -166,8 +163,8 @@ final class CaptureCoordinator {
         }
         keyDown.flags = .maskCommand
         keyUp.flags = .maskCommand
-        keyDown.post(tap: .cghidEventTap)
-        keyUp.post(tap: .cghidEventTap)
+        keyDown.postToPid(processIdentifier)
+        keyUp.postToPid(processIdentifier)
     }
 
     private static func sleepForRefreshInterval(nanoseconds: UInt64) async {

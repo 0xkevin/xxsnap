@@ -70,8 +70,10 @@ enum SelectionToolbarState {
     struct MeasurementControlLayout: Equatable {
         var panel: NSRect
         var label: NSRect
+        var labelSeparator: NSRect
         var cornerStyle: NSRect
         var aspectRatio: NSRect
+        var refreshSeparator: NSRect
         var refresh: NSRect
     }
 
@@ -225,6 +227,10 @@ enum SelectionToolbarState {
             "startArrowType": "开始箭头",
             "endArrowType": "结束箭头",
             "customColor": "自定义颜色",
+            "cornerStyle": "直角/圆角切换",
+            "aspectRatioLockedOn": "锁定长宽比(开)",
+            "aspectRatioLockedOff": "锁定长宽比(关)",
+            "refreshCapture": "刷新截图",
         ][identifier]
     }
 
@@ -431,9 +437,16 @@ enum SelectionToolbarState {
     ) -> MeasurementControlLayout {
         let labelWidth = ceil(textSize.width) + 18
         let buttonSize: CGFloat = 20
-        let buttonGap: CGFloat = 4
-        let textButtonGap: CGFloat = 7
-        let panelWidth = labelWidth + textButtonGap + buttonSize * 3 + buttonGap * 2 + 7
+        let buttonGap: CGFloat = 8
+        let separatorWidth: CGFloat = 1
+        let separatorGap: CGFloat = 8
+        let textSeparatorGap: CGFloat = 8
+        let trailingPadding: CGFloat = 7
+        let panelWidth = labelWidth
+            + textSeparatorGap + separatorWidth + separatorGap
+            + buttonSize + buttonGap + buttonSize
+            + separatorGap + separatorWidth + separatorGap
+            + buttonSize + trailingPadding
         let panelHeight: CGFloat = 24
         var panel = NSRect(x: selectionRect.minX, y: selectionRect.maxY + 8, width: panelWidth, height: panelHeight)
         if panel.maxY > safeBounds.maxY - 8 {
@@ -442,14 +455,24 @@ enum SelectionToolbarState {
         panel = clamp(rect: panel, inside: safeBounds.insetBy(dx: 8, dy: 8))
 
         let label = NSRect(x: panel.minX, y: panel.minY, width: labelWidth, height: panel.height)
-        let firstButtonX = label.maxX + textButtonGap
+        let separatorY = panel.midY - 7
+        let labelSeparator = NSRect(x: label.maxX + textSeparatorGap, y: separatorY, width: separatorWidth, height: 14)
+        let firstButtonX = labelSeparator.maxX + separatorGap
+        let refreshSeparator = NSRect(
+            x: firstButtonX + buttonSize + buttonGap + buttonSize + separatorGap,
+            y: separatorY,
+            width: separatorWidth,
+            height: 14
+        )
         let buttonY = panel.midY - buttonSize / 2
         return MeasurementControlLayout(
             panel: panel,
             label: label,
+            labelSeparator: labelSeparator,
             cornerStyle: NSRect(x: firstButtonX, y: buttonY, width: buttonSize, height: buttonSize),
             aspectRatio: NSRect(x: firstButtonX + buttonSize + buttonGap, y: buttonY, width: buttonSize, height: buttonSize),
-            refresh: NSRect(x: firstButtonX + (buttonSize + buttonGap) * 2, y: buttonY, width: buttonSize, height: buttonSize)
+            refreshSeparator: refreshSeparator,
+            refresh: NSRect(x: refreshSeparator.maxX + separatorGap, y: buttonY, width: buttonSize, height: buttonSize)
         )
     }
 

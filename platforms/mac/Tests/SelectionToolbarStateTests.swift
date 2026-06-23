@@ -272,6 +272,20 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertNil(brushWindow.test_selectedAnnotationKind)
     }
 
+    func testOverlayWindowBrushDoesNotShowEndpointMarkersImmediatelyAfterDrawing() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.brush)
+
+        window.test_mouseDown(at: NSPoint(x: 150, y: 150))
+        window.test_mouseDragged(to: NSPoint(x: 170, y: 180))
+        window.test_mouseDragged(to: NSPoint(x: 210, y: 190))
+        window.test_mouseUp(at: NSPoint(x: 240, y: 170))
+
+        XCTAssertNil(window.test_selectedAnnotationKind)
+        XCTAssertTrue(window.test_selectedBrushEndpointMarkers.isEmpty)
+    }
+
     func testOverlayWindowSelectedBrushShowsOnlyInsetEndpointMarkers() {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
@@ -386,6 +400,12 @@ final class SelectionToolbarStateTests: XCTestCase {
         let startHandle = SelectionToolbarState.brushRotationHandlePoint(for: .start, path: path)!
         let endHandle = SelectionToolbarState.brushRotationHandlePoint(for: .end, path: path)!
 
+        XCTAssertNotEqual(window.test_cursorStyle(at: startHandle), .rotationHandle)
+        XCTAssertNotEqual(window.test_cursorStyle(at: endHandle), .rotationHandle)
+
+        window.test_mouseDown(at: NSPoint(x: 160, y: 160))
+        window.test_mouseUp(at: NSPoint(x: 160, y: 160))
+
         XCTAssertEqual(window.test_cursorStyle(at: startHandle), .rotationHandle)
         XCTAssertEqual(window.test_cursorStyle(at: endHandle), .rotationHandle)
         XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: 140, y: 140)), .brush)
@@ -408,6 +428,9 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         let overlayPath = CaptureBrushPath(points: original.points.map { NSPoint(x: $0.x + 100, y: $0.y + 100) })
         let endHandle = SelectionToolbarState.brushRotationHandlePoint(for: .end, path: overlayPath)!
+
+        window.test_mouseDown(at: NSPoint(x: 160, y: 160))
+        window.test_mouseUp(at: NSPoint(x: 160, y: 160))
 
         window.test_mouseDown(at: endHandle)
         window.test_mouseDragged(to: NSPoint(x: 210, y: 220))
@@ -1067,6 +1090,36 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(markerLine.start.y, 30, accuracy: 0.1)
         XCTAssertEqual(markerLine.end.x, 120, accuracy: 0.1)
         XCTAssertEqual(markerLine.end.y, 80, accuracy: 0.1)
+    }
+
+    func testOverlayWindowMovesSinglePointMarkerWithoutResizingIt() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.marker)
+
+        let point = NSPoint(x: 140, y: 150)
+        window.test_mouseDown(at: point)
+        window.test_mouseUp(at: point)
+
+        guard let original = window.test_markerLine(at: 0) else {
+            return XCTFail("Expected marker annotation")
+        }
+        XCTAssertEqual(original.start.x, original.end.x, accuracy: 0.1)
+        XCTAssertEqual(original.start.y, original.end.y, accuracy: 0.1)
+        XCTAssertEqual(window.test_cursorStyle(at: point), .move)
+
+        window.test_mouseDown(at: point)
+        window.test_mouseDragged(to: NSPoint(x: 170, y: 180))
+        window.test_mouseUp(at: NSPoint(x: 170, y: 180))
+
+        guard let moved = window.test_markerLine(at: 0) else {
+            return XCTFail("Expected moved marker annotation")
+        }
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(moved.start.x, original.start.x + 30, accuracy: 0.1)
+        XCTAssertEqual(moved.start.y, original.start.y + 30, accuracy: 0.1)
+        XCTAssertEqual(moved.end.x, moved.start.x, accuracy: 0.1)
+        XCTAssertEqual(moved.end.y, moved.start.y, accuracy: 0.1)
     }
 
     func testOverlayWindowCanContinueDrawingMarkerFromExistingEndpoint() {
@@ -1939,9 +1992,12 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(layout.cornerStyle.width, 20)
         XCTAssertEqual(layout.aspectRatio.width, 20)
         XCTAssertEqual(layout.refresh.width, 20)
-        XCTAssertLessThan(layout.label.maxX, layout.cornerStyle.minX)
-        XCTAssertLessThan(layout.cornerStyle.maxX, layout.aspectRatio.minX)
-        XCTAssertLessThan(layout.aspectRatio.maxX, layout.refresh.minX)
+        XCTAssertEqual(layout.labelSeparator.width, 1)
+        XCTAssertEqual(layout.refreshSeparator.width, 1)
+        XCTAssertEqual(layout.cornerStyle.minX - layout.labelSeparator.maxX, 8)
+        XCTAssertEqual(layout.aspectRatio.minX - layout.cornerStyle.maxX, 8)
+        XCTAssertEqual(layout.refreshSeparator.minX - layout.aspectRatio.maxX, 8)
+        XCTAssertEqual(layout.refresh.minX - layout.refreshSeparator.maxX, 8)
     }
 
     func testSelectionMeasurementControlHitTestingFindsEachButton() {
@@ -2212,6 +2268,12 @@ final class SelectionToolbarStateTests: XCTestCase {
         )
     }
 
+    func testSelectionCornerRadiusDefaultsToRounded() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+
+        XCTAssertEqual(window.test_selectionCornerRadius, 10)
+    }
+
     func testClickingCornerStyleMeasurementControlTogglesSelectionCornerRadius() {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 220, height: 140))
@@ -2221,11 +2283,11 @@ final class SelectionToolbarStateTests: XCTestCase {
         }
         window.test_mouseDown(at: point)
 
-        XCTAssertEqual(window.test_selectionCornerRadius, 8)
+        XCTAssertEqual(window.test_selectionCornerRadius, 0)
 
         window.test_mouseDown(at: point)
 
-        XCTAssertEqual(window.test_selectionCornerRadius, 0)
+        XCTAssertEqual(window.test_selectionCornerRadius, 10)
     }
 
     func testRoundedSelectionHidesCornerHandlesAndSquareSelectionShowsThem() {
@@ -2463,6 +2525,10 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "save"), "保存")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "copy"), "复制到剪切板")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "scroll"), "滚动截图")
+        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "cornerStyle"), "直角/圆角切换")
+        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "aspectRatioLockedOn"), "锁定长宽比(开)")
+        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "aspectRatioLockedOff"), "锁定长宽比(关)")
+        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "refreshCapture"), "刷新截图")
         XCTAssertNil(SelectionToolbarState.tooltipTitle(for: "ocr"))
         XCTAssertNil(SelectionToolbarState.tooltipTitle(for: "settings"))
     }
