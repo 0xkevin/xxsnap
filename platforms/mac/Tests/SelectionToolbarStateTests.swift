@@ -315,6 +315,34 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_mouseUp(at: NSPoint(x: rotationPoint.x + 24, y: rotationPoint.y + 18))
     }
 
+    func testOverlayWindowDraggingMosaicValueUsesLocalPreviewWithoutFullCompositeRender() throws {
+        let image = gradientImage(size: NSSize(width: 260, height: 180))
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 20, y: 20, width: 200, height: 120))
+        window.test_toggleShapeTool(.mosaicRectangle)
+
+        let typePoint = try XCTUnwrap(window.test_mosaicRedactionTypePoint(.pixelMosaic))
+        window.test_mouseDown(at: typePoint)
+        window.test_mouseUp(at: typePoint)
+        window.test_mouseDown(at: NSPoint(x: 52, y: 48))
+        window.test_mouseDragged(to: NSPoint(x: 134, y: 104))
+        window.test_mouseUp(at: NSPoint(x: 134, y: 104))
+
+        XCTAssertNotNil(window.test_renderedOverlayImage())
+        let renderCountBeforeDrag = window.test_mosaicCompositeRenderCount
+        let sliderPoint = try XCTUnwrap(window.test_mosaicValueIncrementPoint())
+
+        window.test_mouseDown(at: sliderPoint)
+        window.test_mouseDragged(to: NSPoint(x: sliderPoint.x + 20, y: sliderPoint.y))
+        let overlayImage = try XCTUnwrap(window.test_renderedOverlayImage())
+
+        let overlayPixel = try XCTUnwrap(rgbaPixel(in: overlayImage, at: NSPoint(x: 92, y: 76)))
+        let originalPixel = try XCTUnwrap(rgbaPixel(in: image, at: NSPoint(x: 92, y: 76)))
+        XCTAssertTrue(pixelDiffers(overlayPixel, originalPixel))
+        XCTAssertEqual(window.test_mosaicCompositeRenderCount, renderCountBeforeDrag)
+        window.test_mouseUp(at: NSPoint(x: sliderPoint.x + 20, y: sliderPoint.y))
+    }
+
     func testOverlayWindowMosaicRectangleRotationHandleWinsOutsideSelection() throws {
         let image = gradientImage(size: NSSize(width: 240, height: 160))
         let selection = NSRect(x: 20, y: 20, width: 180, height: 120)
@@ -1733,8 +1761,8 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_mouseDown(at: NSPoint(x: 160, y: 160))
         window.test_mouseUp(at: NSPoint(x: 160, y: 160))
 
-        XCTAssertEqual(window.test_cursorStyle(at: startHandle), .rotationHandle)
-        XCTAssertEqual(window.test_cursorStyle(at: endHandle), .rotationHandle)
+        XCTAssertEqual(window.test_cursorStyle(at: startHandle), .resizeUpDown)
+        XCTAssertEqual(window.test_cursorStyle(at: endHandle), .resizeUpDown)
         XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: 140, y: 140)), .brush)
         XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: 180, y: 180)), .brush)
     }
@@ -1761,7 +1789,7 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         window.test_mouseDown(at: endHandle)
         window.test_mouseDragged(to: NSPoint(x: 210, y: 220))
-        XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: 210, y: 220)), .rotationHandle)
+        XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: 210, y: 220)), .resizeUpDown)
         window.test_mouseUp(at: NSPoint(x: 210, y: 220))
 
         guard let updated = window.test_brushPath(at: 0) else {
@@ -1928,13 +1956,20 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "arrow-line"), 0)
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "pencil-tool"), 2)
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "text-tool"), 0)
+        XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "masaike2"), -3)
     }
 
     func testCurrentColorToolbarIconsUseTemplateTint() {
         XCTAssertFalse(SelectionToolbarState.usesFixedColorToolbarIconResource("pencil-tool"))
         XCTAssertFalse(SelectionToolbarState.usesFixedColorToolbarIconResource("arrow-line"))
-        XCTAssertTrue(SelectionToolbarState.usesFixedColorToolbarIconResource("mosaic-tool"))
+        XCTAssertFalse(SelectionToolbarState.usesFixedColorToolbarIconResource("mosaic-tool"))
         XCTAssertTrue(SelectionToolbarState.usesFixedColorToolbarIconResource("undo-enabled"))
+    }
+
+    func testMosaicToolbarButtonUsesMasaike2Resource() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+
+        XCTAssertEqual(window.test_symbolName(for: .mosaic), "toolbar-masaike2")
     }
 
     func testMosaicPreviewProgressMapsRangeEndpoints() {
@@ -2176,7 +2211,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(layout.strokeWidths.count, 0)
         XCTAssertNil(layout.ellipseMode)
         XCTAssertNil(layout.rectangleMode)
-        XCTAssertEqual(SelectionToolbarState.mosaicRedactionTypeButtonRect(in: optionsRect).minX, optionsRect.minX + 15)
+        XCTAssertEqual(SelectionToolbarState.mosaicRedactionTypeButtonRect(in: optionsRect).minX, optionsRect.minX + 10)
         XCTAssertGreaterThan(
             SelectionToolbarState.mosaicRedactionValueRect(in: optionsRect).minX,
             SelectionToolbarState.mosaicRedactionTypeButtonRect(in: optionsRect).maxX
@@ -2193,8 +2228,38 @@ final class SelectionToolbarStateTests: XCTestCase {
         let trailingGap = optionsRect.maxX - valueRect.maxX
 
         XCTAssertLessThan(width, 300)
-        XCTAssertEqual(leadingGap, 15, accuracy: 0.1)
+        XCTAssertEqual(leadingGap, 10, accuracy: 0.1)
         XCTAssertEqual(leadingGap, trailingGap, accuracy: 0.1)
+    }
+
+    func testOptionsToolbarLeadingAndTrailingGapsAreTenPixels() throws {
+        let optionsRect = NSRect(x: 100, y: 100, width: 600, height: 40)
+        let modes: [SelectionToolbarState.OptionsToolbarMode] = [.shape, .arrowLine, .brush, .marker, .mosaic]
+
+        for mode in modes {
+            let width = SelectionToolbarState.optionsToolbarWidth(paletteCount: 8, mode: mode)
+            let modeRect = NSRect(x: optionsRect.minX, y: optionsRect.minY, width: width, height: optionsRect.height)
+            let layout = SelectionToolbarState.optionsToolbarLayout(in: modeRect, paletteCount: 8, mode: mode)
+            var controls = layout.strokeWidths
+            controls.append(contentsOf: layout.colorSwatches)
+            [
+                layout.fillToggle,
+                layout.rectangleMode,
+                layout.ellipseMode,
+                layout.strokeStyle.isEmpty ? nil : layout.strokeStyle,
+                layout.startArrowType,
+                layout.endArrowType,
+            ].compactMap { $0 }.forEach { controls.append($0) }
+            if mode == .mosaic {
+                controls.append(SelectionToolbarState.mosaicRedactionTypeButtonRect(in: modeRect))
+                controls.append(SelectionToolbarState.mosaicRedactionValueRect(in: modeRect))
+            }
+
+            let minX = try XCTUnwrap(controls.map(\.minX).min(), "Expected controls for \(mode)")
+            let maxX = try XCTUnwrap(controls.map(\.maxX).max(), "Expected controls for \(mode)")
+            XCTAssertEqual(minX - modeRect.minX, 10, accuracy: 0.1, "\(mode) leading gap")
+            XCTAssertEqual(modeRect.maxX - maxX, 10, accuracy: 0.1, "\(mode) trailing gap")
+        }
     }
 
     func testMosaicOptionsToolbarMatchesMainToolbarHeightAndOmitsSeparator() throws {
@@ -2218,10 +2283,9 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertLessThanOrEqual(pixelDistance(separatorPixel, gapPixel), 3)
     }
 
-    func testSelectedToolbarBackgroundsUseStrongerOpacity() {
-        XCTAssertEqual(SelectionToolbarState.toolbarSelectedBackgroundAlpha, 0.36, accuracy: 0.001)
+    func testSelectedToolbarBackgroundsAreHiddenExceptMeasurementControls() {
+        XCTAssertEqual(SelectionToolbarState.toolbarSelectedBackgroundAlpha, 0, accuracy: 0.001)
         XCTAssertEqual(SelectionToolbarState.measurementControlSelectedBackgroundAlpha, 0.34, accuracy: 0.001)
-        XCTAssertGreaterThan(SelectionToolbarState.toolbarSelectedBackgroundAlpha, 0.22)
         XCTAssertGreaterThan(SelectionToolbarState.measurementControlSelectedBackgroundAlpha, 0.22)
     }
 
@@ -2531,7 +2595,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         let overlayLine = CaptureMarkerLine(start: NSPoint(x: 140, y: 150), end: NSPoint(x: 220, y: 180))
         let startHandle = SelectionToolbarState.markerRotationHandlePoint(for: .start, line: overlayLine)!
 
-        XCTAssertEqual(window.test_cursorStyle(at: startHandle), .rotationHandle)
+        XCTAssertEqual(window.test_cursorStyle(at: startHandle), .resizeUpDown)
         XCTAssertEqual(window.test_cursorStyle(at: overlayLine.start), .marker)
 
         window.test_mouseDown(at: startHandle)
@@ -2721,6 +2785,53 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_activateShapeTool(.marker)
 
         XCTAssertTrue(window.test_markerToolbarButtonIsSelected)
+    }
+
+    func testMainToolbarHasLeadingAndTrailingDragHandles() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 80, y: 80, width: 360, height: 220))
+
+        let leadingPoint = try XCTUnwrap(window.test_mainToolbarLeadingDragPoint())
+        let trailingPoint = try XCTUnwrap(window.test_mainToolbarTrailingDragPoint())
+        let firstButton = try XCTUnwrap(window.test_mainToolbarButtonRects().first)
+        let settingsButton = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .settings))
+
+        XCTAssertLessThan(leadingPoint.x, firstButton.minX)
+        XCTAssertEqual(trailingPoint.x, settingsButton.midX, accuracy: 0.1)
+        XCTAssertEqual(window.test_cursorStyle(at: leadingPoint), .move)
+        XCTAssertEqual(window.test_cursorStyle(at: trailingPoint), .move)
+    }
+
+    func testMainToolbarLeadingDragHandleMovesToolbar() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 80, y: 80, width: 360, height: 220))
+        let firstButtonBefore = try XCTUnwrap(window.test_mainToolbarButtonRects().first)
+        let leadingPoint = try XCTUnwrap(window.test_mainToolbarLeadingDragPoint())
+
+        window.test_mouseDown(at: leadingPoint)
+        window.test_mouseDragged(to: NSPoint(x: leadingPoint.x + 36, y: leadingPoint.y + 10))
+        window.test_mouseUp(at: NSPoint(x: leadingPoint.x + 36, y: leadingPoint.y + 10))
+
+        let firstButtonAfter = try XCTUnwrap(window.test_mainToolbarButtonRects().first)
+        XCTAssertGreaterThan(firstButtonAfter.minX, firstButtonBefore.minX + 20)
+    }
+
+    func testSelectedMainToolbarIconIsBlueWithoutSelectedBackground() throws {
+        let image = solidImage(size: NSSize(width: 900, height: 520), color: .white)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.rectangle)
+
+        let button = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .rectangle))
+        let unselectedButton = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .mosaic))
+        let overlayImage = try XCTUnwrap(window.test_renderedOverlayImage())
+        let iconPixel = try XCTUnwrap(firstBlueDominantPixel(in: overlayImage, rect: button))
+        let selectedBackgroundPixel = try XCTUnwrap(rgbaPixel(in: overlayImage, at: NSPoint(x: button.minX + 1, y: button.minY + 1)))
+        let unselectedBackgroundPixel = try XCTUnwrap(rgbaPixel(in: overlayImage, at: NSPoint(x: unselectedButton.minX + 1, y: unselectedButton.minY + 1)))
+
+        XCTAssertGreaterThan(iconPixel.blue, iconPixel.red)
+        XCTAssertGreaterThan(iconPixel.blue, iconPixel.green)
+        XCTAssertLessThan(pixelDistance(selectedBackgroundPixel, unselectedBackgroundPixel), 8)
     }
 
     func testMainToolbarButtonsUseRoomierDefaultSpacing() {
@@ -3267,7 +3378,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         let customSlot = swatches.last!
 
         XCTAssertEqual(SelectionToolbarState.optionsToolbarHeight(paletteCount: 4), 30)
-        XCTAssertEqual(SelectionToolbarState.optionsToolbarWidth(paletteCount: 4), 422)
+        XCTAssertEqual(SelectionToolbarState.optionsToolbarWidth(paletteCount: 4), 425)
         XCTAssertEqual(swatches.count, 5)
         XCTAssertTrue(swatches[0..<4].allSatisfy { $0.minY == optionsRect.minY + 9 })
         XCTAssertEqual(customSlot.width, 20)
@@ -3335,7 +3446,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         let fullPaletteWidth = SelectionToolbarState.optionsToolbarWidth(paletteCount: 20)
         let compactPaletteWidth = SelectionToolbarState.optionsToolbarWidth(paletteCount: 8)
 
-        XCTAssertEqual(fullPaletteWidth, 530)
+        XCTAssertEqual(fullPaletteWidth, 533)
         XCTAssertLessThan(compactPaletteWidth, fullPaletteWidth)
     }
 
@@ -4386,6 +4497,15 @@ final class SelectionToolbarStateTests: XCTestCase {
         return image
     }
 
+    private func solidImage(size: NSSize, color: NSColor) -> NSImage {
+        let image = NSImage(size: size)
+        image.lockFocus()
+        color.setFill()
+        NSRect(origin: .zero, size: size).fill()
+        image.unlockFocus()
+        return image
+    }
+
     private func gradientImage(size: NSSize) -> NSImage {
         let image = NSImage(size: size)
         image.lockFocus()
@@ -4486,6 +4606,49 @@ final class SelectionToolbarStateTests: XCTestCase {
             + abs(Int(lhs.green) - Int(rhs.green))
             + abs(Int(lhs.blue) - Int(rhs.blue))
             + abs(Int(lhs.alpha) - Int(rhs.alpha))
+    }
+
+    private func firstBlueDominantPixel(
+        in image: NSImage,
+        rect: NSRect
+    ) throws -> (red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8)? {
+        let cgImage = try XCTUnwrap(image.cgImage(forProposedRect: nil, context: nil, hints: nil))
+        let bytes = try rgbaBytes(in: image)
+        let scaleX = CGFloat(cgImage.width) / max(image.size.width, 1)
+        let scaleY = CGFloat(cgImage.height) / max(image.size.height, 1)
+        let minX = max(0, Int((rect.minX * scaleX).rounded(.down)))
+        let maxX = min(cgImage.width - 1, Int((rect.maxX * scaleX).rounded(.up)))
+        let directY = (
+            min: max(0, Int((rect.minY * scaleY).rounded(.down))),
+            max: min(cgImage.height - 1, Int((rect.maxY * scaleY).rounded(.up)))
+        )
+        let flippedY = (
+            min: max(0, Int(((image.size.height - rect.maxY) * scaleY).rounded(.down))),
+            max: min(cgImage.height - 1, Int(((image.size.height - rect.minY) * scaleY).rounded(.up)))
+        )
+        guard minX < maxX else {
+            return nil
+        }
+
+        for yRange in [directY, flippedY] where yRange.min < yRange.max {
+            for y in yRange.min...yRange.max {
+                for x in minX...maxX {
+                    let index = (y * cgImage.width + x) * 4
+                    let pixel = (
+                        red: bytes[index],
+                        green: bytes[index + 1],
+                        blue: bytes[index + 2],
+                        alpha: bytes[index + 3]
+                    )
+                    if pixel.blue > pixel.red + 20,
+                       pixel.blue > pixel.green + 20,
+                       pixel.alpha > 200 {
+                        return pixel
+                    }
+                }
+            }
+        }
+        return nil
     }
 
     private func averageLumaDelta(in image: NSImage, rect: NSRect) throws -> Double {

@@ -9,8 +9,9 @@ enum SelectionToolbarState {
     static let colorSamplerValueTextColor = NSColor.white
     static let colorSamplerCopyHintTextColor = NSColor.white
     static let colorSamplerSwitchHintTextColor = NSColor.white
-    static let toolbarSelectedBackgroundAlpha: CGFloat = 0.36
+    static let toolbarSelectedBackgroundAlpha: CGFloat = 0
     static let measurementControlSelectedBackgroundAlpha: CGFloat = 0.34
+    static let optionsToolbarHorizontalPadding: CGFloat = 10
 
     enum ColorSamplerCopyMode: Equatable {
         case hex
@@ -245,6 +246,8 @@ enum SelectionToolbarState {
             return 0
         case "text-tool":
             return 0
+        case "masaike2":
+            return -3
         default:
             return 2
         }
@@ -252,7 +255,7 @@ enum SelectionToolbarState {
 
     static func usesFixedColorToolbarIconResource(_ resourceName: String) -> Bool {
         switch resourceName {
-        case "undo-enabled", "undo-disabled", "redo-enabled", "redo-disabled", "mosaic-tool":
+        case "undo-enabled", "undo-disabled", "redo-enabled", "redo-disabled":
             return true
         default:
             return false
@@ -738,11 +741,11 @@ enum SelectionToolbarState {
             max(AppSettings.minimumPaletteVisibleCount, paletteCount)
         )
         if mode == .mosaic {
-            return 154
+            return 144
         }
         let columns = colorSwatchColumnCount(paletteCount: clampedCount)
         let customSize = customColorSwatchSize(paletteCount: clampedCount)
-        return colorSwatchStartXOffset(mode: mode) + CGFloat(columns) * 16 + customSize + 13
+        return colorSwatchStartXOffset(mode: mode) + CGFloat(columns) * 16 + 2 + customSize + optionsToolbarHorizontalPadding
     }
 
     static func optionsToolbarHeight(
@@ -809,13 +812,13 @@ enum SelectionToolbarState {
     private static func colorSwatchStartXOffset(mode: OptionsToolbarMode) -> CGFloat {
         switch mode {
         case .shape:
-            return 325
+            return 329
         case .arrowLine:
-            return 318
+            return 322
         case .brush:
-            return 210
+            return 214
         case .marker:
-            return 98
+            return 102
         case .mosaic:
             return 0
         }
@@ -823,46 +826,51 @@ enum SelectionToolbarState {
 
     static func strokeWidthRects(in optionsRect: NSRect) -> [NSRect] {
         (0..<3).map { index in
-            NSRect(x: optionsRect.minX + 6 + CGFloat(index) * 24, y: optionControlY(in: optionsRect), width: 20, height: 20)
+            NSRect(
+                x: optionsRect.minX + optionsToolbarHorizontalPadding + CGFloat(index) * 24,
+                y: optionControlY(in: optionsRect),
+                width: 20,
+                height: 20
+            )
         }
     }
 
     static func fillToggleRect(in optionsRect: NSRect) -> NSRect {
-        NSRect(x: optionsRect.minX + 86, y: optionControlY(in: optionsRect), width: 20, height: 20)
+        NSRect(x: optionsRect.minX + 90, y: optionControlY(in: optionsRect), width: 20, height: 20)
     }
 
     private static func mosaicTypeButtonRect(in optionsRect: NSRect, mode: OptionsToolbarMode) -> NSRect {
         guard mode == .mosaic else {
             return .zero
         }
-        return NSRect(x: optionsRect.minX + 86, y: optionControlY(in: optionsRect), width: 20, height: 20)
+        return NSRect(x: optionsRect.minX + 90, y: optionControlY(in: optionsRect), width: 20, height: 20)
     }
 
     private static func mosaicRectangleButtonRect(in optionsRect: NSRect, mode: OptionsToolbarMode) -> NSRect {
         guard mode == .mosaic else {
             return .zero
         }
-        return NSRect(x: optionsRect.minX + 90, y: optionControlY(in: optionsRect), width: 20, height: 20)
+        return NSRect(x: optionsRect.minX + 94, y: optionControlY(in: optionsRect), width: 20, height: 20)
     }
 
     static func mosaicRedactionTypeButtonRect(in optionsRect: NSRect) -> NSRect {
-        NSRect(x: optionsRect.minX + 15, y: optionControlY(in: optionsRect), width: 20, height: 20)
+        NSRect(x: optionsRect.minX + optionsToolbarHorizontalPadding, y: optionControlY(in: optionsRect), width: 20, height: 20)
     }
 
     static func mosaicRedactionValueRect(in optionsRect: NSRect) -> NSRect {
-        NSRect(x: optionsRect.minX + 45, y: optionControlY(in: optionsRect), width: 94, height: 20)
+        NSRect(x: optionsRect.minX + 40, y: optionControlY(in: optionsRect), width: 94, height: 20)
     }
 
     static func rectangleModeButtonRect(in optionsRect: NSRect) -> NSRect {
-        NSRect(x: optionsRect.minX + 126, y: optionControlY(in: optionsRect), width: 26, height: 20)
+        NSRect(x: optionsRect.minX + 130, y: optionControlY(in: optionsRect), width: 26, height: 20)
     }
 
     static func ellipseModeButtonRect(in optionsRect: NSRect) -> NSRect {
-        NSRect(x: optionsRect.minX + 158, y: optionControlY(in: optionsRect), width: 22, height: 20)
+        NSRect(x: optionsRect.minX + 162, y: optionControlY(in: optionsRect), width: 22, height: 20)
     }
 
     static func strokeStyleFieldRect(in optionsRect: NSRect) -> NSRect {
-        NSRect(x: optionsRect.minX + 200, y: optionControlY(in: optionsRect), width: 102, height: 20)
+        NSRect(x: optionsRect.minX + 204, y: optionControlY(in: optionsRect), width: 102, height: 20)
     }
 
     static func startArrowTypeFieldRect(in optionsRect: NSRect) -> NSRect {
@@ -874,7 +882,7 @@ enum SelectionToolbarState {
     }
 
     private static func compactStrokeStyleFieldRect(in optionsRect: NSRect) -> NSRect {
-        NSRect(x: optionsRect.minX + 92, y: optionControlY(in: optionsRect), width: 94, height: 20)
+        NSRect(x: optionsRect.minX + 96, y: optionControlY(in: optionsRect), width: 94, height: 20)
     }
 
     private static func strokeStyleRect(in optionsRect: NSRect, mode: OptionsToolbarMode) -> NSRect {
@@ -891,9 +899,9 @@ enum SelectionToolbarState {
     private static func startArrowTypeFieldRect(in optionsRect: NSRect, mode: OptionsToolbarMode) -> NSRect {
         switch mode {
         case .shape:
-            return NSRect(x: optionsRect.minX + 312, y: optionControlY(in: optionsRect), width: 42, height: 20)
+            return NSRect(x: optionsRect.minX + 316, y: optionControlY(in: optionsRect), width: 42, height: 20)
         case .arrowLine:
-            return NSRect(x: optionsRect.minX + 204, y: optionControlY(in: optionsRect), width: 42, height: 20)
+            return NSRect(x: optionsRect.minX + 208, y: optionControlY(in: optionsRect), width: 42, height: 20)
         case .brush, .marker, .mosaic:
             return .zero
         }
@@ -902,9 +910,9 @@ enum SelectionToolbarState {
     private static func endArrowTypeFieldRect(in optionsRect: NSRect, mode: OptionsToolbarMode) -> NSRect {
         switch mode {
         case .shape:
-            return NSRect(x: optionsRect.minX + 360, y: optionControlY(in: optionsRect), width: 42, height: 20)
+            return NSRect(x: optionsRect.minX + 364, y: optionControlY(in: optionsRect), width: 42, height: 20)
         case .arrowLine:
-            return NSRect(x: optionsRect.minX + 252, y: optionControlY(in: optionsRect), width: 42, height: 20)
+            return NSRect(x: optionsRect.minX + 256, y: optionControlY(in: optionsRect), width: 42, height: 20)
         case .brush, .marker, .mosaic:
             return .zero
         }
