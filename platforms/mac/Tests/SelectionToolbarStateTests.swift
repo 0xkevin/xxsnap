@@ -41,6 +41,20 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_lockedSelectionRect?.width, selection.width + 40)
     }
 
+    func testOverlayWindowResizesSelectionFromBorderWhileMosaicToolIsActive() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 200, height: 120)
+        window.test_setLockedSelectionRect(selection)
+        window.test_toggleShapeTool(.mosaicRectangle)
+
+        window.test_mouseDown(at: NSPoint(x: selection.maxX + 10, y: selection.midY))
+        window.test_mouseDragged(to: NSPoint(x: selection.maxX + 40, y: selection.midY))
+        window.test_mouseUp(at: NSPoint(x: selection.maxX + 40, y: selection.midY))
+
+        XCTAssertEqual(window.test_lockedSelectionRect?.origin.x, selection.origin.x)
+        XCTAssertEqual(window.test_lockedSelectionRect?.width, selection.width + 40)
+    }
+
     func testOverlayWindowUsesArrowOutsideSelectionWhileShapeToolIsActive() {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         let selection = NSRect(x: 100, y: 100, width: 200, height: 120)
@@ -57,6 +71,24 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_cursorStyle(at: toolbarPoint), .arrow)
     }
 
+    func testOverlayWindowUsesArrowCursorOnMeasurementToolbarWhileShapeToolIsActive() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.brush)
+
+        guard let cornerPoint = window.test_measurementControlPoint(.cornerStyle),
+              let refreshPoint = window.test_measurementControlPoint(.refresh) else {
+            return XCTFail("Expected measurement toolbar points")
+        }
+
+        XCTAssertEqual(window.test_cursorStyle(at: cornerPoint), .arrow)
+        XCTAssertEqual(window.test_cursorStyle(at: refreshPoint), .arrow)
+
+        window.test_activateShapeTool(.rectangle)
+        XCTAssertEqual(window.test_cursorStyle(at: cornerPoint), .arrow)
+        XCTAssertEqual(window.test_cursorStyle(at: refreshPoint), .arrow)
+    }
+
     func testOverlayWindowUsesDrawingCursorInsideSelectionImmediatelyAfterToolSwitch() {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         let selection = NSRect(x: 100, y: 100, width: 200, height: 120)
@@ -68,6 +100,1301 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         window.test_activateShapeTool(.arrowLine)
         XCTAssertEqual(window.test_cursorStyle(at: point), .crosshair)
+    }
+
+    func testOverlayWindowUsesActiveDrawingCursorOutsideSelectionAwayFromBorder() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 200, height: 120)
+        let outsidePoint = NSPoint(x: selection.maxX + 40, y: selection.midY)
+        window.test_setLockedSelectionRect(selection)
+
+        let cases: [(CaptureAnnotationKind, SelectionToolbarState.OverlayCursorStyle)] = [
+            (.rectangle, .crosshair),
+            (.arrowLine, .crosshair),
+            (.brush, .brush),
+            (.marker, .marker)
+        ]
+
+        for (shape, expectedCursor) in cases {
+            window.test_activateShapeTool(shape)
+            XCTAssertEqual(window.test_cursorStyle(at: outsidePoint), expectedCursor)
+        }
+    }
+
+    func testOverlayWindowActivatesMosaicTool() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 200, height: 120))
+        window.test_toggleShapeTool(.mosaicRectangle)
+
+        XCTAssertEqual(window.test_optionsToolbarMode, .mosaic)
+        XCTAssertEqual(window.test_currentShapeKind, .mosaicRectangle)
+        XCTAssertEqual(window.test_mosaicRedactionType, .pixelMosaic)
+        XCTAssertEqual(window.test_mosaicRedactionValue(for: .gaussianBlur), 8)
+        XCTAssertEqual(window.test_mosaicRedactionValue(for: .pixelMosaic), 8)
+    }
+
+    func testOverlayWindowUsesMosaicRectangleDrawingCursorOutsideSelection() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 200, height: 120)
+        let outsidePoint = NSPoint(x: 80, y: selection.midY)
+        window.test_setLockedSelectionRect(selection)
+        window.test_toggleShapeTool(.mosaicRectangle)
+
+        XCTAssertEqual(window.test_cursorStyle(at: outsidePoint), .crosshair)
+
+        guard let toolbarPoint = window.test_mainToolbarDragPoint() else {
+            return XCTFail("Expected toolbar drag point")
+        }
+
+        XCTAssertEqual(window.test_cursorStyle(at: outsidePoint), .crosshair)
+        XCTAssertEqual(window.test_cursorStyle(at: toolbarPoint), .arrow)
+    }
+
+    func testOverlayWindowUsesSelectionResizeCursorOnMosaicBorder() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 200, height: 120)
+        let rightBorderPoint = NSPoint(x: selection.maxX + 10, y: selection.midY)
+        window.test_setLockedSelectionRect(selection)
+
+        window.test_toggleShapeTool(.mosaicRectangle)
+        XCTAssertEqual(window.test_cursorStyle(at: rightBorderPoint), .resizeLeftRight)
+
+        window.test_activateShapeTool(.mosaicStroke)
+        XCTAssertEqual(window.test_cursorStyle(at: rightBorderPoint), .resizeLeftRight)
+    }
+
+    func testOverlayWindowMosaicToolReopensWithPixelMosaicRedaction() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 200, height: 120))
+        window.test_toggleShapeTool(.mosaicRectangle)
+
+        guard let redactionTypePoint = window.test_mosaicRedactionTypePoint(.pixelMosaic) else {
+            return XCTFail("Expected mosaic redaction type point")
+        }
+
+        window.test_mouseDown(at: redactionTypePoint)
+        window.test_mouseUp(at: redactionTypePoint)
+        XCTAssertEqual(window.test_mosaicRedactionType, .gaussianBlur)
+
+        window.test_toggleShapeTool(.brush)
+        window.test_toggleShapeTool(.mosaicRectangle)
+
+        XCTAssertEqual(window.test_mosaicRedactionType, .pixelMosaic)
+        XCTAssertEqual(window.test_currentShapeKind, .mosaicRectangle)
+    }
+
+    func testOverlayWindowMosaicRedactionTypeTooltipRefreshesImmediatelyAfterToggle() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 200, height: 120))
+        window.test_toggleShapeTool(.mosaicRectangle)
+
+        guard let redactionTypePoint = window.test_mosaicRedactionTypePoint(.pixelMosaic) else {
+            return XCTFail("Expected mosaic redaction type point")
+        }
+
+        window.test_mouseMoved(to: redactionTypePoint)
+        XCTAssertEqual(window.test_hoveredTooltipText, "马赛克")
+
+        window.test_mouseDown(at: redactionTypePoint)
+        XCTAssertEqual(window.test_mosaicRedactionType, .gaussianBlur)
+        XCTAssertEqual(window.test_hoveredTooltipText, "高斯")
+
+        window.test_mouseDown(at: redactionTypePoint)
+        XCTAssertEqual(window.test_mosaicRedactionType, .pixelMosaic)
+        XCTAssertEqual(window.test_hoveredTooltipText, "马赛克")
+    }
+
+    func testOverlayWindowMosaicOptionsKeepPerTypeValuesWithoutShapeModeButtons() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 200, height: 120))
+        window.test_toggleShapeTool(.mosaicRectangle)
+
+        guard
+            let redactionTypePoint = window.test_mosaicRedactionTypePoint(.pixelMosaic),
+            let valueMaximumPoint = window.test_mosaicValueIncrementPoint(),
+            let valueMinimumPoint = window.test_mosaicValueDecrementPoint()
+        else {
+            return XCTFail("Expected mosaic option points")
+        }
+
+        XCTAssertNil(window.test_mosaicRectangleOptionPoint())
+        XCTAssertNil(window.test_optionsStrokeWidthPoint(at: 0))
+        XCTAssertEqual(window.test_currentShapeKind, .mosaicRectangle)
+
+        window.test_mouseDown(at: redactionTypePoint)
+        window.test_mouseUp(at: redactionTypePoint)
+        XCTAssertEqual(window.test_mosaicRedactionType, .gaussianBlur)
+        XCTAssertEqual(window.test_mosaicRedactionValue(for: .gaussianBlur), 8)
+
+        window.test_mouseDown(at: valueMaximumPoint)
+        window.test_mouseUp(at: valueMaximumPoint)
+        XCTAssertEqual(window.test_mosaicRedactionValue(for: .gaussianBlur), 20)
+
+        window.test_mouseDown(at: valueMinimumPoint)
+        window.test_mouseUp(at: valueMinimumPoint)
+        XCTAssertEqual(window.test_mosaicRedactionValue(for: .gaussianBlur), 5)
+
+        window.test_mouseDown(at: redactionTypePoint)
+        window.test_mouseUp(at: redactionTypePoint)
+        XCTAssertEqual(window.test_mosaicRedactionType, .pixelMosaic)
+        XCTAssertEqual(window.test_mosaicRedactionValue(for: .pixelMosaic), 8)
+    }
+
+    func testOverlayWindowMosaicValueSliderClampsToMaximum() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 200, height: 120))
+        window.test_toggleShapeTool(.mosaicRectangle)
+
+        guard
+            let sliderPoint = window.test_mosaicValueIncrementPoint(),
+            let minimumPoint = window.test_mosaicValueDecrementPoint()
+        else {
+            return XCTFail("Expected mosaic value slider points")
+        }
+
+        window.test_mouseDown(at: sliderPoint)
+        window.test_mouseDragged(to: NSPoint(x: sliderPoint.x + 40, y: sliderPoint.y))
+        window.test_mouseUp(at: NSPoint(x: sliderPoint.x + 40, y: sliderPoint.y))
+
+        XCTAssertEqual(window.test_mosaicRedactionValue(for: .pixelMosaic), 20)
+
+        window.test_mouseDown(at: minimumPoint)
+        window.test_mouseDragged(to: NSPoint(x: minimumPoint.x - 40, y: minimumPoint.y))
+        window.test_mouseUp(at: NSPoint(x: minimumPoint.x - 40, y: minimumPoint.y))
+
+        XCTAssertEqual(window.test_mosaicRedactionValue(for: .pixelMosaic), 5)
+    }
+
+    func testOverlayWindowMosaicValueSliderSkipsSameValuePreviewInvalidation() throws {
+        let image = gradientImage(size: NSSize(width: 240, height: 160))
+        let selection = NSRect(x: 20, y: 20, width: 180, height: 120)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(selection)
+        window.test_toggleShapeTool(.mosaicRectangle)
+
+        window.test_mouseDown(at: NSPoint(x: 60, y: 55))
+        window.test_mouseDragged(to: NSPoint(x: 140, y: 125))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 125))
+
+        let sliderPoint = try XCTUnwrap(window.test_mosaicValueInputPoint())
+        window.test_mouseDown(at: sliderPoint)
+
+        let annotation = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: try XCTUnwrap(window.test_annotationRect(at: 0)),
+            style: try XCTUnwrap(window.test_annotationStyle(at: 0)),
+            mosaicRedaction: try XCTUnwrap(window.test_mosaicRedaction(at: 0))
+        )
+        XCTAssertNotNil(window.test_mosaicPreviewComposite(for: [annotation]))
+        XCTAssertTrue(window.test_hasMosaicCompositeCache)
+
+        window.test_mouseDragged(to: sliderPoint)
+
+        XCTAssertTrue(window.test_hasMosaicCompositeCache)
+        window.test_mouseUp(at: sliderPoint)
+    }
+
+    func testOverlayWindowMosaicRectangleRotationReusesPreviewCompositeCache() throws {
+        let image = gradientImage(size: NSSize(width: 240, height: 160))
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 20, y: 20, width: 180, height: 180))
+        window.test_toggleShapeTool(.mosaicRectangle)
+
+        window.test_mouseDown(at: NSPoint(x: 60, y: 55))
+        window.test_mouseDragged(to: NSPoint(x: 140, y: 125))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 125))
+        XCTAssertNotNil(window.test_renderedOverlayImage())
+        let renderCountBeforeRotation = window.test_mosaicCompositeRenderCount
+
+        let rotationPoint = try XCTUnwrap(window.test_mosaicRectangleRotationHandlePoint())
+        window.test_mouseDown(at: rotationPoint)
+        window.test_mouseDragged(to: NSPoint(x: rotationPoint.x + 24, y: rotationPoint.y + 18))
+        XCTAssertNotNil(window.test_renderedOverlayImage())
+
+        XCTAssertEqual(window.test_mosaicCompositeRenderCount, renderCountBeforeRotation)
+        window.test_mouseUp(at: NSPoint(x: rotationPoint.x + 24, y: rotationPoint.y + 18))
+    }
+
+    func testOverlayWindowMosaicRectangleRotationHandleWinsOutsideSelection() throws {
+        let image = gradientImage(size: NSSize(width: 240, height: 160))
+        let selection = NSRect(x: 20, y: 20, width: 180, height: 120)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(selection)
+        window.test_toggleShapeTool(.mosaicRectangle)
+
+        window.test_mouseDown(at: NSPoint(x: 60, y: 55))
+        window.test_mouseDragged(to: NSPoint(x: 140, y: 125))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 125))
+
+        let rotationPoint = try XCTUnwrap(window.test_mosaicRectangleRotationHandlePoint())
+        XCTAssertGreaterThan(rotationPoint.y, selection.maxY)
+        window.test_mouseDown(at: rotationPoint)
+        window.test_mouseDragged(to: NSPoint(x: rotationPoint.x + 24, y: rotationPoint.y + 18))
+        window.test_mouseUp(at: NSPoint(x: rotationPoint.x + 24, y: rotationPoint.y + 18))
+
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertGreaterThan(abs(window.test_annotationRotationAngle(at: 0) ?? 0), 0.05)
+    }
+
+    func testOverlayWindowMosaicToolbarHidesShapeModeControls() {
+        var refreshCallCount = 0
+        let window = SelectionOverlayWindow(
+            backgroundImage: nil,
+            refreshHandler: {
+                refreshCallCount += 1
+                return nil
+            }
+        ) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 200, height: 120))
+        window.test_toggleShapeTool(.mosaicRectangle)
+
+        XCTAssertEqual(refreshCallCount, 0)
+        XCTAssertNil(window.test_mosaicRectangleOptionPoint())
+        XCTAssertNil(window.test_optionsStrokeWidthPoint(at: 0))
+        XCTAssertEqual(window.test_currentShapeKind, .mosaicRectangle)
+    }
+
+    func testOverlayWindowMosaicLargeDotDoesNotTriggerRefreshAndCanDraw() {
+        var refreshCallCount = 0
+        let window = SelectionOverlayWindow(
+            backgroundImage: nil,
+            refreshHandler: {
+                refreshCallCount += 1
+                return nil
+            }
+        ) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_toggleShapeTool(.mosaicStroke)
+        window.test_setCurrentStrokeWidth(40)
+
+        XCTAssertEqual(refreshCallCount, 0)
+        XCTAssertEqual(window.test_currentShapeKind, .mosaicStroke)
+        XCTAssertEqual(window.test_currentStyle?.strokeWidth, 40)
+
+        window.test_mouseDown(at: NSPoint(x: 150, y: 150))
+        window.test_mouseDragged(to: NSPoint(x: 210, y: 180))
+        window.test_mouseUp(at: NSPoint(x: 210, y: 180))
+
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(window.test_annotationStyle(at: 0)?.strokeWidth, 40)
+    }
+
+    func testOverlayWindowMosaicDotClickCreatesDotRedaction() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_toggleShapeTool(.mosaicStroke)
+
+        window.test_mouseDown(at: NSPoint(x: 150, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 150, y: 150))
+
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(window.test_annotationStyle(at: 0)?.strokeWidth, 30)
+        XCTAssertEqual(window.test_mosaicStroke(at: 0)?.points.count, 1)
+    }
+
+    func testOverlayWindowMosaicLargeDotKeepsShortHorizontalStroke() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_toggleShapeTool(.mosaicStroke)
+        window.test_setCurrentStrokeWidth(40)
+
+        window.test_mouseDown(at: NSPoint(x: 150, y: 150))
+        window.test_mouseDragged(to: NSPoint(x: 210, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 210, y: 150))
+
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(window.test_annotationStyle(at: 0)?.strokeWidth, 40)
+        XCTAssertEqual(window.test_mosaicStroke(at: 0)?.points.count ?? 0, 2)
+    }
+
+    func testOverlayWindowMosaicStrokeCollectsDraggedPoints() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_toggleShapeTool(.mosaicStroke)
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 140))
+        window.test_mouseDragged(to: NSPoint(x: 170, y: 165))
+        window.test_mouseDragged(to: NSPoint(x: 210, y: 180))
+        window.test_mouseUp(at: NSPoint(x: 240, y: 200))
+
+        guard let stroke = window.test_mosaicStroke(at: 0) else {
+            return XCTFail("Expected mosaic stroke")
+        }
+        XCTAssertGreaterThan(stroke.points.count, 2)
+    }
+
+    func testOverlayWindowMosaicStrokeCanStartOutsideSelection() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_toggleShapeTool(.mosaicStroke)
+
+        window.test_mouseDown(at: NSPoint(x: 80, y: 150))
+        window.test_mouseDragged(to: NSPoint(x: 140, y: 160))
+        window.test_mouseUp(at: NSPoint(x: 180, y: 170))
+
+        guard let stroke = window.test_mosaicStroke(at: 0) else {
+            return XCTFail("Expected mosaic stroke")
+        }
+
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertLessThan(stroke.points.first?.x ?? 0, 0)
+        XCTAssertGreaterThan(stroke.points.last?.x ?? 0, 0)
+    }
+
+    func testOverlayWindowMosaicStrokeResizesSelectionFromBorder() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        window.test_setLockedSelectionRect(selection)
+        window.test_toggleShapeTool(.mosaicStroke)
+
+        window.test_mouseDown(at: NSPoint(x: selection.minX, y: 150))
+        window.test_mouseDragged(to: NSPoint(x: 150, y: 160))
+        window.test_mouseUp(at: NSPoint(x: 150, y: 160))
+
+        XCTAssertEqual(window.test_annotationCount, 0)
+        XCTAssertEqual(window.test_lockedSelectionRect?.minX, 150)
+        XCTAssertEqual(window.test_lockedSelectionRect?.width, 250)
+    }
+
+    func testOverlayWindowMosaicStrokeShiftDrawsAxisLockedLine() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_toggleShapeTool(.mosaicStroke)
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 140))
+        window.test_mouseDragged(to: NSPoint(x: 190, y: 162), modifierFlags: [.shift])
+        window.test_mouseUp(at: NSPoint(x: 190, y: 162), modifierFlags: [.shift])
+
+        guard let stroke = window.test_mosaicStroke(at: 0) else {
+            return XCTFail("Expected mosaic stroke")
+        }
+        XCTAssertEqual(stroke.points.count, 2)
+        XCTAssertEqual(stroke.points[0].y, stroke.points[1].y, accuracy: 0.001)
+        XCTAssertGreaterThan(stroke.points[1].x, stroke.points[0].x)
+    }
+
+    func testOverlayWindowMosaicStrokeDoesNotMoveExistingStroke() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_toggleShapeTool(.mosaicStroke)
+
+        window.test_mouseDown(at: NSPoint(x: 150, y: 150))
+        window.test_mouseDragged(to: NSPoint(x: 210, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 210, y: 150))
+
+        let original = window.test_mosaicStroke(at: 0)?.points
+        window.test_mouseDown(at: NSPoint(x: 180, y: 150))
+        window.test_mouseDragged(to: NSPoint(x: 200, y: 170))
+        window.test_mouseUp(at: NSPoint(x: 200, y: 170))
+
+        guard let before = original, let after = window.test_mosaicStroke(at: 0)?.points else {
+            return XCTFail("Expected mosaic stroke")
+        }
+        XCTAssertEqual(window.test_annotationCount, 2)
+        XCTAssertEqual(after.first?.x ?? 0, before.first?.x ?? 0, accuracy: 0.001)
+        XCTAssertEqual(after.first?.y ?? 0, before.first?.y ?? 0, accuracy: 0.001)
+    }
+
+    func testOverlayWindowMosaicRectangleCanMoveResizeAndRotate() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_toggleShapeTool(.mosaicRectangle)
+        window.test_mouseDown(at: NSPoint(x: 140, y: 140))
+        window.test_mouseDragged(to: NSPoint(x: 220, y: 180))
+        window.test_mouseUp(at: NSPoint(x: 220, y: 180))
+
+        guard let original = window.test_annotationRect(at: 0) else {
+            return XCTFail("Expected mosaic rectangle")
+        }
+        XCTAssertEqual(window.test_selectedAnnotationKind, .mosaicRectangle)
+        XCTAssertTrue(window.test_selectedAnnotationShowsOutline)
+
+        window.test_mouseDown(at: NSPoint(x: 160, y: 150))
+        window.test_mouseDragged(to: NSPoint(x: 190, y: 170))
+        window.test_mouseUp(at: NSPoint(x: 190, y: 170))
+
+        guard let moved = window.test_annotationRect(at: 0) else {
+            return XCTFail("Expected moved mosaic rectangle")
+        }
+        XCTAssertEqual(moved.origin.x, original.origin.x + 30, accuracy: 0.1)
+        XCTAssertEqual(moved.origin.y, original.origin.y + 20, accuracy: 0.1)
+
+        guard let resizePoint = window.test_shapeResizeHandlePoint(.bottomRight) else {
+            return XCTFail("Expected resize handle")
+        }
+        window.test_mouseDown(at: resizePoint)
+        window.test_mouseDragged(to: NSPoint(x: resizePoint.x + 30, y: resizePoint.y - 20))
+        window.test_mouseUp(at: NSPoint(x: resizePoint.x + 30, y: resizePoint.y - 20))
+
+        guard let resized = window.test_annotationRect(at: 0) else {
+            return XCTFail("Expected resized mosaic rectangle")
+        }
+        XCTAssertGreaterThan(resized.width, moved.width)
+        XCTAssertGreaterThan(resized.height, moved.height)
+
+        guard let rotationPoint = window.test_mosaicRectangleRotationHandlePoint() else {
+            return XCTFail("Expected rotation handle")
+        }
+        window.test_mouseDown(at: rotationPoint)
+        window.test_mouseDragged(to: NSPoint(x: rotationPoint.x + 30, y: rotationPoint.y + 25))
+        window.test_mouseUp(at: NSPoint(x: rotationPoint.x + 30, y: rotationPoint.y + 25))
+
+        XCTAssertGreaterThan(abs(window.test_annotationRotationAngle(at: 0) ?? 0), 0.05)
+        XCTAssertEqual(window.test_mosaicRectangleRotationHandleGlyph(), .refreshDot)
+    }
+
+    func testOverlayWindowMosaicRectangleCanStartOutsideSelection() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_toggleShapeTool(.mosaicRectangle)
+        window.test_mouseDown(at: NSPoint(x: 80, y: 130))
+        window.test_mouseDragged(to: NSPoint(x: 160, y: 190))
+        window.test_mouseUp(at: NSPoint(x: 160, y: 190))
+
+        guard let rect = window.test_annotationRect(at: 0) else {
+            return XCTFail("Expected mosaic rectangle")
+        }
+
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertLessThan(rect.minX, 0)
+        XCTAssertGreaterThan(rect.maxX, 0)
+    }
+
+    func testOverlayWindowMosaicStrokeDraftUsesLiveCompositePreviewPath() {
+        let image = NSImage(size: NSSize(width: 500, height: 400))
+        image.lockFocus()
+        NSColor.red.setFill()
+        NSRect(x: 0, y: 0, width: 500, height: 400).fill()
+        image.unlockFocus()
+
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_toggleShapeTool(.mosaicStroke)
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 140))
+        window.test_mouseDragged(to: NSPoint(x: 220, y: 180))
+
+        XCTAssertTrue(window.test_mosaicStrokeDraftUsesLiveCompositePreviewPath)
+
+        window.test_mouseUp(at: NSPoint(x: 220, y: 180))
+    }
+
+    func testOverlayWindowMosaicRectangleDraftUsesLiveCompositePreviewPath() {
+        let image = NSImage(size: NSSize(width: 500, height: 400))
+        image.lockFocus()
+        NSColor.red.setFill()
+        NSRect(x: 0, y: 0, width: 500, height: 400).fill()
+        image.unlockFocus()
+
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_toggleShapeTool(.mosaicRectangle)
+        window.test_mouseDown(at: NSPoint(x: 140, y: 140))
+        window.test_mouseDragged(to: NSPoint(x: 220, y: 180))
+
+        XCTAssertTrue(window.test_mosaicRectangleDraftUsesLivePreviewPath)
+
+        window.test_mouseUp(at: NSPoint(x: 220, y: 180))
+    }
+
+    func testOverlayWindowMosaicStrokeDraftUsesLocalPreviewTile() {
+        let image = NSImage(size: NSSize(width: 500, height: 400))
+        image.lockFocus()
+        NSColor.red.setFill()
+        NSRect(x: 0, y: 0, width: 500, height: 400).fill()
+        image.unlockFocus()
+
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+
+        var style = CaptureAnnotationStyle()
+        style.strokeWidth = 30
+        let stroke = CaptureMosaicStroke(points: [
+            NSPoint(x: 40, y: 40),
+            NSPoint(x: 120, y: 80),
+        ])
+        let draft = CaptureAnnotation(
+            kind: .mosaicStroke,
+            rect: stroke.boundingRect,
+            style: style,
+            mosaicStroke: stroke,
+            mosaicRedaction: CaptureMosaicRedaction(type: .gaussianBlur, value: 8)
+        )
+
+        guard let drawRect = window.test_mosaicDraftPreviewDrawRect(for: draft) else {
+            return XCTFail("Expected mosaic stroke preview draw rect")
+        }
+
+        XCTAssertLessThan(drawRect.width, image.size.width)
+        XCTAssertLessThan(drawRect.height, image.size.height)
+        XCTAssertLessThan(drawRect.minX, 140)
+        XCTAssertLessThan(drawRect.minY, 140)
+        XCTAssertGreaterThan(drawRect.maxX, 220)
+        XCTAssertGreaterThan(drawRect.maxY, 180)
+    }
+
+    func testOverlayWindowMosaicRectangleDraftUsesLocalPreviewTile() {
+        let image = NSImage(size: NSSize(width: 500, height: 400))
+        image.lockFocus()
+        NSColor.red.setFill()
+        NSRect(x: 0, y: 0, width: 500, height: 400).fill()
+        image.unlockFocus()
+
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+
+        var style = CaptureAnnotationStyle()
+        style.strokeWidth = 30
+        let draft = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(x: 40, y: 40, width: 80, height: 40),
+            style: style,
+            mosaicRedaction: CaptureMosaicRedaction(type: .gaussianBlur, value: 8)
+        )
+
+        guard let drawRect = window.test_mosaicDraftPreviewDrawRect(for: draft) else {
+            return XCTFail("Expected mosaic rectangle preview draw rect")
+        }
+
+        XCTAssertLessThan(drawRect.width, image.size.width)
+        XCTAssertLessThan(drawRect.height, image.size.height)
+        XCTAssertLessThan(drawRect.minX, 140)
+        XCTAssertLessThan(drawRect.minY, 140)
+        XCTAssertGreaterThan(drawRect.maxX, 220)
+        XCTAssertGreaterThan(drawRect.maxY, 180)
+    }
+
+    func testOverlayWindowMosaicRectangleDraftPreservesExistingDotMosaic() throws {
+        let image = gradientImage(size: NSSize(width: 240, height: 160))
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 20, y: 20, width: 180, height: 120))
+        window.test_toggleShapeTool(.mosaicStroke)
+
+        window.test_mouseDown(at: NSPoint(x: 88, y: 82))
+        window.test_mouseUp(at: NSPoint(x: 88, y: 82))
+
+        var style = CaptureAnnotationStyle()
+        style.strokeWidth = 30
+        let draft = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(x: 40, y: 35, width: 80, height: 70),
+            style: style,
+            mosaicRedaction: CaptureMosaicRedaction(type: .gaussianBlur, value: 8)
+        )
+
+        guard let preview = window.test_mosaicDraftPreview(for: draft) else {
+            return XCTFail("Expected mosaic rectangle preview")
+        }
+        let originalCrop = try XCTUnwrap(croppedImage(image, to: preview.drawRect))
+        let originalOnlyPreview = CaptureAnnotationRenderer.redactedPreview(
+            image: originalCrop,
+            redaction: CaptureMosaicRedaction(type: .gaussianBlur, value: 8)
+        )
+
+        XCTAssertNotEqual(try rgbaBytes(in: preview.image), try rgbaBytes(in: originalOnlyPreview))
+    }
+
+    func testOverlayWindowMosaicRectangleDraftFullyRedactsOverExistingDotMosaic() throws {
+        let image = checkerboardImage(size: NSSize(width: 240, height: 160))
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 20, y: 20, width: 180, height: 120))
+        window.test_toggleShapeTool(.mosaicStroke)
+
+        window.test_mouseDown(at: NSPoint(x: 88, y: 82))
+        window.test_mouseUp(at: NSPoint(x: 88, y: 82))
+
+        var style = CaptureAnnotationStyle()
+        style.strokeWidth = 30
+        let draft = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(x: 40, y: 35, width: 80, height: 70),
+            style: style,
+            mosaicRedaction: CaptureMosaicRedaction(type: .gaussianBlur, value: 8)
+        )
+
+        let preview = try XCTUnwrap(window.test_mosaicDraftPreview(for: draft))
+        let originalCrop = try XCTUnwrap(croppedImage(image, to: preview.drawRect))
+
+        for point in [
+            NSPoint(x: 72, y: 60),
+            NSPoint(x: 88, y: 82),
+            NSPoint(x: 112, y: 92),
+            NSPoint(x: 132, y: 122),
+        ] {
+            let localPoint = NSPoint(x: point.x - preview.drawRect.minX, y: point.y - preview.drawRect.minY)
+            let previewPixel = try XCTUnwrap(rgbaPixel(in: preview.image, at: localPoint))
+            let originalPixel = try XCTUnwrap(rgbaPixel(in: originalCrop, at: localPoint))
+            XCTAssertTrue(pixelDiffers(previewPixel, originalPixel), "Expected draft mosaic to redact \(point)")
+        }
+    }
+
+    func testOverlayWindowRenderedMosaicRectangleDoesNotRevealExistingDotMosaic() throws {
+        let image = gradientImage(size: NSSize(width: 240, height: 160))
+        let originalClearPixel = try XCTUnwrap(rgbaPixel(in: image, at: NSPoint(x: 112, y: 92)))
+
+        let combinedWindow = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        combinedWindow.test_setLockedSelectionRect(NSRect(x: 20, y: 20, width: 180, height: 120))
+        combinedWindow.test_toggleShapeTool(.mosaicStroke)
+        combinedWindow.test_mouseDown(at: NSPoint(x: 88, y: 82))
+        combinedWindow.test_mouseUp(at: NSPoint(x: 88, y: 82))
+        let typePoint = try XCTUnwrap(combinedWindow.test_mosaicRedactionTypePoint(.gaussianBlur))
+        combinedWindow.test_mouseDown(at: typePoint)
+        combinedWindow.test_mouseUp(at: typePoint)
+        combinedWindow.test_toggleShapeTool(.mosaicRectangle)
+        combinedWindow.test_mouseDown(at: NSPoint(x: 60, y: 55))
+        combinedWindow.test_mouseDragged(to: NSPoint(x: 140, y: 125))
+        combinedWindow.test_mouseUp(at: NSPoint(x: 140, y: 125))
+        let combinedImage = try XCTUnwrap(combinedWindow.test_renderedOverlayImage())
+        let combinedDotPixel = try XCTUnwrap(rgbaPixel(in: combinedImage, at: NSPoint(x: 88, y: 82)))
+        let combinedRectanglePixel = try XCTUnwrap(rgbaPixel(in: combinedImage, at: NSPoint(x: 112, y: 92)))
+
+        let originalDotPixel = try XCTUnwrap(rgbaPixel(in: image, at: NSPoint(x: 88, y: 82)))
+        XCTAssertTrue(pixelDiffers(combinedDotPixel, originalDotPixel))
+        XCTAssertTrue(pixelDiffers(combinedRectanglePixel, originalClearPixel))
+    }
+
+    func testOverlayWindowRenderedDotAndRectangleMosaicOverlapKeepsStackedRedaction() throws {
+        let image = checkerboardImage(size: NSSize(width: 240, height: 160), squareSize: 4)
+        let selection = NSRect(x: 20, y: 20, width: 180, height: 120)
+        let overlapPoint = NSPoint(x: 88, y: 82)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(selection)
+        window.test_toggleShapeTool(.mosaicStroke)
+
+        let typePoint = try XCTUnwrap(window.test_mosaicRedactionTypePoint(.gaussianBlur))
+        window.test_mouseDown(at: typePoint)
+        window.test_mouseUp(at: typePoint)
+        window.test_mouseDown(at: overlapPoint)
+        window.test_mouseUp(at: overlapPoint)
+
+        window.test_toggleShapeTool(.mosaicRectangle)
+        window.test_mouseDown(at: NSPoint(x: 60, y: 55))
+        window.test_mouseDragged(to: NSPoint(x: 140, y: 125))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 125))
+
+        let overlayImage = try XCTUnwrap(window.test_renderedOverlayImage())
+        let style = try XCTUnwrap(window.test_annotationStyle(at: 1))
+        let rectangleRedaction = try XCTUnwrap(window.test_mosaicRedaction(at: 1))
+        let rectangleOnly = CaptureAnnotationRenderer.render(
+            image: image,
+            annotations: [
+                overlayMosaicAnnotation(CaptureAnnotation(
+                    kind: .mosaicRectangle,
+                    rect: try XCTUnwrap(window.test_annotationRect(at: 1)),
+                    style: style,
+                    mosaicRedaction: rectangleRedaction
+                ), selection: selection),
+            ]
+        )
+
+        let overlayPixel = try XCTUnwrap(rgbaPixel(in: overlayImage, at: overlapPoint))
+        let originalPixel = try XCTUnwrap(rgbaPixel(in: image, at: overlapPoint))
+        let rectangleOnlyPixel = try XCTUnwrap(rgbaPixel(in: rectangleOnly, at: overlapPoint))
+
+        XCTAssertTrue(pixelDiffers(overlayPixel, originalPixel))
+        XCTAssertTrue(pixelDiffers(overlayPixel, rectangleOnlyPixel))
+    }
+
+    func testOverlayWindowSwitchingFromSelectedMosaicRectangleToDotDoesNotMutateRectangleRedaction() throws {
+        let image = checkerboardImage(size: NSSize(width: 240, height: 160), squareSize: 4)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 20, y: 20, width: 180, height: 120))
+        window.test_toggleShapeTool(.mosaicRectangle)
+
+        let typePoint = try XCTUnwrap(window.test_mosaicRedactionTypePoint(.gaussianBlur))
+        window.test_mouseDown(at: typePoint)
+        window.test_mouseUp(at: typePoint)
+        window.test_mouseDown(at: NSPoint(x: 60, y: 55))
+        window.test_mouseDragged(to: NSPoint(x: 140, y: 125))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 125))
+
+        XCTAssertEqual(window.test_selectedAnnotationKind, .mosaicRectangle)
+        let originalRectangleRedaction = try XCTUnwrap(window.test_mosaicRedaction(at: 0))
+
+        window.test_toggleShapeTool(.mosaicStroke)
+        window.test_mouseDown(at: typePoint)
+        window.test_mouseUp(at: typePoint)
+
+        XCTAssertEqual(window.test_mosaicRedaction(at: 0), originalRectangleRedaction)
+        XCTAssertEqual(window.test_currentShapeKind, .mosaicStroke)
+    }
+
+    func testOverlayWindowRenderedOverlappingMosaicRectanglesDoNotRevealOriginalPixels() throws {
+        let image = gradientImage(size: NSSize(width: 240, height: 160))
+        let selection = NSRect(x: 20, y: 20, width: 180, height: 120)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(selection)
+        window.test_toggleShapeTool(.mosaicRectangle)
+
+        let typePoint = try XCTUnwrap(window.test_mosaicRedactionTypePoint(.gaussianBlur))
+        window.test_mouseDown(at: typePoint)
+        window.test_mouseUp(at: typePoint)
+        window.test_mouseDown(at: NSPoint(x: 52, y: 48))
+        window.test_mouseDragged(to: NSPoint(x: 134, y: 104))
+        window.test_mouseUp(at: NSPoint(x: 134, y: 104))
+
+        window.test_mouseDown(at: NSPoint(x: 164, y: 124))
+        window.test_mouseDragged(to: NSPoint(x: 84, y: 68))
+        window.test_mouseUp(at: NSPoint(x: 84, y: 68))
+
+        let overlayImage = try XCTUnwrap(window.test_renderedOverlayImage())
+        let firstRedaction = try XCTUnwrap(window.test_mosaicRedaction(at: 0))
+        let secondStyle = try XCTUnwrap(window.test_annotationStyle(at: 1))
+        let secondRedaction = try XCTUnwrap(window.test_mosaicRedaction(at: 1))
+        XCTAssertEqual(firstRedaction.type, .gaussianBlur)
+        XCTAssertEqual(secondRedaction.type, .gaussianBlur)
+        let secondAnnotation = overlayMosaicAnnotation(CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: try XCTUnwrap(window.test_annotationRect(at: 1)),
+            style: secondStyle,
+            mosaicRedaction: secondRedaction
+        ), selection: selection)
+        let secondOnly = CaptureAnnotationRenderer.render(image: image, annotations: [secondAnnotation])
+
+        let overlapPoint = NSPoint(x: 100, y: 84)
+        let overlayPixel = try XCTUnwrap(rgbaPixel(in: overlayImage, at: overlapPoint))
+        let originalPixel = try XCTUnwrap(rgbaPixel(in: image, at: overlapPoint))
+        let secondOnlyPixel = try XCTUnwrap(rgbaPixel(in: secondOnly, at: overlapPoint))
+
+        XCTAssertTrue(pixelDiffers(overlayPixel, originalPixel))
+        XCTAssertTrue(pixelDiffers(overlayPixel, secondOnlyPixel))
+    }
+
+    func testOverlayWindowMosaicDraftOverMultipleExistingRectanglesKeepsPreviousRedaction() throws {
+        let image = gradientImage(size: NSSize(width: 240, height: 160))
+        let selection = NSRect(x: 20, y: 20, width: 180, height: 120)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(selection)
+        window.test_toggleShapeTool(.mosaicRectangle)
+
+        let typePoint = try XCTUnwrap(window.test_mosaicRedactionTypePoint(.gaussianBlur))
+        window.test_mouseDown(at: typePoint)
+        window.test_mouseUp(at: typePoint)
+        window.test_mouseDown(at: NSPoint(x: 52, y: 48))
+        window.test_mouseDragged(to: NSPoint(x: 134, y: 104))
+        window.test_mouseUp(at: NSPoint(x: 134, y: 104))
+
+        window.test_mouseDown(at: NSPoint(x: 92, y: 112))
+        window.test_mouseDragged(to: NSPoint(x: 170, y: 136))
+        window.test_mouseUp(at: NSPoint(x: 170, y: 136))
+
+        let draft = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(x: 64, y: 48, width: 80, height: 56),
+            style: try XCTUnwrap(window.test_annotationStyle(at: 0)),
+            mosaicRedaction: try XCTUnwrap(window.test_mosaicRedaction(at: 0))
+        )
+        let preview = try XCTUnwrap(window.test_mosaicDraftPreview(for: draft))
+        let draftOnly = CaptureAnnotationRenderer.render(
+            image: image,
+            annotations: [overlayMosaicAnnotation(draft, selection: selection)]
+        )
+
+        let overlapPoint = NSPoint(x: 100, y: 84)
+        let previewPoint = NSPoint(
+            x: overlapPoint.x - preview.drawRect.minX,
+            y: overlapPoint.y - preview.drawRect.minY
+        )
+        let previewPixel = try XCTUnwrap(rgbaPixel(in: preview.image, at: previewPoint))
+        let originalPixel = try XCTUnwrap(rgbaPixel(in: image, at: overlapPoint))
+        let draftOnlyPixel = try XCTUnwrap(rgbaPixel(in: draftOnly, at: overlapPoint))
+
+        XCTAssertTrue(pixelDiffers(previewPixel, originalPixel))
+        XCTAssertTrue(pixelDiffers(previewPixel, draftOnlyPixel))
+    }
+
+    func testOverlayWindowGaussianDotDraftStacksAboveExistingPixelDotMosaic() throws {
+        let image = checkerboardImage(size: NSSize(width: 240, height: 160), squareSize: 4)
+        let selection = NSRect(x: 20, y: 20, width: 180, height: 120)
+        let dotPoint = NSPoint(x: 88, y: 82)
+        let localDotPoint = NSPoint(x: dotPoint.x - selection.minX, y: dotPoint.y - selection.minY)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(selection)
+        window.test_toggleShapeTool(.mosaicStroke)
+
+        window.test_mouseDown(at: dotPoint)
+        window.test_mouseUp(at: dotPoint)
+
+        let typePoint = try XCTUnwrap(window.test_mosaicRedactionTypePoint(.gaussianBlur))
+        window.test_mouseDown(at: typePoint)
+        window.test_mouseUp(at: typePoint)
+
+        var style = try XCTUnwrap(window.test_currentStyle)
+        style.strokeWidth = 30
+        let draft = CaptureAnnotation(
+            kind: .mosaicStroke,
+            rect: NSRect(origin: localDotPoint, size: .zero),
+            style: style,
+            mosaicStroke: CaptureMosaicStroke(points: [localDotPoint]),
+            mosaicRedaction: CaptureMosaicRedaction(type: .gaussianBlur, value: 8)
+        )
+
+        let preview = try XCTUnwrap(window.test_mosaicDraftPreview(for: draft))
+        let first = CaptureAnnotation(
+            kind: .mosaicStroke,
+            rect: NSRect(origin: dotPoint, size: .zero),
+            style: style,
+            mosaicStroke: CaptureMosaicStroke(points: [dotPoint]),
+            mosaicRedaction: CaptureMosaicRedaction(type: .pixelMosaic, value: 8)
+        )
+        let firstComposite = CaptureAnnotationRenderer.render(image: image, annotations: [first])
+        let originalCrop = try XCTUnwrap(croppedImage(image, to: preview.drawRect))
+        let firstCrop = try XCTUnwrap(croppedImage(firstComposite, to: preview.drawRect))
+
+        XCTAssertTrue(try imageBytesDiffer(preview.image, originalCrop))
+        XCTAssertTrue(try imageBytesDiffer(preview.image, firstCrop))
+    }
+
+    func testOverlayWindowRectangleDraftStacksAboveExistingDotMosaic() throws {
+        let image = checkerboardImage(size: NSSize(width: 240, height: 160), squareSize: 4)
+        let selection = NSRect(x: 20, y: 20, width: 180, height: 120)
+        let dotPoint = NSPoint(x: 88, y: 82)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(selection)
+        window.test_toggleShapeTool(.mosaicStroke)
+
+        let typePoint = try XCTUnwrap(window.test_mosaicRedactionTypePoint(.gaussianBlur))
+        window.test_mouseDown(at: typePoint)
+        window.test_mouseUp(at: typePoint)
+        window.test_mouseDown(at: dotPoint)
+        window.test_mouseUp(at: dotPoint)
+
+        window.test_mouseDown(at: typePoint)
+        window.test_mouseUp(at: typePoint)
+
+        var style = try XCTUnwrap(window.test_currentStyle)
+        style.strokeWidth = 30
+        let draft = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(x: 40, y: 35, width: 80, height: 70),
+            style: style,
+            mosaicRedaction: CaptureMosaicRedaction(type: .pixelMosaic, value: 8)
+        )
+
+        let preview = try XCTUnwrap(window.test_mosaicDraftPreview(for: draft))
+        let first = CaptureAnnotation(
+            kind: .mosaicStroke,
+            rect: NSRect(origin: dotPoint, size: .zero),
+            style: style,
+            mosaicStroke: CaptureMosaicStroke(points: [dotPoint]),
+            mosaicRedaction: CaptureMosaicRedaction(type: .gaussianBlur, value: 8)
+        )
+        let second = overlayMosaicAnnotation(draft, selection: selection)
+        let firstComposite = CaptureAnnotationRenderer.render(image: image, annotations: [first])
+        let expected = CaptureAnnotationRenderer.render(image: firstComposite, annotations: [second])
+        let expectedCrop = try XCTUnwrap(croppedImage(expected, to: preview.drawRect))
+        let firstCompositeCrop = try XCTUnwrap(croppedImage(firstComposite, to: preview.drawRect))
+
+        XCTAssertLessThan(try averagePixelDistance(preview.image, expectedCrop), 8)
+        XCTAssertGreaterThan(try averagePixelDistance(preview.image, firstCompositeCrop), 12)
+    }
+
+    func testOverlayWindowMosaicDraftOverlapDoesNotIncreaseSharpness() throws {
+        let image = checkerboardImage(size: NSSize(width: 240, height: 160), squareSize: 4)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 20, y: 20, width: 180, height: 120))
+        window.test_toggleShapeTool(.mosaicRectangle)
+        let typePoint = try XCTUnwrap(window.test_mosaicRedactionTypePoint(.pixelMosaic))
+        window.test_mouseDown(at: typePoint)
+        window.test_mouseUp(at: typePoint)
+
+        window.test_mouseDown(at: NSPoint(x: 50, y: 44))
+        window.test_mouseDragged(to: NSPoint(x: 140, y: 104))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 104))
+
+        var style = CaptureAnnotationStyle()
+        style.strokeWidth = 30
+        let draft = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(x: 64, y: 34, width: 90, height: 60),
+            style: style,
+            mosaicRedaction: CaptureMosaicRedaction(type: .gaussianBlur, value: 8)
+        )
+        let preview = try XCTUnwrap(window.test_mosaicDraftPreview(for: draft))
+        let firstCompositeImage = CaptureAnnotationRenderer.render(image: image, annotations: [
+            CaptureAnnotation(
+                kind: .mosaicRectangle,
+                rect: NSRect(x: 50, y: 44, width: 90, height: 60),
+                style: style,
+                mosaicRedaction: CaptureMosaicRedaction(type: .gaussianBlur, value: 8)
+            )
+        ])
+
+        let overlap = NSRect(x: 76, y: 58, width: 44, height: 28)
+        let firstCrop = try XCTUnwrap(croppedImage(firstCompositeImage, to: overlap))
+        let previewCrop = try XCTUnwrap(croppedImage(preview.image, to: NSRect(
+            x: overlap.minX - preview.drawRect.minX,
+            y: overlap.minY - preview.drawRect.minY,
+            width: overlap.width,
+            height: overlap.height
+        )))
+
+        let firstSharpness = try averageLumaDelta(in: firstCrop, rect: NSRect(origin: .zero, size: firstCrop.size))
+        let previewSharpness = try averageLumaDelta(in: previewCrop, rect: NSRect(origin: .zero, size: previewCrop.size))
+        XCTAssertLessThanOrEqual(previewSharpness, firstSharpness * 1.08)
+    }
+
+    func testOverlayWindowMosaicDraftRedactsExistingMarkerAnnotation() throws {
+        let image = checkerboardImage(size: desktopImageSize(), squareSize: 8)
+        let selection = NSRect(x: 100, y: 100, width: 220, height: 160)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateShapeTool(.marker)
+        window.test_setCurrentStrokeWidth(30)
+        window.test_mouseDown(at: NSPoint(x: 150, y: 170))
+        window.test_mouseDragged(to: NSPoint(x: 260, y: 220))
+        window.test_mouseUp(at: NSPoint(x: 260, y: 220))
+
+        let marker = CaptureAnnotation(
+            kind: .marker,
+            rect: try XCTUnwrap(window.test_annotationRect(at: 0)),
+            style: try XCTUnwrap(window.test_annotationStyle(at: 0)),
+            markerLine: try XCTUnwrap(window.test_markerLine(at: 0))
+        )
+        var style = CaptureAnnotationStyle()
+        style.strokeWidth = 30
+        let draft = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(x: 30, y: 50, width: 160, height: 90),
+            style: style,
+            mosaicRedaction: CaptureMosaicRedaction(type: .gaussianBlur, value: 8)
+        )
+
+        let preview = try XCTUnwrap(window.test_mosaicDraftPreview(for: draft))
+        let expected = CaptureAnnotationRenderer.render(
+            image: image,
+            annotations: [
+                overlayAnnotation(marker, selection: selection),
+                overlayAnnotation(draft, selection: selection),
+            ]
+        )
+        let expectedCrop = try XCTUnwrap(croppedImage(expected, to: preview.drawRect))
+
+        XCTAssertLessThan(try averagePixelDistance(preview.image, expectedCrop), 8)
+    }
+
+    func testOverlayWindowPixelMosaicDraftUsesCompositePixelsForExistingRectangleStroke() throws {
+        let image = checkerboardImage(size: desktopImageSize(), squareSize: 8)
+        let selection = NSRect(x: 100, y: 100, width: 260, height: 180)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateShapeTool(.rectangle)
+        window.test_setCurrentStrokeWidth(24)
+        window.test_mouseDown(at: NSPoint(x: 150, y: 150))
+        window.test_mouseDragged(to: NSPoint(x: 250, y: 230))
+        window.test_mouseUp(at: NSPoint(x: 250, y: 230))
+
+        let rectangle = CaptureAnnotation(
+            kind: .rectangle,
+            rect: try XCTUnwrap(window.test_annotationRect(at: 0)),
+            style: try XCTUnwrap(window.test_annotationStyle(at: 0))
+        )
+        var style = CaptureAnnotationStyle()
+        style.strokeWidth = 30
+        let draft = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(x: 44, y: 44, width: 116, height: 104),
+            style: style,
+            mosaicRedaction: CaptureMosaicRedaction(type: .pixelMosaic, value: 8)
+        )
+
+        let preview = try XCTUnwrap(window.test_mosaicDraftPreview(for: draft))
+        let expected = CaptureAnnotationRenderer.render(
+            image: image,
+            annotations: [
+                overlayAnnotation(rectangle, selection: selection),
+                overlayAnnotation(draft, selection: selection),
+            ]
+        )
+        let expectedCrop = try XCTUnwrap(croppedImage(expected, to: preview.drawRect))
+        let backgroundOnly = CaptureAnnotationRenderer.render(
+            image: image,
+            annotations: [overlayAnnotation(draft, selection: selection)]
+        )
+        let backgroundOnlyCrop = try XCTUnwrap(croppedImage(backgroundOnly, to: preview.drawRect))
+
+        XCTAssertLessThan(try averagePixelDistance(preview.image, expectedCrop), 8)
+        XCTAssertGreaterThan(try averagePixelDistance(preview.image, backgroundOnlyCrop), 12)
+    }
+
+    func testOverlayWindowCommittedMosaicRedactsEarlierMarkerAnnotation() throws {
+        let image = checkerboardImage(size: desktopImageSize(), squareSize: 8)
+        let selection = NSRect(x: 100, y: 100, width: 220, height: 160)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateShapeTool(.marker)
+        window.test_setCurrentStrokeWidth(30)
+        window.test_mouseDown(at: NSPoint(x: 150, y: 170))
+        window.test_mouseDragged(to: NSPoint(x: 260, y: 220))
+        window.test_mouseUp(at: NSPoint(x: 260, y: 220))
+
+        let marker = CaptureAnnotation(
+            kind: .marker,
+            rect: try XCTUnwrap(window.test_annotationRect(at: 0)),
+            style: try XCTUnwrap(window.test_annotationStyle(at: 0)),
+            markerLine: try XCTUnwrap(window.test_markerLine(at: 0))
+        )
+        window.test_toggleShapeTool(.mosaicRectangle)
+        let typePoint = try XCTUnwrap(window.test_mosaicRedactionTypePoint(.pixelMosaic))
+        window.test_mouseDown(at: typePoint)
+        window.test_mouseUp(at: typePoint)
+        window.test_mouseDown(at: NSPoint(x: 130, y: 150))
+        window.test_mouseDragged(to: NSPoint(x: 290, y: 240))
+        window.test_mouseUp(at: NSPoint(x: 290, y: 240))
+
+        let overlayImage = try XCTUnwrap(window.test_renderedOverlayImage())
+        let mosaic = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: try XCTUnwrap(window.test_annotationRect(at: 1)),
+            style: try XCTUnwrap(window.test_annotationStyle(at: 1)),
+            mosaicRedaction: try XCTUnwrap(window.test_mosaicRedaction(at: 1))
+        )
+        let expected = CaptureAnnotationRenderer.render(
+            image: image,
+            annotations: [
+                overlayAnnotation(marker, selection: selection),
+                overlayAnnotation(mosaic, selection: selection),
+            ]
+        )
+        let checkRect = NSRect(x: 140, y: 160, width: 140, height: 70)
+        let overlayCrop = try XCTUnwrap(croppedImage(overlayImage, to: checkRect))
+        let expectedCrop = try XCTUnwrap(croppedImage(expected, to: checkRect))
+
+        XCTAssertLessThan(try averagePixelDistance(overlayCrop, expectedCrop), 8)
+    }
+
+    func testOverlayWindowMosaicRectangleCanStartOnExistingRectangleVerticalBorder() throws {
+        let image = checkerboardImage(size: desktopImageSize(), squareSize: 8)
+        let selection = NSRect(x: 100, y: 100, width: 260, height: 180)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateShapeTool(.rectangle)
+        window.test_setCurrentStrokeWidth(24)
+        window.test_mouseDown(at: NSPoint(x: 150, y: 150))
+        window.test_mouseDragged(to: NSPoint(x: 250, y: 230))
+        window.test_mouseUp(at: NSPoint(x: 250, y: 230))
+
+        let rectangle = CaptureAnnotation(
+            kind: .rectangle,
+            rect: try XCTUnwrap(window.test_annotationRect(at: 0)),
+            style: try XCTUnwrap(window.test_annotationStyle(at: 0))
+        )
+        window.test_toggleShapeTool(.mosaicRectangle)
+        XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: 150, y: 182)), .crosshair)
+        window.test_mouseDown(at: NSPoint(x: 150, y: 182))
+        window.test_mouseDragged(to: NSPoint(x: 178, y: 218))
+        window.test_mouseUp(at: NSPoint(x: 178, y: 218))
+
+        XCTAssertEqual(window.test_annotationCount, 2)
+        let overlayImage = try XCTUnwrap(window.test_renderedOverlayImage())
+        let mosaic = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: try XCTUnwrap(window.test_annotationRect(at: 1)),
+            style: try XCTUnwrap(window.test_annotationStyle(at: 1)),
+            mosaicRedaction: try XCTUnwrap(window.test_mosaicRedaction(at: 1))
+        )
+        let expected = CaptureAnnotationRenderer.render(
+            image: image,
+            annotations: [
+                overlayAnnotation(rectangle, selection: selection),
+                overlayAnnotation(mosaic, selection: selection),
+            ]
+        )
+        let checkRect = NSRect(x: 156, y: 190, width: 20, height: 20)
+        let overlayCrop = try XCTUnwrap(croppedImage(overlayImage, to: checkRect))
+        let expectedCrop = try XCTUnwrap(croppedImage(expected, to: checkRect))
+
+        XCTAssertLessThan(try averagePixelDistance(overlayCrop, expectedCrop), 18)
+    }
+
+    func testOverlayWindowSequentialMosaicCompositesReuseCacheAcrossPrefixes() throws {
+        let image = checkerboardImage(size: NSSize(width: 260, height: 180), squareSize: 4)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 20, y: 20, width: 180, height: 120))
+
+        var markerStyle = CaptureAnnotationStyle()
+        markerStyle.strokeColor = SelectionToolbarState.defaultMarkerColor
+        markerStyle.strokeWidth = 24
+        let marker = CaptureAnnotation(
+            kind: .marker,
+            rect: NSRect(x: 42, y: 44, width: 86, height: 40),
+            style: markerStyle,
+            markerLine: CaptureMarkerLine(start: NSPoint(x: 42, y: 44), end: NSPoint(x: 128, y: 84))
+        )
+        var mosaicStyle = CaptureAnnotationStyle()
+        mosaicStyle.strokeWidth = 30
+        let redaction = CaptureMosaicRedaction(type: .pixelMosaic, value: 8)
+        let firstMosaic = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(x: 32, y: 26, width: 76, height: 50),
+            style: mosaicStyle,
+            mosaicRedaction: redaction
+        )
+        let secondMosaic = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(x: 66, y: 54, width: 82, height: 50),
+            style: mosaicStyle,
+            mosaicRedaction: redaction
+        )
+
+        XCTAssertNotNil(window.test_mosaicPreviewComposite(for: [marker, firstMosaic]))
+        XCTAssertNotNil(window.test_mosaicPreviewComposite(for: [marker, firstMosaic, secondMosaic]))
+        let renderCountAfterTwoPrefixes = window.test_mosaicCompositeRenderCount
+        XCTAssertGreaterThan(renderCountAfterTwoPrefixes, 0)
+
+        XCTAssertNotNil(window.test_mosaicPreviewComposite(for: [marker, firstMosaic]))
+
+        XCTAssertEqual(window.test_mosaicCompositeRenderCount, renderCountAfterTwoPrefixes)
+    }
+
+    func testOverlayWindowMosaicOnlyAnnotationsUseSingleCompositeDraw() {
+        let image = checkerboardImage(size: NSSize(width: 260, height: 180), squareSize: 4)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 20, y: 20, width: 200, height: 120))
+        window.test_toggleShapeTool(.mosaicRectangle)
+
+        window.test_mouseDown(at: NSPoint(x: 42, y: 46))
+        window.test_mouseDragged(to: NSPoint(x: 92, y: 96))
+        window.test_mouseUp(at: NSPoint(x: 92, y: 96))
+        window.test_mouseDown(at: NSPoint(x: 142, y: 50))
+        window.test_mouseDragged(to: NSPoint(x: 192, y: 100))
+        window.test_mouseUp(at: NSPoint(x: 192, y: 100))
+
+        XCTAssertEqual(window.test_annotationCount, 2)
+        XCTAssertNotNil(window.test_renderedOverlayImage())
+
+        XCTAssertEqual(window.test_mosaicCompositeRenderCount, 1)
+    }
+
+    func testOverlayWindowMosaicStrokeIsNotMutatedWhenPreparingNextRectangleMosaic() throws {
+        let image = checkerboardImage(size: NSSize(width: 240, height: 160))
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 20, y: 20, width: 180, height: 120))
+        window.test_toggleShapeTool(.mosaicStroke)
+
+        window.test_mouseDown(at: NSPoint(x: 88, y: 82))
+        window.test_mouseUp(at: NSPoint(x: 88, y: 82))
+
+        XCTAssertNil(window.test_selectedAnnotationKind)
+        let originalRedaction = try XCTUnwrap(window.test_mosaicRedaction(at: 0))
+
+        let typePoint = try XCTUnwrap(window.test_mosaicRedactionTypePoint(.gaussianBlur))
+        window.test_mouseDown(at: typePoint)
+        window.test_mouseUp(at: typePoint)
+
+        window.test_toggleShapeTool(.mosaicRectangle)
+
+        XCTAssertEqual(window.test_mosaicRedaction(at: 0), originalRedaction)
+        XCTAssertEqual(window.test_currentShapeKind, .mosaicRectangle)
+    }
+
+    func testOverlayWindowMosaicDraftPreviewKeepsExistingMosaicAnnotations() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_toggleShapeTool(.mosaicStroke)
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 140))
+        window.test_mouseDragged(to: NSPoint(x: 200, y: 160))
+        window.test_mouseUp(at: NSPoint(x: 200, y: 160))
+
+        var style = CaptureAnnotationStyle()
+        style.strokeWidth = 30
+        let draftStroke = CaptureMosaicStroke(points: [
+            NSPoint(x: 130, y: 90),
+            NSPoint(x: 190, y: 92),
+        ])
+        let draft = CaptureAnnotation(
+            kind: .mosaicStroke,
+            rect: draftStroke.boundingRect,
+            style: style,
+            mosaicStroke: draftStroke,
+            mosaicRedaction: CaptureMosaicRedaction(type: .gaussianBlur, value: 8)
+        )
+
+        XCTAssertEqual(window.test_mosaicDraftPreviewAnnotationCount(for: draft), 2)
+    }
+
+    func testMosaicStrokePreviewDotsStayVisuallySmall() {
+        XCTAssertEqual(SelectionToolbarState.mosaicPreviewDotDiameter(for: 15), 5)
+        XCTAssertEqual(SelectionToolbarState.mosaicPreviewDotDiameter(for: 30), 8)
+        XCTAssertEqual(SelectionToolbarState.mosaicPreviewDotDiameter(for: 40), 11)
+    }
+
+    func testOverlayWindowMosaicPreviewUsesFullBackgroundImage() {
+        let image = NSImage(size: NSSize(width: 240, height: 160))
+        image.lockFocus()
+        NSColor.white.setFill()
+        NSRect(x: 0, y: 0, width: 240, height: 160).fill()
+        NSColor.black.setFill()
+        NSRect(x: 120, y: 50, width: 50, height: 24).fill()
+        image.unlockFocus()
+
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        let selection = NSRect(x: 100, y: 40, width: 80, height: 60)
+        window.test_setLockedSelectionRect(selection)
+
+        var style = CaptureAnnotationStyle()
+        style.strokeWidth = 16
+        let annotation = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(x: 20, y: 10, width: 50, height: 24),
+            style: style,
+            mosaicRedaction: CaptureMosaicRedaction(type: .gaussianBlur, value: 8)
+        )
+
+        guard let preview = window.test_mosaicPreviewComposite(for: [annotation]) else {
+            return XCTFail("Expected mosaic preview composite")
+        }
+
+        XCTAssertEqual(preview.size.width, image.size.width, accuracy: 0.1)
+        XCTAssertEqual(preview.size.height, image.size.height, accuracy: 0.1)
+        XCTAssertEqual(preview.drawRect.origin.x, 0, accuracy: 0.1)
+        XCTAssertEqual(preview.drawRect.origin.y, 0, accuracy: 0.1)
+        XCTAssertGreaterThan(preview.drawRect.width, selection.width)
+        XCTAssertGreaterThan(preview.drawRect.height, selection.height)
+    }
+
+    func testOverlayWindowMosaicPreviewKeepsOutOfSelectionGeometryVisible() {
+        let image = NSImage(size: NSSize(width: 240, height: 160))
+        image.lockFocus()
+        NSColor.white.setFill()
+        NSRect(x: 0, y: 0, width: 240, height: 160).fill()
+        image.unlockFocus()
+
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        let selection = NSRect(x: 100, y: 40, width: 80, height: 60)
+        window.test_setLockedSelectionRect(selection)
+
+        var style = CaptureAnnotationStyle()
+        style.strokeWidth = 30
+        let outsideStroke = CaptureMosaicStroke(points: [
+            NSPoint(x: -40, y: 30),
+            NSPoint(x: -25, y: 30),
+        ])
+        let annotation = CaptureAnnotation(
+            kind: .mosaicStroke,
+            rect: outsideStroke.boundingRect,
+            style: style,
+            mosaicStroke: outsideStroke,
+            mosaicRedaction: CaptureMosaicRedaction(type: .gaussianBlur, value: 8)
+        )
+
+        guard let preview = window.test_mosaicPreviewComposite(for: [annotation]) else {
+            return XCTFail("Expected mosaic preview composite")
+        }
+
+        XCTAssertEqual(preview.size.width, image.size.width, accuracy: 0.1)
+        XCTAssertEqual(preview.size.height, image.size.height, accuracy: 0.1)
+        XCTAssertGreaterThan(preview.drawRect.width, selection.width)
+        XCTAssertGreaterThan(preview.drawRect.height, selection.height)
+
+        guard let clipBounds = window.test_mosaicPreviewClipBounds(for: [annotation]) else {
+            return XCTFail("Expected mosaic preview clip bounds")
+        }
+        XCTAssertLessThan(clipBounds.maxX, selection.minX)
+        XCTAssertLessThan(clipBounds.width, preview.drawRect.width)
+        XCTAssertLessThan(clipBounds.height, preview.drawRect.height)
+        XCTAssertTrue(window.test_mosaicPreviewClipContains(NSPoint(x: 67.5, y: 70), for: [annotation]))
     }
 
     func testToolSwitchingResetsStrokePatternToFirstOption() {
@@ -610,6 +1937,21 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertTrue(SelectionToolbarState.usesFixedColorToolbarIconResource("undo-enabled"))
     }
 
+    func testMosaicPreviewProgressMapsRangeEndpoints() {
+        XCTAssertEqual(SelectionToolbarState.mosaicPreviewProgress(for: 5), 0, accuracy: 0.001)
+        XCTAssertEqual(SelectionToolbarState.mosaicPreviewProgress(for: 12), 7.0 / 15.0, accuracy: 0.001)
+        XCTAssertEqual(SelectionToolbarState.mosaicPreviewProgress(for: 20), 1, accuracy: 0.001)
+    }
+
+    func testMosaicPreviewBackgroundColorDarkensAsValueIncreases() {
+        let low = SelectionToolbarState.mosaicPreviewBackgroundColor(for: 5).usingColorSpace(.sRGB)!
+        let high = SelectionToolbarState.mosaicPreviewBackgroundColor(for: 20).usingColorSpace(.sRGB)!
+
+        XCTAssertGreaterThan(low.redComponent, high.redComponent)
+        XCTAssertGreaterThan(low.greenComponent, high.greenComponent)
+        XCTAssertGreaterThan(low.blueComponent, high.blueComponent)
+    }
+
     func testPolylineTooltipUsesArrowLineLabel() {
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "polyline"), "箭头线")
     }
@@ -823,6 +2165,66 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(SelectionToolbarState.strokeWidthValues(for: .marker), [14, 18, 22])
     }
 
+    func testMosaicOptionsToolbarOnlyShowsRedactionTypeAndValueControls() {
+        let optionsRect = NSRect(x: 100, y: 100, width: 420, height: 40)
+        let layout = SelectionToolbarState.optionsToolbarLayout(
+            in: optionsRect,
+            paletteCount: 8,
+            mode: .mosaic
+        )
+
+        XCTAssertEqual(layout.strokeWidths.count, 0)
+        XCTAssertNil(layout.ellipseMode)
+        XCTAssertNil(layout.rectangleMode)
+        XCTAssertEqual(SelectionToolbarState.mosaicRedactionTypeButtonRect(in: optionsRect).minX, optionsRect.minX + 15)
+        XCTAssertGreaterThan(
+            SelectionToolbarState.mosaicRedactionValueRect(in: optionsRect).minX,
+            SelectionToolbarState.mosaicRedactionTypeButtonRect(in: optionsRect).maxX
+        )
+    }
+
+    func testMosaicOptionsToolbarBalancesLeadingAndTrailingGapAroundControls() {
+        let width = SelectionToolbarState.optionsToolbarWidth(paletteCount: 8, mode: .mosaic)
+        let optionsRect = NSRect(x: 100, y: 100, width: width, height: 40)
+        let typeRect = SelectionToolbarState.mosaicRedactionTypeButtonRect(in: optionsRect)
+        let valueRect = SelectionToolbarState.mosaicRedactionValueRect(in: optionsRect)
+
+        let leadingGap = typeRect.minX - optionsRect.minX
+        let trailingGap = optionsRect.maxX - valueRect.maxX
+
+        XCTAssertLessThan(width, 300)
+        XCTAssertEqual(leadingGap, 15, accuracy: 0.1)
+        XCTAssertEqual(leadingGap, trailingGap, accuracy: 0.1)
+    }
+
+    func testMosaicOptionsToolbarMatchesMainToolbarHeightAndOmitsSeparator() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 60, y: 60, width: 180, height: 120))
+        window.test_toggleShapeTool(.mosaicRectangle)
+
+        let optionsRect = try XCTUnwrap(window.test_optionsToolbarRect)
+        XCTAssertEqual(optionsRect.height, 28, accuracy: 0.1)
+
+        let image = try XCTUnwrap(window.test_renderedOverlayImage())
+        let typeRect = SelectionToolbarState.mosaicRedactionTypeButtonRect(in: optionsRect)
+        let typeBackground = typeRect.insetBy(dx: -3, dy: -5)
+        let valueRect = SelectionToolbarState.mosaicRedactionValueRect(in: optionsRect)
+        let oldSeparatorX = floor(typeBackground.maxX + (valueRect.minX - typeBackground.maxX) / 2) + 1
+        let separatorPoint = NSPoint(x: oldSeparatorX, y: optionsRect.midY)
+        let gapPoint = NSPoint(x: oldSeparatorX - 3, y: optionsRect.midY)
+        let separatorPixel = try XCTUnwrap(rgbaPixel(in: image, at: separatorPoint))
+        let gapPixel = try XCTUnwrap(rgbaPixel(in: image, at: gapPoint))
+
+        XCTAssertLessThanOrEqual(pixelDistance(separatorPixel, gapPixel), 3)
+    }
+
+    func testSelectedToolbarBackgroundsUseStrongerOpacity() {
+        XCTAssertEqual(SelectionToolbarState.toolbarSelectedBackgroundAlpha, 0.36, accuracy: 0.001)
+        XCTAssertEqual(SelectionToolbarState.measurementControlSelectedBackgroundAlpha, 0.34, accuracy: 0.001)
+        XCTAssertGreaterThan(SelectionToolbarState.toolbarSelectedBackgroundAlpha, 0.22)
+        XCTAssertGreaterThan(SelectionToolbarState.measurementControlSelectedBackgroundAlpha, 0.22)
+    }
+
     func testMarkerActivationUsesDefaultHighlighterStyle() {
         var current = CaptureAnnotationStyle()
         current.strokeColor = .systemRed
@@ -942,6 +2344,60 @@ final class SelectionToolbarStateTests: XCTestCase {
             return XCTFail("Expected restored marker style")
         }
         XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: restoredMarkerStyle.strokeColor), "#3C53D7")
+    }
+
+    func testOverlayWindowNonMarkerToolsResetToRedAfterCustomNonMarkerColor() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.rectangle)
+
+        guard let rectangleBluePoint = window.test_optionsPaletteColorPoint(at: 8) else {
+            return XCTFail("Expected rectangle palette control")
+        }
+        window.test_mouseDown(at: rectangleBluePoint)
+        window.test_mouseUp(at: rectangleBluePoint)
+        XCTAssertEqual(
+            SelectionToolbarState.colorSamplerHexString(for: window.test_currentStyle?.strokeColor ?? .clear),
+            "#3C53D7"
+        )
+
+        window.test_activateShapeTool(.arrowLine)
+        XCTAssertEqual(
+            SelectionToolbarState.colorSamplerHexString(for: window.test_currentStyle?.strokeColor ?? .clear),
+            "#FF001A"
+        )
+
+        guard let arrowBluePoint = window.test_optionsPaletteColorPoint(at: 8) else {
+            return XCTFail("Expected arrow palette control")
+        }
+        window.test_mouseDown(at: arrowBluePoint)
+        window.test_mouseUp(at: arrowBluePoint)
+        XCTAssertEqual(
+            SelectionToolbarState.colorSamplerHexString(for: window.test_currentStyle?.strokeColor ?? .clear),
+            "#3C53D7"
+        )
+
+        window.test_activateShapeTool(.brush)
+        XCTAssertEqual(
+            SelectionToolbarState.colorSamplerHexString(for: window.test_currentStyle?.strokeColor ?? .clear),
+            "#FF001A"
+        )
+
+        guard let brushBluePoint = window.test_optionsPaletteColorPoint(at: 8) else {
+            return XCTFail("Expected brush palette control")
+        }
+        window.test_mouseDown(at: brushBluePoint)
+        window.test_mouseUp(at: brushBluePoint)
+        XCTAssertEqual(
+            SelectionToolbarState.colorSamplerHexString(for: window.test_currentStyle?.strokeColor ?? .clear),
+            "#3C53D7"
+        )
+
+        window.test_activateShapeTool(.mosaicRectangle)
+        XCTAssertEqual(
+            SelectionToolbarState.colorSamplerHexString(for: window.test_currentStyle?.strokeColor ?? .clear),
+            "#FF001A"
+        )
     }
 
     func testMarkerActivationClearsStaleStrokeStyleMenu() {
@@ -1267,6 +2723,19 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertTrue(window.test_markerToolbarButtonIsSelected)
     }
 
+    func testMainToolbarButtonsUseRoomierDefaultSpacing() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 80, y: 80, width: 360, height: 220))
+
+        let rects = window.test_mainToolbarButtonRects()
+        XCTAssertGreaterThan(rects.count, 8)
+
+        let gaps = zip(rects, rects.dropFirst()).map { left, right in
+            right.minX - left.maxX
+        }
+        XCTAssertGreaterThanOrEqual(gaps.min() ?? 0, 8)
+    }
+
     func testBrushAnnotationStyleIsNotEditableAfterDrawing() {
         XCTAssertTrue(SelectionToolbarState.annotationKindSupportsPostDrawEditing(.rectangle))
         XCTAssertTrue(SelectionToolbarState.annotationKindSupportsPostDrawEditing(.ellipse))
@@ -1355,7 +2824,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         )
     }
 
-    func testBrushCursorUsesArrowOutsideSelectionAndToolbar() {
+    func testBrushCursorUsesBrushOutsideSelectionAndArrowOnToolbar() {
         XCTAssertEqual(
             SelectionToolbarState.overlayCursorStyle(
                 isSelecting: false,
@@ -1367,7 +2836,7 @@ final class SelectionToolbarStateTests: XCTestCase {
                 isShapeToolActive: true,
                 currentShapeKind: .brush
             ),
-            .arrow
+            .brush
         )
 
         XCTAssertEqual(
@@ -1382,6 +2851,48 @@ final class SelectionToolbarStateTests: XCTestCase {
                 currentShapeKind: .brush
             ),
             .arrow
+        )
+    }
+
+    func testShapeToolCursorStaysActiveOutsideSelectionAwayFromBorder() {
+        XCTAssertEqual(
+            SelectionToolbarState.overlayCursorStyle(
+                isSelecting: false,
+                isToolbarOrPanelPoint: false,
+                resizeHandle: nil,
+                selectionResizeHandle: nil,
+                isAnnotationBorder: false,
+                isInsideSelection: false,
+                isShapeToolActive: true,
+                currentShapeKind: .rectangle
+            ),
+            .crosshair
+        )
+        XCTAssertEqual(
+            SelectionToolbarState.overlayCursorStyle(
+                isSelecting: false,
+                isToolbarOrPanelPoint: false,
+                resizeHandle: nil,
+                selectionResizeHandle: nil,
+                isAnnotationBorder: false,
+                isInsideSelection: false,
+                isShapeToolActive: true,
+                currentShapeKind: .arrowLine
+            ),
+            .crosshair
+        )
+        XCTAssertEqual(
+            SelectionToolbarState.overlayCursorStyle(
+                isSelecting: false,
+                isToolbarOrPanelPoint: false,
+                resizeHandle: nil,
+                selectionResizeHandle: nil,
+                isAnnotationBorder: false,
+                isInsideSelection: false,
+                isShapeToolActive: true,
+                currentShapeKind: .marker
+            ),
+            .marker
         )
     }
 
@@ -1692,7 +3203,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(style.cornerRadius, 5)
     }
 
-    func testPrimaryShapeToolActivationPreservesUserChosenColor() {
+    func testPrimaryShapeToolActivationUsesFirstPaletteColorAfterUserChosenColor() {
         var currentStyle = CaptureAnnotationStyle()
         currentStyle.strokeColor = NSColor(srgbRed: 0, green: 1, blue: 0, alpha: 1)
         currentStyle.fillColor = NSColor(srgbRed: 0, green: 1, blue: 0, alpha: 1)
@@ -1702,8 +3213,8 @@ final class SelectionToolbarStateTests: XCTestCase {
             paletteColors: SelectionOverlayWindow.defaultPaletteColors
         )
 
-        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: style.strokeColor), "#00FF00")
-        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: style.fillColor), "#00FF00")
+        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: style.strokeColor), "#FF001A")
+        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: style.fillColor), "#FF001A")
         XCTAssertEqual(style.strokeWidth, 4)
         XCTAssertEqual(style.cornerRadius, 5)
     }
@@ -2522,6 +4033,9 @@ final class SelectionToolbarStateTests: XCTestCase {
 
     func testToolbarTooltipTitlesAreAvailableForPrimaryButtons() {
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "rectangle"), "形状标注")
+        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "mosaicRectangle"), "矩形模糊")
+        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "mosaicBlur"), "高斯")
+        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "mosaicPixel"), "马赛克")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "save"), "保存")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "copy"), "复制到剪切板")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "scroll"), "滚动截图")
@@ -2852,5 +4366,229 @@ final class SelectionToolbarStateTests: XCTestCase {
             shouldInterpolate: false,
             intent: .defaultIntent
         )!
+    }
+
+    private func checkerboardImage(size: NSSize) -> NSImage {
+        checkerboardImage(size: size, squareSize: 8)
+    }
+
+    private func checkerboardImage(size: NSSize, squareSize: Int) -> NSImage {
+        let image = NSImage(size: size)
+        image.lockFocus()
+        for x in stride(from: 0, to: Int(size.width), by: squareSize) {
+            for y in stride(from: 0, to: Int(size.height), by: squareSize) {
+                let isDark = ((x / squareSize) + (y / squareSize)).isMultiple(of: 2)
+                (isDark ? NSColor.black : NSColor.white).setFill()
+                NSRect(x: x, y: y, width: squareSize, height: squareSize).fill()
+            }
+        }
+        image.unlockFocus()
+        return image
+    }
+
+    private func gradientImage(size: NSSize) -> NSImage {
+        let image = NSImage(size: size)
+        image.lockFocus()
+        for x in 0..<Int(size.width) {
+            let red = CGFloat(x) / max(size.width - 1, 1)
+            for y in 0..<Int(size.height) {
+                let green = CGFloat(y) / max(size.height - 1, 1)
+                NSColor(srgbRed: red, green: green, blue: 1 - red * 0.4, alpha: 1).setFill()
+                NSRect(x: x, y: y, width: 1, height: 1).fill()
+            }
+        }
+        image.unlockFocus()
+        return image
+    }
+
+    private func desktopImageSize() -> NSSize {
+        let frame = NSScreen.screens.reduce(NSRect.null) { partial, screen in
+            partial.union(screen.frame)
+        }
+        return frame.isNull ? NSSize(width: 640, height: 420) : frame.size
+    }
+
+    private func croppedImage(_ image: NSImage, to rect: NSRect) -> NSImage? {
+        let normalizedRect = rect.standardized
+        let clippedRect = normalizedRect.intersection(NSRect(origin: .zero, size: image.size))
+        guard !clippedRect.isEmpty else {
+            return nil
+        }
+
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            return nil
+        }
+
+        let scaleX = CGFloat(cgImage.width) / max(image.size.width, 1)
+        let scaleY = CGFloat(cgImage.height) / max(image.size.height, 1)
+        let pixelRect = CGRect(
+            x: clippedRect.minX * scaleX,
+            y: (image.size.height - clippedRect.maxY) * scaleY,
+            width: clippedRect.width * scaleX,
+            height: clippedRect.height * scaleY
+        )
+        .integral
+        .intersection(CGRect(x: 0, y: 0, width: cgImage.width, height: cgImage.height))
+
+        guard !pixelRect.isEmpty, let croppedImage = cgImage.cropping(to: pixelRect) else {
+            return nil
+        }
+        return NSImage(cgImage: croppedImage, size: clippedRect.size)
+    }
+
+    private func rgbaBytes(in image: NSImage) throws -> [UInt8] {
+        let cgImage = try XCTUnwrap(image.cgImage(forProposedRect: nil, context: nil, hints: nil))
+        var bytes = [UInt8](repeating: 0, count: cgImage.width * cgImage.height * 4)
+        let colorSpace = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        let context = try XCTUnwrap(
+            CGContext(
+                data: &bytes,
+                width: cgImage.width,
+                height: cgImage.height,
+                bitsPerComponent: 8,
+                bytesPerRow: cgImage.width * 4,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )
+        )
+        context.interpolationQuality = .none
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: cgImage.width, height: cgImage.height))
+        return bytes
+    }
+
+    private func rgbaPixel(in image: NSImage, at point: NSPoint) throws -> (red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8)? {
+        let cgImage = try XCTUnwrap(image.cgImage(forProposedRect: nil, context: nil, hints: nil))
+        let scaleX = CGFloat(cgImage.width) / max(image.size.width, 1)
+        let scaleY = CGFloat(cgImage.height) / max(image.size.height, 1)
+        let pixelX = Int((point.x * scaleX).rounded(.down))
+        let pixelY = Int((point.y * scaleY).rounded(.down))
+        guard pixelX >= 0, pixelX < cgImage.width, pixelY >= 0, pixelY < cgImage.height else {
+            return nil
+        }
+
+        let bytes = try rgbaBytes(in: image)
+        let index = (pixelY * cgImage.width + pixelX) * 4
+        return (bytes[index], bytes[index + 1], bytes[index + 2], bytes[index + 3])
+    }
+
+    private func pixelDiffers(
+        _ lhs: (red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8),
+        _ rhs: (red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8)
+    ) -> Bool {
+        lhs.red != rhs.red || lhs.green != rhs.green || lhs.blue != rhs.blue || lhs.alpha != rhs.alpha
+    }
+
+    private func pixelDistance(
+        _ lhs: (red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8),
+        _ rhs: (red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8)
+    ) -> Int {
+        abs(Int(lhs.red) - Int(rhs.red))
+            + abs(Int(lhs.green) - Int(rhs.green))
+            + abs(Int(lhs.blue) - Int(rhs.blue))
+            + abs(Int(lhs.alpha) - Int(rhs.alpha))
+    }
+
+    private func averageLumaDelta(in image: NSImage, rect: NSRect) throws -> Double {
+        let cgImage = try XCTUnwrap(image.cgImage(forProposedRect: nil, context: nil, hints: nil))
+        let bytes = try rgbaBytes(in: image)
+        let minX = max(0, Int(rect.minX.rounded(.down)))
+        let maxX = min(cgImage.width - 1, Int(rect.maxX.rounded(.up)))
+        let minY = max(0, Int(rect.minY.rounded(.down)))
+        let maxY = min(cgImage.height - 1, Int(rect.maxY.rounded(.up)))
+        guard minX < maxX, minY < maxY else {
+            return 0
+        }
+
+        var total = 0.0
+        var count = 0
+        for y in minY..<maxY {
+            for x in minX..<maxX {
+                let luma = lumaAt(x: x, y: y, width: cgImage.width, height: cgImage.height, bytes: bytes)
+                let right = lumaAt(x: x + 1, y: y, width: cgImage.width, height: cgImage.height, bytes: bytes)
+                let down = lumaAt(x: x, y: y + 1, width: cgImage.width, height: cgImage.height, bytes: bytes)
+                total += abs(luma - right) + abs(luma - down)
+                count += 2
+            }
+        }
+        return total / Double(max(1, count))
+    }
+
+    private func lumaAt(x: Int, y: Int, width: Int, height: Int, bytes: [UInt8]) -> Double {
+        let index = (y * width + x) * 4
+        return 0.2126 * Double(bytes[index])
+            + 0.7152 * Double(bytes[index + 1])
+            + 0.0722 * Double(bytes[index + 2])
+    }
+
+    private func overlayMosaicAnnotation(_ annotation: CaptureAnnotation, selection: NSRect) -> CaptureAnnotation {
+        overlayAnnotation(annotation, selection: selection)
+    }
+
+    private func overlayAnnotation(_ annotation: CaptureAnnotation, selection: NSRect) -> CaptureAnnotation {
+        var overlay = annotation
+        overlay.rect.origin.x += selection.minX
+        overlay.rect.origin.y += selection.minY
+        if let arrowLine = annotation.arrowLine {
+            overlay.arrowLine = CaptureArrowLine(
+                start: overlayPoint(arrowLine.start, selection: selection),
+                end: overlayPoint(arrowLine.end, selection: selection),
+                control: overlayPoint(arrowLine.control, selection: selection),
+                startArrowType: arrowLine.startArrowType,
+                endArrowType: arrowLine.endArrowType
+            )
+        }
+        if let markerLine = annotation.markerLine {
+            overlay.markerLine = CaptureMarkerLine(
+                start: overlayPoint(markerLine.start, selection: selection),
+                end: overlayPoint(markerLine.end, selection: selection)
+            )
+        }
+        if let brushPath = annotation.brushPath {
+            overlay.brushPath = CaptureBrushPath(
+                points: brushPath.points.map { overlayPoint($0, selection: selection) }
+            )
+        }
+        if let stroke = annotation.mosaicStroke {
+            overlay.mosaicStroke = CaptureMosaicStroke(
+                points: stroke.points.map { overlayPoint($0, selection: selection) }
+            )
+        }
+        return overlay
+    }
+
+    private func overlayPoint(_ point: NSPoint, selection: NSRect) -> NSPoint {
+        NSPoint(x: point.x + selection.minX, y: point.y + selection.minY)
+    }
+
+    private func assertPreview(
+        _ preview: (image: NSImage, drawRect: NSRect),
+        matchesCropFrom expected: NSImage,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let expectedCrop = try XCTUnwrap(croppedImage(expected, to: preview.drawRect))
+        XCTAssertEqual(try rgbaBytes(in: preview.image), try rgbaBytes(in: expectedCrop), file: file, line: line)
+    }
+
+    private func imageBytesDiffer(_ lhs: NSImage, _ rhs: NSImage) throws -> Bool {
+        try rgbaBytes(in: lhs) != rgbaBytes(in: rhs)
+    }
+
+    private func averagePixelDistance(_ lhs: NSImage, _ rhs: NSImage) throws -> Double {
+        let lhsBytes = try rgbaBytes(in: lhs)
+        let rhsBytes = try rgbaBytes(in: rhs)
+        XCTAssertEqual(lhsBytes.count, rhsBytes.count)
+        guard lhsBytes.count == rhsBytes.count, !lhsBytes.isEmpty else {
+            return .infinity
+        }
+
+        var total = 0
+        for index in stride(from: 0, to: lhsBytes.count, by: 4) {
+            total += abs(Int(lhsBytes[index]) - Int(rhsBytes[index]))
+            total += abs(Int(lhsBytes[index + 1]) - Int(rhsBytes[index + 1]))
+            total += abs(Int(lhsBytes[index + 2]) - Int(rhsBytes[index + 2]))
+            total += abs(Int(lhsBytes[index + 3]) - Int(rhsBytes[index + 3]))
+        }
+        return Double(total) / Double(lhsBytes.count / 4)
     }
 }

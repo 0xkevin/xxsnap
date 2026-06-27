@@ -139,6 +139,301 @@ final class SniporyMacTests: XCTestCase {
         XCTAssertLessThan(highlightedText.blue, 8)
     }
 
+    func testAnnotationRendererDrawsGaussianMosaicOntoImage() throws {
+        let image = try makeBitmapImageWithBlackTextStripe()
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = .systemRed
+        style.strokeWidth = 16
+
+        let annotation = CaptureAnnotation(
+            kind: .mosaicStroke,
+            rect: NSRect(x: 10, y: 20, width: 100, height: 28),
+            style: style,
+            mosaicStroke: CaptureMosaicStroke(points: [
+                NSPoint(x: 10, y: 30),
+                NSPoint(x: 60, y: 30),
+                NSPoint(x: 110, y: 30),
+            ]),
+            mosaicRedaction: CaptureMosaicRedaction(type: .gaussianBlur, value: 8)
+        )
+
+        let rendered = CaptureAnnotationRenderer.render(image: image, annotations: [annotation])
+
+        XCTAssertEqual(rendered.size, image.size)
+        XCTAssertNotEqual(try rgbaBytes(in: rendered), try rgbaBytes(in: image))
+        let renderedPixel = try XCTUnwrap(rgbaPixel(in: rendered, x: 65, y: 30))
+        let imagePixel = try XCTUnwrap(rgbaPixel(in: image, x: 65, y: 30))
+        XCTAssertTrue(
+            renderedPixel.red != imagePixel.red
+                || renderedPixel.green != imagePixel.green
+                || renderedPixel.blue != imagePixel.blue
+                || renderedPixel.alpha != imagePixel.alpha
+        )
+    }
+
+    func testAnnotationRendererDrawsSinglePointMosaicStroke() throws {
+        let image = try makeBitmapImageWithBlackTextStripe()
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = .systemRed
+        style.strokeWidth = 30
+
+        let annotation = CaptureAnnotation(
+            kind: .mosaicStroke,
+            rect: NSRect(x: 65, y: 30, width: 0, height: 0),
+            style: style,
+            mosaicStroke: CaptureMosaicStroke(points: [NSPoint(x: 65, y: 30)]),
+            mosaicRedaction: CaptureMosaicRedaction(type: .pixelMosaic, value: 20)
+        )
+
+        let rendered = CaptureAnnotationRenderer.render(image: image, annotations: [annotation])
+
+        XCTAssertEqual(rendered.size, image.size)
+        XCTAssertNotEqual(try rgbaBytes(in: rendered), try rgbaBytes(in: image))
+        let renderedPixel = try XCTUnwrap(rgbaPixel(in: rendered, x: 65, y: 30))
+        let imagePixel = try XCTUnwrap(rgbaPixel(in: image, x: 65, y: 30))
+        XCTAssertTrue(
+            renderedPixel.red != imagePixel.red
+                || renderedPixel.green != imagePixel.green
+                || renderedPixel.blue != imagePixel.blue
+                || renderedPixel.alpha != imagePixel.alpha
+        )
+    }
+
+    func testAnnotationRendererLaterMosaicDoesNotRevealEarlierMosaicOverlap() throws {
+        let image = try makeBitmapImageWithBlackTextStripe()
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = .systemRed
+        style.strokeWidth = 30
+
+        let dot = CaptureAnnotation(
+            kind: .mosaicStroke,
+            rect: NSRect(x: 65, y: 30, width: 0, height: 0),
+            style: style,
+            mosaicStroke: CaptureMosaicStroke(points: [NSPoint(x: 65, y: 30)]),
+            mosaicRedaction: CaptureMosaicRedaction(type: .pixelMosaic, value: 20)
+        )
+        let rectangle = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(x: 35, y: 8, width: 70, height: 44),
+            style: style,
+            mosaicRedaction: CaptureMosaicRedaction(type: .gaussianBlur, value: 8)
+        )
+
+        try assertLaterMosaicStacksOnEarlierRedaction(
+            image: image,
+            first: dot,
+            second: rectangle,
+            overlapRect: NSRect(x: 56, y: 22, width: 18, height: 16)
+        )
+    }
+
+    func testAnnotationRendererAppliesPixelRectangleToAlreadyGaussianDot() throws {
+        let image = try makeBitmapImageWithBlackTextStripe()
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = .systemRed
+        style.strokeWidth = 30
+
+        let dot = CaptureAnnotation(
+            kind: .mosaicStroke,
+            rect: NSRect(x: 65, y: 30, width: 0, height: 0),
+            style: style,
+            mosaicStroke: CaptureMosaicStroke(points: [NSPoint(x: 65, y: 30)]),
+            mosaicRedaction: CaptureMosaicRedaction(type: .gaussianBlur, value: 12)
+        )
+        let rectangle = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(x: 35, y: 8, width: 70, height: 44),
+            style: style,
+            mosaicRedaction: CaptureMosaicRedaction(type: .pixelMosaic, value: 12)
+        )
+
+        try assertLaterMosaicStacksOnEarlierRedaction(
+            image: image,
+            first: dot,
+            second: rectangle,
+            overlapRect: NSRect(x: 56, y: 22, width: 18, height: 16)
+        )
+    }
+
+    func testAnnotationRendererAppliesGaussianRectangleToAlreadyPixelDot() throws {
+        let image = try makeBitmapImageWithBlackTextStripe()
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = .systemRed
+        style.strokeWidth = 30
+
+        let dot = CaptureAnnotation(
+            kind: .mosaicStroke,
+            rect: NSRect(x: 65, y: 30, width: 0, height: 0),
+            style: style,
+            mosaicStroke: CaptureMosaicStroke(points: [NSPoint(x: 65, y: 30)]),
+            mosaicRedaction: CaptureMosaicRedaction(type: .pixelMosaic, value: 12)
+        )
+        let rectangle = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(x: 35, y: 8, width: 70, height: 44),
+            style: style,
+            mosaicRedaction: CaptureMosaicRedaction(type: .gaussianBlur, value: 12)
+        )
+
+        try assertLaterMosaicStacksOnEarlierRedaction(
+            image: image,
+            first: dot,
+            second: rectangle,
+            overlapRect: NSRect(x: 56, y: 22, width: 18, height: 16)
+        )
+    }
+
+    func testAnnotationRendererOverlappingGaussianMosaicDoesNotIncreaseSharpness() throws {
+        let image = checkerboardImage(size: NSSize(width: 180, height: 120), squareSize: 4)
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = .systemRed
+        style.strokeWidth = 30
+
+        let first = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(x: 30, y: 24, width: 90, height: 60),
+            style: style,
+            mosaicRedaction: CaptureMosaicRedaction(type: .gaussianBlur, value: 8)
+        )
+        let second = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(x: 54, y: 34, width: 90, height: 60),
+            style: style,
+            mosaicRedaction: CaptureMosaicRedaction(type: .gaussianBlur, value: 8)
+        )
+
+        let firstOnly = CaptureAnnotationRenderer.render(image: image, annotations: [first])
+        let firstThenSecond = CaptureAnnotationRenderer.render(image: image, annotations: [first, second])
+
+        let overlapRect = NSRect(x: 62, y: 42, width: 50, height: 34)
+        let originalSharpness = try averageLumaDelta(in: image, rect: overlapRect)
+        let firstSharpness = try averageLumaDelta(in: firstOnly, rect: overlapRect)
+        let combinedSharpness = try averageLumaDelta(in: firstThenSecond, rect: overlapRect)
+
+        XCTAssertLessThan(firstSharpness, originalSharpness * 0.65)
+        XCTAssertLessThanOrEqual(combinedSharpness, firstSharpness * 1.08)
+    }
+
+    func testAnnotationRendererDrawsPixelMosaicOntoImage() throws {
+        let image = try makeBitmapImageWithBlackTextStripe()
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = .systemRed
+        style.strokeWidth = 16
+
+        let annotation = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(x: 20, y: 12, width: 80, height: 44),
+            style: style,
+            mosaicRedaction: CaptureMosaicRedaction(type: .pixelMosaic, value: 20)
+        )
+
+        let rendered = CaptureAnnotationRenderer.render(image: image, annotations: [annotation])
+
+        XCTAssertEqual(rendered.size, image.size)
+        XCTAssertNotEqual(try rgbaBytes(in: rendered), try rgbaBytes(in: image))
+        let renderedPixel = try XCTUnwrap(rgbaPixel(in: rendered, x: 65, y: 30))
+        let imagePixel = try XCTUnwrap(rgbaPixel(in: image, x: 65, y: 30))
+        XCTAssertTrue(
+            renderedPixel.red != imagePixel.red
+                || renderedPixel.green != imagePixel.green
+                || renderedPixel.blue != imagePixel.blue
+                || renderedPixel.alpha != imagePixel.alpha
+        )
+    }
+
+    func testAnnotationRendererPixelMosaicBreaksUpEarlierRectangleStrokeHardEdges() throws {
+        let image = try makeBitmapImage(
+            pointSize: NSSize(width: 160, height: 100),
+            pixelWidth: 160,
+            pixelHeight: 100,
+            fill: .white
+        )
+        var rectangleStyle = CaptureAnnotationStyle()
+        rectangleStyle.strokeColor = .systemRed
+        rectangleStyle.strokeWidth = 8
+
+        var mosaicStyle = CaptureAnnotationStyle()
+        mosaicStyle.strokeWidth = 30
+
+        let rectangle = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 36, y: 24, width: 88, height: 52),
+            style: rectangleStyle
+        )
+        let mosaic = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(x: 32, y: 20, width: 96, height: 60),
+            style: mosaicStyle,
+            mosaicRedaction: CaptureMosaicRedaction(type: .pixelMosaic, value: 12)
+        )
+
+        let rectangleOnly = CaptureAnnotationRenderer.render(image: image, annotations: [rectangle])
+        let mosaicOnly = CaptureAnnotationRenderer.render(image: image, annotations: [mosaic])
+        let redacted = CaptureAnnotationRenderer.render(image: image, annotations: [rectangle, mosaic])
+        let checkRect = NSRect(x: 32, y: 20, width: 96, height: 60)
+        let rectangleRedPixels = redPixelCount(in: rectangleOnly, within: checkRect)
+        let redactedRedPixels = redPixelCount(in: redacted, within: checkRect)
+
+        XCTAssertGreaterThan(rectangleRedPixels, 1200)
+        XCTAssertGreaterThan(redTintPixelCount(in: redacted, within: checkRect), 300)
+        XCTAssertLessThan(redactedRedPixels, rectangleRedPixels / 2)
+        XCTAssertTrue(
+            try imageDiffers(
+                rgbaBytes(in: mosaicOnly),
+                rgbaBytes(in: redacted),
+                width: try XCTUnwrap(redacted.cgImage(forProposedRect: nil, context: nil, hints: nil)).width,
+                height: try XCTUnwrap(redacted.cgImage(forProposedRect: nil, context: nil, hints: nil)).height,
+                rect: checkRect
+            )
+        )
+    }
+
+    func testAnnotationRendererDrawsSmallMosaicRectangleWithLargeStrokeWidth() throws {
+        let image = try makeBitmapImageWithBlackTextStripe()
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = .systemRed
+        style.strokeWidth = 40
+
+        let annotation = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(x: 55, y: 20, width: 20, height: 20),
+            style: style,
+            mosaicRedaction: CaptureMosaicRedaction(type: .pixelMosaic, value: 20)
+        )
+
+        let rendered = CaptureAnnotationRenderer.render(image: image, annotations: [annotation])
+
+        XCTAssertEqual(rendered.size, image.size)
+        XCTAssertNotEqual(try rgbaBytes(in: rendered), try rgbaBytes(in: image))
+        let renderedPixel = try XCTUnwrap(rgbaPixel(in: rendered, x: 65, y: 30))
+        let imagePixel = try XCTUnwrap(rgbaPixel(in: image, x: 65, y: 30))
+        XCTAssertTrue(
+            renderedPixel.red != imagePixel.red
+                || renderedPixel.green != imagePixel.green
+                || renderedPixel.blue != imagePixel.blue
+                || renderedPixel.alpha != imagePixel.alpha
+        )
+    }
+
+    func testAnnotationRendererClipsOutOfBoundsMosaicToImageSize() throws {
+        let image = try makeBitmapImageWithBlackTextStripe()
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = .systemRed
+        style.strokeWidth = 18
+
+        let annotation = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(x: -20, y: 10, width: 90, height: 50),
+            style: style,
+            mosaicRedaction: CaptureMosaicRedaction(type: .gaussianBlur, value: 20)
+        )
+
+        let rendered = CaptureAnnotationRenderer.render(image: image, annotations: [annotation])
+
+        XCTAssertEqual(rendered.size, image.size)
+        XCTAssertEqual(try rgbaBytes(in: rendered).count, try rgbaBytes(in: image).count)
+    }
+
     func testAnnotationRendererPreservesImageDimensionsWhenDrawingMarker() throws {
         var style = CaptureAnnotationStyle()
         style.strokeColor = NSColor(srgbRed: 212 / 255, green: 238 / 255, blue: 167 / 255, alpha: 1)
@@ -849,7 +1144,18 @@ final class SniporyMacTests: XCTestCase {
     }
 
     func testToolbarSvgIconsAreBundledAndReadable() throws {
-        for resource in ["arrow-line", "pencil-tool", "shape-marker", "mosaic-tool", "settings-more"] {
+        for resource in [
+            "arrow-line",
+            "pencil-tool",
+            "shape-marker",
+            "mosaic-tool",
+            "settings-more",
+            "refresh-svgrepo-com",
+            "refresh-svgrepo-com2",
+            "refresh-left-svgrepo-com",
+            "refresh (1)",
+            "refresh-svgrepo-com3",
+        ] {
             let url = try XCTUnwrap(Bundle.main.url(forResource: resource, withExtension: "svg"))
             XCTAssertNotNil(NSImage(contentsOf: url), resource)
         }
@@ -1580,6 +1886,97 @@ final class SniporyMacTests: XCTestCase {
         )
     }
 
+    private func assertLaterMosaicStacksOnEarlierRedaction(
+        image: NSImage,
+        first: CaptureAnnotation,
+        second: CaptureAnnotation,
+        overlapRect: NSRect,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let firstOnly = CaptureAnnotationRenderer.render(image: image, annotations: [first])
+        let combined = CaptureAnnotationRenderer.render(image: image, annotations: [first, second])
+        let sequential = CaptureAnnotationRenderer.render(image: firstOnly, annotations: [second])
+        let secondOnly = CaptureAnnotationRenderer.render(image: image, annotations: [second])
+
+        let combinedBytes = try rgbaBytes(in: combined)
+        let sequentialBytes = try rgbaBytes(in: sequential)
+        let secondOnlyBytes = try rgbaBytes(in: secondOnly)
+        let cgImage = try XCTUnwrap(combined.cgImage(forProposedRect: nil, context: nil, hints: nil), file: file, line: line)
+
+        for y in Int(overlapRect.minY)..<Int(overlapRect.maxY) {
+            for x in Int(overlapRect.minX)..<Int(overlapRect.maxX) {
+                let index = ((cgImage.height - 1 - y) * cgImage.width + x) * 4
+                XCTAssertEqual(Array(combinedBytes[index..<(index + 4)]), Array(sequentialBytes[index..<(index + 4)]), file: file, line: line)
+            }
+        }
+
+        let differsFromSecondOnly = try imageDiffers(combinedBytes, secondOnlyBytes, width: cgImage.width, height: cgImage.height, rect: overlapRect)
+        XCTAssertTrue(differsFromSecondOnly, "Overlapping redaction must be recomputed from the already redacted image, not the original image.", file: file, line: line)
+    }
+
+    private func imageDiffers(_ lhs: [UInt8], _ rhs: [UInt8], width: Int, height: Int, rect: NSRect) throws -> Bool {
+        for y in Int(rect.minY)..<Int(rect.maxY) {
+            for x in Int(rect.minX)..<Int(rect.maxX) {
+                let index = ((height - 1 - y) * width + x) * 4
+                if lhs[index] != rhs[index]
+                    || lhs[index + 1] != rhs[index + 1]
+                    || lhs[index + 2] != rhs[index + 2]
+                    || lhs[index + 3] != rhs[index + 3] {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    private func checkerboardImage(size: NSSize, squareSize: Int) -> NSImage {
+        let image = NSImage(size: size)
+        image.lockFocus()
+        for x in stride(from: 0, to: Int(size.width), by: squareSize) {
+            for y in stride(from: 0, to: Int(size.height), by: squareSize) {
+                let isDark = ((x / squareSize) + (y / squareSize)).isMultiple(of: 2)
+                (isDark ? NSColor.black : NSColor.white).setFill()
+                NSRect(x: x, y: y, width: squareSize, height: squareSize).fill()
+            }
+        }
+        image.unlockFocus()
+        return image
+    }
+
+    private func averageLumaDelta(in image: NSImage, rect: NSRect) throws -> Double {
+        let cgImage = try XCTUnwrap(image.cgImage(forProposedRect: nil, context: nil, hints: nil))
+        let bytes = try rgbaBytes(in: image)
+        let minX = max(0, Int(rect.minX.rounded(.down)))
+        let maxX = min(cgImage.width - 1, Int(rect.maxX.rounded(.up)))
+        let minY = max(0, Int(rect.minY.rounded(.down)))
+        let maxY = min(cgImage.height - 1, Int(rect.maxY.rounded(.up)))
+
+        guard minX < maxX, minY < maxY else {
+            return 0
+        }
+
+        var total = 0.0
+        var count = 0
+        for y in minY..<maxY {
+            for x in minX..<maxX {
+                let luma = lumaAt(x: x, y: y, width: cgImage.width, height: cgImage.height, bytes: bytes)
+                let right = lumaAt(x: x + 1, y: y, width: cgImage.width, height: cgImage.height, bytes: bytes)
+                let down = lumaAt(x: x, y: y + 1, width: cgImage.width, height: cgImage.height, bytes: bytes)
+                total += abs(luma - right) + abs(luma - down)
+                count += 2
+            }
+        }
+        return total / Double(max(1, count))
+    }
+
+    private func lumaAt(x: Int, y: Int, width: Int, height: Int, bytes: [UInt8]) -> Double {
+        let index = ((height - 1 - y) * width + x) * 4
+        return 0.2126 * Double(bytes[index])
+            + 0.7152 * Double(bytes[index + 1])
+            + 0.0722 * Double(bytes[index + 2])
+    }
+
     private func redPixelCount(in image: NSImage, within rect: NSRect) -> Int {
         guard
             let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
@@ -1606,6 +2003,39 @@ final class SniporyMacTests: XCTestCase {
                 let blue = bytes[index + 2]
                 let alpha = bytes[index + 3]
                 if red > 180, green < 120, blue < 120, alpha > 0 {
+                    count += 1
+                }
+            }
+        }
+        return count
+    }
+
+    private func redTintPixelCount(in image: NSImage, within rect: NSRect) -> Int {
+        guard
+            let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
+            let bytes = try? rgbaBytes(in: image)
+        else {
+            return 0
+        }
+
+        let minX = max(0, Int(rect.minX))
+        let maxX = min(cgImage.width, Int(ceil(rect.maxX)))
+        let minY = max(0, Int(rect.minY))
+        let maxY = min(cgImage.height, Int(ceil(rect.maxY)))
+
+        guard minX < maxX, minY < maxY else {
+            return 0
+        }
+
+        var count = 0
+        for x in minX..<maxX {
+            for y in minY..<maxY {
+                let index = ((cgImage.height - 1 - y) * cgImage.width + x) * 4
+                let red = Int(bytes[index])
+                let green = Int(bytes[index + 1])
+                let blue = Int(bytes[index + 2])
+                let alpha = bytes[index + 3]
+                if red > green + 30, red > blue + 30, alpha > 0 {
                     count += 1
                 }
             }

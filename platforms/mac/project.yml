@@ -20,6 +20,11 @@ targets:
       - Resources/Icons/pin-to-screen.svg
       - Resources/Icons/copy-to-clipboard.svg
       - Resources/Icons/save-to-file.svg
+      - Resources/Icons/refresh-svgrepo-com.svg
+      - Resources/Icons/refresh-svgrepo-com2.svg
+      - Resources/Icons/refresh-left-svgrepo-com.svg
+      - Resources/Icons/refresh (1).svg
+      - Resources/Icons/refresh-svgrepo-com3.svg
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.snipory.v2.mac

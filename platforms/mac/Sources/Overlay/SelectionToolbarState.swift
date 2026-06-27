@@ -9,6 +9,8 @@ enum SelectionToolbarState {
     static let colorSamplerValueTextColor = NSColor.white
     static let colorSamplerCopyHintTextColor = NSColor.white
     static let colorSamplerSwitchHintTextColor = NSColor.white
+    static let toolbarSelectedBackgroundAlpha: CGFloat = 0.36
+    static let measurementControlSelectedBackgroundAlpha: CGFloat = 0.34
 
     enum ColorSamplerCopyMode: Equatable {
         case hex
@@ -48,6 +50,7 @@ enum SelectionToolbarState {
         case arrowLine
         case brush
         case marker
+        case mosaic
     }
 
     struct OptionsToolbarLayout: Equatable {
@@ -142,6 +145,8 @@ enum SelectionToolbarState {
             return [3, 5, 7]
         case .marker:
             return [14, 18, 22]
+        case .mosaic:
+            return [15, 30, 40]
         }
     }
 
@@ -170,7 +175,7 @@ enum SelectionToolbarState {
     }
 
     static func showsStrokeStyleField(for mode: OptionsToolbarMode) -> Bool {
-        mode != .marker
+        mode != .marker && mode != .mosaic
     }
 
     static func shouldShowOptionsToolbar(isPrimaryShapeToolActive: Bool) -> Bool {
@@ -186,15 +191,9 @@ enum SelectionToolbarState {
         paletteColors: [NSColor]
     ) -> CaptureAnnotationStyle {
         var style = currentStyle
-        let shouldUseDefaultPaletteColor = styleUsesDefaultInitialColors(currentStyle)
         style.strokeWidth = strokeWidthValues(for: .shape)[1]
         style.cornerRadius = 5
-
-        if shouldUseDefaultPaletteColor, let firstPaletteColor = paletteColors.first {
-            let color = srgbColor(firstPaletteColor)
-            style.strokeColor = color
-            style.fillColor = color
-        }
+        applyDefaultPaletteColor(to: &style, paletteColors: paletteColors)
 
         return style
     }
@@ -206,6 +205,12 @@ enum SelectionToolbarState {
             "pen": "画笔",
             "marker": "标记",
             "mosaic": "马赛克",
+            "mosaicBlur": "高斯",
+            "mosaicPixel": "马赛克",
+            "mosaicSmallDot": "细",
+            "mosaicMediumDot": "中",
+            "mosaicLargeDot": "粗",
+            "mosaicRectangle": "矩形模糊",
             "text": "文字",
             "number": "序号",
             "magnifier": "放大镜",
@@ -217,9 +222,9 @@ enum SelectionToolbarState {
             "save": "保存",
             "copy": "复制到剪切板",
             "scroll": "滚动截图",
-            "strokeWidthThin": "细线",
-            "strokeWidthMedium": "中线",
-            "strokeWidthThick": "粗线",
+            "strokeWidthThin": "细",
+            "strokeWidthMedium": "中",
+            "strokeWidthThick": "粗",
             "fill": "填充",
             "shapeRectangle": "方形",
             "shapeEllipse": "圆形",
@@ -262,6 +267,48 @@ enum SelectionToolbarState {
         )
     }
 
+    static func mosaicDefaultRedactionValue(for type: CaptureMosaicRedactionType) -> Int {
+        8
+    }
+
+    static func mosaicCursorDotDiameter(for strokeWidth: CGFloat) -> CGFloat {
+        switch strokeWidth {
+        case ..<20:
+            return 10
+        case ..<35:
+            return 13
+        default:
+            return 16
+        }
+    }
+
+    static func mosaicPreviewDotDiameter(for strokeWidth: CGFloat) -> CGFloat {
+        switch strokeWidth {
+        case ..<20:
+            return 5
+        case ..<35:
+            return 8
+        default:
+            return 11
+        }
+    }
+
+    static func mosaicPreviewProgress(for value: Int) -> CGFloat {
+        let clamped = min(20, max(5, value))
+        return CGFloat(clamped - 5) / 15
+    }
+
+    static func mosaicPreviewBackgroundColor(for value: Int) -> NSColor {
+        let progress = mosaicPreviewProgress(for: value)
+        let tone = 0.88 - progress * 0.32
+        return NSColor(
+            srgbRed: tone,
+            green: tone,
+            blue: tone,
+            alpha: 1
+        )
+    }
+
     static func strokePatternOptions(
         canUsePremiumStrokePatterns: Bool,
         mode: OptionsToolbarMode = .shape
@@ -272,7 +319,7 @@ enum SelectionToolbarState {
             patterns = [.solid, .dashLong, .dashNarrow, .dashLongShort]
         case .marker:
             patterns = [.solid]
-        case .shape, .arrowLine:
+        case .shape, .arrowLine, .mosaic:
             patterns = CaptureStrokePattern.allCases
         }
 
@@ -303,19 +350,25 @@ enum SelectionToolbarState {
         paletteColors: [NSColor]
     ) -> CaptureAnnotationStyle {
         var style = currentStyle
-        let shouldUseDefaultPaletteColor = styleUsesDefaultInitialColors(currentStyle)
         style.strokeWidth = strokeWidthValues(for: .brush)[0]
         if style.strokePattern.isSketch {
             style.strokePattern = .solid
         }
         style.fillEnabled = false
+        applyDefaultPaletteColor(to: &style, paletteColors: paletteColors)
 
-        if shouldUseDefaultPaletteColor, let firstPaletteColor = paletteColors.first {
-            let color = srgbColor(firstPaletteColor)
-            style.strokeColor = color
-            style.fillColor = color
-        }
+        return style
+    }
 
+    static func mosaicActivationStyle(
+        currentStyle: CaptureAnnotationStyle,
+        paletteColors: [NSColor],
+        strokeWidth: CGFloat
+    ) -> CaptureAnnotationStyle {
+        var style = currentStyle
+        style.strokeWidth = strokeWidth
+        style.fillEnabled = false
+        applyDefaultPaletteColor(to: &style, paletteColors: paletteColors)
         return style
     }
 
@@ -363,7 +416,7 @@ enum SelectionToolbarState {
 
     static func annotationKindSupportsPostDrawEditing(_ kind: CaptureAnnotationKind) -> Bool {
         switch kind {
-        case .rectangle, .ellipse, .arrowLine, .marker:
+        case .rectangle, .ellipse, .arrowLine, .marker, .mosaicStroke, .mosaicRectangle:
             return true
         case .brush:
             return false
@@ -372,9 +425,9 @@ enum SelectionToolbarState {
 
     static func annotationKindSupportsGeometryEditing(_ kind: CaptureAnnotationKind) -> Bool {
         switch kind {
-        case .rectangle, .ellipse:
+        case .rectangle, .ellipse, .mosaicRectangle:
             return true
-        case .arrowLine, .brush, .marker:
+        case .arrowLine, .brush, .marker, .mosaicStroke:
             return false
         }
     }
@@ -419,15 +472,28 @@ enum SelectionToolbarState {
         mode: OptionsToolbarMode
     ) -> OptionsToolbarLayout {
         OptionsToolbarLayout(
-            strokeWidths: strokeWidthRects(in: optionsRect),
+            strokeWidths: mode == .mosaic ? [] : strokeWidthRects(in: optionsRect),
             fillToggle: mode == .shape ? fillToggleRect(in: optionsRect) : nil,
-            rectangleMode: mode == .shape ? rectangleModeButtonRect(in: optionsRect) : nil,
+            rectangleMode: rectangleModeRect(in: optionsRect, mode: mode),
             ellipseMode: mode == .shape ? ellipseModeButtonRect(in: optionsRect) : nil,
             strokeStyle: strokeStyleRect(in: optionsRect, mode: mode),
             startArrowType: mode == .arrowLine ? startArrowTypeFieldRect(in: optionsRect, mode: mode) : nil,
             endArrowType: mode == .arrowLine ? endArrowTypeFieldRect(in: optionsRect, mode: mode) : nil,
-            colorSwatches: colorSwatchRects(in: optionsRect, paletteCount: paletteCount, mode: mode)
+            colorSwatches: mode == .mosaic ? [] : colorSwatchRects(in: optionsRect, paletteCount: paletteCount, mode: mode)
         )
+    }
+
+    private static func rectangleModeRect(in optionsRect: NSRect, mode: OptionsToolbarMode) -> NSRect? {
+        switch mode {
+        case .shape:
+            return rectangleModeButtonRect(in: optionsRect)
+        case .mosaic:
+            // Mosaic stroke/rectangle mode buttons are intentionally hidden for now.
+            // Keep the underlying rectangle helper/code so the old tool can be restored quickly.
+            return nil
+        case .arrowLine, .brush, .marker:
+            return nil
+        }
     }
 
     static func measurementControlLayout(
@@ -671,13 +737,23 @@ enum SelectionToolbarState {
             AppSettings.maximumPaletteVisibleCount,
             max(AppSettings.minimumPaletteVisibleCount, paletteCount)
         )
+        if mode == .mosaic {
+            return 154
+        }
         let columns = colorSwatchColumnCount(paletteCount: clampedCount)
         let customSize = customColorSwatchSize(paletteCount: clampedCount)
         return colorSwatchStartXOffset(mode: mode) + CGFloat(columns) * 16 + customSize + 13
     }
 
-    static func optionsToolbarHeight(paletteCount: Int) -> CGFloat {
-        colorSwatchRowCount(paletteCount: paletteCount) == 1 ? 30 : 40
+    static func optionsToolbarHeight(
+        paletteCount: Int,
+        mode: OptionsToolbarMode = .shape
+    ) -> CGFloat {
+        _ = paletteCount
+        if mode == .mosaic {
+            return 28
+        }
+        return colorSwatchRowCount(paletteCount: paletteCount) == 1 ? 30 : 40
     }
 
     static func arrowTypeSampleRect(in rect: NSRect, pointsRight: Bool) -> NSRect {
@@ -740,22 +816,41 @@ enum SelectionToolbarState {
             return 210
         case .marker:
             return 98
+        case .mosaic:
+            return 0
         }
     }
 
     static func strokeWidthRects(in optionsRect: NSRect) -> [NSRect] {
         (0..<3).map { index in
-            NSRect(
-                x: optionsRect.minX + 6 + CGFloat(index) * 24,
-                y: optionControlY(in: optionsRect),
-                width: 20,
-                height: 20
-            )
+            NSRect(x: optionsRect.minX + 6 + CGFloat(index) * 24, y: optionControlY(in: optionsRect), width: 20, height: 20)
         }
     }
 
     static func fillToggleRect(in optionsRect: NSRect) -> NSRect {
         NSRect(x: optionsRect.minX + 86, y: optionControlY(in: optionsRect), width: 20, height: 20)
+    }
+
+    private static func mosaicTypeButtonRect(in optionsRect: NSRect, mode: OptionsToolbarMode) -> NSRect {
+        guard mode == .mosaic else {
+            return .zero
+        }
+        return NSRect(x: optionsRect.minX + 86, y: optionControlY(in: optionsRect), width: 20, height: 20)
+    }
+
+    private static func mosaicRectangleButtonRect(in optionsRect: NSRect, mode: OptionsToolbarMode) -> NSRect {
+        guard mode == .mosaic else {
+            return .zero
+        }
+        return NSRect(x: optionsRect.minX + 90, y: optionControlY(in: optionsRect), width: 20, height: 20)
+    }
+
+    static func mosaicRedactionTypeButtonRect(in optionsRect: NSRect) -> NSRect {
+        NSRect(x: optionsRect.minX + 15, y: optionControlY(in: optionsRect), width: 20, height: 20)
+    }
+
+    static func mosaicRedactionValueRect(in optionsRect: NSRect) -> NSRect {
+        NSRect(x: optionsRect.minX + 45, y: optionControlY(in: optionsRect), width: 94, height: 20)
     }
 
     static func rectangleModeButtonRect(in optionsRect: NSRect) -> NSRect {
@@ -788,7 +883,7 @@ enum SelectionToolbarState {
             return strokeStyleFieldRect(in: optionsRect)
         case .arrowLine, .brush:
             return compactStrokeStyleFieldRect(in: optionsRect)
-        case .marker:
+        case .marker, .mosaic:
             return .zero
         }
     }
@@ -799,7 +894,7 @@ enum SelectionToolbarState {
             return NSRect(x: optionsRect.minX + 312, y: optionControlY(in: optionsRect), width: 42, height: 20)
         case .arrowLine:
             return NSRect(x: optionsRect.minX + 204, y: optionControlY(in: optionsRect), width: 42, height: 20)
-        case .brush, .marker:
+        case .brush, .marker, .mosaic:
             return .zero
         }
     }
@@ -810,7 +905,7 @@ enum SelectionToolbarState {
             return NSRect(x: optionsRect.minX + 360, y: optionControlY(in: optionsRect), width: 42, height: 20)
         case .arrowLine:
             return NSRect(x: optionsRect.minX + 252, y: optionControlY(in: optionsRect), width: 42, height: 20)
-        case .brush, .marker:
+        case .brush, .marker, .mosaic:
             return .zero
         }
     }
@@ -1050,14 +1145,11 @@ enum SelectionToolbarState {
         }
 
         if isShapeToolActive, currentShapeKind == .brush || currentShapeKind == .marker {
-            guard isInsideSelection else {
-                return .arrow
-            }
             return currentShapeKind == .brush ? .brush : .marker
         }
 
         if isShapeToolActive {
-            return isInsideSelection ? .crosshair : .arrow
+            return .crosshair
         }
 
         if isSelecting || isInsideSelection {
@@ -1500,10 +1592,14 @@ enum SelectionToolbarState {
         return converted.withAlphaComponent(1)
     }
 
-    private static func styleUsesDefaultInitialColors(_ style: CaptureAnnotationStyle) -> Bool {
-        let defaultStyle = CaptureAnnotationStyle()
-        return colorsMatch(style.strokeColor, defaultStyle.strokeColor)
-            && colorsMatch(style.fillColor, defaultStyle.fillColor)
+    private static func applyDefaultPaletteColor(to style: inout CaptureAnnotationStyle, paletteColors: [NSColor]) {
+        guard let firstPaletteColor = paletteColors.first else {
+            return
+        }
+
+        let color = srgbColor(firstPaletteColor)
+        style.strokeColor = color
+        style.fillColor = color
     }
 
     private static func colorsMatch(_ lhs: NSColor, _ rhs: NSColor) -> Bool {
@@ -1664,7 +1760,7 @@ enum SelectionToolbarState {
 
     private static func shapePath(in rect: NSRect, kind: CaptureAnnotationKind, cornerRadius: CGFloat) -> NSBezierPath {
         switch kind {
-        case .arrowLine, .brush, .marker:
+        case .arrowLine, .brush, .marker, .mosaicStroke, .mosaicRectangle:
             NSBezierPath()
         case .rectangle where cornerRadius > 0:
             NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius)

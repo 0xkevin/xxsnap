@@ -1,4 +1,5 @@
 import AppKit
+import CoreImage
 
 enum CaptureCompletionAction {
     case copy
@@ -11,6 +12,40 @@ enum CaptureAnnotationKind {
     case arrowLine
     case brush
     case marker
+    case mosaicStroke
+    case mosaicRectangle
+}
+
+enum CaptureMosaicRedactionType: Equatable {
+    case gaussianBlur
+    case pixelMosaic
+}
+
+struct CaptureMosaicRedaction: Equatable {
+    var type: CaptureMosaicRedactionType
+    var value: Int
+}
+
+struct CaptureMosaicStroke: Equatable {
+    var points: [NSPoint]
+
+    var boundingRect: NSRect {
+        guard let first = points.first else {
+            return .zero
+        }
+
+        var minX = first.x
+        var maxX = first.x
+        var minY = first.y
+        var maxY = first.y
+        for point in points.dropFirst() {
+            minX = min(minX, point.x)
+            maxX = max(maxX, point.x)
+            minY = min(minY, point.y)
+            maxY = max(maxY, point.y)
+        }
+        return NSRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
 }
 
 enum CaptureArrowType: Int, CaseIterable {
@@ -1016,9 +1051,12 @@ struct CaptureAnnotation {
     var kind: CaptureAnnotationKind
     var rect: NSRect
     var style: CaptureAnnotationStyle
+    var rotationAngle: CGFloat = 0
     var arrowLine: CaptureArrowLine?
     var brushPath: CaptureBrushPath?
     var markerLine: CaptureMarkerLine?
+    var mosaicStroke: CaptureMosaicStroke?
+    var mosaicRedaction: CaptureMosaicRedaction?
 }
 
 struct CaptureSelectionResult {
@@ -1030,27 +1068,27 @@ struct CaptureSelectionResult {
 
 enum CaptureAnnotationRenderer {
     static let markerOpacity: CGFloat = 0.85
+    private static let redactionContext = CIContext(options: nil)
 
     static func render(image: NSImage, annotations: [CaptureAnnotation]) -> NSImage {
         guard !annotations.isEmpty else {
             return image
         }
 
+        return renderImage(image: image, annotations: annotations) ?? image
+    }
+
+    private static func renderImage(
+        image: NSImage,
+        annotations: [CaptureAnnotation]
+    ) -> NSImage? {
         guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
-            return image
+            return nil
         }
 
         let colorSpace = cgImage.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!
-        guard let context = CGContext(
-            data: nil,
-            width: cgImage.width,
-            height: cgImage.height,
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else {
-            return image
+        guard let context = makeRenderContext(width: cgImage.width, height: cgImage.height, colorSpace: colorSpace) else {
+            return nil
         }
 
         context.interpolationQuality = .none
@@ -1059,18 +1097,50 @@ enum CaptureAnnotationRenderer {
         let scaleX = CGFloat(cgImage.width) / max(image.size.width, 1)
         let scaleY = CGFloat(cgImage.height) / max(image.size.height, 1)
         for annotation in annotations {
-            draw(annotation, in: context, scaleX: scaleX, scaleY: scaleY)
+            if isMosaicAnnotation(annotation) {
+                drawMosaicAnnotation(
+                    annotation,
+                    in: context,
+                    scaleX: scaleX,
+                    scaleY: scaleY
+                )
+            } else {
+                draw(annotation, in: context, scaleX: scaleX, scaleY: scaleY)
+            }
         }
 
         guard let renderedImage = context.makeImage() else {
-            return image
+            return nil
         }
 
         return NSImage(cgImage: renderedImage, size: image.size)
     }
 
+    private static func makeRenderContext(width: Int, height: Int, colorSpace: CGColorSpace) -> CGContext? {
+        CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )
+    }
+
+    static func redactedPreview(image: NSImage, redaction: CaptureMosaicRedaction) -> NSImage {
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            return image
+        }
+
+        return NSImage(cgImage: redactedImage(from: cgImage, redaction: redaction), size: image.size)
+    }
+
     private static func draw(_ annotation: CaptureAnnotation, in context: CGContext, scaleX: CGFloat, scaleY: CGFloat) {
         let lineScale = (scaleX + scaleY) / 2
+        if isMosaicAnnotation(annotation) {
+            return
+        }
         if annotation.kind == .marker {
             drawMarkerLine(annotation, in: context, scaleX: scaleX, scaleY: scaleY, lineScale: lineScale)
             return
@@ -1104,7 +1174,7 @@ enum CaptureAnnotationRenderer {
             path.addRect(pixelRect)
         case .ellipse:
             path.addEllipse(in: pixelRect)
-        case .arrowLine, .brush, .marker:
+        case .arrowLine, .brush, .marker, .mosaicStroke, .mosaicRectangle:
             return
         }
 
@@ -1140,6 +1210,294 @@ enum CaptureAnnotationRenderer {
         )
         context.strokePath()
         context.restoreGState()
+    }
+
+    private static func isMosaicAnnotation(_ annotation: CaptureAnnotation) -> Bool {
+        annotation.kind == .mosaicStroke || annotation.kind == .mosaicRectangle
+    }
+
+    private static func drawMosaicAnnotation(
+        _ annotation: CaptureAnnotation,
+        in context: CGContext,
+        scaleX: CGFloat,
+        scaleY: CGFloat
+    ) {
+        let lineScale = (scaleX + scaleY) / 2
+        if annotation.kind == .mosaicStroke {
+            drawMosaicStroke(
+                annotation,
+                in: context,
+                scaleX: scaleX,
+                scaleY: scaleY,
+                lineScale: lineScale
+            )
+            return
+        }
+        if annotation.kind == .mosaicRectangle {
+            drawMosaicRectangle(
+                annotation,
+                in: context,
+                scaleX: scaleX,
+                scaleY: scaleY
+            )
+        }
+    }
+
+    private static func drawMosaicStroke(
+        _ annotation: CaptureAnnotation,
+        in context: CGContext,
+        scaleX: CGFloat,
+        scaleY: CGFloat,
+        lineScale: CGFloat
+    ) {
+        guard
+            let mosaicStroke = annotation.mosaicStroke,
+            let redaction = annotation.mosaicRedaction,
+            !mosaicStroke.points.isEmpty
+        else {
+            return
+        }
+
+        guard let strokePath = mosaicStrokeMaskPath(
+            stroke: mosaicStroke,
+            strokeWidth: annotation.style.strokeWidth * lineScale,
+            scaleX: scaleX,
+            scaleY: scaleY
+        ) else {
+            return
+        }
+
+        renderMosaicEffect(
+            redaction: redaction,
+            maskPath: strokePath,
+            in: context,
+            clipRect: mosaicStroke.boundingRect,
+            scaleX: scaleX,
+            scaleY: scaleY
+        )
+    }
+
+    private static func drawMosaicRectangle(
+        _ annotation: CaptureAnnotation,
+        in context: CGContext,
+        scaleX: CGFloat,
+        scaleY: CGFloat
+    ) {
+        guard let redaction = annotation.mosaicRedaction else {
+            return
+        }
+
+        let rect = annotation.rect.standardized
+        let maskPath = mosaicRectangleMaskPath(for: annotation, scaleX: scaleX, scaleY: scaleY)
+        renderMosaicEffect(
+            redaction: redaction,
+            maskPath: maskPath,
+            in: context,
+            clipRect: rect,
+            scaleX: scaleX,
+            scaleY: scaleY
+        )
+    }
+
+    private static func rotatedRectanglePath(for rect: NSRect, angle: CGFloat, scaleX: CGFloat, scaleY: CGFloat) -> CGPath? {
+        guard abs(angle) >= 0.001 else {
+            return nil
+        }
+
+        let center = NSPoint(x: rect.midX, y: rect.midY)
+        let points = [
+            NSPoint(x: rect.minX, y: rect.minY),
+            NSPoint(x: rect.maxX, y: rect.minY),
+            NSPoint(x: rect.maxX, y: rect.maxY),
+            NSPoint(x: rect.minX, y: rect.maxY),
+        ].map { rotatedPoint($0, around: center, angle: angle) }
+
+        let path = CGMutablePath()
+        guard let first = points.first else {
+            return nil
+        }
+        path.move(to: CGPoint(x: first.x * scaleX, y: first.y * scaleY))
+        points.dropFirst().forEach { point in
+            path.addLine(to: CGPoint(x: point.x * scaleX, y: point.y * scaleY))
+        }
+        path.closeSubpath()
+        return path
+    }
+
+    private static func rotatedPoint(_ point: NSPoint, around center: NSPoint, angle: CGFloat) -> NSPoint {
+        let dx = point.x - center.x
+        let dy = point.y - center.y
+        let cosine = cos(angle)
+        let sine = sin(angle)
+        return NSPoint(
+            x: center.x + dx * cosine - dy * sine,
+            y: center.y + dx * sine + dy * cosine
+        )
+    }
+
+    private static func renderMosaicEffect(
+        redaction: CaptureMosaicRedaction,
+        maskPath: CGPath?,
+        in context: CGContext,
+        clipRect: NSRect,
+        scaleX: CGFloat,
+        scaleY: CGFloat
+    ) {
+        guard let displaySnapshot = snapshotContext(context) else {
+            return
+        }
+
+        let displayEffectImage = redactedImage(from: displaySnapshot, redaction: redaction)
+
+        drawMosaicEffectImage(
+            displayEffectImage,
+            maskPath: maskPath,
+            in: context,
+            clipRect: clipRect,
+            imageSize: CGSize(width: displaySnapshot.width, height: displaySnapshot.height),
+            scaleX: scaleX,
+            scaleY: scaleY
+        )
+    }
+
+    private static func drawMosaicEffectImage(
+        _ image: CGImage,
+        maskPath: CGPath?,
+        in context: CGContext,
+        clipRect: NSRect,
+        imageSize: CGSize,
+        scaleX: CGFloat,
+        scaleY: CGFloat
+    ) {
+        let pixelClipRect = CGRect(
+            x: clipRect.minX * scaleX,
+            y: clipRect.minY * scaleY,
+            width: clipRect.width * scaleX,
+            height: clipRect.height * scaleY
+        ).standardized
+
+        context.saveGState()
+        if let maskPath {
+            context.addPath(maskPath)
+            context.clip()
+        } else {
+            context.clip(to: pixelClipRect)
+        }
+        context.setBlendMode(.copy)
+        context.draw(image, in: CGRect(origin: .zero, size: imageSize))
+        context.restoreGState()
+    }
+
+    private static func snapshotContext(_ context: CGContext) -> CGImage? {
+        guard
+            let data = context.data,
+            let colorSpace = context.colorSpace,
+            let copy = CGContext(
+                data: nil,
+                width: context.width,
+                height: context.height,
+                bitsPerComponent: context.bitsPerComponent,
+                bytesPerRow: context.bytesPerRow,
+                space: colorSpace,
+                bitmapInfo: context.bitmapInfo.rawValue
+            ),
+            let copyData = copy.data
+        else {
+            return context.makeImage()
+        }
+        memcpy(copyData, data, context.bytesPerRow * context.height)
+        return copy.makeImage()
+    }
+
+    private static func mosaicStrokeMaskPath(
+        stroke: CaptureMosaicStroke,
+        strokeWidth: CGFloat,
+        scaleX: CGFloat,
+        scaleY: CGFloat
+    ) -> CGPath? {
+        guard let firstPoint = stroke.points.first else {
+            return nil
+        }
+
+        let first = pixelPoint(firstPoint, scaleX: scaleX, scaleY: scaleY)
+        if stroke.points.count == 1 {
+            let radius = max(1, strokeWidth / 2)
+            let dotPath = CGMutablePath()
+            dotPath.addEllipse(in: CGRect(x: first.x - radius, y: first.y - radius, width: radius * 2, height: radius * 2))
+            return dotPath
+        }
+
+        let path = CGMutablePath()
+        path.move(to: first)
+        for point in stroke.points.dropFirst() {
+            path.addLine(to: pixelPoint(point, scaleX: scaleX, scaleY: scaleY))
+        }
+        return strokeMaskPath(for: path, strokeWidth: strokeWidth)
+    }
+
+    private static func mosaicRectangleMaskPath(for annotation: CaptureAnnotation, scaleX: CGFloat, scaleY: CGFloat) -> CGPath? {
+        let rect = annotation.rect.standardized
+        if let rotatedPath = rotatedRectanglePath(for: rect, angle: annotation.rotationAngle, scaleX: scaleX, scaleY: scaleY) {
+            return rotatedPath
+        }
+
+        let path = CGMutablePath()
+        path.addRect(CGRect(
+            x: rect.minX * scaleX,
+            y: rect.minY * scaleY,
+            width: rect.width * scaleX,
+            height: rect.height * scaleY
+        ).standardized)
+        return path
+    }
+
+    private static func strokeMaskPath(for path: CGPath, strokeWidth: CGFloat) -> CGPath {
+        let mutable = CGMutablePath()
+        mutable.addPath(path.copy(strokingWithWidth: max(1, strokeWidth), lineCap: .round, lineJoin: .round, miterLimit: 4))
+        return mutable
+    }
+
+    private static func redactedImage(from cgImage: CGImage, redaction: CaptureMosaicRedaction) -> CGImage {
+        switch redaction.type {
+        case .pixelMosaic:
+            return pixelMosaicImage(from: cgImage, blockSize: max(1, redaction.value))
+        case .gaussianBlur:
+            break
+        }
+        let input = CIImage(cgImage: cgImage).clampedToExtent()
+        let filter = CIFilter(name: "CIGaussianBlur")
+        filter?.setValue(input, forKey: kCIInputImageKey)
+        filter?.setValue(Float(max(1, redaction.value)), forKey: kCIInputRadiusKey)
+
+        let output = (filter?.outputImage ?? input).cropped(to: CGRect(x: 0, y: 0, width: cgImage.width, height: cgImage.height))
+        return redactionContext.createCGImage(output, from: output.extent) ?? cgImage
+    }
+
+    private static func pixelMosaicImage(from cgImage: CGImage, blockSize: Int) -> CGImage {
+        let colorSpace = cgImage.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!
+        let block = max(1, blockSize)
+        guard block > 1 else {
+            return cgImage
+        }
+
+        let smallWidth = max(1, Int(ceil(CGFloat(cgImage.width) / CGFloat(block))))
+        let smallHeight = max(1, Int(ceil(CGFloat(cgImage.height) / CGFloat(block))))
+        guard
+            let smallContext = makeRenderContext(width: smallWidth, height: smallHeight, colorSpace: colorSpace),
+            let outputContext = makeRenderContext(width: cgImage.width, height: cgImage.height, colorSpace: colorSpace)
+        else {
+            return cgImage
+        }
+
+        smallContext.interpolationQuality = .high
+        smallContext.draw(cgImage, in: CGRect(x: 0, y: 0, width: smallWidth, height: smallHeight))
+        guard let smallImage = smallContext.makeImage() else {
+            return cgImage
+        }
+
+        outputContext.interpolationQuality = .none
+        outputContext.draw(smallImage, in: CGRect(x: 0, y: 0, width: cgImage.width, height: cgImage.height))
+        return outputContext.makeImage() ?? cgImage
     }
 
     private static func drawMarkerLine(
@@ -1510,7 +1868,7 @@ enum CaptureSketchStrokePath {
         }
 
         switch kind {
-        case .arrowLine, .brush, .marker:
+        case .arrowLine, .brush, .marker, .mosaicStroke, .mosaicRectangle:
             return []
         case .ellipse:
             return ellipsePoints(in: rect)
