@@ -4,13 +4,15 @@
 
 Snipory v2 mac already has a default color sampler in the screenshot overlay. That sampler appears only when no annotation tool is active and no annotations exist, which makes it useful for early inspection but awkward once the user has started marking up the screenshot.
 
-This design adds an explicit eyedropper button to the main capture toolbar. The tool is mac-overlay scoped for this iteration and should follow the existing `SelectionOverlayWindow` and `SelectionToolbarState` patterns. It should not change snapshot export, annotation undo/redo, or the existing copy/save actions.
+This design adds an explicit eyedropper button to the main capture toolbar and a global mouse-wheel resize shortcut for the locked screenshot selection. The work is mac-overlay scoped for this iteration and should follow the existing `SelectionOverlayWindow` and `SelectionToolbarState` patterns. It should not change snapshot export, annotation undo/redo, or the existing copy/save actions.
 
 ## User Goal
 
 Users need a fast way to inspect and copy colors while editing a selected screenshot. They should be able to click an eyedropper button near the Mosaic tool, hover anywhere inside the selected screenshot region, and copy the visible color under the pointer.
 
 The sampled color should reflect what the user currently sees in the screenshot region. If the user has drawn a rectangle, brush stroke, marker, arrow, or mosaic redaction, the eyedropper samples that visible result. If they want the original color behind a redaction or annotation, they can move or delete that annotation first.
+
+Users should also be able to quickly refine the screenshot selection size after it is locked, regardless of the currently active tool. Mouse-wheel zooming gives them a fast way to expand or shrink the selected area without aiming for resize handles.
 
 ## Toolbar Entry
 
@@ -90,6 +92,22 @@ When eyedropper mode is active:
 - mouse down and drag outside the selection do not move the selection;
 - toolbar and panel clicks keep their existing behavior so users can switch tools or run copy/save/cancel actions.
 
+## Global Selection Wheel Zoom
+
+Mouse-wheel zoom applies to the locked screenshot selection across tools, not only in eyedropper mode.
+
+- When a screenshot selection is locked, scrolling the mouse wheel resizes the selection.
+- Wheel zoom does not switch the active tool and does not clear selected annotations.
+- Wheel zoom is ignored while the overlay is selecting an initial region, drawing an annotation, moving/resizing/rotating an annotation, moving/resizing the selection through drag handles, dragging the toolbar, or editing Mosaic values.
+- Wheel zoom is ignored when the pointer is over the main toolbar, options toolbar, popovers, panels, or other controls.
+- Scrolling up expands the selection; scrolling down shrinks it.
+- If the pointer is inside the locked selection, scaling uses the pointer as the anchor point.
+- If the pointer is outside the locked selection but not over a control, scaling uses the selection center as the anchor point.
+- The maximum selection size is the full `NSScreen.frame` of the screen containing the current selection center, including menu bar and Dock regions.
+- The minimum selection size is `64 x 64` points. This is large enough to remain visible and recoverable while still supporting precise color and UI sampling.
+- Existing annotations should remap with the selection, reusing the current selection-resize behavior so their relative positions and sizes remain visually aligned.
+- Wheel zoom is a selection adjustment, not an annotation edit. It does not add an annotation undo/redo entry.
+
 ## Testing
 
 Add focused mac tests for:
@@ -103,7 +121,12 @@ Add focused mac tests for:
 - eyedropper mode does not move the selection or annotations on mouse down/drag;
 - `C` in eyedropper mode copies only color text;
 - `Command+C` still copies the screenshot result;
-- sampling reflects a committed annotation color rather than the original background at that point.
+- sampling reflects a committed annotation color rather than the original background at that point;
+- wheel zoom expands and shrinks the locked selection in any active tool state where no interaction is in progress;
+- wheel zoom clamps to full `NSScreen.frame` maximum and `64 x 64` point minimum;
+- wheel zoom uses the pointer anchor inside the selection and the selection-center anchor outside it;
+- wheel zoom is ignored over toolbar/options/panels and during drawing, moving, resizing, rotating, toolbar drag, or Mosaic value editing;
+- existing annotations remap with the selection during wheel zoom.
 
 Run the mac XCTest target when possible:
 
