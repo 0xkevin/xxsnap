@@ -1,0 +1,734 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Snipory v2 Capture Overlay Prototype</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #17191d;
+      --screen: #242830;
+      --panel: rgba(30, 33, 38, 0.94);
+      --panel-strong: rgba(20, 22, 26, 0.96);
+      --border: rgba(255, 255, 255, 0.16);
+      --text: #f5f7fb;
+      --muted: #aeb6c3;
+      --blue: #4da3ff;
+      --red: #ff3048;
+      --lime: #b3eb00;
+      --yellow: #ffd037;
+      --purple: #a78bfa;
+      --cyan: #38c7ff;
+      --shadow: 0 18px 56px rgba(0, 0, 0, 0.34);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        linear-gradient(135deg, rgba(77, 163, 255, 0.12), transparent 28%),
+        linear-gradient(315deg, rgba(179, 235, 0, 0.08), transparent 30%),
+        var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 28px 0 36px;
+    }
+
+    header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 18px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 26px;
+      line-height: 1.16;
+      font-weight: 760;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin: 0;
+      max-width: 720px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .doc-link {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 0 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      text-decoration: none;
+      font-size: 13px;
+      white-space: nowrap;
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 300px;
+      gap: 18px;
+      align-items: start;
+    }
+
+    .screen {
+      position: relative;
+      min-height: 650px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 8px;
+      overflow: hidden;
+      background:
+        linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+        radial-gradient(circle at 20% 18%, rgba(77, 163, 255, 0.16), transparent 26%),
+        radial-gradient(circle at 80% 80%, rgba(179, 235, 0, 0.1), transparent 28%),
+        var(--screen);
+      background-size: 64px 64px, 64px 64px, auto, auto, auto;
+      box-shadow: var(--shadow);
+    }
+
+    .app-card,
+    .app-table,
+    .app-sidebar {
+      position: absolute;
+      border: 1px solid rgba(255, 255, 255, 0.13);
+      background: rgba(255, 255, 255, 0.055);
+      border-radius: 7px;
+    }
+
+    .app-sidebar {
+      left: 54px;
+      top: 58px;
+      width: 130px;
+      height: 340px;
+    }
+
+    .app-card {
+      right: 64px;
+      top: 58px;
+      width: 320px;
+      height: 120px;
+    }
+
+    .app-table {
+      right: 64px;
+      top: 206px;
+      width: 520px;
+      height: 310px;
+    }
+
+    .app-line {
+      height: 10px;
+      margin: 18px;
+      border-radius: 3px;
+      background: rgba(255, 255, 255, 0.14);
+    }
+
+    .selection {
+      position: absolute;
+      left: 198px;
+      top: 138px;
+      width: 540px;
+      height: 340px;
+      border: 2px solid rgba(255, 255, 255, 0.92);
+      border-radius: 6px;
+      box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.42);
+    }
+
+    .measure {
+      position: absolute;
+      top: -38px;
+      left: 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      height: 28px;
+      padding: 0 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel-strong);
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .mini-button {
+      width: 20px;
+      height: 20px;
+      display: inline-grid;
+      place-items: center;
+      border-radius: 4px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .toolbar,
+    .options {
+      position: absolute;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      height: 32px;
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: var(--panel);
+      box-shadow: 0 10px 26px rgba(0, 0, 0, 0.24);
+    }
+
+    .toolbar {
+      left: 210px;
+      bottom: -46px;
+    }
+
+    .options {
+      left: 210px;
+      bottom: -86px;
+      min-width: 144px;
+    }
+
+    button.tool {
+      width: 22px;
+      height: 22px;
+      padding: 0;
+      display: inline-grid;
+      place-items: center;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 13px;
+      line-height: 1;
+    }
+
+    button.tool:hover {
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    button.tool.active {
+      color: var(--blue);
+    }
+
+    .divider {
+      width: 1px;
+      height: 18px;
+      background: rgba(255, 255, 255, 0.16);
+      margin: 0 2px;
+    }
+
+    .drag {
+      color: var(--muted);
+      cursor: move;
+    }
+
+    .annotation {
+      position: absolute;
+      pointer-events: none;
+    }
+
+    .shape {
+      left: 92px;
+      top: 76px;
+      width: 156px;
+      height: 96px;
+      border: 4px solid var(--red);
+      border-radius: 10px;
+    }
+
+    .arrow {
+      left: 300px;
+      top: 80px;
+      width: 160px;
+      height: 98px;
+    }
+
+    .brush {
+      left: 70px;
+      top: 210px;
+      width: 170px;
+      height: 90px;
+    }
+
+    .marker {
+      left: 296px;
+      top: 214px;
+      width: 190px;
+      height: 38px;
+      border-top: 18px solid rgba(179, 235, 0, 0.65);
+      border-radius: 999px;
+      transform: rotate(-3deg);
+    }
+
+    .mosaic {
+      left: 384px;
+      top: 126px;
+      width: 110px;
+      height: 78px;
+      overflow: hidden;
+      border-radius: 4px;
+      outline: 2px solid rgba(255, 255, 255, 0.38);
+      background:
+        linear-gradient(45deg, rgba(255, 255, 255, 0.18) 25%, transparent 25% 50%, rgba(255, 255, 255, 0.18) 50% 75%, transparent 75%),
+        rgba(77, 163, 255, 0.22);
+      background-size: 18px 18px;
+    }
+
+    .handles span {
+      position: absolute;
+      width: 9px;
+      height: 9px;
+      border: 1px solid rgba(0, 0, 0, 0.42);
+      border-radius: 50%;
+      background: white;
+    }
+
+    .handles span:nth-child(1) { left: -6px; top: -6px; }
+    .handles span:nth-child(2) { right: -6px; top: -6px; }
+    .handles span:nth-child(3) { right: -6px; bottom: -6px; }
+    .handles span:nth-child(4) { left: -6px; bottom: -6px; }
+
+    .swatch {
+      width: 16px;
+      height: 16px;
+      border-radius: 3px;
+      border: 1px solid rgba(255, 255, 255, 0.32);
+    }
+
+    .chip {
+      min-width: 22px;
+      height: 20px;
+      border-radius: 4px;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      background: rgba(255, 255, 255, 0.06);
+      display: inline-grid;
+      place-items: center;
+      color: var(--text);
+      font-size: 11px;
+    }
+
+    .chip.active {
+      border-color: rgba(77, 163, 255, 0.7);
+      color: var(--blue);
+    }
+
+    .spec {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.055);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .spec h2 {
+      margin: 0;
+      padding: 16px 16px 10px;
+      font-size: 16px;
+      letter-spacing: 0;
+    }
+
+    .spec-section {
+      border-top: 1px solid rgba(255, 255, 255, 0.12);
+      padding: 14px 16px;
+    }
+
+    .spec-section h3 {
+      margin: 0 0 8px;
+      font-size: 13px;
+      color: var(--muted);
+      font-weight: 650;
+    }
+
+    .spec-section p,
+    .spec-section li {
+      color: #d9dee8;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .spec-section ul {
+      margin: 0;
+      padding-left: 18px;
+    }
+
+    .status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 7px 0;
+      color: #d9dee8;
+      font-size: 13px;
+    }
+
+    .status {
+      color: var(--lime);
+      font-size: 12px;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .legend button {
+      min-height: 30px;
+      padding: 0 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    .legend button.active {
+      border-color: rgba(77, 163, 255, 0.72);
+      color: var(--blue);
+    }
+
+    @media (max-width: 920px) {
+      main {
+        width: min(100vw - 20px, 720px);
+        padding-top: 18px;
+      }
+
+      header,
+      .workspace {
+        display: block;
+      }
+
+      .doc-link {
+        margin-top: 14px;
+      }
+
+      .screen {
+        min-height: 560px;
+      }
+
+      .selection {
+        left: 8%;
+        top: 128px;
+        width: 84%;
+        height: 300px;
+      }
+
+      .toolbar {
+        left: 8px;
+        right: 8px;
+        bottom: -46px;
+        overflow-x: auto;
+      }
+
+      .options {
+        left: 8px;
+        right: 8px;
+        bottom: -86px;
+        overflow-x: auto;
+      }
+
+      .spec {
+        margin-top: 110px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Snipory v2 截图叠层原型</h1>
+        <p class="subtitle">低保真可交互原型，用于复核 mac 已完成体验并辅助 Windows 版本复刻。点击下方工具按钮可切换选项工具栏和右侧规则摘要。</p>
+      </div>
+      <a class="doc-link" href="../requirements/snipory-v2-mac-feature-requirements.md">需求说明书</a>
+    </header>
+
+    <div class="workspace">
+      <section class="screen" aria-label="截图叠层原型">
+        <div class="app-sidebar">
+          <div class="app-line"></div>
+          <div class="app-line"></div>
+          <div class="app-line"></div>
+        </div>
+        <div class="app-card">
+          <div class="app-line"></div>
+          <div class="app-line" style="width: 58%"></div>
+        </div>
+        <div class="app-table">
+          <div class="app-line"></div>
+          <div class="app-line"></div>
+          <div class="app-line"></div>
+          <div class="app-line"></div>
+          <div class="app-line"></div>
+        </div>
+
+        <div class="selection">
+          <div class="measure">
+            <span>540 x 340</span>
+            <span class="mini-button" title="直角/圆角">◰</span>
+            <span class="mini-button" title="锁定长宽比">□</span>
+            <span class="mini-button" title="刷新截图">↻</span>
+          </div>
+
+          <div class="annotation shape active-annotation">
+            <div class="handles"><span></span><span></span><span></span><span></span></div>
+          </div>
+          <svg class="annotation arrow" viewBox="0 0 160 98" aria-hidden="true">
+            <path d="M10 76 Q76 10 144 48" fill="none" stroke="#ff3048" stroke-width="5" stroke-linecap="round"/>
+            <path d="M144 48 L127 41 L131 58 Z" fill="#ff3048"/>
+            <circle cx="76" cy="10" r="5" fill="#fff"/>
+          </svg>
+          <svg class="annotation brush" viewBox="0 0 170 90" aria-hidden="true">
+            <path d="M8 68 C24 18 54 28 76 58 S142 80 160 18" fill="none" stroke="#ffd037" stroke-width="6" stroke-linecap="round"/>
+          </svg>
+          <div class="annotation marker"></div>
+          <div class="annotation mosaic"></div>
+
+          <div class="toolbar" role="toolbar" aria-label="主工具栏">
+            <span class="drag">⋮⋮</span>
+            <button class="tool active" data-tool="shape" title="形状标注">▢</button>
+            <button class="tool" data-tool="arrow" title="箭头线">↗</button>
+            <button class="tool" data-tool="brush" title="画笔">✎</button>
+            <button class="tool" data-tool="marker" title="标记">▬</button>
+            <button class="tool" data-tool="mosaic" title="马赛克">▦</button>
+            <button class="tool" data-tool="text" title="文字">T</button>
+            <button class="tool" data-tool="number" title="序号">1</button>
+            <button class="tool" data-tool="magnifier" title="放大镜">⌕</button>
+            <button class="tool" data-tool="eraser" title="橡皮擦">⌫</button>
+            <span class="divider"></span>
+            <button class="tool" title="撤销">↶</button>
+            <button class="tool" title="重做">↷</button>
+            <button class="tool" title="取消">×</button>
+            <span class="divider"></span>
+            <button class="tool" data-tool="pin" title="贴图">⌖</button>
+            <button class="tool" title="保存">▣</button>
+            <button class="tool" title="复制到剪切板">⧉</button>
+            <button class="tool" title="设置/更多">⋯</button>
+          </div>
+
+          <div id="options" class="options" role="toolbar" aria-label="选项工具栏"></div>
+        </div>
+      </section>
+
+      <aside class="spec">
+        <h2 id="tool-title">形状标注</h2>
+        <div class="spec-section">
+          <h3>工具状态</h3>
+          <div class="status-row"><span>mac v2</span><span class="status">已实现</span></div>
+          <div class="status-row"><span>Windows</span><span class="status">待复刻</span></div>
+        </div>
+        <div class="spec-section">
+          <h3>规则摘要</h3>
+          <ul id="rules"></ul>
+        </div>
+        <div class="spec-section">
+          <h3>快速切换</h3>
+          <div class="legend" id="legend"></div>
+        </div>
+      </aside>
+    </div>
+  </main>
+
+  <script>
+    const tools = {
+      shape: {
+        title: "形状标注",
+        implemented: true,
+        options: ["细", "中", "粗", "填充", "矩形", "圆形", "实线", "↙", "↘"],
+        swatches: ["#ff3048", "#ffd037", "#38c7ff", "#a78bfa"],
+        rules: [
+          "支持矩形和椭圆，默认矩形。",
+          "线宽为 2 / 4 / 7，支持填充、线型、颜色和矩形圆角。",
+          "选中后可移动、缩放并继续修改样式。"
+        ]
+      },
+      arrow: {
+        title: "箭头线",
+        implemented: true,
+        options: ["细", "中", "粗", "实线", "始端", "末端"],
+        swatches: ["#ff3048", "#ffd037", "#38c7ff", "#a78bfa"],
+        rules: [
+          "按下为起点，拖拽为终点，默认生成直线。",
+          "中间控制点可把箭头线调整为曲线。",
+          "支持起点和终点箭头类型、线宽、线型和颜色。"
+        ]
+      },
+      brush: {
+        title: "画笔",
+        implemented: true,
+        options: ["细", "中", "粗", "实线"],
+        swatches: ["#ff3048", "#ffd037", "#38c7ff", "#a78bfa"],
+        rules: [
+          "自由拖动生成路径，按 Shift 可生成直线。",
+          "线宽为 3 / 5 / 7，支持线型和颜色。",
+          "完成后样式冻结，可移动但不做边框缩放。"
+        ]
+      },
+      marker: {
+        title: "标记",
+        implemented: true,
+        options: ["细", "中", "粗"],
+        swatches: ["#b3eb00", "#ffd037", "#38c7ff", "#ff7f03"],
+        rules: [
+          "只绘制高亮直线，按 Shift 吸附水平、垂直或 45 度。",
+          "默认颜色 #B3EB00，线宽 14 / 18 / 22。",
+          "选中后可修改颜色和粗细，并可调整两端方向。"
+        ]
+      },
+      mosaic: {
+        title: "马赛克",
+        implemented: true,
+        options: ["高斯", "像素", "8", "15", "30", "40", "矩形"],
+        swatches: [],
+        rules: [
+          "支持高斯模糊和像素马赛克，强度范围 8...20。",
+          "支持滑动打码和矩形打码，滑动点大小 15 / 30 / 40。",
+          "重叠打码不得露出原图，预览和导出必须一致。"
+        ]
+      },
+      text: {
+        title: "文字",
+        implemented: false,
+        options: ["占位"],
+        swatches: [],
+        rules: [
+          "当前仍为占位功能。",
+          "后续应支持文本框创建、输入、移动、删除和导出一致性。",
+          "开发前需先补充详细需求。"
+        ]
+      },
+      number: {
+        title: "序号",
+        implemented: false,
+        options: ["占位"],
+        swatches: [],
+        rules: [
+          "当前仍为占位功能。",
+          "后续应支持递增编号、移动、删除和重排规则。",
+          "删除中间编号后的重排策略必须明确。"
+        ]
+      },
+      magnifier: {
+        title: "放大镜",
+        implemented: false,
+        options: ["占位"],
+        swatches: [],
+        rules: [
+          "当前仍为占位功能。",
+          "后续应支持局部放大、倍率、尺寸调整和导出一致性。",
+          "圆形或矩形放大样式需在需求阶段确认。"
+        ]
+      },
+      eraser: {
+        title: "橡皮擦",
+        implemented: false,
+        options: ["占位"],
+        swatches: [],
+        rules: [
+          "当前仍为占位功能。",
+          "需先确认删除整条标注还是擦除局部。",
+          "必须明确是否影响原始截图像素。"
+        ]
+      },
+      pin: {
+        title: "贴图",
+        implemented: false,
+        options: ["占位"],
+        swatches: [],
+        rules: [
+          "当前仍为占位功能。",
+          "后续应从当前选区创建置顶贴图窗口。",
+          "贴图应保留标注结果，并支持移动、缩放和关闭。"
+        ]
+      }
+    };
+
+    const options = document.querySelector("#options");
+    const rules = document.querySelector("#rules");
+    const title = document.querySelector("#tool-title");
+    const legend = document.querySelector("#legend");
+    const buttons = Array.from(document.querySelectorAll("button.tool[data-tool]"));
+
+    function renderTool(name) {
+      const tool = tools[name] || tools.shape;
+      title.textContent = tool.title;
+      options.innerHTML = "";
+      rules.innerHTML = "";
+
+      tool.options.forEach((label, index) => {
+        const chip = document.createElement("span");
+        chip.className = `chip ${index === 1 || label === "高斯" ? "active" : ""}`;
+        chip.textContent = label;
+        options.appendChild(chip);
+      });
+
+      tool.swatches.forEach((color) => {
+        const swatch = document.createElement("span");
+        swatch.className = "swatch";
+        swatch.style.background = color;
+        options.appendChild(swatch);
+      });
+
+      tool.rules.forEach((rule) => {
+        const li = document.createElement("li");
+        li.textContent = rule;
+        rules.appendChild(li);
+      });
+
+      document.querySelector(".status").textContent = tool.implemented ? "已实现" : "未完成";
+      document.querySelectorAll(".status")[1].textContent = tool.implemented ? "待复刻" : "待设计";
+
+      buttons.forEach((button) => {
+        button.classList.toggle("active", button.dataset.tool === name);
+      });
+    }
+
+    Object.keys(tools).forEach((name) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = tools[name].title;
+      button.className = name === "shape" ? "active" : "";
+      button.addEventListener("click", () => {
+        renderTool(name);
+        Array.from(legend.children).forEach((child) => child.classList.toggle("active", child === button));
+      });
+      legend.appendChild(button);
+    });
+
+    buttons.forEach((button) => {
+      button.addEventListener("click", () => {
+        const name = button.dataset.tool;
+        if (!tools[name]) {
+          return;
+        }
+        renderTool(name);
+        Array.from(legend.children).forEach((child) => {
+          child.classList.toggle("active", child.textContent === tools[name].title);
+        });
+      });
+    });
+
+    renderTool("shape");
+  </script>
+</body>
+</html>
