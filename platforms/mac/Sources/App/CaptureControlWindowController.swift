@@ -25,7 +25,7 @@ final class CaptureControlWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "Snipory"
+        window.title = "xxsnap"
         window.contentView = contentView
         window.center()
         window.isReleasedWhenClosed = false

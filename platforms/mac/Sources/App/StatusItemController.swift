@@ -21,22 +21,22 @@ final class StatusItemController: NSObject {
     }
 
     private func configureStatusItem() {
-        NSLog("snipory configuring status item")
+        NSLog("xxsnap configuring status item")
         statusItem.length = NSStatusItem.squareLength
 
         guard let button = statusItem.button else {
-            NSLog("snipory status item has no button")
+            NSLog("xxsnap status item has no button")
             return
         }
 
         button.title = ""
-        let image = NSImage(systemSymbolName: "viewfinder", accessibilityDescription: "Snipory")
-            ?? NSImage(systemSymbolName: "camera.viewfinder", accessibilityDescription: "Snipory")
+        let image = NSImage(systemSymbolName: "viewfinder", accessibilityDescription: "xxsnap")
+            ?? NSImage(systemSymbolName: "camera.viewfinder", accessibilityDescription: "xxsnap")
         image?.isTemplate = true
         button.image = image
         button.imagePosition = .imageOnly
-        button.toolTip = "Snipory 截图"
-        NSLog("snipory status button configured image=%@ length=%.0f", image == nil ? "missing" : "ok", statusItem.length)
+        button.toolTip = "xxsnap 截图"
+        NSLog("xxsnap status button configured image=%@ length=%.0f", image == nil ? "missing" : "ok", statusItem.length)
 
         let menu = NSMenu()
         let captureItem = NSMenuItem(title: "截图", action: #selector(capture), keyEquivalent: "`")

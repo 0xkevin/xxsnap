@@ -34,16 +34,16 @@ final class CaptureCoordinator {
     }
 
     func startCapture() {
-        NSLog("snipory startCapture")
+        NSLog("xxsnap startCapture")
         guard overlayWindow == nil, captureTask == nil, startTask == nil else {
-            NSLog("snipory startCapture ignored because capture is already active")
+            NSLog("xxsnap startCapture ignored because capture is already active")
             return
         }
 
         if !permissionCoordinator.hasScreenCapturePermission() {
-            NSLog("snipory missing screen capture permission")
+            NSLog("xxsnap missing screen capture permission")
             guard permissionCoordinator.shouldShowScreenCaptureGuidance() else {
-                NSLog("snipory suppressing repeated screen capture permission alert")
+                NSLog("xxsnap suppressing repeated screen capture permission alert")
                 return
             }
 
@@ -69,7 +69,7 @@ final class CaptureCoordinator {
                 backgroundImage = try await screenCaptureService.captureDesktopImage()
                 frozenDesktopImage = backgroundImage
             } catch {
-                NSLog("Snipory desktop snapshot failed before overlay: \(error.localizedDescription)")
+                NSLog("xxsnap desktop snapshot failed before overlay: \(error.localizedDescription)")
                 backgroundImage = nil
                 frozenDesktopImage = nil
             }
@@ -108,7 +108,7 @@ final class CaptureCoordinator {
     private func showPermissionRestartAlert() {
         let alert = NSAlert()
         alert.messageText = "需要录屏权限"
-        alert.informativeText = "请在系统设置中允许 Snipory 录屏，然后退出并重新打开 Snipory。"
+        alert.informativeText = "请在系统设置中允许 xxsnap 录屏，然后退出并重新打开 xxsnap。"
         alert.addButton(withTitle: "打开系统设置")
         alert.addButton(withTitle: "稍后")
         if alert.runModal() == .alertFirstButtonReturn {
@@ -118,8 +118,8 @@ final class CaptureCoordinator {
 
     private func showPermissionSettingsAlert() {
         let alert = NSAlert()
-        alert.messageText = "Snipory 没有录屏权限"
-        alert.informativeText = "请在系统设置 > 隐私与安全性 > 录屏与系统录音中打开 Snipory。打开后需要重启 Snipory。"
+        alert.messageText = "xxsnap 没有录屏权限"
+        alert.informativeText = "请在系统设置 > 隐私与安全性 > 录屏与系统录音中打开 xxsnap。打开后需要重启 xxsnap。"
         alert.addButton(withTitle: "打开系统设置")
         alert.addButton(withTitle: "取消")
         if alert.runModal() == .alertFirstButtonReturn {
@@ -181,12 +181,12 @@ final class CaptureCoordinator {
         overlayWindow = nil
 
         guard let result, !result.screenRect.isEmpty else {
-            NSLog("snipory selection cancelled or empty")
+            NSLog("xxsnap selection cancelled or empty")
             frozenDesktopImage = nil
             captureSessionDidEnd?()
             return
         }
-        NSLog("snipory handling selection annotations=%ld rect=(%.0f, %.0f, %.0f, %.0f)", result.annotations.count, result.screenRect.minX, result.screenRect.minY, result.screenRect.width, result.screenRect.height)
+        NSLog("xxsnap handling selection annotations=%ld rect=(%.0f, %.0f, %.0f, %.0f)", result.annotations.count, result.screenRect.minX, result.screenRect.minY, result.screenRect.width, result.screenRect.height)
 
         captureTask = Task { @MainActor [weak self] in
             guard let self else {
@@ -213,17 +213,17 @@ final class CaptureCoordinator {
                     copyToPasteboard(exportedImage)
                 case .save:
                     if !saveLastCapture(exportedImage) {
-                        NSLog("Snipory save was cancelled or failed")
+                        NSLog("xxsnap save was cancelled or failed")
                     }
                 }
                 NSLog(
-                    "Snipory capture completed: %.0fx%.0f",
+                    "xxsnap capture completed: %.0fx%.0f",
                     exportedImage.size.width,
                     exportedImage.size.height
                 )
             } catch {
                 self.frozenDesktopImage = nil
-                NSLog("Snipory capture failed: \(error.localizedDescription)")
+                NSLog("xxsnap capture failed: \(error.localizedDescription)")
             }
         }
     }
@@ -287,7 +287,7 @@ final class CaptureCoordinator {
             try pngData.write(to: destinationURL)
             return true
         } catch {
-            NSLog("Snipory save failed: \(error.localizedDescription)")
+            NSLog("xxsnap save failed: \(error.localizedDescription)")
             return false
         }
     }
@@ -302,6 +302,6 @@ final class CaptureCoordinator {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = timeZone
         formatter.dateFormat = "yyyyMMdd-HHmmss"
-        return "Snipory 截图 \(formatter.string(from: date)).png"
+        return "xxsnap 截图 \(formatter.string(from: date)).png"
     }
 }

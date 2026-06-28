@@ -1,6 +1,6 @@
 import AppKit
 import XCTest
-@testable import Snipory
+@testable import xxsnap
 
 final class WindowSelectionStateTests: XCTestCase {
     func testBestWindowAtPointIgnoresTinyAndOffscreenWindows() {

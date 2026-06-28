@@ -1,5 +1,5 @@
 import XCTest
-@testable import Snipory
+@testable import xxsnap
 
 final class AppSettingsTests: XCTestCase {
     func testBundleIdentityUsesXxsnap() {

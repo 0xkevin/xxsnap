@@ -15,10 +15,10 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "46ABFCB5C4870442D4CD95A9"
-               BuildableName = "snipory.app"
-               BlueprintName = "snipory"
-               ReferencedContainer = "container:snipory.xcodeproj">
+               BlueprintIdentifier = "644AF003870F0936C40CF84C"
+               BuildableName = "xxsnap.app"
+               BlueprintName = "xxsnap"
+               ReferencedContainer = "container:xxsnap.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
          <BuildActionEntry
@@ -29,10 +29,10 @@
             buildForAnalyzing = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "842B5010A347C78E443AF953"
-               BuildableName = "sniporyTests.xctest"
-               BlueprintName = "sniporyTests"
-               ReferencedContainer = "container:snipory.xcodeproj">
+               BlueprintIdentifier = "2A74C7B575021286B0FE3694"
+               BuildableName = "xxsnapTests.xctest"
+               BlueprintName = "xxsnapTests"
+               ReferencedContainer = "container:xxsnap.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -46,10 +46,10 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "46ABFCB5C4870442D4CD95A9"
-            BuildableName = "snipory.app"
-            BlueprintName = "snipory"
-            ReferencedContainer = "container:snipory.xcodeproj">
+            BlueprintIdentifier = "644AF003870F0936C40CF84C"
+            BuildableName = "xxsnap.app"
+            BlueprintName = "xxsnap"
+            ReferencedContainer = "container:xxsnap.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
       <Testables>
@@ -58,10 +58,10 @@
             parallelizable = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "842B5010A347C78E443AF953"
-               BuildableName = "sniporyTests.xctest"
-               BlueprintName = "sniporyTests"
-               ReferencedContainer = "container:snipory.xcodeproj">
+               BlueprintIdentifier = "2A74C7B575021286B0FE3694"
+               BuildableName = "xxsnapTests.xctest"
+               BlueprintName = "xxsnapTests"
+               ReferencedContainer = "container:xxsnap.xcodeproj">
             </BuildableReference>
          </TestableReference>
       </Testables>
@@ -82,10 +82,10 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "46ABFCB5C4870442D4CD95A9"
-            BuildableName = "snipory.app"
-            BlueprintName = "snipory"
-            ReferencedContainer = "container:snipory.xcodeproj">
+            BlueprintIdentifier = "644AF003870F0936C40CF84C"
+            BuildableName = "xxsnap.app"
+            BlueprintName = "xxsnap"
+            ReferencedContainer = "container:xxsnap.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -99,10 +99,10 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "46ABFCB5C4870442D4CD95A9"
-            BuildableName = "snipory.app"
-            BlueprintName = "snipory"
-            ReferencedContainer = "container:snipory.xcodeproj">
+            BlueprintIdentifier = "644AF003870F0936C40CF84C"
+            BuildableName = "xxsnap.app"
+            BlueprintName = "xxsnap"
+            ReferencedContainer = "container:xxsnap.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

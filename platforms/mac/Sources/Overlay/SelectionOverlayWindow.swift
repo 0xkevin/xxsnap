@@ -1242,7 +1242,7 @@ private final class SelectionOverlayView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        NSLog("snipory overlay mouseDown mode=%@ point=(%.0f, %.0f)", "\(interactionMode)", point.x, point.y)
+        NSLog("xxsnap overlay mouseDown mode=%@ point=(%.0f, %.0f)", "\(interactionMode)", point.x, point.y)
 
         cancelSelectionWheelAnimation()
 
@@ -1267,7 +1267,7 @@ private final class SelectionOverlayView: NSView {
                 interactionMode = .annotating
                 window?.makeFirstResponder(self)
                 updateColorSampler(at: point)
-                NSLog("snipory overlay auto selection locked rect=(%.0f, %.0f, %.0f, %.0f)", hoverRect.minX, hoverRect.minY, hoverRect.width, hoverRect.height)
+                NSLog("xxsnap overlay auto selection locked rect=(%.0f, %.0f, %.0f, %.0f)", hoverRect.minX, hoverRect.minY, hoverRect.width, hoverRect.height)
                 invalidateCursorRectsAndRefresh(at: point)
                 needsDisplay = true
                 return
@@ -1323,7 +1323,7 @@ private final class SelectionOverlayView: NSView {
                 appendBrushDraftPointIfNeeded(clampedPoint, modifierFlags: event.modifierFlags)
                 appendMosaicDraftPointIfNeeded(draftPoint, modifierFlags: event.modifierFlags)
                 interactionMode = .drawingShape
-                NSLog("snipory overlay recovered drawing from drag point=(%.0f, %.0f)", point.x, point.y)
+                NSLog("xxsnap overlay recovered drawing from drag point=(%.0f, %.0f)", point.x, point.y)
             } else {
                 startSelectionMoveIfPossible(at: point)
                 if interactionMode == .movingSelection {
@@ -1506,7 +1506,7 @@ private final class SelectionOverlayView: NSView {
 
     override func mouseUp(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        NSLog("snipory overlay mouseUp mode=%@ point=(%.0f, %.0f)", "\(interactionMode)", point.x, point.y)
+        NSLog("xxsnap overlay mouseUp mode=%@ point=(%.0f, %.0f)", "\(interactionMode)", point.x, point.y)
 
         if isEyedropperToolActive, interactionMode == .annotating {
             updateColorSampler(at: point)
@@ -1531,7 +1531,7 @@ private final class SelectionOverlayView: NSView {
                 interactionMode = .annotating
                 window?.makeFirstResponder(self)
                 updateColorSampler(at: point)
-                NSLog("snipory overlay window selection locked rect=(%.0f, %.0f, %.0f, %.0f)", pendingWindowSelectionRect.minX, pendingWindowSelectionRect.minY, pendingWindowSelectionRect.width, pendingWindowSelectionRect.height)
+                NSLog("xxsnap overlay window selection locked rect=(%.0f, %.0f, %.0f, %.0f)", pendingWindowSelectionRect.minX, pendingWindowSelectionRect.minY, pendingWindowSelectionRect.width, pendingWindowSelectionRect.height)
                 invalidateCursorRectsAndRefresh(at: point)
                 needsDisplay = true
                 return
@@ -1545,7 +1545,7 @@ private final class SelectionOverlayView: NSView {
             interactionMode = .annotating
             window?.makeFirstResponder(self)
             updateColorSampler(at: point)
-            NSLog("snipory overlay selection locked rect=(%.0f, %.0f, %.0f, %.0f)", selectionRect.minX, selectionRect.minY, selectionRect.width, selectionRect.height)
+            NSLog("xxsnap overlay selection locked rect=(%.0f, %.0f, %.0f, %.0f)", selectionRect.minX, selectionRect.minY, selectionRect.width, selectionRect.height)
         case .drawingShape:
             let clampedPoint = clamp(point, to: bounds)
             shapeCurrentPoint = draftEndPoint(rawEnd: clampedPoint, modifierFlags: event.modifierFlags)
@@ -1563,7 +1563,7 @@ private final class SelectionOverlayView: NSView {
                 if draft.kind == .mosaicStroke || draft.kind == .mosaicRectangle {
                     resetMosaicPreviewCaches()
                 }
-                NSLog("snipory overlay added annotation count=%ld rect=(%.0f, %.0f, %.0f, %.0f)", annotations.count, draft.rect.minX, draft.rect.minY, draft.rect.width, draft.rect.height)
+                NSLog("xxsnap overlay added annotation count=%ld rect=(%.0f, %.0f, %.0f, %.0f)", annotations.count, draft.rect.minX, draft.rect.minY, draft.rect.width, draft.rect.height)
             }
             shapeStartPoint = nil
             shapeCurrentPoint = nil
@@ -2382,7 +2382,7 @@ private final class SelectionOverlayView: NSView {
         brushDraftPoints = currentShapeKind == .brush ? [point] : []
         mosaicDraftPoints = currentShapeKind == .mosaicStroke ? [point] : []
         interactionMode = .drawingShape
-        NSLog("snipory overlay drawing started point=(%.0f, %.0f)", point.x, point.y)
+        NSLog("xxsnap overlay drawing started point=(%.0f, %.0f)", point.x, point.y)
     }
 
     private func shouldPreferMosaicDrawingOutsideSelection(at point: NSPoint) -> Bool {
@@ -2484,7 +2484,7 @@ private final class SelectionOverlayView: NSView {
                     self.updateBackgroundImage(image)
                 }
             } catch {
-                NSLog("Snipory refresh background failed: \(error.localizedDescription)")
+                NSLog("xxsnap refresh background failed: \(error.localizedDescription)")
             }
         }
     }
@@ -3523,7 +3523,7 @@ private final class SelectionOverlayView: NSView {
         if let swatch = SelectionToolbarState.swatchHitTarget(at: point, in: optionsRect, paletteCount: visiblePaletteCount, mode: optionsToolbarMode) {
             switch swatch {
             case .custom:
-                NSLog("snipory overlay custom color swatch clicked")
+            NSLog("xxsnap overlay custom color swatch clicked")
                 showsStrokeStyleMenu = false
                 showsCornerRadiusPanel = false
                 showsStartArrowTypeMenu = false
@@ -3726,7 +3726,7 @@ private final class SelectionOverlayView: NSView {
             applyCurrentStyleToSelectedAnnotation()
             showsStrokeStyleMenu = false
             needsDisplay = true
-            NSLog("snipory overlay selected stroke pattern=%ld", option.pattern.rawValue)
+            NSLog("xxsnap overlay selected stroke pattern=%ld", option.pattern.rawValue)
             return true
         case .menuBackground:
             return true
@@ -3998,7 +3998,7 @@ private final class SelectionOverlayView: NSView {
         panel.setAction(#selector(customColorChanged(_:)))
         positionCustomColorPanel(panel)
         panel.orderFrontRegardless()
-        NSLog("snipory overlay opened custom color panel")
+        NSLog("xxsnap overlay opened custom color panel")
     }
 
     @objc private func customColorChanged(_ sender: NSColorPanel) {
@@ -6828,7 +6828,7 @@ private final class SelectionOverlayView: NSView {
 
         let pixel = bitmapPixelPoint(for: point, in: backgroundBitmap)
         NSLog(
-            "snipory color sampler %@",
+            "xxsnap color sampler %@",
             SelectionToolbarState.colorSamplerDebugDescription(
                 atPixelX: pixel.x,
                 y: pixel.y,

@@ -1,4 +1,4 @@
-name: snipory
+name: xxsnap
 options:
   createIntermediateGroups: true
 settings:
@@ -9,14 +9,14 @@ settings:
     CURRENT_PROJECT_VERSION: 1
     MARKETING_VERSION: 0.1.0
 targets:
-  snipory:
+  xxsnap:
     type: application
     platform: macOS
     sources:
       - Sources
       - Resources/Assets.xcassets
-      - Resources/Snipory.png
-      - Resources/Snipory.icns
+      - Resources/xxsnap.png
+      - Resources/xxsnap.icns
       - Resources/Icons/pin-to-screen.svg
       - Resources/Icons/copy-to-clipboard.svg
       - Resources/Icons/save-to-file.svg
@@ -28,40 +28,40 @@ targets:
       - Resources/Icons/eyedropper.svg
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.snipory.v2.mac
-        PRODUCT_NAME: Snipory
-        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        INFOPLIST_KEY_CFBundleDisplayName: Snipory
-        INFOPLIST_KEY_CFBundleName: Snipory
-        INFOPLIST_KEY_CFBundleIconFile: Snipory
+        PRODUCT_BUNDLE_IDENTIFIER: com.xxsnap.mac
+        PRODUCT_NAME: xxsnap
+        ASSETCATALOG_COMPILER_APPICON_NAME: ""
+        INFOPLIST_KEY_CFBundleDisplayName: xxsnap
+        INFOPLIST_KEY_CFBundleName: xxsnap
+        INFOPLIST_KEY_CFBundleIconFile: xxsnap
         INFOPLIST_KEY_LSUIElement: YES
         ENABLE_DEBUG_DYLIB: NO
-        SWIFT_OBJC_BRIDGING_HEADER: Sources/Bridge/SniporyMac-Bridging-Header.h
+        SWIFT_OBJC_BRIDGING_HEADER: Sources/Bridge/xxsnap-Bridging-Header.h
         CODE_SIGN_STYLE: Manual
         CODE_SIGNING_ALLOWED: YES
         CODE_SIGNING_REQUIRED: YES
-        CODE_SIGN_IDENTITY: "Snipory Local Dev"
-  sniporyTests:
+        CODE_SIGN_IDENTITY: "xxsnap Local Dev"
+  xxsnapTests:
     type: bundle.unit-test
     platform: macOS
     sources:
       - Tests
     dependencies:
-      - target: snipory
+      - target: xxsnap
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.snipory.v2.mac.tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.xxsnap.mac.tests
         GENERATE_INFOPLIST_FILE: YES
-        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Snipory.app/Contents/MacOS/Snipory"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/xxsnap.app/Contents/MacOS/xxsnap"
         CODE_SIGNING_ALLOWED: NO
         CODE_SIGNING_REQUIRED: NO
         CODE_SIGN_IDENTITY: ""
 schemes:
-  snipory:
+  xxsnap:
     build:
       targets:
-        snipory: all
-        sniporyTests: [test]
+        xxsnap: all
+        xxsnapTests: [test]
     test:
       targets:
-        - name: sniporyTests
+        - name: xxsnapTests

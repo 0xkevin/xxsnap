@@ -1,6 +1,6 @@
 import AppKit
 import XCTest
-@testable import Snipory
+@testable import xxsnap
 
 final class SniporyMacTests: XCTestCase {
     func testAnnotationRendererDrawsRectangleOntoImage() throws {

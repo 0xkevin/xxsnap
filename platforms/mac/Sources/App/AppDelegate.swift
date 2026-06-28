@@ -7,8 +7,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKeyController: CaptureHotKeyController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSLog("snipory applicationDidFinishLaunching")
-        ProcessInfo.processInfo.disableAutomaticTermination("Snipory menu bar app stays available for capture")
+        NSLog("xxsnap applicationDidFinishLaunching")
+        ProcessInfo.processInfo.disableAutomaticTermination("xxsnap menu bar app stays available for capture")
         let captureCoordinator = CaptureCoordinator()
         self.captureCoordinator = captureCoordinator
         statusItemController = StatusItemController(captureCoordinator: captureCoordinator)
@@ -26,7 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        NSLog("snipory applicationWillTerminate")
+        NSLog("xxsnap applicationWillTerminate")
     }
 }
 
@@ -88,11 +88,11 @@ private final class CaptureHotKeyController {
             &eventHandlerRef
         )
         guard handlerStatus == noErr else {
-            NSLog("snipory hotkey handler install failed status=%d", handlerStatus)
+            NSLog("xxsnap hotkey handler install failed status=%d", handlerStatus)
             return
         }
 
-        let hotKeyID = EventHotKeyID(signature: fourCharacterCode("Snip"), id: 1)
+        let hotKeyID = EventHotKeyID(signature: fourCharacterCode("xxsp"), id: 1)
         let hotKeyStatus = RegisterEventHotKey(
             UInt32(kVK_ANSI_Grave),
             UInt32(cmdKey),
@@ -102,9 +102,9 @@ private final class CaptureHotKeyController {
             &hotKeyRef
         )
         if hotKeyStatus == noErr {
-            NSLog("snipory registered hotkey command-backtick")
+            NSLog("xxsnap registered hotkey command-backtick")
         } else {
-            NSLog("snipory hotkey registration failed status=%d", hotKeyStatus)
+            NSLog("xxsnap hotkey registration failed status=%d", hotKeyStatus)
         }
     }
 }

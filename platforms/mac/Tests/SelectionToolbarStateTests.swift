@@ -1,6 +1,6 @@
 import AppKit
 import XCTest
-@testable import Snipory
+@testable import xxsnap
 
 final class SelectionToolbarStateTests: XCTestCase {
     func testEyedropperSamplesVisibleAnnotationAndCopiesOnlyColor() {

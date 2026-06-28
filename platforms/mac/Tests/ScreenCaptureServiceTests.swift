@@ -3,7 +3,7 @@ import CoreGraphics
 import CoreVideo
 import ScreenCaptureKit
 import XCTest
-@testable import Snipory
+@testable import xxsnap
 
 final class ScreenCaptureServiceTests: XCTestCase {
     @MainActor
