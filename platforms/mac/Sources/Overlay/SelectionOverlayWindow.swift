@@ -26,7 +26,7 @@ private extension NSAlert {
 }
 
 private extension NSCursor {
-    static func sniporyBrushRotationHandle(angle: CGFloat) -> NSCursor {
+    static func xxsnapBrushRotationHandle(angle: CGFloat) -> NSCursor {
         let size = NSSize(width: 24, height: 24)
         let hotSpot = brushRotationHandleCenter
         let image = NSImage(size: size)
@@ -46,11 +46,11 @@ private extension NSCursor {
     static let brushRotationHandleRadius: CGFloat = 5.6
     static let brushRotationHandleColor = NSColor.systemBlue
 
-    static let sniporyMosaicRectangleRotationHandle: NSCursor = {
+    static let xxsnapMosaicRectangleRotationHandle: NSCursor = {
         let size = NSSize(width: 24, height: 24)
         let hotSpot = NSPoint(x: size.width / 2, y: size.height / 2)
         guard let image = svgImage(named: "refresh (1)") else {
-            return NSCursor.sniporyBrushRotationHandle(angle: 0)
+            return NSCursor.xxsnapBrushRotationHandle(angle: 0)
         }
 
         let cursorImage = NSImage(size: size)
@@ -71,7 +71,7 @@ private extension NSCursor {
         Bundle.main.url(forResource: name, withExtension: "svg").flatMap(NSImage.init(contentsOf:))
     }
 
-    static let sniporyEyedropper: NSCursor = {
+    static let xxsnapEyedropper: NSCursor = {
         let size = SelectionToolbarState.eyedropperCursorSize
         let hotSpot = SelectionToolbarState.eyedropperCursorHotSpot
         let iconSize = SelectionToolbarState.eyedropperIconSize
@@ -149,7 +149,7 @@ private extension NSCursor {
         return path
     }
 
-    static let sniporyMove: NSCursor = {
+    static let xxsnapMove: NSCursor = {
         let size = NSSize(width: 28, height: 28)
         if let symbol = NSImage(
             systemSymbolName: "arrow.up.and.down.and.arrow.left.and.right",
@@ -188,7 +188,7 @@ private extension NSCursor {
         return NSCursor(image: image, hotSpot: NSPoint(x: size.width / 2, y: size.height / 2))
     }()
 
-    static let sniporyBrush: NSCursor = {
+    static let xxsnapBrush: NSCursor = {
         let size = NSSize(width: 24, height: 24)
         // Hot spot at the pencil tip (lower-left area of the icon).
         // This ensures the drawn line follows the tip, not the cursor center.
@@ -229,7 +229,7 @@ private extension NSCursor {
         return NSCursor.arrow
     }()
 
-    static func sniporyMarker(color: NSColor, strokeWidth: CGFloat) -> NSCursor {
+    static func xxsnapMarker(color: NSColor, strokeWidth: CGFloat) -> NSCursor {
         let size = NSSize(width: 24, height: 24)
         let center = NSPoint(x: size.width / 2, y: size.height / 2)
         let diameter = SelectionToolbarState.markerCursorDotDiameter(for: strokeWidth)
@@ -259,7 +259,7 @@ private extension NSCursor {
         return NSCursor(image: image, hotSpot: center)
     }
 
-    static func sniporyMosaicDot(diameter: CGFloat) -> NSCursor {
+    static func xxsnapMosaicDot(diameter: CGFloat) -> NSCursor {
         let size = NSSize(width: 24, height: 24)
         let center = NSPoint(x: size.width / 2, y: size.height / 2)
         let image = NSImage(size: size)
@@ -1462,7 +1462,7 @@ private final class SelectionOverlayView: NSView {
         let style = cursorStyle(at: point)
         if currentShapeKind == .mosaicStroke, isShapeToolActive {
             if style == .crosshair {
-                NSCursor.sniporyMosaicDot(diameter: SelectionToolbarState.mosaicCursorDotDiameter(for: currentStyle.strokeWidth)).set()
+                NSCursor.xxsnapMosaicDot(diameter: SelectionToolbarState.mosaicCursorDotDiameter(for: currentStyle.strokeWidth)).set()
             } else {
                 setCursor(style)
             }
@@ -1471,7 +1471,7 @@ private final class SelectionOverlayView: NSView {
         if currentShapeKind == .mosaicRectangle, isShapeToolActive {
             if style != .crosshair {
                 if style == .rotationHandle {
-                    NSCursor.sniporyMosaicRectangleRotationHandle.set()
+                    NSCursor.xxsnapMosaicRectangleRotationHandle.set()
                 } else {
                     setCursor(style)
                 }
@@ -1709,7 +1709,7 @@ private final class SelectionOverlayView: NSView {
         let defaultCursor = interactionMode == .selecting ? NSCursor.crosshair : .arrow
         addCursorRect(bounds, cursor: defaultCursor)
         if isEyedropperToolActive, let lockedSelectionRect {
-            addCursorRect(lockedSelectionRect.standardized, cursor: NSCursor.sniporyEyedropper)
+            addCursorRect(lockedSelectionRect.standardized, cursor: NSCursor.xxsnapEyedropper)
         }
         if let lockedSelectionRect, isShapeToolActive {
             let drawingRect = lockedSelectionRect.standardized.insetBy(dx: 12, dy: 12)
@@ -1724,10 +1724,10 @@ private final class SelectionOverlayView: NSView {
 
     private func cursorRectCursorForActiveShapeTool() -> NSCursor {
         if currentShapeKind == .brush {
-            return NSCursor.sniporyBrush
+            return NSCursor.xxsnapBrush
         }
         if currentShapeKind == .marker {
-            return NSCursor.sniporyMarker(color: currentStyle.strokeColor, strokeWidth: currentStyle.strokeWidth)
+            return NSCursor.xxsnapMarker(color: currentStyle.strokeColor, strokeWidth: currentStyle.strokeWidth)
         }
         return NSCursor.crosshair
     }
@@ -1789,7 +1789,7 @@ private final class SelectionOverlayView: NSView {
         case .crosshair:
             NSCursor.crosshair.set()
         case .move:
-            NSCursor.sniporyMove.set()
+            NSCursor.xxsnapMove.set()
         case .resizeLeftRight:
             NSCursor.resizeLeftRight.set()
         case .resizeUpDown:
@@ -1803,13 +1803,13 @@ private final class SelectionOverlayView: NSView {
         case .resizeBottomRight:
             NSCursor.frameResize(position: .bottomRight, directions: .all).set()
         case .rotationHandle:
-            NSCursor.sniporyBrushRotationHandle(angle: 0).set()
+            NSCursor.xxsnapBrushRotationHandle(angle: 0).set()
         case .brush:
-            NSCursor.sniporyBrush.set()
+            NSCursor.xxsnapBrush.set()
         case .eyedropper:
-            NSCursor.sniporyEyedropper.set()
+            NSCursor.xxsnapEyedropper.set()
         case .marker:
-            NSCursor.sniporyMarker(color: currentStyle.strokeColor, strokeWidth: currentStyle.strokeWidth).set()
+            NSCursor.xxsnapMarker(color: currentStyle.strokeColor, strokeWidth: currentStyle.strokeWidth).set()
         }
     }
 
@@ -2252,7 +2252,7 @@ private final class SelectionOverlayView: NSView {
         }
 
         if let mosaicHit = mosaicRectangleRotationHitTarget(at: point) {
-            NSCursor.sniporyMosaicRectangleRotationHandle.set()
+            NSCursor.xxsnapMosaicRectangleRotationHandle.set()
             selectAnnotation(at: mosaicHit)
             rotatingMosaicRectangleStartPointerAngle = angle(from: mosaicRectangleCenter(for: annotations[mosaicHit]), to: point)
             rotatingMosaicRectangleStartAnnotationAngle = annotations[mosaicHit].rotationAngle
@@ -2304,7 +2304,7 @@ private final class SelectionOverlayView: NSView {
         }
 
         if let arrowHit = arrowLineHitTarget(at: point) {
-            NSCursor.sniporyMove.set()
+            NSCursor.xxsnapMove.set()
             let canEditArrowGeometry = activeToolCanEdit(annotationKind: annotations[arrowHit.index].kind)
             selectAnnotation(at: arrowHit.index)
             switch arrowHit.target {
@@ -2346,7 +2346,7 @@ private final class SelectionOverlayView: NSView {
             guard let hitIndex = annotationIndexForBorder(at: point) else {
                 break
             }
-            NSCursor.sniporyMove.set()
+            NSCursor.xxsnapMove.set()
             selectAnnotation(at: hitIndex)
             beginAnnotationMove(at: hitIndex, point: point)
             showsStrokeStyleMenu = false
@@ -4091,7 +4091,7 @@ private final class SelectionOverlayView: NSView {
             return false
         }
 
-        NSCursor.sniporyMove.set()
+        NSCursor.xxsnapMove.set()
         toolbarDragStartPoint = point
         toolbarDragStartOffset = mainToolbarOffset
         interactionMode = .draggingToolbar
@@ -4290,7 +4290,7 @@ private final class SelectionOverlayView: NSView {
             return
         }
 
-        NSCursor.sniporyMove.set()
+        NSCursor.xxsnapMove.set()
         movingSelectionStartRect = lockedSelectionRect.standardized
         movingSelectionStartAnnotationRects = annotations.map { overlayRect(fromLocalAnnotationRect: $0.rect) }
         movingSelectionStartAnnotations = annotations
@@ -4316,7 +4316,7 @@ private final class SelectionOverlayView: NSView {
             return
         }
 
-        NSCursor.sniporyMove.set()
+        NSCursor.xxsnapMove.set()
         let requested = NSRect(
             x: point.x - movingAnnotationOffset.x,
             y: point.y - movingAnnotationOffset.y,

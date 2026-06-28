@@ -456,7 +456,7 @@ static func shouldShowExplicitColorSampler(
 In the `NSCursor` extension in `SelectionOverlayWindow.swift`, add:
 
 ```swift
-static let sniporyEyedropper: NSCursor = {
+static let xxsnapEyedropper: NSCursor = {
     let size = NSSize(width: 24, height: 24)
     let hotSpot = NSPoint(x: 6, y: 18)
     guard let image = svgImage(named: "eyedropper") else {
@@ -481,7 +481,7 @@ Update `setCursor(_:)`:
 
 ```swift
 case .eyedropper:
-    NSCursor.sniporyEyedropper.set()
+    NSCursor.xxsnapEyedropper.set()
 ```
 
 Update `cursorStyle(at:)` before shape-tool cursor fallback:

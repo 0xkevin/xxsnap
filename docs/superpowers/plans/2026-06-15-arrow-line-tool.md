@@ -6,7 +6,7 @@
 
 **Architecture:** Keep this iteration mac-first. Extend the existing Swift annotation model and renderer, add pure toolbar/hit-test helpers in `SelectionToolbarState`, then wire the existing `SelectionOverlayWindow` mouse flow to arrow line creation and editing. Reuse the current options toolbar container and switch visible controls by active annotation kind.
 
-**Tech Stack:** Swift/AppKit, XCTest, existing Snipory mac target.
+**Tech Stack:** Swift/AppKit, XCTest, existing xxsnap mac target.
 
 ---
 

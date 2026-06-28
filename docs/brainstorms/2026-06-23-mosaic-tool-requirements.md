@@ -15,7 +15,7 @@ The existing Mosaic button in the xxsnap mac capture toolbar becomes a usable re
 
 ## Problem Frame
 
-Snipory already supports several annotation tools for pointing, drawing, and highlighting. Redaction is a different job: users need to hide sensitive content quickly before copying or saving a screenshot.
+xxsnap already supports several annotation tools for pointing, drawing, and highlighting. Redaction is a different job: users need to hide sensitive content quickly before copying or saving a screenshot.
 
 The current product surface already exposes a Mosaic button, but it still behaves as unfinished functionality. This effort should complete that one tool without pulling in other unfinished tools.
 

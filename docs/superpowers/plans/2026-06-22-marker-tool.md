@@ -538,10 +538,10 @@ func test_markerLine(at index: Int) -> CaptureMarkerLine? {
 
 - [ ] **Step 5: Add marker cursor drawing**
 
-Add an `NSCursor.sniporyMarker(color:)` helper near the existing custom cursor helpers in `SelectionOverlayWindow.swift`:
+Add an `NSCursor.xxsnapMarker(color:)` helper near the existing custom cursor helpers in `SelectionOverlayWindow.swift`:
 
 ```swift
-static func sniporyMarker(color: NSColor) -> NSCursor {
+static func xxsnapMarker(color: NSColor) -> NSCursor {
     let size = NSSize(width: 24, height: 24)
     let image = NSImage(size: size)
     image.lockFocus()
@@ -559,7 +559,7 @@ Update `setCursor(_:)`:
 
 ```swift
 case .marker:
-    NSCursor.sniporyMarker(color: currentStyle.strokeColor).set()
+    NSCursor.xxsnapMarker(color: currentStyle.strokeColor).set()
 ```
 
 - [ ] **Step 6: Draw marker annotations in overlay**
@@ -906,7 +906,7 @@ open -n /Users/kevin/Projects/open-source/Snipory/xxsnap/build/xcode-derived/Bui
 pgrep -af "xxsnap.app/Contents/MacOS/xxsnap"
 ```
 
-Expected: one running Snipory debug app process from `build/xcode-derived`.
+Expected: one running xxsnap debug app process from `build/xcode-derived`.
 
 - [ ] **Step 2: Smoke marker workflow**
 
