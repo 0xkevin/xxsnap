@@ -152,6 +152,70 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertFalse(window.test_eyedropperToolbarButtonIsSelected)
     }
 
+    func testClickingTextToolTogglesTextModeAndSelectedState() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 200, height: 120))
+
+        guard let point = window.test_mainToolbarButtonPoint(for: .text) else {
+            return XCTFail("Expected text toolbar button")
+        }
+
+        window.test_mouseDown(at: point)
+        window.test_mouseUp(at: point)
+        XCTAssertTrue(window.test_isTextToolActive)
+        XCTAssertTrue(window.test_textToolbarButtonIsSelected)
+        XCTAssertEqual(window.test_optionsToolbarMode, .text)
+        XCTAssertNil(window.test_currentShapeKind)
+
+        window.test_mouseDown(at: point)
+        window.test_mouseUp(at: point)
+        XCTAssertFalse(window.test_isTextToolActive)
+        XCTAssertFalse(window.test_textToolbarButtonIsSelected)
+        XCTAssertNil(window.test_optionsToolbarMode)
+    }
+
+    func testTextToolCreatesEditableAnnotationAndCommitsTypedText() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateTextTool()
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 150))
+
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(window.test_selectedAnnotationKind, .text)
+        XCTAssertTrue(window.test_isEditingTextAnnotation)
+        XCTAssertEqual(window.test_textAnnotation(at: 0)?.text, "")
+
+        window.test_keyDown(keyCode: 0, charactersIgnoringModifiers: "H")
+        window.test_keyDown(keyCode: 0, charactersIgnoringModifiers: "i")
+        window.test_keyDown(keyCode: 36, charactersIgnoringModifiers: "\r")
+
+        XCTAssertEqual(window.test_selectedAnnotationKind, .text)
+        XCTAssertFalse(window.test_isEditingTextAnnotation)
+        XCTAssertEqual(window.test_textAnnotation(at: 0)?.text, "Hi")
+        XCTAssertGreaterThanOrEqual(window.test_annotationRect(at: 0)?.width ?? 0, 160)
+    }
+
+    func testEmptyTextDraftIsDiscardedOnEscape() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateTextTool()
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 150))
+
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertTrue(window.test_isEditingTextAnnotation)
+
+        window.test_keyDown(keyCode: 53, charactersIgnoringModifiers: "\u{1b}")
+
+        XCTAssertEqual(window.test_annotationCount, 0)
+        XCTAssertFalse(window.test_isEditingTextAnnotation)
+        XCTAssertNil(window.test_selectedAnnotationKind)
+    }
+
     func testActivatingAnotherToolExitsEyedropperMode() {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 200, height: 120))

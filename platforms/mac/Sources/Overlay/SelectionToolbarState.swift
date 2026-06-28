@@ -62,6 +62,7 @@ enum SelectionToolbarState {
         case brush
         case marker
         case mosaic
+        case text
     }
 
     struct OptionsToolbarLayout: Equatable {
@@ -159,6 +160,8 @@ enum SelectionToolbarState {
             return [14, 18, 22]
         case .mosaic:
             return [15, 30, 40]
+        case .text:
+            return []
         }
     }
 
@@ -187,7 +190,7 @@ enum SelectionToolbarState {
     }
 
     static func showsStrokeStyleField(for mode: OptionsToolbarMode) -> Bool {
-        mode != .marker && mode != .mosaic
+        mode != .marker && mode != .mosaic && mode != .text
     }
 
     static func shouldShowOptionsToolbar(isPrimaryShapeToolActive: Bool) -> Bool {
@@ -334,7 +337,7 @@ enum SelectionToolbarState {
         switch mode {
         case .brush:
             patterns = [.solid, .dashLong, .dashNarrow, .dashLongShort]
-        case .marker:
+        case .marker, .text:
             patterns = [.solid]
         case .shape, .arrowLine, .mosaic:
             patterns = CaptureStrokePattern.allCases
@@ -489,14 +492,14 @@ enum SelectionToolbarState {
         mode: OptionsToolbarMode
     ) -> OptionsToolbarLayout {
         OptionsToolbarLayout(
-            strokeWidths: mode == .mosaic ? [] : strokeWidthRects(in: optionsRect),
+            strokeWidths: mode == .mosaic || mode == .text ? [] : strokeWidthRects(in: optionsRect),
             fillToggle: mode == .shape ? fillToggleRect(in: optionsRect) : nil,
             rectangleMode: rectangleModeRect(in: optionsRect, mode: mode),
             ellipseMode: mode == .shape ? ellipseModeButtonRect(in: optionsRect) : nil,
             strokeStyle: strokeStyleRect(in: optionsRect, mode: mode),
             startArrowType: mode == .arrowLine ? startArrowTypeFieldRect(in: optionsRect, mode: mode) : nil,
             endArrowType: mode == .arrowLine ? endArrowTypeFieldRect(in: optionsRect, mode: mode) : nil,
-            colorSwatches: mode == .mosaic ? [] : colorSwatchRects(in: optionsRect, paletteCount: paletteCount, mode: mode)
+            colorSwatches: mode == .mosaic || mode == .text ? [] : colorSwatchRects(in: optionsRect, paletteCount: paletteCount, mode: mode)
         )
     }
 
@@ -508,7 +511,7 @@ enum SelectionToolbarState {
             // Mosaic stroke/rectangle mode buttons are intentionally hidden for now.
             // Keep the underlying rectangle helper/code so the old tool can be restored quickly.
             return nil
-        case .arrowLine, .brush, .marker:
+        case .arrowLine, .brush, .marker, .text:
             return nil
         }
     }
@@ -779,7 +782,11 @@ enum SelectionToolbarState {
         paletteCount: Int,
         mode: OptionsToolbarMode = .shape
     ) -> [NSRect] {
-        (0...paletteCount).map { index in
+        guard mode != .text else {
+            return []
+        }
+
+        return (0...paletteCount).map { index in
             let rows = colorSwatchRowCount(paletteCount: paletteCount)
             let columns = colorSwatchColumnCount(paletteCount: paletteCount)
             let startX = colorSwatchStartXOffset(mode: mode)
@@ -813,6 +820,9 @@ enum SelectionToolbarState {
         if mode == .mosaic {
             return 144
         }
+        if mode == .text {
+            return 40
+        }
         let columns = colorSwatchColumnCount(paletteCount: clampedCount)
         let customSize = customColorSwatchSize(paletteCount: clampedCount)
         return colorSwatchStartXOffset(mode: mode) + CGFloat(columns) * 16 + 2 + customSize + optionsToolbarHorizontalPadding
@@ -823,7 +833,7 @@ enum SelectionToolbarState {
         mode: OptionsToolbarMode = .shape
     ) -> CGFloat {
         _ = paletteCount
-        if mode == .mosaic {
+        if mode == .mosaic || mode == .text {
             return 28
         }
         return colorSwatchRowCount(paletteCount: paletteCount) == 1 ? 30 : 40
@@ -889,7 +899,7 @@ enum SelectionToolbarState {
             return 214
         case .marker:
             return 102
-        case .mosaic:
+        case .mosaic, .text:
             return 0
         }
     }
@@ -961,7 +971,7 @@ enum SelectionToolbarState {
             return strokeStyleFieldRect(in: optionsRect)
         case .arrowLine, .brush:
             return compactStrokeStyleFieldRect(in: optionsRect)
-        case .marker, .mosaic:
+        case .marker, .mosaic, .text:
             return .zero
         }
     }
@@ -972,7 +982,7 @@ enum SelectionToolbarState {
             return NSRect(x: optionsRect.minX + 316, y: optionControlY(in: optionsRect), width: 42, height: 20)
         case .arrowLine:
             return NSRect(x: optionsRect.minX + 208, y: optionControlY(in: optionsRect), width: 42, height: 20)
-        case .brush, .marker, .mosaic:
+        case .brush, .marker, .mosaic, .text:
             return .zero
         }
     }
@@ -983,7 +993,7 @@ enum SelectionToolbarState {
             return NSRect(x: optionsRect.minX + 364, y: optionControlY(in: optionsRect), width: 42, height: 20)
         case .arrowLine:
             return NSRect(x: optionsRect.minX + 256, y: optionControlY(in: optionsRect), width: 42, height: 20)
-        case .brush, .marker, .mosaic:
+        case .brush, .marker, .mosaic, .text:
             return .zero
         }
     }

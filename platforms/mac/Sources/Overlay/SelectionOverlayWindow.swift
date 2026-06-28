@@ -9,6 +9,7 @@ enum TestToolbarButton {
     case marker
     case eyedropper
     case mosaic
+    case text
     case settings
 }
 
@@ -404,6 +405,10 @@ final class SelectionOverlayWindow: NSWindow {
             guard let self, !self.didCompleteSelection else {
                 return event
             }
+            if let overlayView = self.contentView as? SelectionOverlayView,
+               overlayView.handleKeyDown(event) {
+                return nil
+            }
             guard event.keyCode == 53 else {
                 return event
             }
@@ -417,13 +422,13 @@ final class SelectionOverlayWindow: NSWindow {
     }
 
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 53 {
-            cancelOperation(nil)
+        if let overlayView = contentView as? SelectionOverlayView,
+           overlayView.handleKeyDown(event) {
             return
         }
 
-        if let overlayView = contentView as? SelectionOverlayView,
-           overlayView.handleKeyDown(event) {
+        if event.keyCode == 53 {
+            cancelOperation(nil)
             return
         }
 
@@ -437,6 +442,10 @@ final class SelectionOverlayWindow: NSWindow {
 
     func test_activateShapeTool(_ shape: CaptureAnnotationKind) {
         (contentView as? SelectionOverlayView)?.test_activateShapeTool(shape)
+    }
+
+    func test_activateTextTool() {
+        (contentView as? SelectionOverlayView)?.test_activateTextTool()
     }
 
     func test_toggleShapeTool(_ shape: CaptureAnnotationKind) {
@@ -594,6 +603,10 @@ final class SelectionOverlayWindow: NSWindow {
 
     func test_markerLine(at index: Int) -> CaptureMarkerLine? {
         (contentView as? SelectionOverlayView)?.test_markerLine(at: index)
+    }
+
+    func test_textAnnotation(at index: Int) -> CaptureAnnotation? {
+        (contentView as? SelectionOverlayView)?.test_textAnnotation(at: index)
     }
 
     func test_markerToolbarButtonPoint() -> NSPoint? {
@@ -825,6 +838,18 @@ final class SelectionOverlayWindow: NSWindow {
 
     var test_eyedropperToolbarButtonIsSelected: Bool {
         (contentView as? SelectionOverlayView)?.test_eyedropperToolbarButtonIsSelected ?? false
+    }
+
+    var test_isTextToolActive: Bool {
+        (contentView as? SelectionOverlayView)?.test_isTextToolActive ?? false
+    }
+
+    var test_textToolbarButtonIsSelected: Bool {
+        (contentView as? SelectionOverlayView)?.test_textToolbarButtonIsSelected ?? false
+    }
+
+    var test_isEditingTextAnnotation: Bool {
+        (contentView as? SelectionOverlayView)?.test_isEditingTextAnnotation ?? false
     }
 
     private func test_mouseEvent(type: NSEvent.EventType, at point: NSPoint, modifierFlags: NSEvent.ModifierFlags = []) -> NSEvent {
@@ -1125,6 +1150,10 @@ private final class SelectionOverlayView: NSView {
     private var activeShapeKind: CaptureAnnotationKind?
     private var isShapeToolActive = false
     private var isEyedropperToolActive = false
+    private var isTextToolActive = false
+    private var editingTextAnnotationIndex: Int?
+    private var textDraftCreatedDuringCurrentEdit = false
+    private let defaultTextAnnotationSize = NSSize(width: 160, height: 36)
     private var currentStyle = CaptureAnnotationStyle()
     private var nonMarkerStyle = CaptureAnnotationStyle()
     private var markerStyle = SelectionToolbarState.markerActivationStyle(currentStyle: CaptureAnnotationStyle())
@@ -1647,6 +1676,10 @@ private final class SelectionOverlayView: NSView {
     }
 
     func handleKeyDown(_ event: NSEvent) -> Bool {
+        if handleTextEditingKeyDown(event) {
+            return true
+        }
+
         if event.keyCode == 53 {
             selectionDidFinish?(nil)
             return true
@@ -2247,7 +2280,11 @@ private final class SelectionOverlayView: NSView {
             return
         }
 
-        guard lockedSelectionRect != nil else {
+        guard let lockedSelectionRect else {
+            return
+        }
+
+        if isTextToolActive, handleTextToolMouseDown(at: point, selectionRect: lockedSelectionRect.standardized) {
             return
         }
 
@@ -2462,6 +2499,211 @@ private final class SelectionOverlayView: NSView {
         return true
     }
 
+    private func handleTextToolMouseDown(at point: NSPoint, selectionRect: NSRect) -> Bool {
+        commitCurrentTextEdit()
+
+        if let textHit = textAnnotationIndexForBorder(at: point) {
+            beginTextEditing(at: textHit, draftCreated: false)
+            needsDisplay = true
+            return true
+        }
+
+        guard selectionRect.contains(point) else {
+            return true
+        }
+
+        let textRect = textAnnotationRect(anchoredAt: point, inside: selectionRect)
+        var style = currentStyle
+        style.strokeWidth = 0
+        style.strokePattern = .solid
+        style.fillEnabled = false
+        style.textSize = style.textSize > 0 ? style.textSize : 24
+        currentStyle = style
+        let annotation = CaptureAnnotation(
+            kind: .text,
+            rect: localAnnotationRect(from: textRect),
+            style: style,
+            text: ""
+        )
+        annotations.append(annotation)
+        redoAnnotations.removeAll()
+        beginTextEditing(at: annotations.index(before: annotations.endIndex), draftCreated: true)
+        needsDisplay = true
+        return true
+    }
+
+    private func beginTextEditing(at index: Int, draftCreated: Bool) {
+        guard annotations.indices.contains(index), annotations[index].kind == .text else {
+            editingTextAnnotationIndex = nil
+            textDraftCreatedDuringCurrentEdit = false
+            return
+        }
+
+        selectedAnnotationIndex = index
+        editingTextAnnotationIndex = index
+        textDraftCreatedDuringCurrentEdit = draftCreated
+        isTextToolActive = true
+        isEyedropperToolActive = false
+        isShapeToolActive = false
+        activeShapeKind = nil
+        showsCornerRadiusPanel = false
+        showsStrokeStyleMenu = false
+        showsStartArrowTypeMenu = false
+        showsEndArrowTypeMenu = false
+        currentStyle = annotations[index].style
+    }
+
+    private func handleTextEditingKeyDown(_ event: NSEvent) -> Bool {
+        guard let editingTextAnnotationIndex,
+              annotations.indices.contains(editingTextAnnotationIndex),
+              annotations[editingTextAnnotationIndex].kind == .text
+        else {
+            self.editingTextAnnotationIndex = nil
+            textDraftCreatedDuringCurrentEdit = false
+            return false
+        }
+
+        if event.keyCode == 53 {
+            if (annotations[editingTextAnnotationIndex].text ?? "").isEmpty {
+                discardEditingTextAnnotation()
+            } else {
+                self.editingTextAnnotationIndex = nil
+                textDraftCreatedDuringCurrentEdit = false
+            }
+            needsDisplay = true
+            return true
+        }
+
+        if event.keyCode == 36 || event.keyCode == 76 {
+            commitCurrentTextEdit()
+            return true
+        }
+
+        if event.keyCode == 51 {
+            var text = annotations[editingTextAnnotationIndex].text ?? ""
+            if text.isEmpty {
+                discardEditingTextAnnotation()
+            } else {
+                text.removeLast()
+                updateEditingText(text)
+                if text.isEmpty, textDraftCreatedDuringCurrentEdit {
+                    discardEditingTextAnnotation()
+                }
+            }
+            needsDisplay = true
+            return true
+        }
+
+        guard
+            !event.modifierFlags.contains(.command),
+            !event.modifierFlags.contains(.control),
+            let characters = event.characters,
+            !characters.isEmpty
+        else {
+            return false
+        }
+
+        let printableCharacters = characters.filter { character in
+            !character.isNewline
+                && String(character).rangeOfCharacter(from: .controlCharacters) == nil
+        }
+        guard !printableCharacters.isEmpty else {
+            return true
+        }
+
+        updateEditingText((annotations[editingTextAnnotationIndex].text ?? "") + String(printableCharacters))
+        return true
+    }
+
+    private func updateEditingText(_ text: String) {
+        guard let editingTextAnnotationIndex,
+              annotations.indices.contains(editingTextAnnotationIndex),
+              annotations[editingTextAnnotationIndex].kind == .text
+        else {
+            return
+        }
+
+        annotations[editingTextAnnotationIndex].text = text
+        annotations[editingTextAnnotationIndex].rect.size = textAnnotationSize(
+            text: text,
+            style: annotations[editingTextAnnotationIndex].style
+        )
+        if let lockedSelectionRect {
+            let overlayRect = overlayRect(fromLocalAnnotationRect: annotations[editingTextAnnotationIndex].rect)
+            annotations[editingTextAnnotationIndex].rect = localAnnotationRect(
+                from: clamp(rect: overlayRect, inside: lockedSelectionRect.standardized)
+            )
+        }
+        redoAnnotations.removeAll()
+        needsDisplay = true
+    }
+
+    private func commitCurrentTextEdit() {
+        guard let editingTextAnnotationIndex,
+              annotations.indices.contains(editingTextAnnotationIndex),
+              annotations[editingTextAnnotationIndex].kind == .text
+        else {
+            self.editingTextAnnotationIndex = nil
+            textDraftCreatedDuringCurrentEdit = false
+            return
+        }
+
+        let text = annotations[editingTextAnnotationIndex].text ?? ""
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            discardEditingTextAnnotation()
+            return
+        }
+
+        selectedAnnotationIndex = editingTextAnnotationIndex
+        self.editingTextAnnotationIndex = nil
+        textDraftCreatedDuringCurrentEdit = false
+        redoAnnotations.removeAll()
+        needsDisplay = true
+    }
+
+    private func discardEditingTextAnnotation() {
+        guard let editingTextAnnotationIndex else {
+            return
+        }
+
+        if annotations.indices.contains(editingTextAnnotationIndex),
+           textDraftCreatedDuringCurrentEdit
+                || (annotations[editingTextAnnotationIndex].text ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            annotations.remove(at: editingTextAnnotationIndex)
+        }
+        self.editingTextAnnotationIndex = nil
+        textDraftCreatedDuringCurrentEdit = false
+        selectedAnnotationIndex = nil
+        redoAnnotations.removeAll()
+    }
+
+    private func textAnnotationRect(anchoredAt point: NSPoint, inside selectionRect: NSRect) -> NSRect {
+        clamp(
+            rect: NSRect(origin: point, size: defaultTextAnnotationSize),
+            inside: selectionRect
+        )
+    }
+
+    private func textAnnotationSize(text: String, style: CaptureAnnotationStyle) -> NSSize {
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedText.isEmpty else {
+            return defaultTextAnnotationSize
+        }
+
+        let attributedText = NSAttributedString(
+            string: text,
+            attributes: CaptureAnnotationRenderer.textAttributes(style: style)
+        )
+        let measured = attributedText.boundingRect(
+            with: NSSize(width: 480, height: CGFloat.greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading]
+        )
+        return NSSize(
+            width: max(defaultTextAnnotationSize.width, ceil(measured.width) + 8),
+            height: max(defaultTextAnnotationSize.height, ceil(measured.height) + 8)
+        )
+    }
+
     private func refreshSelectionBackground() {
         guard !isRefreshingSelectionBackground, let refreshHandler else {
             return
@@ -2627,6 +2869,8 @@ private final class SelectionOverlayView: NSView {
             showsCornerRadiusPanel = false
             showsStartArrowTypeMenu = false
             showsEndArrowTypeMenu = false
+        case .text:
+            toggleTextTool()
         case .undo:
             undoLastAnnotation()
         case .redo:
@@ -2637,7 +2881,7 @@ private final class SelectionOverlayView: NSView {
             finish(action: .save)
         case .cancel:
             selectionDidFinish?(nil)
-        case .pin, .text, .number, .magnifier, .eraser, .scroll, .settings:
+        case .pin, .number, .magnifier, .eraser, .scroll, .settings:
             showPlaceholder(for: button)
         }
 
@@ -2645,6 +2889,7 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func toggleEyedropperTool() {
+        commitCurrentTextEdit()
         if isEyedropperToolActive {
             isEyedropperToolActive = false
             invalidateCursorRectsAndRefresh()
@@ -2653,6 +2898,7 @@ private final class SelectionOverlayView: NSView {
 
         rememberCurrentStyleForActiveTool()
         isEyedropperToolActive = true
+        isTextToolActive = false
         isShapeToolActive = false
         activeShapeKind = nil
         selectedAnnotationIndex = nil
@@ -2667,9 +2913,44 @@ private final class SelectionOverlayView: NSView {
         invalidateCursorRectsAndRefresh()
     }
 
+    private func toggleTextTool() {
+        commitCurrentTextEdit()
+        if isTextToolActive {
+            isTextToolActive = false
+            selectedAnnotationIndex = nil
+            invalidateCursorRectsAndRefresh()
+            return
+        }
+
+        activateTextTool()
+    }
+
+    private func activateTextTool() {
+        commitCurrentTextEdit()
+        rememberCurrentStyleForActiveTool()
+        isTextToolActive = true
+        isEyedropperToolActive = false
+        isShapeToolActive = false
+        activeShapeKind = nil
+        selectedAnnotationIndex = nil
+        showsCornerRadiusPanel = false
+        showsStrokeStyleMenu = false
+        showsStartArrowTypeMenu = false
+        showsEndArrowTypeMenu = false
+        shapeStartPoint = nil
+        shapeCurrentPoint = nil
+        brushDraftPoints.removeAll()
+        mosaicDraftPoints.removeAll()
+        currentStyle.textSize = currentStyle.textSize > 0 ? currentStyle.textSize : 24
+        invalidateCursorRectsAndRefresh()
+        needsDisplay = true
+    }
+
     private func toggleShapeTool(_ shape: CaptureAnnotationKind) {
+        commitCurrentTextEdit()
         rememberCurrentStyleForActiveTool()
         isEyedropperToolActive = false
+        isTextToolActive = false
         activeShapeKind = activeShapeKind == shape ? nil : shape
         isShapeToolActive = activeShapeKind != nil
         if let activeShapeKind {
@@ -2732,8 +3013,10 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func activateShapeTool(_ shape: CaptureAnnotationKind) {
+        commitCurrentTextEdit()
         rememberCurrentStyleForActiveTool()
         isEyedropperToolActive = false
+        isTextToolActive = false
         activeShapeKind = shape
         currentShapeKind = shape
         isShapeToolActive = true
@@ -2812,6 +3095,10 @@ private final class SelectionOverlayView: NSView {
 
     func test_activateShapeTool(_ shape: CaptureAnnotationKind) {
         activateShapeTool(shape)
+    }
+
+    func test_activateTextTool() {
+        activateTextTool()
     }
 
     func test_toggleShapeTool(_ shape: CaptureAnnotationKind) {
@@ -2928,6 +3215,8 @@ private final class SelectionOverlayView: NSView {
             toolbarButton = .eyedropper
         case .mosaic:
             toolbarButton = .mosaic
+        case .text:
+            toolbarButton = .text
         case .settings:
             toolbarButton = .settings
         }
@@ -2945,6 +3234,8 @@ private final class SelectionOverlayView: NSView {
             toolbarButton = .eyedropper
         case .mosaic:
             toolbarButton = .mosaic
+        case .text:
+            toolbarButton = .text
         case .settings:
             toolbarButton = .settings
         }
@@ -2984,6 +3275,13 @@ private final class SelectionOverlayView: NSView {
             return nil
         }
         return annotations[index].markerLine
+    }
+
+    func test_textAnnotation(at index: Int) -> CaptureAnnotation? {
+        guard annotations.indices.contains(index), annotations[index].kind == .text else {
+            return nil
+        }
+        return annotations[index]
     }
 
     func test_markerToolbarButtonPoint() -> NSPoint? {
@@ -3256,7 +3554,7 @@ private final class SelectionOverlayView: NSView {
     }
 
     var test_optionsToolbarMode: SelectionToolbarState.OptionsToolbarMode? {
-        guard isShapeToolActive else {
+        guard isShapeToolActive || isTextToolActive else {
             return nil
         }
         return optionsToolbarMode
@@ -3314,6 +3612,21 @@ private final class SelectionOverlayView: NSView {
 
     var test_eyedropperToolbarButtonIsSelected: Bool {
         buttonMatchesCurrentTool(.eyedropper)
+    }
+
+    var test_isTextToolActive: Bool {
+        isTextToolActive
+    }
+
+    var test_textToolbarButtonIsSelected: Bool {
+        buttonMatchesCurrentTool(.text)
+    }
+
+    var test_isEditingTextAnnotation: Bool {
+        guard let editingTextAnnotationIndex else {
+            return false
+        }
+        return annotations.indices.contains(editingTextAnnotationIndex)
     }
 
     var test_isColorSamplerVisible: Bool {
@@ -3427,6 +3740,9 @@ private final class SelectionOverlayView: NSView {
 
     private func deleteSelectedAnnotation() -> Bool {
         guard let selectedAnnotationIndex, annotations.indices.contains(selectedAnnotationIndex) else {
+            return false
+        }
+        guard annotations[selectedAnnotationIndex].kind != .text else {
             return false
         }
 
@@ -4139,6 +4455,15 @@ private final class SelectionOverlayView: NSView {
         return nil
     }
 
+    private func textAnnotationIndexForBorder(at point: NSPoint) -> Int? {
+        for index in annotations.indices.reversed() where annotations[index].kind == .text {
+            if textAnnotationBorderContains(point: point, annotation: annotations[index]) {
+                return index
+            }
+        }
+        return nil
+    }
+
     private func annotationBorderContains(_ point: NSPoint, for annotation: CaptureAnnotation) -> Bool {
         if annotation.kind == .arrowLine {
             guard let arrowLine = overlayArrowLine(fromLocalArrowLine: annotation.arrowLine) else {
@@ -4178,6 +4503,9 @@ private final class SelectionOverlayView: NSView {
             }
             return SelectionToolbarState.markerLineContains(point: point, line: markerLine, hitOutset: hitOutset)
         }
+        if annotation.kind == .text {
+            return false
+        }
 
         let rect = overlayRect(fromLocalAnnotationRect: annotation.rect).standardized
         return SelectionToolbarState.shapeBorderContains(
@@ -4186,6 +4514,13 @@ private final class SelectionOverlayView: NSView {
             kind: annotation.kind,
             cornerRadius: annotation.style.cornerRadius
         )
+    }
+
+    private func textAnnotationBorderContains(point: NSPoint, annotation: CaptureAnnotation) -> Bool {
+        let rect = overlayRect(fromLocalAnnotationRect: annotation.rect).standardized
+        let hitOutset: CGFloat = 6
+        return rect.insetBy(dx: -hitOutset, dy: -hitOutset).contains(point)
+            && !rect.insetBy(dx: hitOutset, dy: hitOutset).contains(point)
     }
 
     private func resizeHandle(at point: NSPoint) -> ShapeResizeHandle? {
@@ -6109,6 +6444,8 @@ private final class SelectionOverlayView: NSView {
             break
         case .mosaic:
             drawMosaicModeControls(in: optionsRect)
+        case .text:
+            break
         }
         if SelectionToolbarState.showsStrokeStyleField(for: optionsToolbarMode) {
             drawStrokeStyleField(in: optionsRect)
@@ -6153,7 +6490,7 @@ private final class SelectionOverlayView: NSView {
             if let lastStrokeWidth = layout.strokeWidths.last, let firstSwatchMinX {
                 separatorXs.append(lastStrokeWidth.maxX + (firstSwatchMinX - lastStrokeWidth.maxX) / 2)
             }
-        case .mosaic:
+        case .mosaic, .text:
             break
         }
 
@@ -7221,6 +7558,8 @@ private final class SelectionOverlayView: NSView {
             return isEyedropperToolActive
         case .mosaic:
             return isShapeToolActive && (currentShapeKind == .mosaicStroke || currentShapeKind == .mosaicRectangle)
+        case .text:
+            return isTextToolActive
         default:
             return false
         }
@@ -7295,6 +7634,10 @@ private final class SelectionOverlayView: NSView {
     }
 
     private var optionsToolbarMode: SelectionToolbarState.OptionsToolbarMode {
+        if isTextToolActive {
+            return .text
+        }
+
         switch currentShapeKind {
         case .arrowLine:
             return .arrowLine
@@ -7319,7 +7662,7 @@ private final class SelectionOverlayView: NSView {
 
     private var optionsToolbarRect: NSRect? {
         guard
-            SelectionToolbarState.shouldShowOptionsToolbar(isPrimaryShapeToolActive: isShapeToolActive),
+            SelectionToolbarState.shouldShowOptionsToolbar(isPrimaryShapeToolActive: isShapeToolActive || isTextToolActive),
             let selectionRect,
             let toolbar = mainToolbarRect(for: selectionRect)
         else {
