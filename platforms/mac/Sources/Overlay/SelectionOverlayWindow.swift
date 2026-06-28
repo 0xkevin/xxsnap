@@ -2564,7 +2564,7 @@ private final class SelectionOverlayView: NSView {
         }
 
         if event.keyCode == 53 {
-            if (annotations[editingTextAnnotationIndex].text ?? "").isEmpty {
+            if (annotations[editingTextAnnotationIndex].text ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 discardEditingTextAnnotation()
             } else {
                 self.editingTextAnnotationIndex = nil

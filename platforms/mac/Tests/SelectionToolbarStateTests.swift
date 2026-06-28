@@ -239,6 +239,21 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertNil(window.test_selectedAnnotationKind)
     }
 
+    func testWhitespaceOnlyTextDraftIsDiscardedOnEscape() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateTextTool()
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 150))
+        window.test_keyDown(keyCode: 49, charactersIgnoringModifiers: " ")
+        window.test_keyDown(keyCode: 53, charactersIgnoringModifiers: "\u{1b}")
+
+        XCTAssertEqual(window.test_annotationCount, 0)
+        XCTAssertFalse(window.test_isEditingTextAnnotation)
+        XCTAssertNil(window.test_selectedAnnotationKind)
+    }
+
     func testFinishingCaptureCommitsOrDiscardsActiveTextEdit() {
         var emptyResult: CaptureSelectionResult?
         let emptyExpectation = expectation(description: "empty text draft result")
