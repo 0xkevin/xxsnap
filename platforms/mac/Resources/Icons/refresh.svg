@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>refresh</title>
+    <g id="page-1" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="refresh">
+            <polygon id="path" points="0 0 24 0 24 24 0 24"></polygon>
+            <path d="M20,11 C19.4972762,7.38253734 16.6358693,4.54893297 13.0136706,4.0815525 C9.39147202,3.61417203 5.90450846,5.62863183 4.5,9 M4,5 L4,9 L8,9" id="shape" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+            <path d="M4,13 C4.50272384,16.6174627 7.36413073,19.451067 10.9863294,19.9184475 C14.608528,20.385828 18.0954915,18.3713682 19.5,15 M20,19 L20,15 L16,15" id="shape" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+        </g>
+    </g>
+</svg>
