@@ -2502,7 +2502,7 @@ private final class SelectionOverlayView: NSView {
     private func handleTextToolMouseDown(at point: NSPoint, selectionRect: NSRect) -> Bool {
         commitCurrentTextEdit()
 
-        if let textHit = textAnnotationIndexForBorder(at: point) {
+        if let textHit = textAnnotationIndex(at: point) {
             beginTextEditing(at: textHit, draftCreated: false)
             needsDisplay = true
             return true
@@ -4455,9 +4455,9 @@ private final class SelectionOverlayView: NSView {
         return nil
     }
 
-    private func textAnnotationIndexForBorder(at point: NSPoint) -> Int? {
+    private func textAnnotationIndex(at point: NSPoint) -> Int? {
         for index in annotations.indices.reversed() where annotations[index].kind == .text {
-            if textAnnotationBorderContains(point: point, annotation: annotations[index]) {
+            if textAnnotationHitContains(point: point, annotation: annotations[index]) {
                 return index
             }
         }
@@ -4516,11 +4516,10 @@ private final class SelectionOverlayView: NSView {
         )
     }
 
-    private func textAnnotationBorderContains(point: NSPoint, annotation: CaptureAnnotation) -> Bool {
+    private func textAnnotationHitContains(point: NSPoint, annotation: CaptureAnnotation) -> Bool {
         let rect = overlayRect(fromLocalAnnotationRect: annotation.rect).standardized
         let hitOutset: CGFloat = 6
         return rect.insetBy(dx: -hitOutset, dy: -hitOutset).contains(point)
-            && !rect.insetBy(dx: hitOutset, dy: hitOutset).contains(point)
     }
 
     private func resizeHandle(at point: NSPoint) -> ShapeResizeHandle? {

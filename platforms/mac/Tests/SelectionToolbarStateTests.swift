@@ -198,6 +198,29 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(window.test_annotationRect(at: 0)?.width ?? 0, 160)
     }
 
+    func testTextToolReopensExistingAnnotationFromBodyClick() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateTextTool()
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 150))
+        window.test_keyDown(keyCode: 0, charactersIgnoringModifiers: "H")
+        window.test_keyDown(keyCode: 36, charactersIgnoringModifiers: "\r")
+
+        guard let textRect = window.test_annotationRect(at: 0) else {
+            return XCTFail("Expected text annotation")
+        }
+
+        window.test_mouseDown(at: NSPoint(x: 100 + textRect.midX, y: 100 + textRect.midY))
+        window.test_mouseUp(at: NSPoint(x: 100 + textRect.midX, y: 100 + textRect.midY))
+
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(window.test_selectedAnnotationKind, .text)
+        XCTAssertTrue(window.test_isEditingTextAnnotation)
+        XCTAssertEqual(window.test_textAnnotation(at: 0)?.text, "H")
+    }
+
     func testEmptyTextDraftIsDiscardedOnEscape() {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
