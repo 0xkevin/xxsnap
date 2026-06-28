@@ -198,6 +198,80 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(window.test_annotationRect(at: 0)?.width ?? 0, 160)
     }
 
+    func testTextOptionsToolbarUsesThreeFontSizes() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateTextTool()
+
+        XCTAssertEqual(window.test_optionsToolbarMode, .text)
+        XCTAssertEqual(window.test_textSizeOptions, [16, 24, 32])
+        XCTAssertEqual(window.test_textSizeOptionsCount, 3)
+
+        for index in 0..<window.test_textSizeOptionsCount {
+            XCTAssertNotNil(window.test_optionsTextSizePoint(at: index))
+        }
+
+        let originalColor = SelectionToolbarState.colorSamplerHexString(for: try XCTUnwrap(window.test_currentStyle?.strokeColor))
+        let colorPoint = try XCTUnwrap(window.test_optionsPaletteColorPoint(at: 0))
+        window.test_mouseDown(at: colorPoint)
+        window.test_mouseUp(at: colorPoint)
+
+        XCTAssertNotEqual(SelectionToolbarState.colorSamplerHexString(for: try XCTUnwrap(window.test_currentStyle?.strokeColor)), originalColor)
+        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: try XCTUnwrap(window.test_currentStyle?.strokeColor)), "#FF001A")
+    }
+
+    func testTextAnnotationCanMoveDeleteAndChangeColor() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 360, height: 240)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateTextTool()
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 150))
+        for character in "Hello text" {
+            window.test_keyDown(keyCode: 0, charactersIgnoringModifiers: String(character))
+        }
+        window.test_keyDown(keyCode: 36, charactersIgnoringModifiers: "\r")
+
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(window.test_selectedAnnotationKind, .text)
+        XCTAssertFalse(window.test_isEditingTextAnnotation)
+
+        let originalRect = try XCTUnwrap(window.test_annotationRect(at: 0))
+        let moveStart = NSPoint(x: selection.minX + originalRect.midX, y: selection.minY + originalRect.midY)
+        let moveEnd = NSPoint(x: moveStart.x + 36, y: moveStart.y + 24)
+        window.test_mouseDown(at: moveStart)
+        window.test_mouseDragged(to: moveEnd)
+        window.test_mouseUp(at: moveEnd)
+
+        let movedRect = try XCTUnwrap(window.test_annotationRect(at: 0))
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(window.test_selectedAnnotationKind, .text)
+        XCTAssertEqual(movedRect.minX, originalRect.minX + 36, accuracy: 0.1)
+        XCTAssertEqual(movedRect.minY, originalRect.minY + 24, accuracy: 0.1)
+
+        let colorPoint = try XCTUnwrap(window.test_optionsPaletteColorPoint(at: 0))
+        window.test_mouseDown(at: colorPoint)
+        window.test_mouseUp(at: colorPoint)
+
+        var style = try XCTUnwrap(window.test_annotationStyle(at: 0))
+        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: style.strokeColor), "#FF001A")
+
+        let sizePoint = try XCTUnwrap(window.test_optionsTextSizePoint(at: 2))
+        window.test_mouseDown(at: sizePoint)
+        window.test_mouseUp(at: sizePoint)
+
+        style = try XCTUnwrap(window.test_annotationStyle(at: 0))
+        let resizedRect = try XCTUnwrap(window.test_annotationRect(at: 0))
+        XCTAssertEqual(style.textSize, 32)
+        XCTAssertGreaterThanOrEqual(resizedRect.width, movedRect.width)
+        XCTAssertGreaterThan(resizedRect.height, movedRect.height)
+
+        window.test_keyDown(keyCode: 51)
+        XCTAssertEqual(window.test_annotationCount, 0)
+        XCTAssertNil(window.test_selectedAnnotationKind)
+    }
+
     func testTextToolReopensExistingAnnotationFromBodyClick() {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
