@@ -9,13 +9,13 @@ origin: docs/brainstorms/2026-06-23-mosaic-tool-requirements.md
 
 ## Summary
 
-This plan turns the existing mac capture-toolbar `马赛克` button into a shippable annotation tool in `snipory-v2`. The implementation stays inside the current mac overlay architecture, adds two concrete Mosaic annotation kinds for sliding and rectangle redaction, and uses one shared raster redaction pipeline so overlay preview and exported output stay visually aligned.
+This plan turns the existing mac capture-toolbar `马赛克` button into a shippable annotation tool in `xxsnap`. The implementation stays inside the current mac overlay architecture, adds two concrete Mosaic annotation kinds for sliding and rectangle redaction, and uses one shared raster redaction pipeline so overlay preview and exported output stay visually aligned.
 
 ---
 
 ## Problem Frame
 
-`snipory-v2` already has a visible Mosaic entry in the main toolbar, but it still routes to the unfinished-tool placeholder. The finalized requirements define Mosaic as the next single-tool iteration: activate quickly, support Gaussian blur and pixel mosaic, support both sliding and rectangle workflows, and leave other unfinished tools untouched (see origin: `docs/brainstorms/2026-06-23-mosaic-tool-requirements.md`).
+`xxsnap` already has a visible Mosaic entry in the main toolbar, but it still routes to the unfinished-tool placeholder. The finalized requirements define Mosaic as the next single-tool iteration: activate quickly, support Gaussian blur and pixel mosaic, support both sliding and rectangle workflows, and leave other unfinished tools untouched (see origin: `docs/brainstorms/2026-06-23-mosaic-tool-requirements.md`).
 
 The current overlay system is already strong on activation, selection, movement, delete, undo/redo, and export for shape, arrow, brush, and marker annotations. The main implementation challenge is not “how to add another button”; it is “how to add a pixel-based redaction effect without forking preview and export behavior into two drifting code paths.”
 

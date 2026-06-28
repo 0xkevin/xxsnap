@@ -2,7 +2,7 @@
 
 ## Context
 
-Snipory v2 mac already supports hover-to-select regions before the screenshot selection is locked. The current implementation uses macOS window candidates plus synthetic menu bar and Dock candidates. This is reliable for whole windows and system UI strips, but it does not understand smaller visual structures inside a window.
+xxsnap mac already supports hover-to-select regions before the screenshot selection is locked. The current implementation uses macOS window candidates plus synthetic menu bar and Dock candidates. This is reliable for whole windows and system UI strips, but it does not understand smaller visual structures inside a window.
 
 The same overlay also supports mouse-wheel resizing after a selection is locked. The current resize curve still feels too fast for precise adjustment, so this design slows the wheel response while preserving the ability to expand to the full current screen.
 
@@ -93,7 +93,7 @@ Add focused mac tests for:
 Run the mac XCTest target when possible:
 
 ```bash
-xcodebuild -project platforms/mac/snipory.xcodeproj -scheme snipory -configuration Debug -derivedDataPath build/xcode-derived test
+xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived test
 ```
 
 If the full XCTest target is blocked by signing, permissions, or environment-sensitive screen capture tests, run the nearest focused tests and the mac app build, then report the exact blocker.

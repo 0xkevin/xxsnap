@@ -9,7 +9,7 @@ type: requirements
 
 ## Summary
 
-The existing Mosaic button in the Snipory v2 mac capture toolbar becomes a usable redaction tool. The first version supports both brush-like drag redaction and editable rectangular redaction, with Gaussian blur and pixel mosaic modes available from the secondary toolbar.
+The existing Mosaic button in the xxsnap mac capture toolbar becomes a usable redaction tool. The first version supports both brush-like drag redaction and editable rectangular redaction, with Gaussian blur and pixel mosaic modes available from the secondary toolbar.
 
 ---
 

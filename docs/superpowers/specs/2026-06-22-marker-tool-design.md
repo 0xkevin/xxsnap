@@ -2,7 +2,7 @@
 
 ## Context
 
-Snipory v2 mac already has rectangle/ellipse, arrow line, and brush annotation tools in the screenshot overlay. The main toolbar still shows the `marker` button as an unfinished placeholder. This design turns that button into an independent highlighter-style annotation tool.
+xxsnap mac already has rectangle/ellipse, arrow line, and brush annotation tools in the screenshot overlay. The main toolbar still shows the `marker` button as an unfinished placeholder. This design turns that button into an independent highlighter-style annotation tool.
 
 The marker tool is mac-overlay scoped for this iteration. It should follow the existing `SelectionOverlayWindow`, `SelectionToolbarState`, and `CaptureAnnotationRenderer` patterns, and it should not change the behavior of existing shape, arrow line, brush, copy, save, undo, or redo flows.
 
@@ -123,7 +123,7 @@ Add focused tests for:
 Run the mac XCTest target when possible:
 
 ```bash
-xcodebuild -project platforms/mac/snipory.xcodeproj -scheme snipory -configuration Debug -derivedDataPath build/xcode-derived test
+xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived test
 ```
 
 If full tests are blocked by the existing screen-capture environment-sensitive test, run focused marker-related tests and the mac app build, then report the exact blocker.

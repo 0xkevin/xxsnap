@@ -6,7 +6,7 @@
 
 **Architecture:** Keep the work inside the existing custom AppKit overlay. `SelectionOverlayWindow.swift` owns tool activation, hit testing, cursor behavior, sampler state, and selection resizing; `SelectionToolbarState.swift` owns pure helper decisions such as sampler visibility and wheel-zoom geometry. Existing renderer output is reused to build the visible composite sample source.
 
-**Tech Stack:** Swift 5, AppKit, XCTest, Xcode project resources, existing Snipory v2 mac overlay/test helpers.
+**Tech Stack:** Swift 5, AppKit, XCTest, Xcode project resources, existing xxsnap mac overlay/test helpers.
 
 ---
 
@@ -36,7 +36,7 @@ They share the same overlay state and tests, so one implementation plan is appro
   - Add focused toolbar, sampler, clipboard, and wheel zoom tests.
 - Modify `platforms/mac/project.yml`
   - Add root `eyedropper.svg` as a bundled resource.
-- Modify `platforms/mac/snipory.xcodeproj/project.pbxproj`
+- Modify `platforms/mac/xxsnap.xcodeproj/project.pbxproj`
   - Add `eyedropper.svg` to the app target resource phase, following existing root SVG resource entries.
 - Modify `docs/annotation-tools-user-guide.md`
   - Document explicit eyedropper and global wheel selection resizing.
@@ -52,7 +52,7 @@ They share the same overlay state and tests, so one implementation plan is appro
 - Modify: `platforms/mac/Sources/Overlay/SelectionOverlayWindow.swift`
 - Modify: `platforms/mac/Tests/SelectionToolbarStateTests.swift`
 - Modify: `platforms/mac/project.yml`
-- Modify: `platforms/mac/snipory.xcodeproj/project.pbxproj`
+- Modify: `platforms/mac/xxsnap.xcodeproj/project.pbxproj`
 
 - [ ] **Step 1: Write failing toolbar and resource tests**
 
@@ -112,7 +112,7 @@ func testActivatingAnnotationToolExitsEyedropperMode() throws {
 Run:
 
 ```bash
-xcodebuild -project platforms/mac/snipory.xcodeproj -scheme snipory -configuration Debug -derivedDataPath build/xcode-derived test -only-testing:sniporyTests/SelectionToolbarStateTests/testEyedropperToolbarButtonSitsImmediatelyBeforeMosaic -only-testing:sniporyTests/SelectionToolbarStateTests/testEyedropperSvgIsBundledAndReadable -only-testing:sniporyTests/SelectionToolbarStateTests/testEyedropperToolbarButtonTogglesExplicitSamplerMode -only-testing:sniporyTests/SelectionToolbarStateTests/testActivatingAnnotationToolExitsEyedropperMode
+xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived test -only-testing:xxsnapTests/SelectionToolbarStateTests/testEyedropperToolbarButtonSitsImmediatelyBeforeMosaic -only-testing:xxsnapTests/SelectionToolbarStateTests/testEyedropperSvgIsBundledAndReadable -only-testing:xxsnapTests/SelectionToolbarStateTests/testEyedropperToolbarButtonTogglesExplicitSamplerMode -only-testing:xxsnapTests/SelectionToolbarStateTests/testActivatingAnnotationToolExitsEyedropperMode
 ```
 
 Expected: FAIL because `.eyedropper`, test helpers, tooltip, and bundled resource do not exist yet.
@@ -281,7 +281,7 @@ Add this entry under the `snipory` target `sources` list in `platforms/mac/proje
       - ../../../eyedropper.svg
 ```
 
-Update `platforms/mac/snipory.xcodeproj/project.pbxproj` following the existing root SVG entries such as `border-corner-rounded.svg`:
+Update `platforms/mac/xxsnap.xcodeproj/project.pbxproj` following the existing root SVG entries such as `border-corner-rounded.svg`:
 
 ```pbxproj
 A10000000000000000000033 /* eyedropper.svg in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000033 /* eyedropper.svg */; };
@@ -295,7 +295,7 @@ Add `A20000000000000000000033 /* eyedropper.svg */,` to the `Icons` group and `A
 Run:
 
 ```bash
-xcodebuild -project platforms/mac/snipory.xcodeproj -scheme snipory -configuration Debug -derivedDataPath build/xcode-derived test -only-testing:sniporyTests/SelectionToolbarStateTests/testEyedropperToolbarButtonSitsImmediatelyBeforeMosaic -only-testing:sniporyTests/SelectionToolbarStateTests/testEyedropperSvgIsBundledAndReadable -only-testing:sniporyTests/SelectionToolbarStateTests/testEyedropperToolbarButtonTogglesExplicitSamplerMode -only-testing:sniporyTests/SelectionToolbarStateTests/testActivatingAnnotationToolExitsEyedropperMode
+xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived test -only-testing:xxsnapTests/SelectionToolbarStateTests/testEyedropperToolbarButtonSitsImmediatelyBeforeMosaic -only-testing:xxsnapTests/SelectionToolbarStateTests/testEyedropperSvgIsBundledAndReadable -only-testing:xxsnapTests/SelectionToolbarStateTests/testEyedropperToolbarButtonTogglesExplicitSamplerMode -only-testing:xxsnapTests/SelectionToolbarStateTests/testActivatingAnnotationToolExitsEyedropperMode
 ```
 
 Expected: PASS.
@@ -303,7 +303,7 @@ Expected: PASS.
 - [ ] **Step 8: Commit toolbar entry**
 
 ```bash
-git add platforms/mac/Sources/Overlay/SelectionToolbarState.swift platforms/mac/Sources/Overlay/SelectionOverlayWindow.swift platforms/mac/Tests/SelectionToolbarStateTests.swift platforms/mac/project.yml platforms/mac/snipory.xcodeproj/project.pbxproj
+git add platforms/mac/Sources/Overlay/SelectionToolbarState.swift platforms/mac/Sources/Overlay/SelectionOverlayWindow.swift platforms/mac/Tests/SelectionToolbarStateTests.swift platforms/mac/project.yml platforms/mac/xxsnap.xcodeproj/project.pbxproj
 git commit -m "feat(mac): add eyedropper toolbar entry"
 ```
 
@@ -426,7 +426,7 @@ private func redFilledAnnotationStyle() -> CaptureAnnotationStyle {
 Run:
 
 ```bash
-xcodebuild -project platforms/mac/snipory.xcodeproj -scheme snipory -configuration Debug -derivedDataPath build/xcode-derived test -only-testing:sniporyTests/SelectionToolbarStateTests/testExplicitEyedropperCanSampleWhenAnnotationsExist -only-testing:sniporyTests/SelectionToolbarStateTests/testExplicitEyedropperHidesOutsideLockedSelection -only-testing:sniporyTests/SelectionToolbarStateTests/testEyedropperDoesNotMoveSelectionOrAnnotationsOnDrag -only-testing:sniporyTests/SelectionToolbarStateTests/testEyedropperPlainCCopiesOnlyColorText -only-testing:sniporyTests/SelectionToolbarStateTests/testEyedropperCommandCStillFinishesWithCopyAction
+xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived test -only-testing:xxsnapTests/SelectionToolbarStateTests/testExplicitEyedropperCanSampleWhenAnnotationsExist -only-testing:xxsnapTests/SelectionToolbarStateTests/testExplicitEyedropperHidesOutsideLockedSelection -only-testing:xxsnapTests/SelectionToolbarStateTests/testEyedropperDoesNotMoveSelectionOrAnnotationsOnDrag -only-testing:xxsnapTests/SelectionToolbarStateTests/testEyedropperPlainCCopiesOnlyColorText -only-testing:xxsnapTests/SelectionToolbarStateTests/testEyedropperCommandCStillFinishesWithCopyAction
 ```
 
 Expected: FAIL because explicit sampler helpers and visible-composite sampling do not exist.
@@ -695,7 +695,7 @@ var test_isColorSamplerVisible: Bool {
 Run:
 
 ```bash
-xcodebuild -project platforms/mac/snipory.xcodeproj -scheme snipory -configuration Debug -derivedDataPath build/xcode-derived test -only-testing:sniporyTests/SelectionToolbarStateTests/testExplicitEyedropperCanSampleWhenAnnotationsExist -only-testing:sniporyTests/SelectionToolbarStateTests/testExplicitEyedropperHidesOutsideLockedSelection -only-testing:sniporyTests/SelectionToolbarStateTests/testEyedropperDoesNotMoveSelectionOrAnnotationsOnDrag -only-testing:sniporyTests/SelectionToolbarStateTests/testEyedropperPlainCCopiesOnlyColorText -only-testing:sniporyTests/SelectionToolbarStateTests/testEyedropperCommandCStillFinishesWithCopyAction
+xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived test -only-testing:xxsnapTests/SelectionToolbarStateTests/testExplicitEyedropperCanSampleWhenAnnotationsExist -only-testing:xxsnapTests/SelectionToolbarStateTests/testExplicitEyedropperHidesOutsideLockedSelection -only-testing:xxsnapTests/SelectionToolbarStateTests/testEyedropperDoesNotMoveSelectionOrAnnotationsOnDrag -only-testing:xxsnapTests/SelectionToolbarStateTests/testEyedropperPlainCCopiesOnlyColorText -only-testing:xxsnapTests/SelectionToolbarStateTests/testEyedropperCommandCStillFinishesWithCopyAction
 ```
 
 Expected: PASS.
@@ -794,7 +794,7 @@ func testWheelZoomRemapsExistingAnnotations() throws {
 Run:
 
 ```bash
-xcodebuild -project platforms/mac/snipory.xcodeproj -scheme snipory -configuration Debug -derivedDataPath build/xcode-derived test -only-testing:sniporyTests/SelectionToolbarStateTests/testWheelZoomExpandsLockedSelectionAroundPointer -only-testing:sniporyTests/SelectionToolbarStateTests/testWheelZoomShrinksNoSmallerThanSixtyFourPoints -only-testing:sniporyTests/SelectionToolbarStateTests/testWheelZoomIsIgnoredOverToolbar -only-testing:sniporyTests/SelectionToolbarStateTests/testWheelZoomIsIgnoredWhileDrawingAnnotation -only-testing:sniporyTests/SelectionToolbarStateTests/testWheelZoomRemapsExistingAnnotations
+xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived test -only-testing:xxsnapTests/SelectionToolbarStateTests/testWheelZoomExpandsLockedSelectionAroundPointer -only-testing:xxsnapTests/SelectionToolbarStateTests/testWheelZoomShrinksNoSmallerThanSixtyFourPoints -only-testing:xxsnapTests/SelectionToolbarStateTests/testWheelZoomIsIgnoredOverToolbar -only-testing:xxsnapTests/SelectionToolbarStateTests/testWheelZoomIsIgnoredWhileDrawingAnnotation -only-testing:xxsnapTests/SelectionToolbarStateTests/testWheelZoomRemapsExistingAnnotations
 ```
 
 Expected: FAIL because wheel zoom and test helpers do not exist.
@@ -982,7 +982,7 @@ private func test_scrollEvent(at point: NSPoint, deltaY: CGFloat) -> NSEvent {
 Run:
 
 ```bash
-xcodebuild -project platforms/mac/snipory.xcodeproj -scheme snipory -configuration Debug -derivedDataPath build/xcode-derived test -only-testing:sniporyTests/SelectionToolbarStateTests/testWheelZoomExpandsLockedSelectionAroundPointer -only-testing:sniporyTests/SelectionToolbarStateTests/testWheelZoomShrinksNoSmallerThanSixtyFourPoints -only-testing:sniporyTests/SelectionToolbarStateTests/testWheelZoomIsIgnoredOverToolbar -only-testing:sniporyTests/SelectionToolbarStateTests/testWheelZoomIsIgnoredWhileDrawingAnnotation -only-testing:sniporyTests/SelectionToolbarStateTests/testWheelZoomRemapsExistingAnnotations
+xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived test -only-testing:xxsnapTests/SelectionToolbarStateTests/testWheelZoomExpandsLockedSelectionAroundPointer -only-testing:xxsnapTests/SelectionToolbarStateTests/testWheelZoomShrinksNoSmallerThanSixtyFourPoints -only-testing:xxsnapTests/SelectionToolbarStateTests/testWheelZoomIsIgnoredOverToolbar -only-testing:xxsnapTests/SelectionToolbarStateTests/testWheelZoomIsIgnoredWhileDrawingAnnotation -only-testing:xxsnapTests/SelectionToolbarStateTests/testWheelZoomRemapsExistingAnnotations
 ```
 
 Expected: PASS.
@@ -1035,7 +1035,7 @@ Append this section to `platforms/mac/Tests/manual-capture-checklist.md`:
 Run:
 
 ```bash
-xcodebuild -project platforms/mac/snipory.xcodeproj -scheme snipory -configuration Debug -derivedDataPath build/xcode-derived test -only-testing:sniporyTests/SelectionToolbarStateTests/testEyedropperToolbarButtonSitsImmediatelyBeforeMosaic -only-testing:sniporyTests/SelectionToolbarStateTests/testEyedropperSvgIsBundledAndReadable -only-testing:sniporyTests/SelectionToolbarStateTests/testEyedropperToolbarButtonTogglesExplicitSamplerMode -only-testing:sniporyTests/SelectionToolbarStateTests/testActivatingAnnotationToolExitsEyedropperMode -only-testing:sniporyTests/SelectionToolbarStateTests/testExplicitEyedropperCanSampleWhenAnnotationsExist -only-testing:sniporyTests/SelectionToolbarStateTests/testExplicitEyedropperHidesOutsideLockedSelection -only-testing:sniporyTests/SelectionToolbarStateTests/testEyedropperDoesNotMoveSelectionOrAnnotationsOnDrag -only-testing:sniporyTests/SelectionToolbarStateTests/testEyedropperPlainCCopiesOnlyColorText -only-testing:sniporyTests/SelectionToolbarStateTests/testEyedropperCommandCStillFinishesWithCopyAction -only-testing:sniporyTests/SelectionToolbarStateTests/testWheelZoomExpandsLockedSelectionAroundPointer -only-testing:sniporyTests/SelectionToolbarStateTests/testWheelZoomShrinksNoSmallerThanSixtyFourPoints -only-testing:sniporyTests/SelectionToolbarStateTests/testWheelZoomIsIgnoredOverToolbar -only-testing:sniporyTests/SelectionToolbarStateTests/testWheelZoomIsIgnoredWhileDrawingAnnotation -only-testing:sniporyTests/SelectionToolbarStateTests/testWheelZoomRemapsExistingAnnotations
+xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived test -only-testing:xxsnapTests/SelectionToolbarStateTests/testEyedropperToolbarButtonSitsImmediatelyBeforeMosaic -only-testing:xxsnapTests/SelectionToolbarStateTests/testEyedropperSvgIsBundledAndReadable -only-testing:xxsnapTests/SelectionToolbarStateTests/testEyedropperToolbarButtonTogglesExplicitSamplerMode -only-testing:xxsnapTests/SelectionToolbarStateTests/testActivatingAnnotationToolExitsEyedropperMode -only-testing:xxsnapTests/SelectionToolbarStateTests/testExplicitEyedropperCanSampleWhenAnnotationsExist -only-testing:xxsnapTests/SelectionToolbarStateTests/testExplicitEyedropperHidesOutsideLockedSelection -only-testing:xxsnapTests/SelectionToolbarStateTests/testEyedropperDoesNotMoveSelectionOrAnnotationsOnDrag -only-testing:xxsnapTests/SelectionToolbarStateTests/testEyedropperPlainCCopiesOnlyColorText -only-testing:xxsnapTests/SelectionToolbarStateTests/testEyedropperCommandCStillFinishesWithCopyAction -only-testing:xxsnapTests/SelectionToolbarStateTests/testWheelZoomExpandsLockedSelectionAroundPointer -only-testing:xxsnapTests/SelectionToolbarStateTests/testWheelZoomShrinksNoSmallerThanSixtyFourPoints -only-testing:xxsnapTests/SelectionToolbarStateTests/testWheelZoomIsIgnoredOverToolbar -only-testing:xxsnapTests/SelectionToolbarStateTests/testWheelZoomIsIgnoredWhileDrawingAnnotation -only-testing:xxsnapTests/SelectionToolbarStateTests/testWheelZoomRemapsExistingAnnotations
 ```
 
 Expected: PASS.
@@ -1045,7 +1045,7 @@ Expected: PASS.
 Run:
 
 ```bash
-xcodebuild -project platforms/mac/snipory.xcodeproj -scheme snipory -configuration Debug -derivedDataPath build/xcode-derived build
+xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived build
 ```
 
 Expected: BUILD SUCCEEDED.
@@ -1055,7 +1055,7 @@ Expected: BUILD SUCCEEDED.
 Run:
 
 ```bash
-xcodebuild -project platforms/mac/snipory.xcodeproj -scheme snipory -configuration Debug -derivedDataPath build/xcode-derived test
+xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived test
 ```
 
 Expected: PASS. If this fails because of signing, screen-recording permissions, or environment-sensitive capture tests, record the exact failing test and the focused-test/build results.

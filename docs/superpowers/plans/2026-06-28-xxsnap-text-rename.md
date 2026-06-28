@@ -13,14 +13,14 @@
 ## File Structure
 
 - Modify: `project.yml` to rename targets, scheme, Bundle IDs, product names, signing identity, resources, and test host.
-- Regenerate/rename: `platforms/mac/snipory.xcodeproj` to `platforms/mac/xxsnap.xcodeproj` with XcodeGen.
+- Historical rename from formerly known as Snipory v2: regenerate/rename `platforms/mac/snipory.xcodeproj` to `platforms/mac/xxsnap.xcodeproj` with XcodeGen.
 - Rename resources: `platforms/mac/Resources/Snipory.png`, `platforms/mac/Resources/Snipory.icns`, `platforms/mac/Resources/Icons/Snipory.png`, and `platforms/mac/Resources/Icons/Snipory.icns` to xxsnap names.
 - Rename bridge/test files only where the filename is user/product identity rather than core behavior: `Sources/Bridge/SniporyMac-Bridging-Header.h` and `Tests/SniporyMacTests.swift`.
 - Modify app identity strings in `platforms/mac/Sources/App/*.swift`.
 - Modify overlay model, rendering, interaction, options toolbar, and test helpers in `platforms/mac/Sources/Overlay/CaptureAnnotationRenderer.swift`, `SelectionOverlayWindow.swift`, and `SelectionToolbarState.swift`.
 - Modify tests in `platforms/mac/Tests/*.swift`.
 - Modify docs and commands in `README.md`, relevant `docs/**/*.md`, and platform manual checklists after the directory rename.
-- Move repository directory from `/Users/kevin/Projects/open-source/Snipory/snipory-v2` to `/Users/kevin/Projects/open-source/Snipory/xxsnap` after this plan has been committed.
+- Historical rename from formerly known as Snipory v2: move repository directory from `/Users/kevin/Projects/open-source/Snipory/snipory-v2` to `/Users/kevin/Projects/open-source/Snipory/xxsnap` after this plan has been committed.
 
 ---
 
@@ -75,7 +75,7 @@ func testCaptureRefreshIgnoresXxsnapAsRefreshTarget() {
 Run:
 
 ```bash
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project platforms/mac/snipory.xcodeproj -scheme snipory -configuration Debug -derivedDataPath build/xcode-derived test -only-testing:sniporyTests/AppSettingsTests/testBundleIdentityUsesXxsnap -only-testing:sniporyTests/SelectionToolbarStateTests/testDefaultCaptureFilenameIncludesTimestampToSecond -only-testing:sniporyTests/SelectionToolbarStateTests/testCaptureRefreshIgnoresXxsnapAsRefreshTarget
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived test -only-testing:xxsnapTests/AppSettingsTests/testBundleIdentityUsesXxsnap -only-testing:xxsnapTests/SelectionToolbarStateTests/testDefaultCaptureFilenameIncludesTimestampToSecond -only-testing:xxsnapTests/SelectionToolbarStateTests/testCaptureRefreshIgnoresXxsnapAsRefreshTarget
 ```
 
 Expected: FAIL because the Bundle ID/display name and default filename still use Snipory.
@@ -95,7 +95,7 @@ Leave these tests failing until Task 2 changes the product identity.
 - Rename: `platforms/mac/Resources/Icons/Snipory.png` -> `platforms/mac/Resources/Icons/xxsnap.png`
 - Rename: `platforms/mac/Resources/Icons/Snipory.icns` -> `platforms/mac/Resources/Icons/xxsnap.icns`
 - Rename: `platforms/mac/Sources/Bridge/SniporyMac-Bridging-Header.h` -> `platforms/mac/Sources/Bridge/xxsnap-Bridging-Header.h`
-- Rename/regenerate: `platforms/mac/snipory.xcodeproj` -> `platforms/mac/xxsnap.xcodeproj`
+- Historical rename from formerly known as Snipory v2: `platforms/mac/snipory.xcodeproj` -> `platforms/mac/xxsnap.xcodeproj`
 - Modify: `platforms/mac/Sources/App/AppDelegate.swift`
 - Modify: `platforms/mac/Sources/App/CaptureCoordinator.swift`
 - Modify: `platforms/mac/Sources/App/CaptureControlWindowController.swift`
@@ -228,7 +228,7 @@ schemes:
 Run:
 
 ```bash
-rm -rf platforms/mac/snipory.xcodeproj
+rm -rf platforms/mac/snipory.xcodeproj # formerly known as Snipory v2 project path
 (
   cd platforms/mac
   xcodegen generate
@@ -310,7 +310,7 @@ Expected: commit succeeds.
 ### Task 3: Rename v2 Directory to `xxsnap`
 
 **Files:**
-- Move repository directory: `/Users/kevin/Projects/open-source/Snipory/snipory-v2` -> `/Users/kevin/Projects/open-source/Snipory/xxsnap`
+- Historical rename from formerly known as Snipory v2: `/Users/kevin/Projects/open-source/Snipory/snipory-v2` -> `/Users/kevin/Projects/open-source/Snipory/xxsnap`
 - Modify: `README.md`
 - Modify: `docs/**/*.md`
 - Leave external workspace instructions unchanged; update only files tracked by this repository.
@@ -330,7 +330,7 @@ Expected: current directory is the workspace root.
 Run:
 
 ```bash
-mv snipory-v2 xxsnap
+mv snipory-v2 xxsnap # formerly known as Snipory v2 directory
 cd /Users/kevin/Projects/open-source/Snipory/xxsnap
 git status --short --branch
 ```
@@ -366,7 +366,7 @@ pgrep -af "xxsnap.app/Contents/MacOS/xxsnap"
 Run these targeted replacements:
 
 ```bash
-perl -pi -e 's/Snipory v2/xxsnap/g; s/snipory-v2/xxsnap/g; s/Snipory\\.app/xxsnap.app/g; s/Contents\\/MacOS\\/Snipory/Contents\\/MacOS\\/xxsnap/g; s/platforms\\/mac\\/snipory\\.xcodeproj/platforms\\/mac\\/xxsnap.xcodeproj/g; s/-scheme snipory/-scheme xxsnap/g; s/sniporyTests/xxsnapTests/g' README.md docs/**/*.md platforms/mac/Tests/manual-capture-checklist.md platforms/mac/packaging/README.md platforms/win/**/*.md
+perl -pi -e 's/Snipory v2/xxsnap/g; s/snipory-v2/xxsnap/g; s/Snipory\\.app/xxsnap.app/g; s/Contents\\/MacOS\\/Snipory/Contents\\/MacOS\\/xxsnap/g; s/platforms\\/mac\\/snipory\\.xcodeproj/platforms\\/mac\\/xxsnap.xcodeproj/g; s/-scheme snipory/-scheme xxsnap/g; s/sniporyTests/xxsnapTests/g' README.md docs/**/*.md platforms/mac/Tests/manual-capture-checklist.md platforms/mac/packaging/README.md platforms/win/**/*.md # formerly known as Snipory v2 replacement recipe
 ```
 
 Then manually inspect the references to `../snipory` and keep them unchanged because the legacy Qt project is still the migration reference.
@@ -386,7 +386,7 @@ Do not rename `snipory_core`, include paths, or C++ namespaces in this task.
 Run:
 
 ```bash
-rg -n "snipory-v2|Snipory\\.app|Contents/MacOS/Snipory|com\\.snipory\\.v2\\.mac|Snipory 截图|Snipory 没有录屏权限" README.md docs platforms/mac platforms/win CMakeLists.txt
+rg -n "snipory-v2|Snipory\\.app|Contents/MacOS/Snipory|com\\.snipory\\.v2\\.mac|Snipory 截图|Snipory 没有录屏权限" README.md docs platforms/mac platforms/win CMakeLists.txt # formerly known as Snipory v2 stale scan
 ```
 
 Expected: no output, except historical references in committed design/plan docs where the text explicitly says “formerly known as” or `../snipory`.
@@ -1252,9 +1252,9 @@ Expected: output includes `Authority=xxsnap Local Dev` and `Identifier=com.xxsna
 Run:
 
 ```bash
-pkill -f "/Users/kevin/Projects/open-source/Snipory/snipory-v2/build/xcode-derived/Build/Products/Debug/Snipory.app/Contents/MacOS/Snipory" || true
-pkill -f "Snipory.app/Contents/MacOS/Snipory" || true
-pgrep -af "Snipory.app/Contents/MacOS/Snipory" || true
+pkill -f "/Users/kevin/Projects/open-source/Snipory/xxsnap/build/xcode-derived/Build/Products/Debug/xxsnap.app/Contents/MacOS/xxsnap" || true
+pkill -f "xxsnap.app/Contents/MacOS/xxsnap" || true
+pgrep -af "xxsnap.app/Contents/MacOS/xxsnap" || true
 ```
 
 Expected: final `pgrep` prints no old Snipory process.

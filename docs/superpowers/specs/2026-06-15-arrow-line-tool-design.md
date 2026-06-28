@@ -2,9 +2,9 @@
 
 ## Context
 
-Snipory v2 mac currently has the first annotation tool implemented for rectangle and ellipse shapes. The second main toolbar button is already represented by the `polyline` tool and uses the `arrow-line` icon, but its tooltip and behavior still act as unfinished functionality.
+xxsnap mac currently has the first annotation tool implemented for rectangle and ellipse shapes. The second main toolbar button is already represented by the `polyline` tool and uses the `arrow-line` icon, but its tooltip and behavior still act as unfinished functionality.
 
-This design implements the second tool as the arrow line annotation tool in `snipory-v2/platforms/mac`. The existing Swift/AppKit overlay remains the UI boundary for this change. The legacy Qt project is a reference only and is not modified.
+This design implements the second tool as the arrow line annotation tool in `xxsnap/platforms/mac`. The existing Swift/AppKit overlay remains the UI boundary for this change. The legacy Qt project is a reference only and is not modified.
 
 ## User Goal
 

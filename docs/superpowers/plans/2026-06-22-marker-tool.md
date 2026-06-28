@@ -63,7 +63,7 @@ func testAnnotationRendererPreservesImageDimensionsWhenDrawingMarker() throws {
 Run:
 
 ```bash
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project platforms/mac/snipory.xcodeproj -scheme snipory -configuration Debug -derivedDataPath build/xcode-derived test -only-testing:sniporyTests/SniporyMacTests/testAnnotationRendererDrawsMarkerLineOntoImageWithFixedOpacity -only-testing:sniporyTests/SniporyMacTests/testAnnotationRendererPreservesImageDimensionsWhenDrawingMarker
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived test -only-testing:xxsnapTests/SniporyMacTests/testAnnotationRendererDrawsMarkerLineOntoImageWithFixedOpacity -only-testing:xxsnapTests/SniporyMacTests/testAnnotationRendererPreservesImageDimensionsWhenDrawingMarker
 ```
 
 Expected: compile fails because `CaptureMarkerLine`, `.marker`, and `markerLine` do not exist.
@@ -222,7 +222,7 @@ func testMarkerOptionsToolbarShowsWidthAndColorsOnly() {
 Run:
 
 ```bash
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project platforms/mac/snipory.xcodeproj -scheme snipory -configuration Debug -derivedDataPath build/xcode-derived test -only-testing:sniporyTests/SelectionToolbarStateTests/testMarkerStrokeWidthValuesUseHighlighterSizes -only-testing:sniporyTests/SelectionToolbarStateTests/testMarkerActivationUsesDefaultHighlighterStyle -only-testing:sniporyTests/SelectionToolbarStateTests/testMarkerOptionsToolbarShowsWidthAndColorsOnly
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived test -only-testing:xxsnapTests/SelectionToolbarStateTests/testMarkerStrokeWidthValuesUseHighlighterSizes -only-testing:xxsnapTests/SelectionToolbarStateTests/testMarkerActivationUsesDefaultHighlighterStyle -only-testing:xxsnapTests/SelectionToolbarStateTests/testMarkerOptionsToolbarShowsWidthAndColorsOnly
 ```
 
 Expected: compile fails because `.marker` options mode and `markerActivationStyle` do not exist.
@@ -386,7 +386,7 @@ func testOverlayWindowIgnoresVeryShortMarkerDrag() {
 Run:
 
 ```bash
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project platforms/mac/snipory.xcodeproj -scheme snipory -configuration Debug -derivedDataPath build/xcode-derived test -only-testing:sniporyTests/SelectionToolbarStateTests/testOverlayWindowDrawsMarkerAnnotationFromDrag -only-testing:sniporyTests/SelectionToolbarStateTests/testMarkerShiftDragSnapsToNearestHorizontalVerticalOrDiagonal -only-testing:sniporyTests/SelectionToolbarStateTests/testOverlayWindowIgnoresVeryShortMarkerDrag
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived test -only-testing:xxsnapTests/SelectionToolbarStateTests/testOverlayWindowDrawsMarkerAnnotationFromDrag -only-testing:xxsnapTests/SelectionToolbarStateTests/testMarkerShiftDragSnapsToNearestHorizontalVerticalOrDiagonal -only-testing:xxsnapTests/SelectionToolbarStateTests/testOverlayWindowIgnoresVeryShortMarkerDrag
 ```
 
 Expected: compile fails because marker helpers and test accessors do not exist.
@@ -666,7 +666,7 @@ func testDeleteKeyRemovesSelectedMarkerAnnotation() {
 Run:
 
 ```bash
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project platforms/mac/snipory.xcodeproj -scheme snipory -configuration Debug -derivedDataPath build/xcode-derived test -only-testing:sniporyTests/SelectionToolbarStateTests/testOverlayWindowMovesSelectedMarkerAnnotation -only-testing:sniporyTests/SelectionToolbarStateTests/testMarkerAnnotationStyleIsEditableAfterDrawing -only-testing:sniporyTests/SelectionToolbarStateTests/testDeleteKeyRemovesSelectedMarkerAnnotation
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived test -only-testing:xxsnapTests/SelectionToolbarStateTests/testOverlayWindowMovesSelectedMarkerAnnotation -only-testing:xxsnapTests/SelectionToolbarStateTests/testMarkerAnnotationStyleIsEditableAfterDrawing -only-testing:xxsnapTests/SelectionToolbarStateTests/testDeleteKeyRemovesSelectedMarkerAnnotation
 ```
 
 Expected: at least movement and support-helper tests fail.
@@ -849,7 +849,7 @@ func testShapeArrowBrushAndMarkerToolbarsAreDistinct() {
 Run:
 
 ```bash
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project platforms/mac/snipory.xcodeproj -scheme snipory -configuration Debug -derivedDataPath build/xcode-derived test -only-testing:sniporyTests/SelectionToolbarStateTests -only-testing:sniporyTests/SniporyMacTests
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived test -only-testing:xxsnapTests/SelectionToolbarStateTests -only-testing:xxsnapTests/SniporyMacTests
 ```
 
 Expected: `SelectionToolbarStateTests` and `SniporyMacTests` pass.
@@ -859,7 +859,7 @@ Expected: `SelectionToolbarStateTests` and `SniporyMacTests` pass.
 Run:
 
 ```bash
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project platforms/mac/snipory.xcodeproj -scheme snipory -configuration Debug -derivedDataPath build/xcode-derived test
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived test
 ```
 
 Expected: all tests pass, except the known environment-sensitive `ScreenCaptureServiceTests.testNativeScreenshotTaggedWithDisplayColorSpacePreservesSolidWindowByteValues` may fail on this machine. If it fails, record the exact failure and continue to Step 4.
@@ -869,7 +869,7 @@ Expected: all tests pass, except the known environment-sensitive `ScreenCaptureS
 Run:
 
 ```bash
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project platforms/mac/snipory.xcodeproj -scheme snipory -configuration Debug -derivedDataPath build/xcode-derived build
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived build
 ```
 
 Expected: `** BUILD SUCCEEDED **`.
@@ -901,9 +901,9 @@ Expected: no output.
 Run:
 
 ```bash
-pkill -f "/Users/kevin/Projects/open-source/Snipory/snipory-v2/build/xcode-derived/Build/Products/Debug/Snipory.app/Contents/MacOS/Snipory" || true
-open -n /Users/kevin/Projects/open-source/Snipory/snipory-v2/build/xcode-derived/Build/Products/Debug/Snipory.app
-pgrep -af "Snipory.app/Contents/MacOS/Snipory"
+pkill -f "/Users/kevin/Projects/open-source/Snipory/xxsnap/build/xcode-derived/Build/Products/Debug/xxsnap.app/Contents/MacOS/xxsnap" || true
+open -n /Users/kevin/Projects/open-source/Snipory/xxsnap/build/xcode-derived/Build/Products/Debug/xxsnap.app
+pgrep -af "xxsnap.app/Contents/MacOS/xxsnap"
 ```
 
 Expected: one running Snipory debug app process from `build/xcode-derived`.

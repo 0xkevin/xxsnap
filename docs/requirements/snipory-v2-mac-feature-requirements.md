@@ -1,13 +1,13 @@
-# Snipory v2 Mac 功能需求说明书
+# xxsnap Mac 功能需求说明书
 
 > 文档状态：持续维护中  
 > 最后更新：2026-06-27  
-> 适用范围：`snipory-v2/` native-shell 重写版本，当前以 macOS 实现为事实基准，并作为后续 Windows native shell 开发的产品规格来源。  
-> 配套原型：`docs/prototypes/snipory-v2-capture-overlay-prototype.html`
+> 适用范围：`xxsnap/` native-shell 重写版本，当前以 macOS 实现为事实基准，并作为后续 Windows native shell 开发的产品规格来源。
+> 配套原型：`docs/prototypes/` 中的 capture overlay prototype（历史文件名暂未迁移）
 
 ## 1. 文档目标
 
-这份需求说明书沉淀 Snipory v2 mac 已完成和正在形成的产品能力，降低后续开发 Windows 版本时反复编写提示词、重复解释交互细节和遗漏规则的成本。
+这份需求说明书沉淀 xxsnap mac 已完成和正在形成的产品能力，降低后续开发 Windows 版本时反复编写提示词、重复解释交互细节和遗漏规则的成本。
 
 后续开发原则：
 
@@ -459,12 +459,12 @@ Windows 开发建议按以下顺序推进：
 mac 当前推荐命令：
 
 ```bash
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project platforms/mac/snipory.xcodeproj -scheme snipory -configuration Debug -derivedDataPath build/xcode-derived test
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived test
 ```
 
 截至 2026-06-27，本分支最近一次验证结果：
 
-- `sniporyTests` 执行 `298` 个测试。
+- `xxsnapTests` 执行 `298` 个测试。
 - `0` failures。
 - `TEST SUCCEEDED`。
 
@@ -506,23 +506,23 @@ Windows 后续应建立等价验证：
 3. 如果新增工具，补充“已实现工具需求”或从“待实现工具需求占位”移入正式章节。
 4. 更新 `docs/annotation-tools-user-guide.md` 的最终用户说明。
 5. 如影响 Windows 复刻，更新“Windows 版本迁移规则”。
-6. 如影响原型，更新 `docs/prototypes/snipory-v2-capture-overlay-prototype.html`。
+6. 如影响原型，更新 `docs/prototypes/` 中的 capture overlay prototype（历史文件名暂未迁移）。
 7. 在最终回复或 commit message 中说明文档已同步。
 
 ## 12. 后续开发提示词模板
 
-后续让 AI 开发 Snipory v2 功能时，可直接复用：
+后续让 AI 开发 xxsnap 功能时，可直接复用：
 
 ```text
-请在 Snipory v2 中继续开发 [功能名]。
+请在 xxsnap 中继续开发 [功能名]。
 
 必须先阅读并遵循：
-- docs/requirements/snipory-v2-mac-feature-requirements.md
+- 本文件（历史文件名暂未迁移）
 - docs/annotation-tools-user-guide.md
 - 与该功能相关的 docs/brainstorms/ 或 docs/superpowers/ 文档
 
 要求：
-- 以 snipory-v2 为主方向。
+- 以 xxsnap 为主方向。
 - mac 平台代码放在 platforms/mac/。
 - 平台无关逻辑优先进入 core/ 或可迁移模型。
 - 不改变已实现工具的既有行为，除非需求明确要求。

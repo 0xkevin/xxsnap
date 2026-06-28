@@ -2,7 +2,7 @@
 
 ## Context
 
-Snipory v2 is the current native-shell rewrite track. The mac app already ships the screenshot overlay, selection, annotation tools, eyedropper, mosaic, save/copy/pin flows, and a visible toolbar entry for the text tool. The text entry is still an unfinished placeholder.
+xxsnap is the current native-shell rewrite track. The mac app already ships the screenshot overlay, selection, annotation tools, eyedropper, mosaic, save/copy/pin flows, and a visible toolbar entry for the text tool. The text entry is still an unfinished placeholder.
 
 The product direction changes with this work: the v2 product should become `xxsnap`. The old `Snipory` identity should stop being the name users see, the app bundle should register as a new product, and future debug/run commands should use the new app path.
 
@@ -10,11 +10,11 @@ The selected Bundle ID is `com.xxsnap.mac`.
 
 ## Goals
 
-- Rename the v2 directory from `snipory-v2/` to `xxsnap/`.
+- Rename the v2 directory from `snipory-v2/` to `xxsnap/` for the product formerly known as Snipory v2.
 - Rename the mac product from `Snipory` to `xxsnap` in app name, Bundle display name, file names, permission copy, status item copy, save-file defaults, logs, docs, and build/run commands.
 - Change the mac app Bundle ID to `com.xxsnap.mac` and tests to a matching test Bundle ID.
 - Re-sign and register the debug app as `xxsnap.app`.
-- Stop existing running `Snipory.app` instances before launching the renamed app.
+- Stop existing running `Snipory.app` instances from the product formerly known as Snipory v2 before launching the renamed app.
 - Implement the first shippable text annotation tool on mac.
 
 ## Non-Goals
@@ -55,7 +55,7 @@ The system currently has a `Snipory Local Dev` signing identity. For xxsnap, cre
 
 The mac project should sign the renamed debug app with `xxsnap Local Dev`. After build, register the renamed app through the normal Xcode build/LaunchServices path. Because the Bundle ID changes to `com.xxsnap.mac`, macOS will treat this as a new app for privacy permissions.
 
-Before launching the renamed app, stop any running process matching the old debug app path or `Snipory.app/Contents/MacOS/Snipory`. Do not delete user data or unrelated apps during this cleanup.
+Before launching the renamed app, stop any running process matching the old debug app path or `Snipory.app/Contents/MacOS/Snipory` from the product formerly known as Snipory v2. Do not delete user data or unrelated apps during this cleanup.
 
 ## Text Tool Design
 
@@ -134,7 +134,7 @@ Manual smoke check:
 
 ## Acceptance Criteria
 
-- There is no running old `Snipory.app` debug process after migration.
+- There is no running old `Snipory.app` debug process from the product formerly known as Snipory v2 after migration.
 - The active v2 directory is `xxsnap/`.
 - The built mac app is named `xxsnap.app`, signed with `xxsnap Local Dev`, and uses Bundle ID `com.xxsnap.mac`.
 - User-facing app strings say `xxsnap`.

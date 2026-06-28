@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the second Snipory v2 mac annotation tool as an editable, exportable arrow line tool with arrow-specific toolbar controls.
+**Goal:** Build the second xxsnap mac annotation tool as an editable, exportable arrow line tool with arrow-specific toolbar controls.
 
 **Architecture:** Keep this iteration mac-first. Extend the existing Swift annotation model and renderer, add pure toolbar/hit-test helpers in `SelectionToolbarState`, then wire the existing `SelectionOverlayWindow` mouse flow to arrow line creation and editing. Reuse the current options toolbar container and switch visible controls by active annotation kind.
 
@@ -120,7 +120,7 @@ func testArrowLineHitTargetDistinguishesHandlesAndBody() {
 Run:
 
 ```bash
-xcodebuild -project platforms/mac/snipory.xcodeproj -scheme snipory -configuration Debug test
+xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug test
 ```
 
 Expected: fails to compile because `CaptureArrowType`, `CaptureArrowLine`, `OptionsToolbarMode`, and arrow helpers do not exist yet.
@@ -161,7 +161,7 @@ Add `SelectionToolbarState.OptionsToolbarMode`, `OptionsToolbarLayout`, `ArrowTy
 Run:
 
 ```bash
-xcodebuild -project platforms/mac/snipory.xcodeproj -scheme snipory -configuration Debug test
+xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug test
 ```
 
 Expected: Task 1 tests pass or the command reports an environment-specific signing/Xcode blocker.
@@ -213,7 +213,7 @@ func testAnnotationRendererDrawsArrowLineOntoImage() throws {
 Run:
 
 ```bash
-xcodebuild -project platforms/mac/snipory.xcodeproj -scheme snipory -configuration Debug test
+xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug test
 ```
 
 Expected: fails because renderer does not handle `.arrowLine`.
@@ -227,7 +227,7 @@ In `CaptureAnnotationRenderer.draw`, branch `.arrowLine` before shape path creat
 Run:
 
 ```bash
-xcodebuild -project platforms/mac/snipory.xcodeproj -scheme snipory -configuration Debug test
+xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug test
 ```
 
 Expected: renderer test passes or the command reports an environment-specific signing/Xcode blocker.
@@ -336,7 +336,7 @@ Launch the mac app if the build succeeds, select a screenshot region, activate a
 Run:
 
 ```bash
-xcodebuild -project platforms/mac/snipory.xcodeproj -scheme snipory -configuration Debug test
+xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug test
 ```
 
 - [ ] **Step 2: Run build if tests are blocked**
@@ -344,7 +344,7 @@ xcodebuild -project platforms/mac/snipory.xcodeproj -scheme snipory -configurati
 Run:
 
 ```bash
-xcodebuild -project platforms/mac/snipory.xcodeproj -scheme snipory -configuration Debug build
+xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug build
 ```
 
 - [ ] **Step 3: Report exact result**

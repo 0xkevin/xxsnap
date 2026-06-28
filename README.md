@@ -1,6 +1,6 @@
-# Snipory v2
+# xxsnap
 
-Snipory v2 is the native-shell rewrite of Snipory:
+xxsnap is the native-shell screenshot and annotation rewrite formerly known as Snipory v2:
 
 - shared C++ core
 - native macOS shell
@@ -17,9 +17,9 @@ Current status:
 Restart command：
 
 ```bash
-$ pkill -f "/Users/kevin/Projects/open-source/Snipory/snipory-v2/build/xcode-derived/Build/Products/Debug/Snipory.app/Contents/MacOS/Snipory" || true
-$ open -n /Users/kevin/Projects/open-source/Snipory/snipory-v2/build/xcode-derived/Build/Products/Debug/Snipory.app
-$ pgrep -af "Snipory.app/Contents/MacOS/Snipory"
+$ pkill -f "/Users/kevin/Projects/open-source/Snipory/xxsnap/build/xcode-derived/Build/Products/Debug/xxsnap.app/Contents/MacOS/xxsnap" || true
+$ open -n /Users/kevin/Projects/open-source/Snipory/xxsnap/build/xcode-derived/Build/Products/Debug/xxsnap.app
+$ pgrep -af "xxsnap.app/Contents/MacOS/xxsnap"
 ```
 
 https://github.com/Snipaste/feedback/wiki/PRO

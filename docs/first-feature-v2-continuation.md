@@ -1,20 +1,20 @@
 ---
-title: "Snipory v2 first feature continuation"
+title: "xxsnap first feature continuation"
 date: 2026-06-08
 track: knowledge
 component: v2-mac-capture
 status: active
 ---
 
-# Snipory v2 First Feature Continuation
+# xxsnap First Feature Continuation
 
-This document is the durable continuation marker for the CE compound workflow. If context is compacted or lost, continue Snipory development in `snipory-v2`; use the Qt app in `snipory` only as the reference implementation.
+This document is the durable continuation marker for the CE compound workflow. If context is compacted or lost, continue xxsnap development in `xxsnap`; use the Qt app in `snipory` only as the reference implementation.
 
 ## Current Product Direction
 
-- `snipory-v2` is the long-term mainline for macOS and Windows.
+- `xxsnap` is the long-term mainline for macOS and Windows.
 - Qt `snipory` currently has the working first feature and remains the interaction oracle.
-- Shared behavior should move into `snipory-v2/core` first when it is useful for Windows reuse.
+- Shared behavior should move into `xxsnap/core` first when it is useful for Windows reuse.
 - Native platform shells should stay thin and use Core models/geometry where practical.
 
 ## First Feature Scope
@@ -66,7 +66,7 @@ swiftc -typecheck $(rg --files platforms/mac/Sources | rg '\.swift$')
 Full macOS app verification requires a complete Xcode developer directory:
 
 ```bash
-xcodebuild -project platforms/mac/SniporyMac.xcodeproj -scheme SniporyMac -configuration Debug build
+xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug build
 ```
 
 On 2026-06-08, `xcodebuild` was blocked because `xcode-select` pointed at Command Line Tools instead of a full Xcode install.
@@ -75,5 +75,5 @@ On 2026-06-08, `xcodebuild` was blocked because `xcode-select` pointed at Comman
 
 - Run the full Xcode build and XCTest suite after selecting a complete Xcode install.
 - Manually verify the overlay with screenshots on one and two monitor setups.
-- Replace the temporary Swift-only mac annotation export with an ObjC++ bridge into `snipory-v2/core` so Windows and macOS share the same final renderer.
+- Replace the temporary Swift-only mac annotation export with an ObjC++ bridge into `xxsnap/core` so Windows and macOS share the same final renderer.
 - Add Windows shell resources and implement the Windows first feature using the now-expanded Core model and geometry.

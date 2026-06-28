@@ -2,7 +2,7 @@
 
 ## Context
 
-Snipory v2 mac already has a default color sampler in the screenshot overlay. That sampler appears only when no annotation tool is active and no annotations exist, which makes it useful for early inspection but awkward once the user has started marking up the screenshot.
+xxsnap mac already has a default color sampler in the screenshot overlay. That sampler appears only when no annotation tool is active and no annotations exist, which makes it useful for early inspection but awkward once the user has started marking up the screenshot.
 
 This design adds an explicit eyedropper button to the main capture toolbar and a global mouse-wheel resize shortcut for the locked screenshot selection. The work is mac-overlay scoped for this iteration and should follow the existing `SelectionOverlayWindow` and `SelectionToolbarState` patterns. It should not change snapshot export, annotation undo/redo, or the existing copy/save actions.
 
@@ -131,7 +131,7 @@ Add focused mac tests for:
 Run the mac XCTest target when possible:
 
 ```bash
-xcodebuild -project platforms/mac/snipory.xcodeproj -scheme snipory -configuration Debug -derivedDataPath build/xcode-derived test
+xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived test
 ```
 
 If the full XCTest target is blocked by signing, permissions, or environment-sensitive screen capture tests, run the nearest focused tests and the mac app build, then report the exact blocker.

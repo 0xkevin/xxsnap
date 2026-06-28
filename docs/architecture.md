@@ -1,4 +1,4 @@
-# Snipory v2 Architecture
+# xxsnap Architecture
 
 - `core/`: shared C++ library
 - `platforms/mac/`: Swift/AppKit application shell

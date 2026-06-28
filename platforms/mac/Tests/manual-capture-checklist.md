@@ -1,6 +1,6 @@
 # Manual Capture MVP Checklist
 
-Use this checklist to verify the native macOS screenshot MVP after building `SniporyMac`.
+Use this checklist to verify the native macOS screenshot MVP after building `xxsnap`.
 
 ## Current MVP expectation
 

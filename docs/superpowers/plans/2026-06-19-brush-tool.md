@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Implement the third Snipory v2 mac annotation tool as a freehand brush with width, stroke pattern, and color controls.
+**Goal:** Implement the third xxsnap mac annotation tool as a freehand brush with width, stroke pattern, and color controls.
 
 **Architecture:** Extend the existing mac-only annotation model and overlay interaction flow. Reuse the current options toolbar container with a new brush mode, and render brush paths in both overlay drawing and final image export. Keep coordinates relative to the selected capture rect so drawing outside the selection remains visible in the overlay but is naturally clipped out of exported screenshots.
 
@@ -25,7 +25,7 @@ Add tests that assert brush mode uses stroke widths `[3, 5, 7]`, shows no fill/s
 Run:
 
 ```bash
-xcodebuild -project platforms/mac/snipory.xcodeproj -scheme snipory -configuration Debug -derivedDataPath build/xcode-derived test -only-testing:SniporyTests/SelectionToolbarStateTests
+xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived test -only-testing:xxsnapTests/SelectionToolbarStateTests
 ```
 
 Expected: fails because `.brush` mode and brush widths do not exist.
@@ -88,7 +88,7 @@ Keep `CaptureSelectionResult.snapshotRect` unchanged and do not expand exported 
 Run:
 
 ```bash
-xcodebuild -project platforms/mac/snipory.xcodeproj -scheme snipory -configuration Debug -derivedDataPath build/xcode-derived test
+xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived test
 ```
 
 - [ ] **Step 2: Run app build if tests are blocked**
@@ -96,7 +96,7 @@ xcodebuild -project platforms/mac/snipory.xcodeproj -scheme snipory -configurati
 Run:
 
 ```bash
-xcodebuild -project platforms/mac/snipory.xcodeproj -scheme snipory -configuration Debug -derivedDataPath build/xcode-derived build
+xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived build
 ```
 
 - [ ] **Step 3: Report exact verification status**
