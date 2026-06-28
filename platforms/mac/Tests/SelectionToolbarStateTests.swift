@@ -272,6 +272,28 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertNil(window.test_selectedAnnotationKind)
     }
 
+    func testTextAnnotationCanBeDeletedWithForwardDelete() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 360, height: 240))
+        window.test_activateTextTool()
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 150))
+        for character in "Forward delete" {
+            window.test_keyDown(keyCode: 0, charactersIgnoringModifiers: String(character))
+        }
+        window.test_keyDown(keyCode: 36, charactersIgnoringModifiers: "\r")
+
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(window.test_selectedAnnotationKind, .text)
+        XCTAssertFalse(window.test_isEditingTextAnnotation)
+
+        window.test_keyDown(keyCode: 117)
+
+        XCTAssertEqual(window.test_annotationCount, 0)
+        XCTAssertNil(window.test_selectedAnnotationKind)
+    }
+
     func testTextToolReopensExistingAnnotationFromBodyClick() {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))

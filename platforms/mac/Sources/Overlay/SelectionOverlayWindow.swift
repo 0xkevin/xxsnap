@@ -1720,7 +1720,7 @@ private final class SelectionOverlayView: NSView {
             return true
         }
 
-        if event.keyCode == 51, deleteSelectedAnnotation() {
+        if Self.isAnnotationDeleteKey(event.keyCode), deleteSelectedAnnotation() {
             return true
         }
 
@@ -2649,6 +2649,10 @@ private final class SelectionOverlayView: NSView {
 
         updateEditingText((annotations[editingTextAnnotationIndex].text ?? "") + String(printableCharacters))
         return true
+    }
+
+    private static func isAnnotationDeleteKey(_ keyCode: UInt16) -> Bool {
+        keyCode == 51 || keyCode == 117
     }
 
     private func updateEditingText(_ text: String) {
