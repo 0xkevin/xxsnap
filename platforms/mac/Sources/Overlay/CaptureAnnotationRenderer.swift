@@ -1248,18 +1248,20 @@ enum CaptureAnnotationRenderer {
         var style = annotation.style
         style.textSize *= textScale
         let attributedText = NSAttributedString(string: text, attributes: textAttributes(style: style))
-        let line = CTLineCreateWithAttributedString(attributedText)
         let textRect = annotation.rect.standardized
+        let pixelRect = NSRect(
+            x: textRect.minX * scaleX,
+            y: textRect.minY * scaleY,
+            width: textRect.width * scaleX,
+            height: textRect.height * scaleY
+        )
 
         context.saveGState()
-        context.textMatrix = .identity
-        context.translateBy(x: 0, y: CGFloat(context.height))
-        context.scaleBy(x: 1, y: -1)
-        context.textPosition = CGPoint(
-            x: textRect.minX * scaleX,
-            y: textRect.minY * scaleY
-        )
-        CTLineDraw(line, context)
+        let previousGraphicsContext = NSGraphicsContext.current
+        let graphicsContext = NSGraphicsContext(cgContext: context, flipped: false)
+        NSGraphicsContext.current = graphicsContext
+        attributedText.draw(in: pixelRect)
+        NSGraphicsContext.current = previousGraphicsContext
         context.restoreGState()
     }
 

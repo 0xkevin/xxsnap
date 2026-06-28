@@ -160,8 +160,12 @@ final class xxsnapMacTests: XCTestCase {
         let rendered = CaptureAnnotationRenderer.render(image: image, annotations: [annotation])
 
         XCTAssertTrue(
-            try containsRedDominantOpaquePixel(in: rendered, within: NSRect(x: 20, y: 20, width: 96, height: 56)),
-            "Expected text annotation to draw at least one red-dominant opaque pixel"
+            try containsRedDominantOpaquePixel(in: rendered, within: NSRect(x: 24, y: 28, width: 80, height: 34)),
+            "Expected text annotation to draw inside its annotation rect"
+        )
+        XCTAssertFalse(
+            try containsRedDominantOpaquePixel(in: rendered, within: NSRect(x: 24, y: 63, width: 80, height: 25)),
+            "Expected text annotation not to be vertically mirrored above its annotation rect"
         )
     }
 
