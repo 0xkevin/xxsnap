@@ -141,6 +141,20 @@ enum WindowSelectionState {
             .first { $0.bounds.contains(point) }
     }
 
+    static func bestHoverRect(
+        at point: NSPoint,
+        candidates: [WindowSelectionCandidate],
+        desktopFrame: NSRect,
+        currentProcessID: pid_t
+    ) -> NSRect? {
+        bestWindow(
+            at: point,
+            candidates: candidates,
+            desktopFrame: desktopFrame,
+            currentProcessID: currentProcessID
+        )?.bounds
+    }
+
     private static func isSelectable(_ candidate: WindowSelectionCandidate, desktopFrame: NSRect, currentProcessID: pid_t) -> Bool {
         guard candidate.ownerPID != currentProcessID else {
             return false

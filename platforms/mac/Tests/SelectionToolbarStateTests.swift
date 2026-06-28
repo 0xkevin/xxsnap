@@ -3,6 +3,204 @@ import XCTest
 @testable import Snipory
 
 final class SelectionToolbarStateTests: XCTestCase {
+    func testEyedropperSamplesVisibleAnnotationAndCopiesOnlyColor() {
+        let background = solidImage(size: NSSize(width: 240, height: 160), color: NSColor(srgbRed: 0.95, green: 0.8, blue: 0.1, alpha: 1))
+        let expectedOverlayColor = NSColor(srgbRed: 0.2, green: 0.4, blue: 0.8, alpha: 1)
+        let annotation = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 20, y: 10, width: 80, height: 50),
+            style: {
+                var style = CaptureAnnotationStyle()
+                style.strokeColor = expectedOverlayColor
+                style.fillEnabled = true
+                style.fillColor = expectedOverlayColor
+                return style
+            }()
+        )
+        let point = NSPoint(x: 90, y: 60)
+        let selection = NSRect(x: 40, y: 30, width: 120, height: 80)
+        let overlayColorHex = SelectionToolbarState.colorSamplerHexString(for: expectedOverlayColor)
+
+        let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([annotation])
+
+        guard let eyedropperPoint = window.test_mainToolbarButtonPoint(for: .eyedropper) else {
+            return XCTFail("Expected eyedropper toolbar button")
+        }
+        window.test_mouseDown(at: eyedropperPoint)
+        window.test_mouseUp(at: eyedropperPoint)
+
+        window.test_mouseMoved(to: point)
+        XCTAssertTrue(window.test_isColorSamplerVisible)
+        XCTAssertEqual(window.test_sampledColorHex, overlayColorHex)
+        XCTAssertEqual(window.test_magnifierSampleColorHex(at: point), overlayColorHex)
+
+        window.test_keyDown(keyCode: 0, charactersIgnoringModifiers: "c")
+        XCTAssertEqual(NSPasteboard.general.string(forType: .string), overlayColorHex)
+
+        var copyResult: CaptureSelectionResult?
+        let copyExpectation = expectation(description: "copy action")
+        let copiedWindow = SelectionOverlayWindow(backgroundImage: background) { result in
+            copyResult = result
+            copyExpectation.fulfill()
+        }
+        copiedWindow.test_setLockedSelectionRect(selection)
+        copiedWindow.test_setAnnotations([annotation])
+        copiedWindow.test_mouseDown(at: eyedropperPoint)
+        copiedWindow.test_mouseUp(at: eyedropperPoint)
+        copiedWindow.test_keyDown(keyCode: 8, charactersIgnoringModifiers: "c", modifierFlags: [.command])
+        wait(for: [copyExpectation], timeout: 0.5)
+        XCTAssertEqual(copyResult?.action, .copy)
+
+        window.test_updateColorSampler(at: NSPoint(x: selection.maxX + 12, y: selection.midY))
+        XCTAssertFalse(window.test_isColorSamplerVisible)
+    }
+
+    func testEyedropperSamplesFromTipPointAndMagnifierMatchesTipPixel() throws {
+        let red = NSColor(srgbRed: 1, green: 0, blue: 0, alpha: 1)
+        let green = NSColor(srgbRed: 0, green: 1, blue: 0, alpha: 1)
+        let blue = NSColor(srgbRed: 0, green: 0, blue: 1, alpha: 1)
+        let cyan = NSColor(srgbRed: 0, green: 1, blue: 1, alpha: 1)
+        let magenta = NSColor(srgbRed: 1, green: 0, blue: 1, alpha: 1)
+        let yellow = NSColor(srgbRed: 1, green: 1, blue: 0, alpha: 1)
+        let black = NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 1)
+        let white = NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 1)
+        let image = pixelImage(
+            width: 3,
+            height: 3,
+            pixels: [
+                [red, green, blue],
+                [cyan, magenta, yellow],
+                [black, white, blue],
+            ]
+        )
+        let selection = NSRect(x: 0, y: 0, width: 3, height: 3)
+        let mousePoint = NSPoint(x: 1.5, y: 1.5)
+        let samplePoint = NSPoint(
+            x: mousePoint.x + SelectionToolbarState.eyedropperSampleOffset.width,
+            y: mousePoint.y + SelectionToolbarState.eyedropperSampleOffset.height
+        )
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(selection)
+
+        guard let eyedropperPoint = window.test_mainToolbarButtonPoint(for: .eyedropper) else {
+            return XCTFail("Expected eyedropper toolbar button")
+        }
+        window.test_mouseDown(at: eyedropperPoint)
+        window.test_mouseUp(at: eyedropperPoint)
+
+        window.test_mouseMoved(to: mousePoint)
+
+        XCTAssertEqual(window.test_sampledPointerPoint, samplePoint)
+        XCTAssertEqual(window.test_sampledColorHex, "#FF00FF")
+        XCTAssertEqual(window.test_magnifierSampleColorHex(at: samplePoint), "#FF00FF")
+        XCTAssertEqual(window.test_magnifierSampleColorHex(at: samplePoint, columnOffset: -1, rowOffset: -1), "#FF0000")
+        XCTAssertEqual(window.test_magnifierSampleColorHex(at: samplePoint, columnOffset: 1, rowOffset: 1), "#0000FF")
+    }
+
+    func testEyedropperCursorHotSpotAlignsWithSvgTip() {
+        XCTAssertEqual(SelectionToolbarState.eyedropperCursorHotSpot.x, 3.6, accuracy: 0.2)
+        XCTAssertEqual(SelectionToolbarState.eyedropperCursorHotSpot.y, 20.4, accuracy: 0.2)
+    }
+
+    func testMainToolbarPlacesEyedropperImmediatelyBeforeMosaic() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 200, height: 120))
+
+        guard
+            let markerRect = window.test_mainToolbarButtonRect(for: .marker),
+            let eyedropperRect = window.test_mainToolbarButtonRect(for: .eyedropper),
+            let mosaicRect = window.test_mainToolbarButtonRect(for: .mosaic)
+        else {
+            return XCTFail("Expected marker, eyedropper, and mosaic toolbar buttons")
+        }
+
+        XCTAssertLessThan(markerRect.midX, eyedropperRect.midX)
+        XCTAssertLessThan(eyedropperRect.midX, mosaicRect.midX)
+        XCTAssertEqual(eyedropperRect.minX - markerRect.minX, mosaicRect.minX - eyedropperRect.minX, accuracy: 0.5)
+        XCTAssertEqual(window.test_symbolName(for: .eyedropper), "toolbar-eyedropper")
+        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "eyedropper"), "取色")
+    }
+
+    func testEyedropperResourceIsBundledAndReadableByMacTarget() {
+        let url = Bundle.main.url(forResource: "eyedropper", withExtension: "svg")
+
+        XCTAssertNotNil(url)
+        XCTAssertGreaterThan((try? Data(contentsOf: XCTUnwrap(url)).count) ?? 0, 0)
+    }
+
+    func testClickingEyedropperTogglesExplicitModeAndSelectedState() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 200, height: 120))
+
+        guard let point = window.test_mainToolbarButtonPoint(for: .eyedropper) else {
+            return XCTFail("Expected eyedropper toolbar button")
+        }
+
+        window.test_mouseDown(at: point)
+        window.test_mouseUp(at: point)
+        XCTAssertTrue(window.test_isEyedropperToolActive)
+        XCTAssertTrue(window.test_eyedropperToolbarButtonIsSelected)
+        XCTAssertNil(window.test_optionsToolbarRect)
+        XCTAssertNil(window.test_optionsToolbarMode)
+        XCTAssertNil(window.test_currentShapeKind)
+
+        window.test_mouseDown(at: point)
+        window.test_mouseUp(at: point)
+        XCTAssertFalse(window.test_isEyedropperToolActive)
+        XCTAssertFalse(window.test_eyedropperToolbarButtonIsSelected)
+    }
+
+    func testActivatingAnotherToolExitsEyedropperMode() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 200, height: 120))
+
+        guard let eyedropperPoint = window.test_mainToolbarButtonPoint(for: .eyedropper) else {
+            return XCTFail("Expected eyedropper toolbar button")
+        }
+
+        window.test_mouseDown(at: eyedropperPoint)
+        window.test_mouseUp(at: eyedropperPoint)
+        XCTAssertTrue(window.test_isEyedropperToolActive)
+
+        window.test_activateShapeTool(.marker)
+
+        XCTAssertFalse(window.test_isEyedropperToolActive)
+        XCTAssertFalse(window.test_eyedropperToolbarButtonIsSelected)
+        XCTAssertEqual(window.test_currentShapeKind, .marker)
+        XCTAssertEqual(window.test_optionsToolbarMode, .marker)
+    }
+
+    func testEyedropperCursorOverridesArrowAnnotationHoverInsideSelection() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.arrowLine)
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 140))
+        window.test_mouseDragged(to: NSPoint(x: 220, y: 180))
+        window.test_mouseUp(at: NSPoint(x: 220, y: 180))
+
+        guard let arrowLine = window.test_arrowLine(at: 0) else {
+            return XCTFail("Expected arrow annotation")
+        }
+        guard let eyedropperPoint = window.test_mainToolbarButtonPoint(for: .eyedropper) else {
+            return XCTFail("Expected eyedropper toolbar button")
+        }
+
+        window.test_mouseDown(at: eyedropperPoint)
+        window.test_mouseUp(at: eyedropperPoint)
+
+        let start = NSPoint(x: 100 + arrowLine.start.x, y: 100 + arrowLine.start.y)
+        let end = NSPoint(x: 100 + arrowLine.end.x, y: 100 + arrowLine.end.y)
+        let body = NSPoint(x: (start.x + end.x) / 2, y: (start.y + end.y) / 2)
+
+        XCTAssertTrue(window.test_isEyedropperToolActive)
+        XCTAssertEqual(window.test_cursorStyle(at: start), .eyedropper)
+        XCTAssertEqual(window.test_cursorStyle(at: body), .eyedropper)
+        XCTAssertEqual(window.test_cursorStyle(at: end), .eyedropper)
+    }
+
     func testOverlayWindowEscCancelsBeforeSelectionIsLocked() {
         let didCancel = expectation(description: "selection cancelled")
         let window = SelectionOverlayWindow(backgroundImage: nil) { result in
@@ -1955,6 +2153,7 @@ final class SelectionToolbarStateTests: XCTestCase {
     func testToolbarIconInsetsRenderArrowLineLargerThanDefaultIcons() {
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "arrow-line"), 0)
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "pencil-tool"), 2)
+        XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "eyedropper"), 2)
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "text-tool"), 0)
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "masaike2"), -3)
     }
@@ -3602,6 +3801,19 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(dragged.minY, 8, accuracy: 0.1)
     }
 
+    func testMainToolbarDragHandleIconColorIsSofterThanToolIcons() throws {
+        let color: NSColor = try XCTUnwrap(
+            SelectionToolbarState.mainToolbarDragHandleIconColor(enabled: true)
+                .usingColorSpace(NSColorSpace.deviceRGB)
+        )
+        let disabled = SelectionToolbarState.mainToolbarDragHandleIconColor(enabled: false)
+
+        XCTAssertEqual(color.redComponent, 0.48, accuracy: 0.02)
+        XCTAssertEqual(color.alphaComponent, 0.75, accuracy: 0.02)
+        XCTAssertLessThan(color.alphaComponent, 1)
+        XCTAssertEqual(disabled, NSColor.disabledControlTextColor)
+    }
+
     func testSelectionMeasurementControlLayoutAddsThreeButtonsAfterSizeText() {
         let selection = NSRect(x: 120, y: 140, width: 300, height: 180)
         let layout = SelectionToolbarState.measurementControlLayout(
@@ -4214,6 +4426,310 @@ final class SelectionToolbarStateTests: XCTestCase {
         )
     }
 
+    func testWheelZoomExpandsShrinksAndClampsLockedSelection() {
+        let start = NSRect(x: 110, y: 90, width: 140, height: 90)
+        let bounds = NSRect(x: 0, y: 0, width: 400, height: 300)
+        let anchor = NSPoint(x: start.midX, y: start.midY)
+
+        let expanded = SelectionToolbarState.wheelZoomedSelectionRect(
+            from: start,
+            anchor: anchor,
+            deltaY: 4,
+            inside: bounds,
+            minimumSize: 64
+        )
+        XCTAssertGreaterThan(expanded.width, start.width)
+        XCTAssertGreaterThan(expanded.height, start.height)
+        XCTAssertLessThan(expanded.width - start.width, 14)
+
+        let shrunk = SelectionToolbarState.wheelZoomedSelectionRect(
+            from: start,
+            anchor: anchor,
+            deltaY: -8,
+            inside: bounds,
+            minimumSize: 64
+        )
+        XCTAssertGreaterThanOrEqual(shrunk.width, 64)
+        XCTAssertGreaterThanOrEqual(shrunk.height, 64)
+
+        let hugeBounds = NSRect(x: 0, y: 0, width: 400, height: 300)
+        let nearlyFull = SelectionToolbarState.wheelZoomedSelectionRect(
+            from: NSRect(x: 80, y: 70, width: 90, height: 80),
+            anchor: NSPoint(x: 120, y: 110),
+            deltaY: 80,
+            inside: hugeBounds,
+            minimumSize: 64
+        )
+        XCTAssertTrue(hugeBounds.contains(nearlyFull))
+    }
+
+    func testWheelZoomCanReachFullBoundsAfterRepeatedExpansion() {
+        let bounds = NSRect(x: 0, y: 0, width: 400, height: 300)
+        var rect = NSRect(x: 100, y: 110, width: 200, height: 80)
+
+        for _ in 0..<80 {
+            rect = SelectionToolbarState.wheelZoomedSelectionRect(
+                from: rect,
+                anchor: NSPoint(x: rect.midX, y: rect.midY),
+                deltaY: 8,
+                inside: bounds,
+                minimumSize: 64
+            )
+        }
+
+        XCTAssertEqual(rect.minX, bounds.minX, accuracy: 0.5)
+        XCTAssertEqual(rect.minY, bounds.minY, accuracy: 0.5)
+        XCTAssertEqual(rect.maxX, bounds.maxX, accuracy: 0.5)
+        XCTAssertEqual(rect.maxY, bounds.maxY, accuracy: 0.5)
+    }
+
+    func testWheelZoomAppliesWhileShapeToolIsActive() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 80, width: 160, height: 120)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateShapeTool(.marker)
+
+        XCTAssertTrue(window.test_handleScrollWheel(
+            at: NSPoint(x: selection.midX, y: selection.midY),
+            deltaY: 8
+        ))
+        XCTAssertNotEqual(window.test_lockedSelectionRect, selection)
+    }
+
+    func testWheelZoomAnimatesTowardTargetSelection() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 80, width: 160, height: 120)
+        let pointer = NSPoint(x: selection.midX, y: selection.midY)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateShapeTool(.marker)
+
+        let target = SelectionToolbarState.wheelZoomedSelectionRect(
+            from: selection,
+            anchor: pointer,
+            deltaY: 8,
+            inside: window.test_overlayBounds,
+            minimumSize: 64
+        )
+
+        XCTAssertTrue(window.test_handleScrollWheel(at: pointer, deltaY: 8))
+
+        guard let immediate = window.test_lockedSelectionRect else {
+            return XCTFail("Expected animated selection")
+        }
+        XCTAssertNotEqual(immediate, target)
+        XCTAssertGreaterThan(immediate.width, selection.width)
+        XCTAssertLessThan(immediate.width, target.width)
+
+        window.test_completeSelectionWheelAnimation()
+        XCTAssertEqual(window.test_lockedSelectionRect?.minX ?? 0, target.minX, accuracy: 0.5)
+        XCTAssertEqual(window.test_lockedSelectionRect?.minY ?? 0, target.minY, accuracy: 0.5)
+        XCTAssertEqual(window.test_lockedSelectionRect?.width ?? 0, target.width, accuracy: 0.5)
+        XCTAssertEqual(window.test_lockedSelectionRect?.height ?? 0, target.height, accuracy: 0.5)
+    }
+
+    func testWheelZoomPreservesMosaicStrokeOverlayPosition() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 80, width: 160, height: 120)
+        let overlayPoint = NSPoint(x: 150, y: 130)
+        let localPoint = NSPoint(x: overlayPoint.x - selection.minX, y: overlayPoint.y - selection.minY)
+        let annotation = CaptureAnnotation(
+            kind: .mosaicStroke,
+            rect: NSRect(x: localPoint.x, y: localPoint.y, width: 1, height: 1),
+            style: CaptureAnnotationStyle(),
+            mosaicStroke: CaptureMosaicStroke(points: [localPoint]),
+            mosaicRedaction: CaptureMosaicRedaction(type: .pixelMosaic, value: 8)
+        )
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([annotation])
+
+        XCTAssertTrue(window.test_handleScrollWheel(at: NSPoint(x: selection.midX, y: selection.midY), deltaY: 8))
+        window.test_completeSelectionWheelAnimation()
+
+        let resizedSelection = try XCTUnwrap(window.test_lockedSelectionRect)
+        let resizedStroke = try XCTUnwrap(window.test_mosaicStroke(at: 0))
+        let resizedPoint = try XCTUnwrap(resizedStroke.points.first)
+        XCTAssertEqual(resizedSelection.minX + resizedPoint.x, overlayPoint.x, accuracy: 0.5)
+        XCTAssertEqual(resizedSelection.minY + resizedPoint.y, overlayPoint.y, accuracy: 0.5)
+    }
+
+    func testWheelZoomUsesSelectionCenterWhenPointerIsOutsideSelection() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 120, y: 120, width: 160, height: 120)
+        window.test_setLockedSelectionRect(selection)
+
+        XCTAssertTrue(window.test_handleScrollWheel(
+            at: NSPoint(x: selection.maxX + 24, y: selection.midY),
+            deltaY: 6
+        ))
+
+        guard let resized = window.test_lockedSelectionRect else {
+            return XCTFail("Expected resized selection")
+        }
+
+        XCTAssertEqual(resized.midX, selection.midX, accuracy: 0.5)
+        XCTAssertEqual(resized.midY, selection.midY, accuracy: 0.5)
+    }
+
+    func testWheelZoomDoesNotApplyOverToolbarButtons() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 200, height: 120)
+        window.test_setLockedSelectionRect(selection)
+
+        guard let point = window.test_mainToolbarButtonPoint(for: .mosaic) else {
+            return XCTFail("Expected toolbar button")
+        }
+
+        XCTAssertFalse(window.test_handleScrollWheel(at: point, deltaY: 8))
+        XCTAssertEqual(window.test_lockedSelectionRect, selection)
+    }
+
+    func testTrackpadMagnifyUsesSameSelectionZoomBehaviorAsWheel() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 80, width: 160, height: 120)
+        let anchor = NSPoint(x: selection.midX, y: selection.midY)
+        window.test_setLockedSelectionRect(selection)
+
+        XCTAssertTrue(window.test_handleMagnify(at: anchor, magnification: 0.08))
+
+        guard let immediate = window.test_lockedSelectionRect else {
+            return XCTFail("Expected animated selection")
+        }
+        XCTAssertGreaterThan(immediate.width, selection.width)
+        XCTAssertGreaterThan(immediate.height, selection.height)
+
+        window.test_completeSelectionWheelAnimation()
+
+        guard let magnified = window.test_lockedSelectionRect else {
+            return XCTFail("Expected final magnified selection")
+        }
+        XCTAssertGreaterThan(magnified.width, immediate.width)
+        XCTAssertGreaterThan(magnified.height, immediate.height)
+    }
+
+    func testTrackpadMagnifyDoesNotApplyOverToolbarButtons() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 200, height: 120)
+        window.test_setLockedSelectionRect(selection)
+
+        guard let point = window.test_mainToolbarButtonPoint(for: .mosaic) else {
+            return XCTFail("Expected toolbar button")
+        }
+
+        XCTAssertFalse(window.test_handleMagnify(at: point, magnification: 0.08))
+        XCTAssertEqual(window.test_lockedSelectionRect, selection)
+    }
+
+    func testInitialHoverImmediatelyTracksWindowRegion() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let candidate = WindowSelectionCandidate(
+            id: 1,
+            ownerPID: 10,
+            layer: 0,
+            alpha: 1,
+            bounds: NSRect(x: 36, y: 28, width: 240, height: 140),
+            name: "app"
+        )
+        window.test_setWindowSelectionCandidates([
+            candidate
+        ])
+
+        window.test_mouseMoved(to: NSPoint(x: 90, y: 78))
+
+        XCTAssertEqual(window.test_currentSelectionRect, candidate.bounds)
+    }
+
+    func testInitialHoverLocksCurrentWindowRegionOnMouseDownAndStopsTracking() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let first = WindowSelectionCandidate(
+            id: 1,
+            ownerPID: 10,
+            layer: 0,
+            alpha: 1,
+            bounds: NSRect(x: 20, y: 20, width: 140, height: 120),
+            name: "first"
+        )
+        let second = WindowSelectionCandidate(
+            id: 2,
+            ownerPID: 11,
+            layer: 0,
+            alpha: 1,
+            bounds: NSRect(x: 190, y: 20, width: 140, height: 120),
+            name: "second"
+        )
+        window.test_setWindowSelectionCandidates([
+            first,
+            second,
+        ])
+
+        window.test_mouseMoved(to: NSPoint(x: 88, y: 110))
+        guard let lockedTarget = window.test_currentSelectionRect else {
+            return XCTFail("Expected live window region before click")
+        }
+        XCTAssertEqual(lockedTarget, first.bounds)
+
+        window.test_mouseDown(at: NSPoint(x: 88, y: 110))
+        XCTAssertEqual(window.test_lockedSelectionRect, lockedTarget)
+
+        window.test_mouseMoved(to: NSPoint(x: 240, y: 66))
+        XCTAssertEqual(window.test_lockedSelectionRect, lockedTarget)
+        XCTAssertEqual(window.test_currentSelectionRect, lockedTarget)
+    }
+
+    func testInitialHoverWindowTrackingStaysResponsiveAcrossMouseMoves() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setWindowSelectionCandidates([
+            WindowSelectionCandidate(
+                id: 1,
+                ownerPID: 10,
+                layer: 0,
+                alpha: 1,
+                bounds: NSRect(x: 80, y: 90, width: 1100, height: 670),
+                name: "large app"
+            )
+        ])
+
+        let start = CFAbsoluteTimeGetCurrent()
+        for index in 0..<60 {
+            window.test_mouseMoved(to: NSPoint(
+                x: 180 + CGFloat(index % 20) * 18,
+                y: 160 + CGFloat(index % 12) * 22
+            ))
+        }
+        let elapsed = CFAbsoluteTimeGetCurrent() - start
+
+        XCTAssertLessThan(elapsed, 0.20)
+    }
+
+    func testInitialHoverTracksSystemBarRegions() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let menubar = WindowSelectionCandidate(
+            id: 1,
+            ownerPID: 0,
+            layer: 24,
+            alpha: 1,
+            bounds: NSRect(x: 0, y: 563, width: 900, height: 37),
+            name: "Menubar"
+        )
+        let dock = WindowSelectionCandidate(
+            id: 2,
+            ownerPID: 0,
+            layer: 20,
+            alpha: 1,
+            bounds: NSRect(x: 0, y: 0, width: 900, height: 48),
+            name: "Dock"
+        )
+        window.test_setWindowSelectionCandidates([
+            menubar,
+            dock,
+        ])
+
+        window.test_mouseMoved(to: NSPoint(x: 420, y: 580))
+        XCTAssertEqual(window.test_currentSelectionRect, menubar.bounds)
+
+        window.test_mouseMoved(to: NSPoint(x: 420, y: 24))
+        XCTAssertEqual(window.test_currentSelectionRect, dock.bounds)
+    }
+
     func testColorSamplerHidesAfterUserHasAnnotations() {
         let selection = NSRect(x: 0, y: 0, width: 400, height: 300)
 
@@ -4504,6 +5020,26 @@ final class SelectionToolbarStateTests: XCTestCase {
         NSRect(origin: .zero, size: size).fill()
         image.unlockFocus()
         return image
+    }
+
+    private func pixelImage(width: Int, height: Int, pixels: [[NSColor]]) -> NSImage {
+        var bytes: [UInt8] = []
+        for row in 0..<height {
+            for column in 0..<width {
+                let color = pixels[row][column].usingColorSpace(.sRGB) ?? pixels[row][column]
+                bytes.append(UInt8(round(color.redComponent * 255)))
+                bytes.append(UInt8(round(color.greenComponent * 255)))
+                bytes.append(UInt8(round(color.blueComponent * 255)))
+                bytes.append(UInt8(round(color.alphaComponent * 255)))
+            }
+        }
+        let cgImage = makeTestImage(
+            width: width,
+            height: height,
+            pixels: bytes,
+            bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue
+        )
+        return NSImage(cgImage: cgImage, size: NSSize(width: width, height: height))
     }
 
     private func gradientImage(size: NSSize) -> NSImage {

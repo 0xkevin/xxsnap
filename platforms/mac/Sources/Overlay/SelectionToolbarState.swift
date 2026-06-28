@@ -12,6 +12,16 @@ enum SelectionToolbarState {
     static let toolbarSelectedBackgroundAlpha: CGFloat = 0
     static let measurementControlSelectedBackgroundAlpha: CGFloat = 0.34
     static let optionsToolbarHorizontalPadding: CGFloat = 10
+    static let eyedropperCursorSize = NSSize(width: 24, height: 24)
+    static let eyedropperIconSize: CGFloat = 18
+    static let eyedropperCursorHotSpot = NSPoint(x: 3.6, y: 20.4)
+    static let eyedropperSampleOffset = NSSize(width: 0, height: 0)
+
+    static func mainToolbarDragHandleIconColor(enabled: Bool) -> NSColor {
+        enabled
+            ? NSColor(deviceWhite: 0.48, alpha: 0.75)
+            : .disabledControlTextColor
+    }
 
     enum ColorSamplerCopyMode: Equatable {
         case hex
@@ -120,6 +130,7 @@ enum SelectionToolbarState {
     enum OverlayCursorStyle: Equatable {
         case arrow
         case crosshair
+        case eyedropper
         case move
         case resizeLeftRight
         case resizeUpDown
@@ -205,6 +216,7 @@ enum SelectionToolbarState {
             "polyline": "箭头线",
             "pen": "画笔",
             "marker": "标记",
+            "eyedropper": "取色",
             "mosaic": "马赛克",
             "mosaicBlur": "高斯",
             "mosaicPixel": "马赛克",
@@ -246,6 +258,8 @@ enum SelectionToolbarState {
             return 0
         case "text-tool":
             return 0
+        case "eyedropper":
+            return 2
         case "masaike2":
             return -3
         default:
@@ -679,11 +693,67 @@ enum SelectionToolbarState {
         }
     }
 
+    static func wheelZoomedSelectionRect(
+        from startRect: NSRect,
+        anchor: NSPoint,
+        deltaY: CGFloat,
+        inside bounds: NSRect,
+        minimumSize: CGFloat = 64
+    ) -> NSRect {
+        let normalizedStartRect = startRect.standardized
+        guard normalizedStartRect.width > 0, normalizedStartRect.height > 0 else {
+            return normalizedStartRect
+        }
+
+        let desiredScale = wheelZoomScale(for: deltaY)
+        let minimumScale = max(
+            minimumSize / max(normalizedStartRect.width, 1),
+            minimumSize / max(normalizedStartRect.height, 1)
+        )
+        let scale = max(desiredScale, minimumScale)
+        let zoomed = scaledSelectionRect(
+            from: normalizedStartRect,
+            anchor: anchor,
+            scale: scale
+        )
+        let clipped = zoomed.standardized.intersection(bounds)
+        guard !clipped.isNull, clipped.width > 0, clipped.height > 0 else {
+            return clamp(rect: zoomed, inside: bounds)
+        }
+        return clamp(rect: clipped, inside: bounds)
+    }
+
     private static func signedMagnitude(_ magnitude: CGFloat, delta: CGFloat, defaultSign: CGFloat) -> CGFloat {
         guard delta != 0 else {
             return magnitude * defaultSign
         }
         return magnitude * (delta < 0 ? -1 : 1)
+    }
+
+    private static func wheelZoomScale(for deltaY: CGFloat) -> CGFloat {
+        guard deltaY != 0 else {
+            return 1
+        }
+
+        let clampedDelta = max(-6, min(6, deltaY))
+        return pow(1.02, clampedDelta)
+    }
+
+    private static func scaledSelectionRect(
+        from startRect: NSRect,
+        anchor: NSPoint,
+        scale: CGFloat
+    ) -> NSRect {
+        let minX = anchor.x - (anchor.x - startRect.minX) * scale
+        let maxX = anchor.x + (startRect.maxX - anchor.x) * scale
+        let minY = anchor.y - (anchor.y - startRect.minY) * scale
+        let maxY = anchor.y + (startRect.maxY - anchor.y) * scale
+        return NSRect(
+            x: min(minX, maxX),
+            y: min(minY, maxY),
+            width: abs(maxX - minX),
+            height: abs(maxY - minY)
+        )
     }
 
     private static func defaultHorizontalSign(for handle: OverlayResizeHandle) -> CGFloat {
@@ -1357,6 +1427,21 @@ enum SelectionToolbarState {
         selectionRect: NSRect?
     ) -> Bool {
         guard !isShapeToolActive, !hasAnnotations, let selectionRect else {
+            return false
+        }
+
+        let rect = selectionRect.standardized
+        return pointer.x >= rect.minX
+            && pointer.x <= rect.maxX
+            && pointer.y >= rect.minY
+            && pointer.y <= rect.maxY
+    }
+
+    static func shouldShowExplicitColorSampler(
+        pointer: NSPoint,
+        selectionRect: NSRect?
+    ) -> Bool {
+        guard let selectionRect else {
             return false
         }
 

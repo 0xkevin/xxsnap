@@ -32,6 +32,7 @@
 		A10000000000000000000010 /* copy-to-clipboard.png in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000010 /* copy-to-clipboard.png */; };
 		A10000000000000000000011 /* pin-to-screen.png in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* pin-to-screen.png */; };
 		A10000000000000000000012 /* shape-marker.svg in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000012 /* shape-marker.svg */; };
+		A10000000000000000000033 /* eyedropper.svg in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000033 /* eyedropper.svg */; };
 		A10000000000000000000013 /* mosaic-tool.svg in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000013 /* mosaic-tool.svg */; };
 		A10000000000000000000032 /* masaike2.svg in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000032 /* masaike2.svg */; };
 		A10000000000000000000014 /* text-tool.png in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000014 /* text-tool.png */; };
@@ -104,6 +105,7 @@
 		A20000000000000000000010 /* copy-to-clipboard.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "copy-to-clipboard.png"; sourceTree = "<group>"; };
 		A20000000000000000000011 /* pin-to-screen.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "pin-to-screen.png"; sourceTree = "<group>"; };
 		A20000000000000000000012 /* shape-marker.svg */ = {isa = PBXFileReference; path = "shape-marker.svg"; sourceTree = "<group>"; };
+		A20000000000000000000033 /* eyedropper.svg */ = {isa = PBXFileReference; path = "eyedropper.svg"; sourceTree = "<group>"; };
 		A20000000000000000000013 /* mosaic-tool.svg */ = {isa = PBXFileReference; path = "mosaic-tool.svg"; sourceTree = "<group>"; };
 		A20000000000000000000032 /* masaike2.svg */ = {isa = PBXFileReference; path = "masaike2.svg"; sourceTree = "<group>"; };
 		A20000000000000000000014 /* text-tool.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "text-tool.png"; sourceTree = "<group>"; };
@@ -264,6 +266,7 @@
 				A20000000000000000000010 /* copy-to-clipboard.png */,
 				A20000000000000000000011 /* pin-to-screen.png */,
 				A20000000000000000000012 /* shape-marker.svg */,
+				A20000000000000000000033 /* eyedropper.svg */,
 				A20000000000000000000013 /* mosaic-tool.svg */,
 				A20000000000000000000032 /* masaike2.svg */,
 				A20000000000000000000014 /* text-tool.png */,
@@ -388,6 +391,7 @@
 				A10000000000000000000010 /* copy-to-clipboard.png in Resources */,
 				A10000000000000000000011 /* pin-to-screen.png in Resources */,
 				A10000000000000000000012 /* shape-marker.svg in Resources */,
+				A10000000000000000000033 /* eyedropper.svg in Resources */,
 				A10000000000000000000013 /* mosaic-tool.svg in Resources */,
 				A10000000000000000000032 /* masaike2.svg in Resources */,
 				A10000000000000000000014 /* text-tool.png in Resources */,

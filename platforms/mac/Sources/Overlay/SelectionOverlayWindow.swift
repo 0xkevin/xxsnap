@@ -6,6 +6,8 @@ enum TestMosaicRectangleRotationHandleGlyph {
 
 enum TestToolbarButton {
     case rectangle
+    case marker
+    case eyedropper
     case mosaic
     case settings
 }
@@ -68,6 +70,29 @@ private extension NSCursor {
     static func svgImage(named name: String) -> NSImage? {
         Bundle.main.url(forResource: name, withExtension: "svg").flatMap(NSImage.init(contentsOf:))
     }
+
+    static let sniporyEyedropper: NSCursor = {
+        let size = SelectionToolbarState.eyedropperCursorSize
+        let hotSpot = SelectionToolbarState.eyedropperCursorHotSpot
+        let iconSize = SelectionToolbarState.eyedropperIconSize
+        let inset: CGFloat = (size.width - iconSize) / 2
+
+        guard let image = svgImage(named: "eyedropper") else {
+            return NSCursor.arrow
+        }
+
+        let cursorImage = NSImage(size: size)
+        cursorImage.lockFocus()
+        NSGraphicsContext.current?.imageInterpolation = .high
+        image.draw(
+            in: NSRect(x: inset, y: inset, width: iconSize, height: iconSize),
+            from: NSRect.zero,
+            operation: .copy,
+            fraction: 1.0
+        )
+        cursorImage.unlockFocus()
+        return NSCursor(image: cursorImage, hotSpot: hotSpot)
+    }()
 
     static func drawBrushRotationHandleIcon() {
         let icon = brushRotationHandleStrokePath()
@@ -426,6 +451,18 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_setCurrentStrokeWidth(width)
     }
 
+    func test_setAnnotations(_ annotations: [CaptureAnnotation]) {
+        (contentView as? SelectionOverlayView)?.test_setAnnotations(annotations)
+    }
+
+    func test_setWindowSelectionCandidates(_ candidates: [WindowSelectionCandidate]) {
+        (contentView as? SelectionOverlayView)?.test_setWindowSelectionCandidates(candidates)
+    }
+
+    func test_clearClipboard() {
+        NSPasteboard.general.clearContents()
+    }
+
     func test_setStrokeStyleMenuVisible(_ isVisible: Bool) {
         (contentView as? SelectionOverlayView)?.test_setStrokeStyleMenuVisible(isVisible)
     }
@@ -456,6 +493,35 @@ final class SelectionOverlayWindow: NSWindow {
         overlayView.mouseMoved(with: test_mouseEvent(type: .mouseMoved, at: point))
     }
 
+    func test_updateColorSampler(at point: NSPoint) {
+        (contentView as? SelectionOverlayView)?.test_updateColorSampler(at: point)
+    }
+
+    func test_scrollWheel(at point: NSPoint, deltaY: CGFloat) {
+        guard let overlayView = contentView as? SelectionOverlayView else {
+            return
+        }
+        _ = overlayView.test_handleScrollWheel(at: point, deltaY: deltaY)
+    }
+
+    func test_handleScrollWheel(at point: NSPoint, deltaY: CGFloat) -> Bool {
+        guard let overlayView = contentView as? SelectionOverlayView else {
+            return false
+        }
+        return overlayView.test_handleScrollWheel(at: point, deltaY: deltaY)
+    }
+
+    func test_handleMagnify(at point: NSPoint, magnification: CGFloat) -> Bool {
+        guard let overlayView = contentView as? SelectionOverlayView else {
+            return false
+        }
+        return overlayView.test_handleMagnify(at: point, magnification: magnification)
+    }
+
+    func test_completeSelectionWheelAnimation() {
+        (contentView as? SelectionOverlayView)?.test_completeSelectionWheelAnimation()
+    }
+
     func test_mouseDragged(to point: NSPoint, modifierFlags: NSEvent.ModifierFlags = []) {
         guard let overlayView = contentView as? SelectionOverlayView else {
             return
@@ -470,8 +536,16 @@ final class SelectionOverlayWindow: NSWindow {
         overlayView.mouseUp(with: test_mouseEvent(type: .leftMouseUp, at: point, modifierFlags: modifierFlags))
     }
 
-    func test_keyDown(keyCode: UInt16, charactersIgnoringModifiers: String = "") {
-        keyDown(with: test_keyEvent(keyCode: keyCode, charactersIgnoringModifiers: charactersIgnoringModifiers))
+    func test_keyDown(
+        keyCode: UInt16,
+        charactersIgnoringModifiers: String = "",
+        modifierFlags: NSEvent.ModifierFlags = []
+    ) {
+        keyDown(with: test_keyEvent(
+            keyCode: keyCode,
+            charactersIgnoringModifiers: charactersIgnoringModifiers,
+            modifierFlags: modifierFlags
+        ))
     }
 
     func test_cursorStyle(at point: NSPoint) -> SelectionToolbarState.OverlayCursorStyle? {
@@ -496,6 +570,10 @@ final class SelectionOverlayWindow: NSWindow {
 
     func test_mainToolbarButtonRect(for button: TestToolbarButton) -> NSRect? {
         (contentView as? SelectionOverlayView)?.test_mainToolbarButtonRect(for: button)
+    }
+
+    func test_mainToolbarButtonPoint(for button: TestToolbarButton) -> NSPoint? {
+        (contentView as? SelectionOverlayView)?.test_mainToolbarButtonPoint(for: button)
     }
 
     func test_symbolName(for button: TestToolbarButton) -> String? {
@@ -566,6 +644,30 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_mosaicRectangleRotationHandleGlyph()
     }
 
+    var test_sampledColorHex: String? {
+        (contentView as? SelectionOverlayView)?.test_sampledColorHex
+    }
+
+    var test_sampledPointerPoint: NSPoint? {
+        (contentView as? SelectionOverlayView)?.test_sampledPointerPoint
+    }
+
+    func test_magnifierSampleColorHex(at point: NSPoint) -> String? {
+        (contentView as? SelectionOverlayView)?.test_magnifierSampleColorHex(at: point)
+    }
+
+    func test_magnifierSampleColorHex(at point: NSPoint, columnOffset: Int, rowOffset: Int) -> String? {
+        (contentView as? SelectionOverlayView)?.test_magnifierSampleColorHex(
+            at: point,
+            columnOffset: columnOffset,
+            rowOffset: rowOffset
+        )
+    }
+
+    var test_isColorSamplerVisible: Bool {
+        (contentView as? SelectionOverlayView)?.test_isColorSamplerVisible ?? false
+    }
+
     var test_mosaicStrokeDraftUsesLiveCompositePreviewPath: Bool {
         (contentView as? SelectionOverlayView)?.test_mosaicStrokeDraftUsesLiveCompositePreviewPath ?? false
     }
@@ -596,6 +698,14 @@ final class SelectionOverlayWindow: NSWindow {
 
     var test_lockedSelectionRect: NSRect? {
         (contentView as? SelectionOverlayView)?.test_lockedSelectionRect
+    }
+
+    var test_currentSelectionRect: NSRect? {
+        (contentView as? SelectionOverlayView)?.test_currentSelectionRect
+    }
+
+    var test_overlayBounds: NSRect {
+        (contentView as? SelectionOverlayView)?.test_overlayBounds ?? .zero
     }
 
     var test_selectionCornerRadius: CGFloat {
@@ -709,6 +819,14 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_markerToolbarButtonIsSelected ?? false
     }
 
+    var test_isEyedropperToolActive: Bool {
+        (contentView as? SelectionOverlayView)?.test_isEyedropperToolActive ?? false
+    }
+
+    var test_eyedropperToolbarButtonIsSelected: Bool {
+        (contentView as? SelectionOverlayView)?.test_eyedropperToolbarButtonIsSelected ?? false
+    }
+
     private func test_mouseEvent(type: NSEvent.EventType, at point: NSPoint, modifierFlags: NSEvent.ModifierFlags = []) -> NSEvent {
         NSEvent.mouseEvent(
             with: type,
@@ -723,11 +841,15 @@ final class SelectionOverlayWindow: NSWindow {
         )!
     }
 
-    private func test_keyEvent(keyCode: UInt16, charactersIgnoringModifiers: String) -> NSEvent {
+    private func test_keyEvent(
+        keyCode: UInt16,
+        charactersIgnoringModifiers: String,
+        modifierFlags: NSEvent.ModifierFlags = []
+    ) -> NSEvent {
         NSEvent.keyEvent(
             with: .keyDown,
             location: .zero,
-            modifierFlags: [],
+            modifierFlags: modifierFlags,
             timestamp: 0,
             windowNumber: windowNumber,
             context: nil,
@@ -858,6 +980,7 @@ private final class SelectionOverlayView: NSView {
         case polyline
         case pen
         case marker
+        case eyedropper
         case mosaic
         case text
         case number
@@ -986,6 +1109,12 @@ private final class SelectionOverlayView: NSView {
     private var resizingSelectionStartRect: NSRect?
     private var resizingSelectionStartAnnotationRects: [NSRect] = []
     private var resizingSelectionStartAnnotations: [CaptureAnnotation] = []
+    private var selectionWheelAnimationTimer: Timer?
+    private var selectionWheelAnimationStartTime: CFTimeInterval?
+    private var selectionWheelAnimationStartRect: NSRect?
+    private var selectionWheelAnimationTargetRect: NSRect?
+    private var selectionWheelAnimationStartAnnotationRects: [NSRect] = []
+    private var selectionWheelAnimationStartAnnotations: [CaptureAnnotation] = []
     private let defaultSelectionCornerRadius: CGFloat = 10
     private var selectionCornerRadius: CGFloat = 10
     private var isSelectionAspectRatioLocked = false
@@ -995,6 +1124,7 @@ private final class SelectionOverlayView: NSView {
     private var currentShapeKind = CaptureAnnotationKind.rectangle
     private var activeShapeKind: CaptureAnnotationKind?
     private var isShapeToolActive = false
+    private var isEyedropperToolActive = false
     private var currentStyle = CaptureAnnotationStyle()
     private var nonMarkerStyle = CaptureAnnotationStyle()
     private var markerStyle = SelectionToolbarState.markerActivationStyle(currentStyle: CaptureAnnotationStyle())
@@ -1057,6 +1187,7 @@ private final class SelectionOverlayView: NSView {
         hoverAnimationTimer?.invalidate()
         refreshAnimationTimer?.invalidate()
         colorSamplerCopySuccessTimer?.invalidate()
+        selectionWheelAnimationTimer?.invalidate()
         NSColorPanel.shared.setTarget(nil)
         NSColorPanel.shared.setAction(nil)
     }
@@ -1067,6 +1198,9 @@ private final class SelectionOverlayView: NSView {
         refreshAnimationTimer = nil
         refreshAnimationStartDate = nil
         colorSamplerCopySuccessTimer?.invalidate()
+        selectionWheelAnimationTimer?.invalidate()
+        selectionWheelAnimationTimer = nil
+        selectionWheelAnimationStartTime = nil
         selectionDidFinish = nil
     }
 
@@ -1110,9 +1244,35 @@ private final class SelectionOverlayView: NSView {
         let point = convert(event.locationInWindow, from: nil)
         NSLog("snipory overlay mouseDown mode=%@ point=(%.0f, %.0f)", "\(interactionMode)", point.x, point.y)
 
+        cancelSelectionWheelAnimation()
+
+        if isEyedropperToolActive, !isToolbarOrPanelPoint(point) {
+            updateColorSampler(at: point)
+            needsDisplay = true
+            return
+        }
+
         switch interactionMode {
         case .selecting:
-            pendingWindowSelectionRect = hoveredWindowRect?.contains(point) == true ? hoveredWindowRect : nil
+            if let hoverRect = (hoveredWindowRect ?? displayedWindowRect)?.standardized,
+               hoverRect.contains(point),
+               hoverRect.width >= 8,
+               hoverRect.height >= 8 {
+                hoveredWindowRect = nil
+                displayedWindowRect = nil
+                pendingWindowSelectionRect = nil
+                selectionStartPoint = nil
+                selectionCurrentPoint = nil
+                lockedSelectionRect = hoverRect
+                interactionMode = .annotating
+                window?.makeFirstResponder(self)
+                updateColorSampler(at: point)
+                NSLog("snipory overlay auto selection locked rect=(%.0f, %.0f, %.0f, %.0f)", hoverRect.minX, hoverRect.minY, hoverRect.width, hoverRect.height)
+                invalidateCursorRectsAndRefresh(at: point)
+                needsDisplay = true
+                return
+            }
+            pendingWindowSelectionRect = nil
             selectionStartPoint = point
             selectionCurrentPoint = point
             updateColorSampler(at: point)
@@ -1125,6 +1285,12 @@ private final class SelectionOverlayView: NSView {
 
     override func mouseDragged(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+
+        if isEyedropperToolActive, interactionMode == .annotating {
+            updateColorSampler(at: point)
+            needsDisplay = true
+            return
+        }
 
         switch interactionMode {
         case .selecting:
@@ -1198,6 +1364,14 @@ private final class SelectionOverlayView: NSView {
 
     private func cursorStyle(at point: NSPoint) -> SelectionToolbarState.OverlayCursorStyle {
         let isInsideSelection = cursorSelectionRect?.standardized.contains(point) == true
+
+        if isEyedropperToolActive {
+            if isToolbarOrPanelPoint(point) || !isInsideSelection {
+                return .arrow
+            }
+            return .eyedropper
+        }
+
         let selectionResizeHandle = interactionMode == .annotating && !shouldPreferMosaicDrawingOutsideSelection(at: point)
             ? selectionResizeHandle(at: point)
             : nil
@@ -1334,6 +1508,13 @@ private final class SelectionOverlayView: NSView {
         let point = convert(event.locationInWindow, from: nil)
         NSLog("snipory overlay mouseUp mode=%@ point=(%.0f, %.0f)", "\(interactionMode)", point.x, point.y)
 
+        if isEyedropperToolActive, interactionMode == .annotating {
+            updateColorSampler(at: point)
+            invalidateCursorRectsAndRefresh(at: point)
+            needsDisplay = true
+            return
+        }
+
         switch interactionMode {
         case .selecting:
             hoveredWindowRect = nil
@@ -1441,6 +1622,22 @@ private final class SelectionOverlayView: NSView {
         needsDisplay = true
     }
 
+    override func scrollWheel(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        guard handleScrollWheel(at: point, deltaY: event.scrollingDeltaY) else {
+            super.scrollWheel(with: event)
+            return
+        }
+    }
+
+    override func magnify(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        guard handleMagnify(at: point, magnification: event.magnification) else {
+            super.magnify(with: event)
+            return
+        }
+    }
+
     override func keyDown(with event: NSEvent) {
         if handleKeyDown(event) {
             return
@@ -1511,13 +1708,16 @@ private final class SelectionOverlayView: NSView {
     override func resetCursorRects() {
         let defaultCursor = interactionMode == .selecting ? NSCursor.crosshair : .arrow
         addCursorRect(bounds, cursor: defaultCursor)
+        if isEyedropperToolActive, let lockedSelectionRect {
+            addCursorRect(lockedSelectionRect.standardized, cursor: NSCursor.sniporyEyedropper)
+        }
         if let lockedSelectionRect, isShapeToolActive {
             let drawingRect = lockedSelectionRect.standardized.insetBy(dx: 12, dy: 12)
             if drawingRect.width > 0, drawingRect.height > 0 {
                 addCursorRect(drawingRect, cursor: cursorRectCursorForActiveShapeTool())
             }
         }
-        if let lockedSelectionRect, interactionMode == .annotating {
+        if let lockedSelectionRect, interactionMode == .annotating, !isEyedropperToolActive {
             addSelectionResizeCursorRects(for: lockedSelectionRect.standardized)
         }
     }
@@ -1606,6 +1806,8 @@ private final class SelectionOverlayView: NSView {
             NSCursor.sniporyBrushRotationHandle(angle: 0).set()
         case .brush:
             NSCursor.sniporyBrush.set()
+        case .eyedropper:
+            NSCursor.sniporyEyedropper.set()
         case .marker:
             NSCursor.sniporyMarker(color: currentStyle.strokeColor, strokeWidth: currentStyle.strokeWidth).set()
         }
@@ -1629,7 +1831,7 @@ private final class SelectionOverlayView: NSView {
     }
 
     private var colorSamplerSelectionRect: NSRect? {
-        lockedSelectionRect ?? selectionRect ?? displayedWindowRect ?? hoveredWindowRect
+        lockedSelectionRect
     }
 
     private var cursorSelectionRect: NSRect? {
@@ -1758,12 +1960,12 @@ private final class SelectionOverlayView: NSView {
             if windowCandidates.isEmpty, let window {
                 windowCandidates = WindowSelectionState.currentCandidates(desktopFrame: window.frame)
             }
-            let targetRect = WindowSelectionState.bestWindow(
+            let targetRect = WindowSelectionState.bestHoverRect(
                 at: point,
                 candidates: windowCandidates,
                 desktopFrame: bounds,
                 currentProcessID: pid_t(NSRunningApplication.current.processIdentifier)
-            )?.bounds
+            )
             updateHoveredWindowRect(targetRect)
         } else if interactionMode != .selecting {
             updateHoveredWindowRect(nil)
@@ -1775,6 +1977,35 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func updateColorSampler(at point: NSPoint) {
+        if isEyedropperToolActive {
+            let samplePoint = eyedropperSamplePoint(forMousePoint: point)
+            guard SelectionToolbarState.shouldShowExplicitColorSampler(
+                pointer: samplePoint,
+                selectionRect: lockedSelectionRect
+            ), !isToolbarOrPanelPoint(samplePoint) else {
+                if sampledPointerPoint != nil || sampledColor != nil {
+                    sampledPointerPoint = nil
+                    sampledColor = nil
+                    needsDisplay = true
+                }
+                return
+            }
+
+            guard let color = sampleCurrentColor(at: samplePoint) else {
+                if sampledPointerPoint != nil || sampledColor != nil {
+                    sampledPointerPoint = nil
+                    sampledColor = nil
+                    needsDisplay = true
+                }
+                return
+            }
+
+            sampledPointerPoint = samplePoint
+            sampledColor = color
+            needsDisplay = true
+            return
+        }
+
         guard SelectionToolbarState.shouldShowColorSampler(
             isShapeToolActive: isShapeToolActive,
             hasAnnotations: !annotations.isEmpty,
@@ -1789,9 +2020,25 @@ private final class SelectionOverlayView: NSView {
             return
         }
 
+        guard let color = sampleColor(at: point) else {
+            if sampledPointerPoint != nil || sampledColor != nil {
+                sampledPointerPoint = nil
+                sampledColor = nil
+                needsDisplay = true
+            }
+            return
+        }
+
         sampledPointerPoint = point
-        sampledColor = sampleColor(at: point)
+        sampledColor = color
         needsDisplay = true
+    }
+
+    private func eyedropperSamplePoint(forMousePoint point: NSPoint) -> NSPoint {
+        NSPoint(
+            x: point.x + SelectionToolbarState.eyedropperSampleOffset.width,
+            y: point.y + SelectionToolbarState.eyedropperSampleOffset.height
+        )
     }
 
     private func updateHoveredWindowRect(_ targetRect: NSRect?) {
@@ -1945,6 +2192,8 @@ private final class SelectionOverlayView: NSView {
             return "pen"
         case .marker:
             return "marker"
+        case .eyedropper:
+            return "eyedropper"
         case .mosaic:
             return "mosaic"
         case .text:
@@ -2312,7 +2561,11 @@ private final class SelectionOverlayView: NSView {
         guard let lockedSelectionRect else {
             return stroke
         }
-        return CaptureMosaicStroke(points: stroke.points.map { localPoint(fromOverlayPoint: $0, selectionRect: lockedSelectionRect) })
+        return localMosaicStroke(fromOverlayStroke: stroke, selectionRect: lockedSelectionRect)
+    }
+
+    private func localMosaicStroke(fromOverlayStroke stroke: CaptureMosaicStroke, selectionRect: NSRect) -> CaptureMosaicStroke {
+        CaptureMosaicStroke(points: stroke.points.map { localPoint(fromOverlayPoint: $0, selectionRect: selectionRect) })
     }
 
     private func beginSelectionResize(handle: SelectionToolbarState.OverlayResizeHandle) {
@@ -2366,6 +2619,8 @@ private final class SelectionOverlayView: NSView {
             showsCornerRadiusPanel = false
             showsStartArrowTypeMenu = false
             showsEndArrowTypeMenu = false
+        case .eyedropper:
+            toggleEyedropperTool()
         case .mosaic:
             toggleShapeTool(.mosaicRectangle)
             showsStrokeStyleMenu = false
@@ -2389,8 +2644,32 @@ private final class SelectionOverlayView: NSView {
         needsDisplay = true
     }
 
+    private func toggleEyedropperTool() {
+        if isEyedropperToolActive {
+            isEyedropperToolActive = false
+            invalidateCursorRectsAndRefresh()
+            return
+        }
+
+        rememberCurrentStyleForActiveTool()
+        isEyedropperToolActive = true
+        isShapeToolActive = false
+        activeShapeKind = nil
+        selectedAnnotationIndex = nil
+        showsCornerRadiusPanel = false
+        showsStrokeStyleMenu = false
+        showsStartArrowTypeMenu = false
+        showsEndArrowTypeMenu = false
+        shapeStartPoint = nil
+        shapeCurrentPoint = nil
+        brushDraftPoints.removeAll()
+        mosaicDraftPoints.removeAll()
+        invalidateCursorRectsAndRefresh()
+    }
+
     private func toggleShapeTool(_ shape: CaptureAnnotationKind) {
         rememberCurrentStyleForActiveTool()
+        isEyedropperToolActive = false
         activeShapeKind = activeShapeKind == shape ? nil : shape
         isShapeToolActive = activeShapeKind != nil
         if let activeShapeKind {
@@ -2454,6 +2733,7 @@ private final class SelectionOverlayView: NSView {
 
     private func activateShapeTool(_ shape: CaptureAnnotationKind) {
         rememberCurrentStyleForActiveTool()
+        isEyedropperToolActive = false
         activeShapeKind = shape
         currentShapeKind = shape
         isShapeToolActive = true
@@ -2522,6 +2802,7 @@ private final class SelectionOverlayView: NSView {
 
 #if DEBUG
     func test_setLockedSelectionRect(_ rect: NSRect) {
+        cancelSelectionWheelAnimation()
         let rect = rect.standardized
         lockedSelectionRect = rect
         selectionStartPoint = rect.origin
@@ -2545,6 +2826,18 @@ private final class SelectionOverlayView: NSView {
     func test_setCurrentStrokeWidth(_ width: CGFloat) {
         currentStyle.strokeWidth = width
         rememberCurrentStyleForActiveTool()
+    }
+
+    func test_setAnnotations(_ newAnnotations: [CaptureAnnotation]) {
+        annotations = newAnnotations
+        redoAnnotations.removeAll()
+        selectedAnnotationIndex = nil
+        resetMosaicPreviewCaches()
+        needsDisplay = true
+    }
+
+    func test_setWindowSelectionCandidates(_ candidates: [WindowSelectionCandidate]) {
+        windowCandidates = candidates
     }
 
     func test_setStrokeStyleMenuVisible(_ isVisible: Bool) {
@@ -2572,6 +2865,22 @@ private final class SelectionOverlayView: NSView {
         default:
             break
         }
+    }
+
+    func test_updateColorSampler(at point: NSPoint) {
+        updateColorSampler(at: point)
+    }
+
+    func test_handleScrollWheel(at point: NSPoint, deltaY: CGFloat) -> Bool {
+        handleScrollWheel(at: point, deltaY: deltaY)
+    }
+
+    func test_handleMagnify(at point: NSPoint, magnification: CGFloat) -> Bool {
+        handleMagnify(at: point, magnification: magnification)
+    }
+
+    func test_completeSelectionWheelAnimation() {
+        completeSelectionWheelAnimation()
     }
 
     func test_cursorStyle(at point: NSPoint) -> SelectionToolbarState.OverlayCursorStyle {
@@ -2613,6 +2922,10 @@ private final class SelectionOverlayView: NSView {
         switch button {
         case .rectangle:
             toolbarButton = .rectangle
+        case .marker:
+            toolbarButton = .marker
+        case .eyedropper:
+            toolbarButton = .eyedropper
         case .mosaic:
             toolbarButton = .mosaic
         case .settings:
@@ -2626,12 +2939,23 @@ private final class SelectionOverlayView: NSView {
         switch button {
         case .rectangle:
             toolbarButton = .rectangle
+        case .marker:
+            toolbarButton = .marker
+        case .eyedropper:
+            toolbarButton = .eyedropper
         case .mosaic:
             toolbarButton = .mosaic
         case .settings:
             toolbarButton = .settings
         }
         return symbolName(for: toolbarButton)
+    }
+
+    func test_mainToolbarButtonPoint(for button: TestToolbarButton) -> NSPoint? {
+        guard let rect = test_mainToolbarButtonRect(for: button) else {
+            return nil
+        }
+        return NSPoint(x: rect.midX, y: rect.midY)
     }
 
     func test_annotationRect(at index: Int) -> NSRect? {
@@ -2907,6 +3231,14 @@ private final class SelectionOverlayView: NSView {
         lockedSelectionRect?.standardized
     }
 
+    var test_currentSelectionRect: NSRect? {
+        selectionRect?.standardized
+    }
+
+    var test_overlayBounds: NSRect {
+        bounds
+    }
+
     var test_selectionCornerRadius: CGFloat {
         selectionCornerRadius
     }
@@ -2923,16 +3255,22 @@ private final class SelectionOverlayView: NSView {
         currentStyle
     }
 
-    var test_optionsToolbarMode: SelectionToolbarState.OptionsToolbarMode {
-        optionsToolbarMode
+    var test_optionsToolbarMode: SelectionToolbarState.OptionsToolbarMode? {
+        guard isShapeToolActive else {
+            return nil
+        }
+        return optionsToolbarMode
     }
 
     var test_optionsToolbarRect: NSRect? {
         optionsToolbarRect
     }
 
-    var test_currentShapeKind: CaptureAnnotationKind {
-        currentShapeKind
+    var test_currentShapeKind: CaptureAnnotationKind? {
+        guard isShapeToolActive else {
+            return nil
+        }
+        return currentShapeKind
     }
 
     var test_mosaicRedactionType: CaptureMosaicRedactionType {
@@ -2969,6 +3307,38 @@ private final class SelectionOverlayView: NSView {
     var test_markerToolbarButtonIsSelected: Bool {
         buttonMatchesCurrentTool(.marker)
     }
+
+    var test_isEyedropperToolActive: Bool {
+        isEyedropperToolActive
+    }
+
+    var test_eyedropperToolbarButtonIsSelected: Bool {
+        buttonMatchesCurrentTool(.eyedropper)
+    }
+
+    var test_isColorSamplerVisible: Bool {
+        sampledPointerPoint != nil && sampledColor != nil
+    }
+
+    var test_sampledColorHex: String? {
+        sampledColor.map { SelectionToolbarState.colorSamplerHexString(for: $0) }
+    }
+
+    var test_sampledPointerPoint: NSPoint? {
+        sampledPointerPoint
+    }
+
+    func test_magnifierSampleColorHex(at point: NSPoint) -> String? {
+        magnifierSampleColor(at: point).map { SelectionToolbarState.colorSamplerHexString(for: $0) }
+    }
+
+    func test_magnifierSampleColorHex(at point: NSPoint, columnOffset: Int, rowOffset: Int) -> String? {
+        magnifierSampleColor(
+            centeredAt: point,
+            columnOffset: columnOffset,
+            rowOffset: rowOffset
+        ).map { SelectionToolbarState.colorSamplerHexString(for: $0) }
+    }
 #endif
 
     private func showPlaceholder(for button: ToolbarButton) {
@@ -2982,6 +3352,8 @@ private final class SelectionOverlayView: NSView {
             label = "画笔"
         case .marker:
             label = "标记"
+        case .eyedropper:
+            label = "取色"
         case .mosaic:
             label = "马赛克"
         case .text:
@@ -4030,6 +4402,12 @@ private final class SelectionOverlayView: NSView {
                     let localPath = localBrushPath(fromOverlayBrushPath: overlayPath, selectionRect: lockedSelectionRect)
                     annotations[index].brushPath = localPath
                     annotations[index].rect = localPath.boundingRect
+                } else if movingSelectionStartAnnotations.indices.contains(index),
+                          let mosaicStroke = movingSelectionStartAnnotations[index].mosaicStroke {
+                    let overlayStroke = overlayMosaicStroke(fromLocalMosaicStroke: mosaicStroke, selectionRect: movingSelectionStartRect)
+                    let localStroke = localMosaicStroke(fromOverlayStroke: overlayStroke, selectionRect: lockedSelectionRect)
+                    annotations[index].mosaicStroke = localStroke
+                    annotations[index].rect = localStroke.boundingRect
                 } else {
                     annotations[index].rect = preservedRects[index]
                 }
@@ -4238,11 +4616,199 @@ private final class SelectionOverlayView: NSView {
                 let localPath = localBrushPath(fromOverlayBrushPath: overlayPath, selectionRect: resized)
                 annotations[index].brushPath = localPath
                 annotations[index].rect = localPath.boundingRect
+            } else if resizingSelectionStartAnnotations.indices.contains(index),
+                      let mosaicStroke = resizingSelectionStartAnnotations[index].mosaicStroke {
+                let overlayStroke = overlayMosaicStroke(fromLocalMosaicStroke: mosaicStroke, selectionRect: resizingSelectionStartRect)
+                let localStroke = localMosaicStroke(fromOverlayStroke: overlayStroke, selectionRect: resized)
+                annotations[index].mosaicStroke = localStroke
+                annotations[index].rect = localStroke.boundingRect
             } else {
                 annotations[index].rect = SelectionToolbarState.localAnnotationRect(
                     fromOverlayRect: resizingSelectionStartAnnotationRects[index],
                     selectionRect: resized
                 )
+            }
+        }
+    }
+
+    private func handleScrollWheel(at point: NSPoint, deltaY: CGFloat) -> Bool {
+        handleSelectionZoom(at: point, deltaY: deltaY)
+    }
+
+    private func handleMagnify(at point: NSPoint, magnification: CGFloat) -> Bool {
+        handleSelectionZoom(at: point, deltaY: magnification * 60)
+    }
+
+    private func handleSelectionZoom(at point: NSPoint, deltaY: CGFloat) -> Bool {
+        guard let lockedSelectionRect else {
+            return false
+        }
+        guard !isToolbarOrPanelPoint(point) else {
+            return false
+        }
+        guard interactionMode != .selecting else {
+            return false
+        }
+        guard activeDragIsInProgress == false else {
+            return false
+        }
+
+        let selectionRect = lockedSelectionRect.standardized
+        let anchor = selectionRect.contains(point) ? point : NSPoint(x: selectionRect.midX, y: selectionRect.midY)
+        let screenBounds = screenBounds(containing: lockedSelectionRect)
+        let resized = SelectionToolbarState.wheelZoomedSelectionRect(
+            from: selectionRect,
+            anchor: anchor,
+            deltaY: deltaY,
+            inside: screenBounds,
+            minimumSize: 64
+        )
+        guard resized != selectionRect else {
+            return true
+        }
+
+        startSelectionWheelAnimation(from: selectionRect, to: resized)
+        needsDisplay = true
+        invalidateCursorRectsAndRefresh(at: point)
+        return true
+    }
+
+    private var activeDragIsInProgress: Bool {
+        switch interactionMode {
+        case .selecting, .annotating:
+            return false
+        default:
+            return true
+        }
+    }
+
+    private func startSelectionWheelAnimation(from startRect: NSRect, to targetRect: NSRect) {
+        selectionWheelAnimationTimer?.invalidate()
+        selectionWheelAnimationStartTime = CACurrentMediaTime()
+        selectionWheelAnimationStartRect = startRect
+        selectionWheelAnimationTargetRect = targetRect
+        selectionWheelAnimationStartAnnotationRects = annotations.map { overlayRect(fromLocalAnnotationRect: $0.rect) }
+        selectionWheelAnimationStartAnnotations = annotations
+
+        updateSelectionWheelAnimation(progress: 0.35)
+
+        let timer = Timer(timeInterval: 1 / 60, repeats: true) { [weak self] timer in
+            guard let self else {
+                timer.invalidate()
+                return
+            }
+            guard let startTime = self.selectionWheelAnimationStartTime else {
+                timer.invalidate()
+                return
+            }
+
+            let duration: CFTimeInterval = 0.16
+            let rawProgress = min(1, (CACurrentMediaTime() - startTime) / duration)
+            let eased = 1 - pow(1 - CGFloat(rawProgress), 3)
+            self.updateSelectionWheelAnimation(progress: max(0.35, eased))
+
+            if rawProgress >= 1 {
+                timer.invalidate()
+                self.clearSelectionWheelAnimationState()
+            }
+        }
+        selectionWheelAnimationTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func updateSelectionWheelAnimation(progress: CGFloat) {
+        guard
+            let startRect = selectionWheelAnimationStartRect,
+            let targetRect = selectionWheelAnimationTargetRect
+        else {
+            return
+        }
+
+        let clampedProgress = min(1, max(0, progress))
+        let animatedRect = interpolate(from: startRect, to: targetRect, progress: clampedProgress)
+        applySelectionWheelResize(
+            from: startRect,
+            to: animatedRect,
+            startAnnotationRects: selectionWheelAnimationStartAnnotationRects,
+            startAnnotations: selectionWheelAnimationStartAnnotations
+        )
+        needsDisplay = true
+    }
+
+    private func completeSelectionWheelAnimation() {
+        selectionWheelAnimationTimer?.invalidate()
+        selectionWheelAnimationTimer = nil
+        updateSelectionWheelAnimation(progress: 1)
+        clearSelectionWheelAnimationState()
+    }
+
+    private func cancelSelectionWheelAnimation() {
+        selectionWheelAnimationTimer?.invalidate()
+        clearSelectionWheelAnimationState()
+    }
+
+    private func clearSelectionWheelAnimationState() {
+        selectionWheelAnimationTimer = nil
+        selectionWheelAnimationStartTime = nil
+        selectionWheelAnimationStartRect = nil
+        selectionWheelAnimationTargetRect = nil
+        selectionWheelAnimationStartAnnotationRects.removeAll()
+        selectionWheelAnimationStartAnnotations.removeAll()
+    }
+
+    private func applySelectionWheelResize(from startRect: NSRect, to resized: NSRect) {
+        applySelectionWheelResize(
+            from: startRect,
+            to: resized,
+            startAnnotationRects: annotations.map { overlayRect(fromLocalAnnotationRect: $0.rect) },
+            startAnnotations: annotations
+        )
+    }
+
+    private func applySelectionWheelResize(
+        from startRect: NSRect,
+        to resized: NSRect,
+        startAnnotationRects: [NSRect],
+        startAnnotations: [CaptureAnnotation]
+    ) {
+        resizingSelectionStartRect = startRect
+        resizingSelectionStartAnnotationRects = startAnnotationRects
+        resizingSelectionStartAnnotations = startAnnotations
+        lockedSelectionRect = resized
+
+        if let lockedSelectionRect {
+            let preservedRects = SelectionToolbarState.localAnnotationRectsPreservingOverlayPositions(
+                resizingSelectionStartAnnotationRects,
+                selectionRect: lockedSelectionRect
+            )
+            for index in annotations.indices where preservedRects.indices.contains(index) {
+                if resizingSelectionStartAnnotations.indices.contains(index),
+                   let arrowLine = resizingSelectionStartAnnotations[index].arrowLine {
+                    let overlayLine = overlayArrowLine(fromLocalArrowLine: arrowLine, selectionRect: startRect)
+                    let localLine = localArrowLine(fromOverlayArrowLine: overlayLine, selectionRect: lockedSelectionRect)
+                    annotations[index].arrowLine = localLine
+                    annotations[index].rect = localLine.boundingRect
+                } else if resizingSelectionStartAnnotations.indices.contains(index),
+                          let markerLine = resizingSelectionStartAnnotations[index].markerLine {
+                    let overlayLine = overlayMarkerLine(fromLocalMarkerLine: markerLine, selectionRect: startRect)
+                    let localLine = localMarkerLine(fromOverlayMarkerLine: overlayLine, selectionRect: lockedSelectionRect)
+                    annotations[index].markerLine = localLine
+                    annotations[index].rect = localLine.boundingRect
+                } else if resizingSelectionStartAnnotations.indices.contains(index),
+                          let brushPath = resizingSelectionStartAnnotations[index].brushPath {
+                    let overlayPath = overlayBrushPath(fromLocalBrushPath: brushPath, selectionRect: startRect)
+                    let localPath = localBrushPath(fromOverlayBrushPath: overlayPath, selectionRect: lockedSelectionRect)
+                    annotations[index].brushPath = localPath
+                    annotations[index].rect = localPath.boundingRect
+                } else if resizingSelectionStartAnnotations.indices.contains(index),
+                          let mosaicStroke = resizingSelectionStartAnnotations[index].mosaicStroke {
+                    let overlayStroke = overlayMosaicStroke(fromLocalMosaicStroke: mosaicStroke, selectionRect: startRect)
+                    let localStroke = localMosaicStroke(fromOverlayStroke: overlayStroke, selectionRect: lockedSelectionRect)
+                    annotations[index].mosaicStroke = localStroke
+                    annotations[index].rect = localStroke.boundingRect
+                } else {
+                    annotations[index].rect = preservedRects[index]
+                }
             }
         }
     }
@@ -5150,15 +5716,44 @@ private final class SelectionOverlayView: NSView {
         }
 
         drawPanel(toolbar, opaque: true, alpha: 0.9)
-        drawToolbarButton(mainToolbarLeadingDragHandleRect(in: toolbar), symbol: "toolbar-settings-more", selected: false, enabled: true)
+        drawMainToolbarDragHandle(mainToolbarLeadingDragHandleRect(in: toolbar), enabled: true)
         drawMainToolbarSeparators(in: toolbar)
 
         for (button, rect) in toolbarButtonRects(in: toolbar) {
             let enabled = isToolbarButtonEnabled(button)
+            if button == .settings {
+                drawMainToolbarDragHandle(rect, enabled: enabled)
+                continue
+            }
             drawToolbarButton(rect, symbol: symbolName(for: button, enabled: enabled), selected: buttonMatchesCurrentTool(button), enabled: enabled)
             if button == .number {
                 drawNumberToolDisclosure(in: rect, enabled: enabled)
             }
+        }
+    }
+
+    private func drawMainToolbarDragHandle(_ rect: NSRect, enabled: Bool) {
+        drawToolbarButton(rect, symbol: nil, selected: false, enabled: enabled)
+        let color = SelectionToolbarState.mainToolbarDragHandleIconColor(enabled: enabled)
+        let imageInset = toolbarIconInset(for: "settings-more")
+        if drawToolbarImage(
+            named: "settings-more",
+            in: rect,
+            template: true,
+            enabled: enabled,
+            selected: false,
+            inset: imageInset,
+            tintColor: color
+        ) || drawToolbarImage(
+            named: "toolbar-settings-more",
+            in: rect,
+            template: true,
+            enabled: enabled,
+            selected: false,
+            inset: imageInset,
+            tintColor: color
+        ) {
+            return
         }
     }
 
@@ -5218,6 +5813,28 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func drawColorSamplerIfNeeded() {
+        if isEyedropperToolActive {
+            guard
+                let point = sampledPointerPoint,
+                let color = sampledColor,
+                SelectionToolbarState.shouldShowExplicitColorSampler(
+                    pointer: point,
+                    selectionRect: lockedSelectionRect
+                ),
+                !isToolbarOrPanelPoint(point)
+            else {
+                return
+            }
+
+            let rect = SelectionToolbarState.colorSamplerRect(
+                size: colorSamplerSize,
+                pointer: point,
+                inside: safeLayoutBounds
+            )
+            drawColorSamplerPanel(rect, point: point, color: color)
+            return
+        }
+
         guard
             let point = sampledPointerPoint,
             let color = sampledColor,
@@ -5373,17 +5990,10 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func drawSamplerMagnifier(in rect: NSRect, centeredAt point: NSPoint) {
-        guard let backgroundBitmap else {
-            return
-        }
-
         let gridSize = 9
         let cellWidth = rect.width / CGFloat(gridSize)
         let cellHeight = rect.height / CGFloat(gridSize)
         let contentRect = rect
-        let centerPixel = bitmapPixelPoint(for: point, in: backgroundBitmap)
-        let pixelX = centerPixel.x
-        let pixelY = centerPixel.y
         let centerIndex = gridSize / 2
 
         NSColor.white.setFill()
@@ -5391,15 +6001,17 @@ private final class SelectionOverlayView: NSView {
 
         for row in 0..<gridSize {
             for column in 0..<gridSize {
-                let sampleX = pixelX + column - centerIndex
-                let sampleY = pixelY + centerIndex - row
                 let cellRect = NSRect(
                     x: contentRect.minX + CGFloat(column) * cellWidth,
                     y: contentRect.minY + CGFloat(row) * cellHeight,
                     width: cellWidth,
                     height: cellHeight
                 )
-                (sampleColor(atPixelX: sampleX, y: sampleY, in: backgroundBitmap) ?? .white).setFill()
+                (magnifierSampleColor(
+                    centeredAt: point,
+                    columnOffset: column - centerIndex,
+                    rowOffset: centerIndex - row
+                ) ?? .white).setFill()
                 NSBezierPath(rect: cellRect).fill()
             }
         }
@@ -6093,7 +6705,7 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func copySampledColorToPasteboard() -> Bool {
-        guard let color = sampledColor ?? sampledPointerPoint.flatMap(sampleColor(at:)) else {
+        guard let color = sampledColor ?? sampledPointerPoint.flatMap(sampleCurrentColor(at:)) else {
             return false
         }
 
@@ -6135,6 +6747,80 @@ private final class SelectionOverlayView: NSView {
         return sampleColor(atPixelX: pixel.x, y: pixel.y, in: backgroundBitmap)
     }
 
+    private func sampleCurrentColor(at point: NSPoint) -> NSColor? {
+        if isEyedropperToolActive {
+            return sampleVisibleSelectionColor(at: point)
+        }
+        return sampleColor(at: point)
+    }
+
+    private func magnifierSampleColor(at point: NSPoint) -> NSColor? {
+        sampleCurrentColor(at: point)
+    }
+
+    private func magnifierSampleColor(centeredAt point: NSPoint, columnOffset: Int, rowOffset: Int) -> NSColor? {
+        let samplePoint = magnifierSamplePoint(
+            centeredAt: point,
+            columnOffset: columnOffset,
+            rowOffset: rowOffset
+        )
+        return sampleCurrentColor(at: samplePoint)
+    }
+
+    private func magnifierSamplePoint(centeredAt point: NSPoint, columnOffset: Int, rowOffset: Int) -> NSPoint {
+        let step = magnifierPointStep()
+        return NSPoint(
+            x: point.x + CGFloat(columnOffset) * step.width,
+            y: point.y - CGFloat(rowOffset) * step.height
+        )
+    }
+
+    private func magnifierPointStep() -> NSSize {
+        if let backgroundImage, let cgImage = backgroundImage.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+            return NSSize(
+                width: backgroundImage.size.width / CGFloat(max(cgImage.width, 1)),
+                height: backgroundImage.size.height / CGFloat(max(cgImage.height, 1))
+            )
+        }
+        if let backgroundBitmap {
+            let imageSize = backgroundImage?.size ?? bounds.size
+            return NSSize(
+                width: imageSize.width / CGFloat(max(backgroundBitmap.pixelsWide, 1)),
+                height: imageSize.height / CGFloat(max(backgroundBitmap.pixelsHigh, 1))
+            )
+        }
+        return NSSize(width: 1, height: 1)
+    }
+
+    private func sampleVisibleSelectionColor(at point: NSPoint) -> NSColor? {
+        guard
+            let selectionRect = lockedSelectionRect?.standardized,
+            selectionRect.contains(point)
+        else {
+            return nil
+        }
+
+        guard let composite = mosaicPreviewComposite(for: annotations) else {
+            return sampleColor(at: point)
+        }
+
+        return sampleColor(at: point, in: composite.image)
+    }
+
+    private func sampleColor(at point: NSPoint, in image: NSImage) -> NSColor? {
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            return nil
+        }
+
+        let pixel = bitmapPixelPoint(
+            for: point,
+            imageSize: image.size,
+            pixelsWide: cgImage.width,
+            pixelsHigh: cgImage.height
+        )
+        return SelectionToolbarState.sampleColor(atPixelX: pixel.x, y: pixel.y, in: cgImage)
+    }
+
     private func logColorSamplerDebug(at point: NSPoint, color: NSColor) {
         guard let backgroundBitmap else {
             return
@@ -6153,11 +6839,24 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func bitmapPixelPoint(for point: NSPoint, in bitmap: NSBitmapImageRep) -> (x: Int, y: Int) {
-        let imageSize = backgroundImage?.size ?? bounds.size
-        let scaleX = CGFloat(bitmap.pixelsWide) / max(imageSize.width, 1)
-        let scaleY = CGFloat(bitmap.pixelsHigh) / max(imageSize.height, 1)
-        let x = max(0, min(bitmap.pixelsWide - 1, Int(point.x * scaleX)))
-        let y = max(0, min(bitmap.pixelsHigh - 1, Int((bounds.height - point.y) * scaleY)))
+        bitmapPixelPoint(
+            for: point,
+            imageSize: backgroundImage?.size ?? bounds.size,
+            pixelsWide: bitmap.pixelsWide,
+            pixelsHigh: bitmap.pixelsHigh
+        )
+    }
+
+    private func bitmapPixelPoint(
+        for point: NSPoint,
+        imageSize: NSSize,
+        pixelsWide: Int,
+        pixelsHigh: Int
+    ) -> (x: Int, y: Int) {
+        let scaleX = CGFloat(pixelsWide) / max(imageSize.width, 1)
+        let scaleY = CGFloat(pixelsHigh) / max(imageSize.height, 1)
+        let x = max(0, min(pixelsWide - 1, Int(point.x * scaleX)))
+        let y = max(0, min(pixelsHigh - 1, Int((imageSize.height - point.y) * scaleY)))
         return (x, y)
     }
 
@@ -6206,7 +6905,15 @@ private final class SelectionOverlayView: NSView {
     }
 
     @discardableResult
-    private func drawToolbarImage(named name: String, in rect: NSRect, template: Bool, enabled: Bool, selected: Bool = false, inset: CGFloat = 3) -> Bool {
+    private func drawToolbarImage(
+        named name: String,
+        in rect: NSRect,
+        template: Bool,
+        enabled: Bool,
+        selected: Bool = false,
+        inset: CGFloat = 3,
+        tintColor: NSColor? = nil
+    ) -> Bool {
         let resource = NSImage(named: name)
             ?? Bundle.main.url(forResource: name, withExtension: "svg").flatMap(NSImage.init(contentsOf:))
             ?? Bundle.main.url(forResource: name, withExtension: "png").flatMap(NSImage.init(contentsOf:))
@@ -6214,7 +6921,11 @@ private final class SelectionOverlayView: NSView {
             image.isTemplate = template
             let targetRect = rect.insetBy(dx: inset, dy: inset)
             if template {
-                drawTintedToolbarImage(image, in: targetRect, color: toolbarIconColor(enabled: enabled, selected: selected))
+                drawTintedToolbarImage(
+                    image,
+                    in: targetRect,
+                    color: tintColor ?? toolbarIconColor(enabled: enabled, selected: selected)
+                )
             } else {
                 image.draw(in: targetRect)
             }
@@ -6397,6 +7108,7 @@ private final class SelectionOverlayView: NSView {
             .polyline,
             .pen,
             .marker,
+            .eyedropper,
             .mosaic,
             .text,
             .number,
@@ -6443,6 +7155,8 @@ private final class SelectionOverlayView: NSView {
             return "toolbar-pencil-tool"
         case .marker:
             return "toolbar-highlighter-tool"
+        case .eyedropper:
+            return "toolbar-eyedropper"
         case .mosaic:
             return "toolbar-masaike2"
         case .text:
@@ -6482,6 +7196,8 @@ private final class SelectionOverlayView: NSView {
             return isShapeToolActive && currentShapeKind == .brush
         case .marker:
             return isShapeToolActive && currentShapeKind == .marker
+        case .eyedropper:
+            return isEyedropperToolActive
         case .mosaic:
             return isShapeToolActive && (currentShapeKind == .mosaicStroke || currentShapeKind == .mosaicRectangle)
         default:
@@ -6860,8 +7576,12 @@ private final class SelectionOverlayView: NSView {
             return stroke
         }
 
+        return overlayMosaicStroke(fromLocalMosaicStroke: stroke, selectionRect: lockedSelectionRect)
+    }
+
+    private func overlayMosaicStroke(fromLocalMosaicStroke stroke: CaptureMosaicStroke, selectionRect: NSRect) -> CaptureMosaicStroke {
         return CaptureMosaicStroke(
-            points: stroke.points.map { overlayPoint(fromLocalPoint: $0, selectionRect: lockedSelectionRect) }
+            points: stroke.points.map { overlayPoint(fromLocalPoint: $0, selectionRect: selectionRect) }
         )
     }
 

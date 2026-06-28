@@ -113,4 +113,72 @@ final class WindowSelectionStateTests: XCTestCase {
             NSRect(x: 0, y: 0, width: 900, height: 48),
         ])
     }
+
+    func testBestHoverRectUsesOrdinaryWindowCandidate() {
+        let window = WindowSelectionCandidate(
+            id: 1,
+            ownerPID: 10,
+            layer: 0,
+            alpha: 1,
+            bounds: NSRect(x: 20, y: 20, width: 500, height: 360),
+            name: "app"
+        )
+
+        let rect = WindowSelectionState.bestHoverRect(
+            at: NSPoint(x: 140, y: 150),
+            candidates: [window],
+            desktopFrame: NSRect(x: 0, y: 0, width: 600, height: 420),
+            currentProcessID: 99
+        )
+
+        XCTAssertEqual(rect, window.bounds)
+    }
+
+    func testBestHoverRectKeepsSystemUIAboveOrdinaryWindow() {
+        let menubar = WindowSelectionCandidate(
+            id: 1,
+            ownerPID: 0,
+            layer: 24,
+            alpha: 1,
+            bounds: NSRect(x: 0, y: 563, width: 900, height: 37),
+            name: "Menubar"
+        )
+        let app = WindowSelectionCandidate(
+            id: 2,
+            ownerPID: 10,
+            layer: 0,
+            alpha: 1,
+            bounds: NSRect(x: 0, y: 0, width: 900, height: 600),
+            name: "app"
+        )
+
+        let rect = WindowSelectionState.bestHoverRect(
+            at: NSPoint(x: 50, y: 580),
+            candidates: [menubar, app],
+            desktopFrame: NSRect(x: 0, y: 0, width: 900, height: 600),
+            currentProcessID: 99
+        )
+
+        XCTAssertEqual(rect, menubar.bounds)
+    }
+
+    func testBestHoverRectReturnsNilOutsideWindowCandidates() {
+        let window = WindowSelectionCandidate(
+            id: 1,
+            ownerPID: 10,
+            layer: 0,
+            alpha: 1,
+            bounds: NSRect(x: 20, y: 20, width: 220, height: 160),
+            name: "app"
+        )
+
+        let rect = WindowSelectionState.bestHoverRect(
+            at: NSPoint(x: 280, y: 220),
+            candidates: [window],
+            desktopFrame: NSRect(x: 0, y: 0, width: 600, height: 420),
+            currentProcessID: 99
+        )
+
+        XCTAssertNil(rect)
+    }
 }
