@@ -3,7 +3,7 @@
 > 文档状态：持续维护中  
 > 最后更新：2026-06-27  
 > 适用范围：`xxsnap/` native-shell 重写版本，当前以 macOS 实现为事实基准，并作为后续 Windows native shell 开发的产品规格来源。
-> 配套原型：`docs/prototypes/` 中的 capture overlay prototype（历史文件名暂未迁移）
+> 配套原型：`docs/prototypes/xxsnap-capture-overlay-prototype.html`
 
 ## 1. 文档目标
 
@@ -506,7 +506,7 @@ Windows 后续应建立等价验证：
 3. 如果新增工具，补充“已实现工具需求”或从“待实现工具需求占位”移入正式章节。
 4. 更新 `docs/annotation-tools-user-guide.md` 的最终用户说明。
 5. 如影响 Windows 复刻，更新“Windows 版本迁移规则”。
-6. 如影响原型，更新 `docs/prototypes/` 中的 capture overlay prototype（历史文件名暂未迁移）。
+6. 如影响原型，更新 `docs/prototypes/xxsnap-capture-overlay-prototype.html`。
 7. 在最终回复或 commit message 中说明文档已同步。
 
 ## 12. 后续开发提示词模板
@@ -517,7 +517,7 @@ Windows 后续应建立等价验证：
 请在 xxsnap 中继续开发 [功能名]。
 
 必须先阅读并遵循：
-- 本文件（历史文件名暂未迁移）
+- docs/requirements/xxsnap-mac-feature-requirements.md
 - docs/annotation-tools-user-guide.md
 - 与该功能相关的 docs/brainstorms/ 或 docs/superpowers/ 文档
 

@@ -1252,9 +1252,9 @@ Expected: output includes `Authority=xxsnap Local Dev` and `Identifier=com.xxsna
 Run:
 
 ```bash
-pkill -f "/Users/kevin/Projects/open-source/Snipory/xxsnap/build/xcode-derived/Build/Products/Debug/xxsnap.app/Contents/MacOS/xxsnap" || true
-pkill -f "xxsnap.app/Contents/MacOS/xxsnap" || true
-pgrep -af "xxsnap.app/Contents/MacOS/xxsnap" || true
+pkill -f "/Users/kevin/Projects/open-source/Snipory/snipory-v2/build/xcode-derived/Build/Products/Debug/Snipory.app/Contents/MacOS/Snipory" || true
+pkill -f "Snipory.app/Contents/MacOS/Snipory" || true
+pgrep -af "Snipory.app/Contents/MacOS/Snipory" || true
 ```
 
 Expected: final `pgrep` prints no old Snipory process.
