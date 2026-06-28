@@ -3704,6 +3704,8 @@ private final class SelectionOverlayView: NSView {
             return
         }
 
+        commitCurrentTextEdit()
+
         selectionDidFinish?(
             CaptureSelectionResult(
                 screenRect: window.convertToScreen(lockedSelectionRect).standardized,

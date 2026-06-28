@@ -239,6 +239,39 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertNil(window.test_selectedAnnotationKind)
     }
 
+    func testFinishingCaptureCommitsOrDiscardsActiveTextEdit() {
+        var emptyResult: CaptureSelectionResult?
+        let emptyExpectation = expectation(description: "empty text draft result")
+        let emptyWindow = SelectionOverlayWindow(backgroundImage: nil) { result in
+            emptyResult = result
+            emptyExpectation.fulfill()
+        }
+        emptyWindow.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        emptyWindow.test_activateTextTool()
+        emptyWindow.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        emptyWindow.test_mouseUp(at: NSPoint(x: 140, y: 150))
+        emptyWindow.test_keyDown(keyCode: 8, charactersIgnoringModifiers: "c", modifierFlags: [.command])
+        wait(for: [emptyExpectation], timeout: 0.5)
+        XCTAssertEqual(emptyResult?.annotations.count, 0)
+
+        var textResult: CaptureSelectionResult?
+        let textExpectation = expectation(description: "non-empty text result")
+        let textWindow = SelectionOverlayWindow(backgroundImage: nil) { result in
+            textResult = result
+            textExpectation.fulfill()
+        }
+        textWindow.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        textWindow.test_activateTextTool()
+        textWindow.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        textWindow.test_mouseUp(at: NSPoint(x: 140, y: 150))
+        textWindow.test_keyDown(keyCode: 0, charactersIgnoringModifiers: "x")
+        textWindow.test_keyDown(keyCode: 8, charactersIgnoringModifiers: "c", modifierFlags: [.command])
+        wait(for: [textExpectation], timeout: 0.5)
+        XCTAssertEqual(textResult?.annotations.count, 1)
+        XCTAssertEqual(textResult?.annotations.first?.kind, .text)
+        XCTAssertEqual(textResult?.annotations.first?.text, "x")
+    }
+
     func testActivatingAnotherToolExitsEyedropperMode() {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 200, height: 120))
