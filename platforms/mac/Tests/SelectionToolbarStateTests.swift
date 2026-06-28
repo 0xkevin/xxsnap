@@ -2141,7 +2141,7 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         XCTAssertEqual(
             CaptureCoordinator.defaultCaptureFilename(date: date, timeZone: TimeZone(secondsFromGMT: 0)!),
-            "Snipory 截图 19700101-000000.png"
+            "xxsnap 截图 19700101-000000.png"
         )
     }
 
@@ -4246,6 +4246,21 @@ final class SelectionToolbarStateTests: XCTestCase {
             CaptureCoordinator.shouldRefreshTargetApplication(
                 targetBundleIdentifier: "com.apple.Safari",
                 mainBundleIdentifier: "com.snipory.v2.mac"
+            )
+        )
+    }
+
+    func testCaptureRefreshIgnoresXxsnapAsRefreshTarget() {
+        XCTAssertFalse(
+            CaptureCoordinator.shouldRefreshTargetApplication(
+                targetBundleIdentifier: "com.xxsnap.mac",
+                mainBundleIdentifier: "com.xxsnap.mac"
+            )
+        )
+        XCTAssertTrue(
+            CaptureCoordinator.shouldRefreshTargetApplication(
+                targetBundleIdentifier: "com.apple.finder",
+                mainBundleIdentifier: "com.xxsnap.mac"
             )
         )
     }

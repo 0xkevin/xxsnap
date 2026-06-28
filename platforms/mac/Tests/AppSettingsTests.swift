@@ -2,6 +2,12 @@ import XCTest
 @testable import Snipory
 
 final class AppSettingsTests: XCTestCase {
+    func testBundleIdentityUsesXxsnap() {
+        XCTAssertEqual(Bundle.main.bundleIdentifier, "com.xxsnap.mac")
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String, "xxsnap")
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String, "xxsnap")
+    }
+
     func testAppDelegateAllowsProgrammaticTerminationForCleanRestarts() {
         let delegate = AppDelegate()
 
