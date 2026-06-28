@@ -14,6 +14,8 @@ targets:
     platform: macOS
     sources:
       - Sources
+      - path: Resources/Info.plist
+        buildPhase: none
       - Resources/Assets.xcassets
       - Resources/xxsnap.png
       - Resources/xxsnap.icns
@@ -31,10 +33,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.xxsnap.mac
         PRODUCT_NAME: xxsnap
         ASSETCATALOG_COMPILER_APPICON_NAME: ""
-        INFOPLIST_KEY_CFBundleDisplayName: xxsnap
-        INFOPLIST_KEY_CFBundleName: xxsnap
-        INFOPLIST_KEY_CFBundleIconFile: xxsnap
-        INFOPLIST_KEY_LSUIElement: YES
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Resources/Info.plist
         ENABLE_DEBUG_DYLIB: NO
         SWIFT_OBJC_BRIDGING_HEADER: Sources/Bridge/xxsnap-Bridging-Header.h
         CODE_SIGN_STYLE: Manual

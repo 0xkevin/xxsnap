@@ -78,6 +78,7 @@
 		BE0A667A6A11313F9B532FC2 /* save-to-file.svg */ = {isa = PBXFileReference; path = "save-to-file.svg"; sourceTree = "<group>"; };
 		C662C2A250F475591381BB05 /* CaptureAnnotationRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureAnnotationRenderer.swift; sourceTree = "<group>"; };
 		C7E12CD93A98EF67FC506F54 /* WindowSelectionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowSelectionState.swift; sourceTree = "<group>"; };
+		CAA03D0ECBC1DBC9BD9D2E86 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		CB99BC81E0DE791D15922EE9 /* refresh-left-svgrepo-com.svg */ = {isa = PBXFileReference; path = "refresh-left-svgrepo-com.svg"; sourceTree = "<group>"; };
 		CE931250563980B3056AED56 /* SelectionToolbarState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectionToolbarState.swift; sourceTree = "<group>"; };
 		D2B4C4D0B64515EB108A0F92 /* xxsnap-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "xxsnap-Bridging-Header.h"; sourceTree = "<group>"; };
@@ -179,6 +180,7 @@
 			isa = PBXGroup;
 			children = (
 				B777570511CE72D6B6E9D175 /* Assets.xcassets */,
+				CAA03D0ECBC1DBC9BD9D2E86 /* Info.plist */,
 				E06F5FA13C638ADE764DDA8B /* xxsnap.icns */,
 				E4F7C38789DCA5D0BBB5EEFA /* xxsnap.png */,
 				F51D15626D490752CC2922E4 /* Icons */,
@@ -438,10 +440,8 @@
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
 				ENABLE_DEBUG_DYLIB = NO;
-				INFOPLIST_KEY_CFBundleDisplayName = xxsnap;
-				INFOPLIST_KEY_CFBundleIconFile = xxsnap;
-				INFOPLIST_KEY_CFBundleName = xxsnap;
-				INFOPLIST_KEY_LSUIElement = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -483,10 +483,8 @@
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
 				ENABLE_DEBUG_DYLIB = NO;
-				INFOPLIST_KEY_CFBundleDisplayName = xxsnap;
-				INFOPLIST_KEY_CFBundleIconFile = xxsnap;
-				INFOPLIST_KEY_CFBundleName = xxsnap;
-				INFOPLIST_KEY_LSUIElement = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
