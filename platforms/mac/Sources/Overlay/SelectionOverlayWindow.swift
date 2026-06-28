@@ -3914,6 +3914,8 @@ private final class SelectionOverlayView: NSView {
             return kind == .mosaicStroke || kind == .mosaicRectangle
         case .rectangle, .ellipse:
             return kind == .rectangle || kind == .ellipse
+        case .text:
+            return kind == .text
         }
     }
 
@@ -5309,6 +5311,10 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func drawAnnotation(_ annotation: CaptureAnnotation, inOverlay: Bool) {
+        if annotation.kind == .text {
+            drawTextAnnotation(annotation, inOverlay: inOverlay)
+            return
+        }
         if annotation.kind == .mosaicStroke || annotation.kind == .mosaicRectangle {
             guard let composite = mosaicPreviewComposite(for: [annotation]) else {
                 return
@@ -5349,7 +5355,7 @@ private final class SelectionOverlayView: NSView {
             path = NSBezierPath(rect: insetRect)
         case .ellipse:
             path = NSBezierPath(ovalIn: insetRect)
-        case .arrowLine, .brush, .marker, .mosaicStroke, .mosaicRectangle:
+        case .arrowLine, .brush, .marker, .text, .mosaicStroke, .mosaicRectangle:
             return
         }
 
@@ -5377,6 +5383,21 @@ private final class SelectionOverlayView: NSView {
             phase: 0
         )
         strokePath.stroke()
+    }
+
+    private func drawTextAnnotation(_ annotation: CaptureAnnotation, inOverlay: Bool) {
+        guard
+            let text = annotation.text,
+            !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            return
+        }
+
+        let rect = inOverlay ? overlayRect(fromLocalAnnotationRect: annotation.rect) : annotation.rect
+        NSAttributedString(
+            string: text,
+            attributes: CaptureAnnotationRenderer.textAttributes(style: annotation.style)
+        ).draw(in: rect.standardized)
     }
 
     private func drawBrushPathAnnotation(_ annotation: CaptureAnnotation, inOverlay: Bool) {
@@ -7283,7 +7304,7 @@ private final class SelectionOverlayView: NSView {
             return .marker
         case .mosaicStroke, .mosaicRectangle:
             return .mosaic
-        case .rectangle, .ellipse:
+        case .rectangle, .ellipse, .text:
             return .shape
         }
     }

@@ -22,6 +22,7 @@
 		316D9258F8327AB7845B8970 /* text-tool.svg in Resources */ = {isa = PBXBuildFile; fileRef = 832F0777CBF6ED75895C36AF /* text-tool.svg */; };
 		31B529E62D217D2F5B13FB85 /* copy-to-clipboard.png in Resources */ = {isa = PBXBuildFile; fileRef = 746D4C73B253F54E1E56C5C6 /* copy-to-clipboard.png */; };
 		3255124AE9CD7B90D40C887F /* PermissionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F196A38351C3089668432BA /* PermissionCoordinator.swift */; };
+		373154DBAEF7397C9B344879 /* xxsnapMacTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95FB5FC844E7D04225DF9701 /* xxsnapMacTests.swift */; };
 		393CEA2CDF1666A7490229B1 /* refresh (1).svg in Resources */ = {isa = PBXBuildFile; fileRef = 1DB60D2449C038C54679162D /* refresh (1).svg */; };
 		3B68E276F3F9D035C6BAC9CC /* highlighter-tool.png in Resources */ = {isa = PBXBuildFile; fileRef = 6569DD68B9D82807BFE9B8B4 /* highlighter-tool.png */; };
 		4588B45C2037B363C289D5A1 /* settings-more.svg in Resources */ = {isa = PBXBuildFile; fileRef = 9381E644823646F0488892C2 /* settings-more.svg */; };
@@ -71,7 +72,6 @@
 		C26B9837A1AC80DF15D48384 /* ocr-recognition.png in Resources */ = {isa = PBXBuildFile; fileRef = 4366A178D51261BFC4455224 /* ocr-recognition.png */; };
 		C679C275101C830B61421469 /* border-corner-square.svg in Resources */ = {isa = PBXBuildFile; fileRef = 851C3F8F7298C801D1874B4C /* border-corner-square.svg */; };
 		C6F8975757D47CFF0EECF37E /* mosaic-tool.png in Resources */ = {isa = PBXBuildFile; fileRef = A7EABCA72191CADC6E20729C /* mosaic-tool.png */; };
-		C787E4ECCBC2AAE5F0173952 /* SniporyMacTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79FDDB4CA3E637E09845C3F6 /* SniporyMacTests.swift */; };
 		C9074FF569D4610572CFE532 /* copy-to-clipboard.svg in Resources */ = {isa = PBXBuildFile; fileRef = 16F9496957D9500C499D44CB /* copy-to-clipboard.svg */; };
 		CB7B20E444C4FC3FD6C8F584 /* mosaic-tool.svg in Resources */ = {isa = PBXBuildFile; fileRef = 19A9DB1B5DDF521A858E0762 /* mosaic-tool.svg */; };
 		CFE06F965C4494DC338308AB /* arrow-line.svg in Resources */ = {isa = PBXBuildFile; fileRef = 78A78E47207006A9C842052B /* arrow-line.svg */; };
@@ -133,7 +133,6 @@
 		746D4C73B253F54E1E56C5C6 /* copy-to-clipboard.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "copy-to-clipboard.png"; sourceTree = "<group>"; };
 		75DD0587E7E08F196C25304A /* redo-enabled.svg */ = {isa = PBXFileReference; path = "redo-enabled.svg"; sourceTree = "<group>"; };
 		78A78E47207006A9C842052B /* arrow-line.svg */ = {isa = PBXFileReference; path = "arrow-line.svg"; sourceTree = "<group>"; };
-		79FDDB4CA3E637E09845C3F6 /* SniporyMacTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SniporyMacTests.swift; sourceTree = "<group>"; };
 		7B73F549F3FDCF8AF73E5868 /* number-sequence.svg */ = {isa = PBXFileReference; path = "number-sequence.svg"; sourceTree = "<group>"; };
 		7C22FC10462C7CAF1A2ACA41 /* undo-disabled.svg */ = {isa = PBXFileReference; path = "undo-disabled.svg"; sourceTree = "<group>"; };
 		7E58F0FBF019037172C857FC /* AppSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettingsTests.swift; sourceTree = "<group>"; };
@@ -142,6 +141,7 @@
 		8A2205AED8C5F363A0B466E2 /* ScreenCaptureService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenCaptureService.swift; sourceTree = "<group>"; };
 		90511938797AF565EB5E63DF /* palette-tool.svg */ = {isa = PBXFileReference; path = "palette-tool.svg"; sourceTree = "<group>"; };
 		9381E644823646F0488892C2 /* settings-more.svg */ = {isa = PBXFileReference; path = "settings-more.svg"; sourceTree = "<group>"; };
+		95FB5FC844E7D04225DF9701 /* xxsnapMacTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = xxsnapMacTests.swift; sourceTree = "<group>"; };
 		9A119E98789DE049AE5BBF54 /* manual-capture-checklist.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "manual-capture-checklist.md"; sourceTree = "<group>"; };
 		9A98FE556582ECA9DC75EEAB /* cancel-capture.svg */ = {isa = PBXFileReference; path = "cancel-capture.svg"; sourceTree = "<group>"; };
 		9C2C9A82C9F64C7D76730267 /* SelectionOverlayWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectionOverlayWindow.swift; sourceTree = "<group>"; };
@@ -248,8 +248,8 @@
 				9A119E98789DE049AE5BBF54 /* manual-capture-checklist.md */,
 				2187766CB52D346D96174E61 /* ScreenCaptureServiceTests.swift */,
 				5D09140AE83525CD00CBA67A /* SelectionToolbarStateTests.swift */,
-				79FDDB4CA3E637E09845C3F6 /* SniporyMacTests.swift */,
 				3617A169724914AB97DA76C4 /* WindowSelectionStateTests.swift */,
+				95FB5FC844E7D04225DF9701 /* xxsnapMacTests.swift */,
 			);
 			path = Tests;
 			sourceTree = "<group>";
@@ -528,8 +528,8 @@
 				F8365189DAE642AC6E7A2BA5 /* AppSettingsTests.swift in Sources */,
 				D9E0A938B9832B91B010318D /* ScreenCaptureServiceTests.swift in Sources */,
 				2932C52816DBBB75B3E3D9C3 /* SelectionToolbarStateTests.swift in Sources */,
-				C787E4ECCBC2AAE5F0173952 /* SniporyMacTests.swift in Sources */,
 				569284AA817376C3F20348F1 /* WindowSelectionStateTests.swift in Sources */,
+				373154DBAEF7397C9B344879 /* xxsnapMacTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

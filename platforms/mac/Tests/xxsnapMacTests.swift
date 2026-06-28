@@ -2,7 +2,7 @@ import AppKit
 import XCTest
 @testable import xxsnap
 
-final class SniporyMacTests: XCTestCase {
+final class xxsnapMacTests: XCTestCase {
     func testAnnotationRendererDrawsRectangleOntoImage() throws {
         let image = NSImage(size: NSSize(width: 40, height: 40))
         image.lockFocus()
@@ -137,6 +137,32 @@ final class SniporyMacTests: XCTestCase {
         XCTAssertLessThan(highlightedText.red, 8)
         XCTAssertLessThan(highlightedText.green, 8)
         XCTAssertLessThan(highlightedText.blue, 8)
+    }
+
+    func testAnnotationRendererDrawsTextAnnotation() throws {
+        let image = try makeBitmapImage(
+            pointSize: NSSize(width: 180, height: 100),
+            pixelWidth: 180,
+            pixelHeight: 100,
+            fill: .white
+        )
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = .systemRed
+        style.textSize = 24
+
+        let annotation = CaptureAnnotation(
+            kind: .text,
+            rect: NSRect(x: 24, y: 28, width: 80, height: 34),
+            style: style,
+            text: "Hi"
+        )
+
+        let rendered = CaptureAnnotationRenderer.render(image: image, annotations: [annotation])
+
+        XCTAssertTrue(
+            try containsRedDominantOpaquePixel(in: rendered, within: NSRect(x: 20, y: 20, width: 96, height: 56)),
+            "Expected text annotation to draw at least one red-dominant opaque pixel"
+        )
     }
 
     func testAnnotationRendererDrawsGaussianMosaicOntoImage() throws {
@@ -1884,6 +1910,37 @@ final class SniporyMacTests: XCTestCase {
             blue: bytes[index + 2],
             alpha: bytes[index + 3]
         )
+    }
+
+    private func containsRedDominantOpaquePixel(in image: NSImage, within rect: NSRect) throws -> Bool {
+        let cgImage = try XCTUnwrap(image.cgImage(forProposedRect: nil, context: nil, hints: nil))
+        let minX = max(0, Int(rect.minX))
+        let maxX = min(cgImage.width, Int(ceil(rect.maxX)))
+        let minY = max(0, Int(rect.minY))
+        let maxY = min(cgImage.height, Int(ceil(rect.maxY)))
+
+        guard minX < maxX, minY < maxY else {
+            return false
+        }
+
+        for x in minX..<maxX {
+            for y in minY..<maxY {
+                guard let pixel = try rgbaPixel(in: image, x: x, y: y) else {
+                    continue
+                }
+                let red = Int(pixel.red)
+                let green = Int(pixel.green)
+                let blue = Int(pixel.blue)
+                if pixel.alpha > 220,
+                   red > 150,
+                   red > green + 40,
+                   red > blue + 40 {
+                    return true
+                }
+            }
+        }
+
+        return false
     }
 
     private func assertLaterMosaicStacksOnEarlierRedaction(

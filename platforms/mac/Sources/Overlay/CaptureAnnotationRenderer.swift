@@ -1,5 +1,6 @@
 import AppKit
 import CoreImage
+import CoreText
 
 enum CaptureCompletionAction {
     case copy
@@ -12,6 +13,7 @@ enum CaptureAnnotationKind {
     case arrowLine
     case brush
     case marker
+    case text
     case mosaicStroke
     case mosaicRectangle
 }
@@ -1045,6 +1047,7 @@ struct CaptureAnnotationStyle {
     var fillEnabled = false
     var fillColor: NSColor = NSColor(calibratedRed: 245 / 255, green: 34 / 255, blue: 45 / 255, alpha: 1)
     var cornerRadius: CGFloat = 0
+    var textSize: CGFloat = 24
 }
 
 struct CaptureAnnotation {
@@ -1055,6 +1058,7 @@ struct CaptureAnnotation {
     var arrowLine: CaptureArrowLine?
     var brushPath: CaptureBrushPath?
     var markerLine: CaptureMarkerLine?
+    var text: String?
     var mosaicStroke: CaptureMosaicStroke?
     var mosaicRedaction: CaptureMosaicRedaction?
 }
@@ -1069,6 +1073,17 @@ struct CaptureSelectionResult {
 enum CaptureAnnotationRenderer {
     static let markerOpacity: CGFloat = 0.85
     private static let redactionContext = CIContext(options: nil)
+
+    static func textFont(size: CGFloat) -> NSFont {
+        NSFont.systemFont(ofSize: size, weight: .medium)
+    }
+
+    static func textAttributes(style: CaptureAnnotationStyle) -> [NSAttributedString.Key: Any] {
+        [
+            .font: textFont(size: style.textSize),
+            .foregroundColor: style.strokeColor,
+        ]
+    }
 
     static func render(image: NSImage, annotations: [CaptureAnnotation]) -> NSImage {
         guard !annotations.isEmpty else {
@@ -1141,6 +1156,10 @@ enum CaptureAnnotationRenderer {
         if isMosaicAnnotation(annotation) {
             return
         }
+        if annotation.kind == .text {
+            drawTextAnnotation(annotation, in: context, scaleX: scaleX, scaleY: scaleY, textScale: lineScale)
+            return
+        }
         if annotation.kind == .marker {
             drawMarkerLine(annotation, in: context, scaleX: scaleX, scaleY: scaleY, lineScale: lineScale)
             return
@@ -1174,7 +1193,7 @@ enum CaptureAnnotationRenderer {
             path.addRect(pixelRect)
         case .ellipse:
             path.addEllipse(in: pixelRect)
-        case .arrowLine, .brush, .marker, .mosaicStroke, .mosaicRectangle:
+        case .arrowLine, .brush, .marker, .text, .mosaicStroke, .mosaicRectangle:
             return
         }
 
@@ -1209,6 +1228,38 @@ enum CaptureAnnotationRenderer {
                 .map { $0 * lineScale }
         )
         context.strokePath()
+        context.restoreGState()
+    }
+
+    private static func drawTextAnnotation(
+        _ annotation: CaptureAnnotation,
+        in context: CGContext,
+        scaleX: CGFloat,
+        scaleY: CGFloat,
+        textScale: CGFloat
+    ) {
+        guard
+            let text = annotation.text,
+            !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            return
+        }
+
+        var style = annotation.style
+        style.textSize *= textScale
+        let attributedText = NSAttributedString(string: text, attributes: textAttributes(style: style))
+        let line = CTLineCreateWithAttributedString(attributedText)
+        let textRect = annotation.rect.standardized
+
+        context.saveGState()
+        context.textMatrix = .identity
+        context.translateBy(x: 0, y: CGFloat(context.height))
+        context.scaleBy(x: 1, y: -1)
+        context.textPosition = CGPoint(
+            x: textRect.minX * scaleX,
+            y: textRect.minY * scaleY
+        )
+        CTLineDraw(line, context)
         context.restoreGState()
     }
 
@@ -1868,7 +1919,7 @@ enum CaptureSketchStrokePath {
         }
 
         switch kind {
-        case .arrowLine, .brush, .marker, .mosaicStroke, .mosaicRectangle:
+        case .arrowLine, .brush, .marker, .text, .mosaicStroke, .mosaicRectangle:
             return []
         case .ellipse:
             return ellipsePoints(in: rect)
