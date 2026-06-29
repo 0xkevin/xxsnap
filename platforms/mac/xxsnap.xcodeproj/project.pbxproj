@@ -53,6 +53,7 @@
 		859D56238F4E63DBD6E49617 /* undo-disabled.svg in Resources */ = {isa = PBXBuildFile; fileRef = 7C22FC10462C7CAF1A2ACA41 /* undo-disabled.svg */; };
 		875D73FF8B4029D231901AE2 /* eraser-tool.svg in Resources */ = {isa = PBXBuildFile; fileRef = B26783A4C11DFDC68390DE99 /* eraser-tool.svg */; };
 		87A12EB97E8966F567E405CF /* pin-to-screen.svg in Resources */ = {isa = PBXBuildFile; fileRef = ADE3CA502C8AB2DE9791CD66 /* pin-to-screen.svg */; };
+		88C9A1B2D3E4F5061728394A /* screenshot.svg in Resources */ = {isa = PBXBuildFile; fileRef = 77B8C9D0E1F2031425364758 /* screenshot.svg */; };
 		8A1D5C6713066839A5C21C4C /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7D7DA546BB3234545506458 /* AppDelegate.swift */; };
 		8B88348E80AD052EBD21197B /* eraser-tool.png in Resources */ = {isa = PBXBuildFile; fileRef = 3EA6D152633E6E31441322EA /* eraser-tool.png */; };
 		8D2D0027AE3671BF227FE0B4 /* SelectionOverlayWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C2C9A82C9F64C7D76730267 /* SelectionOverlayWindow.swift */; };
@@ -156,6 +157,7 @@
 		A7EABCA72191CADC6E20729C /* mosaic-tool.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "mosaic-tool.png"; sourceTree = "<group>"; };
 		A89C77B7643079BE8890E43B /* crop.svg */ = {isa = PBXFileReference; path = crop.svg; sourceTree = "<group>"; };
 		ADE3CA502C8AB2DE9791CD66 /* pin-to-screen.svg */ = {isa = PBXFileReference; path = "pin-to-screen.svg"; sourceTree = "<group>"; };
+		77B8C9D0E1F2031425364758 /* screenshot.svg */ = {isa = PBXFileReference; path = screenshot.svg; sourceTree = "<group>"; };
 		B26783A4C11DFDC68390DE99 /* eraser-tool.svg */ = {isa = PBXFileReference; path = "eraser-tool.svg"; sourceTree = "<group>"; };
 		B4908F7F6EB1434EA21DA6C4 /* zoom-in-tool.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "zoom-in-tool.png"; sourceTree = "<group>"; };
 		B688FE29B0B0CC9BDBAB45B2 /* aspect-ratio.svg */ = {isa = PBXFileReference; path = "aspect-ratio.svg"; sourceTree = "<group>"; };
@@ -344,6 +346,7 @@
 				CAAA7381EA68F4F3697426DC /* refresh.svg */,
 				3C1B97ECBE3B6B704D22D3BF /* save-to-file.png */,
 				BE0A667A6A11313F9B532FC2 /* save-to-file.svg */,
+				77B8C9D0E1F2031425364758 /* screenshot.svg */,
 				C17198BAD6AFCEB4159B4687 /* scroll-capture.png */,
 				31142970D1AD9FA528A7EC7C /* scroll-capture.svg */,
 				2707D35D06AF1C4CB212F441 /* settings-more.png */,
@@ -486,6 +489,7 @@
 				A043CFC13B0EA15F5A36B3BD /* refresh.svg in Resources */,
 				9F8768653DE12A57990E4A52 /* save-to-file.png in Resources */,
 				5B59F889F6FD562691B28716 /* save-to-file.svg in Resources */,
+				88C9A1B2D3E4F5061728394A /* screenshot.svg in Resources */,
 				251C81FE4D348158346520EB /* scroll-capture.png in Resources */,
 				B6766A54195F847D1446CE1B /* scroll-capture.svg in Resources */,
 				7DC177F4AFF1C2BCF2AF0A80 /* settings-more.png in Resources */,

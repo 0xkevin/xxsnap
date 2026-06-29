@@ -2384,12 +2384,12 @@ final class SelectionToolbarStateTests: XCTestCase {
     func testPrimaryShapeAndArrowToolbarButtonsUseFunctionNamedIcons() {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
 
-        XCTAssertEqual(window.test_symbolName(for: .rectangle), "toolbar-crop")
+        XCTAssertEqual(window.test_symbolName(for: .rectangle), "toolbar-screenshot")
         XCTAssertEqual(window.test_symbolName(for: .arrow), "toolbar-arrow")
     }
 
-    func testToolbarIconInsetsMakeArrowIconSlightlyLargerThanCropIcon() {
-        XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "crop"), 2)
+    func testToolbarIconInsetsMakeArrowIconSlightlyLargerThanScreenshotIcon() {
+        XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "screenshot"), 2)
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "arrow"), 1)
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "pencil-tool"), 2)
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "eyedropper"), 2)

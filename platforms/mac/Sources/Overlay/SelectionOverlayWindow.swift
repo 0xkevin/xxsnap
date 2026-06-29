@@ -7656,7 +7656,7 @@ private final class SelectionOverlayView: NSView {
     private func symbolName(for button: ToolbarButton, enabled: Bool = true) -> String {
         switch button {
         case .rectangle:
-            return "toolbar-crop"
+            return "toolbar-screenshot"
         case .polyline:
             return "toolbar-arrow"
         case .pen:
