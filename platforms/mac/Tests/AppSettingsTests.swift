@@ -4,8 +4,8 @@ import XCTest
 final class AppSettingsTests: XCTestCase {
     func testBundleIdentityUsesXxsnap() {
         XCTAssertEqual(Bundle.main.bundleIdentifier, "com.xxsnap.mac")
-        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String, "xxsnap")
-        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String, "xxsnap")
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String, "XxSnap")
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String, "XxSnap")
     }
 
     func testAppDelegateAllowsProgrammaticTerminationForCleanRestarts() {
