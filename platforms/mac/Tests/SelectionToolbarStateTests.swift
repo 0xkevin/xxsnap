@@ -2381,8 +2381,16 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertFalse(SelectionToolbarState.shouldShowOptionsToolbar(isPrimaryShapeToolActive: false))
     }
 
-    func testToolbarIconInsetsUseDefaultSizeForLegacyArrowLineIcon() {
-        XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "arrow-line"), 2)
+    func testPrimaryShapeAndArrowToolbarButtonsUseFunctionNamedIcons() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+
+        XCTAssertEqual(window.test_symbolName(for: .rectangle), "toolbar-crop")
+        XCTAssertEqual(window.test_symbolName(for: .arrow), "toolbar-arrow")
+    }
+
+    func testToolbarIconInsetsUseDefaultSizeForCropAndArrowIcons() {
+        XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "crop"), 2)
+        XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "arrow"), 2)
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "pencil-tool"), 2)
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "eyedropper"), 2)
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "text-tool"), 0)
@@ -2391,7 +2399,7 @@ final class SelectionToolbarStateTests: XCTestCase {
 
     func testCurrentColorToolbarIconsUseTemplateTint() {
         XCTAssertFalse(SelectionToolbarState.usesFixedColorToolbarIconResource("pencil-tool"))
-        XCTAssertFalse(SelectionToolbarState.usesFixedColorToolbarIconResource("arrow-line"))
+        XCTAssertFalse(SelectionToolbarState.usesFixedColorToolbarIconResource("arrow"))
         XCTAssertFalse(SelectionToolbarState.usesFixedColorToolbarIconResource("mosaic-tool"))
         XCTAssertTrue(SelectionToolbarState.usesFixedColorToolbarIconResource("undo-enabled"))
     }

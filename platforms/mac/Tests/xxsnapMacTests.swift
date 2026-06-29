@@ -1175,9 +1175,9 @@ final class xxsnapMacTests: XCTestCase {
 
     func testToolbarSvgIconsAreBundledAndReadable() throws {
         for resource in [
-            "arrow-line",
+            "arrow",
+            "crop",
             "pencil-tool",
-            "shape-marker",
             "mosaic-tool",
             "settings-more",
             "refresh-svgrepo-com",
@@ -1191,16 +1191,17 @@ final class xxsnapMacTests: XCTestCase {
         }
     }
 
-    func testPrimaryToolbarShapeAndArrowIconsUseLegacyArtwork() throws {
-        let shapeURL = try XCTUnwrap(Bundle.main.url(forResource: "shape-marker", withExtension: "svg"))
-        let arrowURL = try XCTUnwrap(Bundle.main.url(forResource: "arrow-line", withExtension: "svg"))
-        let shapeSVG = try String(contentsOf: shapeURL, encoding: .utf8)
+    func testPrimaryToolbarShapeAndArrowIconsUseFunctionNamedArtwork() throws {
+        let cropURL = try XCTUnwrap(Bundle.main.url(forResource: "crop", withExtension: "svg"))
+        let arrowURL = try XCTUnwrap(Bundle.main.url(forResource: "arrow", withExtension: "svg"))
+        let cropSVG = try String(contentsOf: cropURL, encoding: .utf8)
         let arrowSVG = try String(contentsOf: arrowURL, encoding: .utf8)
 
-        XCTAssertTrue(shapeSVG.contains("bi-bounding-box-circles"))
-        XCTAssertTrue(shapeSVG.contains("M2 1a1 1 0 1 0 0 2"))
-        XCTAssertTrue(arrowSVG.contains("M14 2.5"))
-        XCTAssertTrue(arrowSVG.contains("L2.146 13.146"))
+        XCTAssertTrue(cropSVG.contains("viewBox=\"0 -960 960 960\""))
+        XCTAssertTrue(cropSVG.contains("M680-40v-160H280"))
+        XCTAssertTrue(cropSVG.contains("v-320H360"))
+        XCTAssertTrue(arrowSVG.contains("id=\"path-1\""))
+        XCTAssertTrue(arrowSVG.contains("rotate(-49)"))
     }
 
     private func makeBitmapImage(

@@ -6,6 +6,7 @@ enum TestMosaicRectangleRotationHandleGlyph {
 
 enum TestToolbarButton {
     case rectangle
+    case arrow
     case marker
     case eyedropper
     case mosaic
@@ -3265,6 +3266,8 @@ private final class SelectionOverlayView: NSView {
         switch button {
         case .rectangle:
             toolbarButton = .rectangle
+        case .arrow:
+            toolbarButton = .polyline
         case .marker:
             toolbarButton = .marker
         case .eyedropper:
@@ -3284,6 +3287,8 @@ private final class SelectionOverlayView: NSView {
         switch button {
         case .rectangle:
             toolbarButton = .rectangle
+        case .arrow:
+            toolbarButton = .polyline
         case .marker:
             toolbarButton = .marker
         case .eyedropper:
@@ -7651,9 +7656,9 @@ private final class SelectionOverlayView: NSView {
     private func symbolName(for button: ToolbarButton, enabled: Bool = true) -> String {
         switch button {
         case .rectangle:
-            return "toolbar-shape-marker"
+            return "toolbar-crop"
         case .polyline:
-            return "toolbar-arrow-line"
+            return "toolbar-arrow"
         case .pen:
             return "toolbar-pencil-tool"
         case .marker:
