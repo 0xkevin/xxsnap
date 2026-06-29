@@ -1302,16 +1302,11 @@ private final class SelectionOverlayView: NSView {
                hoverRect.contains(point),
                hoverRect.width >= 8,
                hoverRect.height >= 8 {
-                hoveredWindowRect = nil
-                displayedWindowRect = nil
-                pendingWindowSelectionRect = nil
-                selectionStartPoint = nil
+                pendingWindowSelectionRect = hoverRect
+                selectionStartPoint = point
                 selectionCurrentPoint = nil
-                lockedSelectionRect = hoverRect
-                interactionMode = .annotating
-                window?.makeFirstResponder(self)
                 updateColorSampler(at: point)
-                NSLog("xxsnap overlay auto selection locked rect=(%.0f, %.0f, %.0f, %.0f)", hoverRect.minX, hoverRect.minY, hoverRect.width, hoverRect.height)
+                NSLog("xxsnap overlay window selection pending rect=(%.0f, %.0f, %.0f, %.0f)", hoverRect.minX, hoverRect.minY, hoverRect.width, hoverRect.height)
                 invalidateCursorRectsAndRefresh(at: point)
                 needsDisplay = true
                 return

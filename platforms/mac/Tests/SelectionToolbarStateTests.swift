@@ -4884,7 +4884,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_currentSelectionRect, candidate.bounds)
     }
 
-    func testInitialHoverLocksCurrentWindowRegionOnMouseDownAndStopsTracking() {
+    func testInitialHoverLocksCurrentWindowRegionOnClickAndStopsTracking() {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         let first = WindowSelectionCandidate(
             id: 1,
@@ -4914,11 +4914,49 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(lockedTarget, first.bounds)
 
         window.test_mouseDown(at: NSPoint(x: 88, y: 110))
+        XCTAssertNil(window.test_lockedSelectionRect)
+        XCTAssertEqual(window.test_currentSelectionRect, lockedTarget)
+
+        window.test_mouseUp(at: NSPoint(x: 88, y: 110))
         XCTAssertEqual(window.test_lockedSelectionRect, lockedTarget)
 
         window.test_mouseMoved(to: NSPoint(x: 240, y: 66))
         XCTAssertEqual(window.test_lockedSelectionRect, lockedTarget)
         XCTAssertEqual(window.test_currentSelectionRect, lockedTarget)
+    }
+
+    func testDraggingFromInitialHoverCreatesManualSelectionInsteadOfLockingWindow() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let candidate = WindowSelectionCandidate(
+            id: 1,
+            ownerPID: 10,
+            layer: 0,
+            alpha: 1,
+            bounds: NSRect(x: 20, y: 20, width: 180, height: 140),
+            name: "app"
+        )
+        window.test_setWindowSelectionCandidates([
+            candidate
+        ])
+
+        let start = NSPoint(x: 80, y: 90)
+        let end = NSPoint(x: 260, y: 210)
+        let expectedManualSelection = NSRect(
+            x: min(start.x, end.x),
+            y: min(start.y, end.y),
+            width: abs(end.x - start.x),
+            height: abs(end.y - start.y)
+        )
+
+        window.test_mouseMoved(to: start)
+        XCTAssertEqual(window.test_currentSelectionRect, candidate.bounds)
+
+        window.test_mouseDown(at: start)
+        window.test_mouseDragged(to: end)
+        XCTAssertEqual(window.test_currentSelectionRect, expectedManualSelection)
+
+        window.test_mouseUp(at: end)
+        XCTAssertEqual(window.test_lockedSelectionRect, expectedManualSelection)
     }
 
     func testInitialHoverWindowTrackingStaysResponsiveAcrossMouseMoves() {
