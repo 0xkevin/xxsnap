@@ -1259,9 +1259,9 @@ private final class SelectionOverlayView: NSView {
         drawSelectionBorder(selectionRect)
         drawSelectionHandles(selectionRect)
         drawMeasurementLabel(selectionRect)
-        drawColorSamplerIfNeeded()
 
         guard lockedSelectionRect != nil else {
+            drawColorSamplerIfNeeded()
             return
         }
 
@@ -1283,6 +1283,7 @@ private final class SelectionOverlayView: NSView {
             drawArrowTypeMenu(field: .end)
         }
         drawTooltipIfNeeded()
+        drawColorSamplerIfNeeded()
     }
 
     override func mouseDown(with event: NSEvent) {

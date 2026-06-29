@@ -265,8 +265,10 @@ enum SelectionToolbarState {
             return 0
         case "eyedropper":
             return 2
+        case "screenshot":
+            return 0
         case "masaike2":
-            return -3
+            return -2
         default:
             return 2
         }
