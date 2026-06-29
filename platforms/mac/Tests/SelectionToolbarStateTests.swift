@@ -2388,9 +2388,9 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_symbolName(for: .arrow), "toolbar-arrow")
     }
 
-    func testToolbarIconInsetsUseDefaultSizeForCropAndArrowIcons() {
+    func testToolbarIconInsetsMakeArrowIconSlightlyLargerThanCropIcon() {
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "crop"), 2)
-        XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "arrow"), 2)
+        XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "arrow"), 1)
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "pencil-tool"), 2)
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "eyedropper"), 2)
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "text-tool"), 0)
