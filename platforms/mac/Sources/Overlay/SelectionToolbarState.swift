@@ -259,8 +259,6 @@ enum SelectionToolbarState {
 
     static func toolbarIconInset(for resourceName: String) -> CGFloat {
         switch resourceName {
-        case "arrow-line":
-            return 0
         case "text-tool":
             return 0
         case "eyedropper":

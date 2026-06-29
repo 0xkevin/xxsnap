@@ -1191,6 +1191,18 @@ final class xxsnapMacTests: XCTestCase {
         }
     }
 
+    func testPrimaryToolbarShapeAndArrowIconsUseLegacyArtwork() throws {
+        let shapeURL = try XCTUnwrap(Bundle.main.url(forResource: "shape-marker", withExtension: "svg"))
+        let arrowURL = try XCTUnwrap(Bundle.main.url(forResource: "arrow-line", withExtension: "svg"))
+        let shapeSVG = try String(contentsOf: shapeURL, encoding: .utf8)
+        let arrowSVG = try String(contentsOf: arrowURL, encoding: .utf8)
+
+        XCTAssertTrue(shapeSVG.contains("bi-bounding-box-circles"))
+        XCTAssertTrue(shapeSVG.contains("M2 1a1 1 0 1 0 0 2"))
+        XCTAssertTrue(arrowSVG.contains("M14 2.5"))
+        XCTAssertTrue(arrowSVG.contains("L2.146 13.146"))
+    }
+
     private func makeBitmapImage(
         pointSize: NSSize,
         pixelWidth: Int,

@@ -2381,8 +2381,8 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertFalse(SelectionToolbarState.shouldShowOptionsToolbar(isPrimaryShapeToolActive: false))
     }
 
-    func testToolbarIconInsetsRenderArrowLineLargerThanDefaultIcons() {
-        XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "arrow-line"), 0)
+    func testToolbarIconInsetsUseDefaultSizeForLegacyArrowLineIcon() {
+        XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "arrow-line"), 2)
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "pencil-tool"), 2)
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "eyedropper"), 2)
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "text-tool"), 0)
