@@ -1,0 +1,62 @@
+name: xxsnap
+options:
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: 5.0
+    MACOSX_DEPLOYMENT_TARGET: 15.0
+    GENERATE_INFOPLIST_FILE: YES
+    CURRENT_PROJECT_VERSION: 1
+    MARKETING_VERSION: 0.1.0
+targets:
+  xxsnap:
+    type: application
+    platform: macOS
+    sources:
+      - Sources
+      - path: Resources/Info.plist
+        buildPhase: none
+      - Resources/Assets.xcassets
+      - Resources/xxsnap.png
+      - Resources/xxsnap.icns
+      - path: Resources/Icons
+        excludes:
+          - xxsnap.png
+          - xxsnap.icns
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.xxsnap.mac
+        PRODUCT_NAME: xxsnap
+        ASSETCATALOG_COMPILER_APPICON_NAME: ""
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Resources/Info.plist
+        ENABLE_DEBUG_DYLIB: NO
+        SWIFT_OBJC_BRIDGING_HEADER: Sources/Bridge/xxsnap-Bridging-Header.h
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGNING_ALLOWED: YES
+        CODE_SIGNING_REQUIRED: YES
+        CODE_SIGN_IDENTITY: "xxsnap Local Dev"
+  xxsnapTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests
+    dependencies:
+      - target: xxsnap
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.xxsnap.mac.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/xxsnap.app/Contents/MacOS/xxsnap"
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
+        CODE_SIGN_IDENTITY: ""
+schemes:
+  xxsnap:
+    build:
+      targets:
+        xxsnap: all
+        xxsnapTests: [test]
+    test:
+      targets:
+        - name: xxsnapTests
