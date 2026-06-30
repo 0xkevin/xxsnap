@@ -1431,16 +1431,28 @@ enum CaptureAnnotationRenderer {
             return
         }
 
-        let displayEffectImage = redactedImage(from: displaySnapshot, redaction: redaction)
+        let imageSize = CGSize(width: displaySnapshot.width, height: displaySnapshot.height)
+        guard
+            let effectRect = mosaicEffectPixelRect(
+                maskPath: maskPath,
+                clipRect: clipRect,
+                redaction: redaction,
+                imageSize: imageSize,
+                scaleX: scaleX,
+                scaleY: scaleY
+            ),
+            let displayCrop = cropMosaicSnapshot(displaySnapshot, to: effectRect)
+        else {
+            return
+        }
+
+        let displayEffectImage = redactedImage(from: displayCrop, redaction: redaction)
 
         drawMosaicEffectImage(
             displayEffectImage,
             maskPath: maskPath,
             in: context,
-            clipRect: clipRect,
-            imageSize: CGSize(width: displaySnapshot.width, height: displaySnapshot.height),
-            scaleX: scaleX,
-            scaleY: scaleY
+            pixelDrawRect: effectRect
         )
     }
 
@@ -1448,28 +1460,96 @@ enum CaptureAnnotationRenderer {
         _ image: CGImage,
         maskPath: CGPath?,
         in context: CGContext,
+        pixelDrawRect: CGRect
+    ) {
+        context.saveGState()
+        if let maskPath {
+            context.addPath(maskPath)
+            context.clip()
+        } else {
+            context.clip(to: pixelDrawRect)
+        }
+        context.setBlendMode(.copy)
+        context.draw(image, in: pixelDrawRect)
+        context.restoreGState()
+    }
+
+    private static func mosaicEffectPixelRect(
+        maskPath: CGPath?,
         clipRect: NSRect,
+        redaction: CaptureMosaicRedaction,
         imageSize: CGSize,
         scaleX: CGFloat,
         scaleY: CGFloat
-    ) {
-        let pixelClipRect = CGRect(
+    ) -> CGRect? {
+        let imageBounds = CGRect(origin: .zero, size: imageSize)
+        var effectRect = CGRect(
             x: clipRect.minX * scaleX,
             y: clipRect.minY * scaleY,
             width: clipRect.width * scaleX,
             height: clipRect.height * scaleY
         ).standardized
 
-        context.saveGState()
         if let maskPath {
-            context.addPath(maskPath)
-            context.clip()
-        } else {
-            context.clip(to: pixelClipRect)
+            let maskBounds = maskPath.boundingBoxOfPath.standardized
+            if !maskBounds.isEmpty {
+                effectRect = effectRect.union(maskBounds)
+            }
         }
-        context.setBlendMode(.copy)
-        context.draw(image, in: CGRect(origin: .zero, size: imageSize))
-        context.restoreGState()
+
+        let value = CGFloat(max(1, redaction.value))
+        let padding: CGFloat
+        switch redaction.type {
+        case .gaussianBlur:
+            padding = value * 3
+        case .pixelMosaic:
+            padding = value
+        }
+
+        effectRect = effectRect.insetBy(dx: -padding, dy: -padding)
+        if redaction.type == .pixelMosaic {
+            effectRect = alignedPixelMosaicEffectRect(
+                effectRect,
+                blockSize: value,
+                imageHeight: imageSize.height
+            )
+        }
+
+        let clipped = effectRect.integral.intersection(imageBounds)
+        return clipped.isEmpty ? nil : clipped
+    }
+
+    private static func alignedPixelMosaicEffectRect(
+        _ rect: CGRect,
+        blockSize: CGFloat,
+        imageHeight: CGFloat
+    ) -> CGRect {
+        guard blockSize > 1 else {
+            return rect
+        }
+
+        let minX = floor(rect.minX / blockSize) * blockSize
+        let maxX = ceil(rect.maxX / blockSize) * blockSize
+        let top = imageHeight - rect.maxY
+        let bottom = imageHeight - rect.minY
+        let alignedTop = floor(top / blockSize) * blockSize
+        let alignedBottom = ceil(bottom / blockSize) * blockSize
+        let minY = imageHeight - alignedBottom
+        let maxY = imageHeight - alignedTop
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
+    private static func cropMosaicSnapshot(
+        _ image: CGImage,
+        to pixelRect: CGRect
+    ) -> CGImage? {
+        let sourceRect = CGRect(
+            x: pixelRect.minX,
+            y: CGFloat(image.height) - pixelRect.maxY,
+            width: pixelRect.width,
+            height: pixelRect.height
+        ).integral.intersection(CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        return sourceRect.isEmpty ? nil : image.cropping(to: sourceRect)
     }
 
     private static func snapshotContext(_ context: CGContext) -> CGImage? {

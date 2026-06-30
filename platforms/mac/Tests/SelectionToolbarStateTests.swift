@@ -735,6 +735,35 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_hoveredTooltipText, "马赛克")
     }
 
+    func testOverlayWindowSelectedPixelMosaicRedactionGlyphUsesWhiteCenterAndBlueArms() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 200, height: 120))
+        window.test_toggleShapeTool(.mosaicRectangle)
+
+        let redactionTypePoint = try XCTUnwrap(window.test_mosaicRedactionTypePoint(.pixelMosaic))
+        let image = try XCTUnwrap(window.test_renderedOverlayImage())
+        let centerRect = NSRect(x: redactionTypePoint.x - 3, y: redactionTypePoint.y - 3, width: 6, height: 6)
+        let crossRect = NSRect(x: redactionTypePoint.x - 12, y: redactionTypePoint.y - 12, width: 24, height: 24)
+
+        XCTAssertNotNil(try firstLightPixel(in: image, rect: centerRect))
+        XCTAssertNotNil(try firstBlueDominantPixel(in: image, rect: crossRect))
+    }
+
+    func testOverlayWindowSelectedGaussianRedactionGlyphTurnsBlue() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 200, height: 120))
+        window.test_toggleShapeTool(.mosaicRectangle)
+
+        let redactionTypePoint = try XCTUnwrap(window.test_mosaicRedactionTypePoint(.gaussianBlur))
+        window.test_mouseDown(at: redactionTypePoint)
+        window.test_mouseUp(at: redactionTypePoint)
+
+        let image = try XCTUnwrap(window.test_renderedOverlayImage())
+        let sampleRect = NSRect(x: redactionTypePoint.x - 4, y: redactionTypePoint.y - 4, width: 8, height: 8)
+
+        XCTAssertNotNil(try firstBlueDominantPixel(in: image, rect: sampleRect))
+    }
+
     func testOverlayWindowMosaicOptionsKeepPerTypeValuesWithoutShapeModeButtons() {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 200, height: 120))
@@ -835,14 +864,14 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_mouseDragged(to: NSPoint(x: 140, y: 125))
         window.test_mouseUp(at: NSPoint(x: 140, y: 125))
         XCTAssertNotNil(window.test_renderedOverlayImage())
-        let renderCountBeforeRotation = window.test_mosaicCompositeRenderCount
+        let fullRenderCountBeforeRotation = window.test_mosaicFullCompositeRenderCount
 
         let rotationPoint = try XCTUnwrap(window.test_mosaicRectangleRotationHandlePoint())
         window.test_mouseDown(at: rotationPoint)
         window.test_mouseDragged(to: NSPoint(x: rotationPoint.x + 24, y: rotationPoint.y + 18))
         XCTAssertNotNil(window.test_renderedOverlayImage())
 
-        XCTAssertEqual(window.test_mosaicCompositeRenderCount, renderCountBeforeRotation)
+        XCTAssertEqual(window.test_mosaicFullCompositeRenderCount, fullRenderCountBeforeRotation)
         window.test_mouseUp(at: NSPoint(x: rotationPoint.x + 24, y: rotationPoint.y + 18))
     }
 
@@ -940,7 +969,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_selectAnnotation(at: 0)
 
         XCTAssertNotNil(window.test_renderedOverlayImage())
-        let renderCountBeforeRotation = window.test_mosaicCompositeRenderCount
+        let fullRenderCountBeforeRotation = window.test_mosaicFullCompositeRenderCount
 
         let rotationPoint = try XCTUnwrap(window.test_mosaicRectangleRotationHandlePoint())
         window.test_mouseDown(at: rotationPoint)
@@ -951,7 +980,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_mouseDragged(to: NSPoint(x: rotationPoint.x + 50, y: rotationPoint.y + 40))
         XCTAssertNotNil(window.test_renderedOverlayImage())
 
-        XCTAssertLessThanOrEqual(window.test_mosaicCompositeRenderCount - renderCountBeforeRotation, 1)
+        XCTAssertLessThanOrEqual(window.test_mosaicFullCompositeRenderCount - fullRenderCountBeforeRotation, 1)
         window.test_mouseUp(at: NSPoint(x: rotationPoint.x + 50, y: rotationPoint.y + 40))
     }
 
@@ -979,7 +1008,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_selectAnnotation(at: 0)
 
         XCTAssertNotNil(window.test_renderedOverlayImage())
-        let renderCountBeforeMove = window.test_mosaicCompositeRenderCount
+        let fullRenderCountBeforeMove = window.test_mosaicFullCompositeRenderCount
         let moveStart = NSPoint(x: selection.minX + 20 + 31, y: selection.minY + 24 + 23)
         window.test_mouseDown(at: moveStart)
         window.test_mouseDragged(to: NSPoint(x: moveStart.x + 24, y: moveStart.y + 12))
@@ -989,7 +1018,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_mouseDragged(to: NSPoint(x: moveStart.x + 56, y: moveStart.y + 28))
         XCTAssertNotNil(window.test_renderedOverlayImage())
 
-        XCTAssertLessThanOrEqual(window.test_mosaicCompositeRenderCount - renderCountBeforeMove, 1)
+        XCTAssertLessThanOrEqual(window.test_mosaicFullCompositeRenderCount - fullRenderCountBeforeMove, 1)
         window.test_mouseUp(at: NSPoint(x: moveStart.x + 56, y: moveStart.y + 28))
     }
 
@@ -1017,7 +1046,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_selectAnnotation(at: 0)
 
         XCTAssertNotNil(window.test_renderedOverlayImage())
-        let renderCountBeforeResize = window.test_mosaicCompositeRenderCount
+        let fullRenderCountBeforeResize = window.test_mosaicFullCompositeRenderCount
         let handlePoint = try XCTUnwrap(window.test_shapeResizeHandlePoint(.bottomRight))
         window.test_mouseDown(at: handlePoint)
         window.test_mouseDragged(to: NSPoint(x: handlePoint.x + 18, y: handlePoint.y + 12))
@@ -1027,7 +1056,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_mouseDragged(to: NSPoint(x: handlePoint.x + 42, y: handlePoint.y + 28))
         XCTAssertNotNil(window.test_renderedOverlayImage())
 
-        XCTAssertLessThanOrEqual(window.test_mosaicCompositeRenderCount - renderCountBeforeResize, 1)
+        XCTAssertLessThanOrEqual(window.test_mosaicFullCompositeRenderCount - fullRenderCountBeforeResize, 1)
         window.test_mouseUp(at: NSPoint(x: handlePoint.x + 42, y: handlePoint.y + 28))
     }
 
@@ -1055,13 +1084,13 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_selectAnnotation(at: 0)
 
         XCTAssertNotNil(window.test_renderedOverlayImage())
-        let renderCountBeforeResize = window.test_mosaicCompositeRenderCount
+        let fullRenderCountBeforeResize = window.test_mosaicFullCompositeRenderCount
         let handlePoint = try XCTUnwrap(window.test_shapeResizeHandlePoint(.bottomRight))
         window.test_mouseDown(at: handlePoint)
         window.test_mouseDragged(to: NSPoint(x: handlePoint.x + 28, y: handlePoint.y - 18))
         XCTAssertNotNil(window.test_renderedOverlayImage())
 
-        XCTAssertEqual(window.test_mosaicCompositeRenderCount, renderCountBeforeResize)
+        XCTAssertEqual(window.test_mosaicFullCompositeRenderCount, fullRenderCountBeforeResize)
         window.test_mouseUp(at: NSPoint(x: handlePoint.x + 28, y: handlePoint.y - 18))
     }
 
@@ -1089,7 +1118,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_selectAnnotation(at: 0)
 
         XCTAssertNotNil(window.test_renderedOverlayImage())
-        let renderCountBeforeMove = window.test_mosaicCompositeRenderCount
+        let fullRenderCountBeforeMove = window.test_mosaicFullCompositeRenderCount
         let moveStart = NSPoint(x: selection.minX + 20 + 34, y: selection.minY + 24 + 25)
         window.test_mouseDown(at: moveStart)
         window.test_mouseDragged(to: NSPoint(x: moveStart.x + 32, y: moveStart.y + 18))
@@ -1097,8 +1126,47 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_mouseDragged(to: NSPoint(x: moveStart.x + 56, y: moveStart.y + 30))
         XCTAssertNotNil(window.test_renderedOverlayImage())
 
-        XCTAssertEqual(window.test_mosaicCompositeRenderCount, renderCountBeforeMove)
+        XCTAssertEqual(window.test_mosaicFullCompositeRenderCount, fullRenderCountBeforeMove)
         window.test_mouseUp(at: NSPoint(x: moveStart.x + 56, y: moveStart.y + 30))
+    }
+
+    func testOverlayWindowMovingMosaicRectangleWithManyLayersShowsLiveRedaction() throws {
+        let image = checkerboardImage(size: NSSize(width: 1040, height: 820), squareSize: 4)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        let selection = NSRect(x: 40, y: 40, width: 940, height: 700)
+        window.test_setLockedSelectionRect(selection)
+
+        var style = CaptureAnnotationStyle()
+        style.strokeWidth = 25
+        let redaction = CaptureMosaicRedaction(type: .gaussianBlur, value: 8)
+        let annotations = (0..<64).map { index in
+            let column = index % 8
+            let row = index / 8
+            return CaptureAnnotation(
+                kind: .mosaicRectangle,
+                rect: NSRect(x: 20 + column * 110, y: 24 + row * 82, width: 68, height: 50),
+                style: style,
+                mosaicRedaction: redaction
+            )
+        }
+        window.test_setAnnotations(annotations)
+        window.test_activateShapeTool(.mosaicRectangle)
+        window.test_selectAnnotation(at: 0)
+
+        XCTAssertNotNil(window.test_renderedOverlayImage())
+        let fullRenderCountBeforeMove = window.test_mosaicFullCompositeRenderCount
+        let moveStart = NSPoint(x: selection.minX + 20 + 34, y: selection.minY + 24 + 25)
+        let moveEnd = NSPoint(x: moveStart.x + 56, y: moveStart.y + 30)
+        window.test_mouseDown(at: moveStart)
+        window.test_mouseDragged(to: moveEnd)
+
+        let overlayImage = try XCTUnwrap(window.test_renderedOverlayImage())
+        let originalPixel = try XCTUnwrap(rgbaPixel(in: image, at: moveEnd))
+        let livePreviewPixel = try XCTUnwrap(rgbaPixel(in: overlayImage, at: moveEnd))
+
+        XCTAssertTrue(pixelDiffers(livePreviewPixel, originalPixel))
+        XCTAssertEqual(window.test_mosaicFullCompositeRenderCount, fullRenderCountBeforeMove)
+        window.test_mouseUp(at: moveEnd)
     }
 
     func testOverlayWindowRotatingMosaicRectangleWithManyLayersDoesNotRecomposeBaseOnFrames() throws {
@@ -1125,7 +1193,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_selectAnnotation(at: 0)
 
         XCTAssertNotNil(window.test_renderedOverlayImage())
-        let renderCountBeforeRotation = window.test_mosaicCompositeRenderCount
+        let fullRenderCountBeforeRotation = window.test_mosaicFullCompositeRenderCount
         let rotationPoint = try XCTUnwrap(window.test_mosaicRectangleRotationHandlePoint())
         window.test_mouseDown(at: rotationPoint)
         window.test_mouseDragged(to: NSPoint(x: rotationPoint.x + 34, y: rotationPoint.y + 26))
@@ -1133,7 +1201,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_mouseDragged(to: NSPoint(x: rotationPoint.x + 58, y: rotationPoint.y + 42))
         XCTAssertNotNil(window.test_renderedOverlayImage())
 
-        XCTAssertEqual(window.test_mosaicCompositeRenderCount, renderCountBeforeRotation)
+        XCTAssertEqual(window.test_mosaicFullCompositeRenderCount, fullRenderCountBeforeRotation)
         window.test_mouseUp(at: NSPoint(x: rotationPoint.x + 58, y: rotationPoint.y + 42))
     }
 
@@ -1160,13 +1228,13 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_activateShapeTool(.mosaicRectangle)
 
         XCTAssertNotNil(window.test_renderedOverlayImage())
-        let renderCountBeforeSelection = window.test_mosaicCompositeRenderCount
+        let fullRenderCountBeforeSelection = window.test_mosaicFullCompositeRenderCount
 
         let selectionPoint = NSPoint(x: selection.minX + 20 + 37, y: selection.minY + 24 + 24)
         window.test_mouseDown(at: selectionPoint)
         XCTAssertNotNil(window.test_renderedOverlayImage())
 
-        XCTAssertEqual(window.test_mosaicCompositeRenderCount, renderCountBeforeSelection)
+        XCTAssertEqual(window.test_mosaicFullCompositeRenderCount, fullRenderCountBeforeSelection)
     }
 
     func testOverlayWindowMosaicRectangleEmptyClickReusesCompletedCompositeCache() throws {
@@ -1208,21 +1276,24 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_mouseUp(at: NSPoint(x: 134, y: 104))
 
         XCTAssertNotNil(window.test_renderedOverlayImage())
-        let renderCountBeforeSecondDraft = window.test_mosaicCompositeRenderCount
+        let fullRenderCountBeforeSecondDraft = window.test_mosaicFullCompositeRenderCount
 
         window.test_mouseDown(at: NSPoint(x: 176, y: 80))
         window.test_mouseDragged(to: NSPoint(x: 248, y: 136))
         XCTAssertNotNil(window.test_renderedOverlayImage())
 
-        let renderCountAfterFirstPreview = window.test_mosaicCompositeRenderCount
+        let fullRenderCountAfterFirstPreview = window.test_mosaicFullCompositeRenderCount
         let redactedBaseRenderCountAfterFirstPreview = window.test_mosaicDraftRedactedBaseRenderCount
 
         window.test_mouseDragged(to: NSPoint(x: 252, y: 140))
         XCTAssertNotNil(window.test_renderedOverlayImage())
 
-        XCTAssertEqual(window.test_mosaicCompositeRenderCount, renderCountAfterFirstPreview)
-        XCTAssertEqual(window.test_mosaicDraftRedactedBaseRenderCount, redactedBaseRenderCountAfterFirstPreview)
-        XCTAssertGreaterThanOrEqual(renderCountAfterFirstPreview, renderCountBeforeSecondDraft)
+        XCTAssertEqual(window.test_mosaicFullCompositeRenderCount, fullRenderCountAfterFirstPreview)
+        XCTAssertLessThanOrEqual(
+            window.test_mosaicDraftRedactedBaseRenderCount - redactedBaseRenderCountAfterFirstPreview,
+            1
+        )
+        XCTAssertGreaterThanOrEqual(fullRenderCountAfterFirstPreview, fullRenderCountBeforeSecondDraft)
         window.test_mouseUp(at: NSPoint(x: 252, y: 140))
     }
 
@@ -1750,6 +1821,69 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertNotNil(window.test_mosaicDraftPreview(for: resizedDraft))
 
         XCTAssertEqual(window.test_mosaicDraftRedactedBaseRenderCount - renderCountBeforePreview, 1)
+    }
+
+    func testOverlayWindowMosaicRectangleDraftWithExistingMosaicAvoidsFullCompositeRender() throws {
+        let image = checkerboardImage(size: NSSize(width: 760, height: 520), squareSize: 4)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 40, y: 40, width: 660, height: 400))
+
+        var style = CaptureAnnotationStyle()
+        style.strokeWidth = 25
+        let redaction = CaptureMosaicRedaction(type: .gaussianBlur, value: 8)
+        let annotations = (0..<24).map { index in
+            let column = index % 6
+            let row = index / 6
+            return CaptureAnnotation(
+                kind: .mosaicRectangle,
+                rect: NSRect(x: 20 + column * 96, y: 24 + row * 74, width: 62, height: 46),
+                style: style,
+                mosaicRedaction: redaction
+            )
+        }
+        window.test_setAnnotations(annotations)
+
+        let draft = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(x: 72, y: 66, width: 130, height: 92),
+            style: style,
+            mosaicRedaction: redaction
+        )
+        let fullRenderCountBeforePreview = window.test_mosaicFullCompositeRenderCount
+
+        XCTAssertNotNil(window.test_mosaicDraftPreview(for: draft))
+        XCTAssertEqual(window.test_mosaicFullCompositeRenderCount, fullRenderCountBeforePreview)
+    }
+
+    func testOverlayWindowDrawingMosaicRectangleDraftWithExistingMosaicAvoidsFullCompositeRender() throws {
+        let image = checkerboardImage(size: NSSize(width: 760, height: 520), squareSize: 4)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 40, y: 40, width: 660, height: 400))
+
+        var style = CaptureAnnotationStyle()
+        style.strokeWidth = 25
+        let redaction = CaptureMosaicRedaction(type: .gaussianBlur, value: 8)
+        let annotations = (0..<24).map { index in
+            let column = index % 6
+            let row = index / 6
+            return CaptureAnnotation(
+                kind: .mosaicRectangle,
+                rect: NSRect(x: 20 + column * 96, y: 24 + row * 74, width: 62, height: 46),
+                style: style,
+                mosaicRedaction: redaction
+            )
+        }
+        window.test_setAnnotations(annotations)
+        window.test_toggleShapeTool(.mosaicRectangle)
+
+        let fullRenderCountBeforeDraw = window.test_mosaicFullCompositeRenderCount
+        window.test_mouseDown(at: NSPoint(x: 132, y: 122))
+        window.test_mouseDragged(to: NSPoint(x: 286, y: 204))
+
+        XCTAssertNotNil(window.test_renderedOverlayImage())
+        XCTAssertEqual(window.test_mosaicFullCompositeRenderCount, fullRenderCountBeforeDraw)
+
+        window.test_mouseUp(at: NSPoint(x: 286, y: 204))
     }
 
     func testOverlayWindowDrawsMosaicRectangleDraftWithoutAllocatingPreviewImageWhileResizing() throws {
@@ -6221,6 +6355,30 @@ final class SelectionToolbarStateTests: XCTestCase {
         in image: NSImage,
         rect: NSRect
     ) throws -> (red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8)? {
+        try firstPixel(in: image, rect: rect) { pixel in
+            Int(pixel.blue) > Int(pixel.red) + 20
+                && Int(pixel.blue) > Int(pixel.green) + 20
+                && pixel.alpha > 200
+        }
+    }
+
+    private func firstLightPixel(
+        in image: NSImage,
+        rect: NSRect
+    ) throws -> (red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8)? {
+        try firstPixel(in: image, rect: rect) { pixel in
+            pixel.red > 230
+                && pixel.green > 230
+                && pixel.blue > 230
+                && pixel.alpha > 200
+        }
+    }
+
+    private func firstPixel(
+        in image: NSImage,
+        rect: NSRect,
+        matching predicate: ((red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8)) -> Bool
+    ) throws -> (red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8)? {
         let cgImage = try XCTUnwrap(image.cgImage(forProposedRect: nil, context: nil, hints: nil))
         let bytes = try rgbaBytes(in: image)
         let scaleX = CGFloat(cgImage.width) / max(image.size.width, 1)
@@ -6249,9 +6407,7 @@ final class SelectionToolbarStateTests: XCTestCase {
                         blue: bytes[index + 2],
                         alpha: bytes[index + 3]
                     )
-                    if pixel.blue > pixel.red + 20,
-                       pixel.blue > pixel.green + 20,
-                       pixel.alpha > 200 {
+                    if predicate(pixel) {
                         return pixel
                     }
                 }
