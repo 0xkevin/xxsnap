@@ -262,7 +262,8 @@ private extension NSCursor {
     }
 
     static func xxsnapMosaicDot(diameter: CGFloat) -> NSCursor {
-        let size = NSSize(width: 24, height: 24)
+        let side = max(24, ceil(diameter) + 4)
+        let size = NSSize(width: side, height: side)
         let center = NSPoint(x: size.width / 2, y: size.height / 2)
         let image = NSImage(size: size)
         image.lockFocus()
@@ -463,6 +464,10 @@ final class SelectionOverlayWindow: NSWindow {
 
     func test_setAnnotations(_ annotations: [CaptureAnnotation]) {
         (contentView as? SelectionOverlayView)?.test_setAnnotations(annotations)
+    }
+
+    func test_selectAnnotation(at index: Int) {
+        (contentView as? SelectionOverlayView)?.test_selectAnnotation(at: index)
     }
 
     func test_setWindowSelectionCandidates(_ candidates: [WindowSelectionCandidate]) {
@@ -818,6 +823,18 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_mosaicCompositeRenderCount ?? 0
     }
 
+    var test_mosaicCompositeDrawCount: Int {
+        (contentView as? SelectionOverlayView)?.test_mosaicCompositeDrawCount ?? 0
+    }
+
+    var test_mosaicDraftRedactedBaseRenderCount: Int {
+        (contentView as? SelectionOverlayView)?.test_mosaicDraftRedactedBaseRenderCount ?? 0
+    }
+
+    var test_mosaicDraftPreviewImageRenderCount: Int {
+        (contentView as? SelectionOverlayView)?.test_mosaicDraftPreviewImageRenderCount ?? 0
+    }
+
     func test_mosaicPreviewClipBounds(for annotations: [CaptureAnnotation]) -> NSRect? {
         (contentView as? SelectionOverlayView)?.test_mosaicPreviewClipBounds(for: annotations)
     }
@@ -1129,13 +1146,7 @@ private final class SelectionOverlayView: NSView {
     private var interactionMode = InteractionMode.selecting
     private var selectionStartPoint: NSPoint?
     private var selectionCurrentPoint: NSPoint?
-    private var lockedSelectionRect: NSRect? {
-        didSet {
-            if oldValue != lockedSelectionRect {
-                resetMosaicPreviewCaches()
-            }
-        }
-    }
+    private var lockedSelectionRect: NSRect?
     private var shapeStartPoint: NSPoint?
     private var shapeCurrentPoint: NSPoint?
     private var brushDraftPoints: [NSPoint] = []
@@ -1148,6 +1159,8 @@ private final class SelectionOverlayView: NSView {
     private var movingAnnotationStartBrushPath: CaptureBrushPath?
     private var movingAnnotationStartMarkerLine: CaptureMarkerLine?
     private var movingAnnotationStartMosaicStroke: CaptureMosaicStroke?
+    private var mosaicGeometryEditingStartAnnotations: [CaptureAnnotation] = []
+    private var mosaicGeometryEditingStartComposite: (image: NSImage, drawRect: NSRect)?
     private var movingAnnotationOffset = NSPoint.zero
     private var rotatingMosaicRectangleStartPointerAngle: CGFloat?
     private var rotatingMosaicRectangleStartAnnotationAngle: CGFloat = 0
@@ -1203,11 +1216,15 @@ private final class SelectionOverlayView: NSView {
         .pixelMosaic: SelectionToolbarState.mosaicDefaultRedactionValue(for: .pixelMosaic),
     ]
     private var mosaicValueEditingText: String?
-    private var mosaicDotIndex: Int = 1
+    private var mosaicDotIndex: Int = 0
     private var mosaicCompositeCache: [String: (image: NSImage, drawRect: NSRect)] = [:]
     private var mosaicDraftPreviewCache: [String: NSImage] = [:]
     private var mosaicDraftRedactedBaseCache: [String: NSImage] = [:]
+    private var mosaicRectangleIconCache: [String: NSImage] = [:]
     private var mosaicCompositeRenderCount = 0
+    private var mosaicCompositeDrawCount = 0
+    private var mosaicDraftRedactedBaseRenderCount = 0
+    private var mosaicDraftPreviewImageRenderCount = 0
     private var currentStartArrowType = CaptureArrowType.none
     private var currentEndArrowType = CaptureArrowType.normal
     private var customColor: NSColor?
@@ -1634,7 +1651,7 @@ private final class SelectionOverlayView: NSView {
                 activeShapeKind = draft.kind
                 redoAnnotations.removeAll()
                 if draft.kind == .mosaicStroke || draft.kind == .mosaicRectangle {
-                    resetMosaicPreviewCaches()
+                    resetMosaicRedactionPreviewCaches()
                 }
                 NSLog("xxsnap overlay added annotation count=%ld rect=(%.0f, %.0f, %.0f, %.0f)", annotations.count, draft.rect.minX, draft.rect.minY, draft.rect.width, draft.rect.height)
             }
@@ -1813,6 +1830,9 @@ private final class SelectionOverlayView: NSView {
         }
         if currentShapeKind == .marker {
             return NSCursor.xxsnapMarker(color: currentStyle.strokeColor, strokeWidth: currentStyle.strokeWidth)
+        }
+        if currentShapeKind == .mosaicStroke {
+            return NSCursor.xxsnapMosaicDot(diameter: SelectionToolbarState.mosaicCursorDotDiameter(for: currentStyle.strokeWidth))
         }
         return NSCursor.crosshair
     }
@@ -2345,6 +2365,7 @@ private final class SelectionOverlayView: NSView {
             selectAnnotation(at: mosaicHit)
             rotatingMosaicRectangleStartPointerAngle = angle(from: mosaicRectangleCenter(for: annotations[mosaicHit]), to: point)
             rotatingMosaicRectangleStartAnnotationAngle = annotations[mosaicHit].rotationAngle
+            captureMosaicGeometryEditingStartState()
             interactionMode = .rotatingMosaicRectangle
             showsStrokeStyleMenu = false
             showsCornerRadiusPanel = false
@@ -2427,6 +2448,7 @@ private final class SelectionOverlayView: NSView {
         case .shapeResize(let handle):
             activeResizeHandle = ShapeResizeHandle(toolbarStateHandle: handle)
             resizingAnnotationStartRect = selectedAnnotation.map { overlayRect(fromLocalAnnotationRect: $0.rect) }
+            captureMosaicGeometryEditingStartState()
             interactionMode = .resizingShape
             showsStrokeStyleMenu = false
             showsCornerRadiusPanel = false
@@ -2897,6 +2919,7 @@ private final class SelectionOverlayView: NSView {
         movingAnnotationStartBrushPath = overlayBrushPath(fromLocalBrushPath: annotations[index].brushPath)
         movingAnnotationStartMarkerLine = overlayMarkerLine(fromLocalMarkerLine: annotations[index].markerLine)
         movingAnnotationStartMosaicStroke = overlayMosaicStroke(fromLocalMosaicStroke: annotations[index].mosaicStroke)
+        captureMosaicGeometryEditingStartState()
         movingAnnotationOffset = NSPoint(
             x: point.x - (movingAnnotationStartRect?.minX ?? point.x),
             y: point.y - (movingAnnotationStartRect?.minY ?? point.y)
@@ -2933,7 +2956,7 @@ private final class SelectionOverlayView: NSView {
         case .eyedropper:
             toggleEyedropperTool()
         case .mosaic:
-            toggleShapeTool(.mosaicRectangle)
+            toggleShapeTool(.mosaicStroke)
             showsStrokeStyleMenu = false
             showsCornerRadiusPanel = false
             showsStartArrowTypeMenu = false
@@ -3202,6 +3225,15 @@ private final class SelectionOverlayView: NSView {
         redoAnnotations.removeAll()
         selectedAnnotationIndex = nil
         resetMosaicPreviewCaches()
+        needsDisplay = true
+    }
+
+    func test_selectAnnotation(at index: Int) {
+        guard annotations.indices.contains(index) else {
+            selectedAnnotationIndex = nil
+            return
+        }
+        selectedAnnotationIndex = index
         needsDisplay = true
     }
 
@@ -3617,6 +3649,18 @@ private final class SelectionOverlayView: NSView {
 
     var test_mosaicCompositeRenderCount: Int {
         mosaicCompositeRenderCount
+    }
+
+    var test_mosaicCompositeDrawCount: Int {
+        mosaicCompositeDrawCount
+    }
+
+    var test_mosaicDraftRedactedBaseRenderCount: Int {
+        mosaicDraftRedactedBaseRenderCount
+    }
+
+    var test_mosaicDraftPreviewImageRenderCount: Int {
+        mosaicDraftPreviewImageRenderCount
     }
 
     func test_mosaicPreviewClipBounds(for annotations: [CaptureAnnotation]) -> NSRect? {
@@ -4106,7 +4150,6 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func handleMosaicOptionsClick(at point: NSPoint, optionsRect: NSRect) -> Bool {
-        /*
         let dotRects = SelectionToolbarState.strokeWidthRects(in: optionsRect)
         let dotValues = SelectionToolbarState.strokeWidthValues(for: .mosaic)
         for (index, rect) in dotRects.enumerated() where rect.contains(point) {
@@ -4124,7 +4167,6 @@ private final class SelectionOverlayView: NSView {
             invalidateCursorRectsAndRefresh()
             return true
         }
-        */
 
         let valueRect = SelectionToolbarState.mosaicRedactionValueRect(in: optionsRect)
         if valueRect.contains(point) {
@@ -4134,7 +4176,7 @@ private final class SelectionOverlayView: NSView {
             return true
         }
 
-        /*
+        let layout = optionsToolbarLayout(in: optionsRect)
         if let rectangleRect = layout.rectangleMode, rectangleRect.contains(point) {
             commitMosaicValueEditing()
             if currentShapeKind != .mosaicRectangle {
@@ -4143,7 +4185,6 @@ private final class SelectionOverlayView: NSView {
             activateShapeTool(.mosaicRectangle)
             return true
         }
-        */
 
         let pixelRect = SelectionToolbarState.mosaicRedactionTypeButtonRect(in: optionsRect)
         if pixelRect.contains(point) {
@@ -4475,7 +4516,7 @@ private final class SelectionOverlayView: NSView {
         case .arrowLine:
             return kind == .arrowLine
         case .brush:
-            return kind == .brush
+            return false
         case .marker:
             return kind == .marker
         case .mosaicStroke, .mosaicRectangle:
@@ -4639,8 +4680,15 @@ private final class SelectionOverlayView: NSView {
         activeMarkerLineHandle = nil
         rotatingBrushStartPath = nil
         activeBrushRotationHandle = nil
+        mosaicGeometryEditingStartAnnotations.removeAll()
+        mosaicGeometryEditingStartComposite = nil
         redoAnnotations.removeAll()
         needsDisplay = true
+    }
+
+    private func captureMosaicGeometryEditingStartState() {
+        mosaicGeometryEditingStartAnnotations = annotations
+        mosaicGeometryEditingStartComposite = cachedFullMosaicPreviewComposite(for: annotations)
     }
 
     private func commitSelectionResize() {
@@ -4733,16 +4781,7 @@ private final class SelectionOverlayView: NSView {
             return SelectionToolbarState.arrowLineHitTarget(at: point, line: arrowLine) == .body
         }
         if annotation.kind == .brush {
-            guard let brushPath = overlayBrushPath(fromLocalBrushPath: annotation.brushPath) else {
-                return false
-            }
-            let hitOutset = max(6, annotation.style.strokeWidth / 2 + 4)
-            if let start = brushPath.points.first, let end = brushPath.points.last,
-               hypot(point.x - start.x, point.y - start.y) <= hitOutset
-                || hypot(point.x - end.x, point.y - end.y) <= hitOutset {
-                return false
-            }
-            return brushPathContains(point, path: brushPath, hitOutset: hitOutset)
+            return false
         }
         if annotation.kind == .mosaicStroke {
             return false
@@ -5022,6 +5061,17 @@ private final class SelectionOverlayView: NSView {
             return
         }
 
+        if annotations[selectedAnnotationIndex].kind == .mosaicRectangle,
+           abs(annotations[selectedAnnotationIndex].rotationAngle) >= 0.001 {
+            updateRotatedMosaicRectangleResize(
+                at: selectedAnnotationIndex,
+                to: point,
+                handle: activeResizeHandle,
+                startRect: resizingAnnotationStartRect
+            )
+            return
+        }
+
         let clampedPoint = clamp(point, to: bounds)
         var minX = resizingAnnotationStartRect.minX
         var maxX = resizingAnnotationStartRect.maxX
@@ -5056,6 +5106,70 @@ private final class SelectionOverlayView: NSView {
             y: min(minY, maxY),
             width: abs(maxX - minX),
             height: abs(maxY - minY)
+        )
+
+        if resized.width >= 8, resized.height >= 8 {
+            annotations[selectedAnnotationIndex].rect = localAnnotationRect(from: resized)
+        }
+    }
+
+    private func updateRotatedMosaicRectangleResize(
+        at selectedAnnotationIndex: Int,
+        to point: NSPoint,
+        handle: ShapeResizeHandle,
+        startRect: NSRect
+    ) {
+        let angle = annotations[selectedAnnotationIndex].rotationAngle
+        let center = NSPoint(x: startRect.midX, y: startRect.midY)
+        let xAxis = NSPoint(x: cos(angle), y: sin(angle))
+        let yAxis = NSPoint(x: -sin(angle), y: cos(angle))
+        let centerX = projectedDistance(center, onto: xAxis)
+        let centerY = projectedDistance(center, onto: yAxis)
+        let pointer = clamp(point, to: bounds)
+        let pointerX = projectedDistance(pointer, onto: xAxis)
+        let pointerY = projectedDistance(pointer, onto: yAxis)
+
+        var minX = centerX - startRect.width / 2
+        var maxX = centerX + startRect.width / 2
+        var minY = centerY - startRect.height / 2
+        var maxY = centerY + startRect.height / 2
+
+        switch handle {
+        case .topLeft:
+            minX = pointerX
+            maxY = pointerY
+        case .top:
+            maxY = pointerY
+        case .topRight:
+            maxX = pointerX
+            maxY = pointerY
+        case .left:
+            minX = pointerX
+        case .right:
+            maxX = pointerX
+        case .bottomLeft:
+            minX = pointerX
+            minY = pointerY
+        case .bottom:
+            minY = pointerY
+        case .bottomRight:
+            maxX = pointerX
+            minY = pointerY
+        }
+
+        let width = abs(maxX - minX)
+        let height = abs(maxY - minY)
+        let resizedCenterX = (minX + maxX) / 2
+        let resizedCenterY = (minY + maxY) / 2
+        let resizedCenter = NSPoint(
+            x: xAxis.x * resizedCenterX + yAxis.x * resizedCenterY,
+            y: xAxis.y * resizedCenterX + yAxis.y * resizedCenterY
+        )
+        let resized = NSRect(
+            x: resizedCenter.x - width / 2,
+            y: resizedCenter.y - height / 2,
+            width: width,
+            height: height
         )
 
         if resized.width >= 8, resized.height >= 8 {
@@ -5433,7 +5547,9 @@ private final class SelectionOverlayView: NSView {
                     drawLiveMosaicValuePreview(at: liveValueIndex)
                 }
             }
-            if let draftAnnotation, isMosaicAnnotation(draftAnnotation) {
+            if let draftAnnotation,
+               isMosaicAnnotation(draftAnnotation),
+               isUsableDraftAnnotation(draftAnnotation) {
                 drawMosaicDraftPreview(draftAnnotation)
             }
             for (index, annotation) in annotations.enumerated()
@@ -5695,9 +5811,14 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func needsSequentialMosaicComposite(for annotations: [CaptureAnnotation]) -> Bool {
+        var mosaicCount = 0
         var hasEarlierNonMosaicAnnotation = false
         for annotation in annotations {
             if isMosaicAnnotation(annotation) {
+                mosaicCount += 1
+                if mosaicCount > 1 {
+                    return true
+                }
                 if hasEarlierNonMosaicAnnotation {
                     return true
                 }
@@ -5711,9 +5832,22 @@ private final class SelectionOverlayView: NSView {
     private func drawAnnotationsRespectingMosaicOrder() {
         let rotatingIndex = rotatingMosaicRectangleAnnotationIndex()
         let liveValueIndex = selectedMosaicValuePreviewIndex()
+        if let liveGeometryIndex = selectedMosaicGeometryPreviewIndex(),
+           drawCachedMosaicCompositeWhileEditingLargeGeometry(at: liveGeometryIndex) {
+            return
+        }
+        if let liveGeometryIndex = selectedMosaicGeometryPreviewIndex(),
+           drawAnnotationsRespectingMosaicOrderWhileEditingSelectedMosaic(at: liveGeometryIndex) {
+            return
+        }
+        if drawSingleMosaicCompositeWhenOrderAllows(rotatingIndex: rotatingIndex, liveValueIndex: liveValueIndex) {
+            return
+        }
+
         for (index, annotation) in annotations.enumerated() {
             if isMosaicAnnotation(annotation) {
-                if rotatingIndex == index, drawRotatingMosaicRectanglePreview(at: index) {
+                if rotatingIndex == index,
+                   drawRotatingMosaicRectanglePreview(at: index, drawBaseAnnotations: false) {
                     continue
                 }
                 if liveValueIndex == index,
@@ -5727,6 +5861,93 @@ private final class SelectionOverlayView: NSView {
             } else {
                 drawAnnotation(annotation, inOverlay: true)
             }
+        }
+    }
+
+    private func drawSingleMosaicCompositeWhenOrderAllows(rotatingIndex: Int?, liveValueIndex: Int?) -> Bool {
+        guard rotatingIndex == nil, liveValueIndex == nil else {
+            return false
+        }
+
+        var mosaicAnnotations: [CaptureAnnotation] = []
+        var nonMosaicPrefixAnnotations: [CaptureAnnotation] = []
+        var hasSeenMosaic = false
+        for annotation in annotations {
+            if isMosaicAnnotation(annotation) {
+                hasSeenMosaic = true
+                mosaicAnnotations.append(annotation)
+            } else if hasSeenMosaic {
+                return false
+            } else {
+                nonMosaicPrefixAnnotations.append(annotation)
+            }
+        }
+
+        guard !mosaicAnnotations.isEmpty else {
+            return false
+        }
+
+        for annotation in nonMosaicPrefixAnnotations {
+            drawAnnotation(annotation, inOverlay: true)
+        }
+        if let composite = mosaicPreviewComposite(for: annotations) {
+            drawMosaicCompositeUnclipped(composite)
+        }
+        return true
+    }
+
+    private func drawAnnotationsRespectingMosaicOrderWhileEditingSelectedMosaic(at selectedIndex: Int) -> Bool {
+        guard annotations.indices.contains(selectedIndex),
+              isMosaicAnnotation(annotations[selectedIndex]) else {
+            return false
+        }
+
+        let baseAnnotations = annotations.enumerated().compactMap { index, annotation in
+            index == selectedIndex ? nil : annotation
+        }
+        let baseImage: NSImage
+        let baseKey: String
+        if let baseComposite = fullMosaicPreviewComposite(for: baseAnnotations),
+           let backgroundImage {
+            drawMosaicCompositeUnclipped(baseComposite)
+            baseImage = baseComposite.image
+            baseKey = mosaicCompositeKey(for: baseAnnotations, backgroundImage: backgroundImage)
+        } else {
+            guard let backgroundImage else {
+                return false
+            }
+            baseImage = backgroundImage
+            baseKey = mosaicBackgroundKey(for: backgroundImage)
+        }
+
+        return drawSelectedMosaicAnnotationPreview(
+            at: selectedIndex,
+            baseImage: baseImage,
+            baseKey: baseKey
+        )
+    }
+
+    private func drawCachedMosaicCompositeWhileEditingLargeGeometry(at selectedIndex: Int) -> Bool {
+        guard
+            annotations.indices.contains(selectedIndex),
+            isMosaicAnnotation(annotations[selectedIndex]),
+            mosaicGeometryEditingShouldUseCachedComposite,
+            !mosaicGeometryEditingStartAnnotations.isEmpty,
+            let composite = mosaicGeometryEditingStartComposite
+        else {
+            return false
+        }
+
+        drawMosaicCompositeUnclipped(composite)
+        return true
+    }
+
+    private var mosaicGeometryEditingShouldUseCachedComposite: Bool {
+        switch interactionMode {
+        case .movingShape, .resizingShape, .rotatingMosaicRectangle:
+            return true
+        default:
+            return false
         }
     }
 
@@ -5765,6 +5986,10 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func drawMosaicDraftPreview(_ annotation: CaptureAnnotation) {
+        if drawMosaicRectangleDraftPreviewDirectly(annotation) {
+            return
+        }
+
         guard let preview = mosaicDraftPreview(for: annotation) else {
             return
         }
@@ -5780,28 +6005,63 @@ private final class SelectionOverlayView: NSView {
         NSGraphicsContext.restoreGraphicsState()
     }
 
+    private func drawMosaicRectangleDraftPreviewDirectly(_ annotation: CaptureAnnotation) -> Bool {
+        guard annotation.kind == .mosaicRectangle,
+              let backgroundImage,
+              let redaction = annotation.mosaicRedaction,
+              let clip = mosaicDraftClipPath(for: annotation) else {
+            return false
+        }
+
+        let redactedBase = mosaicDraftRedactedBaseImage(
+            redaction: redaction,
+            existingAnnotations: annotations,
+            backgroundImage: backgroundImage
+        )
+        NSGraphicsContext.saveGraphicsState()
+        clip.addClip()
+        redactedBase.draw(
+            in: bounds,
+            from: NSRect(origin: .zero, size: redactedBase.size),
+            operation: .copy,
+            fraction: 1
+        )
+        NSGraphicsContext.restoreGraphicsState()
+        return true
+    }
+
     private func drawMosaicComposite(
         _ composite: (image: NSImage, drawRect: NSRect),
         clippedTo annotations: [CaptureAnnotation]
     ) {
-        let clipPath = NSBezierPath()
-        annotations.compactMap(mosaicDraftClipPath).forEach { clipPath.append($0) }
-        guard clipPath.elementCount > 0 else {
-            return
+        for clipPath in annotations.compactMap(mosaicDraftClipPath) {
+            mosaicCompositeDrawCount += 1
+            NSGraphicsContext.saveGraphicsState()
+            clipPath.addClip()
+            composite.image.draw(
+                in: composite.drawRect,
+                from: NSRect(origin: .zero, size: composite.image.size),
+                operation: .copy,
+                fraction: 1
+            )
+            NSGraphicsContext.restoreGraphicsState()
         }
+    }
 
-        NSGraphicsContext.saveGraphicsState()
-        clipPath.addClip()
+    private func drawMosaicCompositeUnclipped(_ composite: (image: NSImage, drawRect: NSRect)) {
+        mosaicCompositeDrawCount += 1
         composite.image.draw(
             in: composite.drawRect,
             from: NSRect(origin: .zero, size: composite.image.size),
             operation: .copy,
             fraction: 1
         )
-        NSGraphicsContext.restoreGraphicsState()
     }
 
-    private func drawRotatingMosaicRectanglePreview(at selectedIndex: Int) -> Bool {
+    private func drawRotatingMosaicRectanglePreview(
+        at selectedIndex: Int,
+        drawBaseAnnotations: Bool = true
+    ) -> Bool {
         guard
             let backgroundImage,
             annotations.indices.contains(selectedIndex),
@@ -5815,13 +6075,46 @@ private final class SelectionOverlayView: NSView {
         let earlierAnnotations = Array(annotations[..<selectedIndex])
         let baseImage: NSImage
         let baseKey: String
-        if let baseComposite = mosaicPreviewComposite(for: earlierAnnotations) {
-            drawMosaicComposite(baseComposite, clippedTo: earlierAnnotations)
+        if let baseComposite = fullMosaicPreviewComposite(for: earlierAnnotations) {
+            if drawBaseAnnotations {
+                drawMosaicComposite(baseComposite, clippedTo: earlierAnnotations)
+            }
             baseImage = baseComposite.image
             baseKey = mosaicCompositeKey(for: earlierAnnotations, backgroundImage: backgroundImage)
         } else {
             baseImage = backgroundImage
             baseKey = mosaicBackgroundKey(for: backgroundImage)
+        }
+
+        let redactedImage = mosaicRedactedBaseImage(
+            baseImage: baseImage,
+            baseKey: baseKey,
+            redaction: redaction
+        )
+        NSGraphicsContext.saveGraphicsState()
+        clipPath.addClip()
+        redactedImage.draw(
+            in: bounds,
+            from: NSRect(origin: .zero, size: redactedImage.size),
+            operation: .copy,
+            fraction: 1
+        )
+        NSGraphicsContext.restoreGraphicsState()
+        return true
+    }
+
+    private func drawSelectedMosaicAnnotationPreview(
+        at selectedIndex: Int,
+        baseImage: NSImage,
+        baseKey: String
+    ) -> Bool {
+        guard
+            annotations.indices.contains(selectedIndex),
+            isMosaicAnnotation(annotations[selectedIndex]),
+            let redaction = annotations[selectedIndex].mosaicRedaction,
+            let clipPath = mosaicDraftClipPath(for: annotations[selectedIndex])
+        else {
+            return false
         }
 
         let redactedImage = mosaicRedactedBaseImage(
@@ -5853,6 +6146,75 @@ private final class SelectionOverlayView: NSView {
         return selectedAnnotationIndex
     }
 
+    private func selectedMosaicGeometryPreviewIndex() -> Int? {
+        guard
+            let selectedAnnotationIndex,
+            annotations.indices.contains(selectedAnnotationIndex),
+            isMosaicAnnotation(annotations[selectedAnnotationIndex])
+        else {
+            return nil
+        }
+
+        switch interactionMode {
+        case .movingShape, .resizingShape, .rotatingMosaicRectangle:
+            return selectedMosaicGeometryHasChanged(at: selectedAnnotationIndex) ? selectedAnnotationIndex : nil
+        default:
+            return nil
+        }
+    }
+
+    private func selectedMosaicGeometryHasChanged(at index: Int) -> Bool {
+        guard annotations.indices.contains(index) else {
+            return false
+        }
+
+        switch interactionMode {
+        case .movingShape:
+            guard let movingAnnotationStartRect else {
+                return true
+            }
+            let currentRect = overlayRect(fromLocalAnnotationRect: annotations[index].rect)
+            if !rectsApproximatelyEqual(currentRect, movingAnnotationStartRect) {
+                return true
+            }
+            guard let movingAnnotationStartMosaicStroke else {
+                return false
+            }
+            guard let currentStroke = overlayMosaicStroke(fromLocalMosaicStroke: annotations[index].mosaicStroke) else {
+                return true
+            }
+            return !pointsApproximatelyEqual(currentStroke.points, movingAnnotationStartMosaicStroke.points)
+        case .resizingShape:
+            guard let resizingAnnotationStartRect else {
+                return true
+            }
+            return !rectsApproximatelyEqual(
+                overlayRect(fromLocalAnnotationRect: annotations[index].rect),
+                resizingAnnotationStartRect
+            )
+        case .rotatingMosaicRectangle:
+            return abs(annotations[index].rotationAngle - rotatingMosaicRectangleStartAnnotationAngle) > 0.001
+        default:
+            return false
+        }
+    }
+
+    private func rectsApproximatelyEqual(_ lhs: NSRect, _ rhs: NSRect) -> Bool {
+        abs(lhs.minX - rhs.minX) <= 0.001
+            && abs(lhs.minY - rhs.minY) <= 0.001
+            && abs(lhs.width - rhs.width) <= 0.001
+            && abs(lhs.height - rhs.height) <= 0.001
+    }
+
+    private func pointsApproximatelyEqual(_ lhs: [NSPoint], _ rhs: [NSPoint]) -> Bool {
+        guard lhs.count == rhs.count else {
+            return false
+        }
+        return zip(lhs, rhs).allSatisfy { left, right in
+            abs(left.x - right.x) <= 0.001 && abs(left.y - right.y) <= 0.001
+        }
+    }
+
     private func selectedMosaicValuePreviewIndex() -> Int? {
         guard interactionMode == .draggingMosaicValue,
               let selectedAnnotationIndex,
@@ -5877,7 +6239,7 @@ private final class SelectionOverlayView: NSView {
         }
         let baseImage: NSImage
         let baseKey: String
-        if let baseComposite = mosaicPreviewComposite(for: resolvedBaseAnnotations) {
+        if let baseComposite = fullMosaicPreviewComposite(for: resolvedBaseAnnotations) {
             baseImage = baseComposite.image
             baseKey = mosaicCompositeKey(for: resolvedBaseAnnotations, backgroundImage: backgroundImage)
         } else {
@@ -7209,7 +7571,6 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func drawMosaicModeControls(in optionsRect: NSRect) {
-        /*
         let strokeWidths = SelectionToolbarState.strokeWidthValues(for: .mosaic)
         for (index, rect) in SelectionToolbarState.strokeWidthRects(in: optionsRect).enumerated() {
             let width = strokeWidths[index]
@@ -7222,8 +7583,7 @@ private final class SelectionOverlayView: NSView {
 
         let rectangleRect = optionsToolbarLayout(in: optionsRect).rectangleMode ?? .zero
         drawToolbarButton(optionButtonBackgroundRect(for: rectangleRect), symbol: nil, selected: currentShapeKind == .mosaicRectangle, enabled: true)
-        drawMosaicRectangleGlyph(in: rectangleRect)
-        */
+        drawMosaicRectangleGlyph(in: rectangleRect, selected: currentShapeKind == .mosaicRectangle)
 
         let redactionTypeRect = SelectionToolbarState.mosaicRedactionTypeButtonRect(in: optionsRect)
         drawToolbarButton(optionButtonBackgroundRect(for: redactionTypeRect), symbol: nil, selected: true, enabled: true)
@@ -7244,8 +7604,8 @@ private final class SelectionOverlayView: NSView {
         drawMosaicValueControl(in: valueRect)
     }
 
-    private func mosaicShapeGlyphColor() -> NSColor {
-        NSColor(calibratedWhite: 0.46, alpha: 1)
+    private func mosaicShapeGlyphColor(selected: Bool = false) -> NSColor {
+        selected ? NSColor.systemBlue : NSColor.labelColor
     }
 
     private func drawMosaicCircleModeGlyph(in rect: NSRect) {
@@ -7328,10 +7688,48 @@ private final class SelectionOverlayView: NSView {
         }
     }
 
-    private func drawMosaicRectangleGlyph(in rect: NSRect) {
-        mosaicShapeGlyphColor().setFill()
+    private func drawMosaicRectangleGlyph(in rect: NSRect, selected: Bool = false) {
+        if let image = mosaicRectangleIcon(selected: selected) {
+            image.draw(in: rect)
+            return
+        }
+
+        mosaicShapeGlyphColor(selected: selected).setFill()
         let side: CGFloat = 15
         NSBezierPath(roundedRect: NSRect(x: rect.midX - side / 2, y: rect.midY - side / 2, width: side, height: side), xRadius: 1.5, yRadius: 1.5).fill()
+    }
+
+    private func mosaicRectangleIcon(selected: Bool) -> NSImage? {
+        let replacementColor = selected ? svgHexColor(for: NSColor.systemBlue) : "#000000"
+        if let cached = mosaicRectangleIconCache[replacementColor] {
+            return cached
+        }
+
+        guard
+            let url = Bundle.main.url(forResource: "square_masaike", withExtension: "svg"),
+            let data = try? Data(contentsOf: url),
+            var svg = String(data: data, encoding: .utf8)
+        else {
+            return nil
+        }
+
+        svg = svg.replacingOccurrences(of: "fill=\"#000000\"", with: "fill=\"\(replacementColor)\"")
+        guard let imageData = svg.data(using: .utf8),
+              let image = NSImage(data: imageData) else {
+            return nil
+        }
+        mosaicRectangleIconCache[replacementColor] = image
+        return image
+    }
+
+    private func svgHexColor(for color: NSColor) -> String {
+        let rgb = color.usingColorSpace(.sRGB) ?? color.usingColorSpace(.deviceRGB) ?? color
+        return String(
+            format: "#%02X%02X%02X",
+            Int((rgb.redComponent * 255).rounded()),
+            Int((rgb.greenComponent * 255).rounded()),
+            Int((rgb.blueComponent * 255).rounded())
+        )
     }
 
     private func mosaicPreviewValue(for type: CaptureMosaicRedactionType) -> Int {
@@ -7489,7 +7887,7 @@ private final class SelectionOverlayView: NSView {
             return nil
         }
 
-        guard let composite = mosaicPreviewComposite(for: annotations) else {
+        guard let composite = fullMosaicPreviewComposite(for: annotations) else {
             return sampleColor(at: point)
         }
 
@@ -8281,22 +8679,157 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func mosaicPreviewComposite(for annotations: [CaptureAnnotation]) -> (image: NSImage, drawRect: NSRect)? {
+        mosaicPreviewComposite(for: annotations, allowLocal: true)
+    }
+
+    private func fullMosaicPreviewComposite(for annotations: [CaptureAnnotation]) -> (image: NSImage, drawRect: NSRect)? {
+        mosaicPreviewComposite(for: annotations, allowLocal: false)
+    }
+
+    private func cachedFullMosaicPreviewComposite(for annotations: [CaptureAnnotation]) -> (image: NSImage, drawRect: NSRect)? {
         guard let backgroundImage, !annotations.isEmpty else {
             return nil
         }
-        let cacheKey = mosaicCompositeKey(for: annotations, backgroundImage: backgroundImage)
+        let cacheKey = [
+            "full",
+            mosaicCompositeKey(for: annotations, backgroundImage: backgroundImage),
+        ].joined(separator: "|")
+        return mosaicCompositeCache[cacheKey]
+    }
+
+    private func mosaicPreviewComposite(
+        for annotations: [CaptureAnnotation],
+        allowLocal: Bool
+    ) -> (image: NSImage, drawRect: NSRect)? {
+        guard let backgroundImage, !annotations.isEmpty else {
+            return nil
+        }
+        let cacheKey = [
+            allowLocal ? "local" : "full",
+            mosaicCompositeKey(for: annotations, backgroundImage: backgroundImage),
+        ].joined(separator: "|")
         if let composite = mosaicCompositeCache[cacheKey] {
             return composite
+        }
+
+        let composite: (image: NSImage, drawRect: NSRect)
+        let renderedFullComposite: Bool
+        if allowLocal,
+           canUseLocalMosaicComposite(for: annotations),
+           let localComposite = localMosaicComposite(for: annotations, backgroundImage: backgroundImage) {
+            composite = localComposite
+            renderedFullComposite = false
+        } else {
+            composite = fullMosaicPreviewCompositeRenderingCacheMiss(
+                for: annotations,
+                backgroundImage: backgroundImage
+            )
+            renderedFullComposite = true
+        }
+        mosaicCompositeRenderCount += 1
+        mosaicCompositeCache[cacheKey] = composite
+        if renderedFullComposite {
+            let fullCacheKey = [
+                "full",
+                mosaicCompositeKey(for: annotations, backgroundImage: backgroundImage),
+            ].joined(separator: "|")
+            mosaicCompositeCache[fullCacheKey] = composite
+        }
+        return composite
+    }
+
+    private func canUseLocalMosaicComposite(for annotations: [CaptureAnnotation]) -> Bool {
+        let mosaicAnnotations = annotations.filter(isMosaicAnnotation)
+        guard mosaicAnnotations.count == 1 else {
+            return false
+        }
+        return mosaicAnnotations.allSatisfy { annotation in
+            annotation.mosaicRedaction?.type == .gaussianBlur
+        }
+    }
+
+    private func fullMosaicPreviewCompositeRenderingCacheMiss(
+        for annotations: [CaptureAnnotation],
+        backgroundImage: NSImage
+    ) -> (image: NSImage, drawRect: NSRect) {
+        if let prefix = longestCachedFullMosaicPrefix(for: annotations, backgroundImage: backgroundImage),
+           prefix.count < annotations.count {
+            let suffix = annotations[prefix.count...].map(overlayAnnotation)
+            let rendered = CaptureAnnotationRenderer.render(image: prefix.composite.image, annotations: suffix)
+            return (rendered, bounds)
         }
 
         let rendered = CaptureAnnotationRenderer.render(
             image: backgroundImage,
             annotations: annotations.map(overlayAnnotation)
         )
-        mosaicCompositeRenderCount += 1
-        let composite = (rendered, bounds)
-        mosaicCompositeCache[cacheKey] = composite
-        return composite
+        return (rendered, bounds)
+    }
+
+    private func longestCachedFullMosaicPrefix(
+        for annotations: [CaptureAnnotation],
+        backgroundImage: NSImage
+    ) -> (count: Int, composite: (image: NSImage, drawRect: NSRect))? {
+        guard annotations.count > 1 else {
+            return nil
+        }
+
+        for count in stride(from: annotations.count - 1, through: 1, by: -1) {
+            let prefix = Array(annotations.prefix(count))
+            let key = [
+                "full",
+                mosaicCompositeKey(for: prefix, backgroundImage: backgroundImage),
+            ].joined(separator: "|")
+            if let composite = mosaicCompositeCache[key] {
+                return (count, composite)
+            }
+        }
+        return nil
+    }
+
+    private func localMosaicComposite(
+        for annotations: [CaptureAnnotation],
+        backgroundImage: NSImage
+    ) -> (image: NSImage, drawRect: NSRect)? {
+        guard let drawRect = mosaicCompositeDrawRect(for: annotations),
+              let backgroundCrop = crop(image: backgroundImage, to: drawRect) else {
+            return nil
+        }
+
+        let shiftedAnnotations = annotations.map { shiftedOverlayAnnotation($0, by: drawRect.origin) }
+        let rendered = CaptureAnnotationRenderer.render(
+            image: backgroundCrop,
+            annotations: shiftedAnnotations
+        )
+        return (rendered, drawRect)
+    }
+
+    private func mosaicCompositeDrawRect(for annotations: [CaptureAnnotation]) -> NSRect? {
+        let imageBounds = backgroundImage.map { NSRect(origin: .zero, size: $0.size) } ?? bounds
+        var unionRect: NSRect?
+        for annotation in annotations where isMosaicAnnotation(annotation) {
+            guard let clipBounds = mosaicDraftClipPath(for: annotation)?.bounds else {
+                continue
+            }
+            let value = CGFloat(max(1, annotation.mosaicRedaction?.value ?? 1))
+            let padding: CGFloat
+            switch annotation.mosaicRedaction?.type {
+            case .gaussianBlur:
+                padding = value * 3
+            case .pixelMosaic:
+                padding = value
+            case .none:
+                padding = 1
+            }
+            let padded = clipBounds.insetBy(dx: -padding, dy: -padding)
+            unionRect = unionRect.map { $0.union(padded) } ?? padded
+        }
+
+        guard let unionRect else {
+            return nil
+        }
+        let clipped = unionRect.intersection(imageBounds)
+        return clipped.isEmpty ? nil : clipped
     }
 
     private func overlayAnnotation(_ annotation: CaptureAnnotation) -> CaptureAnnotation {
@@ -8317,13 +8850,48 @@ private final class SelectionOverlayView: NSView {
         return overlayAnnotation
     }
 
+    private func shiftedOverlayAnnotation(_ annotation: CaptureAnnotation, by origin: NSPoint) -> CaptureAnnotation {
+        var shifted = overlayAnnotation(annotation)
+        shifted.rect.origin.x -= origin.x
+        shifted.rect.origin.y -= origin.y
+        if let arrowLine = shifted.arrowLine {
+            shifted.arrowLine = CaptureArrowLine(
+                start: shiftedPoint(arrowLine.start, by: origin),
+                end: shiftedPoint(arrowLine.end, by: origin),
+                control: shiftedPoint(arrowLine.control, by: origin),
+                startArrowType: arrowLine.startArrowType,
+                endArrowType: arrowLine.endArrowType
+            )
+        }
+        if let markerLine = shifted.markerLine {
+            shifted.markerLine = CaptureMarkerLine(
+                start: shiftedPoint(markerLine.start, by: origin),
+                end: shiftedPoint(markerLine.end, by: origin)
+            )
+        }
+        if let brushPath = shifted.brushPath {
+            shifted.brushPath = CaptureBrushPath(
+                points: brushPath.points.map { shiftedPoint($0, by: origin) }
+            )
+        }
+        if let mosaicStroke = shifted.mosaicStroke {
+            shifted.mosaicStroke = CaptureMosaicStroke(
+                points: mosaicStroke.points.map { shiftedPoint($0, by: origin) }
+            )
+        }
+        return shifted
+    }
+
+    private func shiftedPoint(_ point: NSPoint, by origin: NSPoint) -> NSPoint {
+        NSPoint(x: point.x - origin.x, y: point.y - origin.y)
+    }
+
     private func mosaicCompositeKey(for annotations: [CaptureAnnotation], backgroundImage: NSImage) -> String {
         var parts: [String] = [
             mosaicBackgroundKey(for: backgroundImage),
-            "selection:\(mosaicKey(lockedSelectionRect ?? .zero))",
         ]
-        parts.reserveCapacity(annotations.count + 2)
-        annotations.forEach { parts.append(annotationCompositeKey($0)) }
+        parts.reserveCapacity(annotations.count + 1)
+        annotations.forEach { parts.append(annotationCompositeKey(overlayAnnotation($0))) }
         return parts.joined(separator: "|")
     }
 
@@ -8404,6 +8972,43 @@ private final class SelectionOverlayView: NSView {
             return nil
         }
 
+        if redaction.type == .pixelMosaic || annotation.kind == .mosaicRectangle {
+            return mosaicFullImageDraftPreview(for: annotation, redaction: redaction, backgroundImage: backgroundImage)
+        }
+
+        let existingAnnotations = annotations
+        if !existingAnnotations.isEmpty,
+           canUseLocalMosaicDraftBase(for: existingAnnotations),
+           let preview = mosaicLocalPreview(
+            for: annotation,
+            existingAnnotations: existingAnnotations,
+            backgroundImage: backgroundImage
+           ) {
+            return preview
+        }
+
+        let baseImage: NSImage
+        let baseKey: String
+        if let baseComposite = fullMosaicPreviewComposite(for: existingAnnotations) {
+            baseImage = baseComposite.image
+            baseKey = mosaicCompositeKey(for: existingAnnotations, backgroundImage: backgroundImage)
+        } else {
+            baseImage = backgroundImage
+            baseKey = mosaicBackgroundKey(for: backgroundImage)
+        }
+
+        return mosaicLocalPreview(
+            for: annotation,
+            baseImage: baseImage,
+            baseKey: baseKey
+        )
+    }
+
+    private func mosaicFullImageDraftPreview(
+        for annotation: CaptureAnnotation,
+        redaction: CaptureMosaicRedaction,
+        backgroundImage: NSImage
+    ) -> (image: NSImage, drawRect: NSRect)? {
         let drawRect = mosaicDraftPreviewDrawRect(for: annotation, redaction: redaction)
         let existingAnnotations = annotations
         let cacheKey = [
@@ -8480,6 +9085,7 @@ private final class SelectionOverlayView: NSView {
         if let cached = mosaicDraftRedactedBaseCache[redactedCropKey] {
             redactedProcessingCrop = cached
         } else {
+            mosaicDraftRedactedBaseRenderCount += 1
             redactedProcessingCrop = CaptureAnnotationRenderer.redactedPreview(image: processingBaseCrop, redaction: redaction)
             mosaicDraftRedactedBaseCache[redactedCropKey] = redactedProcessingCrop
         }
@@ -8507,6 +9113,105 @@ private final class SelectionOverlayView: NSView {
         }
         mosaicDraftPreviewCache[cacheKey] = preview
         return (preview, drawRect)
+    }
+
+    private func canUseLocalMosaicDraftBase(for existingAnnotations: [CaptureAnnotation]) -> Bool {
+        existingAnnotations.allSatisfy { annotation in
+            guard isMosaicAnnotation(annotation) else {
+                return true
+            }
+            return annotation.mosaicRedaction?.type == .gaussianBlur
+        }
+    }
+
+    private func mosaicLocalPreview(
+        for annotation: CaptureAnnotation,
+        existingAnnotations: [CaptureAnnotation],
+        backgroundImage: NSImage
+    ) -> (image: NSImage, drawRect: NSRect)? {
+        guard let redaction = annotation.mosaicRedaction else {
+            return nil
+        }
+
+        let drawRect = mosaicDraftPreviewDrawRect(for: annotation, redaction: redaction)
+        let processingRect = mosaicLocalPreviewProcessingRect(
+            for: drawRect,
+            redaction: redaction,
+            imageSize: backgroundImage.size
+        )
+        let baseKey = [
+            "local-base",
+            mosaicCompositeKey(for: existingAnnotations, backgroundImage: backgroundImage),
+            mosaicKey(processingRect),
+        ].joined(separator: "|")
+        let cacheKey = [
+            baseKey,
+            annotationCompositeKey(annotation),
+            mosaicKey(drawRect),
+        ].joined(separator: "|")
+        if let cached = mosaicDraftPreviewCache[cacheKey] {
+            return (cached, drawRect)
+        }
+
+        guard let processingBaseCrop = localMosaicBaseCrop(
+            existingAnnotations: existingAnnotations,
+            backgroundImage: backgroundImage,
+            processingRect: processingRect
+        ) else {
+            return nil
+        }
+
+        let redactedCropKey = [
+            "crop",
+            baseKey,
+            "\(redaction.type)",
+            "\(redaction.value)",
+        ].joined(separator: "|")
+        let redactedProcessingCrop: NSImage
+        if let cached = mosaicDraftRedactedBaseCache[redactedCropKey] {
+            redactedProcessingCrop = cached
+        } else {
+            mosaicDraftRedactedBaseRenderCount += 1
+            redactedProcessingCrop = CaptureAnnotationRenderer.redactedPreview(image: processingBaseCrop, redaction: redaction)
+            mosaicDraftRedactedBaseCache[redactedCropKey] = redactedProcessingCrop
+        }
+
+        let localDrawRect = NSRect(
+            x: drawRect.minX - processingRect.minX,
+            y: drawRect.minY - processingRect.minY,
+            width: drawRect.width,
+            height: drawRect.height
+        )
+        guard
+            let baseCrop = crop(image: processingBaseCrop, to: localDrawRect),
+            let redactedCrop = crop(image: redactedProcessingCrop, to: localDrawRect),
+            let preview = mosaicMaskedPreview(
+                baseCrop: baseCrop,
+                redactedCrop: redactedCrop,
+                annotation: annotation,
+                drawRect: drawRect
+            )
+        else {
+            return nil
+        }
+
+        mosaicDraftPreviewCache[cacheKey] = preview
+        return (preview, drawRect)
+    }
+
+    private func localMosaicBaseCrop(
+        existingAnnotations: [CaptureAnnotation],
+        backgroundImage: NSImage,
+        processingRect: NSRect
+    ) -> NSImage? {
+        guard let backgroundCrop = crop(image: backgroundImage, to: processingRect) else {
+            return nil
+        }
+        let shiftedAnnotations = existingAnnotations.map { shiftedOverlayAnnotation($0, by: processingRect.origin) }
+        return CaptureAnnotationRenderer.render(
+            image: backgroundCrop,
+            annotations: shiftedAnnotations
+        )
     }
 
     private func mosaicLocalPreviewProcessingRect(
@@ -8538,7 +9243,7 @@ private final class SelectionOverlayView: NSView {
     }
 
     private func mosaicDraftPreviewBaseImage() -> NSImage {
-        mosaicPreviewComposite(for: annotations)?.image ?? backgroundImage ?? NSImage(size: bounds.size)
+        fullMosaicPreviewComposite(for: annotations)?.image ?? backgroundImage ?? NSImage(size: bounds.size)
     }
 
     private func mosaicDraftRedactedBaseImage(
@@ -8583,6 +9288,7 @@ private final class SelectionOverlayView: NSView {
             return cached
         }
 
+        mosaicDraftRedactedBaseRenderCount += 1
         let redacted = CaptureAnnotationRenderer.redactedPreview(image: baseImage, redaction: redaction)
         mosaicDraftRedactedBaseCache[cacheKey] = redacted
         return redacted
@@ -8598,6 +9304,7 @@ private final class SelectionOverlayView: NSView {
             return nil
         }
 
+        mosaicDraftPreviewImageRenderCount += 1
         let image = NSImage(size: drawRect.size)
         image.lockFocus()
         let target = NSRect(origin: .zero, size: drawRect.size)
@@ -8848,6 +9555,10 @@ private final class SelectionOverlayView: NSView {
             x: center.x + dx * cosine - dy * sine,
             y: center.y + dx * sine + dy * cosine
         )
+    }
+
+    private func projectedDistance(_ point: NSPoint, onto axis: NSPoint) -> CGFloat {
+        point.x * axis.x + point.y * axis.y
     }
 
     private func angle(from center: NSPoint, to point: NSPoint) -> CGFloat {

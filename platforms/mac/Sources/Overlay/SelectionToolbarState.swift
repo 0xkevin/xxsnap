@@ -167,7 +167,7 @@ enum SelectionToolbarState {
         case .marker:
             return [14, 18, 22]
         case .mosaic:
-            return [15, 30, 40]
+            return [15, 25, 35]
         case .text:
             return []
         }
@@ -264,7 +264,16 @@ enum SelectionToolbarState {
     }
 
     static func toolbarIconInset(for resourceName: String) -> CGFloat {
-        0
+        switch resourceName {
+        case "screenshot":
+            return -1
+        case "number-sequence":
+            return 3
+        case "arrow", "masaike2", "text-tool", "undo-enabled", "undo-disabled", "redo-enabled", "redo-disabled":
+            return 0
+        default:
+            return 2
+        }
     }
 
     static func usesFixedColorToolbarIconResource(_ resourceName: String) -> Bool {
@@ -289,14 +298,7 @@ enum SelectionToolbarState {
     }
 
     static func mosaicCursorDotDiameter(for strokeWidth: CGFloat) -> CGFloat {
-        switch strokeWidth {
-        case ..<20:
-            return 10
-        case ..<35:
-            return 13
-        default:
-            return 16
-        }
+        max(6, strokeWidth * 0.52)
     }
 
     static func mosaicPreviewDotDiameter(for strokeWidth: CGFloat) -> CGFloat {
@@ -489,7 +491,7 @@ enum SelectionToolbarState {
         mode: OptionsToolbarMode
     ) -> OptionsToolbarLayout {
         OptionsToolbarLayout(
-            strokeWidths: mode == .mosaic || mode == .text ? [] : strokeWidthRects(in: optionsRect),
+            strokeWidths: mode == .text ? [] : strokeWidthRects(in: optionsRect),
             textSizes: mode == .text ? [textSizeFieldRect(in: optionsRect)] : [],
             textBold: mode == .text ? textBoldRect(in: optionsRect) : .zero,
             textItalic: mode == .text ? textItalicRect(in: optionsRect) : .zero,
@@ -511,9 +513,7 @@ enum SelectionToolbarState {
         case .shape:
             return rectangleModeButtonRect(in: optionsRect)
         case .mosaic:
-            // Mosaic stroke/rectangle mode buttons are intentionally hidden for now.
-            // Keep the underlying rectangle helper/code so the old tool can be restored quickly.
-            return nil
+            return mosaicRectangleButtonRect(in: optionsRect, mode: mode)
         case .arrowLine, .brush, .marker, .text:
             return nil
         }
@@ -817,7 +817,7 @@ enum SelectionToolbarState {
             max(AppSettings.minimumPaletteVisibleCount, paletteCount)
         )
         if mode == .mosaic {
-            return 144
+            return 252
         }
         if mode == .text {
             let columns = colorSwatchColumnCount(paletteCount: clampedCount)
@@ -964,15 +964,15 @@ enum SelectionToolbarState {
         guard mode == .mosaic else {
             return .zero
         }
-        return NSRect(x: optionsRect.minX + 94, y: optionControlY(in: optionsRect), width: 20, height: 20)
+        return NSRect(x: optionsRect.minX + 88, y: optionControlY(in: optionsRect), width: 20, height: 20)
     }
 
     static func mosaicRedactionTypeButtonRect(in optionsRect: NSRect) -> NSRect {
-        NSRect(x: optionsRect.minX + optionsToolbarHorizontalPadding, y: optionControlY(in: optionsRect), width: 20, height: 20)
+        NSRect(x: optionsRect.minX + 118, y: optionControlY(in: optionsRect), width: 20, height: 20)
     }
 
     static func mosaicRedactionValueRect(in optionsRect: NSRect) -> NSRect {
-        NSRect(x: optionsRect.minX + 40, y: optionControlY(in: optionsRect), width: 94, height: 20)
+        NSRect(x: optionsRect.minX + 148, y: optionControlY(in: optionsRect), width: 94, height: 20)
     }
 
     static func rectangleModeButtonRect(in optionsRect: NSRect) -> NSRect {

@@ -29,6 +29,7 @@
 		3B68E276F3F9D035C6BAC9CC /* highlighter-tool.png in Resources */ = {isa = PBXBuildFile; fileRef = 6569DD68B9D82807BFE9B8B4 /* highlighter-tool.png */; };
 		4588B45C2037B363C289D5A1 /* settings-more.svg in Resources */ = {isa = PBXBuildFile; fileRef = 9381E644823646F0488892C2 /* settings-more.svg */; };
 		48138EF540E08B71E362A940 /* redo-enabled.png in Resources */ = {isa = PBXBuildFile; fileRef = 6E00E3D8E2129AD664A6BD69 /* redo-enabled.png */; };
+		A1B2C3D4E5F60718293A4B60 /* square_masaike.svg in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B70 /* square_masaike.svg */; };
 		4A423183222F53C45C9E493F /* CaptureToolbarWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6EF999F806690CE78EE3FE4 /* CaptureToolbarWindowController.swift */; };
 		4C61F31AECC18ADFCC8F5665 /* arrow.svg in Resources */ = {isa = PBXBuildFile; fileRef = DDEADF04C25FD6C8A3892E82 /* arrow.svg */; };
 		512F956DF83061A47167C08B /* highlighter-tool.svg in Resources */ = {isa = PBXBuildFile; fileRef = DB0753FB16E984A9D3A9EC65 /* highlighter-tool.svg */; };
@@ -111,6 +112,7 @@
 		A1B2C3D4E5F60718293A4B6D /* italic.svg */ = {isa = PBXFileReference; path = "italic.svg"; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4B6E /* stroke.svg */ = {isa = PBXFileReference; path = "stroke.svg"; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4B6F /* screenshot.svg */ = {isa = PBXFileReference; path = "screenshot.svg"; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B70 /* square_masaike.svg */ = {isa = PBXFileReference; path = "square_masaike.svg"; sourceTree = "<group>"; };
 		0EF17E8A625E11836314572B /* crop.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = crop.png; sourceTree = "<group>"; };
 		152848C50D6579EFB098436E /* shape-marker.svg */ = {isa = PBXFileReference; path = "shape-marker.svg"; sourceTree = "<group>"; };
 		16F9496957D9500C499D44CB /* copy-to-clipboard.svg */ = {isa = PBXFileReference; path = "copy-to-clipboard.svg"; sourceTree = "<group>"; };
@@ -330,6 +332,7 @@
 				FBEF0716BFD5842580A18284 /* masaike2.svg */,
 				A7EABCA72191CADC6E20729C /* mosaic-tool.png */,
 				19A9DB1B5DDF521A858E0762 /* mosaic-tool.svg */,
+				A1B2C3D4E5F60718293A4B70 /* square_masaike.svg */,
 				18303562004CA3FF87BD8552 /* number-sequence.png */,
 				7B73F549F3FDCF8AF73E5868 /* number-sequence.svg */,
 				4366A178D51261BFC4455224 /* ocr-recognition.png */,
@@ -476,6 +479,7 @@
 				D718076D391C3FF271311F18 /* masaike2.svg in Resources */,
 				C6F8975757D47CFF0EECF37E /* mosaic-tool.png in Resources */,
 				CB7B20E444C4FC3FD6C8F584 /* mosaic-tool.svg in Resources */,
+				A1B2C3D4E5F60718293A4B60 /* square_masaike.svg in Resources */,
 				BEB0F8E4FAAAD358DC825C84 /* number-sequence.png in Resources */,
 				56462BFC968000298B727BC1 /* number-sequence.svg in Resources */,
 				C26B9837A1AC80DF15D48384 /* ocr-recognition.png in Resources */,
