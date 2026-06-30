@@ -1176,7 +1176,7 @@ final class xxsnapMacTests: XCTestCase {
     func testToolbarSvgIconsAreBundledAndReadable() throws {
         for resource in [
             "arrow",
-            "crop",
+            "screenshot",
             "pencil-tool",
             "mosaic-tool",
             "settings-more",
@@ -1191,15 +1191,24 @@ final class xxsnapMacTests: XCTestCase {
         }
     }
 
+    func testToolbarSvgResourcesIncludeScreenshotArtwork() throws {
+        let screenshotURL = try XCTUnwrap(Bundle.main.url(forResource: "screenshot", withExtension: "svg"))
+        let screenshotSVG = try String(contentsOf: screenshotURL, encoding: .utf8)
+
+        XCTAssertTrue(screenshotSVG.contains("viewBox=\"0 -960 960 960\""))
+        XCTAssertTrue(screenshotSVG.contains("M680-80v-120H560"))
+        XCTAssertTrue(screenshotSVG.contains("M200-200v-200h80v120h120v80H200"))
+    }
+
     func testPrimaryToolbarShapeAndArrowIconsUseFunctionNamedArtwork() throws {
-        let cropURL = try XCTUnwrap(Bundle.main.url(forResource: "crop", withExtension: "svg"))
+        let screenshotURL = try XCTUnwrap(Bundle.main.url(forResource: "screenshot", withExtension: "svg"))
         let arrowURL = try XCTUnwrap(Bundle.main.url(forResource: "arrow", withExtension: "svg"))
-        let cropSVG = try String(contentsOf: cropURL, encoding: .utf8)
+        let screenshotSVG = try String(contentsOf: screenshotURL, encoding: .utf8)
         let arrowSVG = try String(contentsOf: arrowURL, encoding: .utf8)
 
-        XCTAssertTrue(cropSVG.contains("viewBox=\"0 -960 960 960\""))
-        XCTAssertTrue(cropSVG.contains("M680-40v-160H280"))
-        XCTAssertTrue(cropSVG.contains("v-320H360"))
+        XCTAssertTrue(screenshotSVG.contains("viewBox=\"0 -960 960 960\""))
+        XCTAssertTrue(screenshotSVG.contains("M680-80v-120H560"))
+        XCTAssertTrue(screenshotSVG.contains("M200-200v-200h80v120h120v80H200"))
         XCTAssertTrue(arrowSVG.contains("id=\"path-1\""))
         XCTAssertTrue(arrowSVG.contains("rotate(-49)"))
     }

@@ -20,10 +20,12 @@
 		2AE784E6242C209A3757AFA2 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24BFA4790A577CD9B35EBC9C /* AppSettings.swift */; };
 		2E0AEDC864468090102F9B1C /* xxsnap.png in Resources */ = {isa = PBXBuildFile; fileRef = E4F7C38789DCA5D0BBB5EEFA /* xxsnap.png */; };
 		316D9258F8327AB7845B8970 /* text-tool.svg in Resources */ = {isa = PBXBuildFile; fileRef = 832F0777CBF6ED75895C36AF /* text-tool.svg */; };
+		A1B2C3D4E5F60718293A4B5C /* bold.svg in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B6C /* bold.svg */; };
 		31B529E62D217D2F5B13FB85 /* copy-to-clipboard.png in Resources */ = {isa = PBXBuildFile; fileRef = 746D4C73B253F54E1E56C5C6 /* copy-to-clipboard.png */; };
 		3255124AE9CD7B90D40C887F /* PermissionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F196A38351C3089668432BA /* PermissionCoordinator.swift */; };
 		373154DBAEF7397C9B344879 /* xxsnapMacTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95FB5FC844E7D04225DF9701 /* xxsnapMacTests.swift */; };
 		393CEA2CDF1666A7490229B1 /* refresh (1).svg in Resources */ = {isa = PBXBuildFile; fileRef = 1DB60D2449C038C54679162D /* refresh (1).svg */; };
+		A1B2C3D4E5F60718293A4B5D /* italic.svg in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B6D /* italic.svg */; };
 		3B68E276F3F9D035C6BAC9CC /* highlighter-tool.png in Resources */ = {isa = PBXBuildFile; fileRef = 6569DD68B9D82807BFE9B8B4 /* highlighter-tool.png */; };
 		4588B45C2037B363C289D5A1 /* settings-more.svg in Resources */ = {isa = PBXBuildFile; fileRef = 9381E644823646F0488892C2 /* settings-more.svg */; };
 		48138EF540E08B71E362A940 /* redo-enabled.png in Resources */ = {isa = PBXBuildFile; fileRef = 6E00E3D8E2129AD664A6BD69 /* redo-enabled.png */; };
@@ -35,11 +37,13 @@
 		576F043C01E6CBB1493C8100 /* eyedropper.svg in Resources */ = {isa = PBXBuildFile; fileRef = 30F8BFFDF14E4559FB86BF58 /* eyedropper.svg */; };
 		5A59D8B15DBEFA8A46BAC5D6 /* SelectionToolbarState.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE931250563980B3056AED56 /* SelectionToolbarState.swift */; };
 		5AD588EE52771BA51C173307 /* palette-tool.svg in Resources */ = {isa = PBXBuildFile; fileRef = 90511938797AF565EB5E63DF /* palette-tool.svg */; };
+		A1B2C3D4E5F60718293A4B5E /* stroke.svg in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B6E /* stroke.svg */; };
 		5B59F889F6FD562691B28716 /* save-to-file.svg in Resources */ = {isa = PBXBuildFile; fileRef = BE0A667A6A11313F9B532FC2 /* save-to-file.svg */; };
 		5F56CD50B9AD87B11791D4DE /* crop.png in Resources */ = {isa = PBXBuildFile; fileRef = 0EF17E8A625E11836314572B /* crop.png */; };
 		5FABC128915B0C423DD63EC6 /* CaptureCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A177154367D4DF7657018B06 /* CaptureCoordinator.swift */; };
 		607387F890210EC5A615E46D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B777570511CE72D6B6E9D175 /* Assets.xcassets */; };
 		63ABE3D1EE77013000AD73F0 /* manual-capture-checklist.md in Resources */ = {isa = PBXBuildFile; fileRef = 9A119E98789DE049AE5BBF54 /* manual-capture-checklist.md */; };
+		A1B2C3D4E5F60718293A4B5F /* screenshot.svg in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B6F /* screenshot.svg */; };
 		63B85737CA0CBFA4A24B04F0 /* refresh-svgrepo-com3.svg in Resources */ = {isa = PBXBuildFile; fileRef = F5F1CC1AD901DE8A86E8B7F0 /* refresh-svgrepo-com3.svg */; };
 		64955B9C56E7E3B8FF237C06 /* refresh-svgrepo-com2.svg in Resources */ = {isa = PBXBuildFile; fileRef = 1FEF485A40BED01A907F0106 /* refresh-svgrepo-com2.svg */; };
 		6941D40E459A086383AA836D /* cancel-capture.png in Resources */ = {isa = PBXBuildFile; fileRef = A49BB4756C571CD2E8B2066E /* cancel-capture.png */; };
@@ -103,6 +107,10 @@
 /* Begin PBXFileReference section */
 		0209BE008E9C5F0571BE4B9F /* border-corner-rounded.svg */ = {isa = PBXFileReference; path = "border-corner-rounded.svg"; sourceTree = "<group>"; };
 		0ABE865C6E2158661014F31D /* palette-tool.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "palette-tool.png"; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B6C /* bold.svg */ = {isa = PBXFileReference; path = "bold.svg"; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B6D /* italic.svg */ = {isa = PBXFileReference; path = "italic.svg"; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B6E /* stroke.svg */ = {isa = PBXFileReference; path = "stroke.svg"; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B6F /* screenshot.svg */ = {isa = PBXFileReference; path = "screenshot.svg"; sourceTree = "<group>"; };
 		0EF17E8A625E11836314572B /* crop.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = crop.png; sourceTree = "<group>"; };
 		152848C50D6579EFB098436E /* shape-marker.svg */ = {isa = PBXFileReference; path = "shape-marker.svg"; sourceTree = "<group>"; };
 		16F9496957D9500C499D44CB /* copy-to-clipboard.svg */ = {isa = PBXFileReference; path = "copy-to-clipboard.svg"; sourceTree = "<group>"; };
@@ -350,6 +358,10 @@
 				9381E644823646F0488892C2 /* settings-more.svg */,
 				1ADEAA166682CB019207C3A4 /* shape-marker.png */,
 				152848C50D6579EFB098436E /* shape-marker.svg */,
+				A1B2C3D4E5F60718293A4B6C /* bold.svg */,
+				A1B2C3D4E5F60718293A4B6D /* italic.svg */,
+				A1B2C3D4E5F60718293A4B6E /* stroke.svg */,
+				A1B2C3D4E5F60718293A4B6F /* screenshot.svg */,
 				1FE4C4C27283A5FAF4CBCC58 /* text-tool.png */,
 				832F0777CBF6ED75895C36AF /* text-tool.svg */,
 				38AFFB5955898C995A84FFAA /* undo-disabled.png */,
@@ -470,6 +482,10 @@
 				8EC5896434A3E411F9A5B9BC /* ocr-recognition.svg in Resources */,
 				9FF9C25B73F5DB076F93EC57 /* palette-tool.png in Resources */,
 				5AD588EE52771BA51C173307 /* palette-tool.svg in Resources */,
+				A1B2C3D4E5F60718293A4B5C /* bold.svg in Resources */,
+				A1B2C3D4E5F60718293A4B5D /* italic.svg in Resources */,
+				A1B2C3D4E5F60718293A4B5E /* stroke.svg in Resources */,
+				A1B2C3D4E5F60718293A4B5F /* screenshot.svg in Resources */,
 				EE445F0857133B6869C92F0C /* pencil-tool.png in Resources */,
 				FDBF397BAA0A24460ECBCD14 /* pencil-tool.svg in Resources */,
 				8584F96B75EDD97734F1E699 /* pin-to-screen.png in Resources */,
@@ -510,6 +526,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				63ABE3D1EE77013000AD73F0 /* manual-capture-checklist.md in Resources */,
+				A1B2C3D4E5F60718293A4B5F /* screenshot.svg in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

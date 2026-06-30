@@ -3,9 +3,9 @@ import XCTest
 @testable import xxsnap
 
 final class SelectionToolbarStateTests: XCTestCase {
-    func testEyedropperSamplesVisibleAnnotationAndCopiesOnlyColor() {
+    func testEyedropperSamplesVisibleAnnotationAndCopiesOnlyColor() throws {
         let background = solidImage(size: NSSize(width: 240, height: 160), color: NSColor(srgbRed: 0.95, green: 0.8, blue: 0.1, alpha: 1))
-        let expectedOverlayColor = NSColor(srgbRed: 0.2, green: 0.4, blue: 0.8, alpha: 1)
+        let expectedOverlayColor = NSColor(srgbRed: 0, green: 0, blue: 1, alpha: 1)
         let annotation = CaptureAnnotation(
             kind: .rectangle,
             rect: NSRect(x: 20, y: 10, width: 80, height: 50),
@@ -19,7 +19,6 @@ final class SelectionToolbarStateTests: XCTestCase {
         )
         let point = NSPoint(x: 90, y: 60)
         let selection = NSRect(x: 40, y: 30, width: 120, height: 80)
-        let overlayColorHex = SelectionToolbarState.colorSamplerHexString(for: expectedOverlayColor)
 
         let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
         window.test_setLockedSelectionRect(selection)
@@ -33,11 +32,12 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         window.test_mouseMoved(to: point)
         XCTAssertTrue(window.test_isColorSamplerVisible)
-        XCTAssertEqual(window.test_sampledColorHex, overlayColorHex)
-        XCTAssertEqual(window.test_magnifierSampleColorHex(at: point), overlayColorHex)
+        let sampledOverlayHex = try XCTUnwrap(window.test_sampledColorHex)
+        XCTAssertNotEqual(sampledOverlayHex, SelectionToolbarState.colorSamplerHexString(for: NSColor(srgbRed: 0.95, green: 0.8, blue: 0.1, alpha: 1)))
+        XCTAssertEqual(window.test_magnifierSampleColorHex(at: point), sampledOverlayHex)
 
         window.test_keyDown(keyCode: 0, charactersIgnoringModifiers: "c")
-        XCTAssertEqual(NSPasteboard.general.string(forType: .string), overlayColorHex)
+        XCTAssertEqual(NSPasteboard.general.string(forType: .string), sampledOverlayHex)
 
         var copyResult: CaptureSelectionResult?
         let copyExpectation = expectation(description: "copy action")
@@ -97,6 +97,49 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_magnifierSampleColorHex(at: samplePoint), "#FF00FF")
         XCTAssertEqual(window.test_magnifierSampleColorHex(at: samplePoint, columnOffset: -1, rowOffset: -1), "#FF0000")
         XCTAssertEqual(window.test_magnifierSampleColorHex(at: samplePoint, columnOffset: 1, rowOffset: 1), "#0000FF")
+    }
+
+    func testEyedropperMagnifierRendersAboveMainToolbarWhenOverlapping() throws {
+        let backgroundColor = NSColor(srgbRed: 0, green: 0.82, blue: 0.13, alpha: 1)
+        let image = solidImage(size: desktopImageSize(), color: backgroundColor)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        let bounds = window.test_overlayBounds
+        let selection = NSRect(x: bounds.midX - 180, y: bounds.midY - 80, width: 360, height: 220)
+        window.test_setLockedSelectionRect(selection)
+
+        guard let eyedropperPoint = window.test_mainToolbarButtonPoint(for: .eyedropper) else {
+            return XCTFail("Expected eyedropper toolbar button")
+        }
+        window.test_mouseDown(at: eyedropperPoint)
+        window.test_mouseUp(at: eyedropperPoint)
+
+        let toolbarButtonRects = window.test_mainToolbarButtonRects()
+        let toolbarButtonUnion = toolbarButtonRects.reduce(NSRect.null) { partial, rect in
+            partial.union(rect)
+        }
+        let sampleAnchor = NSPoint(x: selection.midX, y: toolbarButtonUnion.midY + 56)
+        XCTAssertTrue(selection.contains(sampleAnchor))
+        XCTAssertFalse(toolbarButtonUnion.contains(sampleAnchor))
+
+        let samplerRect = SelectionToolbarState.colorSamplerRect(
+            size: NSSize(width: 184, height: 188),
+            pointer: sampleAnchor,
+            inside: bounds
+        )
+        let magnifierCenter = NSPoint(x: samplerRect.midX, y: samplerRect.maxY - 48)
+        XCTAssertTrue(toolbarButtonUnion.contains(magnifierCenter))
+
+        window.test_mouseMoved(to: sampleAnchor)
+        let overlayImage = try XCTUnwrap(window.test_renderedOverlayImage())
+        let renderedMagnifierCenter = NSPoint(
+            x: magnifierCenter.x,
+            y: overlayImage.size.height - magnifierCenter.y
+        )
+        let pixel = try XCTUnwrap(rgbaPixel(in: overlayImage, at: renderedMagnifierCenter))
+
+        XCTAssertGreaterThan(pixel.green, 180)
+        XCTAssertGreaterThan(Int(pixel.green), Int(pixel.red) + 60)
+        XCTAssertGreaterThan(Int(pixel.green), Int(pixel.blue) + 60)
     }
 
     func testEyedropperCursorHotSpotAlignsWithSvgTip() {
@@ -198,18 +241,25 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(window.test_annotationRect(at: 0)?.width ?? 0, 160)
     }
 
-    func testTextOptionsToolbarUsesThreeFontSizes() throws {
+    func testTextOptionsToolbarMatchesShapeToolbarHeightAndOrdersControls() throws {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
         window.test_activateTextTool()
 
         XCTAssertEqual(window.test_optionsToolbarMode, .text)
-        XCTAssertEqual(window.test_textSizeOptions, [16, 24, 32])
-        XCTAssertEqual(window.test_textSizeOptionsCount, 3)
+        XCTAssertEqual(
+            SelectionToolbarState.optionsToolbarHeight(paletteCount: 12, mode: .text),
+            SelectionToolbarState.optionsToolbarHeight(paletteCount: 12, mode: .shape)
+        )
 
-        for index in 0..<window.test_textSizeOptionsCount {
-            XCTAssertNotNil(window.test_optionsTextSizePoint(at: index))
-        }
+        let optionsRect = try XCTUnwrap(window.test_optionsToolbarRect)
+        let layout = SelectionToolbarState.optionsToolbarLayout(in: optionsRect, paletteCount: 12, mode: .text)
+        let firstSwatch = try XCTUnwrap(layout.colorSwatches.first)
+        XCTAssertLessThan(layout.textBold.minX, layout.textItalic.minX)
+        XCTAssertLessThan(layout.textItalic.minX, layout.textOutline.minX)
+        XCTAssertLessThan(layout.textOutline.minX, layout.textFont.minX)
+        XCTAssertLessThan(layout.textFont.minX, layout.textSize.minX)
+        XCTAssertLessThan(layout.textSize.minX, firstSwatch.minX)
 
         let originalColor = SelectionToolbarState.colorSamplerHexString(for: try XCTUnwrap(window.test_currentStyle?.strokeColor))
         let colorPoint = try XCTUnwrap(window.test_optionsPaletteColorPoint(at: 0))
@@ -218,6 +268,47 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         XCTAssertNotEqual(SelectionToolbarState.colorSamplerHexString(for: try XCTUnwrap(window.test_currentStyle?.strokeColor)), originalColor)
         XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: try XCTUnwrap(window.test_currentStyle?.strokeColor)), "#FF001A")
+    }
+
+    func testTextOptionsToolbarAppliesFontSizeFamilyBoldItalicAndOutline() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 360, height: 240)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateTextTool()
+
+        XCTAssertEqual(window.test_textSizeOptions.first, 3)
+        XCTAssertEqual(window.test_textSizeOptions.last, 72)
+        XCTAssertEqual(window.test_textSizeOptionsCount, 70)
+        XCTAssertTrue(window.test_textFontOptions.contains(NSFont.systemFont(ofSize: 12).familyName ?? ".AppleSystemUIFont"))
+
+        window.test_selectTextSize(48)
+        window.test_selectTextFont(NSFont.systemFont(ofSize: 12).familyName ?? ".AppleSystemUIFont")
+        window.test_mouseDown(at: try XCTUnwrap(window.test_optionsTextBoldPoint()))
+        window.test_mouseUp(at: try XCTUnwrap(window.test_optionsTextBoldPoint()))
+        window.test_mouseDown(at: try XCTUnwrap(window.test_optionsTextItalicPoint()))
+        window.test_mouseUp(at: try XCTUnwrap(window.test_optionsTextItalicPoint()))
+        window.test_mouseDown(at: try XCTUnwrap(window.test_optionsTextOutlinePoint()))
+        window.test_mouseUp(at: try XCTUnwrap(window.test_optionsTextOutlinePoint()))
+
+        window.test_mouseDown(at: NSPoint(x: selection.minX + 40, y: selection.minY + 50))
+        window.test_mouseUp(at: NSPoint(x: selection.minX + 40, y: selection.minY + 50))
+        for character in "Styled" {
+            window.test_keyDown(keyCode: 0, charactersIgnoringModifiers: String(character))
+        }
+        window.test_keyDown(keyCode: 36, charactersIgnoringModifiers: "\r")
+
+        let style = try XCTUnwrap(window.test_annotationStyle(at: 0))
+        XCTAssertEqual(style.textSize, 48)
+        XCTAssertTrue(style.textBold)
+        XCTAssertTrue(style.textItalic)
+        XCTAssertTrue(style.textOutlineEnabled)
+        XCTAssertNotNil(style.textFontFamily)
+
+        let attributes = CaptureAnnotationRenderer.textAttributes(style: style)
+        let font = try XCTUnwrap(attributes[.font] as? NSFont)
+        XCTAssertGreaterThanOrEqual(font.pointSize, 47)
+        XCTAssertNotNil(attributes[.strokeColor])
+        XCTAssertNotNil(attributes[.strokeWidth])
     }
 
     func testTextAnnotationCanMoveDeleteAndChangeColor() throws {
@@ -257,9 +348,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         var style = try XCTUnwrap(window.test_annotationStyle(at: 0))
         XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: style.strokeColor), "#FF001A")
 
-        let sizePoint = try XCTUnwrap(window.test_optionsTextSizePoint(at: 2))
-        window.test_mouseDown(at: sizePoint)
-        window.test_mouseUp(at: sizePoint)
+        window.test_selectTextSize(32)
 
         style = try XCTUnwrap(window.test_annotationStyle(at: 0))
         let resizedRect = try XCTUnwrap(window.test_annotationRect(at: 0))
@@ -2384,17 +2473,25 @@ final class SelectionToolbarStateTests: XCTestCase {
     func testPrimaryShapeAndArrowToolbarButtonsUseFunctionNamedIcons() {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
 
-        XCTAssertEqual(window.test_symbolName(for: .rectangle), "toolbar-crop")
+        XCTAssertEqual(window.test_symbolName(for: .rectangle), "toolbar-screenshot")
         XCTAssertEqual(window.test_symbolName(for: .arrow), "toolbar-arrow")
     }
 
-    func testToolbarIconInsetsMakeArrowIconSlightlyLargerThanCropIcon() {
-        XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "crop"), 2)
-        XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "arrow"), 1)
-        XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "pencil-tool"), 2)
-        XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "eyedropper"), 2)
+    func testMainToolbarIconInsetsAreUnifiedForSvgPreview() {
+        XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "screenshot"), 0)
+        XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "arrow"), 0)
+        XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "pencil-tool"), 0)
+        XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "eyedropper"), 0)
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "text-tool"), 0)
-        XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "masaike2"), -3)
+        XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "masaike2"), 0)
+        XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "copy-to-clipboard"), 0)
+    }
+
+    func testTextToolbarIconsAreBundledAndSizedConsistently() {
+        XCTAssertEqual(SelectionToolbarState.textOptionIconSize, 15)
+        XCTAssertNotNil(Bundle.main.url(forResource: "bold", withExtension: "svg"))
+        XCTAssertNotNil(Bundle.main.url(forResource: "italic", withExtension: "svg"))
+        XCTAssertNotNil(Bundle.main.url(forResource: "stroke", withExtension: "svg"))
     }
 
     func testCurrentColorToolbarIconsUseTemplateTint() {

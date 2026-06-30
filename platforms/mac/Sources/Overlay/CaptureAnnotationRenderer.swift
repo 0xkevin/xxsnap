@@ -1048,6 +1048,11 @@ struct CaptureAnnotationStyle {
     var fillColor: NSColor = NSColor(calibratedRed: 245 / 255, green: 34 / 255, blue: 45 / 255, alpha: 1)
     var cornerRadius: CGFloat = 0
     var textSize: CGFloat = 24
+    var textFontFamily: String?
+    var textBold = false
+    var textItalic = false
+    var textOutlineEnabled = false
+    var textOutlineColor: NSColor = .white
 }
 
 struct CaptureAnnotation {
@@ -1075,14 +1080,40 @@ enum CaptureAnnotationRenderer {
     private static let redactionContext = CIContext(options: nil)
 
     static func textFont(size: CGFloat) -> NSFont {
-        NSFont.systemFont(ofSize: size, weight: .medium)
+        textFont(style: {
+            var style = CaptureAnnotationStyle()
+            style.textSize = size
+            return style
+        }())
+    }
+
+    static func textFont(style: CaptureAnnotationStyle) -> NSFont {
+        let size = max(3, min(72, style.textSize))
+        let manager = NSFontManager.shared
+        let base = style.textFontFamily.flatMap {
+            manager.font(withFamily: $0, traits: [], weight: 5, size: size)
+        } ?? NSFont.systemFont(ofSize: size, weight: style.textBold ? .bold : .medium)
+
+        var font = base
+        if style.textBold {
+            font = manager.convert(font, toHaveTrait: .boldFontMask)
+        }
+        if style.textItalic {
+            font = manager.convert(font, toHaveTrait: .italicFontMask)
+        }
+        return font
     }
 
     static func textAttributes(style: CaptureAnnotationStyle) -> [NSAttributedString.Key: Any] {
-        [
-            .font: textFont(size: style.textSize),
+        var attributes: [NSAttributedString.Key: Any] = [
+            .font: textFont(style: style),
             .foregroundColor: style.strokeColor,
         ]
+        if style.textOutlineEnabled {
+            attributes[.strokeColor] = style.textOutlineColor
+            attributes[.strokeWidth] = -3
+        }
+        return attributes
     }
 
     static func render(image: NSImage, annotations: [CaptureAnnotation]) -> NSImage {

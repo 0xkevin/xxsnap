@@ -12,7 +12,8 @@ enum SelectionToolbarState {
     static let toolbarSelectedBackgroundAlpha: CGFloat = 0
     static let measurementControlSelectedBackgroundAlpha: CGFloat = 0.34
     static let optionsToolbarHorizontalPadding: CGFloat = 10
-    static let textSizeValues: [CGFloat] = [16, 24, 32]
+    static let textOptionIconSize: CGFloat = 15
+    static let textSizeValues: [CGFloat] = (3...72).map { CGFloat($0) }
     static let eyedropperCursorSize = NSSize(width: 24, height: 24)
     static let eyedropperIconSize: CGFloat = 18
     static let eyedropperCursorHotSpot = NSPoint(x: 3.6, y: 20.4)
@@ -69,6 +70,11 @@ enum SelectionToolbarState {
     struct OptionsToolbarLayout: Equatable {
         var strokeWidths: [NSRect]
         var textSizes: [NSRect]
+        var textBold: NSRect
+        var textItalic: NSRect
+        var textOutline: NSRect
+        var textFont: NSRect
+        var textSize: NSRect
         var fillToggle: NSRect?
         var rectangleMode: NSRect?
         var ellipseMode: NSRect?
@@ -258,18 +264,7 @@ enum SelectionToolbarState {
     }
 
     static func toolbarIconInset(for resourceName: String) -> CGFloat {
-        switch resourceName {
-        case "arrow":
-            return 1
-        case "text-tool":
-            return 0
-        case "eyedropper":
-            return 2
-        case "masaike2":
-            return -3
-        default:
-            return 2
-        }
+        0
     }
 
     static func usesFixedColorToolbarIconResource(_ resourceName: String) -> Bool {
@@ -495,7 +490,12 @@ enum SelectionToolbarState {
     ) -> OptionsToolbarLayout {
         OptionsToolbarLayout(
             strokeWidths: mode == .mosaic || mode == .text ? [] : strokeWidthRects(in: optionsRect),
-            textSizes: mode == .text ? textSizeRects(in: optionsRect) : [],
+            textSizes: mode == .text ? [textSizeFieldRect(in: optionsRect)] : [],
+            textBold: mode == .text ? textBoldRect(in: optionsRect) : .zero,
+            textItalic: mode == .text ? textItalicRect(in: optionsRect) : .zero,
+            textOutline: mode == .text ? textOutlineRect(in: optionsRect) : .zero,
+            textFont: mode == .text ? textFontFieldRect(in: optionsRect) : .zero,
+            textSize: mode == .text ? textSizeFieldRect(in: optionsRect) : .zero,
             fillToggle: mode == .shape ? fillToggleRect(in: optionsRect) : nil,
             rectangleMode: rectangleModeRect(in: optionsRect, mode: mode),
             ellipseMode: mode == .shape ? ellipseModeButtonRect(in: optionsRect) : nil,
@@ -834,7 +834,7 @@ enum SelectionToolbarState {
         mode: OptionsToolbarMode = .shape
     ) -> CGFloat {
         _ = paletteCount
-        if mode == .mosaic || mode == .text {
+        if mode == .mosaic {
             return 28
         }
         return colorSwatchRowCount(paletteCount: paletteCount) == 1 ? 30 : 40
@@ -901,7 +901,7 @@ enum SelectionToolbarState {
         case .marker:
             return 102
         case .text:
-            return optionsToolbarHorizontalPadding + CGFloat(textSizeValues.count) * 34 + 10
+            return 330
         case .mosaic:
             return 0
         }
@@ -919,14 +919,34 @@ enum SelectionToolbarState {
     }
 
     static func textSizeRects(in optionsRect: NSRect) -> [NSRect] {
-        textSizeValues.indices.map { index in
-            NSRect(
-                x: optionsRect.minX + optionsToolbarHorizontalPadding + CGFloat(index) * 34,
-                y: optionControlY(in: optionsRect),
-                width: 28,
-                height: 20
-            )
-        }
+        [textSizeFieldRect(in: optionsRect)]
+    }
+
+    static func textBoldRect(in optionsRect: NSRect) -> NSRect {
+        NSRect(x: optionsRect.minX + optionsToolbarHorizontalPadding, y: optionControlY(in: optionsRect), width: 22, height: 20)
+    }
+
+    static func textItalicRect(in optionsRect: NSRect) -> NSRect {
+        NSRect(x: optionsRect.minX + 38, y: optionControlY(in: optionsRect), width: 22, height: 20)
+    }
+
+    static func textOutlineRect(in optionsRect: NSRect) -> NSRect {
+        NSRect(x: optionsRect.minX + 66, y: optionControlY(in: optionsRect), width: 22, height: 20)
+    }
+
+    static func textFontFieldRect(in optionsRect: NSRect) -> NSRect {
+        NSRect(x: optionsRect.minX + 98, y: optionControlY(in: optionsRect), width: 154, height: 20)
+    }
+
+    static func textSizeFieldRect(in optionsRect: NSRect) -> NSRect {
+        NSRect(x: optionsRect.minX + 262, y: optionControlY(in: optionsRect), width: 48, height: 20)
+    }
+
+    static func installedTextFontFamilies() -> [String] {
+        let families = NSFontManager.shared.availableFontFamilies
+        let systemFamily = NSFont.systemFont(ofSize: 12).familyName
+        let allFamilies = systemFamily.map { families + [$0] } ?? families
+        return Array(Set(allFamilies)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
     static func fillToggleRect(in optionsRect: NSRect) -> NSRect {

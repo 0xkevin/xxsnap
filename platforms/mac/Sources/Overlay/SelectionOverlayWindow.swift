@@ -638,6 +638,30 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_optionsTextSizePoint(at: index)
     }
 
+    var test_textFontOptions: [String] {
+        (contentView as? SelectionOverlayView)?.test_textFontOptions ?? []
+    }
+
+    func test_optionsTextBoldPoint() -> NSPoint? {
+        (contentView as? SelectionOverlayView)?.test_optionsTextBoldPoint()
+    }
+
+    func test_optionsTextItalicPoint() -> NSPoint? {
+        (contentView as? SelectionOverlayView)?.test_optionsTextItalicPoint()
+    }
+
+    func test_optionsTextOutlinePoint() -> NSPoint? {
+        (contentView as? SelectionOverlayView)?.test_optionsTextOutlinePoint()
+    }
+
+    func test_selectTextSize(_ size: CGFloat) {
+        (contentView as? SelectionOverlayView)?.test_selectTextSize(size)
+    }
+
+    func test_selectTextFont(_ family: String) {
+        (contentView as? SelectionOverlayView)?.test_selectTextFont(family)
+    }
+
     func test_mosaicRectangleOptionPoint() -> NSPoint? {
         (contentView as? SelectionOverlayView)?.test_mosaicRectangleOptionPoint()
     }
@@ -1259,9 +1283,9 @@ private final class SelectionOverlayView: NSView {
         drawSelectionBorder(selectionRect)
         drawSelectionHandles(selectionRect)
         drawMeasurementLabel(selectionRect)
-        drawColorSamplerIfNeeded()
 
         guard lockedSelectionRect != nil else {
+            drawColorSamplerIfNeeded()
             return
         }
 
@@ -1283,6 +1307,7 @@ private final class SelectionOverlayView: NSView {
             drawArrowTypeMenu(field: .end)
         }
         drawTooltipIfNeeded()
+        drawColorSamplerIfNeeded()
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -3404,6 +3429,10 @@ private final class SelectionOverlayView: NSView {
         SelectionToolbarState.textSizeValues.count
     }
 
+    var test_textFontOptions: [String] {
+        SelectionToolbarState.installedTextFontFamilies()
+    }
+
     func test_optionsTextSizePoint(at index: Int) -> NSPoint? {
         guard let optionsToolbarRect else {
             return nil
@@ -3414,6 +3443,38 @@ private final class SelectionOverlayView: NSView {
         }
         let rect = rects[index]
         return NSPoint(x: rect.midX, y: rect.midY)
+    }
+
+    func test_optionsTextBoldPoint() -> NSPoint? {
+        guard let optionsToolbarRect else {
+            return nil
+        }
+        let rect = optionsToolbarLayout(in: optionsToolbarRect).textBold
+        return NSPoint(x: rect.midX, y: rect.midY)
+    }
+
+    func test_optionsTextItalicPoint() -> NSPoint? {
+        guard let optionsToolbarRect else {
+            return nil
+        }
+        let rect = optionsToolbarLayout(in: optionsToolbarRect).textItalic
+        return NSPoint(x: rect.midX, y: rect.midY)
+    }
+
+    func test_optionsTextOutlinePoint() -> NSPoint? {
+        guard let optionsToolbarRect else {
+            return nil
+        }
+        let rect = optionsToolbarLayout(in: optionsToolbarRect).textOutline
+        return NSPoint(x: rect.midX, y: rect.midY)
+    }
+
+    func test_selectTextSize(_ size: CGFloat) {
+        applyTextSize(size)
+    }
+
+    func test_selectTextFont(_ family: String) {
+        applyTextFontFamily(family)
     }
 
     func test_mosaicRectangleOptionPoint() -> NSPoint? {
@@ -3854,13 +3915,30 @@ private final class SelectionOverlayView: NSView {
         let strokeWidths = SelectionToolbarState.strokeWidthValues(for: optionsToolbarMode)
 
         if optionsToolbarMode == .text {
-            for (index, rect) in layout.textSizes.enumerated() where rect.contains(point) {
-                guard SelectionToolbarState.textSizeValues.indices.contains(index) else {
-                    return true
-                }
-                currentStyle.textSize = SelectionToolbarState.textSizeValues[index]
+            if layout.textBold.contains(point) {
+                currentStyle.textBold.toggle()
                 rememberCurrentStyleForActiveTool()
                 applyCurrentStyleToSelectedAnnotation()
+                return true
+            }
+            if layout.textItalic.contains(point) {
+                currentStyle.textItalic.toggle()
+                rememberCurrentStyleForActiveTool()
+                applyCurrentStyleToSelectedAnnotation()
+                return true
+            }
+            if layout.textOutline.contains(point) {
+                currentStyle.textOutlineEnabled.toggle()
+                rememberCurrentStyleForActiveTool()
+                applyCurrentStyleToSelectedAnnotation()
+                return true
+            }
+            if layout.textFont.contains(point) {
+                showTextFontMenu(anchoredTo: layout.textFont)
+                return true
+            }
+            if layout.textSize.contains(point) {
+                showTextSizeMenu(anchoredTo: layout.textSize)
                 return true
             }
         }
@@ -3968,6 +4046,63 @@ private final class SelectionOverlayView: NSView {
         }
 
         return true
+    }
+
+    private func applyTextSize(_ size: CGFloat) {
+        currentStyle.textSize = max(3, min(72, size))
+        rememberCurrentStyleForActiveTool()
+        applyCurrentStyleToSelectedAnnotation()
+        needsDisplay = true
+    }
+
+    private func applyTextFontFamily(_ family: String) {
+        currentStyle.textFontFamily = family
+        rememberCurrentStyleForActiveTool()
+        applyCurrentStyleToSelectedAnnotation()
+        needsDisplay = true
+    }
+
+    private func showTextFontMenu(anchoredTo field: NSRect) {
+        let menu = NSMenu()
+        for family in SelectionToolbarState.installedTextFontFamilies() {
+            let item = NSMenuItem(title: family, action: #selector(textFontMenuItemSelected(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = family
+            item.state = family == currentTextFontFamily() ? .on : .off
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: field.minX, y: field.minY - 2), in: self)
+    }
+
+    private func showTextSizeMenu(anchoredTo field: NSRect) {
+        let menu = NSMenu()
+        for size in SelectionToolbarState.textSizeValues {
+            let value = Int(size)
+            let item = NSMenuItem(title: "\(value)", action: #selector(textSizeMenuItemSelected(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = size
+            item.state = Int(currentStyle.textSize.rounded()) == value ? .on : .off
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: field.minX, y: field.minY - 2), in: self)
+    }
+
+    @objc private func textFontMenuItemSelected(_ sender: NSMenuItem) {
+        guard let family = sender.representedObject as? String else {
+            return
+        }
+        applyTextFontFamily(family)
+    }
+
+    @objc private func textSizeMenuItemSelected(_ sender: NSMenuItem) {
+        guard let size = sender.representedObject as? CGFloat else {
+            return
+        }
+        applyTextSize(size)
+    }
+
+    private func currentTextFontFamily() -> String {
+        currentStyle.textFontFamily ?? NSFont.systemFont(ofSize: 12).familyName ?? "System"
     }
 
     private func handleMosaicOptionsClick(at point: NSPoint, optionsRect: NSRect) -> Bool {
@@ -6572,7 +6707,7 @@ private final class SelectionOverlayView: NSView {
         case .mosaic:
             drawMosaicModeControls(in: optionsRect)
         case .text:
-            drawTextSizeButtons(in: optionsRect)
+            drawTextOptions(in: optionsRect)
         }
         if SelectionToolbarState.showsStrokeStyleField(for: optionsToolbarMode) {
             drawStrokeStyleField(in: optionsRect)
@@ -6620,8 +6755,10 @@ private final class SelectionOverlayView: NSView {
         case .mosaic:
             break
         case .text:
-            if let lastTextSize = layout.textSizes.last, let firstSwatchMinX {
-                separatorXs.append(lastTextSize.maxX + (firstSwatchMinX - lastTextSize.maxX) / 2)
+            if let firstSwatchMinX {
+                separatorXs.append(layout.textOutline.maxX + (layout.textFont.minX - layout.textOutline.maxX) / 2)
+                separatorXs.append(layout.textFont.maxX + (layout.textSize.minX - layout.textFont.maxX) / 2)
+                separatorXs.append(layout.textSize.maxX + (firstSwatchMinX - layout.textSize.maxX) / 2)
             }
         }
 
@@ -6979,23 +7116,67 @@ private final class SelectionOverlayView: NSView {
         circlePath.stroke()
     }
 
-    private func drawTextSizeButtons(in optionsRect: NSRect) {
+    private func drawTextOptions(in optionsRect: NSRect) {
         let layout = optionsToolbarLayout(in: optionsRect)
+        drawTextIconToggle(named: "bold", in: layout.textBold, selected: currentStyle.textBold)
+        drawTextIconToggle(named: "italic", in: layout.textItalic, selected: currentStyle.textItalic)
+        drawTextIconToggle(named: "stroke", in: layout.textOutline, selected: currentStyle.textOutlineEnabled)
+        drawTextPopupField(currentTextFontFamily(), in: layout.textFont, compact: false)
+        drawTextPopupField("\(Int(currentStyle.textSize.rounded()))", in: layout.textSize, compact: true)
+    }
+
+    private func drawTextIconToggle(named name: String, in rect: NSRect, selected: Bool) {
+        drawToolbarButton(optionButtonBackgroundRect(for: rect), symbol: nil, selected: selected, enabled: true)
+        let iconSize = SelectionToolbarState.textOptionIconSize
+        let iconRect = NSRect(
+            x: rect.midX - iconSize / 2,
+            y: rect.midY - iconSize / 2,
+            width: iconSize,
+            height: iconSize
+        )
+        _ = drawToolbarImage(
+            named: name,
+            in: iconRect,
+            template: true,
+            enabled: true,
+            selected: selected,
+            inset: 0
+        )
+    }
+
+    private func drawTextPopupField(_ value: String, in field: NSRect, compact: Bool) {
+        NSColor.controlBackgroundColor.setFill()
+        NSBezierPath(roundedRect: field, xRadius: 4, yRadius: 4).fill()
+        NSColor.separatorColor.setStroke()
+        NSBezierPath(roundedRect: field, xRadius: 4, yRadius: 4).stroke()
+
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium),
+            .font: compact ? NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium) : NSFont.systemFont(ofSize: 11),
             .foregroundColor: NSColor.labelColor,
         ]
-        for (index, rect) in layout.textSizes.enumerated() where SelectionToolbarState.textSizeValues.indices.contains(index) {
-            let value = SelectionToolbarState.textSizeValues[index]
-            let selected = currentStyle.textSize == value
-            drawToolbarButton(optionButtonBackgroundRect(for: rect), symbol: nil, selected: selected, enabled: true)
-            let label = "\(Int(value))" as NSString
-            let size = label.size(withAttributes: attributes)
-            label.draw(
-                at: NSPoint(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2),
-                withAttributes: attributes
-            )
+        let availableWidth = max(0, field.width - 20)
+        let clippedValue = clippedLabel(value, attributes: attributes, maxWidth: availableWidth)
+        let labelSize = NSString(string: clippedValue).size(withAttributes: attributes)
+        NSString(string: clippedValue).draw(
+            at: NSPoint(x: field.minX + 7, y: field.midY - labelSize.height / 2),
+            withAttributes: attributes
+        )
+        drawTriangle(in: NSRect(x: field.maxX - 14, y: field.midY - 3, width: 7, height: 5), color: .labelColor)
+    }
+
+    private func clippedLabel(_ value: String, attributes: [NSAttributedString.Key: Any], maxWidth: CGFloat) -> String {
+        if NSString(string: value).size(withAttributes: attributes).width <= maxWidth {
+            return value
         }
+        var label = value
+        while label.count > 1 {
+            label.removeLast()
+            let candidate = label + "..."
+            if NSString(string: candidate).size(withAttributes: attributes).width <= maxWidth {
+                return candidate
+            }
+        }
+        return "..."
     }
 
     private func drawColorSwatches(in optionsRect: NSRect) {
@@ -7656,7 +7837,7 @@ private final class SelectionOverlayView: NSView {
     private func symbolName(for button: ToolbarButton, enabled: Bool = true) -> String {
         switch button {
         case .rectangle:
-            return "toolbar-crop"
+            return "toolbar-screenshot"
         case .polyline:
             return "toolbar-arrow"
         case .pen:
@@ -8179,6 +8360,12 @@ private final class SelectionOverlayView: NSView {
             style.fillEnabled ? "fill" : "nofill",
             colorKey(style.fillColor),
             "\(Int((style.cornerRadius * 100).rounded()))",
+            "\(Int((style.textSize * 100).rounded()))",
+            style.textFontFamily ?? "",
+            style.textBold ? "bold" : "regular",
+            style.textItalic ? "italic" : "roman",
+            style.textOutlineEnabled ? "outline" : "plain",
+            colorKey(style.textOutlineColor),
         ].joined(separator: "/")
     }
 
