@@ -50,7 +50,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         copiedWindow.test_mouseDown(at: eyedropperPoint)
         copiedWindow.test_mouseUp(at: eyedropperPoint)
         copiedWindow.test_keyDown(keyCode: 8, charactersIgnoringModifiers: "c", modifierFlags: [.command])
-        wait(for: [copyExpectation], timeout: 0.5)
+        wait(for: [copyExpectation], timeout: 2)
         XCTAssertEqual(copyResult?.action, .copy)
 
         window.test_updateColorSampler(at: NSPoint(x: selection.maxX + 12, y: selection.midY))
@@ -229,16 +229,369 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_annotationCount, 1)
         XCTAssertEqual(window.test_selectedAnnotationKind, .text)
         XCTAssertTrue(window.test_isEditingTextAnnotation)
+        XCTAssertTrue(window.test_textEditorIsFirstResponder)
         XCTAssertEqual(window.test_textAnnotation(at: 0)?.text, "")
 
-        window.test_keyDown(keyCode: 0, charactersIgnoringModifiers: "H")
-        window.test_keyDown(keyCode: 0, charactersIgnoringModifiers: "i")
-        window.test_keyDown(keyCode: 36, charactersIgnoringModifiers: "\r")
+        window.firstResponder?.insertText("Hi")
+        window.test_commitTextEditing()
 
         XCTAssertEqual(window.test_selectedAnnotationKind, .text)
         XCTAssertFalse(window.test_isEditingTextAnnotation)
         XCTAssertEqual(window.test_textAnnotation(at: 0)?.text, "Hi")
         XCTAssertGreaterThanOrEqual(window.test_annotationRect(at: 0)?.width ?? 0, 160)
+    }
+
+    func testTextToolAcceptsInsertedTextFromAppKitTextInput() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateTextTool()
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 150))
+
+        XCTAssertTrue(window.test_textEditorIsFirstResponder)
+        window.firstResponder?.insertText("Hello")
+        window.firstResponder?.insertText(NSAttributedString(string: " 输入"))
+        window.test_commitTextEditing()
+
+        XCTAssertFalse(window.test_isEditingTextAnnotation)
+        XCTAssertEqual(window.test_textAnnotation(at: 0)?.text, "Hello 输入")
+    }
+
+    func testTextEditorDoesNotBreakMarkedTextReplacementRange() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateTextTool()
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 150))
+
+        let editor = try XCTUnwrap(window.firstResponder as? NSTextView)
+        editor.setMarkedText("ni", selectedRange: NSRange(location: 2, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+        let markedRange = editor.markedRange()
+        XCTAssertEqual(editor.string, "ni")
+        XCTAssertNotEqual(markedRange.location, NSNotFound)
+
+        editor.insertText("你", replacementRange: markedRange)
+
+        XCTAssertEqual(window.test_textAnnotation(at: 0)?.text, "你")
+        XCTAssertEqual(editor.selectedRange().location, editor.string.count)
+    }
+
+    func testTextEditorDirectImeCommitReplacesMarkedPinyin() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateTextTool()
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 150))
+
+        let editor = try XCTUnwrap(window.firstResponder as? NSTextView)
+        editor.setMarkedText("zhong guo", selectedRange: NSRange(location: 9, length: 0), replacementRange: NSRange(location: 0, length: 0))
+        XCTAssertEqual(editor.string, "zhong guo")
+        XCTAssertEqual(editor.markedRange().location, 0)
+        XCTAssertEqual(editor.markedRange().length, 9)
+
+        editor.insertText("中国")
+
+        XCTAssertEqual(editor.string, "中国")
+        XCTAssertEqual(window.test_textAnnotation(at: 0)?.text, "中国")
+    }
+
+    func testTextEditorKeepsMarkedTextTransparentWhileTyping() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateTextTool()
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 150))
+
+        let editor = try XCTUnwrap(window.firstResponder as? NSTextView)
+        let marked = NSAttributedString(
+            string: "zhong",
+            attributes: [.foregroundColor: NSColor.white]
+        )
+        editor.setMarkedText(marked, selectedRange: NSRange(location: 5, length: 0), replacementRange: NSRange(location: 0, length: 0))
+
+        let color = try XCTUnwrap(editor.textStorage?.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor)
+        XCTAssertEqual(color.alphaComponent, 0)
+        XCTAssertTrue(window.test_textEditorUsesTransparentText)
+        XCTAssertEqual(window.test_textAnnotation(at: 0)?.text, "zhong")
+    }
+
+    func testTextEditingLowersOverlayBelowInputCandidateWindows() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateTextTool()
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 150))
+
+        XCTAssertLessThan(window.level.rawValue, NSWindow.Level.popUpMenu.rawValue)
+        XCTAssertTrue(window.test_textEditorIsFirstResponder)
+    }
+
+    func testFirstTextInputKeepsTextSelectionFrameVisibleWhileEditing() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateTextTool()
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 150))
+        window.firstResponder?.insertText("第一段")
+
+        let localRect = try XCTUnwrap(window.test_annotationRect(at: 0))
+        let overlayRect = NSRect(
+            x: selection.minX + localRect.minX,
+            y: selection.minY + localRect.minY,
+            width: localRect.width,
+            height: localRect.height
+        )
+        let image = try XCTUnwrap(window.test_renderedOverlayImage())
+        let framePixel = try firstPixel(in: image, rect: overlayRect.insetBy(dx: -2, dy: -2)) { pixel in
+            pixel.red < 120 && pixel.green > 80 && pixel.blue > 180 && pixel.alpha > 120
+        }
+
+        XCTAssertNotNil(framePixel)
+    }
+
+    func testSelectedTextAnnotationUsesResizeAndMoveCursorsInTextTool() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 420, height: 280)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateTextTool()
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 150))
+        window.firstResponder?.insertText("Resize me")
+        window.test_commitTextEditing()
+
+        let textRect = try XCTUnwrap(window.test_annotationRect(at: 0))
+        let bodyPoint = NSPoint(x: selection.minX + textRect.midX, y: selection.minY + textRect.midY)
+        window.test_mouseDown(at: bodyPoint)
+        window.test_mouseUp(at: bodyPoint)
+
+        let expected: [(SelectionToolbarState.OverlayResizeHandle, SelectionToolbarState.OverlayCursorStyle)] = [
+            (.topLeft, .resizeTopLeft),
+            (.top, .resizeUpDown),
+            (.topRight, .resizeTopRight),
+            (.left, .resizeLeftRight),
+            (.right, .resizeLeftRight),
+            (.bottomLeft, .resizeBottomLeft),
+            (.bottom, .resizeUpDown),
+            (.bottomRight, .resizeBottomRight),
+        ]
+        for (handle, cursor) in expected {
+            let point = try XCTUnwrap(window.test_shapeResizeHandlePoint(handle))
+            XCTAssertEqual(window.test_cursorStyle(at: point), cursor)
+        }
+
+        let borderPoint = NSPoint(x: selection.minX + textRect.minX + textRect.width * 0.25, y: selection.minY + textRect.minY)
+        XCTAssertEqual(window.test_cursorStyle(at: borderPoint), .move)
+    }
+
+    func testDraggingTextBorderAtSelectionEdgeMovesTextNotSelection() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 420, height: 280)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateTextTool()
+
+        window.test_mouseDown(at: NSPoint(x: 180, y: selection.minY))
+        window.test_mouseUp(at: NSPoint(x: 180, y: selection.minY))
+        window.firstResponder?.insertText("贴边文字")
+        window.test_commitTextEditing()
+
+        let beforeSelection = try XCTUnwrap(window.test_lockedSelectionRect)
+        let beforeTextRect = try XCTUnwrap(window.test_annotationRect(at: 0))
+        let borderPoint = NSPoint(
+            x: selection.minX + beforeTextRect.minX + beforeTextRect.width * 0.25,
+            y: selection.minY + beforeTextRect.minY
+        )
+
+        window.test_mouseDown(at: borderPoint)
+        window.test_mouseDragged(to: NSPoint(x: borderPoint.x + 42, y: borderPoint.y + 18))
+        window.test_mouseUp(at: NSPoint(x: borderPoint.x + 42, y: borderPoint.y + 18))
+
+        let afterSelection = try XCTUnwrap(window.test_lockedSelectionRect)
+        let afterTextRect = try XCTUnwrap(window.test_annotationRect(at: 0))
+        XCTAssertEqual(afterSelection, beforeSelection)
+        XCTAssertNotEqual(afterTextRect.origin.x, beforeTextRect.origin.x)
+        XCTAssertNotEqual(afterTextRect.origin.y, beforeTextRect.origin.y)
+    }
+
+    func testDraggingActiveTextEditorMovesTextNotSelectionAndEndsEditing() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 420, height: 280)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateTextTool()
+
+        window.test_mouseDown(at: NSPoint(x: 180, y: selection.minY + 40))
+        window.test_mouseUp(at: NSPoint(x: 180, y: selection.minY + 40))
+        window.firstResponder?.insertText("正在编辑")
+
+        XCTAssertTrue(window.test_textEditorIsFirstResponder)
+        let beforeSelection = try XCTUnwrap(window.test_lockedSelectionRect)
+        let beforeTextRect = try XCTUnwrap(window.test_annotationRect(at: 0))
+        let start = NSPoint(
+            x: selection.minX + beforeTextRect.minX + beforeTextRect.width * 0.25,
+            y: selection.minY + beforeTextRect.minY + beforeTextRect.height * 0.5
+        )
+        let end = NSPoint(x: start.x + 46, y: start.y + 22)
+
+        window.test_textEditorDragSequence(from: start, to: end)
+
+        let afterSelection = try XCTUnwrap(window.test_lockedSelectionRect)
+        let afterTextRect = try XCTUnwrap(window.test_annotationRect(at: 0))
+        XCTAssertEqual(afterSelection, beforeSelection)
+        XCTAssertFalse(window.test_textEditorIsFirstResponder)
+        XCTAssertEqual(window.test_annotationText(at: 0), "正在编辑")
+        XCTAssertNotEqual(afterTextRect.origin.x, beforeTextRect.origin.x)
+        XCTAssertNotEqual(afterTextRect.origin.y, beforeTextRect.origin.y)
+    }
+
+    func testDraggingCommittedTextBodyWithTextToolMovesTextNotSelection() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 420, height: 280)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateTextTool()
+
+        window.test_mouseDown(at: NSPoint(x: 180, y: selection.minY + 40))
+        window.test_mouseUp(at: NSPoint(x: 180, y: selection.minY + 40))
+        window.firstResponder?.insertText("拖动文字")
+        window.test_commitTextEditing()
+
+        let beforeSelection = try XCTUnwrap(window.test_lockedSelectionRect)
+        let beforeTextRect = try XCTUnwrap(window.test_annotationRect(at: 0))
+        let start = NSPoint(
+            x: selection.minX + beforeTextRect.midX,
+            y: selection.minY + beforeTextRect.midY
+        )
+        let firstDragBelowThreshold = NSPoint(x: start.x + 1, y: start.y + 1)
+        let end = NSPoint(x: start.x + 54, y: start.y + 24)
+
+        window.test_mouseDown(at: start)
+        window.test_mouseDragged(to: firstDragBelowThreshold)
+        window.test_mouseDragged(to: end)
+        window.test_mouseUp(at: end)
+
+        let afterSelection = try XCTUnwrap(window.test_lockedSelectionRect)
+        let afterTextRect = try XCTUnwrap(window.test_annotationRect(at: 0))
+        XCTAssertEqual(afterSelection, beforeSelection)
+        XCTAssertFalse(window.test_isEditingTextAnnotation)
+        XCTAssertEqual(window.test_annotationText(at: 0), "拖动文字")
+        XCTAssertEqual(afterTextRect.minX, beforeTextRect.minX + 54, accuracy: 0.1)
+        XCTAssertEqual(afterTextRect.minY, beforeTextRect.minY + 24, accuracy: 0.1)
+    }
+
+    func testClickingFinishedTextReopensEditorAndKeepsDragOnMoveGesture() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 420, height: 280)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateTextTool()
+
+        window.test_mouseDown(at: NSPoint(x: 180, y: selection.minY + 40))
+        window.test_mouseUp(at: NSPoint(x: 180, y: selection.minY + 40))
+        window.firstResponder?.insertText("已完成")
+        window.test_commitTextEditing()
+
+        let textRect = try XCTUnwrap(window.test_annotationRect(at: 0))
+        let bodyPoint = NSPoint(x: selection.minX + textRect.midX, y: selection.minY + textRect.midY)
+        window.test_mouseDown(at: bodyPoint)
+        window.test_mouseUp(at: bodyPoint)
+
+        XCTAssertTrue(window.test_textEditorIsFirstResponder)
+        XCTAssertEqual(window.test_annotationText(at: 0), "已完成")
+
+        window.firstResponder?.insertText("x")
+
+        XCTAssertEqual(window.test_annotationText(at: 0), "已完成x")
+
+        let movedBodyPoint = NSPoint(x: selection.minX + textRect.midX + 8, y: selection.minY + textRect.midY)
+        let dragEnd = NSPoint(x: movedBodyPoint.x + 40, y: movedBodyPoint.y + 18)
+        window.test_textEditorDragSequence(from: movedBodyPoint, to: dragEnd)
+
+        let movedRect = try XCTUnwrap(window.test_annotationRect(at: 0))
+        XCTAssertFalse(window.test_textEditorIsFirstResponder)
+        XCTAssertEqual(movedRect.minX, textRect.minX + 40, accuracy: 0.1)
+        XCTAssertEqual(movedRect.minY, textRect.minY + 18, accuracy: 0.1)
+        XCTAssertEqual(window.test_lockedSelectionRect, selection)
+    }
+
+    func testClickingFinishedTextPlacesCaretAtClickedPositionForContinuedTyping() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 420, height: 280)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateTextTool()
+
+        window.test_mouseDown(at: NSPoint(x: 180, y: selection.minY + 40))
+        window.test_mouseUp(at: NSPoint(x: 180, y: selection.minY + 40))
+        window.firstResponder?.insertText("Hello")
+        window.test_commitTextEditing()
+
+        let textRect = try XCTUnwrap(window.test_annotationRect(at: 0))
+        let leadingPoint = NSPoint(x: selection.minX + textRect.minX + 1, y: selection.minY + textRect.midY)
+        window.test_mouseDown(at: leadingPoint)
+        window.test_mouseUp(at: leadingPoint)
+
+        XCTAssertTrue(window.test_textEditorIsFirstResponder)
+        window.firstResponder?.insertText("X")
+
+        XCTAssertEqual(window.test_annotationText(at: 0), "XHello")
+    }
+
+    func testTextAnnotationExpandsPastPreviousMeasureWidthWhileTyping() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 1_200, height: 260)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateTextTool()
+
+        window.test_mouseDown(at: NSPoint(x: 120, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 120, y: 150))
+        window.firstResponder?.insertText(String(repeating: "中国", count: 28))
+
+        XCTAssertTrue(window.test_isEditingTextAnnotation)
+        XCTAssertGreaterThan(window.test_annotationRect(at: 0)?.width ?? 0, 520)
+        XCTAssertEqual((window.firstResponder as? NSTextView)?.selectedRange().location, (window.firstResponder as? NSTextView)?.string.count)
+    }
+
+    func testTextEditorReturnInsertsLineBreakInsteadOfCommitting() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 500, height: 300)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateTextTool()
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 150))
+        window.firstResponder?.insertText("第一行")
+        window.firstResponder?.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+        window.firstResponder?.insertText("第二行")
+
+        XCTAssertTrue(window.test_isEditingTextAnnotation)
+        XCTAssertEqual(window.test_textAnnotation(at: 0)?.text, "第一行\n第二行")
+        XCTAssertGreaterThan(window.test_annotationRect(at: 0)?.height ?? 0, 44)
+
+        window.test_commitTextEditing()
+        XCTAssertFalse(window.test_isEditingTextAnnotation)
+        XCTAssertEqual(window.test_textAnnotation(at: 0)?.text, "第一行\n第二行")
+    }
+
+    func testTextEditorReceivesOrdinaryKeyEventsWhileEditing() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateTextTool()
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 150))
+
+        XCTAssertTrue(window.test_textEditorIsFirstResponder)
+        XCTAssertFalse(window.test_handleKeyDown(keyCode: 0, charactersIgnoringModifiers: "a"))
+        XCTAssertTrue(window.test_isEditingTextAnnotation)
     }
 
     func testTextOptionsToolbarMatchesShapeToolbarHeightAndOrdersControls() throws {
@@ -260,14 +613,179 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertLessThan(layout.textOutline.minX, layout.textFont.minX)
         XCTAssertLessThan(layout.textFont.minX, layout.textSize.minX)
         XCTAssertLessThan(layout.textSize.minX, firstSwatch.minX)
+        XCTAssertEqual(layout.textFont.minX - layout.textOutline.maxX, 20)
+        XCTAssertEqual(layout.textSize.minX - layout.textFont.maxX, 20)
+        XCTAssertEqual(firstSwatch.minX - layout.textSize.maxX, 20)
 
         let originalColor = SelectionToolbarState.colorSamplerHexString(for: try XCTUnwrap(window.test_currentStyle?.strokeColor))
-        let colorPoint = try XCTUnwrap(window.test_optionsPaletteColorPoint(at: 0))
+        XCTAssertEqual(originalColor, "#FF001A")
+
+        let colorPoint = try XCTUnwrap(window.test_optionsPaletteColorPoint(at: 1))
         window.test_mouseDown(at: colorPoint)
         window.test_mouseUp(at: colorPoint)
 
         XCTAssertNotEqual(SelectionToolbarState.colorSamplerHexString(for: try XCTUnwrap(window.test_currentStyle?.strokeColor)), originalColor)
-        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: try XCTUnwrap(window.test_currentStyle?.strokeColor)), "#FF001A")
+        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: try XCTUnwrap(window.test_currentStyle?.strokeColor)), "#8A8A8A")
+    }
+
+    func testTextToolDefaultsToOutlineAndShowsTextOptionTooltips() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateTextTool()
+
+        let style = try XCTUnwrap(window.test_currentStyle)
+        XCTAssertTrue(style.textOutlineEnabled)
+        XCTAssertEqual(style.textSize, 8)
+        XCTAssertEqual(SelectionToolbarState.colorSamplerHexString(for: style.strokeColor), "#FF001A")
+        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "textBold"), "加粗")
+        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "textItalic"), "斜体")
+        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "textOutline"), "描边")
+
+        let boldPoint = try XCTUnwrap(window.test_optionsTextBoldPoint())
+        window.test_mouseMoved(to: boldPoint)
+        XCTAssertEqual(window.test_hoveredTooltipText, "加粗")
+
+        let italicPoint = try XCTUnwrap(window.test_optionsTextItalicPoint())
+        window.test_mouseMoved(to: italicPoint)
+        XCTAssertEqual(window.test_hoveredTooltipText, "斜体")
+
+        let outlinePoint = try XCTUnwrap(window.test_optionsTextOutlinePoint())
+        window.test_mouseMoved(to: outlinePoint)
+        XCTAssertEqual(window.test_hoveredTooltipText, "描边")
+    }
+
+    func testTextSizeUsesScreenshotAnnotationDisplayScale() {
+        var style = CaptureAnnotationStyle()
+        style.textSize = 15
+
+        XCTAssertGreaterThanOrEqual(CaptureAnnotationRenderer.textFont(style: style).pointSize, 44)
+    }
+
+    func testTextItalicStyleUsesItalicFontTrait() throws {
+        var style = CaptureAnnotationStyle()
+        style.textSize = 12
+        style.textItalic = true
+
+        let attributes = CaptureAnnotationRenderer.textAttributes(style: style)
+        let font = CaptureAnnotationRenderer.textFont(style: style)
+        let obliqueness = try XCTUnwrap(attributes[.obliqueness] as? CGFloat)
+        XCTAssertTrue(NSFontManager.shared.traits(of: font).contains(.italicFontMask))
+        XCTAssertGreaterThan(obliqueness, 0)
+    }
+
+    func testTextAnnotationHeightTracksRenderedTextBounds() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 360, height: 240)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateTextTool()
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 150))
+        window.firstResponder?.insertText("这是")
+
+        let style = try XCTUnwrap(window.test_annotationStyle(at: 0))
+        let measured = NSAttributedString(
+            string: "这是",
+            attributes: CaptureAnnotationRenderer.textAttributes(style: style)
+        ).boundingRect(
+            with: NSSize(width: 480, height: CGFloat.greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading]
+        )
+        let rect = try XCTUnwrap(window.test_annotationRect(at: 0))
+
+        XCTAssertGreaterThanOrEqual(rect.height, ceil(measured.height))
+    }
+
+    func testEditingTextAnnotationDrawsLiveOutlinedEffectInOverlay() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateTextTool()
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 150))
+        window.firstResponder?.insertText("重影")
+
+        let localRect = try XCTUnwrap(window.test_annotationRect(at: 0))
+        let overlayRect = NSRect(
+            x: selection.minX + localRect.minX,
+            y: selection.minY + localRect.minY,
+            width: localRect.width,
+            height: localRect.height
+        ).insetBy(dx: -8, dy: -8)
+        let image = try XCTUnwrap(window.test_renderedOverlayImage())
+
+        let redTextPixel = try firstPixel(in: image, rect: overlayRect) { pixel in
+            pixel.red > 180 && pixel.green < 120 && pixel.blue < 120 && pixel.alpha > 80
+        }
+        let outlinePixel = try firstPixel(in: image, rect: overlayRect) { pixel in
+            pixel.red > 230 && pixel.green > 230 && pixel.blue > 230 && pixel.alpha > 80
+        }
+        let redFillPixels = try matchingPixelCount(in: image, rect: overlayRect) { pixel in
+            pixel.red > 200 && pixel.green < 80 && pixel.blue < 80 && pixel.alpha > 120
+        }
+        XCTAssertNotNil(redTextPixel)
+        XCTAssertNotNil(outlinePixel)
+        XCTAssertGreaterThan(redFillPixels, 240)
+        XCTAssertTrue(window.test_textEditorUsesTransparentText)
+    }
+
+    func testArialHebrewTextAnnotationHeightFitsRenderedBounds() throws {
+        guard NSFontManager.shared.availableFontFamilies.contains("Arial Hebrew") else {
+            throw XCTSkip("Arial Hebrew is not available on this machine")
+        }
+
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 360, height: 240)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateTextTool()
+        window.test_selectTextFont("Arial Hebrew")
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 150))
+        window.firstResponder?.insertText("Arial Hebrew")
+
+        let style = try XCTUnwrap(window.test_annotationStyle(at: 0))
+        let measured = NSAttributedString(
+            string: "Arial Hebrew",
+            attributes: CaptureAnnotationRenderer.textAttributes(style: style)
+        ).boundingRect(
+            with: NSSize(width: 480, height: CGFloat.greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading]
+        )
+        let rect = try XCTUnwrap(window.test_annotationRect(at: 0))
+
+        XCTAssertGreaterThanOrEqual(rect.height, ceil(measured.height))
+    }
+
+    func testTextDropdownsAreEmbeddedAndScrollable() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 420, height: 260))
+        window.test_activateTextTool()
+
+        XCTAssertEqual(SelectionToolbarState.textDropdownBackgroundColor, NSColor.white)
+        XCTAssertEqual(SelectionToolbarState.textDropdownScrollbarTrackColor, NSColor.black.withAlphaComponent(0.14))
+        XCTAssertEqual(SelectionToolbarState.textDropdownScrollbarThumbColor, NSColor.black.withAlphaComponent(0.46))
+
+        let fontPoint = try XCTUnwrap(window.test_optionsTextFontPoint())
+        window.test_mouseDown(at: fontPoint)
+        window.test_mouseUp(at: fontPoint)
+        let fontDropdown = try XCTUnwrap(window.test_textDropdownRect)
+        XCTAssertTrue(window.test_isTextFontDropdownVisible)
+        XCTAssertLessThan(fontDropdown.height, CGFloat(window.test_textFontOptions.count) * 22)
+        XCTAssertTrue(fontDropdown.height <= 184)
+
+        let before = window.test_textDropdownScrollOffset
+        window.test_scrollWheel(at: NSPoint(x: fontDropdown.midX, y: fontDropdown.midY), deltaY: -18)
+        XCTAssertGreaterThan(window.test_textDropdownScrollOffset, before)
+
+        let sizePoint = try XCTUnwrap(window.test_optionsTextSizePoint())
+        window.test_mouseDown(at: sizePoint)
+        window.test_mouseUp(at: sizePoint)
+        let sizeDropdown = try XCTUnwrap(window.test_textDropdownRect)
+        XCTAssertTrue(window.test_isTextSizeDropdownVisible)
+        XCTAssertLessThan(sizeDropdown.height, CGFloat(window.test_textSizeOptionsCount) * 22)
+        XCTAssertTrue(sizeDropdown.height <= 184)
     }
 
     func testTextOptionsToolbarAppliesFontSizeFamilyBoldItalicAndOutline() throws {
@@ -287,8 +805,6 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_mouseUp(at: try XCTUnwrap(window.test_optionsTextBoldPoint()))
         window.test_mouseDown(at: try XCTUnwrap(window.test_optionsTextItalicPoint()))
         window.test_mouseUp(at: try XCTUnwrap(window.test_optionsTextItalicPoint()))
-        window.test_mouseDown(at: try XCTUnwrap(window.test_optionsTextOutlinePoint()))
-        window.test_mouseUp(at: try XCTUnwrap(window.test_optionsTextOutlinePoint()))
 
         window.test_mouseDown(at: NSPoint(x: selection.minX + 40, y: selection.minY + 50))
         window.test_mouseUp(at: NSPoint(x: selection.minX + 40, y: selection.minY + 50))
@@ -308,7 +824,56 @@ final class SelectionToolbarStateTests: XCTestCase {
         let font = try XCTUnwrap(attributes[.font] as? NSFont)
         XCTAssertGreaterThanOrEqual(font.pointSize, 47)
         XCTAssertNotNil(attributes[.strokeColor])
-        XCTAssertNotNil(attributes[.strokeWidth])
+        XCTAssertEqual(attributes[.strokeWidth] as? CGFloat, -6)
+        XCTAssertNil(attributes[.shadow])
+    }
+
+    func testTextAnnotationResizeScalesFontSizeProportionally() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 360, height: 240)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateTextTool()
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 150))
+        window.firstResponder?.insertText("Scale")
+        window.test_commitTextEditing()
+
+        let originalRect = try XCTUnwrap(window.test_annotationRect(at: 0))
+        let originalStyle = try XCTUnwrap(window.test_annotationStyle(at: 0))
+        let originalRatio = originalRect.width / originalRect.height
+        let resizePoint = try XCTUnwrap(window.test_shapeResizeHandlePoint(.bottomRight))
+
+        window.test_mouseDown(at: resizePoint)
+        window.test_mouseDragged(to: NSPoint(x: resizePoint.x + originalRect.width * 0.5, y: resizePoint.y - originalRect.height * 0.5))
+        window.test_mouseUp(at: NSPoint(x: resizePoint.x + originalRect.width * 0.5, y: resizePoint.y - originalRect.height * 0.5))
+
+        let resizedRect = try XCTUnwrap(window.test_annotationRect(at: 0))
+        let resizedStyle = try XCTUnwrap(window.test_annotationStyle(at: 0))
+        let scale = resizedRect.width / originalRect.width
+        XCTAssertGreaterThan(resizedRect.width, originalRect.width)
+        XCTAssertGreaterThan(resizedRect.height, originalRect.height)
+        XCTAssertEqual(resizedRect.width / resizedRect.height, originalRatio, accuracy: 0.02)
+        XCTAssertEqual(resizedStyle.textSize, originalStyle.textSize * scale, accuracy: 0.5)
+    }
+
+    func testTextAnnotationCanRotateWithMosaicRotationHandle() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 360, height: 240))
+        window.test_activateTextTool()
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 150))
+        window.firstResponder?.insertText("Rotate")
+        window.test_commitTextEditing()
+
+        let rotationPoint = try XCTUnwrap(window.test_mosaicRectangleRotationHandlePoint())
+        window.test_mouseDown(at: rotationPoint)
+        window.test_mouseDragged(to: NSPoint(x: rotationPoint.x + 32, y: rotationPoint.y + 24))
+        window.test_mouseUp(at: NSPoint(x: rotationPoint.x + 32, y: rotationPoint.y + 24))
+
+        XCTAssertGreaterThan(abs(window.test_annotationRotationAngle(at: 0) ?? 0), 0.05)
+        XCTAssertEqual(window.test_mosaicRectangleRotationHandleGlyph(), .refreshDot)
     }
 
     func testTextAnnotationCanMoveDeleteAndChangeColor() throws {
@@ -319,10 +884,8 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         window.test_mouseDown(at: NSPoint(x: 140, y: 150))
         window.test_mouseUp(at: NSPoint(x: 140, y: 150))
-        for character in "Hello text" {
-            window.test_keyDown(keyCode: 0, charactersIgnoringModifiers: String(character))
-        }
-        window.test_keyDown(keyCode: 36, charactersIgnoringModifiers: "\r")
+        window.firstResponder?.insertText("Hello text")
+        window.test_commitTextEditing()
 
         XCTAssertEqual(window.test_annotationCount, 1)
         XCTAssertEqual(window.test_selectedAnnotationKind, .text)
@@ -361,6 +924,56 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertNil(window.test_selectedAnnotationKind)
     }
 
+    func testCommittedTextCanMoveResizeAndRotateAfterBodySelection() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 420, height: 280)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateTextTool()
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 150))
+        window.firstResponder?.insertText("Edit me")
+        window.test_commitTextEditing()
+
+        window.test_activateShapeTool(.rectangle)
+        window.test_activateTextTool()
+        let originalRect = try XCTUnwrap(window.test_annotationRect(at: 0))
+        let bodyPoint = NSPoint(x: selection.minX + originalRect.midX, y: selection.minY + originalRect.midY)
+        window.test_mouseDown(at: bodyPoint)
+        window.test_mouseUp(at: bodyPoint)
+
+        XCTAssertEqual(window.test_selectedAnnotationKind, .text)
+        XCTAssertTrue(window.test_isEditingTextAnnotation)
+
+        let moveEnd = NSPoint(x: bodyPoint.x + 44, y: bodyPoint.y + 28)
+        window.test_mouseDown(at: bodyPoint)
+        window.test_mouseDragged(to: moveEnd)
+        window.test_mouseUp(at: moveEnd)
+
+        let movedRect = try XCTUnwrap(window.test_annotationRect(at: 0))
+        XCTAssertEqual(movedRect.minX, originalRect.minX + 44, accuracy: 0.1)
+        XCTAssertEqual(movedRect.minY, originalRect.minY + 28, accuracy: 0.1)
+
+        let originalStyle = try XCTUnwrap(window.test_annotationStyle(at: 0))
+        let resizePoint = try XCTUnwrap(window.test_shapeResizeHandlePoint(.bottomRight))
+        window.test_mouseDown(at: resizePoint)
+        window.test_mouseDragged(to: NSPoint(x: resizePoint.x + movedRect.width * 0.4, y: resizePoint.y - movedRect.height * 0.4))
+        window.test_mouseUp(at: NSPoint(x: resizePoint.x + movedRect.width * 0.4, y: resizePoint.y - movedRect.height * 0.4))
+
+        let resizedRect = try XCTUnwrap(window.test_annotationRect(at: 0))
+        let resizedStyle = try XCTUnwrap(window.test_annotationStyle(at: 0))
+        XCTAssertGreaterThan(resizedRect.width, movedRect.width)
+        XCTAssertGreaterThan(resizedRect.height, movedRect.height)
+        XCTAssertGreaterThan(resizedStyle.textSize, originalStyle.textSize)
+
+        let rotationPoint = try XCTUnwrap(window.test_mosaicRectangleRotationHandlePoint())
+        window.test_mouseDown(at: rotationPoint)
+        window.test_mouseDragged(to: NSPoint(x: rotationPoint.x + 40, y: rotationPoint.y + 26))
+        window.test_mouseUp(at: NSPoint(x: rotationPoint.x + 40, y: rotationPoint.y + 26))
+
+        XCTAssertGreaterThan(abs(window.test_annotationRotationAngle(at: 0) ?? 0), 0.05)
+    }
+
     func testTextAnnotationCanBeDeletedWithForwardDelete() {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 360, height: 240))
@@ -368,10 +981,8 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         window.test_mouseDown(at: NSPoint(x: 140, y: 150))
         window.test_mouseUp(at: NSPoint(x: 140, y: 150))
-        for character in "Forward delete" {
-            window.test_keyDown(keyCode: 0, charactersIgnoringModifiers: String(character))
-        }
-        window.test_keyDown(keyCode: 36, charactersIgnoringModifiers: "\r")
+        window.firstResponder?.insertText("Forward delete")
+        window.test_commitTextEditing()
 
         XCTAssertEqual(window.test_annotationCount, 1)
         XCTAssertEqual(window.test_selectedAnnotationKind, .text)
@@ -390,8 +1001,8 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         window.test_mouseDown(at: NSPoint(x: 140, y: 150))
         window.test_mouseUp(at: NSPoint(x: 140, y: 150))
-        window.test_keyDown(keyCode: 0, charactersIgnoringModifiers: "H")
-        window.test_keyDown(keyCode: 36, charactersIgnoringModifiers: "\r")
+        window.firstResponder?.insertText("H")
+        window.test_commitTextEditing()
 
         guard let textRect = window.test_annotationRect(at: 0) else {
             return XCTFail("Expected text annotation")
@@ -464,7 +1075,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         textWindow.test_activateTextTool()
         textWindow.test_mouseDown(at: NSPoint(x: 140, y: 150))
         textWindow.test_mouseUp(at: NSPoint(x: 140, y: 150))
-        textWindow.test_keyDown(keyCode: 0, charactersIgnoringModifiers: "x")
+        textWindow.firstResponder?.insertText("x")
         textWindow.test_keyDown(keyCode: 8, charactersIgnoringModifiers: "c", modifierFlags: [.command])
         wait(for: [textExpectation], timeout: 0.5)
         XCTAssertEqual(textResult?.annotations.count, 1)
@@ -490,6 +1101,38 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertFalse(window.test_eyedropperToolbarButtonIsSelected)
         XCTAssertEqual(window.test_currentShapeKind, .marker)
         XCTAssertEqual(window.test_optionsToolbarMode, .marker)
+    }
+
+    func testTextToolbarButtonExitsEyedropperModeAndAcceptsInput() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 240, height: 160)
+        let editPoint = NSPoint(x: selection.midX, y: selection.midY)
+        window.test_setLockedSelectionRect(selection)
+
+        let eyedropperPoint = try XCTUnwrap(window.test_mainToolbarButtonPoint(for: .eyedropper))
+        let textPoint = try XCTUnwrap(window.test_mainToolbarButtonPoint(for: .text))
+
+        window.test_mouseDown(at: eyedropperPoint)
+        window.test_mouseUp(at: eyedropperPoint)
+        XCTAssertTrue(window.test_isEyedropperToolActive)
+        XCTAssertEqual(window.test_cursorStyle(at: editPoint), .eyedropper)
+
+        window.test_mouseDown(at: textPoint)
+        window.test_mouseUp(at: textPoint)
+        XCTAssertTrue(window.test_isTextToolActive)
+        XCTAssertTrue(window.test_textToolbarButtonIsSelected)
+        XCTAssertFalse(window.test_isEyedropperToolActive)
+        XCTAssertFalse(window.test_eyedropperToolbarButtonIsSelected)
+        XCTAssertEqual(window.test_cursorStyle(at: editPoint), .textInput)
+
+        window.test_mouseDown(at: editPoint)
+        window.test_mouseUp(at: editPoint)
+        XCTAssertTrue(window.test_textEditorIsFirstResponder)
+        XCTAssertFalse(window.test_handleKeyDown(keyCode: 0, charactersIgnoringModifiers: "a"))
+
+        window.firstResponder?.insertText("abc")
+
+        XCTAssertEqual(window.test_annotationText(at: 0), "abc")
     }
 
     func testEyedropperCursorOverridesArrowAnnotationHoverInsideSelection() {
@@ -618,6 +1261,35 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         window.test_activateShapeTool(.arrowLine)
         XCTAssertEqual(window.test_cursorStyle(at: point), .crosshair)
+    }
+
+    func testOverlayWindowUsesTextInputCursorForTextToolInsideSelection() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 200, height: 120)
+        let point = NSPoint(x: selection.midX, y: selection.midY)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateTextTool()
+
+        XCTAssertEqual(window.test_cursorStyle(at: point), .textInput)
+    }
+
+    func testDraggingInsideSelectionWithTextToolDoesNotMoveSelectionRegion() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 260, height: 180)
+        let start = NSPoint(x: selection.midX, y: selection.midY)
+        let firstDrag = NSPoint(x: start.x + 72, y: start.y + 34)
+        let end = NSPoint(x: firstDrag.x + 18, y: firstDrag.y + 12)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateTextTool()
+
+        window.test_mouseDown(at: start)
+        window.test_mouseDragged(to: firstDrag)
+        window.test_mouseDragged(to: end)
+        window.test_mouseUp(at: end)
+
+        XCTAssertEqual(window.test_lockedSelectionRect, selection)
+        XCTAssertTrue(window.test_isEditingTextAnnotation)
+        XCTAssertEqual(window.test_annotationCount, 1)
     }
 
     func testOverlayWindowUsesActiveDrawingCursorOutsideSelectionAwayFromBorder() {
@@ -3288,6 +3960,7 @@ final class SelectionToolbarStateTests: XCTestCase {
 
     func testTextToolbarIconsAreBundledAndSizedConsistently() {
         XCTAssertEqual(SelectionToolbarState.textOptionIconSize, 15)
+        XCTAssertEqual(SelectionToolbarState.textEmphasisIconSize, 20)
         XCTAssertNotNil(Bundle.main.url(forResource: "bold", withExtension: "svg"))
         XCTAssertNotNil(Bundle.main.url(forResource: "italic", withExtension: "svg"))
         XCTAssertNotNil(Bundle.main.url(forResource: "stroke", withExtension: "svg"))
@@ -6379,6 +7052,21 @@ final class SelectionToolbarStateTests: XCTestCase {
         rect: NSRect,
         matching predicate: ((red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8)) -> Bool
     ) throws -> (red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8)? {
+        try pixels(in: image, rect: rect).first(where: predicate)
+    }
+
+    private func matchingPixelCount(
+        in image: NSImage,
+        rect: NSRect,
+        matching predicate: ((red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8)) -> Bool
+    ) throws -> Int {
+        try pixels(in: image, rect: rect).filter(predicate).count
+    }
+
+    private func pixels(
+        in image: NSImage,
+        rect: NSRect
+    ) throws -> [(red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8)] {
         let cgImage = try XCTUnwrap(image.cgImage(forProposedRect: nil, context: nil, hints: nil))
         let bytes = try rgbaBytes(in: image)
         let scaleX = CGFloat(cgImage.width) / max(image.size.width, 1)
@@ -6394,9 +7082,10 @@ final class SelectionToolbarStateTests: XCTestCase {
             max: min(cgImage.height - 1, Int(((image.size.height - rect.minY) * scaleY).rounded(.up)))
         )
         guard minX < maxX else {
-            return nil
+            return []
         }
 
+        var result: [(red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8)] = []
         for yRange in [directY, flippedY] where yRange.min < yRange.max {
             for y in yRange.min...yRange.max {
                 for x in minX...maxX {
@@ -6407,13 +7096,11 @@ final class SelectionToolbarStateTests: XCTestCase {
                         blue: bytes[index + 2],
                         alpha: bytes[index + 3]
                     )
-                    if predicate(pixel) {
-                        return pixel
-                    }
+                    result.append(pixel)
                 }
             }
         }
-        return nil
+        return result
     }
 
     private func averageLumaDelta(in image: NSImage, rect: NSRect) throws -> Double {

@@ -1077,6 +1077,7 @@ struct CaptureSelectionResult {
 
 enum CaptureAnnotationRenderer {
     static let markerOpacity: CGFloat = 0.85
+    static let textDisplayScale: CGFloat = 3
     private static let redactionContext = CIContext(options: nil)
 
     static func textFont(size: CGFloat) -> NSFont {
@@ -1088,7 +1089,7 @@ enum CaptureAnnotationRenderer {
     }
 
     static func textFont(style: CaptureAnnotationStyle) -> NSFont {
-        let size = max(3, min(72, style.textSize))
+        let size = max(3, min(300, style.textSize * textDisplayScale))
         let manager = NSFontManager.shared
         let base = style.textFontFamily.flatMap {
             manager.font(withFamily: $0, traits: [], weight: 5, size: size)
@@ -1104,16 +1105,49 @@ enum CaptureAnnotationRenderer {
         return font
     }
 
+    static func textLineHeight(style: CaptureAnnotationStyle) -> CGFloat {
+        let font = textFont(style: style)
+        return ceil(font.ascender - font.descender + font.leading)
+    }
+
     static func textAttributes(style: CaptureAnnotationStyle) -> [NSAttributedString.Key: Any] {
         var attributes: [NSAttributedString.Key: Any] = [
             .font: textFont(style: style),
             .foregroundColor: style.strokeColor,
         ]
+        if style.textItalic {
+            attributes[.obliqueness] = CGFloat(0.22)
+        }
         if style.textOutlineEnabled {
             attributes[.strokeColor] = style.textOutlineColor
-            attributes[.strokeWidth] = -3
+            attributes[.strokeWidth] = CGFloat(-6)
         }
         return attributes
+    }
+
+    static func drawText(_ text: String, in rect: NSRect, style: CaptureAnnotationStyle) {
+        guard style.textOutlineEnabled else {
+            NSAttributedString(string: text, attributes: textAttributes(style: style)).draw(in: rect)
+            return
+        }
+
+        var outlineAttributes = textAttributes(style: style)
+        outlineAttributes[.foregroundColor] = NSColor.clear
+        outlineAttributes[.strokeColor] = style.textOutlineColor
+        outlineAttributes[.strokeWidth] = CGFloat(8)
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.22)
+        shadow.shadowOffset = NSSize(width: 1.4, height: -1.4)
+        shadow.shadowBlurRadius = 2
+        outlineAttributes[.shadow] = shadow
+
+        var fillAttributes = textAttributes(style: style)
+        fillAttributes.removeValue(forKey: .strokeColor)
+        fillAttributes.removeValue(forKey: .strokeWidth)
+        fillAttributes.removeValue(forKey: .shadow)
+
+        NSAttributedString(string: text, attributes: outlineAttributes).draw(in: rect)
+        NSAttributedString(string: text, attributes: fillAttributes).draw(in: rect)
     }
 
     static func render(image: NSImage, annotations: [CaptureAnnotation]) -> NSImage {
@@ -1278,7 +1312,6 @@ enum CaptureAnnotationRenderer {
 
         var style = annotation.style
         style.textSize *= textScale
-        let attributedText = NSAttributedString(string: text, attributes: textAttributes(style: style))
         let textRect = annotation.rect.standardized
         let pixelRect = NSRect(
             x: textRect.minX * scaleX,
@@ -1288,10 +1321,15 @@ enum CaptureAnnotationRenderer {
         )
 
         context.saveGState()
+        if abs(annotation.rotationAngle) >= 0.001 {
+            context.translateBy(x: pixelRect.midX, y: pixelRect.midY)
+            context.rotate(by: annotation.rotationAngle)
+            context.translateBy(x: -pixelRect.midX, y: -pixelRect.midY)
+        }
         let previousGraphicsContext = NSGraphicsContext.current
         let graphicsContext = NSGraphicsContext(cgContext: context, flipped: false)
         NSGraphicsContext.current = graphicsContext
-        attributedText.draw(in: pixelRect)
+        drawText(text, in: pixelRect, style: style)
         NSGraphicsContext.current = previousGraphicsContext
         context.restoreGState()
     }
