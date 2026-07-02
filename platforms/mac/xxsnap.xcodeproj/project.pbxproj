@@ -140,7 +140,7 @@
 		597D9837A717D587B72F5C1F /* arrow.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = arrow.png; sourceTree = "<group>"; };
 		5D09140AE83525CD00CBA67A /* SelectionToolbarStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectionToolbarStateTests.swift; sourceTree = "<group>"; };
 		6569DD68B9D82807BFE9B8B4 /* highlighter-tool.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "highlighter-tool.png"; sourceTree = "<group>"; };
-		65E3B9B2366D43EB65277157 /* xxsnap.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = xxsnap.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		65E3B9B2366D43EB65277157 /* XxSnap.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = XxSnap.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		69C2B328D25C6F4DEFCD575D /* undo-enabled.svg */ = {isa = PBXFileReference; path = "undo-enabled.svg"; sourceTree = "<group>"; };
 		6E00E3D8E2129AD664A6BD69 /* redo-enabled.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "redo-enabled.png"; sourceTree = "<group>"; };
 		6F168719916830C9536C929C /* xxsnapTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = xxsnapTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -225,7 +225,7 @@
 		65F4A13A03C198B2FAA07548 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				65E3B9B2366D43EB65277157 /* xxsnap.app */,
+				65E3B9B2366D43EB65277157 /* XxSnap.app */,
 				6F168719916830C9536C929C /* xxsnapTests.xctest */,
 			);
 			name = Products;
@@ -413,8 +413,8 @@
 			name = xxsnap;
 			packageProductDependencies = (
 			);
-			productName = xxsnap;
-			productReference = 65E3B9B2366D43EB65277157 /* xxsnap.app */;
+			productName = XxSnap;
+			productReference = 65E3B9B2366D43EB65277157 /* XxSnap.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -664,7 +664,8 @@
 					"@executable_path/../Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.xxsnap.mac;
-				PRODUCT_NAME = xxsnap;
+				PRODUCT_MODULE_NAME = xxsnap;
+				PRODUCT_NAME = XxSnap;
 				SDKROOT = macosx;
 				SWIFT_OBJC_BRIDGING_HEADER = "Sources/Bridge/xxsnap-Bridging-Header.h";
 			};
@@ -686,7 +687,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.xxsnap.mac.tests;
 				SDKROOT = macosx;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/xxsnap.app/Contents/MacOS/xxsnap";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/XxSnap.app/Contents/MacOS/XxSnap";
 			};
 			name = Debug;
 		};
@@ -707,7 +708,8 @@
 					"@executable_path/../Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.xxsnap.mac;
-				PRODUCT_NAME = xxsnap;
+				PRODUCT_MODULE_NAME = xxsnap;
+				PRODUCT_NAME = XxSnap;
 				SDKROOT = macosx;
 				SWIFT_OBJC_BRIDGING_HEADER = "Sources/Bridge/xxsnap-Bridging-Header.h";
 			};
@@ -788,7 +790,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.xxsnap.mac.tests;
 				SDKROOT = macosx;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/xxsnap.app/Contents/MacOS/xxsnap";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/XxSnap.app/Contents/MacOS/XxSnap";
 			};
 			name = Release;
 		};

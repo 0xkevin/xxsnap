@@ -26,7 +26,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.xxsnap.mac
-        PRODUCT_NAME: xxsnap
+        PRODUCT_NAME: XxSnap
+        PRODUCT_MODULE_NAME: xxsnap
         ASSETCATALOG_COMPILER_APPICON_NAME: ""
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: Resources/Info.plist
@@ -47,7 +48,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.xxsnap.mac.tests
         GENERATE_INFOPLIST_FILE: YES
-        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/xxsnap.app/Contents/MacOS/xxsnap"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/XxSnap.app/Contents/MacOS/XxSnap"
         CODE_SIGNING_ALLOWED: NO
         CODE_SIGNING_REQUIRED: NO
         CODE_SIGN_IDENTITY: ""

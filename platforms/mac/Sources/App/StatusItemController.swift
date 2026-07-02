@@ -30,9 +30,7 @@ final class StatusItemController: NSObject {
         }
 
         button.title = ""
-        let image = NSImage(systemSymbolName: "viewfinder", accessibilityDescription: "xxsnap")
-            ?? NSImage(systemSymbolName: "camera.viewfinder", accessibilityDescription: "xxsnap")
-        image?.isTemplate = true
+        let image = statusBarImage()
         button.image = image
         button.imagePosition = .imageOnly
         button.toolTip = "xxsnap 截图"
@@ -50,5 +48,18 @@ final class StatusItemController: NSObject {
         }
 
         statusItem.menu = menu
+    }
+
+    private func statusBarImage() -> NSImage? {
+        let image = Bundle.main.url(forResource: "xxsnap", withExtension: "png")
+            .flatMap(NSImage.init(contentsOf:))
+            ?? NSImage(named: "xxsnap")
+            ?? NSImage(systemSymbolName: "viewfinder", accessibilityDescription: "xxsnap")
+            ?? NSImage(systemSymbolName: "camera.viewfinder", accessibilityDescription: "xxsnap")
+
+        image?.accessibilityDescription = "xxsnap"
+        image?.size = NSSize(width: 18, height: 18)
+        image?.isTemplate = true
+        return image
     }
 }

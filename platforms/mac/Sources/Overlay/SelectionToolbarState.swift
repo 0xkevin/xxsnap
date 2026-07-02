@@ -13,6 +13,10 @@ enum SelectionToolbarState {
     static let measurementControlSelectedBackgroundAlpha: CGFloat = 0.34
     static let optionsToolbarHorizontalPadding: CGFloat = 10
     static let textOptionIconSize: CGFloat = 15
+    static let textEmphasisIconSize: CGFloat = 20
+    static let textDropdownBackgroundColor = NSColor.white
+    static let textDropdownScrollbarTrackColor = NSColor.black.withAlphaComponent(0.14)
+    static let textDropdownScrollbarThumbColor = NSColor.black.withAlphaComponent(0.46)
     static let textSizeValues: [CGFloat] = (3...72).map { CGFloat($0) }
     static let eyedropperCursorSize = NSSize(width: 24, height: 24)
     static let eyedropperIconSize: CGFloat = 18
@@ -139,6 +143,7 @@ enum SelectionToolbarState {
     enum OverlayCursorStyle: Equatable {
         case arrow
         case crosshair
+        case textInput
         case eyedropper
         case move
         case resizeLeftRight
@@ -253,6 +258,9 @@ enum SelectionToolbarState {
             "shapeRectangle": "方形",
             "shapeEllipse": "圆形",
             "strokeStyle": "线条类型",
+            "textBold": "加粗",
+            "textItalic": "斜体",
+            "textOutline": "描边",
             "startArrowType": "开始箭头",
             "endArrowType": "结束箭头",
             "customColor": "自定义颜色",
@@ -444,9 +452,9 @@ enum SelectionToolbarState {
 
     static func annotationKindSupportsGeometryEditing(_ kind: CaptureAnnotationKind) -> Bool {
         switch kind {
-        case .rectangle, .ellipse, .mosaicRectangle:
+        case .rectangle, .ellipse, .text, .mosaicRectangle:
             return true
-        case .arrowLine, .brush, .marker, .text, .mosaicStroke:
+        case .arrowLine, .brush, .marker, .mosaicStroke:
             return false
         }
     }
@@ -901,7 +909,7 @@ enum SelectionToolbarState {
         case .marker:
             return 102
         case .text:
-            return 330
+            return 350
         case .mosaic:
             return 0
         }
@@ -935,11 +943,11 @@ enum SelectionToolbarState {
     }
 
     static func textFontFieldRect(in optionsRect: NSRect) -> NSRect {
-        NSRect(x: optionsRect.minX + 98, y: optionControlY(in: optionsRect), width: 154, height: 20)
+        NSRect(x: optionsRect.minX + 108, y: optionControlY(in: optionsRect), width: 154, height: 20)
     }
 
     static func textSizeFieldRect(in optionsRect: NSRect) -> NSRect {
-        NSRect(x: optionsRect.minX + 262, y: optionControlY(in: optionsRect), width: 48, height: 20)
+        NSRect(x: optionsRect.minX + 282, y: optionControlY(in: optionsRect), width: 48, height: 20)
     }
 
     static func installedTextFontFamilies() -> [String] {
