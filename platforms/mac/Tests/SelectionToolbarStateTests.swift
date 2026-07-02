@@ -360,7 +360,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertNotNil(framePixel)
     }
 
-    func testSelectedTextAnnotationUsesResizeAndMoveCursorsInTextTool() throws {
+    func testSelectedTextAnnotationUsesInputMoveResizeAndRotationCursorsInTextTool() throws {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         let selection = NSRect(x: 100, y: 100, width: 420, height: 280)
         window.test_setLockedSelectionRect(selection)
@@ -375,6 +375,8 @@ final class SelectionToolbarStateTests: XCTestCase {
         let bodyPoint = NSPoint(x: selection.minX + textRect.midX, y: selection.minY + textRect.midY)
         window.test_mouseDown(at: bodyPoint)
         window.test_mouseUp(at: bodyPoint)
+
+        XCTAssertEqual(window.test_cursorStyle(at: bodyPoint), .textInput)
 
         let expected: [(SelectionToolbarState.OverlayResizeHandle, SelectionToolbarState.OverlayCursorStyle)] = [
             (.topLeft, .resizeTopLeft),
@@ -393,6 +395,9 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         let borderPoint = NSPoint(x: selection.minX + textRect.minX + textRect.width * 0.25, y: selection.minY + textRect.minY)
         XCTAssertEqual(window.test_cursorStyle(at: borderPoint), .move)
+
+        let rotationPoint = try XCTUnwrap(window.test_mosaicRectangleRotationHandlePoint())
+        XCTAssertEqual(window.test_cursorStyle(at: rotationPoint), .rotationHandle)
     }
 
     func testDraggingTextBorderAtSelectionEdgeMovesTextNotSelection() throws {
@@ -400,11 +405,15 @@ final class SelectionToolbarStateTests: XCTestCase {
         let selection = NSRect(x: 100, y: 100, width: 420, height: 280)
         window.test_setLockedSelectionRect(selection)
         window.test_activateTextTool()
-
-        window.test_mouseDown(at: NSPoint(x: 180, y: selection.minY))
-        window.test_mouseUp(at: NSPoint(x: 180, y: selection.minY))
-        window.firstResponder?.insertText("贴边文字")
-        window.test_commitTextEditing()
+        window.test_setAnnotations([
+            CaptureAnnotation(
+                kind: .text,
+                rect: NSRect(x: 80, y: 0, width: 160, height: 36),
+                style: CaptureAnnotationStyle(),
+                text: "贴边文字"
+            )
+        ])
+        window.test_selectAnnotation(at: 0)
 
         let beforeSelection = try XCTUnwrap(window.test_lockedSelectionRect)
         let beforeTextRect = try XCTUnwrap(window.test_annotationRect(at: 0))
@@ -422,6 +431,72 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(afterSelection, beforeSelection)
         XCTAssertNotEqual(afterTextRect.origin.x, beforeTextRect.origin.x)
         XCTAssertNotEqual(afterTextRect.origin.y, beforeTextRect.origin.y)
+    }
+
+    func testTextToolStillAllowsSelectionBorderResizeOnEveryEdge() throws {
+        struct EdgeCase {
+            let start: (NSRect) -> NSPoint
+            let end: (NSRect) -> NSPoint
+            let expectedCursor: SelectionToolbarState.OverlayCursorStyle
+            let assertResized: (NSRect, NSRect) -> Void
+        }
+
+        let cases: [EdgeCase] = [
+            EdgeCase(
+                start: { NSPoint(x: $0.minX + 2, y: $0.midY) },
+                end: { NSPoint(x: $0.minX - 34, y: $0.midY) },
+                expectedCursor: .resizeLeftRight,
+                assertResized: { before, after in
+                    XCTAssertEqual(after.minX, before.minX - 34, accuracy: 0.5)
+                    XCTAssertEqual(after.maxX, before.maxX, accuracy: 0.5)
+                }
+            ),
+            EdgeCase(
+                start: { NSPoint(x: $0.maxX - 2, y: $0.midY) },
+                end: { NSPoint(x: $0.maxX + 34, y: $0.midY) },
+                expectedCursor: .resizeLeftRight,
+                assertResized: { before, after in
+                    XCTAssertEqual(after.minX, before.minX, accuracy: 0.5)
+                    XCTAssertEqual(after.maxX, before.maxX + 34, accuracy: 0.5)
+                }
+            ),
+            EdgeCase(
+                start: { NSPoint(x: $0.midX, y: $0.maxY - 2) },
+                end: { NSPoint(x: $0.midX, y: $0.maxY + 34) },
+                expectedCursor: .resizeUpDown,
+                assertResized: { before, after in
+                    XCTAssertEqual(after.minY, before.minY, accuracy: 0.5)
+                    XCTAssertEqual(after.maxY, before.maxY + 34, accuracy: 0.5)
+                }
+            ),
+            EdgeCase(
+                start: { NSPoint(x: $0.midX, y: $0.minY + 2) },
+                end: { NSPoint(x: $0.midX, y: $0.minY - 34) },
+                expectedCursor: .resizeUpDown,
+                assertResized: { before, after in
+                    XCTAssertEqual(after.minY, before.minY - 34, accuracy: 0.5)
+                    XCTAssertEqual(after.maxY, before.maxY, accuracy: 0.5)
+                }
+            ),
+        ]
+
+        for edgeCase in cases {
+            let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+            let selection = NSRect(x: 100, y: 100, width: 220, height: 140)
+            window.test_setLockedSelectionRect(selection)
+            window.test_activateTextTool()
+
+            let start = edgeCase.start(selection)
+            XCTAssertEqual(window.test_cursorStyle(at: start), edgeCase.expectedCursor)
+
+            window.test_mouseDown(at: start)
+            window.test_mouseDragged(to: edgeCase.end(selection))
+            window.test_mouseUp(at: edgeCase.end(selection))
+
+            let resized = try XCTUnwrap(window.test_lockedSelectionRect)
+            edgeCase.assertResized(selection, resized)
+            XCTAssertEqual(window.test_annotationCount, 0)
+        }
     }
 
     func testDraggingActiveTextEditorMovesTextNotSelectionAndEndsEditing() throws {

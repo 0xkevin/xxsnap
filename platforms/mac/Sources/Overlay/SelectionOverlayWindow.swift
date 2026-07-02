@@ -1923,6 +1923,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             : nil
         let shapeResizeHandle = interactionMode == .annotating ? resizeHandle(at: point)?.toolbarStateHandle : nil
         let isAnnotationBorder = interactionMode == .annotating && annotationIndexForBorder(at: point) != nil
+        let textAnnotationBorderIndex = interactionMode == .annotating ? textAnnotationBorderIndex(at: point) : nil
 
         if isTextToolActive,
            interactionMode == .annotating,
@@ -1930,9 +1931,24 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             if let shapeResizeHandle {
                 return SelectionToolbarState.overlayCursorStyle(for: shapeResizeHandle)
             }
-            if isAnnotationBorder {
+            if textAnnotationBorderIndex != nil {
                 return .move
             }
+        }
+
+        if isTextToolActive,
+           interactionMode == .annotating,
+           mosaicRectangleRotationHitTarget(at: point) != nil {
+            return .rotationHandle
+        }
+
+        if isTextToolActive,
+           interactionMode == .annotating,
+           let selectionResizeHandle,
+           shapeResizeHandle == nil,
+           !isAnnotationBorder,
+           textAnnotationIndex(at: point) == nil {
+            return SelectionToolbarState.overlayCursorStyle(for: selectionResizeHandle)
         }
 
         if isTextToolActive, !isToolbarOrPanelPoint(point), isInsideSelection {
@@ -2421,7 +2437,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         case .resizeBottomRight:
             NSCursor.frameResize(position: .bottomRight, directions: .all).set()
         case .rotationHandle:
-            NSCursor.xxsnapBrushRotationHandle(angle: 0).set()
+            NSCursor.xxsnapMosaicRectangleRotationHandle.set()
         case .brush:
             NSCursor.xxsnapBrush.set()
         case .eyedropper:
@@ -2901,6 +2917,14 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             showsStartArrowTypeMenu = false
             showsEndArrowTypeMenu = false
             needsDisplay = true
+            return
+        }
+
+        if isTextToolActive,
+           resizeHandle(at: point) == nil,
+           textAnnotationIndex(at: point) == nil,
+           let selectionResizeHandle = selectionResizeHandle(at: point) {
+            beginSelectionResize(handle: selectionResizeHandle)
             return
         }
 
@@ -5935,6 +5959,15 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         return nil
     }
 
+    private func textAnnotationBorderIndex(at point: NSPoint) -> Int? {
+        for index in annotations.indices.reversed() where annotations[index].kind == .text {
+            if textAnnotationBorderContains(point: point, annotation: annotations[index]) {
+                return index
+            }
+        }
+        return nil
+    }
+
     private func annotationBorderContains(_ point: NSPoint, for annotation: CaptureAnnotation) -> Bool {
         if annotation.kind == .arrowLine {
             guard let arrowLine = overlayArrowLine(fromLocalArrowLine: annotation.arrowLine) else {
@@ -5980,6 +6013,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     private func textAnnotationHitContains(point: NSPoint, annotation: CaptureAnnotation) -> Bool {
         rotatedAnnotationRectContains(point, annotation: annotation, hitOutset: 6)
+    }
+
+    private func textAnnotationBorderContains(point: NSPoint, annotation: CaptureAnnotation) -> Bool {
+        rotatedAnnotationBorderContains(point, annotation: annotation, hitOutset: 6)
     }
 
     private func resizeHandle(at point: NSPoint) -> ShapeResizeHandle? {
@@ -11326,6 +11363,21 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         let center = NSPoint(x: rect.midX, y: rect.midY)
         let unrotatedPoint = rotatedPoint(point, around: center, angle: -annotation.rotationAngle)
         return rect.contains(unrotatedPoint)
+    }
+
+    private func rotatedAnnotationBorderContains(_ point: NSPoint, annotation: CaptureAnnotation, hitOutset: CGFloat) -> Bool {
+        let rect = overlayRect(fromLocalAnnotationRect: annotation.rect).standardized
+        let center = NSPoint(x: rect.midX, y: rect.midY)
+        let unrotatedPoint = rotatedPoint(point, around: center, angle: -annotation.rotationAngle)
+        let outerRect = rect.insetBy(dx: -hitOutset, dy: -hitOutset)
+        let innerRect = rect.insetBy(dx: hitOutset, dy: hitOutset)
+        guard outerRect.contains(unrotatedPoint) else {
+            return false
+        }
+        guard innerRect.width > 0, innerRect.height > 0 else {
+            return true
+        }
+        return !innerRect.contains(unrotatedPoint)
     }
 
     private func rotatedRectanglePath(for rect: NSRect, angle: CGFloat) -> NSBezierPath {
