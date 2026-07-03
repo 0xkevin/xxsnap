@@ -146,15 +146,25 @@ enum SelectionToolbarState {
         case textInput
         case eyedropper
         case move
+        case moveLight
         case resizeLeftRight
+        case resizeLeftRightLight
         case resizeUpDown
+        case resizeUpDownLight
         case resizeTopLeft
+        case resizeTopLeftLight
         case resizeTopRight
+        case resizeTopRightLight
         case resizeBottomLeft
+        case resizeBottomLeftLight
         case resizeBottomRight
+        case resizeBottomRightLight
         case rotationHandle
         case brush
+        case brushLight
         case marker
+        case markerLight
+        case eyedropperLight
     }
 
     static let defaultFillPreviewColor = NSColor.systemGray
