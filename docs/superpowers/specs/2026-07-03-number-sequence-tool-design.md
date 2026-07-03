@@ -4,7 +4,7 @@
 
 xxsnap already has a visible main-toolbar entry and bundled icon assets for the number sequence tool, but the feature is still a placeholder. Existing requirements say the tool must support incremental numbering, move, delete, reorder rules, color, and size. The capture overlay also has mature patterns for text editing, selection outlines, color palettes, size dropdowns, export rendering, and selected-annotation handles.
 
-This design covers the first shippable mac implementation of the number sequence tool and its companion symbol marks: numbered circles, check marks, and cross marks.
+This design covers the first shippable mac implementation of the number sequence tool and its companion symbol marks: numbered circles, standalone check marks, and standalone cross marks.
 
 ## Goals
 
@@ -81,8 +81,8 @@ The SVG source for the cross mark is:
 When the number tool is active, the mouse cursor becomes a mark cursor:
 
 - numbered circle mode: cursor shows the current number icon;
-- check mode: cursor shows a check mark;
-- cross mode: cursor shows a cross mark.
+- check mode: cursor shows a standalone check mark with no background circle;
+- cross mode: cursor shows a standalone cross mark with no background circle.
 
 The cursor preview uses the current mark color and current size. If the toolbar icon is black, the cursor can still be colored.
 
@@ -111,7 +111,7 @@ Font size controls the glyph size and also scales the surrounding circle. The ci
 
 Numbered marks render as a filled circle in the selected color with a centered number. The inner number color should be readable: use white on dark or saturated fills, and switch to a dark text color on very light fills.
 
-Check and cross marks render as filled circles with the selected icon centered inside. Their default fill colors are green and red, but user color changes replace those fills. The icon glyph follows the same readable foreground rule as numbers.
+Check and cross marks render as standalone glyphs with no background circle. Their default glyph colors are green and red, but user color changes replace those glyph colors.
 
 Preview and export must share the same geometry, font sizing, colors, and foreground contrast rule.
 
@@ -192,7 +192,7 @@ Add focused mac XCTest coverage for:
 - `+` and `-` swap only adjacent numeric marks;
 - moving a mark preserves numeric order;
 - resizing clamps font size to `3...72`;
-- preview and export render number/check/cross marks with matching size, color, contrast, and clipping behavior.
+- preview and export render numbered circles plus standalone check/cross marks with matching size, color, contrast, and clipping behavior.
 
 Run the mac test target after implementation:
 
@@ -218,6 +218,6 @@ Manual smoke check:
 - The second toolbar matches the approved layout and supports mark type, size, and color controls.
 - Number/check/cross creation cursors match active type and color, and return to normal pointer over controls.
 - Numeric marks auto-number, delete-renumber, and adjacent-swap correctly.
-- Check/cross marks share size, color, move, delete, resize, preview, and export behavior without changing numeric order.
+- Check/cross marks render without background circles and share size, color, move, delete, resize, preview, and export behavior without changing numeric order.
 - Marks can be created outside the screenshot selection in the overlay.
 - Existing annotation tools continue to behave as before.
