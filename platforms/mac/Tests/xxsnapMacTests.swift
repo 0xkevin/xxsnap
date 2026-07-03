@@ -139,6 +139,54 @@ final class xxsnapMacTests: XCTestCase {
         XCTAssertLessThan(highlightedText.blue, 8)
     }
 
+    func testAnnotationRendererDrawsMarkerLineOnBlackBackground() throws {
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = SelectionToolbarState.defaultMarkerColor
+        style.strokeWidth = 18
+
+        let marker = CaptureMarkerLine(start: NSPoint(x: 10, y: 30), end: NSPoint(x: 110, y: 30))
+        let image = try makeBitmapImage(
+            pointSize: NSSize(width: 120, height: 80),
+            pixelWidth: 120,
+            pixelHeight: 80,
+            fill: .black
+        )
+        let rendered = CaptureAnnotationRenderer.render(
+            image: image,
+            annotations: [CaptureAnnotation(kind: .marker, rect: marker.boundingRect, style: style, markerLine: marker)]
+        )
+
+        let highlightedBlack = try XCTUnwrap(rgbaPixel(in: rendered, x: 60, y: 30))
+        XCTAssertEqual(highlightedBlack.alpha, 255)
+        XCTAssertGreaterThan(highlightedBlack.red, 40)
+        XCTAssertGreaterThan(highlightedBlack.green, 80)
+        XCTAssertGreaterThan(highlightedBlack.green, highlightedBlack.red)
+    }
+
+    func testAnnotationRendererDrawsDarkMarkerLineOnBlackBackground() throws {
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = .black
+        style.strokeWidth = 18
+
+        let marker = CaptureMarkerLine(start: NSPoint(x: 10, y: 30), end: NSPoint(x: 110, y: 30))
+        let image = try makeBitmapImage(
+            pointSize: NSSize(width: 120, height: 80),
+            pixelWidth: 120,
+            pixelHeight: 80,
+            fill: .black
+        )
+        let rendered = CaptureAnnotationRenderer.render(
+            image: image,
+            annotations: [CaptureAnnotation(kind: .marker, rect: marker.boundingRect, style: style, markerLine: marker)]
+        )
+
+        let highlightedBlack = try XCTUnwrap(rgbaPixel(in: rendered, x: 60, y: 30))
+        XCTAssertEqual(highlightedBlack.alpha, 255)
+        XCTAssertGreaterThan(highlightedBlack.red, 180)
+        XCTAssertGreaterThan(highlightedBlack.green, 180)
+        XCTAssertGreaterThan(highlightedBlack.blue, 180)
+    }
+
     func testAnnotationRendererDrawsTextAnnotation() throws {
         let image = try makeBitmapImage(
             pointSize: NSSize(width: 180, height: 100),

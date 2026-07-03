@@ -73,7 +73,10 @@ private extension NSCursor {
         Bundle.main.url(forResource: name, withExtension: "svg").flatMap(NSImage.init(contentsOf:))
     }
 
-    static let xxsnapEyedropper: NSCursor = {
+    static let xxsnapEyedropper: NSCursor = eyedropperCursor(tint: nil)
+    static let xxsnapEyedropperLight: NSCursor = eyedropperCursor(tint: .white)
+
+    private static func eyedropperCursor(tint: NSColor?) -> NSCursor {
         let size = SelectionToolbarState.eyedropperCursorSize
         let hotSpot = SelectionToolbarState.eyedropperCursorHotSpot
         let iconSize = SelectionToolbarState.eyedropperIconSize
@@ -92,9 +95,13 @@ private extension NSCursor {
             operation: .copy,
             fraction: 1.0
         )
+        if let tint {
+            tint.setFill()
+            NSRect(x: inset, y: inset, width: iconSize, height: iconSize).fill(using: .sourceAtop)
+        }
         cursorImage.unlockFocus()
         return NSCursor(image: cursorImage, hotSpot: hotSpot)
-    }()
+    }
 
     static func drawBrushRotationHandleIcon() {
         let icon = brushRotationHandleStrokePath()
@@ -151,7 +158,16 @@ private extension NSCursor {
         return path
     }
 
-    static let xxsnapMove: NSCursor = {
+    static let xxsnapMove: NSCursor = moveCursor(foreground: .black, outline: NSColor.white.withAlphaComponent(0.9))
+    static let xxsnapMoveLight: NSCursor = moveCursor(foreground: .white, outline: NSColor.black.withAlphaComponent(0.75))
+    static let xxsnapResizeLeftRightLight: NSCursor = resizeCursor(angle: 0, foreground: .white)
+    static let xxsnapResizeUpDownLight: NSCursor = resizeCursor(angle: .pi / 2, foreground: .white)
+    static let xxsnapResizeTopLeftLight: NSCursor = resizeCursor(angle: -.pi / 4, foreground: .white)
+    static let xxsnapResizeTopRightLight: NSCursor = resizeCursor(angle: .pi / 4, foreground: .white)
+    static let xxsnapResizeBottomLeftLight: NSCursor = resizeCursor(angle: .pi / 4, foreground: .white)
+    static let xxsnapResizeBottomRightLight: NSCursor = resizeCursor(angle: -.pi / 4, foreground: .white)
+
+    private static func moveCursor(foreground: NSColor, outline: NSColor) -> NSCursor {
         let size = NSSize(width: 28, height: 28)
         if let symbol = NSImage(
             systemSymbolName: "arrow.up.and.down.and.arrow.left.and.right",
@@ -161,7 +177,7 @@ private extension NSCursor {
             image.lockFocus()
             NSGraphicsContext.current?.imageInterpolation = .high
             symbol.draw(in: NSRect(x: 3, y: 3, width: 22, height: 22))
-            NSColor.black.setFill()
+            foreground.setFill()
             NSRect(x: 3, y: 3, width: 22, height: 22).fill(using: .sourceAtop)
             image.unlockFocus()
             return NSCursor(image: image, hotSpot: NSPoint(x: size.width / 2, y: size.height / 2))
@@ -170,17 +186,17 @@ private extension NSCursor {
         let image = NSImage(size: size)
         image.lockFocus()
 
-        let outline = NSBezierPath()
-        drawMoveCursor(into: outline, offset: .zero)
-        NSColor.white.withAlphaComponent(0.9).setStroke()
-        outline.lineWidth = 4
-        outline.lineCapStyle = .round
-        outline.lineJoinStyle = .round
-        outline.stroke()
+        let outlinePath = NSBezierPath()
+        drawMoveCursor(into: outlinePath, offset: .zero)
+        outline.setStroke()
+        outlinePath.lineWidth = 4
+        outlinePath.lineCapStyle = .round
+        outlinePath.lineJoinStyle = .round
+        outlinePath.stroke()
 
         let path = NSBezierPath()
         drawMoveCursor(into: path, offset: .zero)
-        NSColor.black.setStroke()
+        foreground.setStroke()
         path.lineWidth = 2
         path.lineCapStyle = .round
         path.lineJoinStyle = .round
@@ -188,9 +204,50 @@ private extension NSCursor {
 
         image.unlockFocus()
         return NSCursor(image: image, hotSpot: NSPoint(x: size.width / 2, y: size.height / 2))
-    }()
+    }
 
-    static let xxsnapBrush: NSCursor = {
+    private static func resizeCursor(angle: CGFloat, foreground: NSColor) -> NSCursor {
+        let size = NSSize(width: 24, height: 24)
+        let center = NSPoint(x: size.width / 2, y: size.height / 2)
+        let image = NSImage(size: size)
+        image.lockFocus()
+
+        if let context = NSGraphicsContext.current?.cgContext {
+            context.translateBy(x: center.x, y: center.y)
+            context.rotate(by: angle)
+            context.translateBy(x: -center.x, y: -center.y)
+        }
+
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: 5, y: 12))
+        path.line(to: NSPoint(x: 19, y: 12))
+        path.move(to: NSPoint(x: 5, y: 12))
+        path.line(to: NSPoint(x: 9, y: 8))
+        path.move(to: NSPoint(x: 5, y: 12))
+        path.line(to: NSPoint(x: 9, y: 16))
+        path.move(to: NSPoint(x: 19, y: 12))
+        path.line(to: NSPoint(x: 15, y: 8))
+        path.move(to: NSPoint(x: 19, y: 12))
+        path.line(to: NSPoint(x: 15, y: 16))
+
+        NSColor.black.withAlphaComponent(0.75).setStroke()
+        path.lineWidth = 5
+        path.lineCapStyle = .round
+        path.lineJoinStyle = .round
+        path.stroke()
+
+        foreground.setStroke()
+        path.lineWidth = 2
+        path.stroke()
+
+        image.unlockFocus()
+        return NSCursor(image: image, hotSpot: center)
+    }
+
+    static let xxsnapBrush: NSCursor = brushCursor(tint: nil)
+    static let xxsnapBrushLight: NSCursor = brushCursor(tint: .white)
+
+    private static func brushCursor(tint: NSColor?) -> NSCursor {
         let size = NSSize(width: 24, height: 24)
         // Hot spot at the pencil tip (lower-left area of the icon).
         // This ensures the drawn line follows the tip, not the cursor center.
@@ -210,6 +267,10 @@ private extension NSCursor {
                 operation: .copy,
                 fraction: 1.0
             )
+            if let tint {
+                tint.setFill()
+                NSRect(x: inset, y: inset, width: iconSize, height: iconSize).fill(using: .sourceAtop)
+            }
             scaled.unlockFocus()
             return NSCursor(image: scaled, hotSpot: tipHotSpot)
         }
@@ -223,13 +284,17 @@ private extension NSCursor {
             image.lockFocus()
             NSGraphicsContext.current?.imageInterpolation = .high
             symbol.draw(in: NSRect(x: inset, y: inset, width: iconSize, height: iconSize))
+            if let tint {
+                tint.setFill()
+                NSRect(x: inset, y: inset, width: iconSize, height: iconSize).fill(using: .sourceAtop)
+            }
             image.unlockFocus()
             return NSCursor(image: image, hotSpot: tipHotSpot)
         }
 
         // Ultimate fallback: standard arrow
         return NSCursor.arrow
-    }()
+    }
 
     static func xxsnapMarker(color: NSColor, strokeWidth: CGFloat) -> NSCursor {
         let size = NSSize(width: 24, height: 24)
@@ -621,6 +686,14 @@ final class SelectionOverlayWindow: NSWindow {
 
     func test_textEditorInsertionRect() -> NSRect? {
         (contentView as? SelectionOverlayView)?.test_textEditorInsertionRect()
+    }
+
+    func test_editingTextCaretDrawRect() -> NSRect? {
+        (contentView as? SelectionOverlayView)?.test_editingTextCaretDrawRect()
+    }
+
+    func test_editingTextCaretColor() -> NSColor? {
+        (contentView as? SelectionOverlayView)?.test_editingTextCaretColor()
     }
 
     func test_textEditorOverlayPointForInsertion(at characterIndex: Int) -> NSPoint? {
@@ -1961,7 +2034,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             if isToolbarOrPanelPoint(point) || !isInsideSelection {
                 return .arrow
             }
-            return .eyedropper
+            return backgroundAwareCursorStyle(.eyedropper, at: point)
         }
 
         let selectionResizeHandle = interactionMode == .annotating && !shouldPreferMosaicDrawingOutsideSelection(at: point)
@@ -1979,10 +2052,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
            interactionMode == .annotating,
            selectedAnnotation?.kind == .text {
             if let shapeResizeHandle {
-                return SelectionToolbarState.overlayCursorStyle(for: shapeResizeHandle)
+                return backgroundAwareCursorStyle(SelectionToolbarState.overlayCursorStyle(for: shapeResizeHandle), at: point)
             }
             if textAnnotationBorderIndex != nil {
-                return .move
+                return backgroundAwareCursorStyle(.move, at: point)
             }
         }
 
@@ -1998,7 +2071,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
            shapeResizeHandle == nil,
            !isAnnotationBorder,
            textAnnotationIndex(at: point) == nil {
-            return SelectionToolbarState.overlayCursorStyle(for: selectionResizeHandle)
+            return backgroundAwareCursorStyle(SelectionToolbarState.overlayCursorStyle(for: selectionResizeHandle), at: point)
         }
 
         if isTextToolActive, !isToolbarOrPanelPoint(point), isInsideSelection {
@@ -2006,7 +2079,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
 
         if interactionMode == .movingShape {
-            return .move
+            return backgroundAwareCursorStyle(.move, at: point)
         }
 
         if interactionMode == .annotating, mosaicRectangleRotationHitTarget(at: point) != nil {
@@ -2014,7 +2087,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
 
         if interactionMode == .annotating, shouldPreferMosaicDrawingBeforeAnnotationHitTesting(at: point) {
-            return SelectionToolbarState.overlayCursorStyle(
+            let style = SelectionToolbarState.overlayCursorStyle(
                 isSelecting: false,
                 isToolbarOrPanelPoint: false,
                 resizeHandle: nil,
@@ -2024,14 +2097,15 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 isShapeToolActive: isShapeToolActive,
                 currentShapeKind: currentShapeKind
             )
+            return backgroundAwareCursorStyle(style, at: point)
         }
 
         if interactionMode == .annotating, let arrowHit = arrowLineHitTarget(at: point) {
             switch arrowHit.target {
             case .start, .end:
-                return .resizeUpDown
+                return backgroundAwareCursorStyle(.resizeUpDown, at: point)
             case .control, .body:
-                return .move
+                return backgroundAwareCursorStyle(.move, at: point)
             case .none:
                 break
             }
@@ -2042,38 +2116,38 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
 
         if interactionMode == .rotatingBrush {
-            return .resizeUpDown
+            return backgroundAwareCursorStyle(.resizeUpDown, at: point)
         }
 
         if interactionMode == .resizingMarkerLine {
-            return .resizeUpDown
+            return backgroundAwareCursorStyle(.resizeUpDown, at: point)
         }
 
         if interactionMode == .annotating, markerRotationHitTarget(at: point) != nil {
-            return .resizeUpDown
+            return backgroundAwareCursorStyle(.resizeUpDown, at: point)
         }
 
         if interactionMode == .annotating, brushRotationHitTarget(at: point) != nil {
-            return .resizeUpDown
+            return backgroundAwareCursorStyle(.resizeUpDown, at: point)
         }
 
         if let shapeResizeHandle {
-            return SelectionToolbarState.overlayCursorStyle(for: shapeResizeHandle)
+            return backgroundAwareCursorStyle(SelectionToolbarState.overlayCursorStyle(for: shapeResizeHandle), at: point)
         }
 
         if isAnnotationBorder {
-            return .move
+            return backgroundAwareCursorStyle(.move, at: point)
         }
 
         if let selectionResizeHandle {
-            return SelectionToolbarState.overlayCursorStyle(for: selectionResizeHandle)
+            return backgroundAwareCursorStyle(SelectionToolbarState.overlayCursorStyle(for: selectionResizeHandle), at: point)
         }
 
         if !isShapeToolActive, isMainToolbarDragPoint(point) {
-            return .move
+            return backgroundAwareCursorStyle(.move, at: point)
         }
 
-        return SelectionToolbarState.overlayCursorStyle(
+        let style = SelectionToolbarState.overlayCursorStyle(
             isSelecting: interactionMode == .selecting,
             isToolbarOrPanelPoint: isToolbarOrPanelPoint(point),
             resizeHandle: nil,
@@ -2083,6 +2157,41 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             isShapeToolActive: isShapeToolActive,
             currentShapeKind: currentShapeKind
         )
+        return backgroundAwareCursorStyle(style, at: point)
+    }
+
+    private func backgroundAwareCursorStyle(
+        _ style: SelectionToolbarState.OverlayCursorStyle,
+        at point: NSPoint
+    ) -> SelectionToolbarState.OverlayCursorStyle {
+        guard shouldUseLightCursor(at: point) else {
+            return style
+        }
+
+        switch style {
+        case .move:
+            return .moveLight
+        case .resizeLeftRight:
+            return .resizeLeftRightLight
+        case .resizeUpDown:
+            return .resizeUpDownLight
+        case .resizeTopLeft:
+            return .resizeTopLeftLight
+        case .resizeTopRight:
+            return .resizeTopRightLight
+        case .resizeBottomLeft:
+            return .resizeBottomLeftLight
+        case .resizeBottomRight:
+            return .resizeBottomRightLight
+        case .brush:
+            return .brushLight
+        case .marker:
+            return .markerLight
+        case .eyedropper:
+            return .eyedropperLight
+        default:
+            return style
+        }
     }
 
     private func refreshCursor(at point: NSPoint) {
@@ -2405,7 +2514,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         let defaultCursor = interactionMode == .selecting ? NSCursor.crosshair : .arrow
         addCursorRect(bounds, cursor: defaultCursor)
         if isEyedropperToolActive, let lockedSelectionRect {
-            addCursorRect(lockedSelectionRect.standardized, cursor: NSCursor.xxsnapEyedropper)
+            addCursorRect(
+                lockedSelectionRect.standardized,
+                cursor: selectionPrefersLightCursor(lockedSelectionRect.standardized) ? NSCursor.xxsnapEyedropperLight : NSCursor.xxsnapEyedropper
+            )
         }
         if isTextToolActive, let lockedSelectionRect {
             let textInputRect = lockedSelectionRect.standardized.insetBy(dx: 12, dy: 12)
@@ -2426,10 +2538,11 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     private func cursorRectCursorForActiveShapeTool() -> NSCursor {
         if currentShapeKind == .brush {
-            return NSCursor.xxsnapBrush
+            return selectionPrefersLightCursor(lockedSelectionRect?.standardized) ? NSCursor.xxsnapBrushLight : NSCursor.xxsnapBrush
         }
         if currentShapeKind == .marker {
-            return NSCursor.xxsnapMarker(color: currentStyle.strokeColor, strokeWidth: currentStyle.strokeWidth)
+            let color = selectionPrefersLightCursor(lockedSelectionRect?.standardized) ? NSColor.white : currentStyle.strokeColor
+            return NSCursor.xxsnapMarker(color: color, strokeWidth: currentStyle.strokeWidth)
         }
         if currentShapeKind == .mosaicStroke {
             return NSCursor.xxsnapMosaicDot(diameter: SelectionToolbarState.mosaicCursorDotDiameter(for: currentStyle.strokeWidth))
@@ -2440,42 +2553,43 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private func addSelectionResizeCursorRects(for rect: NSRect) {
         let outset: CGFloat = 12
         let cornerLength = min(max(outset * 2, 18), min(rect.width, rect.height) / 2)
+        let useLightCursor = selectionPrefersLightCursor(rect)
         addCursorRectClipped(
             NSRect(x: rect.minX - outset, y: rect.maxY - cornerLength, width: cornerLength + outset, height: cornerLength + outset),
-            cursor: NSCursor.frameResize(position: .topLeft, directions: .all)
+            cursor: nsCursor(for: useLightCursor ? .resizeTopLeftLight : .resizeTopLeft)
         )
         addCursorRectClipped(
             NSRect(x: rect.maxX - cornerLength, y: rect.maxY - cornerLength, width: cornerLength + outset, height: cornerLength + outset),
-            cursor: NSCursor.frameResize(position: .topRight, directions: .all)
+            cursor: nsCursor(for: useLightCursor ? .resizeTopRightLight : .resizeTopRight)
         )
         addCursorRectClipped(
             NSRect(x: rect.minX - outset, y: rect.minY - outset, width: cornerLength + outset, height: cornerLength + outset),
-            cursor: NSCursor.frameResize(position: .bottomLeft, directions: .all)
+            cursor: nsCursor(for: useLightCursor ? .resizeBottomLeftLight : .resizeBottomLeft)
         )
         addCursorRectClipped(
             NSRect(x: rect.maxX - cornerLength, y: rect.minY - outset, width: cornerLength + outset, height: cornerLength + outset),
-            cursor: NSCursor.frameResize(position: .bottomRight, directions: .all)
+            cursor: nsCursor(for: useLightCursor ? .resizeBottomRightLight : .resizeBottomRight)
         )
 
         if rect.width > cornerLength * 2 {
             addCursorRectClipped(
                 NSRect(x: rect.minX + cornerLength, y: rect.maxY - outset, width: rect.width - cornerLength * 2, height: outset * 2),
-                cursor: NSCursor.resizeUpDown
+                cursor: nsCursor(for: useLightCursor ? .resizeUpDownLight : .resizeUpDown)
             )
             addCursorRectClipped(
                 NSRect(x: rect.minX + cornerLength, y: rect.minY - outset, width: rect.width - cornerLength * 2, height: outset * 2),
-                cursor: NSCursor.resizeUpDown
+                cursor: nsCursor(for: useLightCursor ? .resizeUpDownLight : .resizeUpDown)
             )
         }
 
         if rect.height > cornerLength * 2 {
             addCursorRectClipped(
                 NSRect(x: rect.minX - outset, y: rect.minY + cornerLength, width: outset * 2, height: rect.height - cornerLength * 2),
-                cursor: NSCursor.resizeLeftRight
+                cursor: nsCursor(for: useLightCursor ? .resizeLeftRightLight : .resizeLeftRight)
             )
             addCursorRectClipped(
                 NSRect(x: rect.maxX - outset, y: rect.minY + cornerLength, width: outset * 2, height: rect.height - cornerLength * 2),
-                cursor: NSCursor.resizeLeftRight
+                cursor: nsCursor(for: useLightCursor ? .resizeLeftRightLight : .resizeLeftRight)
             )
         }
     }
@@ -2487,37 +2601,61 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
     }
 
-    private func setCursor(_ style: SelectionToolbarState.OverlayCursorStyle) {
+    private func nsCursor(for style: SelectionToolbarState.OverlayCursorStyle) -> NSCursor {
         switch style {
         case .arrow:
-            NSCursor.arrow.set()
+            return NSCursor.arrow
         case .crosshair:
-            NSCursor.crosshair.set()
+            return NSCursor.crosshair
         case .textInput:
-            NSCursor.iBeam.set()
+            return NSCursor.iBeam
         case .move:
-            NSCursor.xxsnapMove.set()
+            return NSCursor.xxsnapMove
+        case .moveLight:
+            return NSCursor.xxsnapMoveLight
         case .resizeLeftRight:
-            NSCursor.resizeLeftRight.set()
+            return NSCursor.resizeLeftRight
+        case .resizeLeftRightLight:
+            return NSCursor.xxsnapResizeLeftRightLight
         case .resizeUpDown:
-            NSCursor.resizeUpDown.set()
+            return NSCursor.resizeUpDown
+        case .resizeUpDownLight:
+            return NSCursor.xxsnapResizeUpDownLight
         case .resizeTopLeft:
-            NSCursor.frameResize(position: .topLeft, directions: .all).set()
+            return NSCursor.frameResize(position: .topLeft, directions: .all)
+        case .resizeTopLeftLight:
+            return NSCursor.xxsnapResizeTopLeftLight
         case .resizeTopRight:
-            NSCursor.frameResize(position: .topRight, directions: .all).set()
+            return NSCursor.frameResize(position: .topRight, directions: .all)
+        case .resizeTopRightLight:
+            return NSCursor.xxsnapResizeTopRightLight
         case .resizeBottomLeft:
-            NSCursor.frameResize(position: .bottomLeft, directions: .all).set()
+            return NSCursor.frameResize(position: .bottomLeft, directions: .all)
+        case .resizeBottomLeftLight:
+            return NSCursor.xxsnapResizeBottomLeftLight
         case .resizeBottomRight:
-            NSCursor.frameResize(position: .bottomRight, directions: .all).set()
+            return NSCursor.frameResize(position: .bottomRight, directions: .all)
+        case .resizeBottomRightLight:
+            return NSCursor.xxsnapResizeBottomRightLight
         case .rotationHandle:
-            NSCursor.xxsnapMosaicRectangleRotationHandle.set()
+            return NSCursor.xxsnapMosaicRectangleRotationHandle
         case .brush:
-            NSCursor.xxsnapBrush.set()
+            return NSCursor.xxsnapBrush
+        case .brushLight:
+            return NSCursor.xxsnapBrushLight
         case .eyedropper:
-            NSCursor.xxsnapEyedropper.set()
+            return NSCursor.xxsnapEyedropper
+        case .eyedropperLight:
+            return NSCursor.xxsnapEyedropperLight
         case .marker:
-            NSCursor.xxsnapMarker(color: currentStyle.strokeColor, strokeWidth: currentStyle.strokeWidth).set()
+            return NSCursor.xxsnapMarker(color: currentStyle.strokeColor, strokeWidth: currentStyle.strokeWidth)
+        case .markerLight:
+            return NSCursor.xxsnapMarker(color: .white, strokeWidth: currentStyle.strokeWidth)
         }
+    }
+
+    private func setCursor(_ style: SelectionToolbarState.OverlayCursorStyle) {
+        nsCursor(for: style).set()
     }
 
     private var selectionRect: NSRect? {
@@ -4047,7 +4185,28 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return axisLockedPoint(start: shapeStartPoint, rawEnd: rawEnd)
         }
 
+        if (currentShapeKind == .rectangle || currentShapeKind == .ellipse), modifierFlags.contains(.shift) {
+            return equalSidePoint(start: shapeStartPoint, rawEnd: rawEnd)
+        }
+
         return rawEnd
+    }
+
+    private func equalSidePoint(start: NSPoint, rawEnd: NSPoint) -> NSPoint {
+        let deltaX = rawEnd.x - start.x
+        let deltaY = rawEnd.y - start.y
+        let side = max(abs(deltaX), abs(deltaY))
+        return NSPoint(
+            x: start.x + signedDistance(side, matching: deltaX),
+            y: start.y + signedDistance(side, matching: deltaY)
+        )
+    }
+
+    private func signedDistance(_ distance: CGFloat, matching delta: CGFloat) -> CGFloat {
+        if delta < 0 {
+            return -distance
+        }
+        return distance
     }
 
     private func mosaicRedaction(for kind: CaptureAnnotationKind) -> CaptureMosaicRedaction {
@@ -5149,6 +5308,35 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             height: rectInContainer.height
         )
         return editorCaretRect
+    }
+
+    func test_editingTextCaretDrawRect() -> NSRect? {
+        guard let textEditor,
+              let editingTextAnnotationIndex,
+              annotations.indices.contains(editingTextAnnotationIndex)
+        else {
+            return nil
+        }
+
+        return editingTextCaretDrawInfo(
+            for: textEditor,
+            annotation: annotations[editingTextAnnotationIndex]
+        )?.drawRect
+    }
+
+    func test_editingTextCaretColor() -> NSColor? {
+        guard let textEditor,
+              let editingTextAnnotationIndex,
+              annotations.indices.contains(editingTextAnnotationIndex),
+              let caretInfo = editingTextCaretDrawInfo(
+                for: textEditor,
+                annotation: annotations[editingTextAnnotationIndex]
+              )
+        else {
+            return nil
+        }
+
+        return editingTextCaretColor(at: caretInfo.samplePoint)
     }
 
     func test_textEditorOverlayPointForInsertion(at characterIndex: Int) -> NSPoint? {
@@ -8250,16 +8438,44 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             let editingTextAnnotationIndex,
             annotations.indices.contains(editingTextAnnotationIndex),
             annotations[editingTextAnnotationIndex].kind == .text,
-            textEditor.selectedRange().length == 0,
-            let caretRect = textEditorCaretRectInEditorBounds(textEditor)
+            textEditor.selectedRange().length == 0
         else {
             return
         }
 
         let annotation = annotations[editingTextAnnotationIndex]
-        let rect = overlayRect(fromLocalAnnotationRect: annotation.rect).standardized
-        guard rect.width > 0, rect.height > 0 else {
+        guard let caretInfo = editingTextCaretDrawInfo(for: textEditor, annotation: annotation) else {
             return
+        }
+
+        NSGraphicsContext.saveGraphicsState()
+        if abs(annotation.rotationAngle) >= 0.001 {
+            let transform = NSAffineTransform()
+            transform.translateX(by: caretInfo.annotationRect.midX, yBy: caretInfo.annotationRect.midY)
+            transform.rotate(byRadians: annotation.rotationAngle)
+            transform.translateX(by: -caretInfo.annotationRect.midX, yBy: -caretInfo.annotationRect.midY)
+            transform.concat()
+        }
+        editingTextCaretColor(at: caretInfo.samplePoint).setFill()
+        NSBezierPath(rect: caretInfo.drawRect).fill()
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    private struct EditingTextCaretDrawInfo {
+        let annotationRect: NSRect
+        let drawRect: NSRect
+        let samplePoint: NSPoint
+    }
+
+    private func editingTextCaretDrawInfo(
+        for textEditor: NSTextView,
+        annotation: CaptureAnnotation
+    ) -> EditingTextCaretDrawInfo? {
+        let rect = overlayRect(fromLocalAnnotationRect: annotation.rect).standardized
+        guard rect.width > 0, rect.height > 0,
+              let caretRect = textEditorCaretRectInEditorBounds(textEditor)
+        else {
+            return nil
         }
 
         let caretWidth = max(1.5, min(3, annotation.style.textSize / 12))
@@ -8272,23 +8488,34 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             width: caretWidth,
             height: caretHeight
         )
-
-        NSGraphicsContext.saveGraphicsState()
-        if abs(annotation.rotationAngle) >= 0.001 {
-            let transform = NSAffineTransform()
-            transform.translateX(by: rect.midX, yBy: rect.midY)
-            transform.rotate(byRadians: annotation.rotationAngle)
-            transform.translateX(by: -rect.midX, yBy: -rect.midY)
-            transform.concat()
-        }
-        NSColor.black.setFill()
-        NSBezierPath(rect: NSRect(
+        let drawRect = NSRect(
             x: rect.minX + localCaretRect.minX,
             y: rect.minY + localCaretRect.minY,
             width: localCaretRect.width,
             height: localCaretRect.height
-        )).fill()
-        NSGraphicsContext.restoreGraphicsState()
+        )
+        let samplePoint = rotatedPoint(
+            NSPoint(x: drawRect.midX, y: drawRect.midY),
+            around: NSPoint(x: rect.midX, y: rect.midY),
+            angle: annotation.rotationAngle
+        )
+
+        return EditingTextCaretDrawInfo(annotationRect: rect, drawRect: drawRect, samplePoint: samplePoint)
+    }
+
+    private func editingTextCaretColor(at point: NSPoint) -> NSColor {
+        if let selectionRect = lockedSelectionRect?.standardized,
+           let luminance = averageBackgroundLuminance(in: selectionRect) {
+            return luminance < 0.5 ? .white : .black
+        }
+
+        guard let color = sampleColor(at: point),
+              perceivedLuminance(of: color) < 0.18
+        else {
+            return .black
+        }
+
+        return .white
     }
 
     private func textEditorCaretRectInEditorBounds(
@@ -8375,8 +8602,13 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         path.line(to: markerLine.end)
 
         NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current?.cgContext.setBlendMode(.multiply)
-        let markerColor = annotation.style.strokeColor.withAlphaComponent(CaptureAnnotationRenderer.markerOpacity)
+        let samplingLine = inOverlay
+            ? markerLine
+            : (overlayMarkerLine(fromLocalMarkerLine: annotation.markerLine) ?? markerLine)
+        let prefersNormalBlend = markerLinePrefersNormalBlend(samplingLine)
+        NSGraphicsContext.current?.cgContext.setBlendMode(prefersNormalBlend ? .normal : .multiply)
+        let strokeColor = visibleMarkerColor(annotation.style.strokeColor, onDarkBackground: prefersNormalBlend)
+        let markerColor = strokeColor.withAlphaComponent(CaptureAnnotationRenderer.markerOpacity)
         if isZeroLengthMarkerLine(markerLine) {
             markerColor.setFill()
             let radius = annotation.style.strokeWidth / 2
@@ -8396,6 +8628,34 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             path.stroke()
         }
         NSGraphicsContext.restoreGraphicsState()
+    }
+
+    private func markerLinePrefersNormalBlend(_ markerLine: CaptureMarkerLine) -> Bool {
+        let sampleCount = 17
+        var darkSamples = 0
+        var validSamples = 0
+        for index in 0..<sampleCount {
+            let t = CGFloat(index) / CGFloat(sampleCount - 1)
+            let point = NSPoint(
+                x: markerLine.start.x + (markerLine.end.x - markerLine.start.x) * t,
+                y: markerLine.start.y + (markerLine.end.y - markerLine.start.y) * t
+            )
+            guard let color = sampleColor(at: point) else {
+                continue
+            }
+            validSamples += 1
+            if perceivedLuminance(of: color) < 0.12 {
+                darkSamples += 1
+            }
+        }
+        return validSamples > 0 && darkSamples >= max(1, validSamples * 3 / 4)
+    }
+
+    private func visibleMarkerColor(_ color: NSColor, onDarkBackground: Bool) -> NSColor {
+        guard onDarkBackground, perceivedLuminance(of: color) < 0.18 else {
+            return color
+        }
+        return .white
     }
 
     private func drawArrowLineAnnotation(_ annotation: CaptureAnnotation, inOverlay: Bool) {
@@ -9966,6 +10226,71 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         return sampleColor(atPixelX: pixel.x, y: pixel.y, in: backgroundBitmap)
     }
 
+    private func shouldUseLightCursor(at point: NSPoint) -> Bool {
+        guard let selectionRect = cursorSelectionRect?.standardized else {
+            return false
+        }
+
+        let hitRect = selectionRect.insetBy(dx: -16, dy: -16)
+        guard hitRect.contains(point) else {
+            return false
+        }
+
+        return selectionPrefersLightCursor(selectionRect)
+    }
+
+    private func selectionPrefersLightCursor(_ rect: NSRect?) -> Bool {
+        guard let rect,
+              let luminance = averageBackgroundLuminance(in: rect.standardized)
+        else {
+            return false
+        }
+        return luminance < 0.5
+    }
+
+    private func averageBackgroundLuminance(in rect: NSRect) -> CGFloat? {
+        guard backgroundBitmap != nil else {
+            return nil
+        }
+
+        let imageSize = backgroundImage?.size ?? bounds.size
+        let imageRect = NSRect(origin: .zero, size: imageSize)
+        let sampleRect = rect.standardized.intersection(imageRect)
+        guard sampleRect.width > 0, sampleRect.height > 0 else {
+            return nil
+        }
+
+        let maxSamplesPerAxis = 24
+        let columns = max(1, min(maxSamplesPerAxis, Int(ceil(sampleRect.width))))
+        let rows = max(1, min(maxSamplesPerAxis, Int(ceil(sampleRect.height))))
+        var total: CGFloat = 0
+        var count: CGFloat = 0
+
+        for row in 0..<rows {
+            for column in 0..<columns {
+                let point = NSPoint(
+                    x: sampleRect.minX + (CGFloat(column) + 0.5) * sampleRect.width / CGFloat(columns),
+                    y: sampleRect.minY + (CGFloat(row) + 0.5) * sampleRect.height / CGFloat(rows)
+                )
+                guard let color = sampleColor(at: point) else {
+                    continue
+                }
+                total += perceivedLuminance(of: color)
+                count += 1
+            }
+        }
+
+        guard count > 0 else {
+            return nil
+        }
+        return total / count
+    }
+
+    private func perceivedLuminance(of color: NSColor) -> CGFloat {
+        let rgb = color.usingColorSpace(.sRGB) ?? color
+        return 0.2126 * rgb.redComponent + 0.7152 * rgb.greenComponent + 0.0722 * rgb.blueComponent
+    }
+
     private func sampleCurrentColor(at point: NSPoint) -> NSColor? {
         if isEyedropperToolActive {
             return sampleVisibleSelectionColor(at: point)
@@ -10019,11 +10344,32 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return nil
         }
 
+        if let markerColor = visibleDarkMarkerLineColor(at: point) {
+            return markerColor
+        }
+
         guard let composite = fullMosaicPreviewComposite(for: annotations) else {
             return sampleColor(at: point)
         }
 
         return sampleColor(at: point, in: composite.image)
+    }
+
+    private func visibleDarkMarkerLineColor(at point: NSPoint) -> NSColor? {
+        for annotation in annotations.reversed() where annotation.kind == .marker {
+            guard let markerLine = overlayMarkerLine(fromLocalMarkerLine: annotation.markerLine) else {
+                continue
+            }
+            let hitOutset = max(1, annotation.style.strokeWidth / 2 + 1)
+            guard SelectionToolbarState.markerLineContains(point: point, line: markerLine, hitOutset: hitOutset) else {
+                continue
+            }
+            guard markerLinePrefersNormalBlend(markerLine) else {
+                return nil
+            }
+            return visibleMarkerColor(annotation.style.strokeColor, onDarkBackground: true)
+        }
+        return nil
     }
 
     private func sampleColor(at point: NSPoint, in image: NSImage) -> NSColor? {

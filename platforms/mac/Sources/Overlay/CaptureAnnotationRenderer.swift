@@ -1196,7 +1196,7 @@ enum CaptureAnnotationRenderer {
                     scaleY: scaleY
                 )
             } else {
-                draw(annotation, in: context, scaleX: scaleX, scaleY: scaleY)
+                draw(annotation, in: context, sourceImage: cgImage, scaleX: scaleX, scaleY: scaleY)
             }
         }
 
@@ -1227,7 +1227,13 @@ enum CaptureAnnotationRenderer {
         return NSImage(cgImage: redactedImage(from: cgImage, redaction: redaction), size: image.size)
     }
 
-    private static func draw(_ annotation: CaptureAnnotation, in context: CGContext, scaleX: CGFloat, scaleY: CGFloat) {
+    private static func draw(
+        _ annotation: CaptureAnnotation,
+        in context: CGContext,
+        sourceImage: CGImage,
+        scaleX: CGFloat,
+        scaleY: CGFloat
+    ) {
         let lineScale = (scaleX + scaleY) / 2
         if isMosaicAnnotation(annotation) {
             return
@@ -1237,7 +1243,7 @@ enum CaptureAnnotationRenderer {
             return
         }
         if annotation.kind == .marker {
-            drawMarkerLine(annotation, in: context, scaleX: scaleX, scaleY: scaleY, lineScale: lineScale)
+            drawMarkerLine(annotation, in: context, sourceImage: sourceImage, scaleX: scaleX, scaleY: scaleY, lineScale: lineScale)
             return
         }
         if annotation.kind == .arrowLine {
@@ -1716,6 +1722,7 @@ enum CaptureAnnotationRenderer {
     private static func drawMarkerLine(
         _ annotation: CaptureAnnotation,
         in context: CGContext,
+        sourceImage: CGImage,
         scaleX: CGFloat,
         scaleY: CGFloat,
         lineScale: CGFloat
@@ -1725,8 +1732,10 @@ enum CaptureAnnotationRenderer {
         }
 
         context.saveGState()
-        context.setBlendMode(.multiply)
-        context.setStrokeColor(cgColor(annotation.style.strokeColor.withAlphaComponent(markerOpacity)))
+        let prefersNormalBlend = markerLinePrefersNormalBlend(markerLine, sourceImage: sourceImage, scaleX: scaleX, scaleY: scaleY)
+        let strokeColor = visibleMarkerColor(annotation.style.strokeColor, onDarkBackground: prefersNormalBlend)
+        context.setBlendMode(prefersNormalBlend ? .normal : .multiply)
+        context.setStrokeColor(cgColor(strokeColor.withAlphaComponent(markerOpacity)))
         context.setLineWidth(annotation.style.strokeWidth * lineScale)
         context.setLineJoin(.round)
         context.setLineCap(.round)
@@ -1736,7 +1745,7 @@ enum CaptureAnnotationRenderer {
         let end = pixelPoint(markerLine.end, scaleX: scaleX, scaleY: scaleY)
         if hypot(end.x - start.x, end.y - start.y) < 0.5 {
             let radius = annotation.style.strokeWidth * lineScale / 2
-            context.setFillColor(cgColor(annotation.style.strokeColor.withAlphaComponent(markerOpacity)))
+            context.setFillColor(cgColor(strokeColor.withAlphaComponent(markerOpacity)))
             context.fillEllipse(in: CGRect(x: start.x - radius, y: start.y - radius, width: radius * 2, height: radius * 2))
             context.restoreGState()
             return
@@ -1748,6 +1757,46 @@ enum CaptureAnnotationRenderer {
         context.addPath(path)
         context.strokePath()
         context.restoreGState()
+    }
+
+    private static func markerLinePrefersNormalBlend(
+        _ markerLine: CaptureMarkerLine,
+        sourceImage: CGImage,
+        scaleX: CGFloat,
+        scaleY: CGFloat
+    ) -> Bool {
+        let sampleCount = 17
+        var darkSamples = 0
+        for index in 0..<sampleCount {
+            let t = CGFloat(index) / CGFloat(sampleCount - 1)
+            let point = CGPoint(
+                x: (markerLine.start.x + (markerLine.end.x - markerLine.start.x) * t) * scaleX,
+                y: (markerLine.start.y + (markerLine.end.y - markerLine.start.y) * t) * scaleY
+            )
+            guard let color = SelectionToolbarState.sampleColor(
+                atPixelX: Int(point.x.rounded()),
+                y: Int(point.y.rounded()),
+                in: sourceImage
+            ) else {
+                continue
+            }
+            if colorPerceivedLuminance(color) < 0.12 {
+                darkSamples += 1
+            }
+        }
+        return darkSamples >= sampleCount * 3 / 4
+    }
+
+    private static func visibleMarkerColor(_ color: NSColor, onDarkBackground: Bool) -> NSColor {
+        guard onDarkBackground, colorPerceivedLuminance(color) < 0.18 else {
+            return color
+        }
+        return .white
+    }
+
+    private static func colorPerceivedLuminance(_ color: NSColor) -> CGFloat {
+        let rgb = color.usingColorSpace(.sRGB) ?? color
+        return 0.2126 * rgb.redComponent + 0.7152 * rgb.greenComponent + 0.0722 * rgb.blueComponent
     }
 
     private static func drawBrushPath(

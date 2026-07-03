@@ -57,6 +57,54 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertFalse(window.test_isColorSamplerVisible)
     }
 
+    func testEyedropperSamplesVisibleMarkerLineOnBlackBackground() throws {
+        let background = solidImage(size: NSSize(width: 500, height: 400), color: .black)
+        let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateShapeTool(.marker)
+
+        let blackSwatch = try XCTUnwrap(window.test_optionsPaletteColorPoint(at: 2))
+        window.test_mouseDown(at: blackSwatch)
+        window.test_mouseUp(at: blackSwatch)
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseDragged(to: NSPoint(x: 260, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 260, y: 150))
+
+        let eyedropperPoint = try XCTUnwrap(window.test_mainToolbarButtonPoint(for: .eyedropper))
+        window.test_mouseDown(at: eyedropperPoint)
+        window.test_mouseUp(at: eyedropperPoint)
+        window.test_mouseMoved(to: NSPoint(x: 200, y: 150))
+
+        let sampledHex = try XCTUnwrap(window.test_sampledColorHex)
+        XCTAssertEqual(sampledHex, "#FFFFFF")
+        XCTAssertEqual(window.test_magnifierSampleColorHex(at: NSPoint(x: 200, y: 150)), sampledHex)
+    }
+
+    func testEyedropperSamplesColoredMarkerLineOnBlackBackground() throws {
+        let background = solidImage(size: NSSize(width: 500, height: 400), color: .black)
+        let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateShapeTool(.marker)
+
+        let redSwatch = try XCTUnwrap(window.test_optionsPaletteColorPoint(at: 0))
+        window.test_mouseDown(at: redSwatch)
+        window.test_mouseUp(at: redSwatch)
+        window.test_mouseDown(at: NSPoint(x: 140, y: 170))
+        window.test_mouseDragged(to: NSPoint(x: 260, y: 170))
+        window.test_mouseUp(at: NSPoint(x: 260, y: 170))
+
+        let eyedropperPoint = try XCTUnwrap(window.test_mainToolbarButtonPoint(for: .eyedropper))
+        window.test_mouseDown(at: eyedropperPoint)
+        window.test_mouseUp(at: eyedropperPoint)
+        window.test_mouseMoved(to: NSPoint(x: 200, y: 170))
+
+        let sampledHex = try XCTUnwrap(window.test_sampledColorHex)
+        XCTAssertEqual(sampledHex, "#FF001A")
+        XCTAssertEqual(window.test_magnifierSampleColorHex(at: NSPoint(x: 200, y: 170)), sampledHex)
+    }
+
     func testEyedropperSamplesFromTipPointAndMagnifierMatchesTipPixel() throws {
         let red = NSColor(srgbRed: 1, green: 0, blue: 0, alpha: 1)
         let green = NSColor(srgbRed: 0, green: 1, blue: 0, alpha: 1)
@@ -1362,6 +1410,100 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertNotNil(caretPixel)
     }
 
+    func testTextAnnotationDrawsWhiteEditingCaretOnBlackBackground() throws {
+        let background = solidImage(size: NSSize(width: 500, height: 400), color: .black)
+        let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 320, height: 220)
+        var style = CaptureAnnotationStyle()
+        style.textSize = 24
+        let rect = NSRect(
+            x: 120,
+            y: 90,
+            width: CaptureAnnotationRenderer.textHorizontalPadding * 2 + 1,
+            height: CaptureAnnotationRenderer.textLineHeight(style: style)
+        )
+        let overlayRect = NSRect(
+            x: selection.minX + rect.minX,
+            y: selection.minY + rect.minY,
+            width: rect.width,
+            height: rect.height
+        )
+
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateTextTool()
+        window.test_setAnnotations([
+            CaptureAnnotation(
+                kind: .text,
+                rect: rect,
+                style: style,
+                text: ""
+            )
+        ])
+        window.test_selectAnnotation(at: 0)
+        window.test_mouseDown(at: NSPoint(x: overlayRect.midX, y: overlayRect.midY))
+        window.test_mouseUp(at: NSPoint(x: overlayRect.midX, y: overlayRect.midY))
+
+        let caretColor = try XCTUnwrap(window.test_editingTextCaretColor()?.usingColorSpace(.sRGB))
+        XCTAssertGreaterThan(caretColor.redComponent, 0.9)
+        XCTAssertGreaterThan(caretColor.greenComponent, 0.9)
+        XCTAssertGreaterThan(caretColor.blueComponent, 0.9)
+        let insertionRect = try XCTUnwrap(window.test_editingTextCaretDrawRect())
+        let image = try XCTUnwrap(window.test_renderedOverlayImage())
+        let caretPixel = try XCTUnwrap(firstPixel(
+            in: image,
+            rect: insertionRect.insetBy(dx: -1, dy: -1)
+        ) { pixel in
+            pixel.red > 220 && pixel.green > 220 && pixel.blue > 220 && pixel.alpha > 120
+        })
+        XCTAssertGreaterThan(caretPixel.red, 220)
+        XCTAssertGreaterThan(caretPixel.green, 220)
+        XCTAssertGreaterThan(caretPixel.blue, 220)
+        XCTAssertGreaterThan(caretPixel.alpha, 120)
+    }
+
+    func testTextAnnotationUsesOverallSelectionBrightnessForCaretColor() throws {
+        let selection = NSRect(x: 100, y: 100, width: 320, height: 220)
+        var style = CaptureAnnotationStyle()
+        style.textSize = 24
+        let rect = NSRect(
+            x: 120,
+            y: 90,
+            width: CaptureAnnotationRenderer.textHorizontalPadding * 2 + 1,
+            height: CaptureAnnotationRenderer.textLineHeight(style: style)
+        )
+        let overlayRect = NSRect(
+            x: selection.minX + rect.minX,
+            y: selection.minY + rect.minY,
+            width: rect.width,
+            height: rect.height
+        )
+        let background = blackImageWithWhitePatch(
+            size: NSSize(width: 500, height: 400),
+            centeredAt: NSPoint(x: overlayRect.midX, y: overlayRect.midY),
+            patchSize: NSSize(width: 48, height: 48)
+        )
+        let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
+
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateTextTool()
+        window.test_setAnnotations([
+            CaptureAnnotation(
+                kind: .text,
+                rect: rect,
+                style: style,
+                text: ""
+            )
+        ])
+        window.test_selectAnnotation(at: 0)
+        window.test_mouseDown(at: NSPoint(x: overlayRect.midX, y: overlayRect.midY))
+        window.test_mouseUp(at: NSPoint(x: overlayRect.midX, y: overlayRect.midY))
+
+        let caretColor = try XCTUnwrap(window.test_editingTextCaretColor()?.usingColorSpace(.sRGB))
+        XCTAssertGreaterThan(caretColor.redComponent, 0.9)
+        XCTAssertGreaterThan(caretColor.greenComponent, 0.9)
+        XCTAssertGreaterThan(caretColor.blueComponent, 0.9)
+    }
+
     func testRotatedTextAnnotationKeepsLineBreaksAtSelectedInsertionPoints() throws {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         let selection = NSRect(x: 100, y: 100, width: 620, height: 420)
@@ -2099,6 +2241,91 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         window.test_activateShapeTool(.arrowLine)
         XCTAssertEqual(window.test_cursorStyle(at: point), .crosshair)
+    }
+
+    func testOverlayWindowUsesLightBrushCursorOnBlackBackground() {
+        let image = solidImage(size: NSSize(width: 500, height: 400), color: .black)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 200, height: 120)
+        let point = NSPoint(x: selection.midX, y: selection.midY)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateShapeTool(.brush)
+
+        XCTAssertEqual(window.test_cursorStyle(at: point), .brushLight)
+    }
+
+    func testOverlayWindowUsesLightEyedropperCursorOnBlackBackground() throws {
+        let image = solidImage(size: NSSize(width: 500, height: 400), color: .black)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 200, height: 120)
+        let point = NSPoint(x: selection.midX, y: selection.midY)
+        window.test_setLockedSelectionRect(selection)
+
+        let eyedropperPoint = try XCTUnwrap(window.test_mainToolbarButtonPoint(for: .eyedropper))
+        window.test_mouseDown(at: eyedropperPoint)
+        window.test_mouseUp(at: eyedropperPoint)
+
+        XCTAssertEqual(window.test_cursorStyle(at: point), .eyedropperLight)
+    }
+
+    func testOverlayWindowUsesLightMoveCursorOnBlackBackground() {
+        let image = solidImage(size: NSSize(width: 500, height: 400), color: .black)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.rectangle)
+        window.test_mouseDown(at: NSPoint(x: 140, y: 140))
+        window.test_mouseDragged(to: NSPoint(x: 220, y: 180))
+        window.test_mouseUp(at: NSPoint(x: 220, y: 180))
+
+        window.test_mouseDown(at: NSPoint(x: 160, y: 140))
+        window.test_mouseDragged(to: NSPoint(x: 170, y: 150))
+        XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: 170, y: 150)), .moveLight)
+        window.test_mouseUp(at: NSPoint(x: 170, y: 150))
+    }
+
+    func testOverlayWindowUsesLightSelectionResizeCursorsOnBlackBackground() {
+        let image = solidImage(size: NSSize(width: 500, height: 400), color: .black)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 200, height: 120)
+        window.test_setLockedSelectionRect(selection)
+
+        let handles: [(NSPoint, SelectionToolbarState.OverlayCursorStyle)] = [
+            (NSPoint(x: selection.minX, y: selection.maxY), .resizeTopLeftLight),
+            (NSPoint(x: selection.maxX, y: selection.maxY), .resizeTopRightLight),
+            (NSPoint(x: selection.minX, y: selection.minY), .resizeBottomLeftLight),
+            (NSPoint(x: selection.maxX, y: selection.minY), .resizeBottomRightLight),
+            (NSPoint(x: selection.midX, y: selection.maxY), .resizeUpDownLight),
+            (NSPoint(x: selection.maxX, y: selection.midY), .resizeLeftRightLight)
+        ]
+
+        for (point, expected) in handles {
+            XCTAssertEqual(window.test_cursorStyle(at: point), expected)
+        }
+    }
+
+    func testMarkerPreviewRemainsVisibleOnBlackBackgroundWithBlackMarkerColor() throws {
+        let image = solidImage(size: NSSize(width: 500, height: 400), color: .black)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateShapeTool(.marker)
+
+        let blackSwatch = try XCTUnwrap(window.test_optionsPaletteColorPoint(at: 2))
+        window.test_mouseDown(at: blackSwatch)
+        window.test_mouseUp(at: blackSwatch)
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseDragged(to: NSPoint(x: 240, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 240, y: 150))
+
+        let overlayImage = try XCTUnwrap(window.test_renderedOverlayImage())
+        let markerPixel = try firstPixel(
+            in: overlayImage,
+            rect: NSRect(x: 135, y: 140, width: 110, height: 20)
+        ) { pixel in
+            pixel.red > 180 && pixel.green > 180 && pixel.blue > 180 && pixel.alpha > 120
+        }
+
+        XCTAssertNotNil(markerPixel)
     }
 
     func testOverlayWindowUsesTextInputCursorForTextToolInsideSelection() {
@@ -4323,6 +4550,44 @@ final class SelectionToolbarStateTests: XCTestCase {
 
     }
 
+    func testOverlayWindowShiftDraggingRectangleCreatesSquareUntilShiftIsReleased() throws {
+        let squareWindow = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        squareWindow.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        squareWindow.test_activateShapeTool(.rectangle)
+        squareWindow.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        squareWindow.test_mouseDragged(to: NSPoint(x: 220, y: 180), modifierFlags: [.shift])
+        squareWindow.test_mouseUp(at: NSPoint(x: 220, y: 180), modifierFlags: [.shift])
+
+        let squareRect = try XCTUnwrap(squareWindow.test_annotationRect(at: 0))
+        XCTAssertEqual(squareRect.width, 80, accuracy: 0.1)
+        XCTAssertEqual(squareRect.height, 80, accuracy: 0.1)
+
+        let freeWindow = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        freeWindow.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        freeWindow.test_activateShapeTool(.rectangle)
+        freeWindow.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        freeWindow.test_mouseDragged(to: NSPoint(x: 220, y: 180), modifierFlags: [.shift])
+        freeWindow.test_mouseDragged(to: NSPoint(x: 220, y: 180))
+        freeWindow.test_mouseUp(at: NSPoint(x: 220, y: 180))
+
+        let freeRect = try XCTUnwrap(freeWindow.test_annotationRect(at: 0))
+        XCTAssertEqual(freeRect.width, 80, accuracy: 0.1)
+        XCTAssertEqual(freeRect.height, 30, accuracy: 0.1)
+    }
+
+    func testOverlayWindowShiftDraggingEllipseCreatesCircle() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.ellipse)
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseDragged(to: NSPoint(x: 220, y: 180), modifierFlags: [.shift])
+        window.test_mouseUp(at: NSPoint(x: 220, y: 180), modifierFlags: [.shift])
+
+        let circleRect = try XCTUnwrap(window.test_annotationRect(at: 0))
+        XCTAssertEqual(circleRect.width, 80, accuracy: 0.1)
+        XCTAssertEqual(circleRect.height, 80, accuracy: 0.1)
+    }
+
     func testOverlayWindowDoesNotMoveBrushAnnotationAfterDrawing() {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
@@ -5638,6 +5903,16 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertFalse(window.test_showsStrokeStyleMenu)
         XCTAssertFalse(window.test_showsStartArrowTypeMenu)
         XCTAssertFalse(window.test_showsEndArrowTypeMenu)
+    }
+
+    func testMarkerToolbarButtonUsesArrowCursorWhenMarkerIsActive() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.marker)
+
+        let markerButtonPoint = try XCTUnwrap(window.test_markerToolbarButtonPoint())
+
+        XCTAssertEqual(window.test_cursorStyle(at: markerButtonPoint), .arrow)
     }
 
     func testMarkerToolbarButtonSelectedStateWorksWhenMarkerIsActive() {
@@ -7736,6 +8011,22 @@ final class SelectionToolbarStateTests: XCTestCase {
         image.lockFocus()
         color.setFill()
         NSRect(origin: .zero, size: size).fill()
+        image.unlockFocus()
+        return image
+    }
+
+    private func blackImageWithWhitePatch(size: NSSize, centeredAt point: NSPoint, patchSize: NSSize) -> NSImage {
+        let image = solidImage(size: size, color: .black)
+        image.lockFocus()
+        NSColor.white.setFill()
+        for y in [point.y, size.height - point.y] {
+            NSRect(
+                x: point.x - patchSize.width / 2,
+                y: y - patchSize.height / 2,
+                width: patchSize.width,
+                height: patchSize.height
+            ).fill()
+        }
         image.unlockFocus()
         return image
     }
