@@ -954,8 +954,79 @@ enum SelectionToolbarState {
         let families = NSFontManager.shared.availableFontFamilies
         let systemFamily = NSFont.systemFont(ofSize: 12).familyName
         let allFamilies = systemFamily.map { families + [$0] } ?? families
-        return Array(Set(allFamilies)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        return sortedTextFontFamilies(allFamilies)
     }
+
+    static func sortedTextFontFamilies(
+        _ families: [String],
+        preferredLanguages: [String] = Locale.preferredLanguages
+    ) -> [String] {
+        let uniqueFamilies = Array(Set(families.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }))
+            .filter { !$0.isEmpty }
+        let preferChineseFonts = preferredLanguages.first.map(isChinesePreferredLanguage) ?? false
+        return uniqueFamilies.sorted { lhs, rhs in
+            let lhsPreferred = isPreferredTextFontFamily(lhs, preferChineseFonts: preferChineseFonts)
+            let rhsPreferred = isPreferredTextFontFamily(rhs, preferChineseFonts: preferChineseFonts)
+            if lhsPreferred != rhsPreferred {
+                return lhsPreferred
+            }
+            return lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
+        }
+    }
+
+    static func textFontDisplayName(for family: String) -> String {
+        let normalized = family.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalized == "System" || normalized == NSFont.systemFont(ofSize: 12).familyName {
+            return "系统"
+        }
+        if let displayName = localizedChineseTextFontDisplayNames[normalized] {
+            return displayName
+        }
+        return normalized
+    }
+
+    private static func isPreferredTextFontFamily(_ family: String, preferChineseFonts: Bool) -> Bool {
+        let isChineseFont = isChineseTextFontFamily(family)
+        return preferChineseFonts ? isChineseFont : !isChineseFont
+    }
+
+    private static func isChinesePreferredLanguage(_ language: String) -> Bool {
+        language.lowercased().hasPrefix("zh")
+    }
+
+    private static func isChineseTextFontFamily(_ family: String) -> Bool {
+        localizedChineseTextFontDisplayNames[family] != nil || textContainsCJK(textFontDisplayName(for: family))
+    }
+
+    private static func textContainsCJK(_ text: String) -> Bool {
+        text.unicodeScalars.contains { scalar in
+            (0x4E00...0x9FFF).contains(Int(scalar.value))
+        }
+    }
+
+    private static let localizedChineseTextFontDisplayNames: [String: String] = [
+        "PingFang SC": "苹方-简",
+        "PingFang TC": "蘋方-繁",
+        "PingFang HK": "蘋方-港",
+        "Songti SC": "宋体-简",
+        "Songti TC": "宋體-繁",
+        "Heiti SC": "黑体-简",
+        "Heiti TC": "黑體-繁",
+        "Kaiti SC": "楷体-简",
+        "Kaiti TC": "楷體-繁",
+        "STSong": "华文宋体",
+        "STHeiti": "华文黑体",
+        "STKaiti": "华文楷体",
+        "STFangsong": "华文仿宋",
+        "STYuanti": "华文圆体",
+        "Hiragino Sans GB": "冬青黑体简体中文",
+        "Microsoft YaHei": "微软雅黑",
+        "Microsoft JhengHei": "微软正黑体",
+        "SimSun": "宋体",
+        "SimHei": "黑体",
+        "KaiTi": "楷体",
+        "FangSong": "仿宋",
+    ]
 
     static func fillToggleRect(in optionsRect: NSRect) -> NSRect {
         NSRect(x: optionsRect.minX + 90, y: optionControlY(in: optionsRect), width: 20, height: 20)

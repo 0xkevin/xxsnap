@@ -615,6 +615,26 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_annotationRect(at: index)
     }
 
+    func test_textEditorContentOrigin() -> NSPoint? {
+        (contentView as? SelectionOverlayView)?.test_textEditorContentOrigin()
+    }
+
+    func test_textEditorInsertionRect() -> NSRect? {
+        (contentView as? SelectionOverlayView)?.test_textEditorInsertionRect()
+    }
+
+    func test_textEditorOverlayPointForInsertion(at characterIndex: Int) -> NSPoint? {
+        (contentView as? SelectionOverlayView)?.test_textEditorOverlayPointForInsertion(at: characterIndex)
+    }
+
+    func test_textEditorSelectedRange() -> NSRange? {
+        (contentView as? SelectionOverlayView)?.test_textEditorSelectedRange()
+    }
+
+    func test_textEditorFrameCenterRotation() -> CGFloat? {
+        (contentView as? SelectionOverlayView)?.test_textEditorFrameCenterRotation()
+    }
+
     func test_annotationText(at index: Int) -> String? {
         (contentView as? SelectionOverlayView)?.test_annotationText(at: index)
     }
@@ -968,6 +988,14 @@ final class SelectionOverlayWindow: NSWindow {
 
     func test_textEditorMouseDown(at point: NSPoint) {
         (contentView as? SelectionOverlayView)?.test_textEditorMouseDown(at: point)
+    }
+
+    func test_textEditorMouseDragged(to point: NSPoint) {
+        (contentView as? SelectionOverlayView)?.test_textEditorMouseDragged(to: point)
+    }
+
+    func test_textEditorMouseDownAndDragged(from start: NSPoint, to end: NSPoint) {
+        (contentView as? SelectionOverlayView)?.test_textEditorMouseDownAndDragged(from: start, to: end)
     }
 
     func test_textEditorDragSequence(from start: NSPoint, to end: NSPoint) {
@@ -1428,8 +1456,11 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private var pendingTextEditAnnotationIndex: Int?
     private var pendingTextEditStartPoint: NSPoint?
     private var pendingTextEditResizeHandle: ShapeResizeHandle?
+    private var pendingTextEditShouldBeginEditing = true
+    private var shouldRestoreWindowLevelAfterForwardedTextDrag = false
     private var textEditor: NSTextView?
-    private let defaultTextAnnotationSize = NSSize(width: 160, height: 36)
+    private let textCaretAnnotationWidth: CGFloat = 1
+    private let textDeleteHandleIconSize: CGFloat = 14
     private var currentStyle = CaptureAnnotationStyle()
     private var nonMarkerStyle = CaptureAnnotationStyle()
     private var markerStyle = SelectionToolbarState.markerActivationStyle(currentStyle: CaptureAnnotationStyle())
@@ -1521,6 +1552,13 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return
         }
         syncEditingTextFromEditor()
+    }
+
+    func textViewDidChangeSelection(_ notification: Notification) {
+        guard let editor = notification.object as? NSTextView, editor === textEditor else {
+            return
+        }
+        needsDisplay = true
     }
 
     func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
@@ -1620,6 +1658,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
 
         drawAnnotations()
+        drawEditingTextCaretIfNeeded()
         drawDraftAnnotation()
         drawMainToolbar(for: selectionRect)
         drawOptionsToolbar(for: selectionRect)
@@ -1860,9 +1899,16 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 }
 
                 let pendingTextEditResizeHandle = self.pendingTextEditResizeHandle
+                if editingTextAnnotationIndex == pendingTextEditAnnotationIndex {
+                    guard prepareEditingTextForForwardedDrag(at: pendingTextEditAnnotationIndex) else {
+                        shouldRestoreWindowLevelAfterForwardedTextDrag = false
+                        return
+                    }
+                }
                 self.pendingTextEditAnnotationIndex = nil
                 self.pendingTextEditStartPoint = nil
                 self.pendingTextEditResizeHandle = nil
+                self.pendingTextEditShouldBeginEditing = true
                 if let pendingTextEditResizeHandle {
                     beginAnnotationResize(with: pendingTextEditResizeHandle)
                     updateResizingShape(to: point)
@@ -1921,9 +1967,13 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         let selectionResizeHandle = interactionMode == .annotating && !shouldPreferMosaicDrawingOutsideSelection(at: point)
             ? selectionResizeHandle(at: point)
             : nil
-        let shapeResizeHandle = interactionMode == .annotating ? resizeHandle(at: point)?.toolbarStateHandle : nil
+        let shapeResizeHandle = interactionMode == .annotating ? textAwareResizeHandle(at: point)?.toolbarStateHandle : nil
         let isAnnotationBorder = interactionMode == .annotating && annotationIndexForBorder(at: point) != nil
         let textAnnotationBorderIndex = interactionMode == .annotating ? textAnnotationBorderIndex(at: point) : nil
+
+        if textDeleteHandleHitTarget(at: point) != nil {
+            return .arrow
+        }
 
         if isTextToolActive,
            interactionMode == .annotating,
@@ -2159,6 +2209,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             interactionMode = .annotating
         case .movingShape:
             commitSelectedShapePreview()
+            finishForwardedTextDragIfNeeded()
             interactionMode = .annotating
         case .movingSelection:
             commitSelectionMove()
@@ -2194,9 +2245,31 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         case .annotating:
             if let pendingTextEditAnnotationIndex {
                 let editPoint = pendingTextEditStartPoint ?? point
+                let shouldBeginEditing = pendingTextEditShouldBeginEditing
                 self.pendingTextEditAnnotationIndex = nil
                 self.pendingTextEditStartPoint = nil
                 self.pendingTextEditResizeHandle = nil
+                self.pendingTextEditShouldBeginEditing = true
+                guard shouldBeginEditing else {
+                    if editingTextAnnotationIndex == pendingTextEditAnnotationIndex {
+                        commitCurrentTextEdit(restoreWindowLevel: false)
+                    } else {
+                        editingTextAnnotationIndex = nil
+                        removeTextEditor(restoreWindowLevel: false)
+                    }
+                    selectedAnnotationIndex = pendingTextEditAnnotationIndex
+                    shouldRestoreWindowLevelAfterForwardedTextDrag = false
+                    invalidateCursorRectsAndRefresh(at: point)
+                    needsDisplay = true
+                    return
+                }
+                if editingTextAnnotationIndex == pendingTextEditAnnotationIndex, textEditor != nil {
+                    setTextEditorInsertionPoint(at: editPoint)
+                    shouldRestoreWindowLevelAfterForwardedTextDrag = false
+                    invalidateCursorRectsAndRefresh(at: point)
+                    needsDisplay = true
+                    return
+                }
                 beginTextEditing(at: pendingTextEditAnnotationIndex, draftCreated: false, insertionPoint: editPoint)
                 invalidateCursorRectsAndRefresh(at: point)
                 needsDisplay = true
@@ -2897,6 +2970,12 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return
         }
 
+        if textDeleteHandleHitTarget(at: point) != nil {
+            _ = deleteSelectedAnnotation()
+            needsDisplay = true
+            return
+        }
+
         if let mosaicHit = mosaicRectangleRotationHitTarget(at: point) {
             NSCursor.xxsnapMosaicRectangleRotationHandle.set()
             selectAnnotation(at: mosaicHit)
@@ -2921,7 +3000,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
 
         if isTextToolActive,
-           resizeHandle(at: point) == nil,
+           textAwareResizeHandle(at: point) == nil,
            textAnnotationIndex(at: point) == nil,
            let selectionResizeHandle = selectionResizeHandle(at: point) {
             beginSelectionResize(handle: selectionResizeHandle)
@@ -2999,7 +3078,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
 
         switch SelectionToolbarState.annotatingMouseDownTarget(
-            shapeResizeHandle: resizeHandle(at: point)?.toolbarStateHandle,
+            shapeResizeHandle: textAwareResizeHandle(at: point)?.toolbarStateHandle,
             isAnnotationBorder: annotationIndexForBorder(at: point) != nil,
             selectionResizeHandle: selectionResizeHandle(at: point),
             selectionMoveEligible: shouldStartSelectionMove(at: point)
@@ -3104,7 +3183,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return false
         }
 
-        if resizeHandle(at: point) != nil {
+        if textAwareResizeHandle(at: point) != nil {
             return false
         }
 
@@ -3158,12 +3237,14 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             selectAnnotation(at: textHit)
             pendingTextEditAnnotationIndex = textHit
             pendingTextEditStartPoint = point
-            pendingTextEditResizeHandle = resizeHandle(at: point)
+            pendingTextEditResizeHandle = textResizeHandle(at: point, annotation: annotations[textHit])
+            pendingTextEditShouldBeginEditing = shouldBeginTextEditingFromClick(at: point, annotation: annotations[textHit])
             NSLog(
-                "xxsnap text existing selected index=%ld rect=%@ pendingDrag=yes pendingResize=%@",
+                "xxsnap text existing selected index=%ld rect=%@ pendingDrag=yes pendingResize=%@ beginEditing=%@",
                 textHit,
                 NSStringFromRect(overlayRect(fromLocalAnnotationRect: annotations[textHit].rect)),
-                pendingTextEditResizeHandle.map { String(describing: $0.toolbarStateHandle) } ?? "none"
+                pendingTextEditResizeHandle.map { String(describing: $0.toolbarStateHandle) } ?? "none",
+                pendingTextEditShouldBeginEditing ? "yes" : "no"
             )
             needsDisplay = true
             return true
@@ -3210,6 +3291,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
 
         clearPendingTextEdit()
+        shouldRestoreWindowLevelAfterForwardedTextDrag = false
         selectedAnnotationIndex = index
         editingTextAnnotationIndex = index
         textDraftCreatedDuringCurrentEdit = draftCreated
@@ -3249,7 +3331,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return
         }
 
-        let editor = SelectionTextEditor(frame: overlayRect(fromLocalAnnotationRect: annotations[index].rect).standardized)
+        let editor = SelectionTextEditor(frame: .zero)
         editor.delegate = self
         editor.textInputDidChange = { [weak self] in
             self?.syncEditingTextFromEditor()
@@ -3270,34 +3352,37 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         editor.importsGraphics = false
         editor.drawsBackground = false
         editor.backgroundColor = .clear
-        editor.insertionPointColor = annotations[index].style.strokeColor
-        editor.textContainerInset = .zero
+        editor.alphaValue = 1
+        editor.insertionPointColor = .clear
+        editor.textContainerInset = NSSize(width: CaptureAnnotationRenderer.textHorizontalPadding, height: 0)
         editor.textContainer?.lineFragmentPadding = 0
         editor.textContainer?.widthTracksTextView = true
         editor.textContainer?.heightTracksTextView = false
         editor.isHorizontallyResizable = false
         editor.isVerticallyResizable = true
-        editor.minSize = NSSize(width: 24, height: 16)
+        editor.minSize = NSSize(
+            width: CaptureAnnotationRenderer.textHorizontalPadding * 2 + textCaretAnnotationWidth,
+            height: 16
+        )
         editor.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         applyTextEditorStyle(editor, style: annotations[index].style)
+        applyTextEditorFrame(editor, for: annotations[index])
         addSubview(editor)
         textEditor = editor
         editor.moveInsertionPointToEnd()
     }
 
     private func setTextEditorInsertionPoint(at overlayPoint: NSPoint) {
-        guard let textEditor else {
+        guard
+            let textEditor,
+            let editingTextAnnotationIndex,
+            annotations.indices.contains(editingTextAnnotationIndex)
+        else {
             return
         }
 
-        let editorPoint = textEditor.convert(overlayPoint, from: self)
-        let insertionIndex = max(
-            0,
-            min(
-                (textEditor.string as NSString).length,
-                textEditor.characterIndexForInsertion(at: editorPoint)
-            )
-        )
+        let editorPoint = textEditorPoint(for: overlayPoint, annotation: annotations[editingTextAnnotationIndex])
+        let insertionIndex = textEditorInsertionIndex(at: editorPoint, in: textEditor)
         textEditor.setSelectedRange(NSRange(location: insertionIndex, length: 0))
         NSLog(
             "xxsnap text editor caret setFromClick point=(%.0f, %.0f) editorPoint=(%.0f, %.0f) location=%ld",
@@ -3309,17 +3394,73 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         )
     }
 
+    private func textEditorInsertionIndex(at editorPoint: NSPoint, in textEditor: NSTextView) -> Int {
+        let textLength = (textEditor.string as NSString).length
+        guard textLength > 0,
+              let textContainer = textEditor.textContainer,
+              let layoutManager = textEditor.layoutManager
+        else {
+            return 0
+        }
+
+        layoutManager.ensureLayout(for: textContainer)
+        guard layoutManager.numberOfGlyphs > 0 else {
+            return 0
+        }
+
+        let containerOrigin = textEditor.textContainerOrigin
+        let containerPoint = NSPoint(
+            x: editorPoint.x - containerOrigin.x,
+            y: editorPoint.y - containerOrigin.y
+        )
+        var fraction: CGFloat = 0
+        let glyphIndex = layoutManager.glyphIndex(
+            for: containerPoint,
+            in: textContainer,
+            fractionOfDistanceThroughGlyph: &fraction
+        )
+        let clampedGlyphIndex = min(max(0, glyphIndex), layoutManager.numberOfGlyphs - 1)
+        let glyphRect = layoutManager.boundingRect(
+            forGlyphRange: NSRange(location: clampedGlyphIndex, length: 1),
+            in: textContainer
+        )
+        let characterIndex = layoutManager.characterIndexForGlyph(at: clampedGlyphIndex)
+        if containerPoint.x >= glyphRect.midX || fraction >= 0.5 {
+            return min(textLength, characterIndex + 1)
+        }
+        return max(0, characterIndex)
+    }
+
     private func removeTextEditor() {
-        let hadTextEditor = textEditor != nil
+        removeTextEditor(restoreWindowLevel: true)
+    }
+
+    private func removeTextEditor(restoreWindowLevel: Bool) {
         textEditor?.delegate = nil
         if let textEditor = textEditor as? SelectionTextEditor {
             textEditor.textInputDidChange = nil
         }
         textEditor?.removeFromSuperview()
         textEditor = nil
-        if hadTextEditor {
-            window?.level = .screenSaver
+        _ = restoreWindowLevel
+    }
+
+    private func finishForwardedTextDragIfNeeded() {
+        guard shouldRestoreWindowLevelAfterForwardedTextDrag else {
+            return
         }
+
+        let previousLevel = window?.level.rawValue ?? -1
+        shouldRestoreWindowLevelAfterForwardedTextDrag = false
+        if !isEditingTextAnnotation, textEditor != nil {
+            removeTextEditor(restoreWindowLevel: false)
+        }
+        NSLog(
+            "xxsnap text drag finishForwarded previousLevel=%ld currentLevel=%ld editing=%@",
+            previousLevel,
+            window?.level.rawValue ?? -1,
+            isEditingTextAnnotation ? "yes" : "no"
+        )
     }
 
     private func forwardTextEditorMouseDown(_ event: NSEvent) -> Bool {
@@ -3338,7 +3479,29 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return false
         }
 
-        commitCurrentTextEdit()
+        syncEditingTextFromEditor()
+        if let textHit = textAnnotationIndex(at: point) {
+            selectedAnnotationIndex = textHit
+            currentStyle = annotations[textHit].style
+            rememberCurrentStyleForActiveTool()
+            pendingTextEditAnnotationIndex = textHit
+            pendingTextEditStartPoint = point
+            pendingTextEditResizeHandle = textResizeHandle(at: point, annotation: annotations[textHit])
+            pendingTextEditShouldBeginEditing = shouldBeginTextEditingFromClick(at: point, annotation: annotations[textHit])
+            shouldRestoreWindowLevelAfterForwardedTextDrag = textEditor != nil
+            NSLog(
+                "xxsnap text editor prepared existing drag index=%ld rect=%@ pendingResize=%@ beginEditing=%@ editorAlive=%@",
+                textHit,
+                NSStringFromRect(overlayRect(fromLocalAnnotationRect: annotations[textHit].rect)),
+                pendingTextEditResizeHandle.map { String(describing: $0.toolbarStateHandle) } ?? "none",
+                pendingTextEditShouldBeginEditing ? "yes" : "no",
+                textEditor != nil ? "yes" : "no"
+            )
+            needsDisplay = true
+            return true
+        }
+
+        commitCurrentTextEdit(restoreWindowLevel: false)
         handleAnnotatingMouseDown(at: point)
         needsDisplay = true
         return true
@@ -3374,7 +3537,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         let clearColor = NSColor.clear
         editor.font = attributes[.font] as? NSFont
         editor.textColor = clearColor
-        editor.insertionPointColor = style.strokeColor
+        editor.insertionPointColor = clearColor
         attributes[.foregroundColor] = clearColor
         attributes[.strokeColor] = clearColor
         attributes[.strokeWidth] = 0
@@ -3400,7 +3563,23 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return
         }
 
-        textEditor.frame = overlayRect(fromLocalAnnotationRect: annotations[editingTextAnnotationIndex].rect).standardized
+        applyTextEditorFrame(textEditor, for: annotations[editingTextAnnotationIndex])
+    }
+
+    private func applyTextEditorFrame(_ textEditor: NSTextView, for annotation: CaptureAnnotation) {
+        textEditor.frameCenterRotation = 0
+        textEditor.frame = overlayRect(fromLocalAnnotationRect: annotation.rect).standardized
+        textEditor.frameCenterRotation = annotation.rotationAngle * 180 / .pi
+    }
+
+    private func textEditorPoint(for overlayPoint: NSPoint, annotation: CaptureAnnotation) -> NSPoint {
+        let rect = overlayRect(fromLocalAnnotationRect: annotation.rect).standardized
+        let center = NSPoint(x: rect.midX, y: rect.midY)
+        let unrotatedPoint = rotatedPoint(overlayPoint, around: center, angle: -annotation.rotationAngle)
+        return NSPoint(
+            x: unrotatedPoint.x - rect.minX,
+            y: rect.height - (unrotatedPoint.y - rect.minY)
+        )
     }
 
     private func syncEditingTextFromEditor() {
@@ -3460,6 +3639,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return true
         }
 
+        if handleTextNavigationKeyDown(event) {
+            return true
+        }
+
         let previousText = annotations[editingTextAnnotationIndex].text ?? ""
         interpretKeyEvents([event])
         if !isEditingTextAnnotation {
@@ -3475,6 +3658,34 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         if let characters = event.characters, !characters.isEmpty {
             return insertTextIntoCurrentAnnotation(characters)
         }
+        return true
+    }
+
+    private func handleTextNavigationKeyDown(_ event: NSEvent) -> Bool {
+        guard let textEditor else {
+            return false
+        }
+
+        let command: ((Any?) -> Void)?
+        switch event.keyCode {
+        case 123:
+            command = textEditor.moveLeft(_:)
+        case 124:
+            command = textEditor.moveRight(_:)
+        case 125:
+            command = textEditor.moveDown(_:)
+        case 126:
+            command = textEditor.moveUp(_:)
+        default:
+            command = nil
+        }
+        guard let command else {
+            return false
+        }
+
+        _ = window?.makeFirstResponder(textEditor)
+        command(nil)
+        needsDisplay = true
         return true
     }
 
@@ -3521,6 +3732,21 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return true
         }
 
+        if let textEditor {
+            if let textEditor = textEditor as? SelectionTextEditor {
+                textEditor.insertCommittedText(printableCharacters, source: "overlay")
+            } else {
+                let textLength = (textEditor.string as NSString).length
+                let selectedRange = textEditor.selectedRange()
+                let replacementRange = NSMaxRange(selectedRange) <= textLength
+                    ? selectedRange
+                    : NSRange(location: textLength, length: 0)
+                textEditor.insertText(printableCharacters, replacementRange: replacementRange)
+            }
+            syncEditingTextFromEditor()
+            return true
+        }
+
         updateEditingText((annotations[editingTextAnnotationIndex].text ?? "") + printableCharacters)
         NSLog(
             "xxsnap text inserted characters=%ld totalLength=%ld",
@@ -3532,6 +3758,36 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     private func deleteBackwardInCurrentTextAnnotation() {
         guard let editingTextAnnotationIndex = validEditingTextAnnotationIndex() else {
+            return
+        }
+
+        if let textEditor {
+            let textLength = (textEditor.string as NSString).length
+            let selectedRange = textEditor.selectedRange()
+            let replacementRange: NSRange
+            if selectedRange.length > 0, NSMaxRange(selectedRange) <= textLength {
+                replacementRange = selectedRange
+            } else if selectedRange.location > 0, selectedRange.location <= textLength {
+                replacementRange = NSRange(location: selectedRange.location - 1, length: 1)
+            } else {
+                replacementRange = NSRange(location: 0, length: 0)
+            }
+
+            guard replacementRange.length > 0 else {
+                if textLength == 0, textDraftCreatedDuringCurrentEdit {
+                    discardEditingTextAnnotation()
+                }
+                return
+            }
+
+            textEditor.textStorage?.replaceCharacters(in: replacementRange, with: "")
+            (textEditor as? SelectionTextEditor)?.makeTextStorageTransparent()
+            textEditor.setSelectedRange(NSRange(location: replacementRange.location, length: 0))
+            syncEditingTextFromEditor()
+            if textEditor.string.isEmpty, textDraftCreatedDuringCurrentEdit {
+                discardEditingTextAnnotation()
+            }
+            needsDisplay = true
             return
         }
 
@@ -3575,11 +3831,13 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return
         }
 
-        annotations[editingTextAnnotationIndex].text = text
-        annotations[editingTextAnnotationIndex].rect.size = textAnnotationSize(
+        let updatedSize = textAnnotationSize(
             text: text,
             style: annotations[editingTextAnnotationIndex].style
         )
+
+        annotations[editingTextAnnotationIndex].text = text
+        annotations[editingTextAnnotationIndex].rect.size = updatedSize
         if let lockedSelectionRect {
             let overlayRect = overlayRect(fromLocalAnnotationRect: annotations[editingTextAnnotationIndex].rect)
             annotations[editingTextAnnotationIndex].rect = localAnnotationRect(
@@ -3591,7 +3849,32 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         needsDisplay = true
     }
 
-    private func commitCurrentTextEdit() {
+    private func prepareEditingTextForForwardedDrag(at index: Int) -> Bool {
+        syncEditingTextFromEditor()
+        guard editingTextAnnotationIndex == index,
+              annotations.indices.contains(index),
+              annotations[index].kind == .text
+        else {
+            return annotations.indices.contains(index)
+        }
+
+        let text = annotations[index].text ?? ""
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            discardEditingTextAnnotation()
+            return false
+        }
+
+        selectedAnnotationIndex = index
+        editingTextAnnotationIndex = nil
+        textDraftCreatedDuringCurrentEdit = false
+        textEditor?.alphaValue = 0
+        textEditor?.isEditable = false
+        redoAnnotations.removeAll()
+        needsDisplay = true
+        return true
+    }
+
+    private func commitCurrentTextEdit(restoreWindowLevel: Bool = true) {
         syncEditingTextFromEditor()
         guard let editingTextAnnotationIndex,
               annotations.indices.contains(editingTextAnnotationIndex),
@@ -3599,7 +3882,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         else {
             self.editingTextAnnotationIndex = nil
             textDraftCreatedDuringCurrentEdit = false
-            removeTextEditor()
+            removeTextEditor(restoreWindowLevel: restoreWindowLevel)
             return
         }
 
@@ -3613,7 +3896,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         self.editingTextAnnotationIndex = nil
         textDraftCreatedDuringCurrentEdit = false
         clearPendingTextEdit()
-        removeTextEditor()
+        removeTextEditor(restoreWindowLevel: restoreWindowLevel)
         redoAnnotations.removeAll()
         needsDisplay = true
     }
@@ -3640,29 +3923,42 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         pendingTextEditAnnotationIndex = nil
         pendingTextEditStartPoint = nil
         pendingTextEditResizeHandle = nil
+        pendingTextEditShouldBeginEditing = true
     }
 
     private func textAnnotationRect(anchoredAt point: NSPoint, inside selectionRect: NSRect) -> NSRect {
-        clamp(
-            rect: NSRect(origin: point, size: textAnnotationSize(text: " ", style: currentStyle)),
+        let horizontalPadding = CaptureAnnotationRenderer.textHorizontalPadding
+        let size = textAnnotationSize(text: "", style: currentStyle)
+        let verticalOffset = size.height / 2
+        return clamp(
+            rect: NSRect(
+                x: point.x - horizontalPadding,
+                y: point.y - verticalOffset,
+                width: size.width,
+                height: size.height
+            ),
             inside: selectionRect
         )
     }
 
     private func textAnnotationSize(text: String, style: CaptureAnnotationStyle) -> NSSize {
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let measuredText = trimmedText.isEmpty ? "Hg国אב" : text
+        let lineHeight = CaptureAnnotationRenderer.textLineHeight(style: style)
+        let horizontalPadding = CaptureAnnotationRenderer.textHorizontalPadding * 2
+        guard !trimmedText.isEmpty else {
+            return NSSize(width: horizontalPadding + textCaretAnnotationWidth, height: lineHeight)
+        }
+
         let attributedText = NSAttributedString(
-            string: measuredText,
+            string: text,
             attributes: CaptureAnnotationRenderer.textAttributes(style: style)
         )
         let measured = attributedText.boundingRect(
             with: NSSize(width: 10_000, height: CGFloat.greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading]
         )
-        let lineHeight = CaptureAnnotationRenderer.textLineHeight(style: style)
         return NSSize(
-            width: max(defaultTextAnnotationSize.width, ceil(measured.width)),
+            width: horizontalPadding + max(textCaretAnnotationWidth, ceil(measured.width)),
             height: max(lineHeight, ceil(measured.height))
         )
     }
@@ -4804,6 +5100,88 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         return textAlpha == 0 && (typingColor?.alphaComponent ?? 1) == 0
     }
 
+    func test_textEditorContentOrigin() -> NSPoint? {
+        guard let textEditor else {
+            return nil
+        }
+
+        return NSPoint(
+            x: textEditor.frame.minX + textEditor.textContainerInset.width,
+            y: textEditor.frame.minY + textEditor.textContainerInset.height
+        )
+    }
+
+    func test_textEditorInsertionRect() -> NSRect? {
+        guard let textEditor,
+              let textContainer = textEditor.textContainer,
+              let layoutManager = textEditor.layoutManager
+        else {
+            return nil
+        }
+
+        layoutManager.ensureLayout(for: textContainer)
+        let textLength = (textEditor.string as NSString).length
+        let selectedLocation = min(textEditor.selectedRange().location, textLength)
+        let rectInContainer: NSRect
+        if textLength == 0 || layoutManager.numberOfGlyphs == 0 {
+            rectInContainer = layoutManager.extraLineFragmentRect
+        } else if selectedLocation >= textLength {
+            let glyphRange = NSRange(location: max(0, layoutManager.numberOfGlyphs - 1), length: 1)
+            var lastGlyphRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+            lastGlyphRect.origin.x = lastGlyphRect.maxX
+            lastGlyphRect.size.width = 1
+            rectInContainer = lastGlyphRect
+        } else {
+            let glyphIndex = layoutManager.glyphIndexForCharacter(at: selectedLocation)
+            var glyphRect = layoutManager.boundingRect(
+                forGlyphRange: NSRange(location: glyphIndex, length: 1),
+                in: textContainer
+            )
+            glyphRect.size.width = 1
+            rectInContainer = glyphRect
+        }
+
+        let containerOrigin = textEditor.textContainerOrigin
+        let editorCaretRect = NSRect(
+            x: textEditor.frame.minX + containerOrigin.x + rectInContainer.minX,
+            y: textEditor.frame.minY + textEditor.bounds.height - containerOrigin.y - rectInContainer.maxY,
+            width: max(1, rectInContainer.width),
+            height: rectInContainer.height
+        )
+        return editorCaretRect
+    }
+
+    func test_textEditorOverlayPointForInsertion(at characterIndex: Int) -> NSPoint? {
+        guard
+            let textEditor,
+            let editingTextAnnotationIndex,
+            annotations.indices.contains(editingTextAnnotationIndex),
+            let caretRect = textEditorCaretRectInEditorBounds(textEditor, selectedLocation: characterIndex)
+        else {
+            return nil
+        }
+
+        let annotation = annotations[editingTextAnnotationIndex]
+        let rect = overlayRect(fromLocalAnnotationRect: annotation.rect).standardized
+        let unrotatedPoint = NSPoint(
+            x: rect.minX + caretRect.minX,
+            y: rect.minY + rect.height - caretRect.midY
+        )
+        return rotatedPoint(
+            unrotatedPoint,
+            around: NSPoint(x: rect.midX, y: rect.midY),
+            angle: annotation.rotationAngle
+        )
+    }
+
+    func test_textEditorSelectedRange() -> NSRange? {
+        textEditor?.selectedRange()
+    }
+
+    func test_textEditorFrameCenterRotation() -> CGFloat? {
+        textEditor?.frameCenterRotation
+    }
+
     func test_commitTextEditing() {
         commitCurrentTextEdit()
     }
@@ -4815,6 +5193,27 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return
         }
         textEditor.mouseDown(with: event)
+    }
+
+    func test_textEditorMouseDragged(to point: NSPoint) {
+        guard let textEditor,
+              let event = test_mouseEvent(type: .leftMouseDragged, at: point)
+        else {
+            return
+        }
+        textEditor.mouseDragged(with: event)
+    }
+
+    func test_textEditorMouseDownAndDragged(from start: NSPoint, to end: NSPoint) {
+        guard let textEditor,
+              let mouseDown = test_mouseEvent(type: .leftMouseDown, at: start),
+              let mouseDragged = test_mouseEvent(type: .leftMouseDragged, at: end)
+        else {
+            return
+        }
+
+        textEditor.mouseDown(with: mouseDown)
+        textEditor.mouseDragged(with: mouseDragged)
     }
 
     func test_textEditorDragSequence(from start: NSPoint, to end: NSPoint) {
@@ -6019,6 +6418,102 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         rotatedAnnotationBorderContains(point, annotation: annotation, hitOutset: 6)
     }
 
+    private func shouldBeginTextEditingFromClick(at point: NSPoint, annotation: CaptureAnnotation) -> Bool {
+        guard textAnnotationBorderContains(point: point, annotation: annotation) else {
+            return true
+        }
+
+        if let handle = textResizeHandle(at: point, annotation: annotation) {
+            return handle == .left || handle == .right
+        }
+        return false
+    }
+
+    private func textAwareResizeHandle(at point: NSPoint) -> ShapeResizeHandle? {
+        if let handle = resizeHandle(at: point) {
+            return handle
+        }
+        guard
+            let selectedAnnotation,
+            selectedAnnotation.kind == .text
+        else {
+            return nil
+        }
+        return fullscreenTextEdgeResizeHandle(at: point, annotation: selectedAnnotation)
+    }
+
+    private func textResizeHandle(at point: NSPoint, annotation: CaptureAnnotation) -> ShapeResizeHandle? {
+        resizeHandle(at: point) ?? fullscreenTextEdgeResizeHandle(at: point, annotation: annotation)
+    }
+
+    private func fullscreenTextEdgeResizeHandle(at point: NSPoint, annotation: CaptureAnnotation) -> ShapeResizeHandle? {
+        guard
+            annotation.kind == .text,
+            abs(annotation.rotationAngle) < 0.001,
+            let lockedSelectionRect
+        else {
+            return nil
+        }
+
+        let selectionRect = lockedSelectionRect.standardized
+        let rect = overlayRect(fromLocalAnnotationRect: annotation.rect).standardized
+        let tolerance: CGFloat = 6
+        guard
+            abs(rect.minX - selectionRect.minX) <= tolerance,
+            abs(rect.maxX - selectionRect.maxX) <= tolerance,
+            abs(rect.minY - selectionRect.minY) <= tolerance,
+            abs(rect.maxY - selectionRect.maxY) <= tolerance,
+            textAnnotationBorderContains(point: point, annotation: annotation)
+        else {
+            return nil
+        }
+
+        let distances: [(handle: ShapeResizeHandle, distance: CGFloat)] = [
+            (.top, abs(point.y - rect.maxY)),
+            (.right, abs(point.x - rect.maxX)),
+            (.bottom, abs(point.y - rect.minY)),
+            (.left, abs(point.x - rect.minX)),
+        ]
+        return distances
+            .filter { $0.distance <= tolerance }
+            .min { $0.distance < $1.distance }?
+            .handle
+    }
+
+    private func textDeleteHandleHitTarget(at point: NSPoint) -> Int? {
+        guard interactionMode == .annotating,
+              let selectedAnnotationIndex,
+              annotations.indices.contains(selectedAnnotationIndex),
+              annotations[selectedAnnotationIndex].kind == .text,
+              activeToolCanEdit(annotationKind: .text),
+              let rect = textDeleteHandleRect(for: annotations[selectedAnnotationIndex])
+        else {
+            return nil
+        }
+
+        return rect.insetBy(dx: -3, dy: -3).contains(point) ? selectedAnnotationIndex : nil
+    }
+
+    private func textDeleteHandleRect(for annotation: CaptureAnnotation) -> NSRect? {
+        guard annotation.kind == .text else {
+            return nil
+        }
+
+        let rect = overlayRect(fromLocalAnnotationRect: annotation.rect)
+        let handle = handleRect(
+            for: rect,
+            handle: .topRight,
+            kind: annotation.kind,
+            rotationAngle: annotation.rotationAngle
+        )
+        return NSRect(
+            x: handle.midX - textDeleteHandleIconSize / 2,
+            y: handle.midY - textDeleteHandleIconSize / 2,
+            width: textDeleteHandleIconSize,
+            height: textDeleteHandleIconSize
+        )
+    }
+
     private func resizeHandle(at point: NSPoint) -> ShapeResizeHandle? {
         guard let annotation = selectedAnnotation else {
             return nil
@@ -6364,66 +6859,58 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         let halfWidth = startRect.width / 2
         let halfHeight = startRect.height / 2
 
-        let scale: CGFloat
-        let newCenterLocal: NSPoint
+        let isCornerResize: Bool
+        let requestedScale: CGFloat
         switch handle {
-        case .topLeft:
-            let fixed = NSPoint(x: halfWidth, y: -halfHeight)
-            scale = proportionalTextScale(widthDelta: fixed.x - localPointer.x, heightDelta: localPointer.y - fixed.y, startRect: startRect)
-            newCenterLocal = NSPoint(x: fixed.x - startRect.width * scale / 2, y: fixed.y + startRect.height * scale / 2)
         case .top:
-            let fixed = NSPoint(x: 0, y: -halfHeight)
-            scale = proportionalTextScale(widthDelta: startRect.width, heightDelta: localPointer.y - fixed.y, startRect: startRect)
-            newCenterLocal = NSPoint(x: 0, y: fixed.y + startRect.height * scale / 2)
-        case .topRight:
-            let fixed = NSPoint(x: -halfWidth, y: -halfHeight)
-            scale = proportionalTextScale(widthDelta: localPointer.x - fixed.x, heightDelta: localPointer.y - fixed.y, startRect: startRect)
-            newCenterLocal = NSPoint(x: fixed.x + startRect.width * scale / 2, y: fixed.y + startRect.height * scale / 2)
+            isCornerResize = false
+            requestedScale = centeredEdgeTextScale(distanceFromCenter: localPointer.y, halfLength: halfHeight)
         case .left:
-            let fixed = NSPoint(x: halfWidth, y: 0)
-            scale = proportionalTextScale(widthDelta: fixed.x - localPointer.x, heightDelta: startRect.height, startRect: startRect)
-            newCenterLocal = NSPoint(x: fixed.x - startRect.width * scale / 2, y: 0)
+            isCornerResize = false
+            requestedScale = centeredEdgeTextScale(distanceFromCenter: localPointer.x, halfLength: halfWidth)
         case .right:
-            let fixed = NSPoint(x: -halfWidth, y: 0)
-            scale = proportionalTextScale(widthDelta: localPointer.x - fixed.x, heightDelta: startRect.height, startRect: startRect)
-            newCenterLocal = NSPoint(x: fixed.x + startRect.width * scale / 2, y: 0)
-        case .bottomLeft:
-            let fixed = NSPoint(x: halfWidth, y: halfHeight)
-            scale = proportionalTextScale(widthDelta: fixed.x - localPointer.x, heightDelta: fixed.y - localPointer.y, startRect: startRect)
-            newCenterLocal = NSPoint(x: fixed.x - startRect.width * scale / 2, y: fixed.y - startRect.height * scale / 2)
+            isCornerResize = false
+            requestedScale = centeredEdgeTextScale(distanceFromCenter: localPointer.x, halfLength: halfWidth)
         case .bottom:
-            let fixed = NSPoint(x: 0, y: halfHeight)
-            scale = proportionalTextScale(widthDelta: startRect.width, heightDelta: fixed.y - localPointer.y, startRect: startRect)
-            newCenterLocal = NSPoint(x: 0, y: fixed.y - startRect.height * scale / 2)
-        case .bottomRight:
-            let fixed = NSPoint(x: -halfWidth, y: halfHeight)
-            scale = proportionalTextScale(widthDelta: localPointer.x - fixed.x, heightDelta: fixed.y - localPointer.y, startRect: startRect)
-            newCenterLocal = NSPoint(x: fixed.x + startRect.width * scale / 2, y: fixed.y - startRect.height * scale / 2)
+            isCornerResize = false
+            requestedScale = centeredEdgeTextScale(distanceFromCenter: localPointer.y, halfLength: halfHeight)
+        case .topLeft, .topRight, .bottomLeft, .bottomRight:
+            isCornerResize = true
+            requestedScale = max(
+                centeredEdgeTextScale(distanceFromCenter: localPointer.x, halfLength: halfWidth),
+                centeredEdgeTextScale(distanceFromCenter: localPointer.y, halfLength: halfHeight)
+            )
         }
 
-        let newWidth = startRect.width * scale
-        let newHeight = startRect.height * scale
-        guard newWidth >= 8, newHeight >= 8 else {
+        var newStyle = startStyle
+        newStyle.textSize = clampedTextSize(startStyle.textSize * requestedScale)
+        let effectiveScale = startStyle.textSize > 0 ? newStyle.textSize / startStyle.textSize : requestedScale
+        let newSize = isCornerResize
+            ? textAnnotationSize(text: annotations[selectedAnnotationIndex].text ?? "", style: newStyle)
+            : NSSize(width: startRect.width * effectiveScale, height: startRect.height * effectiveScale)
+        guard newSize.width >= 8, newSize.height >= 8 else {
             return
         }
 
-        let newCenter = NSPoint(
-            x: center.x + xAxis.x * newCenterLocal.x + yAxis.x * newCenterLocal.y,
-            y: center.y + xAxis.y * newCenterLocal.x + yAxis.y * newCenterLocal.y
-        )
         annotations[selectedAnnotationIndex].rect = localAnnotationRect(from: NSRect(
-            x: newCenter.x - newWidth / 2,
-            y: newCenter.y - newHeight / 2,
-            width: newWidth,
-            height: newHeight
+            x: center.x - newSize.width / 2,
+            y: center.y - newSize.height / 2,
+            width: newSize.width,
+            height: newSize.height
         ))
-        annotations[selectedAnnotationIndex].style.textSize = max(3, min(300, startStyle.textSize * scale))
+        annotations[selectedAnnotationIndex].style = newStyle
         currentStyle = annotations[selectedAnnotationIndex].style
         textStyle = currentStyle
     }
 
-    private func proportionalTextScale(widthDelta: CGFloat, heightDelta: CGFloat, startRect: NSRect) -> CGFloat {
-        max(0.2, max(widthDelta / max(1, startRect.width), heightDelta / max(1, startRect.height)))
+    private func centeredEdgeTextScale(distanceFromCenter: CGFloat, halfLength: CGFloat) -> CGFloat {
+        max(0.2, abs(distanceFromCenter) / max(1, halfLength))
+    }
+
+    private func clampedTextSize(_ size: CGFloat) -> CGFloat {
+        let minimum = SelectionToolbarState.textSizeValues.first ?? 3
+        let maximum = SelectionToolbarState.textSizeValues.last ?? 72
+        return max(minimum, min(maximum, size))
     }
 
     private func localPoint(_ point: NSPoint, center: NSPoint, xAxis: NSPoint, yAxis: NSPoint) -> NSPoint {
@@ -7756,6 +8243,95 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         NSGraphicsContext.restoreGraphicsState()
     }
 
+    private func drawEditingTextCaretIfNeeded() {
+        guard
+            let textEditor,
+            window?.firstResponder === textEditor,
+            let editingTextAnnotationIndex,
+            annotations.indices.contains(editingTextAnnotationIndex),
+            annotations[editingTextAnnotationIndex].kind == .text,
+            textEditor.selectedRange().length == 0,
+            let caretRect = textEditorCaretRectInEditorBounds(textEditor)
+        else {
+            return
+        }
+
+        let annotation = annotations[editingTextAnnotationIndex]
+        let rect = overlayRect(fromLocalAnnotationRect: annotation.rect).standardized
+        guard rect.width > 0, rect.height > 0 else {
+            return
+        }
+
+        let caretWidth = max(1.5, min(3, annotation.style.textSize / 12))
+        let caretHeight = min(max(1, caretRect.height), rect.height)
+        let clampedX = min(max(caretRect.midX, 0), rect.width)
+        let clampedY = min(max(rect.height - caretRect.maxY, 0), max(0, rect.height - caretHeight))
+        let localCaretRect = NSRect(
+            x: clampedX - caretWidth / 2,
+            y: clampedY,
+            width: caretWidth,
+            height: caretHeight
+        )
+
+        NSGraphicsContext.saveGraphicsState()
+        if abs(annotation.rotationAngle) >= 0.001 {
+            let transform = NSAffineTransform()
+            transform.translateX(by: rect.midX, yBy: rect.midY)
+            transform.rotate(byRadians: annotation.rotationAngle)
+            transform.translateX(by: -rect.midX, yBy: -rect.midY)
+            transform.concat()
+        }
+        NSColor.black.setFill()
+        NSBezierPath(rect: NSRect(
+            x: rect.minX + localCaretRect.minX,
+            y: rect.minY + localCaretRect.minY,
+            width: localCaretRect.width,
+            height: localCaretRect.height
+        )).fill()
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    private func textEditorCaretRectInEditorBounds(
+        _ textEditor: NSTextView,
+        selectedLocation explicitSelectedLocation: Int? = nil
+    ) -> NSRect? {
+        guard let textContainer = textEditor.textContainer,
+              let layoutManager = textEditor.layoutManager
+        else {
+            return nil
+        }
+
+        layoutManager.ensureLayout(for: textContainer)
+        let textLength = (textEditor.string as NSString).length
+        let selectedLocation = min(explicitSelectedLocation ?? textEditor.selectedRange().location, textLength)
+        let rectInContainer: NSRect
+        if textLength == 0 || layoutManager.numberOfGlyphs == 0 {
+            rectInContainer = layoutManager.extraLineFragmentRect
+        } else if selectedLocation >= textLength {
+            let glyphRange = NSRange(location: max(0, layoutManager.numberOfGlyphs - 1), length: 1)
+            var lastGlyphRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+            lastGlyphRect.origin.x = lastGlyphRect.maxX
+            lastGlyphRect.size.width = 1
+            rectInContainer = lastGlyphRect
+        } else {
+            let glyphIndex = layoutManager.glyphIndexForCharacter(at: selectedLocation)
+            var glyphRect = layoutManager.boundingRect(
+                forGlyphRange: NSRange(location: glyphIndex, length: 1),
+                in: textContainer
+            )
+            glyphRect.size.width = 1
+            rectInContainer = glyphRect
+        }
+
+        let containerOrigin = textEditor.textContainerOrigin
+        return NSRect(
+            x: containerOrigin.x + rectInContainer.minX,
+            y: containerOrigin.y + rectInContainer.minY,
+            width: max(1, rectInContainer.width),
+            height: rectInContainer.height
+        )
+    }
+
     private func drawBrushPathAnnotation(_ annotation: CaptureAnnotation, inOverlay: Bool) {
         guard let brushPath = inOverlay
             ? overlayBrushPath(fromLocalBrushPath: annotation.brushPath)
@@ -8086,6 +8662,27 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         image.draw(in: NSRect(x: point.x - size / 2, y: point.y - size / 2, width: size, height: size))
     }
 
+    private func drawTextDeleteHandle(at point: NSPoint) {
+        let size = textDeleteHandleIconSize
+        let rect = NSRect(x: point.x - size / 2, y: point.y - size / 2, width: size, height: size)
+        guard let image = NSCursor.svgImage(named: "x-circle-fill") else {
+            NSColor.systemBlue.setFill()
+            NSBezierPath(ovalIn: rect).fill()
+            NSColor.white.setStroke()
+            let path = NSBezierPath()
+            path.lineWidth = 1.6
+            path.lineCapStyle = .round
+            path.move(to: NSPoint(x: rect.minX + 4, y: rect.minY + 4))
+            path.line(to: NSPoint(x: rect.maxX - 4, y: rect.maxY - 4))
+            path.move(to: NSPoint(x: rect.minX + 4, y: rect.maxY - 4))
+            path.line(to: NSPoint(x: rect.maxX - 4, y: rect.minY + 4))
+            path.stroke()
+            return
+        }
+
+        image.draw(in: rect)
+    }
+
     private func selectedBrushEndpointMarkers(for annotation: CaptureAnnotation) -> [NSPoint] {
         guard annotation.kind == .brush,
               let brushPath = overlayBrushPath(fromLocalBrushPath: annotation.brushPath),
@@ -8103,7 +8700,13 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         let handles = resizeHandleCenters(for: rect, kind: kind, rotationAngle: rotationAngle)
         NSColor.systemBlue.setFill()
         NSColor.white.setStroke()
-        for center in handles {
+        for (index, center) in handles.enumerated() {
+            let handle = ShapeResizeHandle.allCases[index]
+            if kind == .text, handle == .topRight {
+                drawTextDeleteHandle(at: center)
+                continue
+            }
+
             let handleRect = NSRect(x: center.x - 3, y: center.y - 3, width: 6, height: 6)
             let path = NSBezierPath(ovalIn: handleRect)
             path.fill()
@@ -8917,7 +9520,11 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         drawTextIconToggle(named: "bold", in: layout.textBold, selected: currentStyle.textBold)
         drawTextIconToggle(named: "italic", in: layout.textItalic, selected: currentStyle.textItalic)
         drawTextIconToggle(named: "stroke", in: layout.textOutline, selected: currentStyle.textOutlineEnabled)
-        drawTextPopupField(currentTextFontFamily(), in: layout.textFont, compact: false)
+        drawTextPopupField(
+            SelectionToolbarState.textFontDisplayName(for: currentTextFontFamily()),
+            in: layout.textFont,
+            compact: false
+        )
         drawTextPopupField("\(Int(currentStyle.textSize.rounded()))", in: layout.textSize, compact: true)
     }
 
@@ -8973,7 +9580,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         switch kind {
         case .font:
             let families = SelectionToolbarState.installedTextFontFamilies()
-            labels = families
+            labels = families.map { SelectionToolbarState.textFontDisplayName(for: $0) }
             selectedIndex = families.firstIndex(of: currentTextFontFamily())
         case .size:
             let sizes = SelectionToolbarState.textSizeValues

@@ -1110,10 +1110,20 @@ enum CaptureAnnotationRenderer {
         return ceil(font.ascender - font.descender + font.leading)
     }
 
+    static let textHorizontalPadding: CGFloat = 8
+
+    static func textContentRect(in rect: NSRect) -> NSRect {
+        let horizontalPadding = min(textHorizontalPadding, max(0, rect.width / 2))
+        return rect.insetBy(dx: horizontalPadding, dy: 0)
+    }
+
     static func textAttributes(style: CaptureAnnotationStyle) -> [NSAttributedString.Key: Any] {
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.lineBreakMode = .byClipping
         var attributes: [NSAttributedString.Key: Any] = [
             .font: textFont(style: style),
             .foregroundColor: style.strokeColor,
+            .paragraphStyle: paragraphStyle,
         ]
         if style.textItalic {
             attributes[.obliqueness] = CGFloat(0.22)
@@ -1126,8 +1136,9 @@ enum CaptureAnnotationRenderer {
     }
 
     static func drawText(_ text: String, in rect: NSRect, style: CaptureAnnotationStyle) {
+        let contentRect = textContentRect(in: rect)
         guard style.textOutlineEnabled else {
-            NSAttributedString(string: text, attributes: textAttributes(style: style)).draw(in: rect)
+            NSAttributedString(string: text, attributes: textAttributes(style: style)).draw(in: contentRect)
             return
         }
 
@@ -1146,8 +1157,8 @@ enum CaptureAnnotationRenderer {
         fillAttributes.removeValue(forKey: .strokeWidth)
         fillAttributes.removeValue(forKey: .shadow)
 
-        NSAttributedString(string: text, attributes: outlineAttributes).draw(in: rect)
-        NSAttributedString(string: text, attributes: fillAttributes).draw(in: rect)
+        NSAttributedString(string: text, attributes: outlineAttributes).draw(in: contentRect)
+        NSAttributedString(string: text, attributes: fillAttributes).draw(in: contentRect)
     }
 
     static func render(image: NSImage, annotations: [CaptureAnnotation]) -> NSImage {
