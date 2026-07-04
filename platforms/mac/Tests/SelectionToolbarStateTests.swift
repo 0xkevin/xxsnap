@@ -2478,6 +2478,23 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_currentStyle?.textSize, 36)
     }
 
+    func testNumberCreationCursorChangesByTypeAndAvoidsToolbar() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 180))
+        window.test_activateNumberTool()
+
+        XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: 160, y: 160)), .numberMark)
+
+        window.test_setNumberMarkType(.check)
+        XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: 160, y: 160)), .numberCheck)
+
+        window.test_setNumberMarkType(.cross)
+        XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: 160, y: 160)), .numberCross)
+
+        let toolbarPoint = try XCTUnwrap(window.test_mainToolbarButtonPoint(for: .number))
+        XCTAssertEqual(window.test_cursorStyle(at: toolbarPoint), .arrow)
+    }
+
     func testNumberToolCreatesSequentialMarksInsideAndOutsideSelection() throws {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         let selection = NSRect(x: 120, y: 120, width: 220, height: 140)

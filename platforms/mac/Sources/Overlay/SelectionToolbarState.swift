@@ -169,6 +169,9 @@ enum SelectionToolbarState {
         case marker
         case markerLight
         case eyedropperLight
+        case numberMark
+        case numberCheck
+        case numberCross
     }
 
     static let defaultFillPreviewColor = NSColor.systemGray

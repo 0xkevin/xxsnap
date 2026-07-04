@@ -2094,6 +2094,26 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         let isAnnotationBorder = interactionMode == .annotating && annotationIndexForBorder(at: point) != nil
         let textAnnotationBorderIndex = interactionMode == .annotating ? textAnnotationBorderIndex(at: point) : nil
 
+        if isNumberToolActive {
+            if isToolbarOrPanelPoint(point) {
+                return .arrow
+            }
+            if interactionMode == .movingShape {
+                return backgroundAwareCursorStyle(.move, at: point)
+            }
+            if interactionMode == .annotating, numberAnnotationIndex(at: point) != nil {
+                return backgroundAwareCursorStyle(.move, at: point)
+            }
+            switch currentNumberMarkType {
+            case .number:
+                return .numberMark
+            case .check:
+                return .numberCheck
+            case .cross:
+                return .numberCross
+            }
+        }
+
         if textDeleteHandleHitTarget(at: point) != nil {
             return .arrow
         }
@@ -2651,6 +2671,17 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
     }
 
+    private func numberCreationCursor(for type: CaptureNumberMarkType) -> NSCursor {
+        let size = NSSize(width: 30, height: 30)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        NSGraphicsContext.current?.imageInterpolation = .high
+        let rect = NSRect(origin: .zero, size: size).insetBy(dx: 3, dy: 3)
+        drawNumberMarkIcon(type, in: rect, color: currentStyle.strokeColor, toolbar: false)
+        image.unlockFocus()
+        return NSCursor(image: image, hotSpot: NSPoint(x: 10, y: 20))
+    }
+
     private func nsCursor(for style: SelectionToolbarState.OverlayCursorStyle) -> NSCursor {
         switch style {
         case .arrow:
@@ -2701,6 +2732,12 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return NSCursor.xxsnapMarker(color: currentStyle.strokeColor, strokeWidth: currentStyle.strokeWidth)
         case .markerLight:
             return NSCursor.xxsnapMarker(color: .white, strokeWidth: currentStyle.strokeWidth)
+        case .numberMark:
+            return numberCreationCursor(for: .number)
+        case .numberCheck:
+            return numberCreationCursor(for: .check)
+        case .numberCross:
+            return numberCreationCursor(for: .cross)
         }
     }
 
