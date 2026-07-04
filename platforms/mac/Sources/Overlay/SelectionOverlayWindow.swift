@@ -6278,6 +6278,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return kind == .rectangle || kind == .ellipse
         case .text:
             return kind == .text
+        case .numberSequence:
+            return kind == .numberSequence
         }
     }
 
@@ -8380,7 +8382,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             path = NSBezierPath(rect: insetRect)
         case .ellipse:
             path = NSBezierPath(ovalIn: insetRect)
-        case .arrowLine, .brush, .marker, .text, .mosaicStroke, .mosaicRectangle:
+        case .arrowLine, .brush, .marker, .text, .numberSequence, .mosaicStroke, .mosaicRectangle:
             return
         }
 
@@ -10858,7 +10860,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return .marker
         case .mosaicStroke, .mosaicRectangle:
             return .mosaic
-        case .rectangle, .ellipse, .text:
+        case .rectangle, .ellipse, .text, .numberSequence:
             return .shape
         }
     }

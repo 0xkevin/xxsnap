@@ -453,7 +453,7 @@ enum SelectionToolbarState {
 
     static func annotationKindSupportsPostDrawEditing(_ kind: CaptureAnnotationKind) -> Bool {
         switch kind {
-        case .rectangle, .ellipse, .arrowLine, .marker, .text, .mosaicStroke, .mosaicRectangle:
+        case .rectangle, .ellipse, .arrowLine, .marker, .text, .numberSequence, .mosaicStroke, .mosaicRectangle:
             return true
         case .brush:
             return false
@@ -462,7 +462,7 @@ enum SelectionToolbarState {
 
     static func annotationKindSupportsGeometryEditing(_ kind: CaptureAnnotationKind) -> Bool {
         switch kind {
-        case .rectangle, .ellipse, .text, .mosaicRectangle:
+        case .rectangle, .ellipse, .text, .numberSequence, .mosaicRectangle:
             return true
         case .arrowLine, .brush, .marker, .mosaicStroke:
             return false
@@ -1986,7 +1986,7 @@ enum SelectionToolbarState {
 
     private static func shapePath(in rect: NSRect, kind: CaptureAnnotationKind, cornerRadius: CGFloat) -> NSBezierPath {
         switch kind {
-        case .arrowLine, .brush, .marker, .text, .mosaicStroke, .mosaicRectangle:
+        case .arrowLine, .brush, .marker, .text, .numberSequence, .mosaicStroke, .mosaicRectangle:
             NSBezierPath()
         case .rectangle where cornerRadius > 0:
             NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius)

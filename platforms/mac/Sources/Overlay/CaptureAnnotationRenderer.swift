@@ -14,10 +14,9 @@ enum CaptureAnnotationKind {
     case brush
     case marker
     case text
+    case numberSequence
     case mosaicStroke
     case mosaicRectangle
-
-    static let numberSequence: CaptureAnnotationKind = .text
 }
 
 enum CaptureMosaicRedactionType: Equatable {
@@ -1256,6 +1255,10 @@ enum CaptureAnnotationRenderer {
             drawTextAnnotation(annotation, in: context, scaleX: scaleX, scaleY: scaleY, textScale: lineScale)
             return
         }
+        if annotation.kind == .numberSequence {
+            drawNumberSequenceAnnotation(annotation, in: context, scaleX: scaleX, scaleY: scaleY, textScale: lineScale)
+            return
+        }
         if annotation.kind == .marker {
             drawMarkerLine(annotation, in: context, sourceImage: sourceImage, scaleX: scaleX, scaleY: scaleY, lineScale: lineScale)
             return
@@ -1289,7 +1292,7 @@ enum CaptureAnnotationRenderer {
             path.addRect(pixelRect)
         case .ellipse:
             path.addEllipse(in: pixelRect)
-        case .arrowLine, .brush, .marker, .text, .mosaicStroke, .mosaicRectangle:
+        case .arrowLine, .brush, .marker, .text, .numberSequence, .mosaicStroke, .mosaicRectangle:
             return
         }
 
@@ -2225,7 +2228,7 @@ enum CaptureSketchStrokePath {
         }
 
         switch kind {
-        case .arrowLine, .brush, .marker, .text, .mosaicStroke, .mosaicRectangle:
+        case .arrowLine, .brush, .marker, .text, .numberSequence, .mosaicStroke, .mosaicRectangle:
             return []
         case .ellipse:
             return ellipsePoints(in: rect)
