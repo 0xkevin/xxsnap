@@ -2531,6 +2531,21 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_numberSequenceIndex(at: 2), 2)
     }
 
+    func testOverlayRendersStandaloneCheckWithoutBackgroundCircle() throws {
+        let window = SelectionOverlayWindow(backgroundImage: solidImage(size: NSSize(width: 300, height: 220), color: .white)) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 80, y: 80, width: 180, height: 120))
+        window.test_activateNumberTool()
+        window.test_setNumberMarkType(.check)
+        window.test_mouseDown(at: NSPoint(x: 160, y: 140))
+        window.test_mouseUp(at: NSPoint(x: 160, y: 140))
+
+        let image = try XCTUnwrap(window.test_renderedOverlayImage())
+        let corner = try XCTUnwrap(rgbaPixel(in: image, at: NSPoint(x: 145, y: image.size.height - 125)))
+        XCTAssertGreaterThan(corner.red, 245)
+        XCTAssertGreaterThan(corner.green, 245)
+        XCTAssertGreaterThan(corner.blue, 245)
+    }
+
     func testNumberDeleteRenumbersRemainingMarks() throws {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 180))

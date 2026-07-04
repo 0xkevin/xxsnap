@@ -243,6 +243,30 @@ final class xxsnapMacTests: XCTestCase {
         XCTAssertLessThan(circleFill.blue, 90)
     }
 
+    func testNumberExportUsesSequenceIndexAndSelectedColor() throws {
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = NSColor(srgbRed: 0.1, green: 0.25, blue: 1, alpha: 1)
+        style.textSize = 28
+        let mark = CaptureAnnotation(
+            kind: .numberSequence,
+            rect: NSRect(x: 30, y: 30, width: 42, height: 42),
+            style: style,
+            numberMarkType: .number,
+            numberSequenceIndex: 7
+        )
+        let image = try makeBitmapImage(
+            pointSize: NSSize(width: 120, height: 100),
+            pixelWidth: 120,
+            pixelHeight: 100,
+            fill: .white
+        )
+
+        let rendered = CaptureAnnotationRenderer.render(image: image, annotations: [mark])
+
+        let fill = try XCTUnwrap(rgbaPixel(in: rendered, x: 51, y: 49))
+        XCTAssertGreaterThan(fill.blue, 180)
+    }
+
     func testCheckAndCrossRenderWithoutCircleBackground() throws {
         var checkStyle = CaptureAnnotationStyle()
         checkStyle.strokeColor = NSColor(srgbRed: 0, green: 0.7, blue: 0, alpha: 1)
