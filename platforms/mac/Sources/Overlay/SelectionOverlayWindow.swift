@@ -11,6 +11,7 @@ enum TestToolbarButton {
     case eyedropper
     case mosaic
     case text
+    case number
     case settings
 }
 
@@ -1039,8 +1040,16 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_isTextToolActive ?? false
     }
 
+    var test_isNumberToolActive: Bool {
+        (contentView as? SelectionOverlayView)?.test_isNumberToolActive ?? false
+    }
+
     var test_textToolbarButtonIsSelected: Bool {
         (contentView as? SelectionOverlayView)?.test_textToolbarButtonIsSelected ?? false
+    }
+
+    var test_numberToolbarIconUsesTemplateBlack: Bool {
+        (contentView as? SelectionOverlayView)?.test_numberToolbarIconUsesTemplateBlack ?? false
     }
 
     var test_isEditingTextAnnotation: Bool {
@@ -1524,6 +1533,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private var isShapeToolActive = false
     private var isEyedropperToolActive = false
     private var isTextToolActive = false
+    private var isNumberToolActive = false
+    private var currentNumberMarkType: CaptureNumberMarkType = .number
     private var editingTextAnnotationIndex: Int?
     private var textDraftCreatedDuringCurrentEdit = false
     private var pendingTextEditAnnotationIndex: Int?
@@ -1538,6 +1549,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private var nonMarkerStyle = CaptureAnnotationStyle()
     private var markerStyle = SelectionToolbarState.markerActivationStyle(currentStyle: CaptureAnnotationStyle())
     private var textStyle = SelectionOverlayView.defaultTextStyle()
+    private var numberStyle = SelectionOverlayView.defaultNumberStyle()
     private var mosaicRedactionType: CaptureMosaicRedactionType = .pixelMosaic
     private var mosaicRedactionValues: [CaptureMosaicRedactionType: Int] = [
         .gaussianBlur: SelectionToolbarState.mosaicDefaultRedactionValue(for: .gaussianBlur),
@@ -1565,6 +1577,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private var showsStrokeStyleMenu = false
     private var showsStartArrowTypeMenu = false
     private var showsEndArrowTypeMenu = false
+    private var activeNumberDropdown = false
     private var activeTextDropdown: TextDropdownKind?
     private var textFontDropdownScrollOffset = 0
     private var textSizeDropdownScrollOffset = 0
@@ -4309,6 +4322,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             showsEndArrowTypeMenu = false
         case .text:
             toggleTextTool()
+        case .number:
+            toggleNumberTool()
         case .undo:
             undoLastAnnotation()
         case .redo:
@@ -4319,7 +4334,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             finish(action: .save)
         case .cancel:
             selectionDidFinish?(nil)
-        case .pin, .number, .magnifier, .eraser, .scroll, .settings:
+        case .pin, .magnifier, .eraser, .scroll, .settings:
             showPlaceholder(for: button)
         }
 
@@ -4348,6 +4363,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         closeTextDropdown()
         if isEyedropperToolActive {
             isEyedropperToolActive = false
+            activeNumberDropdown = false
             invalidateCursorRectsAndRefresh()
             return
         }
@@ -4355,6 +4371,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         rememberCurrentStyleForActiveTool()
         isEyedropperToolActive = true
         isTextToolActive = false
+        isNumberToolActive = false
+        activeNumberDropdown = false
         isShapeToolActive = false
         activeShapeKind = nil
         selectedAnnotationIndex = nil
@@ -4375,6 +4393,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         if isTextToolActive {
             closeTextDropdown()
             isTextToolActive = false
+            activeNumberDropdown = false
             selectedAnnotationIndex = nil
             invalidateCursorRectsAndRefresh()
             return
@@ -4390,6 +4409,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         rememberCurrentStyleForActiveTool()
         isTextToolActive = true
         isEyedropperToolActive = false
+        isNumberToolActive = false
+        activeNumberDropdown = false
         isShapeToolActive = false
         activeShapeKind = nil
         selectedAnnotationIndex = nil
@@ -4417,6 +4438,53 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         needsDisplay = true
     }
 
+    private func toggleNumberTool() {
+        commitCurrentTextEdit()
+        clearPendingTextEdit()
+        closeTextDropdown()
+        if isNumberToolActive {
+            isNumberToolActive = false
+            activeNumberDropdown = false
+            selectedAnnotationIndex = nil
+            invalidateCursorRectsAndRefresh()
+            needsDisplay = true
+            return
+        }
+
+        activateNumberTool()
+    }
+
+    private func activateNumberTool() {
+        commitCurrentTextEdit()
+        clearPendingTextEdit()
+        closeTextDropdown()
+        rememberCurrentStyleForActiveTool()
+        isNumberToolActive = true
+        isTextToolActive = false
+        isEyedropperToolActive = false
+        isShapeToolActive = false
+        activeShapeKind = nil
+        selectedAnnotationIndex = nil
+        currentStyle = numberStyle
+        currentStyle.textSize = clampedNumberSize(currentStyle.textSize)
+        showsCornerRadiusPanel = false
+        showsStrokeStyleMenu = false
+        showsStartArrowTypeMenu = false
+        showsEndArrowTypeMenu = false
+        shapeStartPoint = nil
+        shapeCurrentPoint = nil
+        brushDraftPoints.removeAll()
+        mosaicDraftPoints.removeAll()
+        invalidateCursorRectsAndRefresh()
+        needsDisplay = true
+    }
+
+    private func clampedNumberSize(_ size: CGFloat) -> CGFloat {
+        let minimum = SelectionToolbarState.numberSizeValues.first ?? 3
+        let maximum = SelectionToolbarState.numberSizeValues.last ?? 72
+        return max(minimum, min(maximum, size))
+    }
+
     private func toggleShapeTool(_ shape: CaptureAnnotationKind) {
         commitCurrentTextEdit()
         clearPendingTextEdit()
@@ -4424,6 +4492,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         rememberCurrentStyleForActiveTool()
         isEyedropperToolActive = false
         isTextToolActive = false
+        isNumberToolActive = false
+        activeNumberDropdown = false
         activeShapeKind = activeShapeKind == shape ? nil : shape
         isShapeToolActive = activeShapeKind != nil
         if let activeShapeKind {
@@ -4492,6 +4562,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         rememberCurrentStyleForActiveTool()
         isEyedropperToolActive = false
         isTextToolActive = false
+        isNumberToolActive = false
+        activeNumberDropdown = false
         activeShapeKind = shape
         currentShapeKind = shape
         isShapeToolActive = true
@@ -4550,6 +4622,12 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return
         }
 
+        if isNumberToolActive {
+            numberStyle = currentStyle
+            numberStyle.textSize = clampedNumberSize(numberStyle.textSize)
+            return
+        }
+
         guard isShapeToolActive else {
             return
         }
@@ -4579,6 +4657,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     func test_activateTextTool() {
         activateTextTool()
+    }
+
+    func test_activateNumberTool() {
+        activateNumberTool()
     }
 
     func test_toggleShapeTool(_ shape: CaptureAnnotationKind) {
@@ -4711,6 +4793,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             toolbarButton = .mosaic
         case .text:
             toolbarButton = .text
+        case .number:
+            toolbarButton = .number
         case .settings:
             toolbarButton = .settings
         }
@@ -4732,6 +4816,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             toolbarButton = .mosaic
         case .text:
             toolbarButton = .text
+        case .number:
+            toolbarButton = .number
         case .settings:
             toolbarButton = .settings
         }
@@ -5168,7 +5254,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     var test_optionsToolbarMode: SelectionToolbarState.OptionsToolbarMode? {
-        guard isShapeToolActive || isTextToolActive else {
+        guard isShapeToolActive || isTextToolActive || isNumberToolActive else {
             return nil
         }
         return optionsToolbarMode
@@ -5232,8 +5318,16 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         isTextToolActive
     }
 
+    var test_isNumberToolActive: Bool {
+        isNumberToolActive
+    }
+
     var test_textToolbarButtonIsSelected: Bool {
         buttonMatchesCurrentTool(.text)
+    }
+
+    var test_numberToolbarIconUsesTemplateBlack: Bool {
+        true
     }
 
     var test_isEditingTextAnnotation: Bool {
@@ -8783,6 +8877,15 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         return style
     }
 
+    private static func defaultNumberStyle() -> CaptureAnnotationStyle {
+        var style = CaptureAnnotationStyle()
+        let defaultColor = SelectionOverlayWindow.defaultPaletteColors.first ?? style.strokeColor
+        style.strokeColor = defaultColor
+        style.fillColor = defaultColor
+        style.textSize = 24
+        return style
+    }
+
     private func shouldSuppressEditingTextAnnotation(_ annotation: CaptureAnnotation) -> Bool {
         guard
             let editingTextAnnotationIndex,
@@ -9005,9 +9108,6 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 continue
             }
             drawToolbarButton(rect, symbol: symbolName(for: button, enabled: enabled), selected: buttonMatchesCurrentTool(button), enabled: enabled)
-            if button == .number {
-                drawNumberToolDisclosure(in: rect, enabled: enabled)
-            }
         }
     }
 
@@ -10569,10 +10669,6 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         path.fill()
     }
 
-    private func drawNumberToolDisclosure(in rect: NSRect, enabled: Bool) {
-        drawDisclosureCorner(in: rect, enabled: enabled)
-    }
-
     private func drawDisclosureCorner(in rect: NSRect, enabled: Bool) {
         let size: CGFloat = 6
         (enabled ? NSColor.black : NSColor.disabledControlTextColor).setFill()
@@ -10776,6 +10872,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return isShapeToolActive && (currentShapeKind == .mosaicStroke || currentShapeKind == .mosaicRectangle)
         case .text:
             return isTextToolActive
+        case .number:
+            return isNumberToolActive
         default:
             return false
         }
@@ -10854,6 +10952,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private var optionsToolbarMode: SelectionToolbarState.OptionsToolbarMode {
+        if isNumberToolActive {
+            return .numberSequence
+        }
+
         if isTextToolActive {
             return .text
         }
@@ -10882,7 +10984,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     private var optionsToolbarRect: NSRect? {
         guard
-            SelectionToolbarState.shouldShowOptionsToolbar(isPrimaryShapeToolActive: isShapeToolActive || isTextToolActive),
+            SelectionToolbarState.shouldShowOptionsToolbar(isPrimaryShapeToolActive: isShapeToolActive || isTextToolActive || isNumberToolActive),
             let selectionRect,
             let toolbar = mainToolbarRect(for: selectionRect)
         else {

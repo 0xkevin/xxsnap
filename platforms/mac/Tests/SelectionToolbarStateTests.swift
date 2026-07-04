@@ -2410,6 +2410,34 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(SelectionToolbarState.numberSizeValues.count, 70)
     }
 
+    func testNumberToolbarButtonActivatesNumberModeAndOptionsToolbar() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 260, height: 160))
+
+        let numberPoint = try XCTUnwrap(window.test_mainToolbarButtonPoint(for: .number))
+        window.test_mouseDown(at: numberPoint)
+        window.test_mouseUp(at: numberPoint)
+
+        XCTAssertTrue(window.test_isNumberToolActive)
+        XCTAssertEqual(window.test_optionsToolbarMode, .numberSequence)
+        XCTAssertNotNil(window.test_optionsToolbarRect)
+    }
+
+    func testNumberToolbarIconStaysBlackWhenColorChanges() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 260, height: 160))
+        let numberPoint = try XCTUnwrap(window.test_mainToolbarButtonPoint(for: .number))
+
+        window.test_mouseDown(at: numberPoint)
+        window.test_mouseUp(at: numberPoint)
+
+        let redPoint = try XCTUnwrap(window.test_optionsPaletteColorPoint(at: 0))
+        window.test_mouseDown(at: redPoint)
+        window.test_mouseUp(at: redPoint)
+
+        XCTAssertEqual(window.test_numberToolbarIconUsesTemplateBlack, true)
+    }
+
     func testMosaicDotSizesAndCursorPreviewAreScaledDown() {
         XCTAssertEqual(SelectionToolbarState.strokeWidthValues(for: .mosaic), [15, 25, 35])
         XCTAssertEqual(SelectionToolbarState.mosaicCursorDotDiameter(for: 15), 7.8, accuracy: 0.01)
