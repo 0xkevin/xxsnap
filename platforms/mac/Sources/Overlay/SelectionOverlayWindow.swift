@@ -805,6 +805,10 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_selectTextFont(family)
     }
 
+    func test_annotation(at index: Int) -> CaptureAnnotation? {
+        (contentView as? SelectionOverlayView)?.test_annotation(at: index)
+    }
+
     func test_activateNumberTool() {
         (contentView as? SelectionOverlayView)?.test_activateNumberTool()
     }
@@ -827,6 +831,14 @@ final class SelectionOverlayWindow: NSWindow {
 
     func test_selectNumberSize(_ size: CGFloat) {
         (contentView as? SelectionOverlayView)?.test_selectNumberSize(size)
+    }
+
+    func test_numberSequenceIndex(at index: Int) -> Int? {
+        (contentView as? SelectionOverlayView)?.test_numberSequenceIndex(at: index)
+    }
+
+    func test_setNumberMarkType(_ type: CaptureNumberMarkType) {
+        (contentView as? SelectionOverlayView)?.test_setNumberMarkType(type)
     }
 
     func test_mosaicRectangleOptionPoint() -> NSPoint? {
@@ -3150,6 +3162,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return
         }
 
+        if isNumberToolActive, handleNumberToolMouseDown(at: point) {
+            return
+        }
+
         if textDeleteHandleHitTarget(at: point) != nil {
             _ = deleteSelectedAnnotation()
             needsDisplay = true
@@ -3297,6 +3313,51 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         showsStrokeStyleMenu = false
         showsCornerRadiusPanel = false
         needsDisplay = true
+    }
+
+    private func handleNumberToolMouseDown(at point: NSPoint) -> Bool {
+        guard lockedSelectionRect != nil, !isToolbarOrPanelPoint(point) else {
+            return false
+        }
+
+        if let index = numberAnnotationIndex(at: point) {
+            selectAnnotation(at: index)
+            beginAnnotationMove(at: index, point: point)
+            return true
+        }
+
+        createNumberMark(at: point)
+        return true
+    }
+
+    private func createNumberMark(at point: NSPoint) {
+        var style = currentStyle
+        style.textSize = clampedNumberSize(style.textSize)
+        let rect = CaptureAnnotationRenderer.numberMarkRect(centeredAt: point, fontSize: style.textSize)
+        let annotation = CaptureAnnotation(
+            kind: .numberSequence,
+            rect: localAnnotationRect(from: rect),
+            style: style,
+            numberMarkType: currentNumberMarkType
+        )
+        annotations.append(annotation)
+        renumberNumberSequenceAnnotations()
+        selectedAnnotationIndex = annotations.indices.last
+        numberStyle = style
+        redoAnnotations.removeAll()
+        needsDisplay = true
+    }
+
+    private func renumberNumberSequenceAnnotations() {
+        var next = 1
+        for index in annotations.indices where annotations[index].kind == .numberSequence {
+            if annotations[index].numberMarkType == .number || annotations[index].numberMarkType == nil {
+                annotations[index].numberSequenceIndex = next
+                next += 1
+            } else {
+                annotations[index].numberSequenceIndex = nil
+            }
+        }
     }
 
     private func beginShapeDrawing(at point: NSPoint) {
@@ -5048,6 +5109,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         applyTextFontFamily(family)
     }
 
+    func test_annotation(at index: Int) -> CaptureAnnotation? {
+        annotations.indices.contains(index) ? annotations[index] : nil
+    }
+
     var test_numberMarkType: CaptureNumberMarkType {
         currentNumberMarkType
     }
@@ -5082,6 +5147,14 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     func test_selectNumberSize(_ size: CGFloat) {
         applyTextSize(size)
+    }
+
+    func test_numberSequenceIndex(at index: Int) -> Int? {
+        annotations.indices.contains(index) ? annotations[index].numberSequenceIndex : nil
+    }
+
+    func test_setNumberMarkType(_ type: CaptureNumberMarkType) {
+        setNumberMarkType(type)
     }
 
     func test_mosaicRectangleOptionPoint() -> NSPoint? {
@@ -6561,6 +6634,14 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             rememberCurrentStyleForActiveTool()
             return
         }
+        if annotation.kind == .numberSequence {
+            activateNumberTool()
+            selectedAnnotationIndex = index
+            currentNumberMarkType = annotation.numberMarkType ?? .number
+            currentStyle = annotation.style
+            rememberCurrentStyleForActiveTool()
+            return
+        }
         activateShapeTool(annotation.kind)
         currentStyle = annotation.style
         rememberCurrentStyleForActiveTool()
@@ -6611,6 +6692,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 annotations[selectedAnnotationIndex].arrowLine = arrowLine
                 annotations[selectedAnnotationIndex].rect = arrowLine.boundingRect
             }
+        } else if annotations[selectedAnnotationIndex].kind == .numberSequence {
+            annotations[selectedAnnotationIndex].style.textSize = clampedNumberSize(annotations[selectedAnnotationIndex].style.textSize)
         } else if SelectionToolbarState.annotationKindSupportsPostDrawEditing(annotations[selectedAnnotationIndex].kind) {
             annotations[selectedAnnotationIndex].kind = currentShapeKind
         }
@@ -6802,6 +6885,16 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         return nil
     }
 
+    private func numberAnnotationIndex(at point: NSPoint) -> Int? {
+        for index in annotations.indices.reversed() where annotations[index].kind == .numberSequence {
+            let rect = overlayRect(fromLocalAnnotationRect: annotations[index].rect).standardized.insetBy(dx: -6, dy: -6)
+            if rect.contains(point) {
+                return index
+            }
+        }
+        return nil
+    }
+
     private func textAnnotationIndex(at point: NSPoint) -> Int? {
         for index in annotations.indices.reversed() where annotations[index].kind == .text {
             if textAnnotationHitContains(point: point, annotation: annotations[index]) {
@@ -6852,6 +6945,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
         if annotation.kind == .text {
             return textAnnotationHitContains(point: point, annotation: annotation)
+        }
+        if annotation.kind == .numberSequence {
+            return false
         }
 
         let rect = overlayRect(fromLocalAnnotationRect: annotation.rect).standardized
@@ -8605,6 +8701,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             drawTextAnnotation(annotation, inOverlay: inOverlay)
             return
         }
+        if annotation.kind == .numberSequence {
+            drawNumberSequenceAnnotation(annotation, inOverlay: inOverlay)
+            return
+        }
         if annotation.kind == .mosaicStroke || annotation.kind == .mosaicRectangle {
             guard let composite = mosaicPreviewComposite(for: [annotation]) else {
                 return
@@ -8673,6 +8773,36 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             phase: 0
         )
         strokePath.stroke()
+    }
+
+    private func drawNumberSequenceAnnotation(_ annotation: CaptureAnnotation, inOverlay: Bool) {
+        let rect = (inOverlay ? overlayRect(fromLocalAnnotationRect: annotation.rect) : annotation.rect).standardized
+        switch annotation.numberMarkType ?? .number {
+        case .number:
+            annotation.style.strokeColor.setFill()
+            NSBezierPath(ovalIn: rect).fill()
+            let value = max(1, annotation.numberSequenceIndex ?? 1)
+            let text = "\(value)"
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.monospacedDigitSystemFont(ofSize: max(3, annotation.style.textSize * 0.72), weight: .bold),
+                .foregroundColor: readableNumberForegroundColor(on: annotation.style.strokeColor),
+            ]
+            let size = NSString(string: text).size(withAttributes: attributes)
+            NSString(string: text).draw(
+                at: NSPoint(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2 + rect.height * 0.08),
+                withAttributes: attributes
+            )
+        case .check:
+            drawNumberSymbol("✓", in: rect, color: annotation.style.strokeColor)
+        case .cross:
+            drawNumberSymbol("×", in: rect, color: annotation.style.strokeColor)
+        }
+    }
+
+    private func readableNumberForegroundColor(on color: NSColor) -> NSColor {
+        let rgb = color.usingColorSpace(.deviceRGB) ?? color
+        let luminance = 0.2126 * rgb.redComponent + 0.7152 * rgb.greenComponent + 0.0722 * rgb.blueComponent
+        return luminance > 0.68 ? NSColor.black.withAlphaComponent(0.86) : .white
     }
 
     private func drawTextAnnotation(_ annotation: CaptureAnnotation, inOverlay: Bool) {

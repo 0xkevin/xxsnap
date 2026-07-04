@@ -2478,6 +2478,42 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_currentStyle?.textSize, 36)
     }
 
+    func testNumberToolCreatesSequentialMarksInsideAndOutsideSelection() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 120, y: 120, width: 220, height: 140)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateNumberTool()
+
+        window.test_mouseDown(at: NSPoint(x: 150, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 150, y: 150))
+        window.test_mouseDown(at: NSPoint(x: selection.maxX + 30, y: selection.maxY + 24))
+        window.test_mouseUp(at: NSPoint(x: selection.maxX + 30, y: selection.maxY + 24))
+
+        XCTAssertEqual(window.test_annotationCount, 2)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 1)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 1), 2)
+        XCTAssertEqual(window.test_annotation(at: 1)?.kind, .numberSequence)
+    }
+
+    func testCheckAndCrossCreationDoNotAffectNumberOrder() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 120, y: 120, width: 220, height: 140))
+        window.test_activateNumberTool()
+
+        window.test_mouseDown(at: NSPoint(x: 150, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 150, y: 150))
+        window.test_setNumberMarkType(.check)
+        window.test_mouseDown(at: NSPoint(x: 190, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 190, y: 150))
+        window.test_setNumberMarkType(.number)
+        window.test_mouseDown(at: NSPoint(x: 230, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 230, y: 150))
+
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 1)
+        XCTAssertNil(window.test_numberSequenceIndex(at: 1))
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 2), 2)
+    }
+
     func testMosaicDotSizesAndCursorPreviewAreScaledDown() {
         XCTAssertEqual(SelectionToolbarState.strokeWidthValues(for: .mosaic), [15, 25, 35])
         XCTAssertEqual(SelectionToolbarState.mosaicCursorDotDiameter(for: 15), 7.8, accuracy: 0.01)

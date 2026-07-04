@@ -1966,7 +1966,7 @@ enum SelectionToolbarState {
     }
 
     static func shapeBorderContains(point: NSPoint, rect: NSRect, kind: CaptureAnnotationKind, cornerRadius: CGFloat, hitOutset: CGFloat = 6) -> Bool {
-        guard kind != .arrowLine, kind != .brush, kind != .marker else {
+        guard kind != .arrowLine, kind != .brush, kind != .marker, kind != .numberSequence else {
             return false
         }
 
