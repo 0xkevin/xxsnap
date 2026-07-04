@@ -2438,6 +2438,46 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_numberToolbarIconUsesTemplateBlack, true)
     }
 
+    func testNumberOptionsSwitchTypeAndDefaultColors() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 180))
+        window.test_activateNumberTool()
+
+        XCTAssertEqual(window.test_numberMarkType, .number)
+
+        let typePoint = try XCTUnwrap(window.test_numberMarkTypePoint())
+        window.test_mouseDown(at: typePoint)
+        window.test_mouseUp(at: typePoint)
+        let checkPoint = try XCTUnwrap(window.test_numberMarkTypeMenuPoint(.check))
+        window.test_mouseDown(at: checkPoint)
+        window.test_mouseUp(at: checkPoint)
+
+        XCTAssertEqual(window.test_numberMarkType, .check)
+        XCTAssertEqual(window.test_currentStyle?.strokeColor.usingColorSpace(.deviceRGB)?.greenComponent ?? 0, 1, accuracy: 0.35)
+
+        window.test_mouseDown(at: typePoint)
+        window.test_mouseUp(at: typePoint)
+        let crossPoint = try XCTUnwrap(window.test_numberMarkTypeMenuPoint(.cross))
+        window.test_mouseDown(at: crossPoint)
+        window.test_mouseUp(at: crossPoint)
+
+        XCTAssertEqual(window.test_numberMarkType, .cross)
+        XCTAssertGreaterThan(window.test_currentStyle?.strokeColor.usingColorSpace(.deviceRGB)?.redComponent ?? 0, 0.8)
+    }
+
+    func testNumberSizeDropdownUpdatesCurrentSize() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 180))
+        window.test_activateNumberTool()
+
+        let sizePoint = try XCTUnwrap(window.test_numberSizePoint())
+        window.test_mouseDown(at: sizePoint)
+        window.test_mouseUp(at: sizePoint)
+        window.test_selectNumberSize(36)
+
+        XCTAssertEqual(window.test_currentStyle?.textSize, 36)
+    }
+
     func testMosaicDotSizesAndCursorPreviewAreScaledDown() {
         XCTAssertEqual(SelectionToolbarState.strokeWidthValues(for: .mosaic), [15, 25, 35])
         XCTAssertEqual(SelectionToolbarState.mosaicCursorDotDiameter(for: 15), 7.8, accuracy: 0.01)

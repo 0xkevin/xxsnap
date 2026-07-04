@@ -805,6 +805,30 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_selectTextFont(family)
     }
 
+    func test_activateNumberTool() {
+        (contentView as? SelectionOverlayView)?.test_activateNumberTool()
+    }
+
+    var test_numberMarkType: CaptureNumberMarkType {
+        (contentView as? SelectionOverlayView)?.test_numberMarkType ?? .number
+    }
+
+    func test_numberMarkTypePoint() -> NSPoint? {
+        (contentView as? SelectionOverlayView)?.test_numberMarkTypePoint()
+    }
+
+    func test_numberSizePoint() -> NSPoint? {
+        (contentView as? SelectionOverlayView)?.test_numberSizePoint()
+    }
+
+    func test_numberMarkTypeMenuPoint(_ type: CaptureNumberMarkType) -> NSPoint? {
+        (contentView as? SelectionOverlayView)?.test_numberMarkTypeMenuPoint(type)
+    }
+
+    func test_selectNumberSize(_ size: CGFloat) {
+        (contentView as? SelectionOverlayView)?.test_selectNumberSize(size)
+    }
+
     func test_mosaicRectangleOptionPoint() -> NSPoint? {
         (contentView as? SelectionOverlayView)?.test_mosaicRectangleOptionPoint()
     }
@@ -1761,6 +1785,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         if showsEndArrowTypeMenu {
             drawArrowTypeMenu(field: .end)
         }
+        drawNumberMarkTypeMenuIfNeeded()
         drawTextDropdownIfNeeded()
         drawTooltipIfNeeded()
         drawColorSamplerIfNeeded()
@@ -3099,6 +3124,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
 
         if handleMeasurementControlClick(at: point) {
+            return
+        }
+
+        if activeNumberDropdown, handleOptionsClick(at: point) {
             return
         }
 
@@ -5019,6 +5048,42 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         applyTextFontFamily(family)
     }
 
+    var test_numberMarkType: CaptureNumberMarkType {
+        currentNumberMarkType
+    }
+
+    func test_numberMarkTypePoint() -> NSPoint? {
+        guard let optionsToolbarRect else {
+            return nil
+        }
+        let rect = optionsToolbarLayout(in: optionsToolbarRect).numberMarkType
+        return NSPoint(x: rect.midX, y: rect.midY)
+    }
+
+    func test_numberSizePoint() -> NSPoint? {
+        guard let optionsToolbarRect else {
+            return nil
+        }
+        let rect = optionsToolbarLayout(in: optionsToolbarRect).numberSize
+        return NSPoint(x: rect.midX, y: rect.midY)
+    }
+
+    func test_numberMarkTypeMenuPoint(_ type: CaptureNumberMarkType) -> NSPoint? {
+        guard let optionsToolbarRect else {
+            return nil
+        }
+        let itemRects = numberMarkTypeMenuItemRects(in: numberMarkTypeMenuRect(in: optionsToolbarRect))
+        guard let index = CaptureNumberMarkType.allCases.firstIndex(of: type), itemRects.indices.contains(index) else {
+            return nil
+        }
+        let rect = itemRects[index]
+        return NSPoint(x: rect.midX, y: rect.midY)
+    }
+
+    func test_selectNumberSize(_ size: CGFloat) {
+        applyTextSize(size)
+    }
+
     func test_mosaicRectangleOptionPoint() -> NSPoint? {
         guard let optionsToolbarRect else {
             return nil
@@ -5671,6 +5736,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             closeTextDropdown()
             return handleMosaicOptionsClick(at: point, optionsRect: optionsRect)
         }
+        if optionsToolbarMode == .numberSequence {
+            return handleNumberOptionsClick(at: point, optionsRect: optionsRect)
+        }
         let layout = optionsToolbarLayout(in: optionsRect)
         let strokeWidths = SelectionToolbarState.strokeWidthValues(for: optionsToolbarMode)
 
@@ -5779,33 +5847,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return true
         }
 
-        if let swatch = SelectionToolbarState.swatchHitTarget(at: point, in: optionsRect, paletteCount: visiblePaletteCount, mode: optionsToolbarMode) {
-            closeTextDropdown()
-            switch swatch {
-            case .custom:
-            NSLog("xxsnap overlay custom color swatch clicked")
-                showsStrokeStyleMenu = false
-                showsCornerRadiusPanel = false
-                showsStartArrowTypeMenu = false
-                showsEndArrowTypeMenu = false
-                isCustomColorSwatchActive = true
-                toggleCustomColorPanel()
-            case let .palette(index):
-                guard colors.indices.contains(index) else {
-                    return true
-                }
-                let color = opaqueColor(colors[index])
-                currentStyle.strokeColor = color
-                currentStyle.fillColor = color
-                rememberCurrentStyleForActiveTool()
-                customColor = nil
-                isCustomColorSwatchActive = false
-                closeCustomColorPanel()
-                applyCurrentStyleToSelectedAnnotation()
-                invalidateMarkerCursorIfNeeded()
-                showsStartArrowTypeMenu = false
-                showsEndArrowTypeMenu = false
-            }
+        if handleColorSwatchClick(at: point, optionsRect: optionsRect) {
             return true
         }
 
@@ -5821,8 +5863,116 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         return true
     }
 
+    private func handleNumberOptionsClick(at point: NSPoint, optionsRect: NSRect) -> Bool {
+        if let selectedType = numberMarkTypeMenuHitTarget(at: point) {
+            setNumberMarkType(selectedType)
+            activeNumberDropdown = false
+            needsDisplay = true
+            return true
+        }
+
+        let layout = optionsToolbarLayout(in: optionsRect)
+        if layout.numberMarkType.contains(point) {
+            closeTextDropdown()
+            activeNumberDropdown.toggle()
+            showsStrokeStyleMenu = false
+            showsCornerRadiusPanel = false
+            showsStartArrowTypeMenu = false
+            showsEndArrowTypeMenu = false
+            needsDisplay = true
+            return true
+        }
+
+        if layout.numberSize.contains(point) {
+            activeNumberDropdown = false
+            toggleTextDropdown(.size)
+            return true
+        }
+
+        if handleColorSwatchClick(at: point, optionsRect: optionsRect) {
+            activeNumberDropdown = false
+            return true
+        }
+
+        if !optionsRect.contains(point) {
+            activeNumberDropdown = false
+            closeTextDropdown()
+            return false
+        }
+
+        return true
+    }
+
+    private func handleColorSwatchClick(at point: NSPoint, optionsRect: NSRect) -> Bool {
+        guard let swatch = SelectionToolbarState.swatchHitTarget(at: point, in: optionsRect, paletteCount: visiblePaletteCount, mode: optionsToolbarMode) else {
+            return false
+        }
+
+        closeTextDropdown()
+        switch swatch {
+        case .custom:
+            NSLog("xxsnap overlay custom color swatch clicked")
+            showsStrokeStyleMenu = false
+            showsCornerRadiusPanel = false
+            showsStartArrowTypeMenu = false
+            showsEndArrowTypeMenu = false
+            isCustomColorSwatchActive = true
+            toggleCustomColorPanel()
+        case let .palette(index):
+            guard colors.indices.contains(index) else {
+                return true
+            }
+            let color = opaqueColor(colors[index])
+            currentStyle.strokeColor = color
+            currentStyle.fillColor = color
+            rememberCurrentStyleForActiveTool()
+            customColor = nil
+            isCustomColorSwatchActive = false
+            closeCustomColorPanel()
+            applyCurrentStyleToSelectedAnnotation()
+            invalidateMarkerCursorIfNeeded()
+            showsStartArrowTypeMenu = false
+            showsEndArrowTypeMenu = false
+        }
+        return true
+    }
+
+    private func numberMarkTypeMenuHitTarget(at point: NSPoint) -> CaptureNumberMarkType? {
+        guard activeNumberDropdown, let optionsToolbarRect else {
+            return nil
+        }
+        let menu = numberMarkTypeMenuRect(in: optionsToolbarRect)
+        guard menu.contains(point) else {
+            return nil
+        }
+        return CaptureNumberMarkType.allCases.enumerated().first { index, _ in
+            numberMarkTypeMenuItemRects(in: menu)[index].contains(point)
+        }?.element
+    }
+
+    private func setNumberMarkType(_ type: CaptureNumberMarkType) {
+        currentNumberMarkType = type
+        switch type {
+        case .number:
+            break
+        case .check:
+            currentStyle.strokeColor = NSColor.systemGreen
+            currentStyle.fillColor = NSColor.systemGreen
+            customColor = nil
+            isCustomColorSwatchActive = false
+        case .cross:
+            currentStyle.strokeColor = NSColor.systemRed
+            currentStyle.fillColor = NSColor.systemRed
+            customColor = nil
+            isCustomColorSwatchActive = false
+        }
+        rememberCurrentStyleForActiveTool()
+        applyCurrentStyleToSelectedAnnotation()
+        invalidateCursorRectsAndRefresh()
+    }
+
     private func applyTextSize(_ size: CGFloat) {
-        currentStyle.textSize = max(3, min(72, size))
+        currentStyle.textSize = isNumberToolActive ? clampedNumberSize(size) : max(3, min(72, size))
         rememberCurrentStyleForActiveTool()
         applyCurrentStyleToSelectedAnnotation()
         needsDisplay = true
@@ -5876,7 +6026,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
         if let optionsRect = optionsToolbarRect {
             let layout = optionsToolbarLayout(in: optionsRect)
-            let activeField = kind == .font ? layout.textFont : layout.textSize
+            let activeField = textDropdownAnchorField(for: kind, in: layout)
             if activeField.contains(point) {
                 return false
             }
@@ -5899,13 +6049,16 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private func applyTextDropdownSelection(_ kind: TextDropdownKind, at index: Int) {
         switch kind {
         case .font:
+            guard !isNumberToolActive else {
+                return
+            }
             let families = SelectionToolbarState.installedTextFontFamilies()
             guard families.indices.contains(index) else {
                 return
             }
             applyTextFontFamily(families[index])
         case .size:
-            let sizes = SelectionToolbarState.textSizeValues
+            let sizes = textSizeValuesForActiveTool()
             guard sizes.indices.contains(index) else {
                 return
             }
@@ -5917,10 +6070,14 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         let selectedIndex: Int
         switch kind {
         case .font:
+            if isNumberToolActive {
+                selectedIndex = 0
+                break
+            }
             let families = SelectionToolbarState.installedTextFontFamilies()
             selectedIndex = families.firstIndex(of: currentTextFontFamily()) ?? 0
         case .size:
-            selectedIndex = SelectionToolbarState.textSizeValues.firstIndex { Int($0.rounded()) == Int(currentStyle.textSize.rounded()) } ?? 0
+            selectedIndex = textSizeValuesForActiveTool().firstIndex { Int($0.rounded()) == Int(currentStyle.textSize.rounded()) } ?? 0
         }
         let visibleCount = textDropdownVisibleItemCount(for: kind)
         let currentOffset = textDropdownScrollOffset(for: kind)
@@ -5934,17 +6091,29 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private func textDropdownRect(for kind: TextDropdownKind) -> NSRect? {
-        guard optionsToolbarMode == .text, let optionsRect = optionsToolbarRect else {
+        guard (optionsToolbarMode == .text || (optionsToolbarMode == .numberSequence && kind == .size)),
+              let optionsRect = optionsToolbarRect else {
             return nil
         }
         let layout = optionsToolbarLayout(in: optionsRect)
-        let field = kind == .font ? layout.textFont : layout.textSize
+        let field = textDropdownAnchorField(for: kind, in: layout)
         let height = CGFloat(textDropdownVisibleItemCount(for: kind)) * textDropdownItemHeight + 8
         return SelectionToolbarState.popoverRect(
             size: NSSize(width: max(field.width, kind == .font ? 154 : 48), height: height),
             anchoredTo: field,
             inside: safeLayoutBounds
         )
+    }
+
+    private func textDropdownAnchorField(for kind: TextDropdownKind, in layout: SelectionToolbarState.OptionsToolbarLayout) -> NSRect {
+        if optionsToolbarMode == .numberSequence, kind == .size {
+            return layout.numberSize
+        }
+        return kind == .font ? layout.textFont : layout.textSize
+    }
+
+    private func textSizeValuesForActiveTool() -> [CGFloat] {
+        isNumberToolActive ? SelectionToolbarState.numberSizeValues : SelectionToolbarState.textSizeValues
     }
 
     private var textDropdownItemHeight: CGFloat {
@@ -5960,7 +6129,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         case .font:
             return SelectionToolbarState.installedTextFontFamilies().count
         case .size:
-            return SelectionToolbarState.textSizeValues.count
+            return textSizeValuesForActiveTool().count
         }
     }
 
@@ -9470,7 +9639,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         case .text:
             drawTextOptions(in: optionsRect)
         case .numberSequence:
-            break
+            drawNumberOptions(in: optionsRect)
         }
         if SelectionToolbarState.showsStrokeStyleField(for: optionsToolbarMode) {
             drawStrokeStyleField(in: optionsRect)
@@ -9897,6 +10066,94 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         drawTextPopupField("\(Int(currentStyle.textSize.rounded()))", in: layout.textSize, compact: true)
     }
 
+    private func drawNumberOptions(in optionsRect: NSRect) {
+        let layout = optionsToolbarLayout(in: optionsRect)
+        drawNumberMarkTypeField(in: layout.numberMarkType)
+        drawTextPopupField("\(Int(currentStyle.textSize.rounded()))", in: layout.numberSize, compact: true)
+    }
+
+    private func drawNumberMarkTypeField(in field: NSRect) {
+        NSColor.controlBackgroundColor.setFill()
+        NSBezierPath(roundedRect: field, xRadius: 4, yRadius: 4).fill()
+        NSColor.separatorColor.setStroke()
+        NSBezierPath(roundedRect: field, xRadius: 4, yRadius: 4).stroke()
+
+        drawNumberMarkIcon(
+            currentNumberMarkType,
+            in: NSRect(x: field.minX + 8, y: field.midY - 7, width: 14, height: 14),
+            color: .labelColor,
+            toolbar: true
+        )
+        drawTriangle(in: NSRect(x: field.maxX - 14, y: field.midY - 3, width: 7, height: 5), color: .labelColor)
+    }
+
+    private func drawNumberMarkTypeMenuIfNeeded() {
+        guard activeNumberDropdown, let optionsToolbarRect else {
+            return
+        }
+
+        let menu = numberMarkTypeMenuRect(in: optionsToolbarRect)
+        drawPanel(menu)
+        for (index, type) in CaptureNumberMarkType.allCases.enumerated() {
+            let item = numberMarkTypeMenuItemRects(in: menu)[index]
+            let selected = type == currentNumberMarkType
+            drawToolbarButton(item, symbol: nil, selected: selected, enabled: true)
+            drawNumberMarkIcon(
+                type,
+                in: NSRect(x: item.midX - 8, y: item.midY - 8, width: 16, height: 16),
+                color: selected ? NSColor.systemBlue : defaultNumberMenuColor(for: type),
+                toolbar: true
+            )
+        }
+    }
+
+    private func defaultNumberMenuColor(for type: CaptureNumberMarkType) -> NSColor {
+        switch type {
+        case .number:
+            return .labelColor
+        case .check:
+            return .systemGreen
+        case .cross:
+            return .systemRed
+        }
+    }
+
+    private func drawNumberMarkIcon(_ type: CaptureNumberMarkType, in rect: NSRect, color: NSColor, toolbar: Bool) {
+        switch type {
+        case .number:
+            color.setStroke()
+            let circle = NSBezierPath(ovalIn: rect.insetBy(dx: 1.5, dy: 1.5))
+            circle.lineWidth = toolbar ? 1.4 : 1.6
+            circle.stroke()
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .semibold),
+                .foregroundColor: color,
+            ]
+            let text = "1"
+            let size = NSString(string: text).size(withAttributes: attributes)
+            NSString(string: text).draw(
+                at: NSPoint(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2),
+                withAttributes: attributes
+            )
+        case .check:
+            drawNumberSymbol("✓", in: rect, color: color)
+        case .cross:
+            drawNumberSymbol("×", in: rect, color: color)
+        }
+    }
+
+    private func drawNumberSymbol(_ symbol: String, in rect: NSRect, color: NSColor) {
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: rect.height, weight: .bold),
+            .foregroundColor: color,
+        ]
+        let size = NSString(string: symbol).size(withAttributes: attributes)
+        NSString(string: symbol).draw(
+            at: NSPoint(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2),
+            withAttributes: attributes
+        )
+    }
+
     private func drawTextIconToggle(named name: String, in rect: NSRect, selected: Bool) {
         drawToolbarButton(optionButtonBackgroundRect(for: rect), symbol: nil, selected: selected, enabled: true)
         let iconSize = (name == "bold" || name == "italic")
@@ -9952,7 +10209,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             labels = families.map { SelectionToolbarState.textFontDisplayName(for: $0) }
             selectedIndex = families.firstIndex(of: currentTextFontFamily())
         case .size:
-            let sizes = SelectionToolbarState.textSizeValues
+            let sizes = textSizeValuesForActiveTool()
             labels = sizes.map { "\(Int($0.rounded()))" }
             selectedIndex = sizes.firstIndex { Int($0.rounded()) == Int(currentStyle.textSize.rounded()) }
         }
@@ -10929,6 +11186,12 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return true
         }
 
+        if activeNumberDropdown,
+           let optionsToolbarRect,
+           numberMarkTypeMenuRect(in: optionsToolbarRect).contains(point) {
+            return true
+        }
+
         if showsCornerRadiusPanel, let cornerRadiusPanelRect, cornerRadiusPanelRect.contains(point) {
             return true
         }
@@ -11079,6 +11342,26 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     private func arrowTypeMenuItemRects(in menu: NSRect) -> [NSRect] {
         SelectionToolbarState.arrowTypeMenuItemRects(in: menu, itemCount: CaptureArrowType.allCases.count)
+    }
+
+    private func numberMarkTypeMenuRect(in optionsRect: NSRect) -> NSRect {
+        let field = optionsToolbarLayout(in: optionsRect).numberMarkType
+        return SelectionToolbarState.popoverRect(
+            size: NSSize(width: 56, height: CGFloat(CaptureNumberMarkType.allCases.count) * 26 + 8),
+            anchoredTo: field,
+            inside: safeLayoutBounds
+        )
+    }
+
+    private func numberMarkTypeMenuItemRects(in menu: NSRect) -> [NSRect] {
+        CaptureNumberMarkType.allCases.indices.map { index in
+            NSRect(
+                x: menu.minX + 4,
+                y: menu.maxY - 4 - 26 * CGFloat(index + 1),
+                width: menu.width - 8,
+                height: 26
+            )
+        }
     }
 
     private func shapeModeBackgroundRect(for button: NSRect) -> NSRect {
