@@ -9369,6 +9369,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             drawMosaicModeControls(in: optionsRect)
         case .text:
             drawTextOptions(in: optionsRect)
+        case .numberSequence:
+            break
         }
         if SelectionToolbarState.showsStrokeStyleField(for: optionsToolbarMode) {
             drawStrokeStyleField(in: optionsRect)
@@ -9420,6 +9422,11 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 separatorXs.append(layout.textOutline.maxX + (layout.textFont.minX - layout.textOutline.maxX) / 2)
                 separatorXs.append(layout.textFont.maxX + (layout.textSize.minX - layout.textFont.maxX) / 2)
                 separatorXs.append(layout.textSize.maxX + (firstSwatchMinX - layout.textSize.maxX) / 2)
+            }
+        case .numberSequence:
+            if let firstSwatchMinX {
+                separatorXs.append(layout.numberMarkType.maxX + (layout.numberSize.minX - layout.numberMarkType.maxX) / 2)
+                separatorXs.append(layout.numberSize.maxX + (firstSwatchMinX - layout.numberSize.maxX) / 2)
             }
         }
 

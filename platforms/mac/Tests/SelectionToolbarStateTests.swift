@@ -2393,6 +2393,23 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_mosaicRedactionValue(for: .pixelMosaic), 8)
     }
 
+    func testNumberSequenceOptionsToolbarLayoutHasTypeSizeAndColorSections() {
+        let rect = NSRect(x: 10, y: 20, width: 250, height: 30)
+        let layout = SelectionToolbarState.optionsToolbarLayout(in: rect, paletteCount: 8, mode: .numberSequence)
+
+        XCTAssertFalse(layout.numberMarkType.isEmpty)
+        XCTAssertFalse(layout.numberSize.isEmpty)
+        XCTAssertGreaterThan(layout.colorSwatches.count, 1)
+        XCTAssertLessThan(layout.numberMarkType.maxX, layout.numberSize.minX)
+        XCTAssertLessThan(layout.numberSize.maxX, layout.colorSwatches[0].minX)
+    }
+
+    func testNumberSequenceSizeValuesAreThreeThroughSeventyTwo() {
+        XCTAssertEqual(SelectionToolbarState.numberSizeValues.first, 3)
+        XCTAssertEqual(SelectionToolbarState.numberSizeValues.last, 72)
+        XCTAssertEqual(SelectionToolbarState.numberSizeValues.count, 70)
+    }
+
     func testMosaicDotSizesAndCursorPreviewAreScaledDown() {
         XCTAssertEqual(SelectionToolbarState.strokeWidthValues(for: .mosaic), [15, 25, 35])
         XCTAssertEqual(SelectionToolbarState.mosaicCursorDotDiameter(for: 15), 7.8, accuracy: 0.01)
