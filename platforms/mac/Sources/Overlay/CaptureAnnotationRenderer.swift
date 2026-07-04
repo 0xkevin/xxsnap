@@ -1424,9 +1424,6 @@ enum CaptureAnnotationRenderer {
                 ),
                 withAttributes: attributes
             )
-            context.setBlendMode(.normal)
-            context.setFillColor(cgColor(style.strokeColor))
-            context.fillEllipse(in: NSRect(x: pixelRect.midX - 3, y: pixelRect.midY + 1, width: 6, height: 6))
         case .check:
             drawNumberSymbol("✓", in: pixelRect, color: style.strokeColor, size: style.textSize)
         case .cross:

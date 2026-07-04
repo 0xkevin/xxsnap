@@ -237,10 +237,10 @@ final class xxsnapMacTests: XCTestCase {
         )
         let rendered = CaptureAnnotationRenderer.render(image: image, annotations: [annotation])
 
-        let center = try XCTUnwrap(rgbaPixel(in: rendered, x: 58, y: 62))
-        XCTAssertGreaterThan(center.red, 200)
-        XCTAssertLessThan(center.green, 90)
-        XCTAssertLessThan(center.blue, 90)
+        let circleFill = try XCTUnwrap(rgbaPixel(in: rendered, x: 46, y: 58))
+        XCTAssertGreaterThan(circleFill.red, 200)
+        XCTAssertLessThan(circleFill.green, 90)
+        XCTAssertLessThan(circleFill.blue, 90)
     }
 
     func testCheckAndCrossRenderWithoutCircleBackground() throws {
