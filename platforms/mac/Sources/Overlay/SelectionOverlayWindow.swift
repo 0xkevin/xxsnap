@@ -865,6 +865,22 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_shapeResizeHandlePoint(handle)
     }
 
+    func test_numberDeleteHandlePoint() -> NSPoint? {
+        (contentView as? SelectionOverlayView)?.test_numberDeleteHandlePoint()
+    }
+
+    func test_numberResizeHandlePoint() -> NSPoint? {
+        (contentView as? SelectionOverlayView)?.test_numberResizeHandlePoint()
+    }
+
+    func test_numberIncrementHandlePoint() -> NSPoint? {
+        (contentView as? SelectionOverlayView)?.test_numberIncrementHandlePoint()
+    }
+
+    func test_numberDecrementHandlePoint() -> NSPoint? {
+        (contentView as? SelectionOverlayView)?.test_numberDecrementHandlePoint()
+    }
+
     func test_mosaicRectangleRotationHandlePoint() -> NSPoint? {
         (contentView as? SelectionOverlayView)?.test_mosaicRectangleRotationHandlePoint()
     }
@@ -1357,6 +1373,18 @@ private final class SelectionTextEditor: NSTextView {
 }
 
 private final class SelectionOverlayView: NSView, NSTextViewDelegate {
+    private enum NumberHandleKind {
+        case delete
+        case resize
+        case increment
+        case decrement
+    }
+
+    private struct NumberHandleHit {
+        var index: Int
+        var kind: NumberHandleKind
+    }
+
     var selectionDidFinish: ((CaptureSelectionResult?) -> Void)?
     private var backgroundImage: NSImage?
     private var backgroundBitmap: NSBitmapImageRep?
@@ -2097,6 +2125,14 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         if isNumberToolActive {
             if isToolbarOrPanelPoint(point) {
                 return .arrow
+            }
+            if let hit = numberHandleHitTarget(at: point) {
+                switch hit.kind {
+                case .resize:
+                    return backgroundAwareCursorStyle(.resizeBottomRight, at: point)
+                case .delete, .increment, .decrement:
+                    return .arrow
+                }
             }
             if interactionMode == .movingShape {
                 return backgroundAwareCursorStyle(.move, at: point)
@@ -3357,6 +3393,11 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return false
         }
 
+        if let hit = numberHandleHitTarget(at: point) {
+            handleNumberHandleMouseDown(hit)
+            return true
+        }
+
         if let index = numberAnnotationIndex(at: point) {
             selectAnnotation(at: index)
             beginAnnotationMove(at: index, point: point)
@@ -3365,6 +3406,20 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
         createNumberMark(at: point)
         return true
+    }
+
+    private func handleNumberHandleMouseDown(_ hit: NumberHandleHit) {
+        selectAnnotation(at: hit.index)
+        switch hit.kind {
+        case .delete:
+            _ = deleteSelectedAnnotation()
+        case .resize:
+            beginAnnotationResize(with: .bottomRight)
+        case .increment:
+            swapNumberAnnotation(at: hit.index, direction: 1)
+        case .decrement:
+            swapNumberAnnotation(at: hit.index, direction: -1)
+        }
     }
 
     private func createNumberMark(at point: NSPoint) {
@@ -3395,6 +3450,43 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 annotations[index].numberSequenceIndex = nil
             }
         }
+    }
+
+    private func numericNumberAnnotationIndices() -> [Int] {
+        annotations.indices.filter {
+            annotations[$0].kind == .numberSequence &&
+                (annotations[$0].numberMarkType == .number || annotations[$0].numberMarkType == nil)
+        }.sorted {
+            (annotations[$0].numberSequenceIndex ?? Int.max) < (annotations[$1].numberSequenceIndex ?? Int.max)
+        }
+    }
+
+    private func canMoveNumberAnnotation(direction: Int) -> Bool {
+        guard let selectedAnnotationIndex else {
+            return false
+        }
+        let indices = numericNumberAnnotationIndices()
+        guard let position = indices.firstIndex(of: selectedAnnotationIndex) else {
+            return false
+        }
+        return indices.indices.contains(position + direction)
+    }
+
+    private func swapNumberAnnotation(at index: Int, direction: Int) {
+        let indices = numericNumberAnnotationIndices()
+        guard let position = indices.firstIndex(of: index),
+              indices.indices.contains(position + direction)
+        else {
+            return
+        }
+
+        let otherIndex = indices[position + direction]
+        let currentNumber = annotations[index].numberSequenceIndex
+        annotations[index].numberSequenceIndex = annotations[otherIndex].numberSequenceIndex
+        annotations[otherIndex].numberSequenceIndex = currentNumber
+        selectedAnnotationIndex = index
+        redoAnnotations.removeAll()
+        needsDisplay = true
     }
 
     private func beginShapeDrawing(at point: NSPoint) {
@@ -5263,6 +5355,31 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         return NSPoint(x: rectForHandle.midX, y: rectForHandle.midY)
     }
 
+    func test_numberDeleteHandlePoint() -> NSPoint? {
+        test_numberHandlePoint(.delete)
+    }
+
+    func test_numberResizeHandlePoint() -> NSPoint? {
+        test_numberHandlePoint(.resize)
+    }
+
+    func test_numberIncrementHandlePoint() -> NSPoint? {
+        test_numberHandlePoint(.increment)
+    }
+
+    func test_numberDecrementHandlePoint() -> NSPoint? {
+        test_numberHandlePoint(.decrement)
+    }
+
+    private func test_numberHandlePoint(_ kind: NumberHandleKind) -> NSPoint? {
+        guard let selectedAnnotation,
+              let rect = numberHandleRect(for: selectedAnnotation, kind: kind)
+        else {
+            return nil
+        }
+        return NSPoint(x: rect.midX, y: rect.midY)
+    }
+
     func test_mosaicRectangleRotationHandlePoint() -> NSPoint? {
         guard let selectedAnnotation, annotationKindSupportsRotationHandle(selectedAnnotation.kind) else {
             return nil
@@ -5828,6 +5945,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         showsCornerRadiusPanel = false
         showsStartArrowTypeMenu = false
         showsEndArrowTypeMenu = false
+        if removed.kind == .numberSequence {
+            renumberNumberSequenceAnnotations()
+        }
         if removed.kind == .mosaicStroke || removed.kind == .mosaicRectangle {
             resetMosaicPreviewCaches()
         }
@@ -6932,6 +7052,52 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         return nil
     }
 
+    private func numberHandleRect(for annotation: CaptureAnnotation, kind: NumberHandleKind) -> NSRect? {
+        guard annotation.kind == .numberSequence else {
+            return nil
+        }
+        let rect = overlayRect(fromLocalAnnotationRect: annotation.rect).standardized
+        let size: CGFloat = 15
+        let center: NSPoint
+        switch kind {
+        case .delete:
+            center = NSPoint(x: rect.maxX, y: rect.maxY)
+        case .resize:
+            center = NSPoint(x: rect.maxX, y: rect.minY)
+        case .increment:
+            guard annotation.numberMarkType == .number || annotation.numberMarkType == nil else {
+                return nil
+            }
+            center = NSPoint(x: rect.minX, y: rect.maxY)
+        case .decrement:
+            guard annotation.numberMarkType == .number || annotation.numberMarkType == nil else {
+                return nil
+            }
+            center = NSPoint(x: rect.minX, y: rect.minY)
+        }
+        return NSRect(x: center.x - size / 2, y: center.y - size / 2, width: size, height: size)
+    }
+
+    private func numberHandleHitTarget(at point: NSPoint) -> NumberHandleHit? {
+        guard interactionMode == .annotating,
+              let selectedAnnotationIndex,
+              annotations.indices.contains(selectedAnnotationIndex),
+              annotations[selectedAnnotationIndex].kind == .numberSequence,
+              activeToolCanEdit(annotationKind: .numberSequence)
+        else {
+            return nil
+        }
+
+        let kinds: [NumberHandleKind] = [.delete, .resize, .increment, .decrement]
+        for kind in kinds {
+            if let rect = numberHandleRect(for: annotations[selectedAnnotationIndex], kind: kind),
+               rect.insetBy(dx: -3, dy: -3).contains(point) {
+                return NumberHandleHit(index: selectedAnnotationIndex, kind: kind)
+            }
+        }
+        return nil
+    }
+
     private func textAnnotationIndex(at point: NSPoint) -> Int? {
         for index in annotations.indices.reversed() where annotations[index].kind == .text {
             if textAnnotationHitContains(point: point, annotation: annotations[index]) {
@@ -7362,6 +7528,16 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return
         }
 
+        if annotations[selectedAnnotationIndex].kind == .numberSequence {
+            updateNumberAnnotationResize(
+                at: selectedAnnotationIndex,
+                to: point,
+                startRect: resizingAnnotationStartRect,
+                startStyle: resizingAnnotationStartStyle ?? annotations[selectedAnnotationIndex].style
+            )
+            return
+        }
+
         if annotations[selectedAnnotationIndex].kind == .text {
             updateTextAnnotationResize(
                 at: selectedAnnotationIndex,
@@ -7423,6 +7599,24 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         if resized.width >= 8, resized.height >= 8 {
             annotations[selectedAnnotationIndex].rect = localAnnotationRect(from: resized)
         }
+    }
+
+    private func updateNumberAnnotationResize(
+        at index: Int,
+        to point: NSPoint,
+        startRect: NSRect,
+        startStyle: CaptureAnnotationStyle
+    ) {
+        let center = NSPoint(x: startRect.midX, y: startRect.midY)
+        let startDistance = max(1, hypot(startRect.maxX - center.x, startRect.minY - center.y))
+        let currentDistance = max(1, hypot(point.x - center.x, point.y - center.y))
+        var style = startStyle
+        style.textSize = clampedNumberSize(startStyle.textSize * currentDistance / startDistance)
+        let nextRect = CaptureAnnotationRenderer.numberMarkRect(centeredAt: center, fontSize: style.textSize)
+        annotations[index].style = style
+        annotations[index].rect = localAnnotationRect(from: nextRect)
+        currentStyle = style
+        numberStyle = style
     }
 
     private func updateTextAnnotationResize(
@@ -9248,6 +9442,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private func drawSelectedAnnotationOutline(_ annotation: CaptureAnnotation) {
+        if annotation.kind == .numberSequence {
+            drawSelectedNumberMarkOutline(annotation)
+            return
+        }
         if annotation.kind == .arrowLine {
             drawSelectedArrowLineOutline(annotation)
             return
@@ -9286,6 +9484,48 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
         if annotationKindSupportsRotationHandle(annotation.kind), let point = mosaicRectangleRotationHandlePoint(for: annotation) {
             drawMosaicRectangleRotationHandle(at: point)
+        }
+    }
+
+    private func drawSelectedNumberMarkOutline(_ annotation: CaptureAnnotation) {
+        let rect = overlayRect(fromLocalAnnotationRect: annotation.rect).standardized
+        NSColor.systemBlue.setStroke()
+        let outline = NSBezierPath(rect: rect)
+        outline.lineWidth = 1.5
+        outline.setLineDash([4, 3], count: 2, phase: 0)
+        outline.stroke()
+
+        drawNumberHandle(.delete, for: annotation, enabled: true)
+        drawNumberHandle(.resize, for: annotation, enabled: true)
+        if annotation.numberMarkType == .number || annotation.numberMarkType == nil {
+            drawNumberHandle(.increment, for: annotation, enabled: canMoveNumberAnnotation(direction: 1))
+            drawNumberHandle(.decrement, for: annotation, enabled: canMoveNumberAnnotation(direction: -1))
+        }
+    }
+
+    private func drawNumberHandle(_ kind: NumberHandleKind, for annotation: CaptureAnnotation, enabled: Bool) {
+        guard let rect = numberHandleRect(for: annotation, kind: kind) else {
+            return
+        }
+
+        switch kind {
+        case .delete:
+            NSColor.systemBlue.setFill()
+            NSBezierPath(ovalIn: rect).fill()
+            drawNumberSymbol("×", in: rect.insetBy(dx: 2, dy: 2), color: .white)
+        case .resize:
+            (enabled ? NSColor.systemBlue : NSColor.disabledControlTextColor).setFill()
+            NSBezierPath(ovalIn: rect).fill()
+        case .increment, .decrement:
+            NSColor.white.setFill()
+            NSBezierPath(rect: rect).fill()
+            (enabled ? NSColor.systemBlue : NSColor.disabledControlTextColor).setStroke()
+            NSBezierPath(rect: rect).stroke()
+            drawNumberSymbol(
+                kind == .increment ? "+" : "-",
+                in: rect.insetBy(dx: 1, dy: 1),
+                color: enabled ? .systemBlue : .disabledControlTextColor
+            )
         }
     }
 

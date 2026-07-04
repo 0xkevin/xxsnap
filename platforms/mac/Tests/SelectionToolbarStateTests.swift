@@ -2531,6 +2531,68 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_numberSequenceIndex(at: 2), 2)
     }
 
+    func testNumberDeleteRenumbersRemainingMarks() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 180))
+        window.test_activateNumberTool()
+        [150, 190, 230].forEach { x in
+            window.test_mouseDown(at: NSPoint(x: x, y: 150))
+            window.test_mouseUp(at: NSPoint(x: x, y: 150))
+        }
+
+        window.test_selectAnnotation(at: 1)
+        let deletePoint = try XCTUnwrap(window.test_numberDeleteHandlePoint())
+        window.test_mouseDown(at: deletePoint)
+        window.test_mouseUp(at: deletePoint)
+
+        XCTAssertEqual(window.test_annotationCount, 2)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 1)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 1), 2)
+    }
+
+    func testNumberPlusMinusSwapAdjacentNumbersOnly() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 360, height: 180))
+        window.test_activateNumberTool()
+        [150, 190, 230].forEach { x in
+            window.test_mouseDown(at: NSPoint(x: x, y: 150))
+            window.test_mouseUp(at: NSPoint(x: x, y: 150))
+        }
+
+        window.test_selectAnnotation(at: 1)
+        let plusPoint = try XCTUnwrap(window.test_numberIncrementHandlePoint())
+        window.test_mouseDown(at: plusPoint)
+        window.test_mouseUp(at: plusPoint)
+
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 1)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 1), 3)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 2), 2)
+
+        let minusPoint = try XCTUnwrap(window.test_numberDecrementHandlePoint())
+        window.test_mouseDown(at: minusPoint)
+        window.test_mouseUp(at: minusPoint)
+
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 1), 2)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 2), 3)
+    }
+
+    func testNumberResizeClampsSize() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 360, height: 180))
+        window.test_activateNumberTool()
+        window.test_selectNumberSize(70)
+        window.test_mouseDown(at: NSPoint(x: 180, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 180, y: 150))
+        window.test_selectAnnotation(at: 0)
+
+        let handle = try XCTUnwrap(window.test_numberResizeHandlePoint())
+        window.test_mouseDown(at: handle)
+        window.test_mouseDragged(to: NSPoint(x: handle.x + 120, y: handle.y - 120))
+        window.test_mouseUp(at: NSPoint(x: handle.x + 120, y: handle.y - 120))
+
+        XCTAssertEqual(window.test_annotationStyle(at: 0)?.textSize, 72)
+    }
+
     func testMosaicDotSizesAndCursorPreviewAreScaledDown() {
         XCTAssertEqual(SelectionToolbarState.strokeWidthValues(for: .mosaic), [15, 25, 35])
         XCTAssertEqual(SelectionToolbarState.mosaicCursorDotDiameter(for: 15), 7.8, accuracy: 0.01)
