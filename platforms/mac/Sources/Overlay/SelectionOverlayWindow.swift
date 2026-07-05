@@ -561,18 +561,25 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_dragMouse(to: point)
     }
 
-    func test_mouseDown(at point: NSPoint) {
+    func test_mouseDown(at point: NSPoint, modifierFlags: NSEvent.ModifierFlags = []) {
         guard let overlayView = contentView as? SelectionOverlayView else {
             return
         }
-        overlayView.mouseDown(with: test_mouseEvent(type: .leftMouseDown, at: point))
+        overlayView.mouseDown(with: test_mouseEvent(type: .leftMouseDown, at: point, modifierFlags: modifierFlags))
     }
 
-    func test_mouseMoved(to point: NSPoint) {
+    func test_doubleClick(at point: NSPoint) {
         guard let overlayView = contentView as? SelectionOverlayView else {
             return
         }
-        overlayView.mouseMoved(with: test_mouseEvent(type: .mouseMoved, at: point))
+        overlayView.mouseDown(with: test_mouseEvent(type: .leftMouseDown, at: point, clickCount: 2))
+    }
+
+    func test_mouseMoved(to point: NSPoint, modifierFlags: NSEvent.ModifierFlags = []) {
+        guard let overlayView = contentView as? SelectionOverlayView else {
+            return
+        }
+        overlayView.mouseMoved(with: test_mouseEvent(type: .mouseMoved, at: point, modifierFlags: modifierFlags))
     }
 
     func test_updateColorSampler(at point: NSPoint) {
@@ -679,6 +686,10 @@ final class SelectionOverlayWindow: NSWindow {
 
     func test_annotationRect(at index: Int) -> NSRect? {
         (contentView as? SelectionOverlayView)?.test_annotationRect(at: index)
+    }
+
+    func test_annotationOverlayRect(at index: Int) -> NSRect? {
+        (contentView as? SelectionOverlayView)?.test_annotationOverlayRect(at: index)
     }
 
     func test_textEditorContentOrigin() -> NSPoint? {
@@ -829,6 +840,22 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_numberMarkTypeMenuPoint(type)
     }
 
+    func test_numberMarkTypeIconInteriorPoint() -> NSPoint? {
+        (contentView as? SelectionOverlayView)?.test_numberMarkTypeIconInteriorPoint()
+    }
+
+    func test_numberCursorImage(for type: CaptureNumberMarkType) -> NSImage? {
+        (contentView as? SelectionOverlayView)?.test_numberCursorImage(for: type)
+    }
+
+    func test_numberCursorHotSpot(for type: CaptureNumberMarkType) -> NSPoint? {
+        (contentView as? SelectionOverlayView)?.test_numberCursorHotSpot(for: type)
+    }
+
+    func test_numberCursorText(for type: CaptureNumberMarkType) -> String? {
+        (contentView as? SelectionOverlayView)?.test_numberCursorText(for: type)
+    }
+
     func test_selectNumberSize(_ size: CGFloat) {
         (contentView as? SelectionOverlayView)?.test_selectNumberSize(size)
     }
@@ -881,6 +908,46 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_numberDecrementHandlePoint()
     }
 
+    func test_numberIncrementHandleIsHitTarget() -> Bool {
+        (contentView as? SelectionOverlayView)?.test_numberIncrementHandleIsHitTarget() ?? false
+    }
+
+    func test_numberDecrementHandleIsHitTarget() -> Bool {
+        (contentView as? SelectionOverlayView)?.test_numberDecrementHandleIsHitTarget() ?? false
+    }
+
+    func test_numberResetHandlePoint() -> NSPoint? {
+        (contentView as? SelectionOverlayView)?.test_numberResetHandlePoint()
+    }
+
+    func test_numberDeleteHandleRect() -> NSRect? {
+        (contentView as? SelectionOverlayView)?.test_numberDeleteHandleRect()
+    }
+
+    func test_numberResizeHandleRect() -> NSRect? {
+        (contentView as? SelectionOverlayView)?.test_numberResizeHandleRect()
+    }
+
+    func test_numberIncrementHandleRect() -> NSRect? {
+        (contentView as? SelectionOverlayView)?.test_numberIncrementHandleRect()
+    }
+
+    func test_numberDecrementHandleRect() -> NSRect? {
+        (contentView as? SelectionOverlayView)?.test_numberDecrementHandleRect()
+    }
+
+    func test_numberResetHandleRect() -> NSRect? {
+        (contentView as? SelectionOverlayView)?.test_numberResetHandleRect()
+    }
+
+    func test_numberOutlineRect() -> NSRect? {
+        (contentView as? SelectionOverlayView)?.test_numberOutlineRect()
+    }
+
+    var test_numberControlsVisible: Bool {
+        (contentView as? SelectionOverlayView)?.test_numberControlsVisible ?? false
+    }
+
     func test_mosaicRectangleRotationHandlePoint() -> NSPoint? {
         (contentView as? SelectionOverlayView)?.test_mosaicRectangleRotationHandlePoint()
     }
@@ -895,6 +962,14 @@ final class SelectionOverlayWindow: NSWindow {
 
     var test_sampledPointerPoint: NSPoint? {
         (contentView as? SelectionOverlayView)?.test_sampledPointerPoint
+    }
+
+    var test_eyedropperMeasurementLine: (start: NSPoint, end: NSPoint)? {
+        (contentView as? SelectionOverlayView)?.test_eyedropperMeasurementLine
+    }
+
+    var test_eyedropperMeasurementLabel: String? {
+        (contentView as? SelectionOverlayView)?.test_eyedropperMeasurementLabel
     }
 
     func test_magnifierSampleColorHex(at point: NSPoint) -> String? {
@@ -1136,7 +1211,12 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_textEditorDragSequence(from: start, to: end)
     }
 
-    private func test_mouseEvent(type: NSEvent.EventType, at point: NSPoint, modifierFlags: NSEvent.ModifierFlags = []) -> NSEvent {
+    private func test_mouseEvent(
+        type: NSEvent.EventType,
+        at point: NSPoint,
+        modifierFlags: NSEvent.ModifierFlags = [],
+        clickCount: Int = 1
+    ) -> NSEvent {
         NSEvent.mouseEvent(
             with: type,
             location: point,
@@ -1145,7 +1225,7 @@ final class SelectionOverlayWindow: NSWindow {
             windowNumber: windowNumber,
             context: nil,
             eventNumber: 0,
-            clickCount: 1,
+            clickCount: clickCount,
             pressure: 1
         )!
     }
@@ -1378,6 +1458,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         case resize
         case increment
         case decrement
+        case reset
     }
 
     private struct NumberHandleHit {
@@ -1548,6 +1629,15 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private var annotations: [CaptureAnnotation] = []
     private var redoAnnotations: [CaptureAnnotation] = []
     private var selectedAnnotationIndex: Int?
+    private var selectedNumberAnnotationCanFollowTypeDropdown = false
+    private var revealedNumberControlsIndex: Int?
+    private var editingNumberAnnotationIndex: Int?
+    private var editingNumberDraft: String = ""
+    private var editingNumberHasDraft = false
+    private var editingNumberDraftWasEdited = false
+    private var editingNumberCaretIndex = 0
+    private var numberCaretBlinkTimer: Timer?
+    private var numberCaretVisible = false
     private var movingAnnotationStartRect: NSRect?
     private var movingAnnotationStartArrowLine: CaptureArrowLine?
     private var movingAnnotationStartBrushPath: CaptureBrushPath?
@@ -1645,8 +1735,12 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private var activeTextDropdown: TextDropdownKind?
     private var textFontDropdownScrollOffset = 0
     private var textSizeDropdownScrollOffset = 0
+    private var textDropdownScrollRemainderY: CGFloat = 0
     private var sampledPointerPoint: NSPoint?
     private var sampledColor: NSColor?
+    private var eyedropperMeasurementStartPoint: NSPoint?
+    private var eyedropperMeasurementEndPoint: NSPoint?
+    private var isEyedropperMeasurementInProgress = false
     private var colorSamplerCopyMode: SelectionToolbarState.ColorSamplerCopyMode = .hex
     private var colorSamplerCopySuccessUntil: Date?
     private var colorSamplerCopySuccessTimer: Timer?
@@ -1745,11 +1839,13 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     override func mouseExited(with event: NSEvent) {
+        commitNumberEditingIfNeeded()
         hoveredWindowRect = nil
         displayedWindowRect = nil
         hoverAnimationTimer?.invalidate()
         hoverAnimationTimer = nil
         hoveredTooltip = nil
+        revealedNumberControlsIndex = nil
         NSCursor.arrow.set()
         needsDisplay = true
     }
@@ -1759,6 +1855,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         refreshAnimationTimer?.invalidate()
         colorSamplerCopySuccessTimer?.invalidate()
         selectionWheelAnimationTimer?.invalidate()
+        numberCaretBlinkTimer?.invalidate()
         NSColorPanel.shared.setTarget(nil)
         NSColorPanel.shared.setAction(nil)
     }
@@ -1772,6 +1869,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         selectionWheelAnimationTimer?.invalidate()
         selectionWheelAnimationTimer = nil
         selectionWheelAnimationStartTime = nil
+        stopNumberCaretBlink()
         selectionDidFinish = nil
     }
 
@@ -1828,6 +1926,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         drawNumberMarkTypeMenuIfNeeded()
         drawTextDropdownIfNeeded()
         drawTooltipIfNeeded()
+        drawEyedropperMeasurementIfNeeded()
         drawColorSamplerIfNeeded()
     }
 
@@ -1960,6 +2059,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         cancelSelectionWheelAnimation()
 
         if isEyedropperToolActive, !isToolbarOrPanelPoint(point) {
+            handleEyedropperMeasurementClick(at: point, modifierFlags: event.modifierFlags)
             updateColorSampler(at: point)
             needsDisplay = true
             return
@@ -1985,7 +2085,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             selectionCurrentPoint = point
             updateColorSampler(at: point)
         case .annotating, .drawingShape, .draggingToolbar, .draggingCornerRadius, .draggingMosaicValue, .movingShape, .movingSelection, .resizingShape, .resizingArrowLine, .resizingMarkerLine, .rotatingBrush, .rotatingMosaicRectangle, .resizingSelection:
-            handleAnnotatingMouseDown(at: point)
+            handleAnnotatingMouseDown(at: point, clickCount: event.clickCount)
         }
 
         needsDisplay = true
@@ -1995,6 +2095,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         let point = convert(event.locationInWindow, from: nil)
 
         if isEyedropperToolActive, interactionMode == .annotating {
+            updateEyedropperMeasurement(to: point, modifierFlags: event.modifierFlags)
             updateColorSampler(at: point)
             needsDisplay = true
             return
@@ -2100,6 +2201,11 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     override func mouseMoved(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+        commitNumberEditingIfPointerLeaves(at: point)
+        updateRevealedNumberControls(at: point)
+        if isEyedropperToolActive, isEyedropperMeasurementInProgress {
+            updateEyedropperMeasurement(to: point, modifierFlags: event.modifierFlags)
+        }
         updateHoverState(at: point)
         updateColorSampler(at: point)
         refreshCursor(at: point)
@@ -2130,7 +2236,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 switch hit.kind {
                 case .resize:
                     return backgroundAwareCursorStyle(.resizeBottomRight, at: point)
-                case .delete, .increment, .decrement:
+                case .delete, .increment, .decrement, .reset:
                     return .arrow
                 }
             }
@@ -2534,6 +2640,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return false
         }
 
+        if handleNumberEditingKeyDown(event) {
+            return true
+        }
+
         if handleTextEditingKeyDown(event) {
             return true
         }
@@ -2707,15 +2817,26 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
     }
 
+    private func numberCursorText(for type: CaptureNumberMarkType) -> String {
+        switch type {
+        case .number:
+            return "\(nextNumberSequenceIndex())"
+        case .check:
+            return "✓"
+        case .cross:
+            return "×"
+        }
+    }
+
     private func numberCreationCursor(for type: CaptureNumberMarkType) -> NSCursor {
         let size = NSSize(width: 30, height: 30)
         let image = NSImage(size: size)
         image.lockFocus()
         NSGraphicsContext.current?.imageInterpolation = .high
         let rect = NSRect(origin: .zero, size: size).insetBy(dx: 3, dy: 3)
-        drawNumberMarkIcon(type, in: rect, color: currentStyle.strokeColor, toolbar: false)
+        drawNumberMarkIcon(type, in: rect, color: currentStyle.strokeColor, toolbar: false, numberText: numberCursorText(for: type))
         image.unlockFocus()
-        return NSCursor(image: image, hotSpot: NSPoint(x: 10, y: 20))
+        return NSCursor(image: image, hotSpot: NSPoint(x: size.width / 2, y: size.height / 2))
     }
 
     private func nsCursor(for style: SelectionToolbarState.OverlayCursorStyle) -> NSCursor {
@@ -3009,6 +3130,93 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         )
     }
 
+    private var eyedropperMeasurementLine: (start: NSPoint, end: NSPoint)? {
+        guard let start = eyedropperMeasurementStartPoint,
+              let end = eyedropperMeasurementEndPoint,
+              eyedropperMeasurementPixelLength(from: start, to: end) > 0
+        else {
+            return nil
+        }
+        return (start, end)
+    }
+
+    private var eyedropperMeasurementLabel: String? {
+        guard let line = eyedropperMeasurementLine else {
+            return nil
+        }
+        return "\(eyedropperMeasurementPixelLength(from: line.start, to: line.end)) px"
+    }
+
+    private func handleEyedropperMeasurementClick(at point: NSPoint, modifierFlags: NSEvent.ModifierFlags) {
+        if isEyedropperMeasurementInProgress, eyedropperMeasurementStartPoint != nil {
+            finishEyedropperMeasurement(at: point, modifierFlags: modifierFlags)
+        } else {
+            beginEyedropperMeasurement(at: point)
+        }
+    }
+
+    private func beginEyedropperMeasurement(at point: NSPoint) {
+        guard isValidEyedropperMeasurementPoint(point) else {
+            clearEyedropperMeasurement()
+            return
+        }
+        eyedropperMeasurementStartPoint = point
+        eyedropperMeasurementEndPoint = point
+        isEyedropperMeasurementInProgress = true
+    }
+
+    private func updateEyedropperMeasurement(to point: NSPoint, modifierFlags: NSEvent.ModifierFlags) {
+        guard eyedropperMeasurementStartPoint != nil else {
+            return
+        }
+        eyedropperMeasurementEndPoint = snappedEyedropperMeasurementEndPoint(rawEnd: point, modifierFlags: modifierFlags)
+    }
+
+    private func finishEyedropperMeasurement(at point: NSPoint, modifierFlags: NSEvent.ModifierFlags) {
+        guard let start = eyedropperMeasurementStartPoint else {
+            return
+        }
+        let end = snappedEyedropperMeasurementEndPoint(rawEnd: point, modifierFlags: modifierFlags)
+        eyedropperMeasurementEndPoint = end
+        if eyedropperMeasurementPixelLength(from: start, to: end) == 0 {
+            clearEyedropperMeasurement()
+        } else {
+            isEyedropperMeasurementInProgress = false
+        }
+    }
+
+    private func snappedEyedropperMeasurementEndPoint(
+        rawEnd: NSPoint,
+        modifierFlags: NSEvent.ModifierFlags
+    ) -> NSPoint {
+        guard let start = eyedropperMeasurementStartPoint else {
+            return rawEnd
+        }
+        return SelectionToolbarState.snappedMarkerEndPoint(
+            start: start,
+            rawEnd: rawEnd,
+            isShiftPressed: modifierFlags.contains(.shift)
+        )
+    }
+
+    private func clearEyedropperMeasurement() {
+        eyedropperMeasurementStartPoint = nil
+        eyedropperMeasurementEndPoint = nil
+        isEyedropperMeasurementInProgress = false
+    }
+
+    private func isValidEyedropperMeasurementPoint(_ point: NSPoint) -> Bool {
+        let samplePoint = eyedropperSamplePoint(forMousePoint: point)
+        return SelectionToolbarState.shouldShowExplicitColorSampler(
+            pointer: samplePoint,
+            selectionRect: lockedSelectionRect
+        ) && !isToolbarOrPanelPoint(samplePoint)
+    }
+
+    private func eyedropperMeasurementPixelLength(from start: NSPoint, to end: NSPoint) -> Int {
+        Int(hypot(end.x - start.x, end.y - start.y).rounded())
+    }
+
     private func updateHoveredWindowRect(_ targetRect: NSRect?) {
         guard hoveredWindowRect != targetRect else {
             return
@@ -3203,16 +3411,19 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
     }
 
-    private func handleAnnotatingMouseDown(at point: NSPoint) {
+    private func handleAnnotatingMouseDown(at point: NSPoint, clickCount: Int = 1) {
+        if activeTextDropdown != nil, handleTextDropdownClick(at: point) {
+            return
+        }
+        if activeNumberDropdown, handleOptionsClick(at: point) {
+            return
+        }
+
         if startToolbarDragIfPossible(at: point) {
             return
         }
 
         if handleMeasurementControlClick(at: point) {
-            return
-        }
-
-        if activeNumberDropdown, handleOptionsClick(at: point) {
             return
         }
 
@@ -3235,7 +3446,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return
         }
 
-        if isNumberToolActive, handleNumberToolMouseDown(at: point) {
+        if isNumberToolActive, handleNumberToolMouseDown(at: point, clickCount: clickCount) {
             return
         }
 
@@ -3388,7 +3599,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         needsDisplay = true
     }
 
-    private func handleNumberToolMouseDown(at point: NSPoint) -> Bool {
+    private func handleNumberToolMouseDown(at point: NSPoint, clickCount: Int) -> Bool {
         guard lockedSelectionRect != nil, !isToolbarOrPanelPoint(point) else {
             return false
         }
@@ -3397,9 +3608,16 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             handleNumberHandleMouseDown(hit)
             return true
         }
+        if disabledNumberAdjustmentHandleContains(point) {
+            return true
+        }
 
         if let index = numberAnnotationIndex(at: point) {
             selectAnnotation(at: index)
+            if clickCount >= 2 {
+                beginNumberEditing(at: index)
+                return true
+            }
             beginAnnotationMove(at: index, point: point)
             return true
         }
@@ -3416,9 +3634,11 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         case .resize:
             beginAnnotationResize(with: .bottomRight)
         case .increment:
-            swapNumberAnnotation(at: hit.index, direction: 1)
+            adjustNumberAnnotation(at: hit.index, delta: 1)
         case .decrement:
-            swapNumberAnnotation(at: hit.index, direction: -1)
+            adjustNumberAnnotation(at: hit.index, delta: -1)
+        case .reset:
+            resetNumberAnnotation(at: hit.index)
         }
     }
 
@@ -3426,18 +3646,30 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         var style = currentStyle
         style.textSize = clampedNumberSize(style.textSize)
         let rect = CaptureAnnotationRenderer.numberMarkRect(centeredAt: point, fontSize: style.textSize)
-        let annotation = CaptureAnnotation(
+        var annotation = CaptureAnnotation(
             kind: .numberSequence,
             rect: localAnnotationRect(from: rect),
             style: style,
             numberMarkType: currentNumberMarkType
         )
+        annotation.numberSequenceIndex = currentNumberMarkType == .number ? nextNumberSequenceIndex() : nil
+        annotation.numberSequenceIsManual = currentNumberMarkType == .number && isNumberSequenceManualModeActive()
         annotations.append(annotation)
-        renumberNumberSequenceAnnotations()
         selectedAnnotationIndex = annotations.indices.last
+        revealedNumberControlsIndex = nil
+        selectedNumberAnnotationCanFollowTypeDropdown = true
         numberStyle = style
         redoAnnotations.removeAll()
+        invalidateCursorRectsAndRefresh(at: point)
         needsDisplay = true
+    }
+
+    private func nextNumberSequenceIndex(excluding excludedIndex: Int? = nil) -> Int {
+        numericNumberAnnotationIndices()
+            .filter { $0 != excludedIndex }
+            .compactMap { annotations[$0].numberSequenceIndex }
+            .max()
+            .map { min(999, $0 + 1) } ?? 1
     }
 
     private func renumberNumberSequenceAnnotations() {
@@ -3445,9 +3677,27 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         for index in annotations.indices where annotations[index].kind == .numberSequence {
             if annotations[index].numberMarkType == .number || annotations[index].numberMarkType == nil {
                 annotations[index].numberSequenceIndex = next
+                annotations[index].numberSequenceIsManual = false
                 next += 1
             } else {
                 annotations[index].numberSequenceIndex = nil
+                annotations[index].numberSequenceIsManual = false
+            }
+        }
+    }
+
+    private func isNumberSequenceManualModeActive() -> Bool {
+        annotations.contains {
+            $0.kind == .numberSequence &&
+                ($0.numberMarkType == .number || $0.numberMarkType == nil) &&
+                $0.numberSequenceIsManual
+        }
+    }
+
+    private func markNumberSequenceManualMode() {
+        for index in annotations.indices where annotations[index].kind == .numberSequence {
+            if annotations[index].numberMarkType == .number || annotations[index].numberMarkType == nil {
+                annotations[index].numberSequenceIsManual = true
             }
         }
     }
@@ -3461,32 +3711,205 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
     }
 
-    private func canMoveNumberAnnotation(direction: Int) -> Bool {
-        guard let selectedAnnotationIndex else {
+    private func canAdjustNumberAnnotation(delta: Int) -> Bool {
+        guard let selectedAnnotationIndex,
+              annotations.indices.contains(selectedAnnotationIndex),
+              annotations[selectedAnnotationIndex].kind == .numberSequence,
+              annotations[selectedAnnotationIndex].numberMarkType == .number || annotations[selectedAnnotationIndex].numberMarkType == nil
+        else {
             return false
         }
-        let indices = numericNumberAnnotationIndices()
-        guard let position = indices.firstIndex(of: selectedAnnotationIndex) else {
-            return false
-        }
-        return indices.indices.contains(position + direction)
+        let value = annotations[selectedAnnotationIndex].numberSequenceIndex ?? 1
+        return (1...999).contains(value + delta)
     }
 
-    private func swapNumberAnnotation(at index: Int, direction: Int) {
-        let indices = numericNumberAnnotationIndices()
-        guard let position = indices.firstIndex(of: index),
-              indices.indices.contains(position + direction)
+    private func adjustNumberAnnotation(at index: Int, delta: Int) {
+        guard annotations.indices.contains(index),
+              annotations[index].kind == .numberSequence,
+              annotations[index].numberMarkType == .number || annotations[index].numberMarkType == nil
         else {
             return
         }
 
-        let otherIndex = indices[position + direction]
-        let currentNumber = annotations[index].numberSequenceIndex
-        annotations[index].numberSequenceIndex = annotations[otherIndex].numberSequenceIndex
-        annotations[otherIndex].numberSequenceIndex = currentNumber
+        let value = annotations[index].numberSequenceIndex ?? 1
+        annotations[index].numberSequenceIndex = min(999, max(1, value + delta))
         selectedAnnotationIndex = index
         redoAnnotations.removeAll()
         needsDisplay = true
+    }
+
+    private func resetNumberAnnotation(at index: Int) {
+        guard annotations.indices.contains(index),
+              annotations[index].kind == .numberSequence,
+              (annotations[index].numberSequenceIndex ?? 1) > 1
+        else {
+            return
+        }
+        annotations[index].numberSequenceIndex = 1
+        selectedAnnotationIndex = index
+        redoAnnotations.removeAll()
+        needsDisplay = true
+    }
+
+    private func beginNumberEditing(at index: Int) {
+        guard annotations.indices.contains(index),
+              annotations[index].kind == .numberSequence,
+              annotations[index].numberMarkType == .number || annotations[index].numberMarkType == nil
+        else {
+            return
+        }
+        editingNumberAnnotationIndex = index
+        let value = min(999, max(1, annotations[index].numberSequenceIndex ?? 1))
+        editingNumberDraft = "\(value)"
+        editingNumberHasDraft = true
+        editingNumberDraftWasEdited = false
+        editingNumberCaretIndex = editingNumberDraft.count
+        selectedAnnotationIndex = index
+        revealedNumberControlsIndex = index
+        startNumberCaretBlink()
+        window?.makeFirstResponder(self)
+        needsDisplay = true
+    }
+
+    private func commitNumberEditing() {
+        guard let editingNumberAnnotationIndex,
+              annotations.indices.contains(editingNumberAnnotationIndex),
+              annotations[editingNumberAnnotationIndex].kind == .numberSequence
+        else {
+            clearNumberEditing()
+            return
+        }
+        if editingNumberDraftWasEdited {
+            markNumberSequenceManualMode()
+            if let value = Int(editingNumberDraft), value > 0 {
+                annotations[editingNumberAnnotationIndex].numberSequenceIndex = min(999, max(1, value))
+            } else if editingNumberDraft.isEmpty {
+                annotations[editingNumberAnnotationIndex].numberSequenceIndex = 1
+            }
+        }
+        clearNumberEditing()
+        redoAnnotations.removeAll()
+        needsDisplay = true
+    }
+
+    private func clearNumberEditing() {
+        editingNumberAnnotationIndex = nil
+        editingNumberDraft = ""
+        editingNumberHasDraft = false
+        editingNumberDraftWasEdited = false
+        editingNumberCaretIndex = 0
+        stopNumberCaretBlink()
+    }
+
+    private func commitNumberEditingIfNeeded() {
+        guard editingNumberAnnotationIndex != nil else {
+            return
+        }
+        commitNumberEditing()
+    }
+
+    private func commitNumberEditingIfPointerLeaves(at point: NSPoint) {
+        guard let editingNumberAnnotationIndex,
+              annotations.indices.contains(editingNumberAnnotationIndex),
+              annotations[editingNumberAnnotationIndex].kind == .numberSequence
+        else {
+            return
+        }
+        if numberControlsRegionContains(point, for: annotations[editingNumberAnnotationIndex]) {
+            return
+        }
+        commitNumberEditing()
+    }
+
+    private func startNumberCaretBlink() {
+        numberCaretBlinkTimer?.invalidate()
+        numberCaretVisible = true
+        let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+            guard let self, self.editingNumberAnnotationIndex != nil else {
+                return
+            }
+            self.numberCaretVisible.toggle()
+            self.needsDisplay = true
+        }
+        numberCaretBlinkTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func stopNumberCaretBlink() {
+        numberCaretBlinkTimer?.invalidate()
+        numberCaretBlinkTimer = nil
+        numberCaretVisible = false
+    }
+
+    private func showNumberCaretNow() {
+        numberCaretVisible = true
+        needsDisplay = true
+    }
+
+    private func handleNumberEditingKeyDown(_ event: NSEvent) -> Bool {
+        guard let editingNumberAnnotationIndex,
+              annotations.indices.contains(editingNumberAnnotationIndex),
+              annotations[editingNumberAnnotationIndex].kind == .numberSequence
+        else {
+            return false
+        }
+
+        if event.keyCode == 36 || event.keyCode == 76 {
+            commitNumberEditing()
+            return true
+        }
+        if event.keyCode == 53 {
+            clearNumberEditing()
+            needsDisplay = true
+            return true
+        }
+        if event.keyCode == 123 {
+            editingNumberCaretIndex = max(0, editingNumberCaretIndex - 1)
+            showNumberCaretNow()
+            return true
+        }
+        if event.keyCode == 124 {
+            editingNumberCaretIndex = min(editingNumberDraft.count, editingNumberCaretIndex + 1)
+            showNumberCaretNow()
+            return true
+        }
+        if event.keyCode == 51 {
+            editingNumberHasDraft = true
+            editingNumberDraftWasEdited = true
+            if editingNumberCaretIndex > 0 {
+                let removeIndex = editingNumberDraft.index(editingNumberDraft.startIndex, offsetBy: editingNumberCaretIndex - 1)
+                editingNumberDraft.remove(at: removeIndex)
+                editingNumberCaretIndex -= 1
+            }
+            markNumberSequenceManualMode()
+            showNumberCaretNow()
+            return true
+        }
+        guard let characters = event.charactersIgnoringModifiers, characters.allSatisfy({ $0.isNumber }) else {
+            return true
+        }
+        var nextDraft = editingNumberDraft
+        let insertIndex = nextDraft.index(nextDraft.startIndex, offsetBy: min(editingNumberCaretIndex, nextDraft.count))
+        nextDraft.insert(contentsOf: characters, at: insertIndex)
+        if nextDraft.count > 3 {
+            showNumberCaretNow()
+            return true
+        }
+        if let value = Int(nextDraft) {
+            let clamped = min(999, max(1, value))
+            let clampedText = "\(clamped)"
+            editingNumberHasDraft = true
+            editingNumberDraftWasEdited = true
+            editingNumberDraft = clampedText
+            editingNumberCaretIndex = clampedText == nextDraft
+                ? min(clampedText.count, editingNumberCaretIndex + characters.count)
+                : clampedText.count
+            markNumberSequenceManualMode()
+            annotations[editingNumberAnnotationIndex].numberSequenceIndex = clamped
+            redoAnnotations.removeAll()
+            showNumberCaretNow()
+        }
+        return true
     }
 
     private func beginShapeDrawing(at point: NSPoint) {
@@ -3667,6 +4090,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         textDraftCreatedDuringCurrentEdit = draftCreated
         isTextToolActive = true
         isEyedropperToolActive = false
+        clearEyedropperMeasurement()
         isShapeToolActive = false
         activeShapeKind = nil
         showsCornerRadiusPanel = false
@@ -4583,12 +5007,14 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         if isEyedropperToolActive {
             isEyedropperToolActive = false
             activeNumberDropdown = false
+            clearEyedropperMeasurement()
             invalidateCursorRectsAndRefresh()
             return
         }
 
         rememberCurrentStyleForActiveTool()
         isEyedropperToolActive = true
+        clearEyedropperMeasurement()
         isTextToolActive = false
         isNumberToolActive = false
         activeNumberDropdown = false
@@ -4628,6 +5054,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         rememberCurrentStyleForActiveTool()
         isTextToolActive = true
         isEyedropperToolActive = false
+        clearEyedropperMeasurement()
         isNumberToolActive = false
         activeNumberDropdown = false
         isShapeToolActive = false
@@ -4681,6 +5108,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         isNumberToolActive = true
         isTextToolActive = false
         isEyedropperToolActive = false
+        clearEyedropperMeasurement()
         isShapeToolActive = false
         activeShapeKind = nil
         selectedAnnotationIndex = nil
@@ -4710,6 +5138,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         closeTextDropdown()
         rememberCurrentStyleForActiveTool()
         isEyedropperToolActive = false
+        clearEyedropperMeasurement()
         isTextToolActive = false
         isNumberToolActive = false
         activeNumberDropdown = false
@@ -4780,6 +5209,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         closeTextDropdown()
         rememberCurrentStyleForActiveTool()
         isEyedropperToolActive = false
+        clearEyedropperMeasurement()
         isTextToolActive = false
         isNumberToolActive = false
         activeNumberDropdown = false
@@ -4907,9 +5337,11 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     func test_selectAnnotation(at index: Int) {
         guard annotations.indices.contains(index) else {
             selectedAnnotationIndex = nil
+            selectedNumberAnnotationCanFollowTypeDropdown = false
             return
         }
         selectedAnnotationIndex = index
+        selectedNumberAnnotationCanFollowTypeDropdown = annotations[index].kind == .numberSequence
         needsDisplay = true
     }
 
@@ -5055,6 +5487,13 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return nil
         }
         return annotations[index].rect
+    }
+
+    func test_annotationOverlayRect(at index: Int) -> NSRect? {
+        guard annotations.indices.contains(index) else {
+            return nil
+        }
+        return overlayRect(fromLocalAnnotationRect: annotations[index].rect)
     }
 
     func test_annotationText(at index: Int) -> String? {
@@ -5274,6 +5713,27 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         return NSPoint(x: rect.midX, y: rect.midY)
     }
 
+    func test_numberMarkTypeIconInteriorPoint() -> NSPoint? {
+        guard let optionsToolbarRect else {
+            return nil
+        }
+        let field = optionsToolbarLayout(in: optionsToolbarRect).numberMarkType
+        let iconRect = NSRect(x: field.minX + 8, y: field.midY - 7, width: 14, height: 14)
+        return NSPoint(x: iconRect.minX + 4, y: iconRect.midY)
+    }
+
+    func test_numberCursorImage(for type: CaptureNumberMarkType) -> NSImage? {
+        numberCreationCursor(for: type).image
+    }
+
+    func test_numberCursorHotSpot(for type: CaptureNumberMarkType) -> NSPoint? {
+        numberCreationCursor(for: type).hotSpot
+    }
+
+    func test_numberCursorText(for type: CaptureNumberMarkType) -> String? {
+        numberCursorText(for: type)
+    }
+
     func test_selectNumberSize(_ size: CGFloat) {
         applyTextSize(size)
     }
@@ -5371,13 +5831,69 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         test_numberHandlePoint(.decrement)
     }
 
+    func test_numberIncrementHandleIsHitTarget() -> Bool {
+        guard let point = test_numberIncrementHandlePoint() else {
+            return false
+        }
+        return numberHandleHitTarget(at: point)?.kind == .increment
+    }
+
+    func test_numberDecrementHandleIsHitTarget() -> Bool {
+        guard let point = test_numberDecrementHandlePoint() else {
+            return false
+        }
+        return numberHandleHitTarget(at: point)?.kind == .decrement
+    }
+
+    func test_numberResetHandlePoint() -> NSPoint? {
+        test_numberHandlePoint(.reset)
+    }
+
+    func test_numberDeleteHandleRect() -> NSRect? {
+        test_numberHandleRect(.delete)
+    }
+
+    func test_numberResizeHandleRect() -> NSRect? {
+        test_numberHandleRect(.resize)
+    }
+
+    func test_numberIncrementHandleRect() -> NSRect? {
+        test_numberHandleRect(.increment)
+    }
+
+    func test_numberDecrementHandleRect() -> NSRect? {
+        test_numberHandleRect(.decrement)
+    }
+
+    func test_numberResetHandleRect() -> NSRect? {
+        test_numberHandleRect(.reset)
+    }
+
+    func test_numberOutlineRect() -> NSRect? {
+        guard let selectedAnnotation else {
+            return nil
+        }
+        return numberEditingOutlineRect(for: selectedAnnotation)
+    }
+
+    var test_numberControlsVisible: Bool {
+        shouldShowSelectedNumberControls()
+    }
+
     private func test_numberHandlePoint(_ kind: NumberHandleKind) -> NSPoint? {
+        guard let rect = test_numberHandleRect(kind) else {
+            return nil
+        }
+        return NSPoint(x: rect.midX, y: rect.midY)
+    }
+
+    private func test_numberHandleRect(_ kind: NumberHandleKind) -> NSRect? {
         guard let selectedAnnotation,
               let rect = numberHandleRect(for: selectedAnnotation, kind: kind)
         else {
             return nil
         }
-        return NSPoint(x: rect.midX, y: rect.midY)
+        return rect
     }
 
     func test_mosaicRectangleRotationHandlePoint() -> NSPoint? {
@@ -5830,6 +6346,14 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         sampledPointerPoint
     }
 
+    var test_eyedropperMeasurementLine: (start: NSPoint, end: NSPoint)? {
+        eyedropperMeasurementLine
+    }
+
+    var test_eyedropperMeasurementLabel: String? {
+        eyedropperMeasurementLabel
+    }
+
     func test_magnifierSampleColorHex(at point: NSPoint) -> String? {
         magnifierSampleColor(at: point).map { SelectionToolbarState.colorSamplerHexString(for: $0) }
     }
@@ -5930,14 +6454,27 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private func deleteSelectedAnnotation() -> Bool {
-        guard let selectedAnnotationIndex, annotations.indices.contains(selectedAnnotationIndex) else {
+        let deletionIndex: Int?
+        if let selectedAnnotationIndex, annotations.indices.contains(selectedAnnotationIndex) {
+            deletionIndex = selectedAnnotationIndex
+        } else if let revealedNumberControlsIndex,
+                  annotations.indices.contains(revealedNumberControlsIndex),
+                  annotations[revealedNumberControlsIndex].kind == .numberSequence {
+            deletionIndex = revealedNumberControlsIndex
+        } else {
+            deletionIndex = nil
+        }
+
+        guard let deletionIndex else {
             return false
         }
 
-        let removed = annotations[selectedAnnotationIndex]
-        annotations.remove(at: selectedAnnotationIndex)
+        let removed = annotations[deletionIndex]
+        let shouldRenumberNumberSequence = removed.kind == .numberSequence && !isNumberSequenceManualModeActive()
+        annotations.remove(at: deletionIndex)
         self.selectedAnnotationIndex = nil
         editingTextAnnotationIndex = nil
+        clearNumberEditing()
         clearPendingTextEdit()
         removeTextEditor()
         redoAnnotations.removeAll()
@@ -5946,7 +6483,11 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         showsStartArrowTypeMenu = false
         showsEndArrowTypeMenu = false
         if removed.kind == .numberSequence {
-            renumberNumberSequenceAnnotations()
+            if shouldRenumberNumberSequence {
+                renumberNumberSequenceAnnotations()
+            }
+            revealedNumberControlsIndex = nil
+            invalidateCursorRectsAndRefresh()
         }
         if removed.kind == .mosaicStroke || removed.kind == .mosaicRectangle {
             resetMosaicPreviewCaches()
@@ -6181,10 +6722,17 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private func setNumberMarkType(_ type: CaptureNumberMarkType) {
+        let previousType = currentNumberMarkType
         currentNumberMarkType = type
         switch type {
         case .number:
-            break
+            if previousType != .number {
+                let defaultColor = Self.defaultNumberStyle().strokeColor
+                currentStyle.strokeColor = defaultColor
+                currentStyle.fillColor = defaultColor
+                customColor = nil
+                isCustomColorSwatchActive = false
+            }
         case .check:
             currentStyle.strokeColor = NSColor.systemGreen
             currentStyle.fillColor = NSColor.systemGreen
@@ -6198,7 +6746,32 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
         rememberCurrentStyleForActiveTool()
         applyCurrentStyleToSelectedAnnotation()
+        applyCurrentNumberMarkTypeToSelectedAnnotation(type)
         invalidateCursorRectsAndRefresh()
+    }
+
+    private func applyCurrentNumberMarkTypeToSelectedAnnotation(_ type: CaptureNumberMarkType) {
+        guard let selectedAnnotationIndex,
+              annotations.indices.contains(selectedAnnotationIndex),
+              annotations[selectedAnnotationIndex].kind == .numberSequence,
+              selectedNumberAnnotationCanFollowTypeDropdown
+        else {
+            return
+        }
+
+        annotations[selectedAnnotationIndex].numberMarkType = type
+        switch type {
+        case .number:
+            if annotations[selectedAnnotationIndex].numberSequenceIndex == nil {
+                annotations[selectedAnnotationIndex].numberSequenceIndex = nextNumberSequenceIndex(excluding: selectedAnnotationIndex)
+                annotations[selectedAnnotationIndex].numberSequenceIsManual = false
+            }
+        case .check, .cross:
+            annotations[selectedAnnotationIndex].numberSequenceIndex = nil
+            annotations[selectedAnnotationIndex].numberSequenceIsManual = false
+        }
+        redoAnnotations.removeAll()
+        needsDisplay = true
     }
 
     private func applyTextSize(_ size: CGFloat) {
@@ -6238,6 +6811,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return
         }
         activeTextDropdown = nil
+        textDropdownScrollRemainderY = 0
         needsDisplay = true
     }
 
@@ -6269,9 +6843,16 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         guard let kind = activeTextDropdown, let menu = textDropdownRect(for: kind), menu.contains(point) else {
             return false
         }
-        let direction = deltaY < 0 ? 1 : -1
-        let steps = max(1, Int((abs(deltaY) / 8).rounded(.up)))
+        textDropdownScrollRemainderY += deltaY
+        let stepDelta: CGFloat = 8
+        let steps = Int(abs(textDropdownScrollRemainderY) / stepDelta)
+        guard steps > 0 else {
+            return true
+        }
+
+        let direction = textDropdownScrollRemainderY < 0 ? 1 : -1
         setTextDropdownScrollOffset(textDropdownScrollOffset(for: kind) + direction * steps, for: kind)
+        textDropdownScrollRemainderY = textDropdownScrollRemainderY.truncatingRemainder(dividingBy: stepDelta)
         needsDisplay = true
         return true
     }
@@ -6794,6 +7375,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         if annotation.kind == .numberSequence {
             activateNumberTool()
             selectedAnnotationIndex = index
+            selectedNumberAnnotationCanFollowTypeDropdown = true
             currentNumberMarkType = annotation.numberMarkType ?? .number
             currentStyle = annotation.style
             rememberCurrentStyleForActiveTool()
@@ -6851,6 +7433,16 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             }
         } else if annotations[selectedAnnotationIndex].kind == .numberSequence {
             annotations[selectedAnnotationIndex].style.textSize = clampedNumberSize(annotations[selectedAnnotationIndex].style.textSize)
+            if annotations[selectedAnnotationIndex].numberSequenceIndex != nil {
+                annotations[selectedAnnotationIndex].numberSequenceIndex = min(999, max(1, annotations[selectedAnnotationIndex].numberSequenceIndex ?? 1))
+            }
+            let overlayRect = overlayRect(fromLocalAnnotationRect: annotations[selectedAnnotationIndex].rect).standardized
+            let center = NSPoint(x: overlayRect.midX, y: overlayRect.midY)
+            let resizedRect = CaptureAnnotationRenderer.numberMarkRect(
+                centeredAt: center,
+                fontSize: annotations[selectedAnnotationIndex].style.textSize
+            )
+            annotations[selectedAnnotationIndex].rect = localAnnotationRect(from: resizedRect)
         } else if SelectionToolbarState.annotationKindSupportsPostDrawEditing(annotations[selectedAnnotationIndex].kind) {
             annotations[selectedAnnotationIndex].kind = currentShapeKind
         }
@@ -7052,12 +7644,65 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         return nil
     }
 
+    private func updateRevealedNumberControls(at point: NSPoint) {
+        let previous = revealedNumberControlsIndex
+        if let index = numberAnnotationIndex(at: point) {
+            revealedNumberControlsIndex = index
+        } else if let index = revealedNumberControlsIndex,
+                  annotations.indices.contains(index),
+                  numberControlsRegionContains(point, for: annotations[index]) {
+            revealedNumberControlsIndex = index
+        } else {
+            revealedNumberControlsIndex = nil
+        }
+
+        if previous != revealedNumberControlsIndex {
+            needsDisplay = true
+        }
+    }
+
+    private func numberControlsRegionContains(_ point: NSPoint, for annotation: CaptureAnnotation) -> Bool {
+        guard annotation.kind == .numberSequence else {
+            return false
+        }
+        let outlineRect = numberEditingOutlineRect(for: annotation)
+        if outlineRect.insetBy(dx: -16, dy: -16).contains(point) {
+            return true
+        }
+        return [.delete, .resize, .increment, .decrement, .reset].contains { kind in
+            numberHandleRect(for: annotation, kind: kind)?.insetBy(dx: -8, dy: -8).contains(point) == true
+        }
+    }
+
+    private func numberEditingOutlineRect(for annotation: CaptureAnnotation) -> NSRect {
+        overlayRect(fromLocalAnnotationRect: annotation.rect).standardized.insetBy(dx: -4, dy: -4)
+    }
+
+    private func shouldShowSelectedNumberControls() -> Bool {
+        guard let selectedAnnotationIndex,
+              annotations.indices.contains(selectedAnnotationIndex),
+              annotations[selectedAnnotationIndex].kind == .numberSequence
+        else {
+            return false
+        }
+        return true
+    }
+
     private func numberHandleRect(for annotation: CaptureAnnotation, kind: NumberHandleKind) -> NSRect? {
         guard annotation.kind == .numberSequence else {
             return nil
         }
-        let rect = overlayRect(fromLocalAnnotationRect: annotation.rect).standardized
-        let size: CGFloat = 15
+        let rect = numberEditingOutlineRect(for: annotation)
+        let size: CGFloat
+        switch kind {
+        case .resize:
+            size = 7.5
+        case .increment, .decrement, .reset:
+            size = 12
+        case .delete:
+            size = 15
+        }
+        let outsideLeftCenterX = rect.minX - size / 2 - 2
         let center: NSPoint
         switch kind {
         case .delete:
@@ -7068,12 +7713,19 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             guard annotation.numberMarkType == .number || annotation.numberMarkType == nil else {
                 return nil
             }
-            center = NSPoint(x: rect.minX, y: rect.maxY)
+            center = NSPoint(x: outsideLeftCenterX, y: rect.maxY)
         case .decrement:
             guard annotation.numberMarkType == .number || annotation.numberMarkType == nil else {
                 return nil
             }
-            center = NSPoint(x: rect.minX, y: rect.minY)
+            center = NSPoint(x: outsideLeftCenterX, y: rect.maxY - size)
+        case .reset:
+            guard (annotation.numberMarkType == .number || annotation.numberMarkType == nil),
+                  (annotation.numberSequenceIndex ?? 1) > 1
+            else {
+                return nil
+            }
+            center = NSPoint(x: outsideLeftCenterX, y: rect.minY)
         }
         return NSRect(x: center.x - size / 2, y: center.y - size / 2, width: size, height: size)
     }
@@ -7083,19 +7735,50 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
               let selectedAnnotationIndex,
               annotations.indices.contains(selectedAnnotationIndex),
               annotations[selectedAnnotationIndex].kind == .numberSequence,
-              activeToolCanEdit(annotationKind: .numberSequence)
+              activeToolCanEdit(annotationKind: .numberSequence),
+              shouldShowSelectedNumberControls()
         else {
             return nil
         }
 
-        let kinds: [NumberHandleKind] = [.delete, .resize, .increment, .decrement]
+        let kinds: [NumberHandleKind] = [.delete, .resize, .increment, .decrement, .reset]
         for kind in kinds {
+            if kind == .increment, !canAdjustNumberAnnotation(delta: 1) {
+                continue
+            }
+            if kind == .decrement, !canAdjustNumberAnnotation(delta: -1) {
+                continue
+            }
             if let rect = numberHandleRect(for: annotations[selectedAnnotationIndex], kind: kind),
                rect.insetBy(dx: -3, dy: -3).contains(point) {
                 return NumberHandleHit(index: selectedAnnotationIndex, kind: kind)
             }
         }
         return nil
+    }
+
+    private func disabledNumberAdjustmentHandleContains(_ point: NSPoint) -> Bool {
+        guard interactionMode == .annotating,
+              let selectedAnnotationIndex,
+              annotations.indices.contains(selectedAnnotationIndex),
+              annotations[selectedAnnotationIndex].kind == .numberSequence,
+              activeToolCanEdit(annotationKind: .numberSequence),
+              shouldShowSelectedNumberControls()
+        else {
+            return false
+        }
+
+        let disabledHandles: [(kind: NumberHandleKind, delta: Int)] = [
+            (.increment, 1),
+            (.decrement, -1),
+        ]
+        for disabledHandle in disabledHandles where !canAdjustNumberAnnotation(delta: disabledHandle.delta) {
+            if let rect = numberHandleRect(for: annotations[selectedAnnotationIndex], kind: disabledHandle.kind),
+               rect.insetBy(dx: -3, dy: -3).contains(point) {
+                return true
+            }
+        }
+        return false
     }
 
     private func textAnnotationIndex(at point: NSPoint) -> Int? {
@@ -8373,16 +9056,32 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     private func drawAnnotations() {
         let alreadyRenderedWithMosaicOrdering = shouldRenderAnnotationsWithMosaicOrdering
+        let selectedIndex = selectedAnnotationIndex
         for (index, annotation) in annotations.enumerated() {
-            if isMosaicAnnotation(annotation) {
+            if isMosaicAnnotation(annotation) || index == selectedIndex {
                 continue
             }
             if !alreadyRenderedWithMosaicOrdering {
                 drawAnnotation(annotation, inOverlay: true)
             }
-            if selectedAnnotationIndex == index, shouldDrawSelectedAnnotationOutline(annotation) {
-                drawSelectedAnnotationOutline(annotation)
-            }
+        }
+
+        guard let selectedIndex,
+              annotations.indices.contains(selectedIndex)
+        else {
+            return
+        }
+
+        let selectedAnnotation = annotations[selectedIndex]
+        guard !isMosaicAnnotation(selectedAnnotation) else {
+            return
+        }
+
+        if !alreadyRenderedWithMosaicOrdering {
+            drawAnnotation(selectedAnnotation, inOverlay: true)
+        }
+        if shouldDrawSelectedAnnotationOutline(selectedAnnotation) {
+            drawSelectedAnnotationOutline(selectedAnnotation)
         }
     }
 
@@ -9012,22 +9711,76 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         case .number:
             annotation.style.strokeColor.setFill()
             NSBezierPath(ovalIn: rect).fill()
-            let value = max(1, annotation.numberSequenceIndex ?? 1)
+            let value = min(999, max(1, annotation.numberSequenceIndex ?? 1))
             let text = "\(value)"
+            let displayedText: String
+            let isEditingNumber: Bool
+            if let editingNumberAnnotationIndex,
+               annotations.indices.contains(editingNumberAnnotationIndex),
+               annotations[editingNumberAnnotationIndex].rect == annotation.rect {
+                isEditingNumber = true
+                displayedText = editingNumberHasDraft ? editingNumberDraft : text
+            } else {
+                isEditingNumber = false
+                displayedText = text
+            }
+            let font = NSFont.monospacedDigitSystemFont(
+                ofSize: CaptureAnnotationRenderer.numberMarkTextFontSize(for: annotation.style.textSize, text: displayedText),
+                weight: .bold
+            )
             let attributes: [NSAttributedString.Key: Any] = [
-                .font: NSFont.monospacedDigitSystemFont(ofSize: max(3, annotation.style.textSize * 0.72), weight: .bold),
+                .font: font,
                 .foregroundColor: readableNumberForegroundColor(on: annotation.style.strokeColor),
             ]
-            let size = NSString(string: text).size(withAttributes: attributes)
-            NSString(string: text).draw(
-                at: NSPoint(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2 + rect.height * 0.08),
+            let size = NSString(string: displayedText).size(withAttributes: attributes)
+            let textOrigin = NSPoint(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2)
+            NSString(string: displayedText).draw(
+                at: textOrigin,
                 withAttributes: attributes
             )
+            if isEditingNumber, numberCaretVisible {
+                drawNumberEditingCaret(
+                    inText: displayedText,
+                    caretIndex: editingNumberCaretIndex,
+                    textOrigin: textOrigin,
+                    textSize: size,
+                    attributes: attributes,
+                    font: font,
+                    in: rect
+                )
+            }
         case .check:
             drawNumberSymbol("✓", in: rect, color: annotation.style.strokeColor)
         case .cross:
             drawNumberSymbol("×", in: rect, color: annotation.style.strokeColor)
         }
+    }
+
+    private func drawNumberEditingCaret(
+        inText text: String,
+        caretIndex: Int,
+        textOrigin: NSPoint,
+        textSize: NSSize,
+        attributes: [NSAttributedString.Key: Any],
+        font: NSFont,
+        in rect: NSRect
+    ) {
+        let caretWidth = max(1.2, min(2.2, font.pointSize / 14))
+        let caretHeight = min(max(8, textSize.height * 0.88), rect.height * 0.82)
+        let horizontalPadding = max(2, rect.width * 0.07)
+        let clampedCaretIndex = min(max(0, caretIndex), text.count)
+        let prefix = String(text.prefix(clampedCaretIndex))
+        let prefixWidth = NSString(string: prefix).size(withAttributes: attributes).width
+        let requestedX = textOrigin.x + prefixWidth + max(1, caretWidth / 2)
+        let caretX = min(requestedX, rect.maxX - horizontalPadding - caretWidth)
+        let caretRect = NSRect(
+            x: max(rect.minX + horizontalPadding, caretX),
+            y: rect.midY - caretHeight / 2,
+            width: caretWidth,
+            height: caretHeight
+        )
+        NSColor.black.setFill()
+        NSBezierPath(rect: caretRect).fill()
     }
 
     private func readableNumberForegroundColor(on color: NSColor) -> NSColor {
@@ -9412,7 +10165,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         let defaultColor = SelectionOverlayWindow.defaultPaletteColors.first ?? style.strokeColor
         style.strokeColor = defaultColor
         style.fillColor = defaultColor
-        style.textSize = 24
+        style.textSize = 3
         return style
     }
 
@@ -9488,18 +10241,25 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private func drawSelectedNumberMarkOutline(_ annotation: CaptureAnnotation) {
-        let rect = overlayRect(fromLocalAnnotationRect: annotation.rect).standardized
+        let rect = numberEditingOutlineRect(for: annotation)
         NSColor.systemBlue.setStroke()
         let outline = NSBezierPath(rect: rect)
         outline.lineWidth = 1.5
         outline.setLineDash([4, 3], count: 2, phase: 0)
         outline.stroke()
 
+        guard shouldShowSelectedNumberControls() else {
+            return
+        }
+
         drawNumberHandle(.delete, for: annotation, enabled: true)
         drawNumberHandle(.resize, for: annotation, enabled: true)
         if annotation.numberMarkType == .number || annotation.numberMarkType == nil {
-            drawNumberHandle(.increment, for: annotation, enabled: canMoveNumberAnnotation(direction: 1))
-            drawNumberHandle(.decrement, for: annotation, enabled: canMoveNumberAnnotation(direction: -1))
+            drawNumberHandle(.increment, for: annotation, enabled: canAdjustNumberAnnotation(delta: 1))
+            drawNumberHandle(.decrement, for: annotation, enabled: canAdjustNumberAnnotation(delta: -1))
+            if (annotation.numberSequenceIndex ?? 1) > 1 {
+                drawNumberHandle(.reset, for: annotation, enabled: true)
+            }
         }
     }
 
@@ -9510,23 +10270,107 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
         switch kind {
         case .delete:
-            NSColor.systemBlue.setFill()
-            NSBezierPath(ovalIn: rect).fill()
-            drawNumberSymbol("×", in: rect.insetBy(dx: 2, dy: 2), color: .white)
+            drawNumberDeleteHandle(in: rect, enabled: enabled)
         case .resize:
             (enabled ? NSColor.systemBlue : NSColor.disabledControlTextColor).setFill()
             NSBezierPath(ovalIn: rect).fill()
         case .increment, .decrement:
-            NSColor.white.setFill()
-            NSBezierPath(rect: rect).fill()
-            (enabled ? NSColor.systemBlue : NSColor.disabledControlTextColor).setStroke()
-            NSBezierPath(rect: rect).stroke()
-            drawNumberSymbol(
-                kind == .increment ? "+" : "-",
-                in: rect.insetBy(dx: 1, dy: 1),
-                color: enabled ? .systemBlue : .disabledControlTextColor
+            drawNumberSquareHandle(kind, in: rect, enabled: enabled)
+        case .reset:
+            drawNumberResetHandle(in: rect, enabled: enabled)
+        }
+    }
+
+    private func drawNumberSquareHandle(_ kind: NumberHandleKind, in rect: NSRect, enabled: Bool) {
+        let color = enabled ? NSColor.systemBlue : NSColor.disabledControlTextColor
+        NSColor.white.setFill()
+        NSBezierPath(rect: rect).fill()
+        color.setStroke()
+        let outline = NSBezierPath(rect: rect.insetBy(dx: 1, dy: 1))
+        outline.lineWidth = 1.2
+        outline.stroke()
+
+        let path = NSBezierPath()
+        let inset = rect.insetBy(dx: 4.5, dy: 4.5)
+        path.move(to: NSPoint(x: inset.minX, y: rect.midY))
+        path.line(to: NSPoint(x: inset.maxX, y: rect.midY))
+        if kind == .increment {
+            path.move(to: NSPoint(x: rect.midX, y: inset.minY))
+            path.line(to: NSPoint(x: rect.midX, y: inset.maxY))
+        }
+        path.lineWidth = 1.4
+        path.lineCapStyle = .round
+        color.setStroke()
+        path.stroke()
+    }
+
+    private func drawNumberDeleteHandle(in rect: NSRect, enabled: Bool) {
+        NSColor.white.setFill()
+        NSBezierPath(ovalIn: rect.insetBy(dx: -1, dy: -1)).fill()
+
+        if let image = Bundle.main.url(forResource: "close", withExtension: "svg")
+            .flatMap(NSImage.init(contentsOf:)) {
+            image.draw(in: rect)
+            return
+        }
+
+        (enabled ? NSColor.systemBlue : NSColor.disabledControlTextColor).setFill()
+        NSBezierPath(ovalIn: rect).fill()
+        drawNumberSymbol("×", in: rect.insetBy(dx: 2, dy: 2), color: .white)
+    }
+
+    private func drawNumberResetHandle(in rect: NSRect, enabled: Bool) {
+        let color = enabled ? NSColor.systemBlue : NSColor.disabledControlTextColor
+
+        if let image = Bundle.main.url(forResource: "reset2", withExtension: "svg")
+            .flatMap(NSImage.init(contentsOf:)) {
+            image.isTemplate = true
+            NSGraphicsContext.saveGraphicsState()
+            NSBezierPath(rect: rect.insetBy(dx: 1.5, dy: 1.5)).addClip()
+            drawTintedToolbarImage(image, in: rect.insetBy(dx: -0.75, dy: -0.75), color: color)
+            NSGraphicsContext.restoreGraphicsState()
+            return
+        }
+
+        drawNumberResetFallback(in: rect, color: color)
+    }
+
+    private func drawNumberResetFallback(in rect: NSRect, color: NSColor) {
+        guard let context = NSGraphicsContext.current?.cgContext else {
+            return
+        }
+        let iconRect = rect.insetBy(dx: 2.5, dy: 2.5)
+        func svgPoint(_ x: CGFloat, _ y: CGFloat) -> NSPoint {
+            NSPoint(
+                x: iconRect.minX + x / 16 * iconRect.width,
+                y: iconRect.maxY - y / 16 * iconRect.height
             )
         }
+
+        context.saveGState()
+
+        let arc = NSBezierPath()
+        arc.appendArc(
+            withCenter: svgPoint(8, 8),
+            radius: iconRect.width * 5 / 16,
+            startAngle: 48,
+            endAngle: 334,
+            clockwise: false
+        )
+        arc.lineWidth = 1.25
+        arc.lineCapStyle = .round
+        color.setStroke()
+        arc.stroke()
+
+        let arrow = NSBezierPath()
+        arrow.move(to: svgPoint(8, 4.466))
+        arrow.line(to: svgPoint(8, 0.534))
+        arrow.line(to: svgPoint(10.77, 2.5))
+        arrow.line(to: svgPoint(8.41, 4.658))
+        arrow.close()
+        color.setFill()
+        arrow.fill()
+        context.restoreGState()
     }
 
     private func drawSelectedArrowLineOutline(_ annotation: CaptureAnnotation) {
@@ -9765,6 +10609,45 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         NSColor(calibratedWhite: 0.08, alpha: 0.94).setFill()
         NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5).fill()
         NSString(string: hoveredTooltip.text).draw(in: rect.insetBy(dx: 8, dy: 5), withAttributes: attributes)
+    }
+
+    private func drawEyedropperMeasurementIfNeeded() {
+        guard isEyedropperToolActive,
+              let line = eyedropperMeasurementLine,
+              let label = eyedropperMeasurementLabel
+        else {
+            return
+        }
+
+        let path = NSBezierPath()
+        path.move(to: line.start)
+        path.line(to: line.end)
+        let dash: [CGFloat] = [6, 4]
+        path.setLineDash(dash, count: dash.count, phase: 0)
+        path.lineCapStyle = .round
+        path.lineWidth = 3
+        NSColor.white.withAlphaComponent(0.95).setStroke()
+        path.stroke()
+        path.lineWidth = 1.5
+        NSColor.systemBlue.setStroke()
+        path.stroke()
+
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: samplerInfoFont(ofSize: 12, weight: .semibold),
+            .foregroundColor: NSColor.white,
+        ]
+        let textSize = NSString(string: label).size(withAttributes: attributes)
+        var labelRect = NSRect(
+            x: (line.start.x + line.end.x) / 2 - textSize.width / 2 - 7,
+            y: max(line.start.y, line.end.y) + 8,
+            width: textSize.width + 14,
+            height: textSize.height + 8
+        )
+        labelRect.origin.x = max(safeLayoutBounds.minX + 4, min(labelRect.minX, safeLayoutBounds.maxX - labelRect.width - 4))
+        labelRect.origin.y = max(safeLayoutBounds.minY + 4, min(labelRect.minY, safeLayoutBounds.maxY - labelRect.height - 4))
+        NSColor(calibratedWhite: 0.08, alpha: 0.9).setFill()
+        NSBezierPath(roundedRect: labelRect, xRadius: 5, yRadius: 5).fill()
+        NSString(string: label).draw(in: labelRect.insetBy(dx: 7, dy: 4), withAttributes: attributes)
     }
 
     private func drawColorSamplerIfNeeded() {
@@ -10508,7 +11391,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             drawNumberMarkIcon(
                 type,
                 in: NSRect(x: item.midX - 8, y: item.midY - 8, width: 16, height: 16),
-                color: selected ? NSColor.systemBlue : defaultNumberMenuColor(for: type),
+                color: selected && type == .number ? NSColor.systemBlue : defaultNumberMenuColor(for: type),
                 toolbar: true
             )
         }
@@ -10525,18 +11408,25 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
     }
 
-    private func drawNumberMarkIcon(_ type: CaptureNumberMarkType, in rect: NSRect, color: NSColor, toolbar: Bool) {
+    private func drawNumberMarkIcon(
+        _ type: CaptureNumberMarkType,
+        in rect: NSRect,
+        color: NSColor,
+        toolbar: Bool,
+        numberText: String = "1"
+    ) {
         switch type {
         case .number:
-            color.setStroke()
+            color.setFill()
             let circle = NSBezierPath(ovalIn: rect.insetBy(dx: 1.5, dy: 1.5))
-            circle.lineWidth = toolbar ? 1.4 : 1.6
-            circle.stroke()
+            circle.fill()
+            let foregroundColor = readableNumberForegroundColor(on: color)
+            let text = numberText
+            let fontSize: CGFloat = toolbar ? 9 : (text.count >= 3 ? 8 : 12)
             let attributes: [NSAttributedString.Key: Any] = [
-                .font: NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .semibold),
-                .foregroundColor: color,
+                .font: NSFont.monospacedDigitSystemFont(ofSize: fontSize, weight: .semibold),
+                .foregroundColor: foregroundColor,
             ]
-            let text = "1"
             let size = NSString(string: text).size(withAttributes: attributes)
             NSString(string: text).draw(
                 at: NSPoint(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2),

@@ -105,6 +105,53 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_magnifierSampleColorHex(at: NSPoint(x: 200, y: 170)), sampledHex)
     }
 
+    func testEyedropperClickMoveClickShowsPixelMeasurementLine() throws {
+        let background = solidImage(size: NSSize(width: 500, height: 400), color: .white)
+        let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+
+        let eyedropperPoint = try XCTUnwrap(window.test_mainToolbarButtonPoint(for: .eyedropper))
+        window.test_mouseDown(at: eyedropperPoint)
+        window.test_mouseUp(at: eyedropperPoint)
+
+        let start = NSPoint(x: 150, y: 150)
+        let end = NSPoint(x: 153, y: 154)
+        window.test_mouseDown(at: start)
+        window.test_mouseUp(at: start)
+        window.test_mouseMoved(to: end)
+        window.test_mouseDown(at: end)
+        window.test_mouseUp(at: end)
+
+        let line = try XCTUnwrap(window.test_eyedropperMeasurementLine)
+        XCTAssertEqual(line.start, start)
+        XCTAssertEqual(line.end, end)
+        XCTAssertEqual(window.test_eyedropperMeasurementLabel, "5 px")
+        XCTAssertTrue(window.test_isColorSamplerVisible)
+    }
+
+    func testEyedropperShiftDragSnapsMeasurementLineToStraightAxis() throws {
+        let background = solidImage(size: NSSize(width: 500, height: 400), color: .white)
+        let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+
+        let eyedropperPoint = try XCTUnwrap(window.test_mainToolbarButtonPoint(for: .eyedropper))
+        window.test_mouseDown(at: eyedropperPoint)
+        window.test_mouseUp(at: eyedropperPoint)
+
+        let start = NSPoint(x: 150, y: 150)
+        window.test_mouseDown(at: start)
+        window.test_mouseUp(at: start)
+        window.test_mouseMoved(to: NSPoint(x: 214, y: 170), modifierFlags: [.shift])
+        window.test_mouseDown(at: NSPoint(x: 214, y: 170), modifierFlags: [.shift])
+        window.test_mouseUp(at: NSPoint(x: 214, y: 170), modifierFlags: [.shift])
+
+        let line = try XCTUnwrap(window.test_eyedropperMeasurementLine)
+        XCTAssertEqual(line.start, start)
+        XCTAssertEqual(line.end.x, 214, accuracy: 0.1)
+        XCTAssertEqual(line.end.y, 150, accuracy: 0.1)
+        XCTAssertEqual(window.test_eyedropperMeasurementLabel, "64 px")
+    }
+
     func testEyedropperSamplesFromTipPointAndMagnifierMatchesTipPixel() throws {
         let red = NSColor(srgbRed: 1, green: 0, blue: 0, alpha: 1)
         let green = NSColor(srgbRed: 0, green: 1, blue: 0, alpha: 1)
@@ -2404,10 +2451,116 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertLessThan(layout.numberSize.maxX, layout.colorSwatches[0].minX)
     }
 
-    func testNumberSequenceSizeValuesAreThreeThroughSeventyTwo() {
-        XCTAssertEqual(SelectionToolbarState.numberSizeValues.first, 3)
-        XCTAssertEqual(SelectionToolbarState.numberSizeValues.last, 72)
-        XCTAssertEqual(SelectionToolbarState.numberSizeValues.count, 70)
+    func testNumberSequenceSizeValuesMatchSnipastePresetList() {
+        XCTAssertEqual(SelectionToolbarState.numberSizeValues, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 20, 24, 32, 40, 48, 60, 72])
+    }
+
+    func testNumberToolDefaultSizeIsThree() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 180))
+        window.test_activateNumberTool()
+
+        XCTAssertEqual(window.test_currentStyle?.textSize, 3)
+
+        window.test_mouseDown(at: NSPoint(x: 180, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 180, y: 150))
+
+        XCTAssertEqual(window.test_annotationStyle(at: 0)?.textSize, 3)
+    }
+
+    func testNumberDefaultVisualSizeMatchesSnipasteScaleExpectation() {
+        let expectedDiameters: [Int: CGFloat] = [
+            1: 15, 2: 18, 3: 21, 4: 24, 5: 27,
+            6: 30, 7: 33, 8: 36, 9: 38, 10: 41,
+            12: 47, 14: 47, 16: 54, 20: 70, 24: 82,
+            32: 105, 40: 128, 48: 152, 60: 186, 72: 221,
+        ]
+        for (size, diameter) in expectedDiameters {
+            XCTAssertEqual(CaptureAnnotationRenderer.numberMarkDiameter(for: CGFloat(size)), diameter, accuracy: 1)
+        }
+        XCTAssertEqual(CaptureAnnotationRenderer.numberMarkTextFontSize(for: 5), 19.44, accuracy: 0.8)
+        XCTAssertEqual(CaptureAnnotationRenderer.numberMarkTextFontSize(for: 10), 29.52, accuracy: 0.8)
+        XCTAssertEqual(CaptureAnnotationRenderer.numberMarkTextFontSize(for: 72), 159.12, accuracy: 2)
+    }
+
+    func testNumberSizeSixteenRendersLargerThanFourteen() {
+        XCTAssertGreaterThan(
+            CaptureAnnotationRenderer.numberMarkDiameter(for: 16),
+            CaptureAnnotationRenderer.numberMarkDiameter(for: 14)
+        )
+        XCTAssertGreaterThan(
+            CaptureAnnotationRenderer.numberMarkTextFontSize(for: 16),
+            CaptureAnnotationRenderer.numberMarkTextFontSize(for: 14)
+        )
+    }
+
+    func testNumberDigitRendersCenteredInCircle() throws {
+        let window = SelectionOverlayWindow(backgroundImage: solidImage(size: NSSize(width: 360, height: 260), color: .white)) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 80, y: 80, width: 220, height: 140))
+        window.test_activateNumberTool()
+        window.test_mouseDown(at: NSPoint(x: 180, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 180, y: 150))
+
+        let markRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+        let image = try XCTUnwrap(window.test_renderedOverlayImage())
+        let digitBounds = try XCTUnwrap(whiteDigitBounds(in: image, insideCircleRect: markRect))
+
+        XCTAssertEqual(digitBounds.midX, markRect.midX, accuracy: 1.5)
+        XCTAssertEqual(digitBounds.midY, markRect.midY, accuracy: 1.5)
+    }
+
+    func testNumberThreeDigitValueFitsInsideCircle() throws {
+        let window = SelectionOverlayWindow(backgroundImage: solidImage(size: NSSize(width: 360, height: 260), color: .white)) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 80, y: 80, width: 220, height: 140))
+        window.test_activateNumberTool()
+        window.test_mouseDown(at: NSPoint(x: 180, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 180, y: 150))
+        window.test_selectAnnotation(at: 0)
+        let markRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+        window.test_doubleClick(at: NSPoint(x: markRect.midX, y: markRect.midY))
+        window.test_keyDown(keyCode: 51)
+        for digit in ["9", "9", "9"] {
+            window.test_keyDown(keyCode: 0, charactersIgnoringModifiers: digit)
+        }
+        window.test_keyDown(keyCode: 36)
+
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 999)
+        let image = try XCTUnwrap(window.test_renderedOverlayImage())
+        let digitBounds = try XCTUnwrap(whiteDigitBounds(in: image, insideCircleRect: markRect))
+        XCTAssertLessThanOrEqual(digitBounds.width, markRect.width * 0.86)
+        XCTAssertLessThanOrEqual(digitBounds.height, markRect.height * 0.86)
+    }
+
+    func testNumberDoubleClickShowsBlackCaretAfterDigit() throws {
+        let window = SelectionOverlayWindow(backgroundImage: solidImage(size: NSSize(width: 360, height: 260), color: .white)) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 80, y: 80, width: 220, height: 140))
+        window.test_activateNumberTool()
+        let yellowPoint = try XCTUnwrap(window.test_optionsPaletteColorPoint(at: 5))
+        window.test_mouseDown(at: yellowPoint)
+        window.test_mouseUp(at: yellowPoint)
+        window.test_mouseDown(at: NSPoint(x: 180, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 180, y: 150))
+
+        let markRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+        window.test_doubleClick(at: NSPoint(x: markRect.midX, y: markRect.midY))
+
+        let text = "1"
+        let fontSize = CaptureAnnotationRenderer.numberMarkTextFontSize(for: window.test_annotationStyle(at: 0)?.textSize ?? 5, text: text)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: fontSize, weight: .bold),
+        ]
+        let textSize = NSString(string: text).size(withAttributes: attributes)
+        let caretProbe = NSRect(
+            x: markRect.midX + textSize.width / 2 + 1,
+            y: markRect.midY - textSize.height / 2,
+            width: 4,
+            height: textSize.height
+        )
+        let image = try XCTUnwrap(window.test_renderedOverlayImage())
+        let caretPixel = try firstPixel(in: image, rect: caretProbe) { pixel in
+            pixel.red < 60 && pixel.green < 60 && pixel.blue < 60 && pixel.alpha > 180
+        }
+        XCTAssertNotNil(caretPixel)
     }
 
     func testNumberToolbarButtonActivatesNumberModeAndOptionsToolbar() throws {
@@ -2421,6 +2574,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertTrue(window.test_isNumberToolActive)
         XCTAssertEqual(window.test_optionsToolbarMode, .numberSequence)
         XCTAssertNotNil(window.test_optionsToolbarRect)
+        XCTAssertEqual(window.test_currentStyle?.textSize, 3)
     }
 
     func testNumberToolbarIconStaysBlackWhenColorChanges() throws {
@@ -2465,6 +2619,132 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertGreaterThan(window.test_currentStyle?.strokeColor.usingColorSpace(.deviceRGB)?.redComponent ?? 0, 0.8)
     }
 
+    func testNumberMarkTypeMenuKeepsCheckAndCrossGlyphColorsWhenSelected() throws {
+        let window = SelectionOverlayWindow(backgroundImage: solidImage(size: NSSize(width: 760, height: 360), color: .white)) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 180))
+        window.test_activateNumberTool()
+
+        let typePoint = try XCTUnwrap(window.test_numberMarkTypePoint())
+        window.test_setNumberMarkType(.check)
+        window.test_mouseDown(at: typePoint)
+        window.test_mouseUp(at: typePoint)
+        let checkPoint = try XCTUnwrap(window.test_numberMarkTypeMenuPoint(.check))
+        let checkImage = try XCTUnwrap(window.test_renderedOverlayImage())
+        let checkIconRect = NSRect(x: checkPoint.x - 9, y: checkPoint.y - 9, width: 18, height: 18)
+        XCTAssertNotNil(try firstPixel(in: checkImage, rect: checkIconRect) { pixel in
+            pixel.green > 130 && Int(pixel.green) > Int(pixel.red) + 35 && Int(pixel.green) > Int(pixel.blue) + 20
+        })
+
+        window.test_mouseDown(at: typePoint)
+        window.test_mouseUp(at: typePoint)
+        window.test_setNumberMarkType(.cross)
+        window.test_mouseDown(at: typePoint)
+        window.test_mouseUp(at: typePoint)
+        let crossPoint = try XCTUnwrap(window.test_numberMarkTypeMenuPoint(.cross))
+        let crossImage = try XCTUnwrap(window.test_renderedOverlayImage())
+        let crossIconRect = NSRect(x: crossPoint.x - 9, y: crossPoint.y - 9, width: 18, height: 18)
+        XCTAssertNotNil(try firstPixel(in: crossImage, rect: crossIconRect) { pixel in
+            pixel.red > 180 && Int(pixel.red) > Int(pixel.green) + 60 && Int(pixel.red) > Int(pixel.blue) + 60
+        })
+    }
+
+    func testSelectedNumberAnnotationFollowsTypeDropdownSelection() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 180))
+        window.test_activateNumberTool()
+        window.test_setNumberMarkType(.check)
+        window.test_mouseDown(at: NSPoint(x: 180, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 180, y: 150))
+
+        XCTAssertEqual(window.test_annotation(at: 0)?.numberMarkType, .check)
+        let markRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+        window.test_mouseDown(at: NSPoint(x: markRect.midX, y: markRect.midY))
+        window.test_mouseUp(at: NSPoint(x: markRect.midX, y: markRect.midY))
+
+        let typePoint = try XCTUnwrap(window.test_numberMarkTypePoint())
+        window.test_mouseDown(at: typePoint)
+        window.test_mouseUp(at: typePoint)
+        let crossPoint = try XCTUnwrap(window.test_numberMarkTypeMenuPoint(.cross))
+        window.test_mouseDown(at: crossPoint)
+        window.test_mouseUp(at: crossPoint)
+
+        XCTAssertEqual(window.test_annotation(at: 0)?.numberMarkType, .cross)
+        XCTAssertNil(window.test_annotation(at: 0)?.numberSequenceIndex)
+
+        window.test_mouseDown(at: typePoint)
+        window.test_mouseUp(at: typePoint)
+        let numberPoint = try XCTUnwrap(window.test_numberMarkTypeMenuPoint(.number))
+        window.test_mouseDown(at: numberPoint)
+        window.test_mouseUp(at: numberPoint)
+
+        XCTAssertEqual(window.test_annotation(at: 0)?.numberMarkType, .number)
+        XCTAssertEqual(window.test_annotation(at: 0)?.numberSequenceIndex, 1)
+    }
+
+    func testSelectedCheckOrCrossReturnsToDefaultRedWhenChangedBackToNumber() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 180))
+        window.test_activateNumberTool()
+        window.test_setNumberMarkType(.check)
+        window.test_mouseDown(at: NSPoint(x: 180, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 180, y: 150))
+
+        let typePoint = try XCTUnwrap(window.test_numberMarkTypePoint())
+        window.test_mouseDown(at: typePoint)
+        window.test_mouseUp(at: typePoint)
+        let numberPoint = try XCTUnwrap(window.test_numberMarkTypeMenuPoint(.number))
+        window.test_mouseDown(at: numberPoint)
+        window.test_mouseUp(at: numberPoint)
+
+        let expectedHex = SelectionToolbarState.colorSamplerHexString(
+            for: try XCTUnwrap(SelectionOverlayWindow.defaultPaletteColors.first)
+        )
+        let currentHex = SelectionToolbarState.colorSamplerHexString(
+            for: try XCTUnwrap(window.test_currentStyle?.strokeColor)
+        )
+        let annotationHex = SelectionToolbarState.colorSamplerHexString(
+            for: try XCTUnwrap(window.test_annotationStyle(at: 0)?.strokeColor)
+        )
+
+        XCTAssertEqual(window.test_annotation(at: 0)?.numberMarkType, .number)
+        XCTAssertEqual(currentHex, expectedHex)
+        XCTAssertEqual(annotationHex, expectedHex)
+
+        window.test_mouseDown(at: typePoint)
+        window.test_mouseUp(at: typePoint)
+        let crossPoint = try XCTUnwrap(window.test_numberMarkTypeMenuPoint(.cross))
+        window.test_mouseDown(at: crossPoint)
+        window.test_mouseUp(at: crossPoint)
+        window.test_mouseDown(at: typePoint)
+        window.test_mouseUp(at: typePoint)
+        window.test_mouseDown(at: numberPoint)
+        window.test_mouseUp(at: numberPoint)
+
+        let crossBackHex = SelectionToolbarState.colorSamplerHexString(
+            for: try XCTUnwrap(window.test_annotationStyle(at: 0)?.strokeColor)
+        )
+        XCTAssertEqual(crossBackHex, expectedHex)
+    }
+
+    func testNewlyCreatedSelectedNumberAnnotationFollowsTypeDropdownSelection() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 180))
+        window.test_activateNumberTool()
+        window.test_setNumberMarkType(.check)
+        window.test_mouseDown(at: NSPoint(x: 180, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 180, y: 150))
+
+        let typePoint = try XCTUnwrap(window.test_numberMarkTypePoint())
+        window.test_mouseDown(at: typePoint)
+        window.test_mouseUp(at: typePoint)
+        let crossPoint = try XCTUnwrap(window.test_numberMarkTypeMenuPoint(.cross))
+        window.test_mouseDown(at: crossPoint)
+        window.test_mouseUp(at: crossPoint)
+
+        XCTAssertEqual(window.test_annotation(at: 0)?.numberMarkType, .cross)
+        XCTAssertNil(window.test_annotation(at: 0)?.numberSequenceIndex)
+    }
+
     func testNumberSizeDropdownUpdatesCurrentSize() throws {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 180))
@@ -2476,6 +2756,137 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_selectNumberSize(36)
 
         XCTAssertEqual(window.test_currentStyle?.textSize, 36)
+    }
+
+    func testNumberSizeDropdownSelectsLargeScrolledSizeFromPopup() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 180))
+        window.test_activateNumberTool()
+
+        let sizePoint = try XCTUnwrap(window.test_numberSizePoint())
+        window.test_mouseDown(at: sizePoint)
+        window.test_mouseUp(at: sizePoint)
+
+        let dropdown = try XCTUnwrap(window.test_textDropdownRect)
+        XCTAssertTrue(window.test_isTextSizeDropdownVisible)
+        window.test_scrollWheel(at: NSPoint(x: dropdown.midX, y: dropdown.midY), deltaY: -400)
+        XCTAssertGreaterThanOrEqual(window.test_textDropdownScrollOffset, 12)
+
+        let lastVisibleSizePoint = NSPoint(x: dropdown.midX, y: dropdown.minY + 15)
+        window.test_mouseDown(at: lastVisibleSizePoint)
+        window.test_mouseUp(at: lastVisibleSizePoint)
+
+        XCTAssertEqual(window.test_currentStyle?.textSize, 72)
+    }
+
+    func testNumberSizeDropdownStaysAtLastPageAfterSmallScrollBounce() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 180))
+        window.test_activateNumberTool()
+
+        let sizePoint = try XCTUnwrap(window.test_numberSizePoint())
+        window.test_mouseDown(at: sizePoint)
+        window.test_mouseUp(at: sizePoint)
+
+        let dropdown = try XCTUnwrap(window.test_textDropdownRect)
+        window.test_scrollWheel(at: NSPoint(x: dropdown.midX, y: dropdown.midY), deltaY: -400)
+        XCTAssertEqual(window.test_textDropdownScrollOffset, 12)
+
+        window.test_scrollWheel(at: NSPoint(x: dropdown.midX, y: dropdown.midY), deltaY: 2)
+        XCTAssertEqual(window.test_textDropdownScrollOffset, 12)
+
+        let lastVisibleSizePoint = NSPoint(x: dropdown.midX, y: dropdown.minY + 15)
+        window.test_mouseDown(at: lastVisibleSizePoint)
+        window.test_mouseUp(at: lastVisibleSizePoint)
+
+        XCTAssertEqual(window.test_currentStyle?.textSize, 72)
+    }
+
+    func testNumberSizeDropdownResizesExistingMarkBackground() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 180))
+        window.test_activateNumberTool()
+        window.test_mouseDown(at: NSPoint(x: 180, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 180, y: 150))
+        window.test_selectAnnotation(at: 0)
+
+        let before = try XCTUnwrap(window.test_annotationRect(at: 0))
+        window.test_selectNumberSize(36)
+        let after = try XCTUnwrap(window.test_annotationRect(at: 0))
+
+        XCTAssertGreaterThan(after.width, before.width)
+        XCTAssertGreaterThan(after.height, before.height)
+        XCTAssertEqual(after.midX, before.midX, accuracy: 0.5)
+        XCTAssertEqual(after.midY, before.midY, accuracy: 0.5)
+    }
+
+    func testNumberDropdownAndCursorUseFilledNumberIcon() throws {
+        let window = SelectionOverlayWindow(backgroundImage: solidImage(size: NSSize(width: 760, height: 360), color: .white)) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 180))
+        window.test_activateNumberTool()
+
+        let image = try XCTUnwrap(window.test_renderedOverlayImage())
+        let iconInterior = try XCTUnwrap(window.test_numberMarkTypeIconInteriorPoint())
+        let toolbarPixel = try XCTUnwrap(rgbaPixel(in: image, at: NSPoint(x: iconInterior.x, y: image.size.height - iconInterior.y)))
+        XCTAssertLessThan(toolbarPixel.red, 80)
+        XCTAssertLessThan(toolbarPixel.green, 80)
+        XCTAssertLessThan(toolbarPixel.blue, 80)
+
+        let cursorImage = try XCTUnwrap(window.test_numberCursorImage(for: .number))
+        let cursorPixel = try XCTUnwrap(rgbaPixel(in: cursorImage, at: NSPoint(x: 9, y: 15)))
+        XCTAssertGreaterThan(cursorPixel.alpha, 200)
+        XCTAssertLessThan(Int(cursorPixel.red) + Int(cursorPixel.green) + Int(cursorPixel.blue), 520)
+    }
+
+    func testNumberCursorDisplaysNextSequenceNumber() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 180))
+        window.test_activateNumberTool()
+
+        XCTAssertEqual(window.test_numberCursorText(for: .number), "1")
+
+        window.test_mouseDown(at: NSPoint(x: 180, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 180, y: 150))
+        XCTAssertEqual(window.test_numberCursorText(for: .number), "2")
+
+        window.test_mouseDown(at: NSPoint(x: 280, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 280, y: 150))
+        XCTAssertEqual(window.test_numberCursorText(for: .number), "3")
+    }
+
+    func testThreeDigitNumberCursorKeepsHorizontalPadding() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 180))
+        window.test_activateNumberTool()
+
+        var style = CaptureAnnotationStyle()
+        style.textSize = 3
+        style.strokeColor = .systemRed
+        let mark = CaptureAnnotation(
+            kind: .numberSequence,
+            rect: NSRect(x: 40, y: 40, width: 21, height: 21),
+            style: style,
+            numberMarkType: .number,
+            numberSequenceIndex: 99
+        )
+        window.test_setAnnotations([mark])
+
+        let image = try XCTUnwrap(window.test_numberCursorImage(for: .number))
+        let circleRect = NSRect(x: 4.5, y: 4.5, width: 21, height: 21)
+        let digitBounds = try XCTUnwrap(whiteDigitBounds(in: image, insideCircleRect: circleRect))
+
+        XCTAssertEqual(window.test_numberCursorText(for: .number), "100")
+        XCTAssertGreaterThanOrEqual(digitBounds.minX - circleRect.minX, 2.8)
+        XCTAssertGreaterThanOrEqual(circleRect.maxX - digitBounds.maxX, 2.8)
+    }
+
+    func testNumberSymbolCursorHotSpotIsCenteredOnMark() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 180))
+        window.test_activateNumberTool()
+
+        XCTAssertEqual(window.test_numberCursorHotSpot(for: .check), NSPoint(x: 15, y: 15))
+        XCTAssertEqual(window.test_numberCursorHotSpot(for: .cross), NSPoint(x: 15, y: 15))
     }
 
     func testNumberCreationCursorChangesByTypeAndAvoidsToolbar() throws {
@@ -2512,7 +2923,27 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_annotation(at: 1)?.kind, .numberSequence)
     }
 
-    func testCheckAndCrossCreationDoNotAffectNumberOrder() throws {
+    func testNumberSelectionOutlineSitsOutsideCircleAndControlsStayVisible() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 180))
+        window.test_activateNumberTool()
+        window.test_mouseDown(at: NSPoint(x: 180, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 180, y: 150))
+
+        let markRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+        let outlineRect = try XCTUnwrap(window.test_numberOutlineRect())
+
+        XCTAssertLessThan(outlineRect.minX, markRect.minX)
+        XCTAssertLessThan(outlineRect.minY, markRect.minY)
+        XCTAssertGreaterThan(outlineRect.maxX, markRect.maxX)
+        XCTAssertGreaterThan(outlineRect.maxY, markRect.maxY)
+        XCTAssertTrue(window.test_numberControlsVisible)
+
+        window.test_mouseMoved(to: NSPoint(x: 440, y: 280))
+        XCTAssertTrue(window.test_numberControlsVisible)
+    }
+
+    func testSelectedTypeChangesKeepFollowingNumberOrder() throws {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_setLockedSelectionRect(NSRect(x: 120, y: 120, width: 220, height: 140))
         window.test_activateNumberTool()
@@ -2520,14 +2951,14 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_mouseDown(at: NSPoint(x: 150, y: 150))
         window.test_mouseUp(at: NSPoint(x: 150, y: 150))
         window.test_setNumberMarkType(.check)
-        window.test_mouseDown(at: NSPoint(x: 190, y: 150))
-        window.test_mouseUp(at: NSPoint(x: 190, y: 150))
+        window.test_mouseDown(at: NSPoint(x: 260, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 260, y: 150))
         window.test_setNumberMarkType(.number)
-        window.test_mouseDown(at: NSPoint(x: 230, y: 150))
-        window.test_mouseUp(at: NSPoint(x: 230, y: 150))
+        window.test_mouseDown(at: NSPoint(x: 330, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 330, y: 150))
 
-        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 1)
-        XCTAssertNil(window.test_numberSequenceIndex(at: 1))
+        XCTAssertNil(window.test_numberSequenceIndex(at: 0))
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 1), 1)
         XCTAssertEqual(window.test_numberSequenceIndex(at: 2), 2)
     }
 
@@ -2540,7 +2971,8 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_mouseUp(at: NSPoint(x: 160, y: 140))
 
         let image = try XCTUnwrap(window.test_renderedOverlayImage())
-        let corner = try XCTUnwrap(rgbaPixel(in: image, at: NSPoint(x: 145, y: image.size.height - 125)))
+        let markRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+        let corner = try XCTUnwrap(rgbaPixel(in: image, at: NSPoint(x: markRect.minX + 3, y: image.size.height - markRect.minY - 3)))
         XCTAssertGreaterThan(corner.red, 245)
         XCTAssertGreaterThan(corner.green, 245)
         XCTAssertGreaterThan(corner.blue, 245)
@@ -2550,12 +2982,14 @@ final class SelectionToolbarStateTests: XCTestCase {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 180))
         window.test_activateNumberTool()
-        [150, 190, 230].forEach { x in
+        [150, 260, 370].forEach { x in
             window.test_mouseDown(at: NSPoint(x: x, y: 150))
             window.test_mouseUp(at: NSPoint(x: x, y: 150))
         }
 
         window.test_selectAnnotation(at: 1)
+        let selectedRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 1))
+        window.test_mouseMoved(to: NSPoint(x: selectedRect.midX, y: selectedRect.midY))
         let deletePoint = try XCTUnwrap(window.test_numberDeleteHandlePoint())
         window.test_mouseDown(at: deletePoint)
         window.test_mouseUp(at: deletePoint)
@@ -2565,30 +2999,498 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_numberSequenceIndex(at: 1), 2)
     }
 
-    func testNumberPlusMinusSwapAdjacentNumbersOnly() throws {
+    func testDeleteKeyRemovesSelectedNumberCheckAndCrossMarks() throws {
+        for type in [CaptureNumberMarkType.number, .check, .cross] {
+            let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+            window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 180))
+            window.test_activateNumberTool()
+            window.test_setNumberMarkType(type)
+            window.test_mouseDown(at: NSPoint(x: 180, y: 150))
+            window.test_mouseUp(at: NSPoint(x: 180, y: 150))
+
+            let markRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+            window.test_mouseDown(at: NSPoint(x: markRect.midX, y: markRect.midY))
+            window.test_mouseUp(at: NSPoint(x: markRect.midX, y: markRect.midY))
+
+            window.test_keyDown(keyCode: 51)
+
+            XCTAssertEqual(window.test_annotationCount, 0, "\(type) should delete with Delete key")
+            XCTAssertNil(window.test_selectedAnnotationKind)
+        }
+    }
+
+    func testDeleteKeyRemovesNewlyCreatedNumberCheckAndCrossMarks() {
+        for type in [CaptureNumberMarkType.number, .check, .cross] {
+            let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+            window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 180))
+            window.test_activateNumberTool()
+            window.test_setNumberMarkType(type)
+            window.test_mouseDown(at: NSPoint(x: 180, y: 150))
+            window.test_mouseUp(at: NSPoint(x: 180, y: 150))
+
+            window.test_keyDown(keyCode: 51)
+
+            XCTAssertEqual(window.test_annotationCount, 0, "\(type) should delete immediately after creation")
+            XCTAssertNil(window.test_selectedAnnotationKind)
+        }
+    }
+
+    func testForwardDeleteKeyRemovesSelectedNumberCheckAndCrossMarks() throws {
+        for type in [CaptureNumberMarkType.number, .check, .cross] {
+            let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+            window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 180))
+            window.test_activateNumberTool()
+            window.test_setNumberMarkType(type)
+            window.test_mouseDown(at: NSPoint(x: 180, y: 150))
+            window.test_mouseUp(at: NSPoint(x: 180, y: 150))
+
+            let markRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+            window.test_mouseDown(at: NSPoint(x: markRect.midX, y: markRect.midY))
+            window.test_mouseUp(at: NSPoint(x: markRect.midX, y: markRect.midY))
+
+            window.test_keyDown(keyCode: 117)
+
+            XCTAssertEqual(window.test_annotationCount, 0, "\(type) should delete with forward Delete key")
+            XCTAssertNil(window.test_selectedAnnotationKind)
+        }
+    }
+
+    func testDeleteKeyRemovesHoveredNumberMarkWhenControlsAreRevealed() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 180))
+        window.test_activateNumberTool()
+        window.test_mouseDown(at: NSPoint(x: 180, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 180, y: 150))
+        window.test_mouseDown(at: NSPoint(x: 260, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 260, y: 150))
+        window.test_selectAnnotation(at: 99)
+
+        let secondRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 1))
+        window.test_mouseMoved(to: NSPoint(x: secondRect.midX, y: secondRect.midY))
+        window.test_keyDown(keyCode: 51)
+
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 1)
+        XCTAssertNil(window.test_selectedAnnotationKind)
+    }
+
+    func testManualNumberModeKeepsRemainingValuesWhenDeletingMarks() throws {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 360, height: 180))
         window.test_activateNumberTool()
-        [150, 190, 230].forEach { x in
+        [150, 260, 370].forEach { x in
             window.test_mouseDown(at: NSPoint(x: x, y: 150))
             window.test_mouseUp(at: NSPoint(x: x, y: 150))
         }
 
+        let secondRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 1))
+        window.test_doubleClick(at: NSPoint(x: secondRect.midX, y: secondRect.midY))
+        window.test_keyDown(keyCode: 51)
+        window.test_keyDown(keyCode: 0, charactersIgnoringModifiers: "7")
+        window.test_keyDown(keyCode: 36)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 1)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 1), 7)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 2), 3)
+
         window.test_selectAnnotation(at: 1)
+        window.test_mouseMoved(to: NSPoint(x: secondRect.midX, y: secondRect.midY))
+        let deleteManualPoint = try XCTUnwrap(window.test_numberDeleteHandlePoint())
+        window.test_mouseDown(at: deleteManualPoint)
+        window.test_mouseUp(at: deleteManualPoint)
+
+        XCTAssertEqual(window.test_annotationCount, 2)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 1)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 1), 3)
+
+        let firstRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+        window.test_selectAnnotation(at: 0)
+        window.test_mouseMoved(to: NSPoint(x: firstRect.midX, y: firstRect.midY))
+        let deleteFirstPoint = try XCTUnwrap(window.test_numberDeleteHandlePoint())
+        window.test_mouseDown(at: deleteFirstPoint)
+        window.test_mouseUp(at: deleteFirstPoint)
+
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 3)
+    }
+
+    func testNumberPlusMinusAdjustCurrentValueAndResetWhenGreaterThanOne() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 360, height: 180))
+        window.test_activateNumberTool()
+        window.test_mouseDown(at: NSPoint(x: 150, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 150, y: 150))
+
+        window.test_selectAnnotation(at: 0)
+        let selectedRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+        window.test_mouseMoved(to: NSPoint(x: selectedRect.midX, y: selectedRect.midY))
+        XCTAssertNil(window.test_numberResetHandlePoint())
         let plusPoint = try XCTUnwrap(window.test_numberIncrementHandlePoint())
         window.test_mouseDown(at: plusPoint)
         window.test_mouseUp(at: plusPoint)
 
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 2)
+        let resetPoint = try XCTUnwrap(window.test_numberResetHandlePoint())
+        window.test_mouseDown(at: resetPoint)
+        window.test_mouseUp(at: resetPoint)
         XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 1)
-        XCTAssertEqual(window.test_numberSequenceIndex(at: 1), 3)
-        XCTAssertEqual(window.test_numberSequenceIndex(at: 2), 2)
+        XCTAssertNil(window.test_numberResetHandlePoint())
 
         let minusPoint = try XCTUnwrap(window.test_numberDecrementHandlePoint())
         window.test_mouseDown(at: minusPoint)
         window.test_mouseUp(at: minusPoint)
 
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 1)
+    }
+
+    func testNumberPlusHandleDisablesAt999AndMinusStaysActive() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 360, height: 180))
+        window.test_activateNumberTool()
+        window.test_mouseDown(at: NSPoint(x: 150, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 150, y: 150))
+
+        let selectedRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+        window.test_doubleClick(at: NSPoint(x: selectedRect.midX, y: selectedRect.midY))
+        window.test_keyDown(keyCode: 51)
+        for digit in ["9", "9", "9"] {
+            window.test_keyDown(keyCode: 0, charactersIgnoringModifiers: digit)
+        }
+        window.test_keyDown(keyCode: 36)
+        window.test_mouseMoved(to: NSPoint(x: selectedRect.midX, y: selectedRect.midY))
+
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 999)
+        XCTAssertFalse(window.test_numberIncrementHandleIsHitTarget())
+        XCTAssertTrue(window.test_numberDecrementHandleIsHitTarget())
+
+        let plusPoint = try XCTUnwrap(window.test_numberIncrementHandlePoint())
+        window.test_mouseDown(at: plusPoint)
+        window.test_mouseUp(at: plusPoint)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 999)
+    }
+
+    func testNumberPlusMinusHandlesStackOnLeftSide() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 360, height: 180))
+        window.test_activateNumberTool()
+        window.test_mouseDown(at: NSPoint(x: 150, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 150, y: 150))
+        window.test_selectAnnotation(at: 0)
+        let selectedRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+        window.test_mouseMoved(to: NSPoint(x: selectedRect.midX, y: selectedRect.midY))
+
+        let plusRect = try XCTUnwrap(window.test_numberIncrementHandleRect())
+        let minusRect = try XCTUnwrap(window.test_numberDecrementHandleRect())
+        let outlineRect = try XCTUnwrap(window.test_numberOutlineRect())
+
+        XCTAssertLessThanOrEqual(plusRect.maxX, outlineRect.minX - 1)
+        XCTAssertLessThanOrEqual(minusRect.maxX, outlineRect.minX - 1)
+        XCTAssertEqual(plusRect.midY, outlineRect.maxY, accuracy: 0.5)
+        XCTAssertGreaterThan(plusRect.midY, minusRect.midY)
+        XCTAssertEqual(plusRect.minY, minusRect.maxY, accuracy: 0.5)
+    }
+
+    func testNumberResetHandleSitsOutsideOutline() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 360, height: 180))
+        window.test_activateNumberTool()
+        window.test_mouseDown(at: NSPoint(x: 150, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 150, y: 150))
+        window.test_selectAnnotation(at: 0)
+        let selectedRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+        window.test_mouseMoved(to: NSPoint(x: selectedRect.midX, y: selectedRect.midY))
+        let plusPoint = try XCTUnwrap(window.test_numberIncrementHandlePoint())
+        window.test_mouseDown(at: plusPoint)
+        window.test_mouseUp(at: plusPoint)
+
+        let resetRect = try XCTUnwrap(window.test_numberResetHandleRect())
+        let plusRect = try XCTUnwrap(window.test_numberIncrementHandleRect())
+        let minusRect = try XCTUnwrap(window.test_numberDecrementHandleRect())
+        let deleteRect = try XCTUnwrap(window.test_numberDeleteHandleRect())
+        let resizeRect = try XCTUnwrap(window.test_numberResizeHandleRect())
+        let outlineRect = try XCTUnwrap(window.test_numberOutlineRect())
+
+        XCTAssertLessThanOrEqual(resetRect.maxX, outlineRect.minX - 1)
+        XCTAssertEqual(plusRect.midY, deleteRect.midY, accuracy: 0.5)
+        XCTAssertEqual(resetRect.midY, resizeRect.midY, accuracy: 0.5)
+        XCTAssertEqual(resetRect.size.width, plusRect.size.width, accuracy: 0.1)
+        XCTAssertEqual(resetRect.size.height, plusRect.size.height, accuracy: 0.1)
+        XCTAssertEqual(resetRect.size.width, minusRect.size.width, accuracy: 0.1)
+        XCTAssertEqual(resetRect.size.height, minusRect.size.height, accuracy: 0.1)
+        XCTAssertEqual(plusRect.width, 12, accuracy: 0.1)
+        XCTAssertEqual(plusRect.height, 12, accuracy: 0.1)
+        XCTAssertEqual(minusRect.width, 12, accuracy: 0.1)
+        XCTAssertEqual(minusRect.height, 12, accuracy: 0.1)
+        XCTAssertNotNil(Bundle.main.url(forResource: "reset2", withExtension: "svg"))
+        XCTAssertNotNil(Bundle.main.url(forResource: "close", withExtension: "svg"))
+
+        let image = try XCTUnwrap(window.test_renderedOverlayImage())
+        let resetPixel = try XCTUnwrap(firstPixel(in: image, rect: resetRect.insetBy(dx: 1, dy: 1)) { pixel in
+            pixel.blue > 140 && pixel.green > 70 && pixel.red < 120 && pixel.alpha > 120
+        })
+        XCTAssertGreaterThan(resetPixel.blue, resetPixel.red)
+    }
+
+    func testNumberDeleteHandleDrawsAboveDashedOutline() throws {
+        let window = SelectionOverlayWindow(backgroundImage: solidImage(size: NSSize(width: 360, height: 260), color: .white)) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 220, height: 120))
+        window.test_activateNumberTool()
+        window.test_mouseDown(at: NSPoint(x: 180, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 180, y: 150))
+        window.test_selectAnnotation(at: 0)
+        let selectedRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+        window.test_mouseMoved(to: NSPoint(x: selectedRect.midX, y: selectedRect.midY))
+
+        let deleteRect = try XCTUnwrap(window.test_numberDeleteHandleRect())
+        let image = try XCTUnwrap(window.test_renderedOverlayImage())
+        let centerBand = NSRect(x: deleteRect.minX + 3, y: deleteRect.midY - 1, width: deleteRect.width - 6, height: 2)
+        let blueOrWhitePixels = try matchingPixelCount(in: image, rect: centerBand) { pixel in
+            let isBlue = pixel.blue > 120 && pixel.red < 80 && pixel.green > 70 && pixel.alpha > 180
+            let isWhite = pixel.red > 220 && pixel.green > 220 && pixel.blue > 220 && pixel.alpha > 180
+            return isBlue || isWhite
+        }
+        XCTAssertGreaterThan(blueOrWhitePixels, 12)
+    }
+
+    func testNumberResetHandleDrawsIconWithoutBoxBackground() throws {
+        let window = SelectionOverlayWindow(
+            backgroundImage: solidImage(
+                size: NSSize(width: 360, height: 240),
+                color: NSColor(srgbRed: 0.18, green: 0.18, blue: 0.18, alpha: 1)
+            )
+        ) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 220, height: 120))
+        window.test_activateNumberTool()
+        window.test_mouseDown(at: NSPoint(x: 170, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 170, y: 150))
+        window.test_selectAnnotation(at: 0)
+        let selectedRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+        window.test_mouseMoved(to: NSPoint(x: selectedRect.midX, y: selectedRect.midY))
+        let plusPoint = try XCTUnwrap(window.test_numberIncrementHandlePoint())
+        window.test_mouseDown(at: plusPoint)
+        window.test_mouseUp(at: plusPoint)
+
+        let resetRect = try XCTUnwrap(window.test_numberResetHandleRect())
+        let image = try XCTUnwrap(window.test_renderedOverlayImage())
+        let topLeftCorner = try XCTUnwrap(rgbaPixel(
+            in: image,
+            at: NSPoint(x: resetRect.minX + 1, y: image.size.height - resetRect.maxY + 2)
+        ))
+        XCTAssertLessThan(topLeftCorner.red, 80)
+        XCTAssertLessThan(topLeftCorner.green, 80)
+        XCTAssertLessThan(topLeftCorner.blue, 80)
+        XCTAssertNotNil(
+            try firstBlueDominantPixel(
+                in: image,
+                rect: resetRect.insetBy(dx: 1, dy: 1)
+            )
+        )
+    }
+
+    func testNumberResetIconUsesVisibleGlyphArea() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 220, height: 120))
+        window.test_activateNumberTool()
+        window.test_mouseDown(at: NSPoint(x: 170, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 170, y: 150))
+        window.test_selectAnnotation(at: 0)
+        let selectedRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+        window.test_mouseMoved(to: NSPoint(x: selectedRect.midX, y: selectedRect.midY))
+        let plusPoint = try XCTUnwrap(window.test_numberIncrementHandlePoint())
+        window.test_mouseDown(at: plusPoint)
+        window.test_mouseUp(at: plusPoint)
+
+        let resetRect = try XCTUnwrap(window.test_numberResetHandleRect())
+        let image = try XCTUnwrap(window.test_renderedOverlayImage())
+        let leftGlyphBand = NSRect(
+            x: resetRect.minX + 2,
+            y: resetRect.minY + 4,
+            width: 1,
+            height: resetRect.height - 8
+        )
+        XCTAssertNotNil(try firstBlueDominantPixel(in: image, rect: leftGlyphBand))
+    }
+
+    func testSelectedNumberControlsRenderAboveOverlappingNumberMarks() throws {
+        let window = SelectionOverlayWindow(backgroundImage: solidImage(size: NSSize(width: 420, height: 260), color: .white)) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 240, height: 120)
+        var style = CaptureAnnotationStyle()
+        style.textSize = 5
+        style.strokeColor = NSColor(calibratedRed: 245 / 255, green: 34 / 255, blue: 45 / 255, alpha: 1)
+
+        func numberMark(center: NSPoint, index: Int) -> CaptureAnnotation {
+            let overlayRect = CaptureAnnotationRenderer.numberMarkRect(centeredAt: center, fontSize: style.textSize)
+            return CaptureAnnotation(
+                kind: .numberSequence,
+                rect: NSRect(
+                    x: overlayRect.minX - selection.minX,
+                    y: overlayRect.minY - selection.minY,
+                    width: overlayRect.width,
+                    height: overlayRect.height
+                ),
+                style: style,
+                numberMarkType: .number,
+                numberSequenceIndex: index
+            )
+        }
+
+        let selectedCenter = NSPoint(x: 220, y: 150)
+        let selected = numberMark(center: selectedCenter, index: 2)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateNumberTool()
+        window.test_setAnnotations([selected])
+        window.test_selectAnnotation(at: 0)
+        window.test_mouseMoved(to: selectedCenter)
+        let plusRect = try XCTUnwrap(window.test_numberIncrementHandleRect())
+        let coveringMark = numberMark(center: NSPoint(x: plusRect.midX, y: plusRect.midY), index: 3)
+
+        window.test_setAnnotations([selected, coveringMark])
+        window.test_selectAnnotation(at: 0)
+        window.test_mouseMoved(to: selectedCenter)
+
+        let image = try XCTUnwrap(window.test_renderedOverlayImage())
+        XCTAssertNotNil(try firstBlueDominantPixel(in: image, rect: plusRect.insetBy(dx: 1, dy: 1)))
+    }
+
+    func testSelectedNumberControlsStayVisibleAndClickableAfterPointerLeaves() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 360, height: 180))
+        window.test_activateNumberTool()
+        window.test_mouseDown(at: NSPoint(x: 150, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 150, y: 150))
+
+        window.test_selectAnnotation(at: 0)
+        let selectedRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+        window.test_mouseMoved(to: NSPoint(x: selectedRect.midX, y: selectedRect.midY))
+        XCTAssertTrue(window.test_numberControlsVisible)
+
+        let plusPoint = try XCTUnwrap(window.test_numberIncrementHandlePoint())
+        window.test_mouseMoved(to: NSPoint(x: 440, y: 280))
+
+        XCTAssertTrue(window.test_numberControlsVisible)
+        window.test_mouseDown(at: plusPoint)
+        window.test_mouseUp(at: plusPoint)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 2)
+    }
+
+    func testNumberDoubleClickEditsValueTo999AndIgnoresAdditionalDigit() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 360, height: 180))
+        window.test_activateNumberTool()
+        window.test_mouseDown(at: NSPoint(x: 150, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 150, y: 150))
+
+        let selectedRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+        window.test_doubleClick(at: NSPoint(x: selectedRect.midX, y: selectedRect.midY))
+        window.test_keyDown(keyCode: 51)
+        for digit in ["9", "9", "9", "1"] {
+            window.test_keyDown(keyCode: 0, charactersIgnoringModifiers: digit)
+        }
+        window.test_keyDown(keyCode: 36)
+
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 999)
+    }
+
+    func testNumberKeyboardInputIgnoresFourthDigitInsteadOfClampingTo999() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 360, height: 180))
+        window.test_activateNumberTool()
+        window.test_mouseDown(at: NSPoint(x: 150, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 150, y: 150))
+
+        let selectedRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+        window.test_doubleClick(at: NSPoint(x: selectedRect.midX, y: selectedRect.midY))
+        window.test_keyDown(keyCode: 51)
+        for digit in ["1", "2", "3", "4"] {
+            window.test_keyDown(keyCode: 0, charactersIgnoringModifiers: digit)
+        }
+        window.test_keyDown(keyCode: 36)
+
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 123)
+    }
+
+    func testNumberKeyboardInputInsertsAtCaretWithoutClearingExistingDigits() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 360, height: 180))
+        window.test_activateNumberTool()
+        window.test_mouseDown(at: NSPoint(x: 150, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 150, y: 150))
+
+        let selectedRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+        window.test_doubleClick(at: NSPoint(x: selectedRect.midX, y: selectedRect.midY))
+        window.test_keyDown(keyCode: 0, charactersIgnoringModifiers: "2")
+        window.test_keyDown(keyCode: 123, charactersIgnoringModifiers: "")
+        window.test_keyDown(keyCode: 0, charactersIgnoringModifiers: "9")
+        window.test_keyDown(keyCode: 36)
+
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 192)
+    }
+
+    func testNumberEmptyKeyboardDraftCompletesToOneAndNextMarkContinuesFromIt() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 360, height: 180))
+        window.test_activateNumberTool()
+        window.test_mouseDown(at: NSPoint(x: 150, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 150, y: 150))
+
+        let selectedRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+        window.test_doubleClick(at: NSPoint(x: selectedRect.midX, y: selectedRect.midY))
+        window.test_keyDown(keyCode: 0, charactersIgnoringModifiers: "7")
+        window.test_keyDown(keyCode: 51)
+        window.test_keyDown(keyCode: 51)
+        window.test_mouseMoved(to: NSPoint(x: 420, y: 260))
+
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 1)
+
+        window.test_mouseDown(at: NSPoint(x: 260, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 260, y: 150))
+
+        XCTAssertEqual(window.test_annotationCount, 2)
         XCTAssertEqual(window.test_numberSequenceIndex(at: 1), 2)
-        XCTAssertEqual(window.test_numberSequenceIndex(at: 2), 3)
+    }
+
+    func testKeyboardEditedNumberStaysWhenCreatingNextNumberMark() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 360, height: 180))
+        window.test_activateNumberTool()
+        window.test_mouseDown(at: NSPoint(x: 150, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 150, y: 150))
+
+        let selectedRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+        window.test_doubleClick(at: NSPoint(x: selectedRect.midX, y: selectedRect.midY))
+        window.test_keyDown(keyCode: 0, charactersIgnoringModifiers: "7")
+        window.test_keyDown(keyCode: 36)
+
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 17)
+
+        window.test_mouseDown(at: NSPoint(x: 260, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 260, y: 150))
+
+        XCTAssertEqual(window.test_annotationCount, 2)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 17)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 1), 18)
+    }
+
+    func testNumberLargeKeyboardInputFitsInSmallestCircleWithoutWrapping() throws {
+        let window = SelectionOverlayWindow(backgroundImage: solidImage(size: NSSize(width: 360, height: 260), color: .white)) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 220, height: 120))
+        window.test_activateNumberTool()
+        window.test_selectNumberSize(1)
+        window.test_mouseDown(at: NSPoint(x: 180, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 180, y: 150))
+
+        let markRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+        window.test_doubleClick(at: NSPoint(x: markRect.midX, y: markRect.midY))
+        window.test_keyDown(keyCode: 51)
+        for digit in ["9", "9", "9", "8", "7", "6"] {
+            window.test_keyDown(keyCode: 0, charactersIgnoringModifiers: digit)
+        }
+        window.test_keyDown(keyCode: 36)
+
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 999)
+        let image = try XCTUnwrap(window.test_renderedOverlayImage())
+        let digitBounds = try XCTUnwrap(whiteDigitBounds(in: image, insideCircleRect: markRect))
+        XCTAssertLessThanOrEqual(digitBounds.width, markRect.width * 0.86)
+        XCTAssertLessThanOrEqual(digitBounds.height, markRect.height * 0.86)
     }
 
     func testNumberResizeClampsSize() throws {
@@ -2600,12 +3502,31 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_mouseUp(at: NSPoint(x: 180, y: 150))
         window.test_selectAnnotation(at: 0)
 
+        let selectedRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+        window.test_mouseMoved(to: NSPoint(x: selectedRect.midX, y: selectedRect.midY))
         let handle = try XCTUnwrap(window.test_numberResizeHandlePoint())
         window.test_mouseDown(at: handle)
         window.test_mouseDragged(to: NSPoint(x: handle.x + 120, y: handle.y - 120))
         window.test_mouseUp(at: NSPoint(x: handle.x + 120, y: handle.y - 120))
 
         XCTAssertEqual(window.test_annotationStyle(at: 0)?.textSize, 72)
+    }
+
+    func testNumberResizeHandleIsHalfTheDeleteHandleSize() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 360, height: 180))
+        window.test_activateNumberTool()
+        window.test_mouseDown(at: NSPoint(x: 180, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 180, y: 150))
+        window.test_selectAnnotation(at: 0)
+        let selectedRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+        window.test_mouseMoved(to: NSPoint(x: selectedRect.midX, y: selectedRect.midY))
+
+        let deleteRect = try XCTUnwrap(window.test_numberDeleteHandleRect())
+        let resizeRect = try XCTUnwrap(window.test_numberResizeHandleRect())
+
+        XCTAssertEqual(resizeRect.width, deleteRect.width / 2, accuracy: 0.5)
+        XCTAssertEqual(resizeRect.height, deleteRect.height / 2, accuracy: 0.5)
     }
 
     func testMosaicDotSizesAndCursorPreviewAreScaledDown() {
@@ -7314,6 +8235,7 @@ final class SelectionToolbarStateTests: XCTestCase {
             "aspect-ratio",
             "aspect-ratio-fill",
             "refresh",
+            "reset2",
         ]
         resourceNames.forEach { name in
             XCTAssertNotNil(Bundle.main.url(forResource: name, withExtension: "svg"), "\(name).svg should be bundled")
@@ -8397,6 +9319,42 @@ final class SelectionToolbarStateTests: XCTestCase {
         matching predicate: ((red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8)) -> Bool
     ) throws -> (red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8)? {
         try pixels(in: image, rect: rect).first(where: predicate)
+    }
+
+    private func whiteDigitBounds(in image: NSImage, insideCircleRect rect: NSRect) throws -> NSRect? {
+        let cgImage = try XCTUnwrap(image.cgImage(forProposedRect: nil, context: nil, hints: nil))
+        let bytes = try rgbaBytes(in: image)
+        let scaleX = CGFloat(cgImage.width) / max(image.size.width, 1)
+        let scaleY = CGFloat(cgImage.height) / max(image.size.height, 1)
+        let center = NSPoint(x: rect.midX, y: rect.midY)
+        let radius = min(rect.width, rect.height) / 2
+        let minX = max(0, Int((rect.minX * scaleX).rounded(.down)))
+        let maxX = min(cgImage.width - 1, Int((rect.maxX * scaleX).rounded(.up)))
+        let minY = max(0, Int(((image.size.height - rect.maxY) * scaleY).rounded(.down)))
+        let maxY = min(cgImage.height - 1, Int(((image.size.height - rect.minY) * scaleY).rounded(.up)))
+
+        var bounds: NSRect?
+        for y in minY...maxY {
+            for x in minX...maxX {
+                let overlayPoint = NSPoint(x: CGFloat(x) / scaleX, y: image.size.height - CGFloat(y) / scaleY)
+                guard hypot(overlayPoint.x - center.x, overlayPoint.y - center.y) <= radius - 2 else {
+                    continue
+                }
+                let index = (y * cgImage.width + x) * 4
+                let pixel = (
+                    red: bytes[index],
+                    green: bytes[index + 1],
+                    blue: bytes[index + 2],
+                    alpha: bytes[index + 3]
+                )
+                guard pixel.red > 230, pixel.green > 230, pixel.blue > 230, pixel.alpha > 100 else {
+                    continue
+                }
+                let pointRect = NSRect(x: overlayPoint.x, y: overlayPoint.y, width: 1 / scaleX, height: 1 / scaleY)
+                bounds = bounds.map { $0.union(pointRect) } ?? pointRect
+            }
+        }
+        return bounds
     }
 
     private func matchingPixelCount(

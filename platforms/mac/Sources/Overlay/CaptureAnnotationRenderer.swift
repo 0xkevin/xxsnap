@@ -1067,6 +1067,7 @@ struct CaptureAnnotation {
     var text: String?
     var numberMarkType: CaptureNumberMarkType?
     var numberSequenceIndex: Int?
+    var numberSequenceIsManual = false
     var mosaicStroke: CaptureMosaicStroke?
     var mosaicRedaction: CaptureMosaicRedaction?
 }
@@ -1369,12 +1370,64 @@ enum CaptureAnnotationRenderer {
     }
 
     static func numberMarkDiameter(for fontSize: CGFloat) -> CGFloat {
-        max(18, ceil(fontSize + max(10, fontSize * 0.55)))
+        interpolatedNumberMarkDiameter(for: fontSize)
+    }
+
+    static func numberMarkTextFontSize(for fontSize: CGFloat) -> CGFloat {
+        max(7, numberMarkDiameter(for: fontSize) * 0.72)
+    }
+
+    static func numberMarkTextFontSize(for fontSize: CGFloat, text: String) -> CGFloat {
+        let diameter = numberMarkDiameter(for: fontSize)
+        let maxTextSize = NSSize(width: diameter * 0.78, height: diameter * 0.78)
+        var candidate = numberMarkTextFontSize(for: fontSize)
+        let string = NSString(string: text)
+        while candidate > 6 {
+            let font = NSFont.monospacedDigitSystemFont(ofSize: candidate, weight: .bold)
+            let measured = string.size(withAttributes: [.font: font])
+            if measured.width <= maxTextSize.width, measured.height <= maxTextSize.height {
+                return candidate
+            }
+            candidate -= 1
+        }
+        return max(6, candidate)
     }
 
     static func numberMarkRect(centeredAt point: NSPoint, fontSize: CGFloat) -> NSRect {
         let diameter = numberMarkDiameter(for: fontSize)
         return NSRect(x: point.x - diameter / 2, y: point.y - diameter / 2, width: diameter, height: diameter)
+    }
+
+    private static let snipasteNumberMarkDiameters: [(size: CGFloat, diameter: CGFloat)] = [
+        (1, 15), (2, 18), (3, 21), (4, 24), (5, 27),
+        (6, 30), (7, 33), (8, 36), (9, 38), (10, 41),
+        (12, 47), (14, 47), (16, 54), (20, 70), (24, 82),
+        (32, 105), (40, 128), (48, 152), (60, 186), (72, 221),
+    ]
+
+    private static func interpolatedNumberMarkDiameter(for fontSize: CGFloat) -> CGFloat {
+        let points = snipasteNumberMarkDiameters
+        guard let first = points.first, let last = points.last else {
+            return max(18, fontSize)
+        }
+        if fontSize <= first.size {
+            return first.diameter
+        }
+        if fontSize >= last.size {
+            return last.diameter
+        }
+        if let exact = points.first(where: { abs($0.size - fontSize) < 0.001 }) {
+            return exact.diameter
+        }
+        for index in 0..<(points.count - 1) {
+            let lower = points[index]
+            let upper = points[index + 1]
+            if fontSize >= lower.size, fontSize <= upper.size {
+                let progress = (fontSize - lower.size) / max(upper.size - lower.size, 1)
+                return lower.diameter + (upper.diameter - lower.diameter) * progress
+            }
+        }
+        return last.diameter
     }
 
     private static func readableForegroundColor(on color: NSColor) -> NSColor {
@@ -1409,9 +1462,9 @@ enum CaptureAnnotationRenderer {
         case .number:
             context.setFillColor(cgColor(style.strokeColor))
             context.fillEllipse(in: pixelRect)
-            let value = max(1, annotation.numberSequenceIndex ?? 1)
+            let value = min(999, max(1, annotation.numberSequenceIndex ?? 1))
             let text = "\(value)"
-            let font = NSFont.monospacedDigitSystemFont(ofSize: max(3, style.textSize * 0.72), weight: .bold)
+            let font = NSFont.monospacedDigitSystemFont(ofSize: numberMarkTextFontSize(for: style.textSize, text: text), weight: .bold)
             let attributes: [NSAttributedString.Key: Any] = [
                 .font: font,
                 .foregroundColor: readableForegroundColor(on: style.strokeColor),
@@ -1420,7 +1473,7 @@ enum CaptureAnnotationRenderer {
             NSString(string: text).draw(
                 at: NSPoint(
                     x: pixelRect.midX - size.width / 2,
-                    y: pixelRect.midY - size.height / 2 + pixelRect.height * 0.08
+                    y: pixelRect.midY - size.height / 2
                 ),
                 withAttributes: attributes
             )

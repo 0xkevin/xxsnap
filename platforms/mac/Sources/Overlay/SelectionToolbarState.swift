@@ -18,7 +18,7 @@ enum SelectionToolbarState {
     static let textDropdownScrollbarTrackColor = NSColor.black.withAlphaComponent(0.14)
     static let textDropdownScrollbarThumbColor = NSColor.black.withAlphaComponent(0.46)
     static let textSizeValues: [CGFloat] = (3...72).map { CGFloat($0) }
-    static let numberSizeValues: [CGFloat] = (3...72).map { CGFloat($0) }
+    static let numberSizeValues: [CGFloat] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 20, 24, 32, 40, 48, 60, 72]
     static let eyedropperCursorSize = NSSize(width: 24, height: 24)
     static let eyedropperIconSize: CGFloat = 18
     static let eyedropperCursorHotSpot = NSPoint(x: 3.6, y: 20.4)
