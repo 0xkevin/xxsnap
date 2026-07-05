@@ -217,6 +217,96 @@ final class xxsnapMacTests: XCTestCase {
         )
     }
 
+    func testNumberSequenceRendererDrawsNumberCircle() throws {
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = NSColor(srgbRed: 1, green: 0, blue: 0, alpha: 1)
+        style.textSize = 24
+        let annotation = CaptureAnnotation(
+            kind: .numberSequence,
+            rect: NSRect(x: 40, y: 40, width: 36, height: 36),
+            style: style,
+            numberMarkType: .number,
+            numberSequenceIndex: 1
+        )
+
+        let image = try makeBitmapImage(
+            pointSize: NSSize(width: 140, height: 120),
+            pixelWidth: 140,
+            pixelHeight: 120,
+            fill: .white
+        )
+        let rendered = CaptureAnnotationRenderer.render(image: image, annotations: [annotation])
+
+        let circleFill = try XCTUnwrap(rgbaPixel(in: rendered, x: 46, y: 58))
+        XCTAssertGreaterThan(circleFill.red, 200)
+        XCTAssertLessThan(circleFill.green, 90)
+        XCTAssertLessThan(circleFill.blue, 90)
+    }
+
+    func testNumberExportUsesSequenceIndexAndSelectedColor() throws {
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = NSColor(srgbRed: 0.1, green: 0.25, blue: 1, alpha: 1)
+        style.textSize = 28
+        let mark = CaptureAnnotation(
+            kind: .numberSequence,
+            rect: NSRect(x: 30, y: 30, width: 42, height: 42),
+            style: style,
+            numberMarkType: .number,
+            numberSequenceIndex: 7
+        )
+        let image = try makeBitmapImage(
+            pointSize: NSSize(width: 120, height: 100),
+            pixelWidth: 120,
+            pixelHeight: 100,
+            fill: .white
+        )
+
+        let rendered = CaptureAnnotationRenderer.render(image: image, annotations: [mark])
+
+        let fill = try XCTUnwrap(rgbaPixel(in: rendered, x: 51, y: 49))
+        XCTAssertGreaterThan(fill.blue, 180)
+    }
+
+    func testCheckAndCrossRenderWithoutCircleBackground() throws {
+        var checkStyle = CaptureAnnotationStyle()
+        checkStyle.strokeColor = NSColor(srgbRed: 0, green: 0.7, blue: 0, alpha: 1)
+        checkStyle.textSize = 32
+        var crossStyle = CaptureAnnotationStyle()
+        crossStyle.strokeColor = NSColor(srgbRed: 1, green: 0, blue: 0, alpha: 1)
+        crossStyle.textSize = 32
+
+        let check = CaptureAnnotation(
+            kind: .numberSequence,
+            rect: NSRect(x: 28, y: 28, width: 40, height: 40),
+            style: checkStyle,
+            numberMarkType: .check
+        )
+        let cross = CaptureAnnotation(
+            kind: .numberSequence,
+            rect: NSRect(x: 82, y: 28, width: 40, height: 40),
+            style: crossStyle,
+            numberMarkType: .cross
+        )
+
+        let image = try makeBitmapImage(
+            pointSize: NSSize(width: 150, height: 100),
+            pixelWidth: 150,
+            pixelHeight: 100,
+            fill: .white
+        )
+        let rendered = CaptureAnnotationRenderer.render(image: image, annotations: [check, cross])
+
+        let checkCorner = try XCTUnwrap(rgbaPixel(in: rendered, x: 30, y: 70))
+        XCTAssertGreaterThan(checkCorner.red, 245)
+        XCTAssertGreaterThan(checkCorner.green, 245)
+        XCTAssertGreaterThan(checkCorner.blue, 245)
+
+        let crossCorner = try XCTUnwrap(rgbaPixel(in: rendered, x: 84, y: 70))
+        XCTAssertGreaterThan(crossCorner.red, 245)
+        XCTAssertGreaterThan(crossCorner.green, 245)
+        XCTAssertGreaterThan(crossCorner.blue, 245)
+    }
+
     func testAnnotationRendererDrawsGaussianMosaicOntoImage() throws {
         let image = try makeBitmapImageWithBlackTextStripe()
         var style = CaptureAnnotationStyle()

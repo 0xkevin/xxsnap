@@ -14,6 +14,7 @@ enum CaptureAnnotationKind {
     case brush
     case marker
     case text
+    case numberSequence
     case mosaicStroke
     case mosaicRectangle
 }
@@ -1064,8 +1065,17 @@ struct CaptureAnnotation {
     var brushPath: CaptureBrushPath?
     var markerLine: CaptureMarkerLine?
     var text: String?
+    var numberMarkType: CaptureNumberMarkType?
+    var numberSequenceIndex: Int?
+    var numberSequenceIsManual = false
     var mosaicStroke: CaptureMosaicStroke?
     var mosaicRedaction: CaptureMosaicRedaction?
+}
+
+enum CaptureNumberMarkType: CaseIterable, Equatable {
+    case number
+    case check
+    case cross
 }
 
 struct CaptureSelectionResult {
@@ -1238,8 +1248,16 @@ enum CaptureAnnotationRenderer {
         if isMosaicAnnotation(annotation) {
             return
         }
+        if annotation.numberMarkType != nil {
+            drawNumberSequenceAnnotation(annotation, in: context, scaleX: scaleX, scaleY: scaleY, textScale: lineScale)
+            return
+        }
         if annotation.kind == .text {
             drawTextAnnotation(annotation, in: context, scaleX: scaleX, scaleY: scaleY, textScale: lineScale)
+            return
+        }
+        if annotation.kind == .numberSequence {
+            drawNumberSequenceAnnotation(annotation, in: context, scaleX: scaleX, scaleY: scaleY, textScale: lineScale)
             return
         }
         if annotation.kind == .marker {
@@ -1275,7 +1293,7 @@ enum CaptureAnnotationRenderer {
             path.addRect(pixelRect)
         case .ellipse:
             path.addEllipse(in: pixelRect)
-        case .arrowLine, .brush, .marker, .text, .mosaicStroke, .mosaicRectangle:
+        case .arrowLine, .brush, .marker, .text, .numberSequence, .mosaicStroke, .mosaicRectangle:
             return
         }
 
@@ -1349,6 +1367,136 @@ enum CaptureAnnotationRenderer {
         drawText(text, in: pixelRect, style: style)
         NSGraphicsContext.current = previousGraphicsContext
         context.restoreGState()
+    }
+
+    static func numberMarkDiameter(for fontSize: CGFloat) -> CGFloat {
+        interpolatedNumberMarkDiameter(for: fontSize)
+    }
+
+    static func numberMarkTextFontSize(for fontSize: CGFloat) -> CGFloat {
+        max(7, numberMarkDiameter(for: fontSize) * 0.72)
+    }
+
+    static func numberMarkTextFontSize(for fontSize: CGFloat, text: String) -> CGFloat {
+        let diameter = numberMarkDiameter(for: fontSize)
+        let maxTextSize = NSSize(width: diameter * 0.78, height: diameter * 0.78)
+        var candidate = numberMarkTextFontSize(for: fontSize)
+        let string = NSString(string: text)
+        while candidate > 6 {
+            let font = NSFont.monospacedDigitSystemFont(ofSize: candidate, weight: .bold)
+            let measured = string.size(withAttributes: [.font: font])
+            if measured.width <= maxTextSize.width, measured.height <= maxTextSize.height {
+                return candidate
+            }
+            candidate -= 1
+        }
+        return max(6, candidate)
+    }
+
+    static func numberMarkRect(centeredAt point: NSPoint, fontSize: CGFloat) -> NSRect {
+        let diameter = numberMarkDiameter(for: fontSize)
+        return NSRect(x: point.x - diameter / 2, y: point.y - diameter / 2, width: diameter, height: diameter)
+    }
+
+    private static let snipasteNumberMarkDiameters: [(size: CGFloat, diameter: CGFloat)] = [
+        (1, 15), (2, 18), (3, 21), (4, 24), (5, 27),
+        (6, 30), (7, 33), (8, 36), (9, 38), (10, 41),
+        (12, 47), (14, 47), (16, 54), (20, 70), (24, 82),
+        (32, 105), (40, 128), (48, 152), (60, 186), (72, 221),
+    ]
+
+    private static func interpolatedNumberMarkDiameter(for fontSize: CGFloat) -> CGFloat {
+        let points = snipasteNumberMarkDiameters
+        guard let first = points.first, let last = points.last else {
+            return max(18, fontSize)
+        }
+        if fontSize <= first.size {
+            return first.diameter
+        }
+        if fontSize >= last.size {
+            return last.diameter
+        }
+        if let exact = points.first(where: { abs($0.size - fontSize) < 0.001 }) {
+            return exact.diameter
+        }
+        for index in 0..<(points.count - 1) {
+            let lower = points[index]
+            let upper = points[index + 1]
+            if fontSize >= lower.size, fontSize <= upper.size {
+                let progress = (fontSize - lower.size) / max(upper.size - lower.size, 1)
+                return lower.diameter + (upper.diameter - lower.diameter) * progress
+            }
+        }
+        return last.diameter
+    }
+
+    private static func readableForegroundColor(on color: NSColor) -> NSColor {
+        let rgb = color.usingColorSpace(.deviceRGB) ?? color
+        let luminance = 0.2126 * rgb.redComponent + 0.7152 * rgb.greenComponent + 0.0722 * rgb.blueComponent
+        return luminance > 0.68 ? NSColor.black.withAlphaComponent(0.86) : .white
+    }
+
+    private static func drawNumberSequenceAnnotation(
+        _ annotation: CaptureAnnotation,
+        in context: CGContext,
+        scaleX: CGFloat,
+        scaleY: CGFloat,
+        textScale: CGFloat
+    ) {
+        let type = annotation.numberMarkType ?? .number
+        var style = annotation.style
+        style.textSize *= textScale
+        let rect = annotation.rect.standardized
+        let pixelRect = NSRect(
+            x: rect.minX * scaleX,
+            y: rect.minY * scaleY,
+            width: rect.width * scaleX,
+            height: rect.height * scaleY
+        )
+
+        context.saveGState()
+        let previousGraphicsContext = NSGraphicsContext.current
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+
+        switch type {
+        case .number:
+            context.setFillColor(cgColor(style.strokeColor))
+            context.fillEllipse(in: pixelRect)
+            let value = min(999, max(1, annotation.numberSequenceIndex ?? 1))
+            let text = "\(value)"
+            let font = NSFont.monospacedDigitSystemFont(ofSize: numberMarkTextFontSize(for: style.textSize, text: text), weight: .bold)
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: readableForegroundColor(on: style.strokeColor),
+            ]
+            let size = NSString(string: text).size(withAttributes: attributes)
+            NSString(string: text).draw(
+                at: NSPoint(
+                    x: pixelRect.midX - size.width / 2,
+                    y: pixelRect.midY - size.height / 2
+                ),
+                withAttributes: attributes
+            )
+        case .check:
+            drawNumberSymbol("✓", in: pixelRect, color: style.strokeColor, size: style.textSize)
+        case .cross:
+            drawNumberSymbol("×", in: pixelRect, color: style.strokeColor, size: style.textSize)
+        }
+
+        NSGraphicsContext.current = previousGraphicsContext
+        context.restoreGState()
+    }
+
+    private static func drawNumberSymbol(_ symbol: String, in rect: NSRect, color: NSColor, size: CGFloat) {
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: max(3, size), weight: .bold),
+            .foregroundColor: color,
+        ]
+        let symbolSize = NSString(string: symbol).size(withAttributes: attributes)
+        NSString(string: symbol).draw(
+            at: NSPoint(x: rect.midX - symbolSize.width / 2, y: rect.midY - symbolSize.height / 2),
+            withAttributes: attributes
+        )
     }
 
     private static func isMosaicAnnotation(_ annotation: CaptureAnnotation) -> Bool {
@@ -2130,7 +2278,7 @@ enum CaptureSketchStrokePath {
         }
 
         switch kind {
-        case .arrowLine, .brush, .marker, .text, .mosaicStroke, .mosaicRectangle:
+        case .arrowLine, .brush, .marker, .text, .numberSequence, .mosaicStroke, .mosaicRectangle:
             return []
         case .ellipse:
             return ellipsePoints(in: rect)
