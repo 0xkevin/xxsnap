@@ -143,7 +143,12 @@ final class xxsnapMacTests: XCTestCase {
     }
 
     func testEraserMaskClearsMosaicAnnotationWithoutClearingScreenshotPixels() throws {
-        let image = checkerboardImage(size: NSSize(width: 120, height: 80), squareSize: 4)
+        let image = try fixedPixelCheckerboardImage(
+            pointSize: NSSize(width: 120, height: 80),
+            pixelWidth: 240,
+            pixelHeight: 160,
+            squareSize: 8
+        )
         let annotation = CaptureAnnotation(
             kind: .mosaicRectangle,
             rect: NSRect(x: 20, y: 16, width: 80, height: 48),
@@ -2358,6 +2363,37 @@ final class xxsnapMacTests: XCTestCase {
         }
         image.unlockFocus()
         return image
+    }
+
+    private func fixedPixelCheckerboardImage(
+        pointSize: NSSize,
+        pixelWidth: Int,
+        pixelHeight: Int,
+        squareSize: Int
+    ) throws -> NSImage {
+        let colorSpace = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        let context = try XCTUnwrap(
+            CGContext(
+                data: nil,
+                width: pixelWidth,
+                height: pixelHeight,
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )
+        )
+
+        for x in stride(from: 0, to: pixelWidth, by: squareSize) {
+            for y in stride(from: 0, to: pixelHeight, by: squareSize) {
+                let isDark = ((x / squareSize) + (y / squareSize)).isMultiple(of: 2)
+                context.setFillColor((isDark ? NSColor.black : NSColor.white).cgColor)
+                context.fill(CGRect(x: x, y: y, width: squareSize, height: squareSize))
+            }
+        }
+
+        let cgImage = try XCTUnwrap(context.makeImage())
+        return NSImage(cgImage: cgImage, size: pointSize)
     }
 
     private func averageLumaDelta(in image: NSImage, rect: NSRect) throws -> Double {
