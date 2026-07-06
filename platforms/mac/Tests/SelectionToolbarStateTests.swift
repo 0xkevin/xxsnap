@@ -2577,6 +2577,37 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_currentStyle?.textSize, 3)
     }
 
+    func testMagnifierToolbarButtonActivatesMagnifierModeAndOptionsToolbar() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 80, y: 80, width: 220, height: 160))
+
+        let point = try XCTUnwrap(window.test_mainToolbarButtonPoint(for: .magnifier))
+        window.test_mouseDown(at: point)
+
+        XCTAssertTrue(window.test_isMagnifierToolActive)
+        XCTAssertEqual(window.test_optionsToolbarMode, .magnifier)
+        XCTAssertNotNil(window.test_optionsToolbarRect)
+        XCTAssertEqual(window.test_currentMagnifierShape, .circle)
+        XCTAssertEqual(window.test_currentMagnifierZoom, 2)
+    }
+
+    func testMagnifierOptionsSwitchShapeZoomStrokeAndColor() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 80, y: 80, width: 220, height: 160))
+        window.test_activateMagnifierTool()
+
+        window.test_setMagnifierShape(.rectangle)
+        window.test_setMagnifierZoom(3)
+        window.test_setCurrentStrokeWidth(7)
+        let colorPoint = try XCTUnwrap(window.test_optionsPaletteColorPoint(at: 2))
+        window.test_mouseDown(at: colorPoint)
+
+        XCTAssertEqual(window.test_currentMagnifierShape, .rectangle)
+        XCTAssertEqual(window.test_currentMagnifierZoom, 3)
+        XCTAssertEqual(window.test_currentStyle?.strokeWidth, 7)
+        XCTAssertEqual(window.test_currentStyle?.strokeColor, SelectionOverlayWindow.defaultPaletteColors[2])
+    }
+
     func testNumberToolbarIconStaysBlackWhenColorChanges() throws {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 260, height: 160))
