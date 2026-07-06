@@ -381,6 +381,42 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertFalse(window.test_hasPendingTextEdit)
     }
 
+    func testEraserClickDeletesTopmostHitAnnotationAndUndoRestoresIt() {
+        let window = makeOverlayWindowWithLockedSelection()
+        let first = testRectangleAnnotation(x: 20, y: 20, width: 60, height: 40, renderOrder: 1)
+        let second = testRectangleAnnotation(x: 30, y: 24, width: 60, height: 40, renderOrder: 2)
+        window.test_setAnnotations([first, second])
+        click(window, button: .eraser)
+
+        window.test_mouseDown(at: NSPoint(x: 142, y: 136))
+        window.test_mouseUp(at: NSPoint(x: 142, y: 136))
+
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(window.test_annotation(at: 0)?.renderOrder, 1)
+
+        click(window, button: .undo)
+        XCTAssertEqual(window.test_annotationCount, 2)
+        XCTAssertEqual(window.test_annotation(at: 1)?.renderOrder, 2)
+
+        click(window, button: .redo)
+        XCTAssertEqual(window.test_annotationCount, 1)
+    }
+
+    func testEraserClickOnEmptyAreaDoesNotCreateHistoryEntry() {
+        let window = makeOverlayWindowWithLockedSelection()
+        window.test_setAnnotations([testRectangleAnnotation(x: 20, y: 20, width: 60, height: 40, renderOrder: 1)])
+        click(window, button: .eraser)
+        XCTAssertEqual(window.test_undoActionCount, 0)
+
+        window.test_mouseDown(at: NSPoint(x: 240, y: 240))
+        window.test_mouseUp(at: NSPoint(x: 240, y: 240))
+
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(window.test_undoActionCount, 0)
+        click(window, button: .undo)
+        XCTAssertEqual(window.test_annotationCount, 1)
+    }
+
     func testEraserDefaultsToFreehandMediumSizeAndCircleCursor() {
         let window = makeOverlayWindowWithLockedSelection()
         click(window, button: .eraser)
@@ -10645,6 +10681,22 @@ final class SelectionToolbarStateTests: XCTestCase {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 240, height: 160))
         return window
+    }
+
+    private func testRectangleAnnotation(
+        x: CGFloat,
+        y: CGFloat,
+        width: CGFloat,
+        height: CGFloat,
+        renderOrder: Int
+    ) -> CaptureAnnotation {
+        var annotation = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: x, y: y, width: width, height: height),
+            style: CaptureAnnotationStyle()
+        )
+        annotation.renderOrder = renderOrder
+        return annotation
     }
 
     private func click(
