@@ -2596,16 +2596,66 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_setLockedSelectionRect(NSRect(x: 80, y: 80, width: 220, height: 160))
         window.test_activateMagnifierTool()
 
-        window.test_setMagnifierShape(.rectangle)
-        window.test_setMagnifierZoom(3)
-        window.test_setCurrentStrokeWidth(7)
+        let optionsRect = try XCTUnwrap(window.test_optionsToolbarRect)
+        let layout = SelectionToolbarState.optionsToolbarLayout(
+            in: optionsRect,
+            paletteCount: SelectionOverlayWindow.defaultPaletteColors.count,
+            mode: .magnifier
+        )
+        let rectangleButton = try XCTUnwrap(layout.rectangleMode)
+        let rectanglePoint = NSPoint(x: rectangleButton.midX, y: rectangleButton.midY)
+        window.test_mouseDown(at: rectanglePoint)
+        XCTAssertEqual(window.test_currentMagnifierShape, .rectangle)
+
+        let circleButton = try XCTUnwrap(layout.ellipseMode)
+        let circlePoint = NSPoint(x: circleButton.midX, y: circleButton.midY)
+        window.test_mouseDown(at: circlePoint)
+        XCTAssertEqual(window.test_currentMagnifierShape, .circle)
+
+        let zoomPoint = NSPoint(x: layout.magnifierZooms[2].midX, y: layout.magnifierZooms[2].midY)
+        window.test_mouseDown(at: zoomPoint)
+        let strokePoint = NSPoint(x: layout.strokeWidths[2].midX, y: layout.strokeWidths[2].midY)
+        window.test_mouseDown(at: strokePoint)
         let colorPoint = try XCTUnwrap(window.test_optionsPaletteColorPoint(at: 2))
         window.test_mouseDown(at: colorPoint)
 
-        XCTAssertEqual(window.test_currentMagnifierShape, .rectangle)
         XCTAssertEqual(window.test_currentMagnifierZoom, 3)
         XCTAssertEqual(window.test_currentStyle?.strokeWidth, 7)
         XCTAssertEqual(window.test_currentStyle?.strokeColor, SelectionOverlayWindow.defaultPaletteColors[2])
+    }
+
+    func testSelectingExistingMagnifierRestoresMagnifierToolbarState() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 80, y: 80, width: 220, height: 160)
+        window.test_setLockedSelectionRect(selection)
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = SelectionOverlayWindow.defaultPaletteColors[8]
+        style.fillColor = SelectionOverlayWindow.defaultPaletteColors[8]
+        style.strokeWidth = 7
+        style.strokePattern = .solid
+        style.fillEnabled = false
+        let annotation = CaptureAnnotation(
+            kind: .magnifier,
+            rect: NSRect(x: 30, y: 30, width: 70, height: 70),
+            style: style,
+            magnifierShape: .rectangle,
+            magnifierZoom: 4
+        )
+        window.test_setAnnotations([annotation])
+
+        window.test_mouseDown(at: NSPoint(x: selection.minX + 65, y: selection.minY + 65))
+
+        XCTAssertTrue(window.test_isMagnifierToolActive)
+        XCTAssertEqual(window.test_optionsToolbarMode, .magnifier)
+        XCTAssertEqual(window.test_currentMagnifierShape, .rectangle)
+        XCTAssertEqual(window.test_currentMagnifierZoom, 4)
+        XCTAssertEqual(window.test_currentStyle?.strokeWidth, 7)
+        XCTAssertEqual(window.test_currentStyle?.strokeColor, SelectionOverlayWindow.defaultPaletteColors[8])
+
+        window.test_activateShapeTool(.rectangle)
+        XCTAssertEqual(window.test_currentShapeKind, .rectangle)
+        XCTAssertNotEqual(window.test_currentStyle?.strokeWidth, 7)
+        XCTAssertNotEqual(window.test_currentStyle?.strokeColor, SelectionOverlayWindow.defaultPaletteColors[8])
     }
 
     func testNumberToolbarIconStaysBlackWhenColorChanges() throws {

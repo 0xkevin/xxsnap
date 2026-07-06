@@ -7554,6 +7554,16 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             rememberCurrentStyleForActiveTool()
             return
         }
+        if annotation.kind == .magnifier {
+            activateMagnifierTool()
+            selectedAnnotationIndex = index
+            currentStyle = annotation.style
+            magnifierStyle = annotation.style
+            currentMagnifierShape = annotation.effectiveMagnifierShape
+            currentMagnifierZoom = annotation.effectiveMagnifierZoom
+            rememberCurrentStyleForActiveTool()
+            return
+        }
         activateShapeTool(annotation.kind)
         currentStyle = annotation.style
         rememberCurrentStyleForActiveTool()
@@ -8021,6 +8031,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
         if annotation.kind == .numberSequence {
             return false
+        }
+        if annotation.kind == .magnifier {
+            return rotatedAnnotationRectContains(point, annotation: annotation, hitOutset: 4)
         }
 
         let rect = overlayRect(fromLocalAnnotationRect: annotation.rect).standardized
