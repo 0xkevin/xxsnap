@@ -1235,22 +1235,21 @@ enum CaptureAnnotationRenderer {
         let scaleY = CGFloat(cgImage.height) / max(image.size.height, 1)
 
         let entries = renderEntries(annotations: annotations, eraserMasks: eraserMasks)
-        if eraserMasks.isEmpty {
-            for entry in entries {
-                guard case let .annotation(annotation) = entry.kind else {
-                    continue
-                }
+        if !eraserMasks.isEmpty {
+            context.beginTransparencyLayer(auxiliaryInfo: nil)
+        }
+
+        for entry in entries {
+            switch entry.kind {
+            case let .annotation(annotation):
                 drawRenderAnnotation(annotation, in: context, sourceImage: cgImage, scaleX: scaleX, scaleY: scaleY)
+            case let .eraserMask(mask):
+                clear(mask: mask, in: context, scaleX: scaleX, scaleY: scaleY)
             }
-        } else {
-            for entry in entries {
-                switch entry.kind {
-                case let .annotation(annotation):
-                    drawRenderAnnotation(annotation, in: context, sourceImage: cgImage, scaleX: scaleX, scaleY: scaleY)
-                case let .eraserMask(mask):
-                    clear(mask: mask, in: context, sourceImage: cgImage, scaleX: scaleX, scaleY: scaleY)
-                }
-            }
+        }
+
+        if !eraserMasks.isEmpty {
+            context.endTransparencyLayer()
         }
 
         guard let renderedImage = context.makeImage() else {
@@ -1316,7 +1315,6 @@ enum CaptureAnnotationRenderer {
     private static func clear(
         mask: CaptureEraserMask,
         in context: CGContext,
-        sourceImage: CGImage,
         scaleX: CGFloat,
         scaleY: CGFloat
     ) {
@@ -1326,9 +1324,8 @@ enum CaptureAnnotationRenderer {
 
         context.saveGState()
         context.addPath(path)
-        context.clip()
-        context.setBlendMode(.copy)
-        context.draw(sourceImage, in: CGRect(x: 0, y: 0, width: sourceImage.width, height: sourceImage.height))
+        context.setBlendMode(.clear)
+        context.fillPath()
         context.restoreGState()
     }
 
