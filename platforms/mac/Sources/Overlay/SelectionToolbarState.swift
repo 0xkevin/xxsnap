@@ -72,6 +72,7 @@ enum SelectionToolbarState {
         case text
         case numberSequence
         case magnifier
+        case eraser
     }
 
     struct OptionsToolbarLayout: Equatable {
@@ -86,6 +87,9 @@ enum SelectionToolbarState {
         var numberSize: NSRect
         var magnifierZoom: NSRect
         var magnifierZooms: [NSRect]
+        var eraserFreehandMode: NSRect?
+        var eraserRectangleMode: NSRect?
+        var eraserSizes: [NSRect]
         var fillToggle: NSRect?
         var rectangleMode: NSRect?
         var ellipseMode: NSRect?
@@ -175,12 +179,14 @@ enum SelectionToolbarState {
         case numberMark
         case numberCheck
         case numberCross
+        case eraserCircle
     }
 
     static let defaultFillPreviewColor = NSColor.systemGray
     static let defaultMarkerColor = NSColor(srgbRed: 179 / 255, green: 235 / 255, blue: 0 / 255, alpha: 1)
     static let rotationHandleInset: CGFloat = 14
     static let magnifierZoomValues: [CGFloat] = [1.5, 2, 3, 4]
+    static let eraserSizeValues: [CGFloat] = [12, 24, 40]
 
     static func strokeWidthValues(for mode: OptionsToolbarMode) -> [CGFloat] {
         switch mode {
@@ -196,7 +202,7 @@ enum SelectionToolbarState {
             return [15, 25, 35]
         case .magnifier:
             return [2, 4, 7]
-        case .text, .numberSequence:
+        case .eraser, .text, .numberSequence:
             return []
         }
     }
@@ -226,7 +232,7 @@ enum SelectionToolbarState {
     }
 
     static func showsStrokeStyleField(for mode: OptionsToolbarMode) -> Bool {
-        mode != .marker && mode != .mosaic && mode != .text && mode != .numberSequence && mode != .magnifier
+        mode != .marker && mode != .mosaic && mode != .text && mode != .numberSequence && mode != .magnifier && mode != .eraser
     }
 
     static func shouldShowOptionsToolbar(isPrimaryShapeToolActive: Bool) -> Bool {
@@ -367,7 +373,7 @@ enum SelectionToolbarState {
         switch mode {
         case .brush:
             patterns = [.solid, .dashLong, .dashNarrow, .dashLongShort]
-        case .marker, .text, .numberSequence, .magnifier:
+        case .marker, .text, .numberSequence, .magnifier, .eraser:
             patterns = [.solid]
         case .shape, .arrowLine, .mosaic:
             patterns = CaptureStrokePattern.allCases
@@ -533,13 +539,16 @@ enum SelectionToolbarState {
             numberSize: mode == .numberSequence ? numberSizeFieldRect(in: optionsRect) : .zero,
             magnifierZoom: mode == .magnifier ? magnifierZoomFieldRect(in: optionsRect) : .zero,
             magnifierZooms: [],
+            eraserFreehandMode: mode == .eraser ? eraserFreehandModeButtonRect(in: optionsRect) : nil,
+            eraserRectangleMode: mode == .eraser ? eraserRectangleModeButtonRect(in: optionsRect) : nil,
+            eraserSizes: mode == .eraser ? eraserSizeButtonRects(in: optionsRect) : [],
             fillToggle: mode == .shape ? fillToggleRect(in: optionsRect) : nil,
             rectangleMode: rectangleModeRect(in: optionsRect, mode: mode),
             ellipseMode: ellipseModeRect(in: optionsRect, mode: mode),
             strokeStyle: strokeStyleRect(in: optionsRect, mode: mode),
             startArrowType: mode == .arrowLine ? startArrowTypeFieldRect(in: optionsRect, mode: mode) : nil,
             endArrowType: mode == .arrowLine ? endArrowTypeFieldRect(in: optionsRect, mode: mode) : nil,
-            colorSwatches: mode == .mosaic ? [] : colorSwatchRects(in: optionsRect, paletteCount: paletteCount, mode: mode)
+            colorSwatches: (mode == .mosaic || mode == .eraser) ? [] : colorSwatchRects(in: optionsRect, paletteCount: paletteCount, mode: mode)
         )
     }
 
@@ -551,7 +560,7 @@ enum SelectionToolbarState {
             return magnifierRectangleModeButtonRect(in: optionsRect)
         case .mosaic:
             return mosaicRectangleButtonRect(in: optionsRect, mode: mode)
-        case .arrowLine, .brush, .marker, .text, .numberSequence:
+        case .arrowLine, .brush, .marker, .text, .numberSequence, .eraser:
             return nil
         }
     }
@@ -562,7 +571,7 @@ enum SelectionToolbarState {
             return ellipseModeButtonRect(in: optionsRect)
         case .magnifier:
             return magnifierEllipseModeButtonRect(in: optionsRect)
-        case .arrowLine, .brush, .marker, .mosaic, .text, .numberSequence:
+        case .arrowLine, .brush, .marker, .mosaic, .text, .numberSequence, .eraser:
             return nil
         }
     }
@@ -833,6 +842,10 @@ enum SelectionToolbarState {
         paletteCount: Int,
         mode: OptionsToolbarMode = .shape
     ) -> [NSRect] {
+        guard mode != .eraser else {
+            return []
+        }
+
         return (0...paletteCount).map { index in
             let rows = colorSwatchRowCount(paletteCount: paletteCount)
             let columns = colorSwatchColumnCount(paletteCount: paletteCount)
@@ -867,6 +880,9 @@ enum SelectionToolbarState {
         if mode == .mosaic {
             return 252
         }
+        if mode == .eraser {
+            return 188
+        }
         let columns = colorSwatchColumnCount(paletteCount: clampedCount)
         let customSize = customColorSwatchSize(paletteCount: clampedCount)
         let paletteWidth = colorSwatchStartXOffset(mode: mode) + CGFloat(columns) * 16 + 2 + customSize + optionsToolbarHorizontalPadding
@@ -883,6 +899,9 @@ enum SelectionToolbarState {
         _ = paletteCount
         if mode == .mosaic {
             return 28
+        }
+        if mode == .eraser {
+            return 40
         }
         return colorSwatchRowCount(paletteCount: paletteCount) == 1 ? 30 : 40
     }
@@ -955,6 +974,8 @@ enum SelectionToolbarState {
             return 148
         case .mosaic:
             return 0
+        case .eraser:
+            return 0
         }
     }
 
@@ -1007,6 +1028,21 @@ enum SelectionToolbarState {
 
     static func magnifierZoomFieldRect(in optionsRect: NSRect) -> NSRect {
         NSRect(x: optionsRect.minX + 160, y: optionControlY(in: optionsRect), width: 58, height: 20)
+    }
+
+    static func eraserFreehandModeButtonRect(in optionsRect: NSRect) -> NSRect {
+        NSRect(x: optionsRect.minX + 10, y: optionsRect.minY + 8, width: 24, height: 24)
+    }
+
+    static func eraserRectangleModeButtonRect(in optionsRect: NSRect) -> NSRect {
+        NSRect(x: optionsRect.minX + 40, y: optionsRect.minY + 8, width: 24, height: 24)
+    }
+
+    static func eraserSizeButtonRects(in optionsRect: NSRect) -> [NSRect] {
+        let startX = optionsRect.minX + 80
+        return eraserSizeValues.indices.map { index in
+            NSRect(x: startX + CGFloat(index) * 32, y: optionsRect.minY + 8, width: 24, height: 24)
+        }
     }
 
     static func installedTextFontFamilies() -> [String] {
@@ -1151,7 +1187,7 @@ enum SelectionToolbarState {
             return strokeStyleFieldRect(in: optionsRect)
         case .arrowLine, .brush:
             return compactStrokeStyleFieldRect(in: optionsRect)
-        case .marker, .mosaic, .text, .numberSequence, .magnifier:
+        case .marker, .mosaic, .text, .numberSequence, .magnifier, .eraser:
             return .zero
         }
     }
@@ -1162,7 +1198,7 @@ enum SelectionToolbarState {
             return NSRect(x: optionsRect.minX + 316, y: optionControlY(in: optionsRect), width: 42, height: 20)
         case .arrowLine:
             return NSRect(x: optionsRect.minX + 208, y: optionControlY(in: optionsRect), width: 42, height: 20)
-        case .brush, .marker, .mosaic, .text, .numberSequence, .magnifier:
+        case .brush, .marker, .mosaic, .text, .numberSequence, .magnifier, .eraser:
             return .zero
         }
     }
@@ -1173,7 +1209,7 @@ enum SelectionToolbarState {
             return NSRect(x: optionsRect.minX + 364, y: optionControlY(in: optionsRect), width: 42, height: 20)
         case .arrowLine:
             return NSRect(x: optionsRect.minX + 256, y: optionControlY(in: optionsRect), width: 42, height: 20)
-        case .brush, .marker, .mosaic, .text, .numberSequence, .magnifier:
+        case .brush, .marker, .mosaic, .text, .numberSequence, .magnifier, .eraser:
             return .zero
         }
     }

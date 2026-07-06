@@ -2944,6 +2944,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return numberCreationCursor(for: .check)
         case .numberCross:
             return numberCreationCursor(for: .cross)
+        case .eraserCircle:
+            return NSCursor.crosshair
         }
     }
 
@@ -11362,6 +11364,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             drawNumberOptions(in: optionsRect)
         case .magnifier:
             drawMagnifierOptions(in: optionsRect)
+        case .eraser:
+            break
         }
         if SelectionToolbarState.showsStrokeStyleField(for: optionsToolbarMode) {
             drawStrokeStyleField(in: optionsRect)
@@ -11436,6 +11440,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 separatorXs.append(lastStrokeWidth.maxX + (firstSwatchMinX - lastStrokeWidth.maxX) / 2)
             }
         case .mosaic:
+            break
+        case .eraser:
             break
         case .magnifier:
             if let lastStrokeWidth = layout.strokeWidths.last,

@@ -7315,6 +7315,40 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertTrue(SelectionToolbarState.showsStrokeStyleField(for: .brush))
     }
 
+    func testEraserToolbarModeHasFreehandRectangleAndSizeControls() {
+        let optionsRect = NSRect(x: 20, y: 30, width: 220, height: 40)
+        let layout = SelectionToolbarState.optionsToolbarLayout(
+            in: optionsRect,
+            paletteCount: 14,
+            mode: .eraser
+        )
+
+        XCTAssertEqual(SelectionToolbarState.eraserSizeValues, [12, 24, 40])
+        XCTAssertNotNil(layout.eraserFreehandMode)
+        XCTAssertNotNil(layout.eraserRectangleMode)
+        XCTAssertEqual(layout.eraserSizes.count, 3)
+        XCTAssertTrue(layout.strokeWidths.isEmpty)
+        XCTAssertTrue(layout.colorSwatches.isEmpty)
+        XCTAssertFalse(SelectionToolbarState.showsStrokeStyleField(for: .eraser))
+    }
+
+    func testEraserOptionsToolbarSizeIsCompactAndStable() {
+        XCTAssertEqual(
+            SelectionToolbarState.optionsToolbarWidth(paletteCount: 14, mode: .eraser),
+            188
+        )
+        XCTAssertEqual(
+            SelectionToolbarState.optionsToolbarHeight(paletteCount: 14, mode: .eraser),
+            40
+        )
+    }
+
+    func testEraserCursorStyleIsDistinctFromBrushMarkerAndCrosshair() {
+        XCTAssertNotEqual(SelectionToolbarState.OverlayCursorStyle.eraserCircle, .brush)
+        XCTAssertNotEqual(SelectionToolbarState.OverlayCursorStyle.eraserCircle, .marker)
+        XCTAssertNotEqual(SelectionToolbarState.OverlayCursorStyle.eraserCircle, .crosshair)
+    }
+
     func testMagnifierToolbarModeHasShapeZoomStrokeAndColorSections() throws {
         let optionsRect = NSRect(
             x: 20,
