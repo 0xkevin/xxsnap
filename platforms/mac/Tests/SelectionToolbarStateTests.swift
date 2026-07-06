@@ -6611,7 +6611,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertTrue(SelectionToolbarState.showsStrokeStyleField(for: .brush))
     }
 
-    func testMagnifierToolbarModeHasShapeZoomStrokeAndColorSections() {
+    func testMagnifierToolbarModeHasShapeZoomStrokeAndColorSections() throws {
         let optionsRect = NSRect(x: 20, y: 30, width: 380, height: 40)
         let layout = SelectionToolbarState.optionsToolbarLayout(
             in: optionsRect,
@@ -6625,6 +6625,18 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertNotNil(layout.ellipseMode)
         XCTAssertEqual(layout.magnifierZooms.count, 4)
         XCTAssertEqual(layout.colorSwatches.count, 15)
+        let sectionRects = layout.strokeWidths
+            + [try XCTUnwrap(layout.rectangleMode), try XCTUnwrap(layout.ellipseMode)]
+            + layout.magnifierZooms
+            + [try XCTUnwrap(layout.colorSwatches.first), try XCTUnwrap(layout.colorSwatches.last)]
+        for firstIndex in sectionRects.indices {
+            for secondIndex in sectionRects.indices where firstIndex < secondIndex {
+                XCTAssertFalse(
+                    sectionRects[firstIndex].intersects(sectionRects[secondIndex]),
+                    "Expected magnifier toolbar sections \(firstIndex) and \(secondIndex) not to overlap"
+                )
+            }
+        }
         XCTAssertFalse(SelectionToolbarState.showsStrokeStyleField(for: .magnifier))
     }
 
@@ -6640,8 +6652,8 @@ final class SelectionToolbarStateTests: XCTestCase {
             style: CaptureAnnotationStyle()
         )
 
-        XCTAssertEqual(annotation.magnifierShape ?? .circle, .circle)
-        XCTAssertEqual(annotation.magnifierZoom ?? 2, 2)
+        XCTAssertEqual(annotation.magnifierShape, .circle)
+        XCTAssertEqual(annotation.magnifierZoom, 2)
 
         annotation.magnifierShape = .rectangle
         annotation.magnifierZoom = 4

@@ -533,7 +533,7 @@ enum SelectionToolbarState {
             magnifierZooms: mode == .magnifier ? magnifierZoomRects(in: optionsRect) : [],
             fillToggle: mode == .shape ? fillToggleRect(in: optionsRect) : nil,
             rectangleMode: rectangleModeRect(in: optionsRect, mode: mode),
-            ellipseMode: (mode == .shape || mode == .magnifier) ? ellipseModeButtonRect(in: optionsRect) : nil,
+            ellipseMode: ellipseModeRect(in: optionsRect, mode: mode),
             strokeStyle: strokeStyleRect(in: optionsRect, mode: mode),
             startArrowType: mode == .arrowLine ? startArrowTypeFieldRect(in: optionsRect, mode: mode) : nil,
             endArrowType: mode == .arrowLine ? endArrowTypeFieldRect(in: optionsRect, mode: mode) : nil,
@@ -546,10 +546,21 @@ enum SelectionToolbarState {
         case .shape:
             return rectangleModeButtonRect(in: optionsRect)
         case .magnifier:
-            return rectangleModeButtonRect(in: optionsRect)
+            return magnifierRectangleModeButtonRect(in: optionsRect)
         case .mosaic:
             return mosaicRectangleButtonRect(in: optionsRect, mode: mode)
         case .arrowLine, .brush, .marker, .text, .numberSequence:
+            return nil
+        }
+    }
+
+    private static func ellipseModeRect(in optionsRect: NSRect, mode: OptionsToolbarMode) -> NSRect? {
+        switch mode {
+        case .shape:
+            return ellipseModeButtonRect(in: optionsRect)
+        case .magnifier:
+            return magnifierEllipseModeButtonRect(in: optionsRect)
+        case .arrowLine, .brush, .marker, .mosaic, .text, .numberSequence:
             return nil
         }
     }
@@ -939,7 +950,7 @@ enum SelectionToolbarState {
         case .marker:
             return 102
         case .magnifier:
-            return 290
+            return 284
         case .text:
             return 350
         case .numberSequence:
@@ -995,9 +1006,9 @@ enum SelectionToolbarState {
     static func magnifierZoomRects(in optionsRect: NSRect) -> [NSRect] {
         (0..<magnifierZoomValues.count).map { index in
             NSRect(
-                x: optionsRect.minX + 118 + CGFloat(index) * 38,
+                x: optionsRect.minX + 90 + CGFloat(index) * 32,
                 y: optionsRect.midY - 11,
-                width: 32,
+                width: 28,
                 height: 22
             )
         }
@@ -1113,6 +1124,14 @@ enum SelectionToolbarState {
 
     static func ellipseModeButtonRect(in optionsRect: NSRect) -> NSRect {
         NSRect(x: optionsRect.minX + 162, y: optionControlY(in: optionsRect), width: 22, height: 20)
+    }
+
+    private static func magnifierRectangleModeButtonRect(in optionsRect: NSRect) -> NSRect {
+        NSRect(x: optionsRect.minX + 226, y: optionControlY(in: optionsRect), width: 26, height: 20)
+    }
+
+    private static func magnifierEllipseModeButtonRect(in optionsRect: NSRect) -> NSRect {
+        NSRect(x: optionsRect.minX + 258, y: optionControlY(in: optionsRect), width: 22, height: 20)
     }
 
     static func strokeStyleFieldRect(in optionsRect: NSRect) -> NSRect {

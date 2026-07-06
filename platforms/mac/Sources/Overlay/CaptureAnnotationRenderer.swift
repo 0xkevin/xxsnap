@@ -1074,8 +1074,8 @@ struct CaptureAnnotation {
     var numberMarkType: CaptureNumberMarkType?
     var numberSequenceIndex: Int?
     var numberSequenceIsManual = false
-    var magnifierShape: CaptureMagnifierShape?
-    var magnifierZoom: CGFloat?
+    var magnifierShape: CaptureMagnifierShape? = .circle
+    var magnifierZoom: CGFloat? = 2
     var mosaicStroke: CaptureMosaicStroke?
     var mosaicRedaction: CaptureMosaicRedaction?
 }
