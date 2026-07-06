@@ -1062,10 +1062,24 @@ struct CaptureAnnotationStyle {
     var textOutlineColor: NSColor = .white
 }
 
+enum CaptureEraserMaskKind: Equatable {
+    case freehand
+    case rectangle
+}
+
+struct CaptureEraserMask: Equatable {
+    var kind: CaptureEraserMaskKind
+    var renderOrder: Int
+    var size: CGFloat
+    var points: [NSPoint]
+    var rect: NSRect
+}
+
 struct CaptureAnnotation {
     var kind: CaptureAnnotationKind
     var rect: NSRect
     var style: CaptureAnnotationStyle
+    var renderOrder: Int = 0
     var rotationAngle: CGFloat = 0
     var arrowLine: CaptureArrowLine?
     var brushPath: CaptureBrushPath?
@@ -1098,6 +1112,7 @@ struct CaptureSelectionResult {
     var screenRect: NSRect
     var snapshotRect: NSRect
     var annotations: [CaptureAnnotation]
+    var eraserMasks: [CaptureEraserMask] = []
     var action: CaptureCompletionAction
 }
 

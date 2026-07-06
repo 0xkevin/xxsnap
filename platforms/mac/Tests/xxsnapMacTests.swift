@@ -3,6 +3,59 @@ import XCTest
 @testable import xxsnap
 
 final class xxsnapMacTests: XCTestCase {
+    func testEraserMaskStoresFreehandAndRectangleGeometry() {
+        let freehand = CaptureEraserMask(
+            kind: .freehand,
+            renderOrder: 7,
+            size: 24,
+            points: [
+                NSPoint(x: 10, y: 12),
+                NSPoint(x: 20, y: 22),
+            ],
+            rect: .zero
+        )
+        let rectangle = CaptureEraserMask(
+            kind: .rectangle,
+            renderOrder: 8,
+            size: 24,
+            points: [],
+            rect: NSRect(x: 2, y: 4, width: 30, height: 40)
+        )
+
+        XCTAssertEqual(freehand.kind, .freehand)
+        XCTAssertEqual(freehand.renderOrder, 7)
+        XCTAssertEqual(freehand.size, 24)
+        XCTAssertEqual(freehand.points.count, 2)
+        XCTAssertEqual(rectangle.kind, .rectangle)
+        XCTAssertEqual(rectangle.rect, NSRect(x: 2, y: 4, width: 30, height: 40))
+    }
+
+    func testSelectionResultCarriesEraserMasksWithoutChangingExistingAnnotationDefault() {
+        let annotation = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 4, y: 5, width: 30, height: 20),
+            style: CaptureAnnotationStyle()
+        )
+        let mask = CaptureEraserMask(
+            kind: .rectangle,
+            renderOrder: 2,
+            size: 24,
+            points: [],
+            rect: NSRect(x: 8, y: 8, width: 10, height: 10)
+        )
+        let result = CaptureSelectionResult(
+            screenRect: NSRect(x: 1, y: 2, width: 100, height: 80),
+            snapshotRect: NSRect(x: 0, y: 0, width: 100, height: 80),
+            annotations: [annotation],
+            eraserMasks: [mask],
+            action: .copy
+        )
+
+        XCTAssertEqual(annotation.renderOrder, 0)
+        XCTAssertEqual(result.annotations.count, 1)
+        XCTAssertEqual(result.eraserMasks, [mask])
+    }
+
     func testAnnotationRendererDrawsRectangleOntoImage() throws {
         let image = NSImage(size: NSSize(width: 40, height: 40))
         image.lockFocus()
