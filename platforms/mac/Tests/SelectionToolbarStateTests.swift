@@ -344,6 +344,43 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertTrue(window.test_isShapeToolActive)
     }
 
+    func testEraserActivationClearsNumberMagnifierAndEyedropperTools() {
+        let numberWindow = makeOverlayWindowWithLockedSelection()
+        click(numberWindow, button: .number)
+        XCTAssertTrue(numberWindow.test_isNumberToolActive)
+
+        click(numberWindow, button: .eraser)
+        XCTAssertTrue(numberWindow.test_isEraserToolActive)
+        XCTAssertFalse(numberWindow.test_isNumberToolActive)
+
+        let magnifierWindow = makeOverlayWindowWithLockedSelection()
+        click(magnifierWindow, button: .magnifier)
+        XCTAssertTrue(magnifierWindow.test_isMagnifierToolActive)
+
+        click(magnifierWindow, button: .eraser)
+        XCTAssertTrue(magnifierWindow.test_isEraserToolActive)
+        XCTAssertFalse(magnifierWindow.test_isMagnifierToolActive)
+
+        let eyedropperWindow = makeOverlayWindowWithLockedSelection()
+        click(eyedropperWindow, button: .eyedropper)
+        XCTAssertTrue(eyedropperWindow.test_isEyedropperToolActive)
+
+        click(eyedropperWindow, button: .eraser)
+        XCTAssertTrue(eyedropperWindow.test_isEraserToolActive)
+        XCTAssertFalse(eyedropperWindow.test_isEyedropperToolActive)
+    }
+
+    func testEraserActivationClearsPendingTextEditState() {
+        let window = makeOverlayWindowWithLockedSelection()
+        window.test_seedPendingTextEdit()
+        XCTAssertTrue(window.test_hasPendingTextEdit)
+
+        click(window, button: .eraser)
+
+        XCTAssertTrue(window.test_isEraserToolActive)
+        XCTAssertFalse(window.test_hasPendingTextEdit)
+    }
+
     func testTextToolCreatesEditableAnnotationAndCommitsTypedText() {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         let selection = NSRect(x: 100, y: 100, width: 300, height: 220)

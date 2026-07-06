@@ -860,6 +860,14 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_didShowPlaceholder ?? false
     }
 
+    var test_hasPendingTextEdit: Bool {
+        (contentView as? SelectionOverlayView)?.test_hasPendingTextEdit ?? false
+    }
+
+    func test_seedPendingTextEdit() {
+        (contentView as? SelectionOverlayView)?.test_seedPendingTextEdit()
+    }
+
     var test_currentMagnifierShape: CaptureMagnifierShape {
         (contentView as? SelectionOverlayView)?.test_currentMagnifierShape ?? .rectangle
     }
@@ -5489,6 +5497,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         activeNumberDropdown = false
         activeMagnifierZoomDropdown = false
         commitCurrentTextEdit()
+        clearPendingTextEdit()
     }
 
     private func cancelEraserDraft() {
@@ -6343,6 +6352,20 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     var test_didShowPlaceholder: Bool {
         didShowPlaceholderForTesting
+    }
+
+    var test_hasPendingTextEdit: Bool {
+        pendingTextEditAnnotationIndex != nil
+            || pendingTextEditStartPoint != nil
+            || pendingTextEditResizeHandle != nil
+            || pendingTextEditShouldBeginEditing == false
+    }
+
+    func test_seedPendingTextEdit() {
+        pendingTextEditAnnotationIndex = 0
+        pendingTextEditStartPoint = .zero
+        pendingTextEditResizeHandle = nil
+        pendingTextEditShouldBeginEditing = false
     }
 
     var test_currentMagnifierShape: CaptureMagnifierShape {
