@@ -1074,10 +1074,18 @@ struct CaptureAnnotation {
     var numberMarkType: CaptureNumberMarkType?
     var numberSequenceIndex: Int?
     var numberSequenceIsManual = false
-    var magnifierShape: CaptureMagnifierShape? = .circle
-    var magnifierZoom: CGFloat? = 2
+    var magnifierShape: CaptureMagnifierShape?
+    var magnifierZoom: CGFloat?
     var mosaicStroke: CaptureMosaicStroke?
     var mosaicRedaction: CaptureMosaicRedaction?
+
+    var effectiveMagnifierShape: CaptureMagnifierShape {
+        magnifierShape ?? .circle
+    }
+
+    var effectiveMagnifierZoom: CGFloat {
+        magnifierZoom ?? 2
+    }
 }
 
 enum CaptureNumberMarkType: CaseIterable, Equatable {

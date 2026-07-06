@@ -865,17 +865,13 @@ enum SelectionToolbarState {
         if mode == .mosaic {
             return 252
         }
-        if mode == .magnifier {
-            return 430
-        }
-        if mode == .text {
-            let columns = colorSwatchColumnCount(paletteCount: clampedCount)
-            let customSize = customColorSwatchSize(paletteCount: clampedCount)
-            return colorSwatchStartXOffset(mode: mode) + CGFloat(columns) * 16 + 2 + customSize + optionsToolbarHorizontalPadding
-        }
         let columns = colorSwatchColumnCount(paletteCount: clampedCount)
         let customSize = customColorSwatchSize(paletteCount: clampedCount)
-        return colorSwatchStartXOffset(mode: mode) + CGFloat(columns) * 16 + 2 + customSize + optionsToolbarHorizontalPadding
+        let paletteWidth = colorSwatchStartXOffset(mode: mode) + CGFloat(columns) * 16 + 2 + customSize + optionsToolbarHorizontalPadding
+        if mode == .magnifier {
+            return max(430, paletteWidth)
+        }
+        return paletteWidth
     }
 
     static func optionsToolbarHeight(

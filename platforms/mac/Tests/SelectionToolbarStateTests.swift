@@ -6612,10 +6612,15 @@ final class SelectionToolbarStateTests: XCTestCase {
     }
 
     func testMagnifierToolbarModeHasShapeZoomStrokeAndColorSections() throws {
-        let optionsRect = NSRect(x: 20, y: 30, width: 380, height: 40)
+        let optionsRect = NSRect(
+            x: 20,
+            y: 30,
+            width: SelectionToolbarState.optionsToolbarWidth(paletteCount: 20, mode: .magnifier),
+            height: 40
+        )
         let layout = SelectionToolbarState.optionsToolbarLayout(
             in: optionsRect,
-            paletteCount: 14,
+            paletteCount: 20,
             mode: .magnifier
         )
 
@@ -6624,11 +6629,16 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertNotNil(layout.rectangleMode)
         XCTAssertNotNil(layout.ellipseMode)
         XCTAssertEqual(layout.magnifierZooms.count, 4)
-        XCTAssertEqual(layout.colorSwatches.count, 15)
+        XCTAssertEqual(layout.colorSwatches.count, 21)
         let sectionRects = layout.strokeWidths
             + [try XCTUnwrap(layout.rectangleMode), try XCTUnwrap(layout.ellipseMode)]
             + layout.magnifierZooms
-            + [try XCTUnwrap(layout.colorSwatches.first), try XCTUnwrap(layout.colorSwatches.last)]
+            + layout.colorSwatches
+        for rect in sectionRects {
+            XCTAssertTrue(optionsRect.contains(rect), "Expected \(rect) inside \(optionsRect)")
+        }
+        let maxControlX = try XCTUnwrap(sectionRects.map(\.maxX).max())
+        XCTAssertGreaterThanOrEqual(optionsRect.maxX - maxControlX, SelectionToolbarState.optionsToolbarHorizontalPadding)
         for firstIndex in sectionRects.indices {
             for secondIndex in sectionRects.indices where firstIndex < secondIndex {
                 XCTAssertFalse(
@@ -6652,14 +6662,27 @@ final class SelectionToolbarStateTests: XCTestCase {
             style: CaptureAnnotationStyle()
         )
 
-        XCTAssertEqual(annotation.magnifierShape, .circle)
-        XCTAssertEqual(annotation.magnifierZoom, 2)
+        XCTAssertNil(annotation.magnifierShape)
+        XCTAssertNil(annotation.magnifierZoom)
+        XCTAssertEqual(annotation.effectiveMagnifierShape, .circle)
+        XCTAssertEqual(annotation.effectiveMagnifierZoom, 2)
 
         annotation.magnifierShape = .rectangle
         annotation.magnifierZoom = 4
 
         XCTAssertEqual(annotation.magnifierShape, .rectangle)
         XCTAssertEqual(annotation.magnifierZoom, 4)
+        XCTAssertEqual(annotation.effectiveMagnifierShape, .rectangle)
+        XCTAssertEqual(annotation.effectiveMagnifierZoom, 4)
+
+        let rectangle = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 20, y: 30, width: 80, height: 60),
+            style: CaptureAnnotationStyle()
+        )
+
+        XCTAssertNil(rectangle.magnifierShape)
+        XCTAssertNil(rectangle.magnifierZoom)
     }
 
     func testOverlayWindowUsesMarkerOptionsToolbarModeForMarkerShape() {
