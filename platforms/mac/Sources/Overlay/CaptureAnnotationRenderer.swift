@@ -1203,16 +1203,21 @@ enum CaptureAnnotationRenderer {
     }
 
     static func render(image: NSImage, annotations: [CaptureAnnotation]) -> NSImage {
-        guard !annotations.isEmpty else {
+        render(image: image, annotations: annotations, eraserMasks: [])
+    }
+
+    static func render(image: NSImage, annotations: [CaptureAnnotation], eraserMasks: [CaptureEraserMask]) -> NSImage {
+        guard !annotations.isEmpty || !eraserMasks.isEmpty else {
             return image
         }
 
-        return renderImage(image: image, annotations: annotations) ?? image
+        return renderImage(image: image, annotations: annotations, eraserMasks: eraserMasks) ?? image
     }
 
     private static func renderImage(
         image: NSImage,
-        annotations: [CaptureAnnotation]
+        annotations: [CaptureAnnotation],
+        eraserMasks: [CaptureEraserMask]
     ) -> NSImage? {
         guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
             return nil
@@ -1228,16 +1233,23 @@ enum CaptureAnnotationRenderer {
 
         let scaleX = CGFloat(cgImage.width) / max(image.size.width, 1)
         let scaleY = CGFloat(cgImage.height) / max(image.size.height, 1)
-        for annotation in annotations {
-            if isMosaicAnnotation(annotation) {
-                drawMosaicAnnotation(
-                    annotation,
-                    in: context,
-                    scaleX: scaleX,
-                    scaleY: scaleY
-                )
-            } else {
-                draw(annotation, in: context, sourceImage: cgImage, scaleX: scaleX, scaleY: scaleY)
+
+        let entries = renderEntries(annotations: annotations, eraserMasks: eraserMasks)
+        if eraserMasks.isEmpty {
+            for entry in entries {
+                guard case let .annotation(annotation) = entry.kind else {
+                    continue
+                }
+                drawRenderAnnotation(annotation, in: context, sourceImage: cgImage, scaleX: scaleX, scaleY: scaleY)
+            }
+        } else {
+            for entry in entries {
+                switch entry.kind {
+                case let .annotation(annotation):
+                    drawRenderAnnotation(annotation, in: context, sourceImage: cgImage, scaleX: scaleX, scaleY: scaleY)
+                case let .eraserMask(mask):
+                    clear(mask: mask, in: context, sourceImage: cgImage, scaleX: scaleX, scaleY: scaleY)
+                }
             }
         }
 
@@ -1246,6 +1258,118 @@ enum CaptureAnnotationRenderer {
         }
 
         return NSImage(cgImage: renderedImage, size: image.size)
+    }
+
+    private enum RenderEntryKind {
+        case annotation(CaptureAnnotation)
+        case eraserMask(CaptureEraserMask)
+    }
+
+    private struct RenderEntry {
+        var order: Int
+        var tieBreak: Int
+        var kind: RenderEntryKind
+    }
+
+    private static func renderEntries(
+        annotations: [CaptureAnnotation],
+        eraserMasks: [CaptureEraserMask]
+    ) -> [RenderEntry] {
+        let annotationEntries = annotations.enumerated().map { index, annotation in
+            RenderEntry(
+                order: annotation.renderOrder == 0 ? index + 1 : annotation.renderOrder,
+                tieBreak: index,
+                kind: .annotation(annotation)
+            )
+        }
+        let maskEntries = eraserMasks.enumerated().map { index, mask in
+            RenderEntry(order: mask.renderOrder, tieBreak: 10_000 + index, kind: .eraserMask(mask))
+        }
+
+        return (annotationEntries + maskEntries).sorted {
+            if $0.order != $1.order {
+                return $0.order < $1.order
+            }
+            return $0.tieBreak < $1.tieBreak
+        }
+    }
+
+    private static func drawRenderAnnotation(
+        _ annotation: CaptureAnnotation,
+        in context: CGContext,
+        sourceImage: CGImage,
+        scaleX: CGFloat,
+        scaleY: CGFloat
+    ) {
+        if isMosaicAnnotation(annotation) {
+            drawMosaicAnnotation(
+                annotation,
+                in: context,
+                scaleX: scaleX,
+                scaleY: scaleY
+            )
+        } else {
+            draw(annotation, in: context, sourceImage: sourceImage, scaleX: scaleX, scaleY: scaleY)
+        }
+    }
+
+    private static func clear(
+        mask: CaptureEraserMask,
+        in context: CGContext,
+        sourceImage: CGImage,
+        scaleX: CGFloat,
+        scaleY: CGFloat
+    ) {
+        guard let path = eraserMaskPath(mask: mask, scaleX: scaleX, scaleY: scaleY) else {
+            return
+        }
+
+        context.saveGState()
+        context.addPath(path)
+        context.clip()
+        context.setBlendMode(.copy)
+        context.draw(sourceImage, in: CGRect(x: 0, y: 0, width: sourceImage.width, height: sourceImage.height))
+        context.restoreGState()
+    }
+
+    private static func eraserMaskPath(mask: CaptureEraserMask, scaleX: CGFloat, scaleY: CGFloat) -> CGPath? {
+        switch mask.kind {
+        case .rectangle:
+            let rect = mask.rect.standardized
+            let path = CGMutablePath()
+            path.addRect(CGRect(
+                x: rect.minX * scaleX,
+                y: rect.minY * scaleY,
+                width: rect.width * scaleX,
+                height: rect.height * scaleY
+            ))
+            return path
+        case .freehand:
+            return freehandEraserMaskPath(mask: mask, scaleX: scaleX, scaleY: scaleY)
+        }
+    }
+
+    private static func freehandEraserMaskPath(mask: CaptureEraserMask, scaleX: CGFloat, scaleY: CGFloat) -> CGPath? {
+        guard let firstPoint = mask.points.first else {
+            return nil
+        }
+
+        let lineScale = (scaleX + scaleY) / 2
+        let lineWidth = max(1, mask.size * lineScale)
+        let first = pixelPoint(firstPoint, scaleX: scaleX, scaleY: scaleY)
+        if mask.points.count == 1 {
+            let radius = lineWidth / 2
+            let path = CGMutablePath()
+            path.addEllipse(in: CGRect(x: first.x - radius, y: first.y - radius, width: radius * 2, height: radius * 2))
+            return path
+        }
+
+        let path = CGMutablePath()
+        path.move(to: first)
+        for point in mask.points.dropFirst() {
+            path.addLine(to: pixelPoint(point, scaleX: scaleX, scaleY: scaleY))
+        }
+        return path.copy(strokingWithWidth: lineWidth, lineCap: .round, lineJoin: .round, miterLimit: 4)
     }
 
     private static func makeRenderContext(width: Int, height: Int, colorSpace: CGColorSpace) -> CGContext? {

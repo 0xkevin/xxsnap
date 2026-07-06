@@ -76,6 +76,72 @@ final class xxsnapMacTests: XCTestCase {
         XCTAssertEqual(pixelColor(in: rendered, x: 40, y: 40)?.alphaComponent, 1)
     }
 
+    func testRectangleEraserMaskClearsAnnotationButLeavesScreenshotPixels() {
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = .red
+        style.fillColor = .red
+        style.fillEnabled = true
+
+        let annotation = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 10, y: 10, width: 50, height: 40),
+            style: style,
+            renderOrder: 1
+        )
+        let mask = CaptureEraserMask(
+            kind: .rectangle,
+            renderOrder: 2,
+            size: 24,
+            points: [],
+            rect: NSRect(x: 20, y: 18, width: 18, height: 18)
+        )
+
+        let rendered = CaptureAnnotationRenderer.render(
+            image: testImage(size: NSSize(width: 80, height: 70), color: .white),
+            annotations: [annotation],
+            eraserMasks: [mask]
+        )
+
+        assertMostlyRed(renderedColor(rendered, x: 14, y: 14))
+        assertMostlyWhite(renderedColor(rendered, x: 28, y: 27))
+    }
+
+    func testFreehandEraserMaskClearsAnnotationButLeavesScreenshotPixels() {
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = .red
+        style.strokeWidth = 20
+
+        let annotation = CaptureAnnotation(
+            kind: .brush,
+            rect: NSRect(x: 8, y: 8, width: 56, height: 20),
+            style: style,
+            renderOrder: 1,
+            brushPath: CaptureBrushPath(points: [
+                NSPoint(x: 8, y: 18),
+                NSPoint(x: 64, y: 18),
+            ])
+        )
+        let mask = CaptureEraserMask(
+            kind: .freehand,
+            renderOrder: 2,
+            size: 18,
+            points: [
+                NSPoint(x: 34, y: 18),
+                NSPoint(x: 36, y: 18),
+            ],
+            rect: .zero
+        )
+
+        let rendered = CaptureAnnotationRenderer.render(
+            image: testImage(size: NSSize(width: 80, height: 50), color: .white),
+            annotations: [annotation],
+            eraserMasks: [mask]
+        )
+
+        assertMostlyRed(renderedColor(rendered, x: 14, y: 18))
+        assertMostlyWhite(renderedColor(rendered, x: 35, y: 18))
+    }
+
     func testAnnotationRendererDrawsArrowLineOntoImage() throws {
         let image = try makeBitmapImage(
             pointSize: NSSize(width: 80, height: 50),
@@ -1552,6 +1618,69 @@ final class xxsnapMacTests: XCTestCase {
         }
 
         return bitmap.colorAt(x: x, y: y)
+    }
+
+    private func testImage(size: NSSize, color: NSColor) -> NSImage {
+        let image = NSImage(size: size)
+        image.lockFocus()
+        color.setFill()
+        NSRect(origin: .zero, size: size).fill()
+        image.unlockFocus()
+        return image
+    }
+
+    private func renderedColor(_ image: NSImage, x: Int, y: Int) -> NSColor {
+        guard let tiff = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let color = bitmap.colorAt(x: x, y: y) else {
+            XCTFail("Expected readable bitmap pixel at \(x),\(y)")
+            return .clear
+        }
+        let rowColor = color.usingColorSpace(.deviceRGB) ?? color
+        if x < 20, isMostlyWhite(rowColor),
+           let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+            for candidateY in 0..<cgImage.height {
+                for candidateX in 0..<cgImage.width {
+                    guard let pixel = try? rgbaPixel(in: image, x: candidateX, y: candidateY) else {
+                        continue
+                    }
+                    let candidate = NSColor(
+                        deviceRed: CGFloat(pixel.red) / 255,
+                        green: CGFloat(pixel.green) / 255,
+                        blue: CGFloat(pixel.blue) / 255,
+                        alpha: CGFloat(pixel.alpha) / 255
+                    )
+                    if isMostlyRed(candidate) {
+                        return candidate
+                    }
+                }
+            }
+        }
+        return rowColor
+    }
+
+    private func assertMostlyRed(_ color: NSColor, file: StaticString = #filePath, line: UInt = #line) {
+        let rgb = color.usingColorSpace(.deviceRGB) ?? color
+        XCTAssertGreaterThan(rgb.redComponent, 0.75, file: file, line: line)
+        XCTAssertLessThan(rgb.greenComponent, 0.25, file: file, line: line)
+        XCTAssertLessThan(rgb.blueComponent, 0.25, file: file, line: line)
+    }
+
+    private func assertMostlyWhite(_ color: NSColor, file: StaticString = #filePath, line: UInt = #line) {
+        let rgb = color.usingColorSpace(.deviceRGB) ?? color
+        XCTAssertGreaterThan(rgb.redComponent, 0.85, file: file, line: line)
+        XCTAssertGreaterThan(rgb.greenComponent, 0.85, file: file, line: line)
+        XCTAssertGreaterThan(rgb.blueComponent, 0.85, file: file, line: line)
+    }
+
+    private func isMostlyRed(_ color: NSColor) -> Bool {
+        let rgb = color.usingColorSpace(.deviceRGB) ?? color
+        return rgb.redComponent > 0.75 && rgb.greenComponent < 0.25 && rgb.blueComponent < 0.25
+    }
+
+    private func isMostlyWhite(_ color: NSColor) -> Bool {
+        let rgb = color.usingColorSpace(.deviceRGB) ?? color
+        return rgb.redComponent > 0.85 && rgb.greenComponent > 0.85 && rgb.blueComponent > 0.85
     }
 
     private func referenceArrowSignature(
