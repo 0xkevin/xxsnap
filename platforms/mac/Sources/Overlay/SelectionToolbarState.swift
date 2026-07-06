@@ -71,6 +71,7 @@ enum SelectionToolbarState {
         case mosaic
         case text
         case numberSequence
+        case magnifier
     }
 
     struct OptionsToolbarLayout: Equatable {
@@ -83,6 +84,7 @@ enum SelectionToolbarState {
         var textSize: NSRect
         var numberMarkType: NSRect
         var numberSize: NSRect
+        var magnifierZooms: [NSRect]
         var fillToggle: NSRect?
         var rectangleMode: NSRect?
         var ellipseMode: NSRect?
@@ -177,6 +179,7 @@ enum SelectionToolbarState {
     static let defaultFillPreviewColor = NSColor.systemGray
     static let defaultMarkerColor = NSColor(srgbRed: 179 / 255, green: 235 / 255, blue: 0 / 255, alpha: 1)
     static let rotationHandleInset: CGFloat = 14
+    static let magnifierZoomValues: [CGFloat] = [1.5, 2, 3, 4]
 
     static func strokeWidthValues(for mode: OptionsToolbarMode) -> [CGFloat] {
         switch mode {
@@ -190,6 +193,8 @@ enum SelectionToolbarState {
             return [14, 18, 22]
         case .mosaic:
             return [15, 25, 35]
+        case .magnifier:
+            return [2, 4, 7]
         case .text, .numberSequence:
             return []
         }
@@ -220,7 +225,7 @@ enum SelectionToolbarState {
     }
 
     static func showsStrokeStyleField(for mode: OptionsToolbarMode) -> Bool {
-        mode != .marker && mode != .mosaic && mode != .text && mode != .numberSequence
+        mode != .marker && mode != .mosaic && mode != .text && mode != .numberSequence && mode != .magnifier
     }
 
     static func shouldShowOptionsToolbar(isPrimaryShapeToolActive: Bool) -> Bool {
@@ -361,7 +366,7 @@ enum SelectionToolbarState {
         switch mode {
         case .brush:
             patterns = [.solid, .dashLong, .dashNarrow, .dashLongShort]
-        case .marker, .text, .numberSequence:
+        case .marker, .text, .numberSequence, .magnifier:
             patterns = [.solid]
         case .shape, .arrowLine, .mosaic:
             patterns = CaptureStrokePattern.allCases
@@ -460,7 +465,7 @@ enum SelectionToolbarState {
 
     static func annotationKindSupportsPostDrawEditing(_ kind: CaptureAnnotationKind) -> Bool {
         switch kind {
-        case .rectangle, .ellipse, .arrowLine, .marker, .text, .numberSequence, .mosaicStroke, .mosaicRectangle:
+        case .rectangle, .ellipse, .arrowLine, .marker, .text, .numberSequence, .magnifier, .mosaicStroke, .mosaicRectangle:
             return true
         case .brush:
             return false
@@ -469,7 +474,7 @@ enum SelectionToolbarState {
 
     static func annotationKindSupportsGeometryEditing(_ kind: CaptureAnnotationKind) -> Bool {
         switch kind {
-        case .rectangle, .ellipse, .text, .numberSequence, .mosaicRectangle:
+        case .rectangle, .ellipse, .text, .numberSequence, .magnifier, .mosaicRectangle:
             return true
         case .arrowLine, .brush, .marker, .mosaicStroke:
             return false
@@ -525,9 +530,10 @@ enum SelectionToolbarState {
             textSize: mode == .text ? textSizeFieldRect(in: optionsRect) : .zero,
             numberMarkType: mode == .numberSequence ? numberMarkTypeFieldRect(in: optionsRect) : .zero,
             numberSize: mode == .numberSequence ? numberSizeFieldRect(in: optionsRect) : .zero,
+            magnifierZooms: mode == .magnifier ? magnifierZoomRects(in: optionsRect) : [],
             fillToggle: mode == .shape ? fillToggleRect(in: optionsRect) : nil,
             rectangleMode: rectangleModeRect(in: optionsRect, mode: mode),
-            ellipseMode: mode == .shape ? ellipseModeButtonRect(in: optionsRect) : nil,
+            ellipseMode: (mode == .shape || mode == .magnifier) ? ellipseModeButtonRect(in: optionsRect) : nil,
             strokeStyle: strokeStyleRect(in: optionsRect, mode: mode),
             startArrowType: mode == .arrowLine ? startArrowTypeFieldRect(in: optionsRect, mode: mode) : nil,
             endArrowType: mode == .arrowLine ? endArrowTypeFieldRect(in: optionsRect, mode: mode) : nil,
@@ -538,6 +544,8 @@ enum SelectionToolbarState {
     private static func rectangleModeRect(in optionsRect: NSRect, mode: OptionsToolbarMode) -> NSRect? {
         switch mode {
         case .shape:
+            return rectangleModeButtonRect(in: optionsRect)
+        case .magnifier:
             return rectangleModeButtonRect(in: optionsRect)
         case .mosaic:
             return mosaicRectangleButtonRect(in: optionsRect, mode: mode)
@@ -846,6 +854,9 @@ enum SelectionToolbarState {
         if mode == .mosaic {
             return 252
         }
+        if mode == .magnifier {
+            return 430
+        }
         if mode == .text {
             let columns = colorSwatchColumnCount(paletteCount: clampedCount)
             let customSize = customColorSwatchSize(paletteCount: clampedCount)
@@ -927,6 +938,8 @@ enum SelectionToolbarState {
             return 214
         case .marker:
             return 102
+        case .magnifier:
+            return 290
         case .text:
             return 350
         case .numberSequence:
@@ -977,6 +990,17 @@ enum SelectionToolbarState {
 
     static func numberSizeFieldRect(in optionsRect: NSRect) -> NSRect {
         NSRect(x: optionsRect.minX + 78, y: optionControlY(in: optionsRect), width: 48, height: 20)
+    }
+
+    static func magnifierZoomRects(in optionsRect: NSRect) -> [NSRect] {
+        (0..<magnifierZoomValues.count).map { index in
+            NSRect(
+                x: optionsRect.minX + 118 + CGFloat(index) * 38,
+                y: optionsRect.midY - 11,
+                width: 32,
+                height: 22
+            )
+        }
     }
 
     static func installedTextFontFamilies() -> [String] {
@@ -1113,7 +1137,7 @@ enum SelectionToolbarState {
             return strokeStyleFieldRect(in: optionsRect)
         case .arrowLine, .brush:
             return compactStrokeStyleFieldRect(in: optionsRect)
-        case .marker, .mosaic, .text, .numberSequence:
+        case .marker, .mosaic, .text, .numberSequence, .magnifier:
             return .zero
         }
     }
@@ -1124,7 +1148,7 @@ enum SelectionToolbarState {
             return NSRect(x: optionsRect.minX + 316, y: optionControlY(in: optionsRect), width: 42, height: 20)
         case .arrowLine:
             return NSRect(x: optionsRect.minX + 208, y: optionControlY(in: optionsRect), width: 42, height: 20)
-        case .brush, .marker, .mosaic, .text, .numberSequence:
+        case .brush, .marker, .mosaic, .text, .numberSequence, .magnifier:
             return .zero
         }
     }
@@ -1135,7 +1159,7 @@ enum SelectionToolbarState {
             return NSRect(x: optionsRect.minX + 364, y: optionControlY(in: optionsRect), width: 42, height: 20)
         case .arrowLine:
             return NSRect(x: optionsRect.minX + 256, y: optionControlY(in: optionsRect), width: 42, height: 20)
-        case .brush, .marker, .mosaic, .text, .numberSequence:
+        case .brush, .marker, .mosaic, .text, .numberSequence, .magnifier:
             return .zero
         }
     }
@@ -2005,7 +2029,7 @@ enum SelectionToolbarState {
 
     private static func shapePath(in rect: NSRect, kind: CaptureAnnotationKind, cornerRadius: CGFloat) -> NSBezierPath {
         switch kind {
-        case .arrowLine, .brush, .marker, .text, .numberSequence, .mosaicStroke, .mosaicRectangle:
+        case .arrowLine, .brush, .marker, .text, .numberSequence, .magnifier, .mosaicStroke, .mosaicRectangle:
             NSBezierPath()
         case .rectangle where cornerRadius > 0:
             NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius)

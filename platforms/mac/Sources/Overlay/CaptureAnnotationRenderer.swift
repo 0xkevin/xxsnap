@@ -15,8 +15,14 @@ enum CaptureAnnotationKind {
     case marker
     case text
     case numberSequence
+    case magnifier
     case mosaicStroke
     case mosaicRectangle
+}
+
+enum CaptureMagnifierShape: CaseIterable, Equatable {
+    case circle
+    case rectangle
 }
 
 enum CaptureMosaicRedactionType: Equatable {
@@ -1068,6 +1074,8 @@ struct CaptureAnnotation {
     var numberMarkType: CaptureNumberMarkType?
     var numberSequenceIndex: Int?
     var numberSequenceIsManual = false
+    var magnifierShape: CaptureMagnifierShape?
+    var magnifierZoom: CGFloat?
     var mosaicStroke: CaptureMosaicStroke?
     var mosaicRedaction: CaptureMosaicRedaction?
 }
@@ -1293,7 +1301,7 @@ enum CaptureAnnotationRenderer {
             path.addRect(pixelRect)
         case .ellipse:
             path.addEllipse(in: pixelRect)
-        case .arrowLine, .brush, .marker, .text, .numberSequence, .mosaicStroke, .mosaicRectangle:
+        case .arrowLine, .brush, .marker, .text, .numberSequence, .magnifier, .mosaicStroke, .mosaicRectangle:
             return
         }
 
@@ -2278,7 +2286,7 @@ enum CaptureSketchStrokePath {
         }
 
         switch kind {
-        case .arrowLine, .brush, .marker, .text, .numberSequence, .mosaicStroke, .mosaicRectangle:
+        case .arrowLine, .brush, .marker, .text, .numberSequence, .magnifier, .mosaicStroke, .mosaicRectangle:
             return []
         case .ellipse:
             return ellipsePoints(in: rect)

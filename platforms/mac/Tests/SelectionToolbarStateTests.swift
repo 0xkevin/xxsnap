@@ -6611,6 +6611,45 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertTrue(SelectionToolbarState.showsStrokeStyleField(for: .brush))
     }
 
+    func testMagnifierToolbarModeHasShapeZoomStrokeAndColorSections() {
+        let optionsRect = NSRect(x: 20, y: 30, width: 380, height: 40)
+        let layout = SelectionToolbarState.optionsToolbarLayout(
+            in: optionsRect,
+            paletteCount: 14,
+            mode: .magnifier
+        )
+
+        XCTAssertEqual(SelectionToolbarState.strokeWidthValues(for: .magnifier), [2, 4, 7])
+        XCTAssertEqual(SelectionToolbarState.magnifierZoomValues, [1.5, 2, 3, 4])
+        XCTAssertNotNil(layout.rectangleMode)
+        XCTAssertNotNil(layout.ellipseMode)
+        XCTAssertEqual(layout.magnifierZooms.count, 4)
+        XCTAssertEqual(layout.colorSwatches.count, 15)
+        XCTAssertFalse(SelectionToolbarState.showsStrokeStyleField(for: .magnifier))
+    }
+
+    func testMagnifierKindSupportsSelectionAndGeometryEditing() {
+        XCTAssertTrue(SelectionToolbarState.annotationKindSupportsPostDrawEditing(.magnifier))
+        XCTAssertTrue(SelectionToolbarState.annotationKindSupportsGeometryEditing(.magnifier))
+    }
+
+    func testDefaultMagnifierAnnotationStateIsCircleTwoX() {
+        var annotation = CaptureAnnotation(
+            kind: .magnifier,
+            rect: NSRect(x: 10, y: 20, width: 120, height: 120),
+            style: CaptureAnnotationStyle()
+        )
+
+        XCTAssertEqual(annotation.magnifierShape ?? .circle, .circle)
+        XCTAssertEqual(annotation.magnifierZoom ?? 2, 2)
+
+        annotation.magnifierShape = .rectangle
+        annotation.magnifierZoom = 4
+
+        XCTAssertEqual(annotation.magnifierShape, .rectangle)
+        XCTAssertEqual(annotation.magnifierZoom, 4)
+    }
+
     func testOverlayWindowUsesMarkerOptionsToolbarModeForMarkerShape() {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_activateShapeTool(.marker)

@@ -7346,6 +7346,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return false
         case .marker:
             return kind == .marker
+        case .magnifier:
+            return kind == .magnifier
         case .mosaicStroke, .mosaicRectangle:
             return kind == .mosaicStroke || kind == .mosaicRectangle
         case .rectangle, .ellipse:
@@ -9675,7 +9677,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             path = NSBezierPath(rect: insetRect)
         case .ellipse:
             path = NSBezierPath(ovalIn: insetRect)
-        case .arrowLine, .brush, .marker, .text, .numberSequence, .mosaicStroke, .mosaicRectangle:
+        case .arrowLine, .brush, .marker, .text, .numberSequence, .magnifier, .mosaicStroke, .mosaicRectangle:
             return
         }
 
@@ -10930,6 +10932,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             drawTextOptions(in: optionsRect)
         case .numberSequence:
             drawNumberOptions(in: optionsRect)
+        case .magnifier:
+            break
         }
         if SelectionToolbarState.showsStrokeStyleField(for: optionsToolbarMode) {
             drawStrokeStyleField(in: optionsRect)
@@ -10975,6 +10979,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 separatorXs.append(lastStrokeWidth.maxX + (firstSwatchMinX - lastStrokeWidth.maxX) / 2)
             }
         case .mosaic:
+            break
+        case .magnifier:
             break
         case .text:
             if let firstSwatchMinX {
@@ -12529,6 +12535,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return .marker
         case .mosaicStroke, .mosaicRectangle:
             return .mosaic
+        case .magnifier:
+            return .magnifier
         case .rectangle, .ellipse, .text, .numberSequence:
             return .shape
         }
