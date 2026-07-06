@@ -500,6 +500,66 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_undoActionCount, 1)
     }
 
+    func testFinishResultIncludesCommittedEraserMasks() throws {
+        var finishedResult: CaptureSelectionResult?
+        let expectation = expectation(description: "copy action")
+        let window = SelectionOverlayWindow(backgroundImage: nil) { result in
+            finishedResult = result
+            expectation.fulfill()
+        }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 240, height: 160))
+        click(window, button: .eraser)
+        click(window, eraserMode: "rectangle")
+
+        window.test_mouseDown(at: NSPoint(x: 180, y: 170))
+        window.test_mouseDragged(to: NSPoint(x: 130, y: 120))
+        window.test_mouseUp(at: NSPoint(x: 130, y: 120))
+        window.test_keyDown(keyCode: 8, charactersIgnoringModifiers: "c", modifierFlags: [.command])
+
+        wait(for: [expectation], timeout: 2)
+        let mask = try XCTUnwrap(finishedResult?.eraserMasks.first)
+        XCTAssertEqual(finishedResult?.eraserMasks.count, 1)
+        XCTAssertEqual(mask.kind, .rectangle)
+        XCTAssertEqual(mask.rect, NSRect(x: 30, y: 20, width: 50, height: 50))
+        XCTAssertEqual(finishedResult?.action, .copy)
+    }
+
+    func testPreviewCompositeUsesCommittedAndDraftEraserMasks() throws {
+        let image = solidImage(size: NSSize(width: 260, height: 180), color: .white)
+        let selection = NSRect(x: 20, y: 20, width: 200, height: 120)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([
+            filledRectangleAnnotation(
+                rect: NSRect(x: 20, y: 20, width: 140, height: 70),
+                color: .systemRed,
+                renderOrder: 1
+            ),
+        ])
+        click(window, button: .eraser)
+        click(window, eraserMode: "rectangle")
+
+        window.test_mouseDown(at: NSPoint(x: 60, y: 60))
+        window.test_mouseDragged(to: NSPoint(x: 92, y: 92))
+        window.test_mouseUp(at: NSPoint(x: 92, y: 92))
+
+        window.test_mouseDown(at: NSPoint(x: 120, y: 60))
+        window.test_mouseDragged(to: NSPoint(x: 152, y: 92))
+        XCTAssertEqual(window.test_eraserPreviewMaskCount, 2)
+        let previewImage = try XCTUnwrap(window.test_eraserPreviewCompositeImage())
+
+        for erasedOverlayPoint in [NSPoint(x: 72, y: 72), NSPoint(x: 132, y: 72)] {
+            let samplePoint = NSPoint(x: erasedOverlayPoint.x, y: image.size.height - erasedOverlayPoint.y)
+            let previewPixel = try XCTUnwrap(rgbaPixel(in: previewImage, at: samplePoint))
+            let originalPixel = try XCTUnwrap(rgbaPixel(in: image, at: samplePoint))
+            XCTAssertFalse(
+                pixelDiffers(previewPixel, originalPixel),
+                "Expected eraser preview to reveal original pixel at \(erasedOverlayPoint), got \(hex(previewPixel)) expected \(hex(originalPixel))"
+            )
+        }
+        window.test_mouseUp(at: NSPoint(x: 152, y: 92))
+    }
+
     func testDeleteSelectedAnnotationRecordsUndoHistory() {
         let window = makeOverlayWindowWithLockedSelection()
         let annotation = testRectangleAnnotation(x: 20, y: 20, width: 60, height: 40, renderOrder: 1)
@@ -10903,6 +10963,17 @@ final class SelectionToolbarStateTests: XCTestCase {
             rect: NSRect(x: x, y: y, width: width, height: height),
             style: CaptureAnnotationStyle()
         )
+        annotation.renderOrder = renderOrder
+        return annotation
+    }
+
+    private func filledRectangleAnnotation(rect: NSRect, color: NSColor, renderOrder: Int) -> CaptureAnnotation {
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = color
+        style.strokeWidth = 1
+        style.fillEnabled = true
+        style.fillColor = color
+        var annotation = CaptureAnnotation(kind: .rectangle, rect: rect, style: style)
         annotation.renderOrder = renderOrder
         return annotation
     }

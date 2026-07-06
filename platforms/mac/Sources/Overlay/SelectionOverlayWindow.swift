@@ -889,6 +889,10 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_eraserMaskCount ?? 0
     }
 
+    var test_eraserPreviewMaskCount: Int {
+        (contentView as? SelectionOverlayView)?.test_eraserPreviewMaskCount ?? 0
+    }
+
     func test_eraserMask(at index: Int) -> CaptureEraserMask? {
         (contentView as? SelectionOverlayView)?.test_eraserMask(at: index)
     }
@@ -1183,6 +1187,10 @@ final class SelectionOverlayWindow: NSWindow {
 
     func test_mosaicPreviewComposite(for annotations: [CaptureAnnotation]) -> (size: NSSize, drawRect: NSRect)? {
         (contentView as? SelectionOverlayView)?.test_mosaicPreviewComposite(for: annotations)
+    }
+
+    func test_eraserPreviewCompositeImage() -> NSImage? {
+        (contentView as? SelectionOverlayView)?.test_eraserPreviewCompositeImage()
     }
 
     var test_hasMosaicCompositeCache: Bool {
@@ -6532,6 +6540,13 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         return (composite.image.size, composite.drawRect)
     }
 
+    func test_eraserPreviewCompositeImage() -> NSImage? {
+        guard let backgroundImage else {
+            return nil
+        }
+        return eraserPreviewCompositeImage(backgroundImage: backgroundImage)
+    }
+
     var test_hasMosaicCompositeCache: Bool {
         !mosaicCompositeCache.isEmpty
     }
@@ -6663,6 +6678,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     var test_eraserMaskCount: Int {
         eraserMasks.count
+    }
+
+    var test_eraserPreviewMaskCount: Int {
+        committedAndDraftEraserMasks.count
     }
 
     func test_eraserMask(at index: Int) -> CaptureEraserMask? {
@@ -7128,6 +7147,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 screenRect: window.convertToScreen(lockedSelectionRect).standardized,
                 snapshotRect: lockedSelectionRect.standardized,
                 annotations: annotations,
+                eraserMasks: eraserMasks,
                 action: action
             )
         )
@@ -9743,31 +9763,33 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     private func drawOverlay() {
         if let backgroundImage {
-            backgroundImage.draw(in: bounds, from: NSRect(origin: .zero, size: backgroundImage.size), operation: .copy, fraction: 1)
-            let usesSequentialMosaicOrdering = shouldRenderAnnotationsWithMosaicOrdering
-            if let rotatingIndex = rotatingMosaicRectangleAnnotationIndex(),
-               !usesSequentialMosaicOrdering,
-               rotatingIndex == annotations.indices.last,
-               drawRotatingMosaicRectanglePreview(at: rotatingIndex) {
-                // Rotation changes only the clip path; reuse the filtered base image.
-            } else if usesSequentialMosaicOrdering {
-                drawAnnotationsRespectingMosaicOrder()
-            } else {
-                let liveValueIndex = selectedMosaicValuePreviewIndex()
-                let mosaicAnnotations = annotations.enumerated().compactMap { index, annotation in
-                    isMosaicAnnotation(annotation) && index != liveValueIndex ? annotation : nil
+            if !drawEraserPreviewComposite(backgroundImage: backgroundImage) {
+                backgroundImage.draw(in: bounds, from: NSRect(origin: .zero, size: backgroundImage.size), operation: .copy, fraction: 1)
+                let usesSequentialMosaicOrdering = shouldRenderAnnotationsWithMosaicOrdering
+                if let rotatingIndex = rotatingMosaicRectangleAnnotationIndex(),
+                   !usesSequentialMosaicOrdering,
+                   rotatingIndex == annotations.indices.last,
+                   drawRotatingMosaicRectanglePreview(at: rotatingIndex) {
+                    // Rotation changes only the clip path; reuse the filtered base image.
+                } else if usesSequentialMosaicOrdering {
+                    drawAnnotationsRespectingMosaicOrder()
+                } else {
+                    let liveValueIndex = selectedMosaicValuePreviewIndex()
+                    let mosaicAnnotations = annotations.enumerated().compactMap { index, annotation in
+                        isMosaicAnnotation(annotation) && index != liveValueIndex ? annotation : nil
+                    }
+                    if let composite = mosaicPreviewComposite(for: mosaicAnnotations) {
+                        drawMosaicComposite(composite, clippedTo: mosaicAnnotations)
+                    }
+                    if let liveValueIndex {
+                        drawLiveMosaicValuePreview(at: liveValueIndex)
+                    }
                 }
-                if let composite = mosaicPreviewComposite(for: mosaicAnnotations) {
-                    drawMosaicComposite(composite, clippedTo: mosaicAnnotations)
+                if let draftAnnotation,
+                   isMosaicAnnotation(draftAnnotation),
+                   isUsableDraftAnnotation(draftAnnotation) {
+                    drawMosaicDraftPreview(draftAnnotation)
                 }
-                if let liveValueIndex {
-                    drawLiveMosaicValuePreview(at: liveValueIndex)
-                }
-            }
-            if let draftAnnotation,
-               isMosaicAnnotation(draftAnnotation),
-               isUsableDraftAnnotation(draftAnnotation) {
-                drawMosaicDraftPreview(draftAnnotation)
             }
             for (index, annotation) in annotations.enumerated()
                 where annotation.kind == .mosaicRectangle
@@ -9789,6 +9811,33 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
         NSColor.black.withAlphaComponent(0.34).setFill()
         path.fill()
+    }
+
+    private func drawEraserPreviewComposite(backgroundImage: NSImage) -> Bool {
+        guard let rendered = eraserPreviewCompositeImage(backgroundImage: backgroundImage) else {
+            return false
+        }
+
+        rendered.draw(
+            in: bounds,
+            from: NSRect(origin: .zero, size: rendered.size),
+            operation: .copy,
+            fraction: 1
+        )
+        return true
+    }
+
+    private func eraserPreviewCompositeImage(backgroundImage: NSImage) -> NSImage? {
+        let masks = committedAndDraftEraserMasks
+        guard !masks.isEmpty else {
+            return nil
+        }
+
+        return CaptureAnnotationRenderer.render(
+            image: backgroundImage,
+            annotations: annotations.map(overlayAnnotation),
+            eraserMasks: masks.map(overlayEraserMask)
+        )
     }
 
     private func drawSelectionBorder(_ rect: NSRect) {
@@ -10000,6 +10049,13 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private func drawAnnotations() {
+        if usesEraserPreviewComposite {
+            if let selectedAnnotation, shouldDrawSelectedAnnotationOutline(selectedAnnotation) {
+                drawSelectedAnnotationOutline(selectedAnnotation)
+            }
+            return
+        }
+
         let alreadyRenderedWithMosaicOrdering = shouldRenderAnnotationsWithMosaicOrdering
         let selectedIndex = selectedAnnotationIndex
         for (index, annotation) in annotations.enumerated() {
@@ -10027,6 +10083,49 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
         if shouldDrawSelectedAnnotationOutline(selectedAnnotation) {
             drawSelectedAnnotationOutline(selectedAnnotation)
+        }
+    }
+
+    private var usesEraserPreviewComposite: Bool {
+        backgroundImage != nil && !committedAndDraftEraserMasks.isEmpty
+    }
+
+    private var committedAndDraftEraserMasks: [CaptureEraserMask] {
+        var masks = eraserMasks
+        if let draft = draftEraserMaskForPreview() {
+            masks.append(draft)
+        }
+        return masks
+    }
+
+    private func draftEraserMaskForPreview() -> CaptureEraserMask? {
+        guard isDraggingEraser else {
+            return nil
+        }
+
+        switch currentEraserDrawingMode {
+        case .freehand:
+            guard !eraserDraftPoints.isEmpty else {
+                return nil
+            }
+            return CaptureEraserMask(
+                kind: .freehand,
+                renderOrder: nextRenderOrderValue,
+                size: currentEraserSize,
+                points: eraserDraftPoints,
+                rect: .zero
+            )
+        case .rectangle:
+            guard let draft = eraserDraftRect?.standardized, !draft.isEmpty else {
+                return nil
+            }
+            return CaptureEraserMask(
+                kind: .rectangle,
+                renderOrder: nextRenderOrderValue,
+                size: currentEraserSize,
+                points: [],
+                rect: localRect(fromOverlayRect: draft)
+            )
         }
     }
 
@@ -14242,6 +14341,20 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             overlayAnnotation.mosaicStroke = overlayMosaicStroke(fromLocalMosaicStroke: mosaicStroke)
         }
         return overlayAnnotation
+    }
+
+    private func overlayEraserMask(_ mask: CaptureEraserMask) -> CaptureEraserMask {
+        guard let lockedSelectionRect else {
+            return mask
+        }
+
+        return CaptureEraserMask(
+            kind: mask.kind,
+            renderOrder: mask.renderOrder,
+            size: mask.size,
+            points: mask.points.map { overlayPoint(fromLocalPoint: $0, selectionRect: lockedSelectionRect) },
+            rect: overlayRect(fromLocalAnnotationRect: mask.rect)
+        )
     }
 
     private func shiftedOverlayAnnotation(_ annotation: CaptureAnnotation, by origin: NSPoint) -> CaptureAnnotation {
