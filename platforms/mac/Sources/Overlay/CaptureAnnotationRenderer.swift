@@ -1561,20 +1561,28 @@ enum CaptureAnnotationRenderer {
         context.saveGState()
         addMagnifierClip(shape: shape, rect: destination, to: context)
         context.clip()
-        if !clippedSource.isNull,
-           clippedSource.width > 0,
-           clippedSource.height > 0,
-           let crop = sourceImage.cropping(to: clippedSource.integral) {
+        let integralSource = clippedSource.integral.intersection(imageBounds)
+        if !integralSource.isNull,
+           integralSource.width > 0,
+           integralSource.height > 0 {
+            let cropRect = CGRect(
+                x: integralSource.minX,
+                y: CGFloat(sourceImage.height) - integralSource.maxY,
+                width: integralSource.width,
+                height: integralSource.height
+            )
             let xScale = destination.width / max(requestedSource.width, 1)
             let yScale = destination.height / max(requestedSource.height, 1)
             let drawRect = CGRect(
-                x: destination.minX + (clippedSource.minX - requestedSource.minX) * xScale,
-                y: destination.minY + (clippedSource.minY - requestedSource.minY) * yScale,
-                width: clippedSource.width * xScale,
-                height: clippedSource.height * yScale
+                x: destination.minX + (integralSource.minX - requestedSource.minX) * xScale,
+                y: destination.minY + (integralSource.minY - requestedSource.minY) * yScale,
+                width: integralSource.width * xScale,
+                height: integralSource.height * yScale
             )
-            context.interpolationQuality = .none
-            context.draw(crop, in: drawRect)
+            if let crop = sourceImage.cropping(to: cropRect) {
+                context.interpolationQuality = .none
+                context.draw(crop, in: drawRect)
+            }
         }
         context.restoreGState()
 

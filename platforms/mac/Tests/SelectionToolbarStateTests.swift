@@ -4960,6 +4960,51 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(hex(center), "#FFFFFF")
     }
 
+    func testMagnifierRendererConvertsRenderYToCGImageCropY() throws {
+        let base = rowBandImage(
+            width: 80,
+            height: 80,
+            colorAtRow: { row in
+                if row < 30 {
+                    return .blue
+                }
+                if row >= 50 {
+                    return .red
+                }
+                return .white
+            }
+        )
+        let coveringAnnotation = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 20, y: 0, width: 40, height: 40),
+            style: {
+                var style = CaptureAnnotationStyle()
+                style.fillEnabled = true
+                style.fillColor = .green
+                style.strokeColor = .green
+                style.strokeWidth = 2
+                return style
+            }()
+        )
+        let magnifier = CaptureAnnotation(
+            kind: .magnifier,
+            rect: NSRect(x: 20, y: 0, width: 40, height: 40),
+            style: {
+                var style = CaptureAnnotationStyle()
+                style.strokeColor = .black
+                style.strokeWidth = 2
+                return style
+            }(),
+            magnifierShape: .rectangle,
+            magnifierZoom: 2
+        )
+
+        let rendered = CaptureAnnotationRenderer.render(image: base, annotations: [coveringAnnotation, magnifier])
+        let center = try XCTUnwrap(rgbaPixel(in: rendered, at: NSPoint(x: 40, y: 20)))
+
+        XCTAssertEqual(hex(center), "#0000FF")
+    }
+
     func testMagnifierRendererClipsSourceAtImageBounds() throws {
         let sourceRed = NSColor(srgbRed: 1, green: 0, blue: 0, alpha: 1)
         let annotationGreen = NSColor(srgbRed: 0, green: 1, blue: 0, alpha: 1)
@@ -9281,10 +9326,6 @@ final class SelectionToolbarStateTests: XCTestCase {
         )!
     }
 
-    private func makeSolidTestImage(size: NSSize, color: NSColor) -> NSImage {
-        makeTestImage(size: size) { _ in color }
-    }
-
     private func makeTestImage(size: NSSize, colorAt: (NSPoint) -> NSColor) -> NSImage {
         let image = NSImage(size: size)
         image.lockFocus()
@@ -9296,6 +9337,26 @@ final class SelectionToolbarStateTests: XCTestCase {
         }
         image.unlockFocus()
         return image
+    }
+
+    private func rowBandImage(width: Int, height: Int, colorAtRow: (Int) -> NSColor) -> NSImage {
+        var bytes: [UInt8] = []
+        for row in 0..<height {
+            let color = colorAtRow(row).usingColorSpace(.sRGB) ?? colorAtRow(row)
+            for _ in 0..<width {
+                bytes.append(UInt8(round(color.redComponent * 255)))
+                bytes.append(UInt8(round(color.greenComponent * 255)))
+                bytes.append(UInt8(round(color.blueComponent * 255)))
+                bytes.append(UInt8(round(color.alphaComponent * 255)))
+            }
+        }
+        let cgImage = makeTestImage(
+            width: width,
+            height: height,
+            pixels: bytes,
+            bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue
+        )
+        return NSImage(cgImage: cgImage, size: NSSize(width: width, height: height))
     }
 
     private func checkerboardImage(size: NSSize) -> NSImage {
