@@ -1264,6 +1264,17 @@ enum CaptureAnnotationRenderer {
         if isMosaicAnnotation(annotation) {
             return
         }
+        if annotation.kind == .magnifier {
+            drawMagnifierAnnotation(
+                annotation,
+                in: context,
+                sourceImage: sourceImage,
+                scaleX: scaleX,
+                scaleY: scaleY,
+                lineScale: lineScale
+            )
+            return
+        }
         if annotation.numberMarkType != nil {
             drawNumberSequenceAnnotation(annotation, in: context, scaleX: scaleX, scaleY: scaleY, textScale: lineScale)
             return
@@ -1513,6 +1524,87 @@ enum CaptureAnnotationRenderer {
             at: NSPoint(x: rect.midX - symbolSize.width / 2, y: rect.midY - symbolSize.height / 2),
             withAttributes: attributes
         )
+    }
+
+    private static func drawMagnifierAnnotation(
+        _ annotation: CaptureAnnotation,
+        in context: CGContext,
+        sourceImage: CGImage,
+        scaleX: CGFloat,
+        scaleY: CGFloat,
+        lineScale: CGFloat
+    ) {
+        let rect = annotation.rect.standardized
+        guard rect.width > 0, rect.height > 0 else {
+            return
+        }
+
+        let zoom = validMagnifierZoom(annotation.effectiveMagnifierZoom)
+        let shape = annotation.effectiveMagnifierShape
+        let destination = CGRect(
+            x: rect.minX * scaleX,
+            y: rect.minY * scaleY,
+            width: rect.width * scaleX,
+            height: rect.height * scaleY
+        )
+        let sourceWidth = destination.width / zoom
+        let sourceHeight = destination.height / zoom
+        let requestedSource = CGRect(
+            x: destination.midX - sourceWidth / 2,
+            y: destination.midY - sourceHeight / 2,
+            width: sourceWidth,
+            height: sourceHeight
+        )
+        let imageBounds = CGRect(x: 0, y: 0, width: sourceImage.width, height: sourceImage.height)
+        let clippedSource = requestedSource.intersection(imageBounds)
+
+        context.saveGState()
+        addMagnifierClip(shape: shape, rect: destination, to: context)
+        context.clip()
+        if !clippedSource.isNull,
+           clippedSource.width > 0,
+           clippedSource.height > 0,
+           let crop = sourceImage.cropping(to: clippedSource.integral) {
+            let xScale = destination.width / max(requestedSource.width, 1)
+            let yScale = destination.height / max(requestedSource.height, 1)
+            let drawRect = CGRect(
+                x: destination.minX + (clippedSource.minX - requestedSource.minX) * xScale,
+                y: destination.minY + (clippedSource.minY - requestedSource.minY) * yScale,
+                width: clippedSource.width * xScale,
+                height: clippedSource.height * yScale
+            )
+            context.interpolationQuality = .none
+            context.draw(crop, in: drawRect)
+        }
+        context.restoreGState()
+
+        context.saveGState()
+        addMagnifierClip(
+            shape: shape,
+            rect: destination.insetBy(
+                dx: annotation.style.strokeWidth * lineScale / 2,
+                dy: annotation.style.strokeWidth * lineScale / 2
+            ),
+            to: context
+        )
+        context.setStrokeColor(cgColor(annotation.style.strokeColor))
+        context.setLineWidth(annotation.style.strokeWidth * lineScale)
+        context.strokePath()
+        context.restoreGState()
+    }
+
+    private static func validMagnifierZoom(_ zoom: CGFloat) -> CGFloat {
+        let candidates: [CGFloat] = [1.5, 2, 3, 4]
+        return candidates.min(by: { abs($0 - zoom) < abs($1 - zoom) }) ?? 2
+    }
+
+    private static func addMagnifierClip(shape: CaptureMagnifierShape, rect: CGRect, to context: CGContext) {
+        switch shape {
+        case .circle:
+            context.addEllipse(in: rect)
+        case .rectangle:
+            context.addRect(rect)
+        }
     }
 
     private static func isMosaicAnnotation(_ annotation: CaptureAnnotation) -> Bool {

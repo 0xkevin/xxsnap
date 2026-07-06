@@ -4918,6 +4918,80 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertTrue(pixelDiffers(overlayPixel, rectangleOnlyPixel))
     }
 
+    func testMagnifierRendererSamplesOriginalImageInsteadOfAnnotations() throws {
+        let base = makeTestImage(size: NSSize(width: 80, height: 80)) { point in
+            if point.x < 40 && point.y < 40 {
+                return NSColor.red
+            }
+            if point.x >= 40 && point.y >= 40 {
+                return NSColor.blue
+            }
+            return NSColor.white
+        }
+        var coveringAnnotation = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 20, y: 20, width: 40, height: 40),
+            style: {
+                var style = CaptureAnnotationStyle()
+                style.fillEnabled = true
+                style.fillColor = .green
+                style.strokeColor = .green
+                style.strokeWidth = 2
+                return style
+            }()
+        )
+        coveringAnnotation.style.fillEnabled = true
+        let magnifier = CaptureAnnotation(
+            kind: .magnifier,
+            rect: NSRect(x: 20, y: 20, width: 40, height: 40),
+            style: {
+                var style = CaptureAnnotationStyle()
+                style.strokeColor = .black
+                style.strokeWidth = 2
+                return style
+            }(),
+            magnifierShape: .rectangle,
+            magnifierZoom: 2
+        )
+
+        let rendered = CaptureAnnotationRenderer.render(image: base, annotations: [coveringAnnotation, magnifier])
+        let center = try XCTUnwrap(rgbaPixel(in: rendered, at: NSPoint(x: 50, y: 50)))
+
+        XCTAssertEqual(hex(center), "#FFFFFF")
+    }
+
+    func testMagnifierRendererClipsSourceAtImageBounds() throws {
+        let base = makeSolidTestImage(size: NSSize(width: 80, height: 80), color: .red)
+        let coveringAnnotation = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 0, y: 0, width: 80, height: 80),
+            style: {
+                var style = CaptureAnnotationStyle()
+                style.fillEnabled = true
+                style.fillColor = .green
+                style.strokeColor = .green
+                style.strokeWidth = 2
+                return style
+            }()
+        )
+        let magnifier = CaptureAnnotation(
+            kind: .magnifier,
+            rect: NSRect(x: -10, y: -10, width: 40, height: 40),
+            style: {
+                var style = CaptureAnnotationStyle()
+                style.strokeColor = .black
+                style.strokeWidth = 2
+                return style
+            }(),
+            magnifierShape: .circle,
+            magnifierZoom: 4
+        )
+
+        let rendered = CaptureAnnotationRenderer.render(image: base, annotations: [coveringAnnotation, magnifier])
+        let insideAvailableSource = try XCTUnwrap(rgbaPixel(in: rendered, at: NSPoint(x: 8, y: 72)))
+        XCTAssertEqual(hex(insideAvailableSource), "#FF0000")
+    }
+
     func testOverlayWindowDrawsOverlappingMosaicLayersSequentially() throws {
         let image = checkerboardImage(size: NSSize(width: 240, height: 160), squareSize: 4)
         let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
@@ -9199,6 +9273,23 @@ final class SelectionToolbarStateTests: XCTestCase {
         )!
     }
 
+    private func makeSolidTestImage(size: NSSize, color: NSColor) -> NSImage {
+        makeTestImage(size: size) { _ in color }
+    }
+
+    private func makeTestImage(size: NSSize, colorAt: (NSPoint) -> NSColor) -> NSImage {
+        let image = NSImage(size: size)
+        image.lockFocus()
+        for y in 0..<Int(size.height) {
+            for x in 0..<Int(size.width) {
+                colorAt(NSPoint(x: x, y: y)).setFill()
+                NSRect(x: x, y: y, width: 1, height: 1).fill()
+            }
+        }
+        image.unlockFocus()
+        return image
+    }
+
     private func checkerboardImage(size: NSSize) -> NSImage {
         checkerboardImage(size: size, squareSize: 8)
     }
@@ -9345,6 +9436,10 @@ final class SelectionToolbarStateTests: XCTestCase {
         let bytes = try rgbaBytes(in: image)
         let index = (pixelY * cgImage.width + pixelX) * 4
         return (bytes[index], bytes[index + 1], bytes[index + 2], bytes[index + 3])
+    }
+
+    private func hex(_ pixel: (red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8)) -> String {
+        String(format: "#%02X%02X%02X", pixel.red, pixel.green, pixel.blue)
     }
 
     private func pixelDiffers(
