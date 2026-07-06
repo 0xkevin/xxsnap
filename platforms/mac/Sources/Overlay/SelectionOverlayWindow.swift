@@ -1816,6 +1816,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private var currentEraserDrawingMode: EraserDrawingMode = .freehand
     private var currentEraserSize: CGFloat = 24
     private let eraserDragThreshold: CGFloat = 3
+    private let eraserClickTolerance: CGFloat = 0.5
     private var eraserCircleCursorCache: [CGFloat: NSCursor] = [:]
     private var eraserMasks: [CaptureEraserMask] = []
     private var eraserDraftPoints: [NSPoint] = []
@@ -2621,10 +2622,14 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
 
         if isEraserToolActive, interactionMode == .annotating {
-            if !isDraggingEraser {
+            if isDraggingEraser {
+                finishEraserDrag(at: point)
+            } else if let down = eraserMouseDownPoint,
+                      hypot(point.x - down.x, point.y - down.y) <= eraserClickTolerance {
                 finishEraserClick(at: point)
             } else {
-                finishEraserDrag(at: point)
+                cancelEraserDraft()
+                needsDisplay = true
             }
             return
         }
