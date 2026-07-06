@@ -5921,6 +5921,50 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_mosaicCompositeRenderCount, renderCountAfterTwoPrefixes)
     }
 
+    func testOverlayWindowMosaicCompositeCacheKeyIncludesMagnifierShapeAndZoom() throws {
+        let image = coordinateRedBlueImage(width: 240, height: 160)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 20, y: 20, width: 160, height: 100))
+
+        var magnifierStyle = CaptureAnnotationStyle()
+        magnifierStyle.strokeWidth = 0
+        let circleTwoX = CaptureAnnotation(
+            kind: .magnifier,
+            rect: NSRect(x: 48, y: 28, width: 56, height: 56),
+            style: magnifierStyle,
+            magnifierShape: .circle,
+            magnifierZoom: 2
+        )
+        let circleFourX = CaptureAnnotation(
+            kind: .magnifier,
+            rect: circleTwoX.rect,
+            style: magnifierStyle,
+            magnifierShape: .circle,
+            magnifierZoom: 4
+        )
+        let rectangleFourX = CaptureAnnotation(
+            kind: .magnifier,
+            rect: circleTwoX.rect,
+            style: magnifierStyle,
+            magnifierShape: .rectangle,
+            magnifierZoom: 4
+        )
+
+        XCTAssertNotNil(window.test_mosaicPreviewComposite(for: [circleTwoX]))
+        let renderCountAfterFirstComposite = window.test_mosaicCompositeRenderCount
+        XCTAssertGreaterThan(renderCountAfterFirstComposite, 0)
+
+        XCTAssertNotNil(window.test_mosaicPreviewComposite(for: [circleTwoX]))
+        XCTAssertEqual(window.test_mosaicCompositeRenderCount, renderCountAfterFirstComposite)
+
+        XCTAssertNotNil(window.test_mosaicPreviewComposite(for: [circleFourX]))
+        let renderCountAfterZoomChange = window.test_mosaicCompositeRenderCount
+        XCTAssertEqual(renderCountAfterZoomChange, renderCountAfterFirstComposite + 1)
+
+        XCTAssertNotNil(window.test_mosaicPreviewComposite(for: [rectangleFourX]))
+        XCTAssertEqual(window.test_mosaicCompositeRenderCount, renderCountAfterZoomChange + 1)
+    }
+
     func testOverlayWindowMosaicOnlyAnnotationsUseSequentialCompositeDraw() {
         let image = checkerboardImage(size: NSSize(width: 260, height: 180), squareSize: 4)
         let window = SelectionOverlayWindow(backgroundImage: image) { _ in }

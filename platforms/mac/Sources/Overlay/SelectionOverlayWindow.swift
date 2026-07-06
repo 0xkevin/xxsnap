@@ -13532,6 +13532,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         if let markerLine = annotation.markerLine {
             item += ":marker:\(pointKey(markerLine.start))>\(pointKey(markerLine.end))"
         }
+        if annotation.kind == .magnifier {
+            item += ":magnifier:\(annotation.effectiveMagnifierShape):\(Int((annotation.effectiveMagnifierZoom * 100).rounded()))"
+        }
         if let stroke = annotation.mosaicStroke {
             item += ":mosaic:" + stroke.points.map(pointKey).joined(separator: ",")
         }
