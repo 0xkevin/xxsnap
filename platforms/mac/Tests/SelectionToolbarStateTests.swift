@@ -417,6 +417,41 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_annotationCount, 1)
     }
 
+    func testEraserDragDoesNotMoveSelectionBeforeMaskToolIsImplemented() {
+        let window = makeOverlayWindowWithLockedSelection()
+        window.test_setAnnotations([testRectangleAnnotation(x: 20, y: 20, width: 60, height: 40, renderOrder: 1)])
+        click(window, button: .eraser)
+        let selectionBefore = window.test_lockedSelectionRect
+
+        window.test_mouseDown(at: NSPoint(x: 160, y: 150))
+        window.test_mouseDragged(to: NSPoint(x: 220, y: 190))
+        XCTAssertTrue(window.test_isDraggingEraser)
+        window.test_mouseUp(at: NSPoint(x: 220, y: 190))
+
+        XCTAssertEqual(window.test_lockedSelectionRect, selectionBefore)
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(window.test_undoActionCount, 0)
+    }
+
+    func testDeleteSelectedAnnotationRecordsUndoHistory() {
+        let window = makeOverlayWindowWithLockedSelection()
+        let annotation = testRectangleAnnotation(x: 20, y: 20, width: 60, height: 40, renderOrder: 1)
+        window.test_setAnnotations([annotation])
+        window.test_selectAnnotation(at: 0)
+
+        window.test_keyDown(keyCode: 51)
+
+        XCTAssertEqual(window.test_annotationCount, 0)
+        XCTAssertEqual(window.test_undoActionCount, 1)
+
+        click(window, button: .undo)
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(window.test_annotation(at: 0)?.renderOrder, 1)
+
+        click(window, button: .redo)
+        XCTAssertEqual(window.test_annotationCount, 0)
+    }
+
     func testEraserDefaultsToFreehandMediumSizeAndCircleCursor() {
         let window = makeOverlayWindowWithLockedSelection()
         click(window, button: .eraser)

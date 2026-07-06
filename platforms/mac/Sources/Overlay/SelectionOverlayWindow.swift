@@ -873,6 +873,10 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_isEraserToolActive ?? false
     }
 
+    var test_isDraggingEraser: Bool {
+        (contentView as? SelectionOverlayView)?.test_isDraggingEraser ?? false
+    }
+
     var test_currentEraserDrawingMode: String {
         (contentView as? SelectionOverlayView)?.test_currentEraserDrawingMode ?? "freehand"
     }
@@ -2219,6 +2223,12 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         if isEyedropperToolActive, interactionMode == .annotating {
             updateEyedropperMeasurement(to: point, modifierFlags: event.modifierFlags)
             updateColorSampler(at: point)
+            needsDisplay = true
+            return
+        }
+
+        if isEraserToolActive, interactionMode == .annotating {
+            isDraggingEraser = true
             needsDisplay = true
             return
         }
@@ -6548,6 +6558,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         isEraserToolActive
     }
 
+    var test_isDraggingEraser: Bool {
+        isDraggingEraser
+    }
+
     var test_currentEraserDrawingMode: String {
         switch currentEraserDrawingMode {
         case .freehand:
@@ -7091,7 +7105,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         clearNumberEditing()
         clearPendingTextEdit()
         removeTextEditor()
-        redoActions.removeAll()
+        recordUndo(.deletedAnnotation(annotation: removed, index: deletionIndex))
         showsStrokeStyleMenu = false
         showsCornerRadiusPanel = false
         showsStartArrowTypeMenu = false
