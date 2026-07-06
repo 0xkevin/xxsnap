@@ -312,6 +312,38 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertNil(window.test_optionsToolbarMode)
     }
 
+    func testEraserToolbarButtonActivatesEraserInsteadOfPlaceholder() {
+        let window = makeOverlayWindowWithLockedSelection()
+
+        XCTAssertEqual(window.test_symbolName(for: .eraser), "toolbar-eraser-tool")
+        XCTAssertFalse(window.test_isEraserToolActive)
+
+        click(window, button: .eraser)
+
+        XCTAssertTrue(window.test_isEraserToolActive)
+        XCTAssertEqual(window.test_optionsToolbarMode, .eraser)
+        XCTAssertFalse(window.test_didShowPlaceholder)
+    }
+
+    func testEraserToolIsMutuallyExclusiveWithExistingTools() {
+        let window = makeOverlayWindowWithLockedSelection()
+
+        click(window, button: .text)
+        XCTAssertTrue(window.test_isTextToolActive)
+
+        click(window, button: .eraser)
+        XCTAssertTrue(window.test_isEraserToolActive)
+        XCTAssertFalse(window.test_isTextToolActive)
+        XCTAssertFalse(window.test_isNumberToolActive)
+        XCTAssertFalse(window.test_isMagnifierToolActive)
+        XCTAssertFalse(window.test_isEyedropperToolActive)
+        XCTAssertFalse(window.test_isShapeToolActive)
+
+        click(window, button: .rectangle)
+        XCTAssertFalse(window.test_isEraserToolActive)
+        XCTAssertTrue(window.test_isShapeToolActive)
+    }
+
     func testTextToolCreatesEditableAnnotationAndCommitsTypedText() {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
@@ -10518,5 +10550,25 @@ final class SelectionToolbarStateTests: XCTestCase {
             total += abs(Int(lhsBytes[index + 3]) - Int(rhsBytes[index + 3]))
         }
         return Double(total) / Double(lhsBytes.count / 4)
+    }
+
+    private func makeOverlayWindowWithLockedSelection() -> SelectionOverlayWindow {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 240, height: 160))
+        return window
+    }
+
+    private func click(
+        _ window: SelectionOverlayWindow,
+        button: TestToolbarButton,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard let point = window.test_mainToolbarButtonPoint(for: button) else {
+            XCTFail("Expected \(button) toolbar button", file: file, line: line)
+            return
+        }
+        window.test_mouseDown(at: point)
+        window.test_mouseUp(at: point)
     }
 }

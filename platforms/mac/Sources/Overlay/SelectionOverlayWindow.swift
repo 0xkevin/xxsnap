@@ -13,6 +13,7 @@ enum TestToolbarButton {
     case text
     case number
     case magnifier
+    case eraser
     case settings
 }
 
@@ -847,6 +848,18 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_isMagnifierToolActive ?? false
     }
 
+    var test_isEraserToolActive: Bool {
+        (contentView as? SelectionOverlayView)?.test_isEraserToolActive ?? false
+    }
+
+    var test_isShapeToolActive: Bool {
+        (contentView as? SelectionOverlayView)?.test_isShapeToolActive ?? false
+    }
+
+    var test_didShowPlaceholder: Bool {
+        (contentView as? SelectionOverlayView)?.test_didShowPlaceholder ?? false
+    }
+
     var test_currentMagnifierShape: CaptureMagnifierShape {
         (contentView as? SelectionOverlayView)?.test_currentMagnifierShape ?? .rectangle
     }
@@ -1647,6 +1660,11 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         case end
     }
 
+    private enum EraserDrawingMode: Equatable {
+        case freehand
+        case rectangle
+    }
+
     private let colors = SelectionOverlayWindow.defaultPaletteColors
     private var visiblePaletteCount: Int {
         min(colors.count, settings.paletteVisibleCount)
@@ -1728,6 +1746,13 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private var isTextToolActive = false
     private var isNumberToolActive = false
     private var isMagnifierToolActive = false
+    private var isEraserToolActive = false
+    private var currentEraserDrawingMode: EraserDrawingMode = .freehand
+    private var currentEraserSize: CGFloat = 24
+    private var eraserMasks: [CaptureEraserMask] = []
+    private var eraserDraftPoints: [NSPoint] = []
+    private var eraserDraftRect: NSRect?
+    private var isDraggingEraser = false
     private var currentMagnifierShape: CaptureMagnifierShape = .rectangle
     private var currentMagnifierZoom: CGFloat = 2
     private var currentNumberMarkType: CaptureNumberMarkType = .number
@@ -1780,6 +1805,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private var textFontDropdownScrollOffset = 0
     private var textSizeDropdownScrollOffset = 0
     private var textDropdownScrollRemainderY: CGFloat = 0
+    private var didShowPlaceholderForTesting = false
     private var sampledPointerPoint: NSPoint?
     private var sampledColor: NSColor?
     private var eyedropperMeasurementStartPoint: NSPoint?
@@ -5059,6 +5085,12 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             showsCornerRadiusPanel = false
             showsStartArrowTypeMenu = false
             showsEndArrowTypeMenu = false
+        case .eraser:
+            toggleEraserTool()
+            showsStrokeStyleMenu = false
+            showsCornerRadiusPanel = false
+            showsStartArrowTypeMenu = false
+            showsEndArrowTypeMenu = false
         case .undo:
             undoLastAnnotation()
         case .redo:
@@ -5069,7 +5101,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             finish(action: .save)
         case .cancel:
             selectionDidFinish?(nil)
-        case .pin, .eraser, .scroll, .settings:
+        case .pin, .scroll, .settings:
             showPlaceholder(for: button)
         }
 
@@ -5107,6 +5139,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
         rememberCurrentStyleForActiveTool()
         isEyedropperToolActive = true
+        isEraserToolActive = false
+        cancelEraserDraft()
         clearEyedropperMeasurement()
         isTextToolActive = false
         isNumberToolActive = false
@@ -5149,6 +5183,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         closeMagnifierZoomDropdown()
         rememberCurrentStyleForActiveTool()
         isTextToolActive = true
+        isEraserToolActive = false
+        cancelEraserDraft()
         isEyedropperToolActive = false
         clearEyedropperMeasurement()
         isNumberToolActive = false
@@ -5205,6 +5241,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         closeMagnifierZoomDropdown()
         rememberCurrentStyleForActiveTool()
         isNumberToolActive = true
+        isEraserToolActive = false
+        cancelEraserDraft()
         isTextToolActive = false
         isEyedropperToolActive = false
         clearEyedropperMeasurement()
@@ -5255,6 +5293,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         closeMagnifierZoomDropdown()
         rememberCurrentStyleForActiveTool()
         isMagnifierToolActive = true
+        isEraserToolActive = false
+        cancelEraserDraft()
         isTextToolActive = false
         isNumberToolActive = false
         isEyedropperToolActive = false
@@ -5283,6 +5323,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         closeTextDropdown()
         closeMagnifierZoomDropdown()
         rememberCurrentStyleForActiveTool()
+        isEraserToolActive = false
+        cancelEraserDraft()
         isEyedropperToolActive = false
         clearEyedropperMeasurement()
         isTextToolActive = false
@@ -5356,6 +5398,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         closeTextDropdown()
         closeMagnifierZoomDropdown()
         rememberCurrentStyleForActiveTool()
+        isEraserToolActive = false
+        cancelEraserDraft()
         isEyedropperToolActive = false
         clearEyedropperMeasurement()
         isTextToolActive = false
@@ -5412,6 +5456,45 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         brushDraftPoints.removeAll()
         mosaicDraftPoints.removeAll()
         invalidateCursorRectsAndRefresh()
+    }
+
+    private func toggleEraserTool() {
+        let shouldEnable = !isEraserToolActive
+        clearTransientAnnotationUI()
+        isEraserToolActive = shouldEnable
+        if shouldEnable {
+            isEyedropperToolActive = false
+            clearEyedropperMeasurement()
+            activeShapeKind = nil
+            isShapeToolActive = false
+            isTextToolActive = false
+            isNumberToolActive = false
+            isMagnifierToolActive = false
+            activeNumberDropdown = false
+            selectedAnnotationIndex = nil
+            currentEraserDrawingMode = .freehand
+            currentEraserSize = 24
+        }
+        cancelEraserDraft()
+        invalidateCursorRectsAndRefresh()
+        needsDisplay = true
+    }
+
+    private func clearTransientAnnotationUI() {
+        showsStrokeStyleMenu = false
+        showsCornerRadiusPanel = false
+        showsStartArrowTypeMenu = false
+        showsEndArrowTypeMenu = false
+        activeTextDropdown = nil
+        activeNumberDropdown = false
+        activeMagnifierZoomDropdown = false
+        commitCurrentTextEdit()
+    }
+
+    private func cancelEraserDraft() {
+        eraserDraftPoints.removeAll()
+        eraserDraftRect = nil
+        isDraggingEraser = false
     }
 
     private func rememberCurrentStyleForActiveTool() {
@@ -5607,6 +5690,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             toolbarButton = .number
         case .magnifier:
             toolbarButton = .magnifier
+        case .eraser:
+            toolbarButton = .eraser
         case .settings:
             toolbarButton = .settings
         }
@@ -5632,6 +5717,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             toolbarButton = .number
         case .magnifier:
             toolbarButton = .magnifier
+        case .eraser:
+            toolbarButton = .eraser
         case .settings:
             toolbarButton = .settings
         }
@@ -6246,6 +6333,18 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         isMagnifierToolActive
     }
 
+    var test_isEraserToolActive: Bool {
+        isEraserToolActive
+    }
+
+    var test_isShapeToolActive: Bool {
+        isShapeToolActive
+    }
+
+    var test_didShowPlaceholder: Bool {
+        didShowPlaceholderForTesting
+    }
+
     var test_currentMagnifierShape: CaptureMagnifierShape {
         currentMagnifierShape
     }
@@ -6265,7 +6364,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     var test_optionsToolbarMode: SelectionToolbarState.OptionsToolbarMode? {
-        guard isShapeToolActive || isTextToolActive || isNumberToolActive || isMagnifierToolActive else {
+        guard isShapeToolActive || isTextToolActive || isNumberToolActive || isMagnifierToolActive || isEraserToolActive else {
             return nil
         }
         return optionsToolbarMode
@@ -6571,6 +6670,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 #endif
 
     private func showPlaceholder(for button: ToolbarButton) {
+        didShowPlaceholderForTesting = true
         let label: String
         switch button {
         case .pin:
@@ -12934,6 +13034,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return isNumberToolActive
         case .magnifier:
             return isMagnifierToolActive
+        case .eraser:
+            return isEraserToolActive
         default:
             return false
         }
@@ -13024,6 +13126,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private var optionsToolbarMode: SelectionToolbarState.OptionsToolbarMode {
+        if isEraserToolActive {
+            return .eraser
+        }
+
         if isTextToolActive {
             return .text
         }
@@ -13062,7 +13168,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     private var optionsToolbarRect: NSRect? {
         guard
-            SelectionToolbarState.shouldShowOptionsToolbar(isPrimaryShapeToolActive: isShapeToolActive || isTextToolActive || isNumberToolActive || isMagnifierToolActive),
+            SelectionToolbarState.shouldShowOptionsToolbar(isPrimaryShapeToolActive: isShapeToolActive || isTextToolActive || isNumberToolActive || isMagnifierToolActive || isEraserToolActive),
             let selectionRect,
             let toolbar = mainToolbarRect(for: selectionRect)
         else {
