@@ -31,6 +31,20 @@ Use this checklist to verify the native macOS screenshot MVP after building `xxs
 - [ ] A successful capture copies the image to the system clipboard.
 - [ ] The current build has a save helper available in code for PNG export once UI wiring is added.
 
+## Magnifier tool smoke check
+
+- [ ] Start capture and lock a screenshot selection.
+- [ ] Click the magnifier toolbar button and verify the second toolbar appears.
+- [ ] Verify default shape is circle and default zoom is `2x`.
+- [ ] Drag-create a circular magnifier.
+- [ ] Hold `Shift` while dragging and verify the lens is square/circular.
+- [ ] Switch to rectangle and create a rectangular magnifier.
+- [ ] Change zoom to `1.5x`, `3x`, and `4x`.
+- [ ] Change border color and width.
+- [ ] Move, resize, and delete a selected magnifier.
+- [ ] Draw text or an arrow over the screenshot and verify the magnifier still shows original screenshot pixels.
+- [ ] Copy and save, then compare exported output with overlay preview.
+
 ## Notes
 
 - Task 6 wires clipboard output and prepares save behavior for later UI exposure.
