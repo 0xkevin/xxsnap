@@ -703,6 +703,10 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_eraserSizePoint(size)
     }
 
+    var test_eraserCircleCursorInfo: (imageSize: NSSize, hotSpot: NSPoint, centerAlpha: CGFloat, ringAlpha: CGFloat)? {
+        (contentView as? SelectionOverlayView)?.test_eraserCircleCursorInfo
+    }
+
     func test_symbolName(for button: TestToolbarButton) -> String? {
         (contentView as? SelectionOverlayView)?.test_symbolName(for: button)
     }
@@ -1780,6 +1784,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private var isEraserToolActive = false
     private var currentEraserDrawingMode: EraserDrawingMode = .freehand
     private var currentEraserSize: CGFloat = 24
+    private var eraserCircleCursorCache: [CGFloat: NSCursor] = [:]
     private var eraserMasks: [CaptureEraserMask] = []
     private var eraserDraftPoints: [NSPoint] = []
     private var eraserDraftRect: NSRect?
@@ -2958,14 +2963,19 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private func eraserCircleCursor(diameter: CGFloat) -> NSCursor {
-        let side = max(16, ceil(diameter) + 4)
+        let normalizedDiameter = max(1, ceil(diameter))
+        if let cachedCursor = eraserCircleCursorCache[normalizedDiameter] {
+            return cachedCursor
+        }
+
+        let side = max(16, normalizedDiameter + 4)
         let image = NSImage(size: NSSize(width: side, height: side))
         image.lockFocus()
         let rect = NSRect(
-            x: (side - diameter) / 2,
-            y: (side - diameter) / 2,
-            width: diameter,
-            height: diameter
+            x: (side - normalizedDiameter) / 2,
+            y: (side - normalizedDiameter) / 2,
+            width: normalizedDiameter,
+            height: normalizedDiameter
         ).insetBy(dx: 1, dy: 1)
         let path = NSBezierPath(ovalIn: rect)
         path.lineWidth = 3
@@ -2975,7 +2985,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         NSColor.black.withAlphaComponent(0.85).setStroke()
         path.stroke()
         image.unlockFocus()
-        return NSCursor(image: image, hotSpot: NSPoint(x: side / 2, y: side / 2))
+        let cursor = NSCursor(image: image, hotSpot: NSPoint(x: side / 2, y: side / 2))
+        eraserCircleCursorCache[normalizedDiameter] = cursor
+        return cursor
     }
 
     private func nsCursor(for style: SelectionToolbarState.OverlayCursorStyle) -> NSCursor {
@@ -6447,6 +6459,58 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     var test_currentEraserSize: CGFloat {
         currentEraserSize
+    }
+
+    var test_eraserCircleCursorInfo: (imageSize: NSSize, hotSpot: NSPoint, centerAlpha: CGFloat, ringAlpha: CGFloat)? {
+        let cursor = eraserCircleCursor(diameter: currentEraserSize)
+        guard let cgImage = cursor.image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            return nil
+        }
+
+        let width = cgImage.width
+        let height = cgImage.height
+        let bytesPerPixel = 4
+        let bytesPerRow = width * bytesPerPixel
+        var bytes = [UInt8](repeating: 0, count: height * bytesPerRow)
+        guard let context = CGContext(
+            data: &bytes,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            return nil
+        }
+
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        func alpha(atX x: Int, y: Int) -> CGFloat {
+            let clampedX = max(0, min(width - 1, x))
+            let clampedY = max(0, min(height - 1, y))
+            let index = clampedY * bytesPerRow + clampedX * bytesPerPixel + 3
+            return CGFloat(bytes[index]) / 255
+        }
+
+        let centerX = width / 2
+        let centerY = height / 2
+        let centerAlpha = alpha(atX: centerX, y: centerY)
+        let center = CGPoint(x: CGFloat(width) / 2, y: CGFloat(height) / 2)
+        let innerTransparentRadius = max(0, currentEraserSize / 2 - 3)
+        var ringAlpha: CGFloat = 0
+        for y in 0..<height {
+            for x in 0..<width {
+                let dx = CGFloat(x) + 0.5 - center.x
+                let dy = CGFloat(y) + 0.5 - center.y
+                guard hypot(dx, dy) >= innerTransparentRadius else {
+                    continue
+                }
+                ringAlpha = max(ringAlpha, alpha(atX: x, y: y))
+            }
+        }
+
+        return (cursor.image.size, cursor.hotSpot, centerAlpha, ringAlpha)
     }
 
     var test_isShapeToolActive: Bool {

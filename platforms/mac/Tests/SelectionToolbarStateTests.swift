@@ -414,6 +414,25 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_cursorStyle(at: window.test_pointInsideLockedSelection()), .eraserCircle)
     }
 
+    func testEraserCircleCursorIsHollowCenteredAndSizeAware() throws {
+        let window = makeOverlayWindowWithLockedSelection()
+        click(window, button: .eraser)
+
+        let mediumInfo = try XCTUnwrap(window.test_eraserCircleCursorInfo)
+        XCTAssertGreaterThanOrEqual(mediumInfo.imageSize.width, 28)
+        XCTAssertGreaterThanOrEqual(mediumInfo.imageSize.height, 28)
+        XCTAssertEqual(mediumInfo.hotSpot.x, mediumInfo.imageSize.width / 2, accuracy: 0.001)
+        XCTAssertEqual(mediumInfo.hotSpot.y, mediumInfo.imageSize.height / 2, accuracy: 0.001)
+        XCTAssertLessThan(mediumInfo.centerAlpha, 0.05)
+        XCTAssertGreaterThan(mediumInfo.ringAlpha, 0.1)
+
+        click(window, eraserSize: 40)
+
+        let largeInfo = try XCTUnwrap(window.test_eraserCircleCursorInfo)
+        XCTAssertGreaterThan(largeInfo.imageSize.width, mediumInfo.imageSize.width)
+        XCTAssertGreaterThan(largeInfo.imageSize.height, mediumInfo.imageSize.height)
+    }
+
     func testTextToolCreatesEditableAnnotationAndCommitsTypedText() {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
