@@ -2411,7 +2411,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             selectionResizeHandle: nil,
             isAnnotationBorder: false,
             isInsideSelection: isInsideSelection,
-            isShapeToolActive: isShapeToolActive,
+            isShapeToolActive: isShapeToolActive || isMagnifierToolActive,
             currentShapeKind: currentShapeKind
         )
         return backgroundAwareCursorStyle(style, at: point)
@@ -3161,7 +3161,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
 
         guard SelectionToolbarState.shouldShowColorSampler(
-            isShapeToolActive: isShapeToolActive,
+            isShapeToolActive: isImplicitColorSamplerBlocked,
             hasAnnotations: !annotations.isEmpty,
             pointer: point,
             selectionRect: colorSamplerSelectionRect
@@ -3186,6 +3186,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         sampledPointerPoint = point
         sampledColor = color
         needsDisplay = true
+    }
+
+    private var isImplicitColorSamplerBlocked: Bool {
+        isShapeToolActive || isTextToolActive || isNumberToolActive || isMagnifierToolActive
     }
 
     private func eyedropperSamplePoint(forMousePoint point: NSPoint) -> NSPoint {
@@ -11104,7 +11108,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             let color = sampledColor,
             let selectionRect = colorSamplerSelectionRect,
             SelectionToolbarState.shouldShowColorSampler(
-                isShapeToolActive: isShapeToolActive,
+                isShapeToolActive: isImplicitColorSamplerBlocked,
                 hasAnnotations: !annotations.isEmpty,
                 pointer: point,
                 selectionRect: selectionRect

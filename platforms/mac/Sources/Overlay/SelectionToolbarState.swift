@@ -255,7 +255,7 @@ enum SelectionToolbarState {
             "polyline": "箭头线",
             "pen": "画笔",
             "marker": "标记",
-            "eyedropper": "取色/测距",
+            "eyedropper": "取色｜测距",
             "mosaic": "马赛克",
             "mosaicBlur": "高斯",
             "mosaicPixel": "马赛克",

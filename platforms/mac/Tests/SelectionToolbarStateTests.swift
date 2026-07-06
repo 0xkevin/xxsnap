@@ -258,7 +258,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertLessThan(eyedropperRect.midX, mosaicRect.midX)
         XCTAssertEqual(eyedropperRect.minX - markerRect.minX, mosaicRect.minX - eyedropperRect.minX, accuracy: 0.5)
         XCTAssertEqual(window.test_symbolName(for: .eyedropper), "toolbar-eyedropper")
-        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "eyedropper"), "取色/测距")
+        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "eyedropper"), "取色｜测距")
     }
 
     func testEyedropperResourceIsBundledAndReadableByMacTarget() {
@@ -2288,6 +2288,90 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         window.test_activateShapeTool(.arrowLine)
         XCTAssertEqual(window.test_cursorStyle(at: point), .crosshair)
+    }
+
+    func testOverlayWindowUsesMagnifierCrosshairOutsideSelectionButArrowOnToolbars() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 200, height: 120)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateMagnifierTool()
+
+        XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: selection.midX, y: selection.midY)), .crosshair)
+        XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: selection.maxX + 40, y: selection.midY)), .crosshair)
+
+        let toolbarPoint = try XCTUnwrap(window.test_mainToolbarButtonPoint(for: .magnifier))
+        XCTAssertEqual(window.test_cursorStyle(at: toolbarPoint), .arrow)
+
+        let optionsRect = try XCTUnwrap(window.test_optionsToolbarRect)
+        let optionsPoint = NSPoint(x: optionsRect.midX, y: optionsRect.midY)
+        XCTAssertEqual(window.test_cursorStyle(at: optionsPoint), .arrow)
+    }
+
+    func testColorSamplerHidesWhenTextNumberOrMagnifierAnnotationIsSelected() throws {
+        let window = SelectionOverlayWindow(
+            backgroundImage: solidImage(size: NSSize(width: 500, height: 360), color: .white)
+        ) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 200)
+        window.test_setLockedSelectionRect(selection)
+
+        window.test_updateColorSampler(at: NSPoint(x: selection.midX, y: selection.midY))
+        XCTAssertTrue(window.test_isColorSamplerVisible)
+
+        let style = CaptureAnnotationStyle()
+        let selectedKinds: [CaptureAnnotation] = [
+            CaptureAnnotation(kind: .text, rect: NSRect(x: 40, y: 40, width: 80, height: 32), style: style, text: "Text"),
+            CaptureAnnotation(
+                kind: .numberSequence,
+                rect: NSRect(x: 140, y: 40, width: 28, height: 28),
+                style: style,
+                numberMarkType: .number,
+                numberSequenceIndex: 1
+            ),
+            CaptureAnnotation(
+                kind: .magnifier,
+                rect: NSRect(x: 200, y: 40, width: 72, height: 72),
+                style: style,
+                magnifierShape: .circle,
+                magnifierZoom: 2
+            ),
+        ]
+
+        for (index, annotation) in selectedKinds.enumerated() {
+            window.test_setAnnotations([annotation])
+            window.test_selectAnnotation(at: 0)
+            window.test_updateColorSampler(at: NSPoint(x: selection.midX, y: selection.midY))
+
+            XCTAssertFalse(window.test_isColorSamplerVisible, "Expected sampler hidden for \(annotation.kind) at index \(index)")
+        }
+    }
+
+    func testColorSamplerHidesWhenTextNumberOrMagnifierToolIsActive() throws {
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 200)
+        let samplePoint = NSPoint(x: selection.midX, y: selection.midY)
+
+        let textWindow = SelectionOverlayWindow(
+            backgroundImage: solidImage(size: NSSize(width: 500, height: 360), color: .white)
+        ) { _ in }
+        textWindow.test_setLockedSelectionRect(selection)
+        textWindow.test_activateTextTool()
+        textWindow.test_updateColorSampler(at: samplePoint)
+        XCTAssertFalse(textWindow.test_isColorSamplerVisible)
+
+        let numberWindow = SelectionOverlayWindow(
+            backgroundImage: solidImage(size: NSSize(width: 500, height: 360), color: .white)
+        ) { _ in }
+        numberWindow.test_setLockedSelectionRect(selection)
+        numberWindow.test_activateNumberTool()
+        numberWindow.test_updateColorSampler(at: samplePoint)
+        XCTAssertFalse(numberWindow.test_isColorSamplerVisible)
+
+        let magnifierWindow = SelectionOverlayWindow(
+            backgroundImage: solidImage(size: NSSize(width: 500, height: 360), color: .white)
+        ) { _ in }
+        magnifierWindow.test_setLockedSelectionRect(selection)
+        magnifierWindow.test_activateMagnifierTool()
+        magnifierWindow.test_updateColorSampler(at: samplePoint)
+        XCTAssertFalse(magnifierWindow.test_isColorSamplerVisible)
     }
 
     func testOverlayWindowUsesLightBrushCursorOnBlackBackground() {
@@ -9214,7 +9298,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "save"), "保存")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "copy"), "复制到剪切板")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "scroll"), "滚动截图")
-        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "eyedropper"), "取色/测距")
+        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "eyedropper"), "取色｜测距")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "cornerStyle"), "直角/圆角切换")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "aspectRatioLockedOn"), "锁定长宽比(开)")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "aspectRatioLockedOff"), "锁定长宽比(关)")
