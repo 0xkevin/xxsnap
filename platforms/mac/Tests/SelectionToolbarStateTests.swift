@@ -4961,35 +4961,43 @@ final class SelectionToolbarStateTests: XCTestCase {
     }
 
     func testMagnifierRendererClipsSourceAtImageBounds() throws {
-        let base = makeSolidTestImage(size: NSSize(width: 80, height: 80), color: .red)
+        let sourceRed = NSColor(srgbRed: 1, green: 0, blue: 0, alpha: 1)
+        let annotationGreen = NSColor(srgbRed: 0, green: 1, blue: 0, alpha: 1)
+        let base = makeTestImage(size: NSSize(width: 80, height: 80)) { point in
+            point.x < 6 ? sourceRed : NSColor.white
+        }
         let coveringAnnotation = CaptureAnnotation(
             kind: .rectangle,
             rect: NSRect(x: 0, y: 0, width: 80, height: 80),
             style: {
                 var style = CaptureAnnotationStyle()
                 style.fillEnabled = true
-                style.fillColor = .green
-                style.strokeColor = .green
+                style.fillColor = annotationGreen
+                style.strokeColor = annotationGreen
                 style.strokeWidth = 2
                 return style
             }()
         )
         let magnifier = CaptureAnnotation(
             kind: .magnifier,
-            rect: NSRect(x: -10, y: -10, width: 40, height: 40),
+            rect: NSRect(x: -25, y: 20, width: 40, height: 40),
             style: {
                 var style = CaptureAnnotationStyle()
                 style.strokeColor = .black
                 style.strokeWidth = 2
                 return style
             }(),
-            magnifierShape: .circle,
-            magnifierZoom: 4
+            magnifierShape: .rectangle,
+            magnifierZoom: 2
         )
 
         let rendered = CaptureAnnotationRenderer.render(image: base, annotations: [coveringAnnotation, magnifier])
-        let insideAvailableSource = try XCTUnwrap(rgbaPixel(in: rendered, at: NSPoint(x: 8, y: 72)))
+        let insideAvailableSource = try XCTUnwrap(rgbaPixel(in: rendered, at: NSPoint(x: 8, y: 40)))
+        let outsideAvailableSource = try XCTUnwrap(rgbaPixel(in: rendered, at: NSPoint(x: 2, y: 40)))
+
         XCTAssertEqual(hex(insideAvailableSource), "#FF0000")
+        XCTAssertNotEqual(hex(outsideAvailableSource), "#FF0000")
+        XCTAssertGreaterThan(outsideAvailableSource.green, 180)
     }
 
     func testOverlayWindowDrawsOverlappingMosaicLayersSequentially() throws {
