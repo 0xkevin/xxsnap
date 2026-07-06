@@ -827,10 +827,6 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_annotation(at: index)
     }
 
-    func test_deleteSelectedAnnotation() {
-        (contentView as? SelectionOverlayView)?.test_deleteSelectedAnnotation()
-    }
-
     func test_activateNumberTool() {
         (contentView as? SelectionOverlayView)?.test_activateNumberTool()
     }
@@ -5818,10 +5814,6 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     func test_annotation(at index: Int) -> CaptureAnnotation? {
         annotations.indices.contains(index) ? annotations[index] : nil
-    }
-
-    func test_deleteSelectedAnnotation() {
-        _ = deleteSelectedAnnotation()
     }
 
     var test_numberMarkType: CaptureNumberMarkType {

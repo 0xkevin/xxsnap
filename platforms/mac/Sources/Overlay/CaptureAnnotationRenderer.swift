@@ -1593,7 +1593,6 @@ enum CaptureAnnotationRenderer {
     }
 
     struct MagnifierDrawGeometry {
-        var requestedSource: CGRect
         var integralSource: CGRect
         var drawRect: CGRect
     }
@@ -1620,7 +1619,6 @@ enum CaptureAnnotationRenderer {
         let xScale = destination.width / max(requestedSource.width, 1)
         let yScale = destination.height / max(requestedSource.height, 1)
         return MagnifierDrawGeometry(
-            requestedSource: requestedSource,
             integralSource: integralSource,
             drawRect: CGRect(
                 x: destination.minX + (integralSource.minX - requestedSource.minX) * xScale,
