@@ -106,6 +106,53 @@ final class xxsnapMacTests: XCTestCase {
         assertMostlyWhite(renderedColor(rendered, x: 40, y: 36))
     }
 
+    func testAnnotationCreatedAfterEraserMaskRendersAboveMask() throws {
+        var redStyle = CaptureAnnotationStyle()
+        redStyle.strokeColor = .red
+        redStyle.fillColor = .red
+        redStyle.fillEnabled = true
+
+        var blueStyle = CaptureAnnotationStyle()
+        blueStyle.strokeColor = .blue
+        blueStyle.fillColor = .blue
+        blueStyle.fillEnabled = true
+
+        let oldAnnotation = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 10, y: 10, width: 40, height: 40),
+            style: redStyle,
+            renderOrder: 1
+        )
+        let mask = CaptureEraserMask(
+            kind: .rectangle,
+            renderOrder: 2,
+            size: 24,
+            points: [],
+            rect: NSRect(x: 20, y: 20, width: 20, height: 20)
+        )
+        let laterAnnotation = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 24, y: 24, width: 12, height: 12),
+            style: blueStyle,
+            renderOrder: 3
+        )
+
+        let rendered = CaptureAnnotationRenderer.render(
+            image: try makeBitmapImage(
+                pointSize: NSSize(width: 70, height: 70),
+                pixelWidth: 70,
+                pixelHeight: 70,
+                fill: .white
+            ),
+            annotations: [oldAnnotation, laterAnnotation],
+            eraserMasks: [mask]
+        )
+        let color = renderedColor(rendered, x: 30, y: 30).usingColorSpace(.deviceRGB) ?? .clear
+
+        XCTAssertGreaterThan(color.blueComponent, 0.65)
+        XCTAssertLessThan(color.redComponent, 0.35)
+    }
+
     func testFreehandEraserMaskClearsAnnotationButLeavesScreenshotPixels() {
         var style = CaptureAnnotationStyle()
         style.strokeColor = .red
