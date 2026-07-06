@@ -2658,6 +2658,47 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertNotEqual(window.test_currentStyle?.strokeColor, SelectionOverlayWindow.defaultPaletteColors[8])
     }
 
+    func testSelectedMagnifierStyleOptionsPreserveMagnifierKindShapeAndZoom() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 80, y: 80, width: 220, height: 160)
+        window.test_setLockedSelectionRect(selection)
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = SelectionOverlayWindow.defaultPaletteColors[8]
+        style.fillColor = SelectionOverlayWindow.defaultPaletteColors[8]
+        style.strokeWidth = 4
+        style.strokePattern = .solid
+        style.fillEnabled = false
+        let annotation = CaptureAnnotation(
+            kind: .magnifier,
+            rect: NSRect(x: 30, y: 30, width: 70, height: 70),
+            style: style,
+            magnifierShape: .rectangle,
+            magnifierZoom: 4
+        )
+        window.test_setAnnotations([annotation])
+        let selectionPoint = NSPoint(x: selection.minX + 65, y: selection.minY + 65)
+        window.test_mouseDown(at: selectionPoint)
+        window.test_mouseUp(at: selectionPoint)
+
+        let optionsRect = try XCTUnwrap(window.test_optionsToolbarRect)
+        let layout = SelectionToolbarState.optionsToolbarLayout(
+            in: optionsRect,
+            paletteCount: SelectionOverlayWindow.defaultPaletteColors.count,
+            mode: .magnifier
+        )
+        let strokePoint = NSPoint(x: layout.strokeWidths[2].midX, y: layout.strokeWidths[2].midY)
+        window.test_mouseDown(at: strokePoint)
+        let colorPoint = try XCTUnwrap(window.test_optionsPaletteColorPoint(at: 2))
+        window.test_mouseDown(at: colorPoint)
+
+        let updated = try XCTUnwrap(window.test_annotation(at: 0))
+        XCTAssertEqual(updated.kind, .magnifier)
+        XCTAssertEqual(updated.style.strokeWidth, 7)
+        XCTAssertEqual(updated.style.strokeColor, SelectionOverlayWindow.defaultPaletteColors[2])
+        XCTAssertEqual(updated.effectiveMagnifierShape, .rectangle)
+        XCTAssertEqual(updated.effectiveMagnifierZoom, 4)
+    }
+
     func testNumberToolbarIconStaysBlackWhenColorChanges() throws {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 260, height: 160))

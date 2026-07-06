@@ -7626,6 +7626,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 fontSize: annotations[selectedAnnotationIndex].style.textSize
             )
             annotations[selectedAnnotationIndex].rect = localAnnotationRect(from: resizedRect)
+        } else if annotations[selectedAnnotationIndex].kind == .magnifier {
+            annotations[selectedAnnotationIndex].magnifierShape = currentMagnifierShape
+            annotations[selectedAnnotationIndex].magnifierZoom = currentMagnifierZoom
         } else if SelectionToolbarState.annotationKindSupportsPostDrawEditing(annotations[selectedAnnotationIndex].kind) {
             annotations[selectedAnnotationIndex].kind = currentShapeKind
         }
