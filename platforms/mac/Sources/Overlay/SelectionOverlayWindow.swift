@@ -889,6 +889,14 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_currentEraserSize ?? 24
     }
 
+    var test_eraserSelectedModeIdentifier: String {
+        (contentView as? SelectionOverlayView)?.test_eraserSelectedModeIdentifier ?? ""
+    }
+
+    var test_eraserSelectedSize: CGFloat {
+        (contentView as? SelectionOverlayView)?.test_eraserSelectedSize ?? 0
+    }
+
     var test_eraserMaskCount: Int {
         (contentView as? SelectionOverlayView)?.test_eraserMaskCount ?? 0
     }
@@ -6687,6 +6695,14 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         currentEraserSize
     }
 
+    var test_eraserSelectedModeIdentifier: String {
+        test_currentEraserDrawingMode
+    }
+
+    var test_eraserSelectedSize: CGFloat {
+        currentEraserSize
+    }
+
     var test_eraserMaskCount: Int {
         eraserMasks.count
     }
@@ -12101,7 +12117,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         case .magnifier:
             drawMagnifierOptions(in: optionsRect)
         case .eraser:
-            break
+            drawEraserOptions(in: optionsRect)
         }
         if SelectionToolbarState.showsStrokeStyleField(for: optionsToolbarMode) {
             drawStrokeStyleField(in: optionsRect)
@@ -12109,6 +12125,47 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         if optionsToolbarMode != .mosaic {
             drawColorSwatches(in: optionsRect)
         }
+    }
+
+    private func drawEraserOptions(in optionsRect: NSRect) {
+        let layout = optionsToolbarLayout(in: optionsRect)
+        if let freehand = layout.eraserFreehandMode {
+            drawToolbarButton(
+                freehand,
+                symbol: "toolbar-eraser-tool",
+                selected: currentEraserDrawingMode == .freehand,
+                enabled: true
+            )
+        }
+        if let rectangle = layout.eraserRectangleMode {
+            drawToolbarButton(
+                rectangle,
+                symbol: "toolbar-screenshot",
+                selected: currentEraserDrawingMode == .rectangle,
+                enabled: true
+            )
+        }
+        for (index, rect) in layout.eraserSizes.enumerated() where SelectionToolbarState.eraserSizeValues.indices.contains(index) {
+            let size = SelectionToolbarState.eraserSizeValues[index]
+            drawEraserSizeButton(rect, size: size, selected: currentEraserSize == size)
+        }
+    }
+
+    private func drawEraserSizeButton(_ rect: NSRect, size: CGFloat, selected: Bool) {
+        let background = NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5)
+        (selected ? NSColor.controlAccentColor : NSColor.windowBackgroundColor.withAlphaComponent(0.92)).setFill()
+        background.fill()
+
+        let diameter = min(rect.width - 10, max(6, size / 2))
+        let circle = NSBezierPath(ovalIn: NSRect(
+            x: rect.midX - diameter / 2,
+            y: rect.midY - diameter / 2,
+            width: diameter,
+            height: diameter
+        ))
+        circle.lineWidth = selected ? 2 : 1.5
+        (selected ? NSColor.white : NSColor.labelColor).setStroke()
+        circle.stroke()
     }
 
     private func drawMagnifierOptions(in optionsRect: NSRect) {

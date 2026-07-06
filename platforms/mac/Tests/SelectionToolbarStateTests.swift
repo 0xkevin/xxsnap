@@ -823,6 +823,20 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_cursorStyle(at: window.test_pointInsideLockedSelection()), .eraserCircle)
     }
 
+    func testEraserOptionsExposeSelectedModeAndSizeForDrawing() {
+        let window = makeOverlayWindowWithLockedSelection()
+        click(window, button: .eraser)
+
+        XCTAssertEqual(window.test_eraserSelectedModeIdentifier, "freehand")
+        XCTAssertEqual(window.test_eraserSelectedSize, 24)
+
+        click(window, eraserMode: "rectangle")
+        click(window, eraserSize: 12)
+
+        XCTAssertEqual(window.test_eraserSelectedModeIdentifier, "rectangle")
+        XCTAssertEqual(window.test_eraserSelectedSize, 12)
+    }
+
     func testEraserCircleCursorIsHollowCenteredAndSizeAware() throws {
         let window = makeOverlayWindowWithLockedSelection()
         click(window, button: .eraser)
