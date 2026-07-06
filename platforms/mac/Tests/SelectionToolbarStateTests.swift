@@ -452,6 +452,37 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_annotationCount, 0)
     }
 
+    func testRedoRestoresEditedAnnotationSnapshotAfterUndo() throws {
+        let window = makeOverlayWindowWithLockedSelection()
+        window.test_activateShapeTool(.rectangle)
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseDragged(to: NSPoint(x: 220, y: 180))
+        window.test_mouseUp(at: NSPoint(x: 220, y: 180))
+        XCTAssertEqual(window.test_undoActionCount, 1)
+
+        let createdRect = try XCTUnwrap(window.test_annotationRect(at: 0))
+        window.test_selectAnnotation(at: 0)
+        let resizeStart = try XCTUnwrap(window.test_shapeResizeHandlePoint(.bottomRight))
+        let resizeEnd = NSPoint(x: resizeStart.x + 24, y: resizeStart.y - 18)
+        window.test_mouseDown(at: resizeStart)
+        window.test_mouseDragged(to: resizeEnd)
+        window.test_mouseUp(at: resizeEnd)
+
+        let editedRect = try XCTUnwrap(window.test_annotationRect(at: 0))
+        XCTAssertNotEqual(editedRect, createdRect)
+
+        click(window, button: .undo)
+        XCTAssertEqual(window.test_annotationCount, 0)
+
+        click(window, button: .redo)
+        XCTAssertEqual(window.test_annotationCount, 1)
+        let restoredRect = try XCTUnwrap(window.test_annotationRect(at: 0))
+        XCTAssertEqual(restoredRect.origin.x, editedRect.origin.x, accuracy: 0.1)
+        XCTAssertEqual(restoredRect.origin.y, editedRect.origin.y, accuracy: 0.1)
+        XCTAssertEqual(restoredRect.width, editedRect.width, accuracy: 0.1)
+        XCTAssertEqual(restoredRect.height, editedRect.height, accuracy: 0.1)
+    }
+
     func testDeleteNumberSequenceAnnotationUndoRestoresRenumberedMarks() {
         let window = makeOverlayWindowWithLockedSelection()
         window.test_setAnnotations([

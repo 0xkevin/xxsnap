@@ -7041,10 +7041,12 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         guard let action = undoActions.popLast() else {
             return
         }
+        var redoAction = action
         switch action {
         case .addedAnnotation(let annotation):
             if let index = annotations.lastIndex(where: { $0.renderOrder == annotation.renderOrder }) {
-                annotations.remove(at: index)
+                let removedCurrent = annotations.remove(at: index)
+                redoAction = .addedAnnotation(removedCurrent)
             }
             selectedAnnotationIndex = annotations.indices.last
         case .addedEraserMask(let mask):
@@ -7055,7 +7057,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             annotations = before
             selectedAnnotationIndex = validAnnotationIndex(selectedIndexBefore)
         }
-        redoActions.append(action)
+        redoActions.append(redoAction)
         resetMosaicPreviewCaches()
         needsDisplay = true
     }
