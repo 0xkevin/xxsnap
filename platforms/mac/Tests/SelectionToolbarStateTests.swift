@@ -487,6 +487,19 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_undoActionCount, 0)
     }
 
+    func testEraserClickJitterOverAnnotationDeletesAndRecordsHistory() {
+        let window = makeOverlayWindowWithLockedSelection()
+        window.test_setAnnotations([testRectangleAnnotation(x: 20, y: 20, width: 60, height: 40, renderOrder: 1)])
+        click(window, button: .eraser)
+
+        window.test_mouseDown(at: NSPoint(x: 142, y: 136))
+        window.test_mouseUp(at: NSPoint(x: 143, y: 137))
+
+        XCTAssertEqual(window.test_annotationCount, 0)
+        XCTAssertEqual(window.test_eraserMaskCount, 0)
+        XCTAssertEqual(window.test_undoActionCount, 1)
+    }
+
     func testDeleteSelectedAnnotationRecordsUndoHistory() {
         let window = makeOverlayWindowWithLockedSelection()
         let annotation = testRectangleAnnotation(x: 20, y: 20, width: 60, height: 40, renderOrder: 1)

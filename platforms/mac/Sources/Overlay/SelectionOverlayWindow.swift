@@ -1816,13 +1816,13 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private var currentEraserDrawingMode: EraserDrawingMode = .freehand
     private var currentEraserSize: CGFloat = 24
     private let eraserDragThreshold: CGFloat = 3
-    private let eraserClickTolerance: CGFloat = 0.5
     private var eraserCircleCursorCache: [CGFloat: NSCursor] = [:]
     private var eraserMasks: [CaptureEraserMask] = []
     private var eraserDraftPoints: [NSPoint] = []
     private var eraserDraftRect: NSRect?
     private var eraserMouseDownPoint: NSPoint?
     private var isDraggingEraser = false
+    private var hasEraserDragEvent = false
     private var currentMagnifierShape: CaptureMagnifierShape = .rectangle
     private var currentMagnifierZoom: CGFloat = 2
     private var currentNumberMarkType: CaptureNumberMarkType = .number
@@ -2625,7 +2625,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             if isDraggingEraser {
                 finishEraserDrag(at: point)
             } else if let down = eraserMouseDownPoint,
-                      hypot(point.x - down.x, point.y - down.y) <= eraserClickTolerance {
+                      !hasEraserDragEvent,
+                      hypot(point.x - down.x, point.y - down.y) < eraserDragThreshold {
                 finishEraserClick(at: point)
             } else {
                 cancelEraserDraft()
@@ -5660,6 +5661,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         eraserDraftPoints.removeAll()
         eraserDraftRect = nil
         isDraggingEraser = false
+        hasEraserDragEvent = false
     }
 
     private func beginEraserInteraction(at point: NSPoint) {
@@ -5667,12 +5669,14 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         eraserDraftPoints = [localPoint(fromOverlayPoint: point)]
         eraserDraftRect = nil
         isDraggingEraser = false
+        hasEraserDragEvent = false
     }
 
     private func updateEraserDrag(to point: NSPoint) {
         guard let down = eraserMouseDownPoint else {
             return
         }
+        hasEraserDragEvent = true
         let distance = hypot(point.x - down.x, point.y - down.y)
         if distance >= eraserDragThreshold {
             isDraggingEraser = true
