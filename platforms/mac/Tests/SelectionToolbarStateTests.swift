@@ -381,6 +381,39 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertFalse(window.test_hasPendingTextEdit)
     }
 
+    func testEraserDefaultsToFreehandMediumSizeAndCircleCursor() {
+        let window = makeOverlayWindowWithLockedSelection()
+        click(window, button: .eraser)
+
+        XCTAssertEqual(window.test_currentEraserDrawingMode, "freehand")
+        XCTAssertEqual(window.test_currentEraserSize, 24)
+
+        let point = window.test_pointInsideLockedSelection()
+        XCTAssertEqual(window.test_cursorStyle(at: point), .eraserCircle)
+    }
+
+    func testEraserRectangleModeUsesCrosshairAndToolbarUsesArrow() {
+        let window = makeOverlayWindowWithLockedSelection()
+        click(window, button: .eraser)
+        click(window, eraserMode: "rectangle")
+
+        XCTAssertEqual(window.test_currentEraserDrawingMode, "rectangle")
+        XCTAssertEqual(window.test_cursorStyle(at: window.test_pointInsideLockedSelection()), .crosshair)
+
+        let toolbarPoint = window.test_mainToolbarButtonPoint(for: .eraser)!
+        XCTAssertEqual(window.test_cursorStyle(at: toolbarPoint), .arrow)
+    }
+
+    func testEraserSizeButtonsUpdateCircleCursorDiameterState() {
+        let window = makeOverlayWindowWithLockedSelection()
+        click(window, button: .eraser)
+
+        click(window, eraserSize: 40)
+
+        XCTAssertEqual(window.test_currentEraserSize, 40)
+        XCTAssertEqual(window.test_cursorStyle(at: window.test_pointInsideLockedSelection()), .eraserCircle)
+    }
+
     func testTextToolCreatesEditableAnnotationAndCommitsTypedText() {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
@@ -10603,6 +10636,34 @@ final class SelectionToolbarStateTests: XCTestCase {
     ) {
         guard let point = window.test_mainToolbarButtonPoint(for: button) else {
             XCTFail("Expected \(button) toolbar button", file: file, line: line)
+            return
+        }
+        window.test_mouseDown(at: point)
+        window.test_mouseUp(at: point)
+    }
+
+    private func click(
+        _ window: SelectionOverlayWindow,
+        eraserMode: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard let point = window.test_eraserModePoint(eraserMode) else {
+            XCTFail("Expected \(eraserMode) eraser mode button", file: file, line: line)
+            return
+        }
+        window.test_mouseDown(at: point)
+        window.test_mouseUp(at: point)
+    }
+
+    private func click(
+        _ window: SelectionOverlayWindow,
+        eraserSize: CGFloat,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard let point = window.test_eraserSizePoint(eraserSize) else {
+            XCTFail("Expected \(eraserSize) eraser size button", file: file, line: line)
             return
         }
         window.test_mouseDown(at: point)

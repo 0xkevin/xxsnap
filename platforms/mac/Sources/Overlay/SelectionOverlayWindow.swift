@@ -688,6 +688,21 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_mainToolbarButtonPoint(for: button)
     }
 
+    func test_pointInsideLockedSelection() -> NSPoint {
+        guard let rect = test_currentSelectionRect?.standardized else {
+            return .zero
+        }
+        return NSPoint(x: rect.midX, y: rect.midY)
+    }
+
+    func test_eraserModePoint(_ mode: String) -> NSPoint? {
+        (contentView as? SelectionOverlayView)?.test_eraserModePoint(mode)
+    }
+
+    func test_eraserSizePoint(_ size: CGFloat) -> NSPoint? {
+        (contentView as? SelectionOverlayView)?.test_eraserSizePoint(size)
+    }
+
     func test_symbolName(for button: TestToolbarButton) -> String? {
         (contentView as? SelectionOverlayView)?.test_symbolName(for: button)
     }
@@ -850,6 +865,14 @@ final class SelectionOverlayWindow: NSWindow {
 
     var test_isEraserToolActive: Bool {
         (contentView as? SelectionOverlayView)?.test_isEraserToolActive ?? false
+    }
+
+    var test_currentEraserDrawingMode: String {
+        (contentView as? SelectionOverlayView)?.test_currentEraserDrawingMode ?? "freehand"
+    }
+
+    var test_currentEraserSize: CGFloat {
+        (contentView as? SelectionOverlayView)?.test_currentEraserSize ?? 24
     }
 
     var test_isShapeToolActive: Bool {
@@ -2335,6 +2358,18 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             }
         }
 
+        if isEraserToolActive {
+            if isToolbarOrPanelPoint(point) {
+                return .arrow
+            }
+            switch currentEraserDrawingMode {
+            case .freehand:
+                return .eraserCircle
+            case .rectangle:
+                return .crosshair
+            }
+        }
+
         if textDeleteHandleHitTarget(at: point) != nil {
             return .arrow
         }
@@ -2922,6 +2957,27 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         return NSCursor(image: image, hotSpot: NSPoint(x: size.width / 2, y: size.height / 2))
     }
 
+    private func eraserCircleCursor(diameter: CGFloat) -> NSCursor {
+        let side = max(16, ceil(diameter) + 4)
+        let image = NSImage(size: NSSize(width: side, height: side))
+        image.lockFocus()
+        let rect = NSRect(
+            x: (side - diameter) / 2,
+            y: (side - diameter) / 2,
+            width: diameter,
+            height: diameter
+        ).insetBy(dx: 1, dy: 1)
+        let path = NSBezierPath(ovalIn: rect)
+        path.lineWidth = 3
+        NSColor.white.withAlphaComponent(0.95).setStroke()
+        path.stroke()
+        path.lineWidth = 1.25
+        NSColor.black.withAlphaComponent(0.85).setStroke()
+        path.stroke()
+        image.unlockFocus()
+        return NSCursor(image: image, hotSpot: NSPoint(x: side / 2, y: side / 2))
+    }
+
     private func nsCursor(for style: SelectionToolbarState.OverlayCursorStyle) -> NSCursor {
         switch style {
         case .arrow:
@@ -2979,7 +3035,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         case .numberCross:
             return numberCreationCursor(for: .cross)
         case .eraserCircle:
-            return NSCursor.crosshair
+            return eraserCircleCursor(diameter: currentEraserSize)
         }
     }
 
@@ -5932,6 +5988,40 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         return NSPoint(x: rect.midX, y: rect.midY)
     }
 
+    func test_eraserModePoint(_ mode: String) -> NSPoint? {
+        guard let optionsToolbarRect else {
+            return nil
+        }
+        let layout = optionsToolbarLayout(in: optionsToolbarRect)
+        let rect: NSRect?
+        switch mode {
+        case "freehand":
+            rect = layout.eraserFreehandMode
+        case "rectangle":
+            rect = layout.eraserRectangleMode
+        default:
+            rect = nil
+        }
+        guard let rect else {
+            return nil
+        }
+        return NSPoint(x: rect.midX, y: rect.midY)
+    }
+
+    func test_eraserSizePoint(_ size: CGFloat) -> NSPoint? {
+        guard let optionsToolbarRect,
+              let index = SelectionToolbarState.eraserSizeValues.firstIndex(where: { abs($0 - size) < 0.001 })
+        else {
+            return nil
+        }
+        let rects = optionsToolbarLayout(in: optionsToolbarRect).eraserSizes
+        guard rects.indices.contains(index) else {
+            return nil
+        }
+        let rect = rects[index]
+        return NSPoint(x: rect.midX, y: rect.midY)
+    }
+
     func test_selectTextSize(_ size: CGFloat) {
         applyTextSize(size)
     }
@@ -6344,6 +6434,19 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     var test_isEraserToolActive: Bool {
         isEraserToolActive
+    }
+
+    var test_currentEraserDrawingMode: String {
+        switch currentEraserDrawingMode {
+        case .freehand:
+            return "freehand"
+        case .rectangle:
+            return "rectangle"
+        }
+    }
+
+    var test_currentEraserSize: CGFloat {
+        currentEraserSize
     }
 
     var test_isShapeToolActive: Bool {
@@ -6839,6 +6942,12 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         if optionsToolbarMode == .magnifier {
             return handleMagnifierOptionsClick(at: point, optionsRect: optionsRect)
         }
+        if optionsToolbarMode == .eraser,
+           handleEraserOptionsClick(at: point, in: optionsRect) {
+            needsDisplay = true
+            invalidateCursorRectsAndRefresh(at: point)
+            return true
+        }
         let layout = optionsToolbarLayout(in: optionsRect)
         let strokeWidths = SelectionToolbarState.strokeWidthValues(for: optionsToolbarMode)
 
@@ -6961,6 +7070,25 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
 
         return true
+    }
+
+    private func handleEraserOptionsClick(at point: NSPoint, in optionsRect: NSRect) -> Bool {
+        let layout = optionsToolbarLayout(in: optionsRect)
+        if layout.eraserFreehandMode?.contains(point) == true {
+            currentEraserDrawingMode = .freehand
+            cancelEraserDraft()
+            return true
+        }
+        if layout.eraserRectangleMode?.contains(point) == true {
+            currentEraserDrawingMode = .rectangle
+            cancelEraserDraft()
+            return true
+        }
+        for (index, rect) in layout.eraserSizes.enumerated() where rect.contains(point) {
+            currentEraserSize = SelectionToolbarState.eraserSizeValues[index]
+            return true
+        }
+        return false
     }
 
     private func handleNumberOptionsClick(at point: NSPoint, optionsRect: NSRect) -> Bool {
