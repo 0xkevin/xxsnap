@@ -1713,7 +1713,12 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private enum CaptureHistoryAction {
         case addedAnnotation(CaptureAnnotation)
         case addedEraserMask(CaptureEraserMask)
-        case deletedAnnotation(annotation: CaptureAnnotation, index: Int)
+        case deletedAnnotations(
+            before: [CaptureAnnotation],
+            after: [CaptureAnnotation],
+            selectedIndexBefore: Int?,
+            selectedIndexAfter: Int?
+        )
     }
 
     private let colors = SelectionOverlayWindow.defaultPaletteColors
@@ -5656,12 +5661,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             cancelEraserDraft()
             return
         }
-        let removed = annotations.remove(at: hitIndex)
-        selectedAnnotationIndex = nil
-        recordUndo(.deletedAnnotation(annotation: removed, index: hitIndex))
-        resetMosaicPreviewCaches()
+        _ = deleteAnnotation(at: hitIndex, selectedIndexAfter: nil)
         cancelEraserDraft()
-        needsDisplay = true
     }
 
     private func finishEraserDrag(at point: NSPoint) {
@@ -7050,9 +7051,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             if let index = eraserMasks.lastIndex(where: { $0.renderOrder == mask.renderOrder }) {
                 eraserMasks.remove(at: index)
             }
-        case .deletedAnnotation(let annotation, let index):
-            annotations.insert(annotation, at: min(max(index, 0), annotations.count))
-            selectedAnnotationIndex = min(index, annotations.count - 1)
+        case .deletedAnnotations(let before, _, let selectedIndexBefore, _):
+            annotations = before
+            selectedAnnotationIndex = validAnnotationIndex(selectedIndexBefore)
         }
         redoActions.append(action)
         resetMosaicPreviewCaches()
@@ -7070,15 +7071,20 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         case .addedEraserMask(let mask):
             eraserMasks.append(mask)
             selectedAnnotationIndex = nil
-        case .deletedAnnotation(let annotation, _):
-            if let index = annotations.lastIndex(where: { $0.renderOrder == annotation.renderOrder }) {
-                annotations.remove(at: index)
-            }
-            selectedAnnotationIndex = annotations.indices.last
+        case .deletedAnnotations(_, let after, _, let selectedIndexAfter):
+            annotations = after
+            selectedAnnotationIndex = validAnnotationIndex(selectedIndexAfter)
         }
         undoActions.append(action)
         resetMosaicPreviewCaches()
         needsDisplay = true
+    }
+
+    private func validAnnotationIndex(_ index: Int?) -> Int? {
+        guard let index, annotations.indices.contains(index) else {
+            return nil
+        }
+        return index
     }
 
     private func deleteSelectedAnnotation() -> Bool {
@@ -7097,15 +7103,24 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return false
         }
 
+        return deleteAnnotation(at: deletionIndex, selectedIndexAfter: nil)
+    }
+
+    private func deleteAnnotation(at deletionIndex: Int, selectedIndexAfter: Int?) -> Bool {
+        guard annotations.indices.contains(deletionIndex) else {
+            return false
+        }
+
+        let beforeAnnotations = annotations
+        let selectedIndexBefore = selectedAnnotationIndex
         let removed = annotations[deletionIndex]
         let shouldRenumberNumberSequence = removed.kind == .numberSequence && !isNumberSequenceManualModeActive()
         annotations.remove(at: deletionIndex)
-        self.selectedAnnotationIndex = nil
+        selectedAnnotationIndex = selectedIndexAfter
         editingTextAnnotationIndex = nil
         clearNumberEditing()
         clearPendingTextEdit()
         removeTextEditor()
-        recordUndo(.deletedAnnotation(annotation: removed, index: deletionIndex))
         showsStrokeStyleMenu = false
         showsCornerRadiusPanel = false
         showsStartArrowTypeMenu = false
@@ -7120,6 +7135,13 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         if removed.kind == .mosaicStroke || removed.kind == .mosaicRectangle {
             resetMosaicPreviewCaches()
         }
+        selectedAnnotationIndex = validAnnotationIndex(selectedIndexAfter)
+        recordUndo(.deletedAnnotations(
+            before: beforeAnnotations,
+            after: annotations,
+            selectedIndexBefore: selectedIndexBefore,
+            selectedIndexAfter: selectedAnnotationIndex
+        ))
         needsDisplay = true
         return true
     }
@@ -8439,8 +8461,20 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         switch annotation.kind {
         case .rectangle, .ellipse, .mosaicRectangle, .text, .magnifier:
             return rotatedAnnotationRectContains(point, annotation: annotation, hitOutset: 0)
-        case .arrowLine, .brush, .marker, .mosaicStroke, .numberSequence:
+        case .arrowLine, .marker:
             return false
+        case .brush:
+            guard let brushPath = overlayBrushPath(fromLocalBrushPath: annotation.brushPath) else {
+                return false
+            }
+            return brushPathContains(point, path: brushPath, hitOutset: max(8, annotation.style.strokeWidth / 2 + 4))
+        case .mosaicStroke:
+            guard let mosaicStroke = overlayMosaicStroke(fromLocalMosaicStroke: annotation.mosaicStroke) else {
+                return false
+            }
+            return mosaicStrokeContains(point, stroke: mosaicStroke, hitOutset: max(8, annotation.style.strokeWidth / 2 + 4))
+        case .numberSequence:
+            return overlayRect(fromLocalAnnotationRect: annotation.rect).standardized.insetBy(dx: -6, dy: -6).contains(point)
         }
     }
 

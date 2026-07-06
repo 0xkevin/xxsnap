@@ -452,6 +452,81 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_annotationCount, 0)
     }
 
+    func testDeleteNumberSequenceAnnotationUndoRestoresRenumberedMarks() {
+        let window = makeOverlayWindowWithLockedSelection()
+        window.test_setAnnotations([
+            testNumberSequenceAnnotation(x: 20, y: 20, index: 1, renderOrder: 1),
+            testNumberSequenceAnnotation(x: 60, y: 20, index: 2, renderOrder: 2),
+            testNumberSequenceAnnotation(x: 100, y: 20, index: 3, renderOrder: 3),
+        ])
+        window.test_selectAnnotation(at: 1)
+
+        window.test_keyDown(keyCode: 51)
+
+        XCTAssertEqual(window.test_annotationCount, 2)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 1)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 1), 2)
+
+        click(window, button: .undo)
+        XCTAssertEqual(window.test_annotationCount, 3)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 1)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 1), 2)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 2), 3)
+
+        click(window, button: .redo)
+        XCTAssertEqual(window.test_annotationCount, 2)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 1)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 1), 2)
+    }
+
+    func testEraserClickDeletesNumberSequenceAndRenumbersRemainingMarks() {
+        let window = makeOverlayWindowWithLockedSelection()
+        window.test_setAnnotations([
+            testNumberSequenceAnnotation(x: 20, y: 20, index: 1, renderOrder: 1),
+            testNumberSequenceAnnotation(x: 60, y: 20, index: 2, renderOrder: 2),
+            testNumberSequenceAnnotation(x: 100, y: 20, index: 3, renderOrder: 3),
+        ])
+        click(window, button: .eraser)
+
+        window.test_mouseDown(at: NSPoint(x: 170, y: 130))
+        window.test_mouseUp(at: NSPoint(x: 170, y: 130))
+
+        XCTAssertEqual(window.test_annotationCount, 2)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 1)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 1), 2)
+
+        click(window, button: .undo)
+        XCTAssertEqual(window.test_annotationCount, 3)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 1)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 1), 2)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 2), 3)
+
+        click(window, button: .redo)
+        XCTAssertEqual(window.test_annotationCount, 2)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 1)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 1), 2)
+    }
+
+    func testEraserClickDeletesBrushAndMosaicStrokeAnnotations() {
+        let window = makeOverlayWindowWithLockedSelection()
+        window.test_setAnnotations([
+            testBrushAnnotation(points: [NSPoint(x: 40, y: 40), NSPoint(x: 80, y: 80)], renderOrder: 1),
+            testMosaicStrokeAnnotation(points: [NSPoint(x: 100, y: 40), NSPoint(x: 140, y: 80)], renderOrder: 2),
+        ])
+        click(window, button: .eraser)
+
+        window.test_mouseDown(at: NSPoint(x: 160, y: 160))
+        window.test_mouseUp(at: NSPoint(x: 160, y: 160))
+
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(window.test_annotation(at: 0)?.kind, .mosaicStroke)
+
+        window.test_mouseDown(at: NSPoint(x: 220, y: 160))
+        window.test_mouseUp(at: NSPoint(x: 220, y: 160))
+
+        XCTAssertEqual(window.test_annotationCount, 0)
+    }
+
     func testEraserDefaultsToFreehandMediumSizeAndCircleCursor() {
         let window = makeOverlayWindowWithLockedSelection()
         click(window, button: .eraser)
@@ -10729,6 +10804,51 @@ final class SelectionToolbarStateTests: XCTestCase {
             kind: .rectangle,
             rect: NSRect(x: x, y: y, width: width, height: height),
             style: CaptureAnnotationStyle()
+        )
+        annotation.renderOrder = renderOrder
+        return annotation
+    }
+
+    private func testNumberSequenceAnnotation(
+        x: CGFloat,
+        y: CGFloat,
+        index: Int,
+        renderOrder: Int
+    ) -> CaptureAnnotation {
+        var style = CaptureAnnotationStyle()
+        style.textSize = 5
+        var annotation = CaptureAnnotation(
+            kind: .numberSequence,
+            rect: NSRect(x: x, y: y, width: 21, height: 21),
+            style: style,
+            numberMarkType: .number,
+            numberSequenceIndex: index
+        )
+        annotation.renderOrder = renderOrder
+        return annotation
+    }
+
+    private func testBrushAnnotation(points: [NSPoint], renderOrder: Int) -> CaptureAnnotation {
+        var style = CaptureAnnotationStyle()
+        style.strokeWidth = 12
+        var annotation = CaptureAnnotation(
+            kind: .brush,
+            rect: CaptureBrushPath(points: points).boundingRect,
+            style: style,
+            brushPath: CaptureBrushPath(points: points)
+        )
+        annotation.renderOrder = renderOrder
+        return annotation
+    }
+
+    private func testMosaicStrokeAnnotation(points: [NSPoint], renderOrder: Int) -> CaptureAnnotation {
+        var style = CaptureAnnotationStyle()
+        style.strokeWidth = 12
+        var annotation = CaptureAnnotation(
+            kind: .mosaicStroke,
+            rect: CaptureMosaicStroke(points: points).boundingRect,
+            style: style,
+            mosaicStroke: CaptureMosaicStroke(points: points)
         )
         annotation.renderOrder = renderOrder
         return annotation
