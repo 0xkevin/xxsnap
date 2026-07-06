@@ -89,6 +89,38 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertNotEqual(sampledHex, SelectionToolbarState.colorSamplerHexString(for: annotationColor))
     }
 
+    func testEyedropperSamplesBackgroundWhereEraserMaskClearsMarkerLine() throws {
+        let background = solidImage(size: NSSize(width: 500, height: 400), color: .black)
+        let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        let samplePoint = NSPoint(x: 200, y: 150)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateShapeTool(.marker)
+
+        let blackSwatch = try XCTUnwrap(window.test_optionsPaletteColorPoint(at: 2))
+        window.test_mouseDown(at: blackSwatch)
+        window.test_mouseUp(at: blackSwatch)
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseDragged(to: NSPoint(x: 260, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 260, y: 150))
+        window.test_setEraserMasks([
+            CaptureEraserMask(
+                kind: .rectangle,
+                renderOrder: 2,
+                size: 24,
+                points: [],
+                rect: NSRect(x: 70, y: 35, width: 80, height: 30)
+            ),
+        ])
+
+        let eyedropperPoint = try XCTUnwrap(window.test_mainToolbarButtonPoint(for: .eyedropper))
+        window.test_mouseDown(at: eyedropperPoint)
+        window.test_mouseUp(at: eyedropperPoint)
+
+        let sampledHex = try XCTUnwrap(window.test_magnifierSampleColorHex(at: samplePoint))
+        XCTAssertEqual(sampledHex, "#000000")
+    }
+
     func testEyedropperSamplesVisibleMarkerLineOnBlackBackground() throws {
         let background = solidImage(size: NSSize(width: 500, height: 400), color: .black)
         let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
@@ -607,10 +639,10 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_setEraserMasks([
             CaptureEraserMask(
                 kind: .rectangle,
-                renderOrder: 1,
+                renderOrder: 5,
                 size: 24,
                 points: [],
-                rect: NSRect(x: 10, y: 10, width: 20, height: 20)
+                rect: NSRect(x: 50, y: 30, width: 120, height: 90)
             ),
         ])
         window.test_toggleShapeTool(.mosaicRectangle)

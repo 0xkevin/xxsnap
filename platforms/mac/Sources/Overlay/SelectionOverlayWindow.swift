@@ -9859,7 +9859,16 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         else {
             return annotations
         }
-        return annotations + [draftAnnotation]
+        var previewDraft = draftAnnotation
+        if previewDraft.renderOrder == 0 {
+            let nextPreviewOrder = max(
+                nextRenderOrderValue,
+                (annotations.map(\.renderOrder).max() ?? 0) + 1,
+                (eraserMasks.map(\.renderOrder).max() ?? 0) + 1
+            )
+            previewDraft.renderOrder = nextPreviewOrder
+        }
+        return annotations + [previewDraft]
     }
 
     private func drawSelectionBorder(_ rect: NSRect) {
@@ -13238,10 +13247,6 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return nil
         }
 
-        if let markerColor = visibleDarkMarkerLineColor(at: point) {
-            return markerColor
-        }
-
         if !eraserMasks.isEmpty, let backgroundImage {
             let composite = CaptureAnnotationRenderer.render(
                 image: backgroundImage,
@@ -13249,6 +13254,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 eraserMasks: eraserMasks.map(overlayEraserMask)
             )
             return sampleColor(at: point, in: composite)
+        }
+
+        if let markerColor = visibleDarkMarkerLineColor(at: point) {
+            return markerColor
         }
 
         guard let composite = fullMosaicPreviewComposite(for: annotations) else {
