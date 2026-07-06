@@ -5321,6 +5321,136 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertLessThan(pixel.red, 80)
     }
 
+    func testMagnifierOverlayPreviewMatchesExportRendererAtCenter() throws {
+        let imageSize = NSSize(width: 240, height: 160)
+        let base = coordinateRedBlueImage(width: Int(imageSize.width), height: Int(imageSize.height))
+        let selection = NSRect(x: 24, y: 18, width: 168, height: 108)
+        var style = CaptureAnnotationStyle()
+        style.strokeWidth = 0
+        let localCenter = NSPoint(x: 126, y: 62)
+        let lensSize: CGFloat = 48
+        let magnifier = CaptureAnnotation(
+            kind: .magnifier,
+            rect: NSRect(
+                x: localCenter.x - lensSize / 2,
+                y: localCenter.y - lensSize / 2,
+                width: lensSize,
+                height: lensSize
+            ),
+            style: style,
+            magnifierShape: .circle,
+            magnifierZoom: 2
+        )
+        let window = fixedCanvasOverlayWindow(backgroundImage: base, canvasSize: imageSize)
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([magnifier])
+
+        let overlayCenter = NSPoint(
+            x: selection.minX + localCenter.x,
+            y: selection.minY + localCenter.y
+        )
+        let overlayImage = try XCTUnwrap(window.test_renderedOverlayImage())
+        let exported = CaptureAnnotationRenderer.render(
+            image: base,
+            annotations: [overlayAnnotation(magnifier, selection: selection)]
+        )
+        let sourcePixel = try XCTUnwrap(rgbaPixel(in: base, at: overlayCenter))
+        let overlayPixel = try XCTUnwrap(rgbaPixel(in: overlayImage, at: overlayCenter))
+        let exportPixel = try XCTUnwrap(rgbaPixel(in: exported, at: overlayCenter))
+
+        XCTAssertEqual(hex(overlayPixel), hex(sourcePixel))
+        XCTAssertEqual(hex(exportPixel), hex(sourcePixel))
+    }
+
+    func testMagnifierDoesNotMagnifyMosaicOrTextAnnotations() throws {
+        let imageSize = NSSize(width: 180, height: 120)
+        let base = coordinateRedBlueImage(width: Int(imageSize.width), height: Int(imageSize.height))
+        let selection = NSRect(x: 20, y: 16, width: 130, height: 88)
+        var coverStyle = CaptureAnnotationStyle()
+        coverStyle.fillEnabled = true
+        coverStyle.fillColor = NSColor(srgbRed: 0, green: 1, blue: 0, alpha: 1)
+        coverStyle.strokeColor = coverStyle.fillColor
+        coverStyle.strokeWidth = 0
+        var textStyle = CaptureAnnotationStyle()
+        textStyle.strokeColor = .white
+        textStyle.fillColor = .white
+        textStyle.textSize = 36
+        var mosaicStyle = CaptureAnnotationStyle()
+        mosaicStyle.strokeWidth = 24
+        var magnifierStyle = CaptureAnnotationStyle()
+        magnifierStyle.strokeWidth = 0
+        let localCenter = NSPoint(x: 72, y: 48)
+        let coveringAnnotation = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 54, y: 30, width: 36, height: 36),
+            style: coverStyle
+        )
+        let text = CaptureAnnotation(
+            kind: .text,
+            rect: NSRect(x: 50, y: 26, width: 56, height: 44),
+            style: textStyle,
+            text: "X"
+        )
+        let mosaicLike = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(x: 46, y: 22, width: 56, height: 52),
+            style: mosaicStyle,
+            mosaicRedaction: CaptureMosaicRedaction(type: .gaussianBlur, value: 8)
+        )
+        let magnifier = CaptureAnnotation(
+            kind: .magnifier,
+            rect: NSRect(x: localCenter.x - 28, y: localCenter.y - 28, width: 56, height: 56),
+            style: magnifierStyle,
+            magnifierShape: .circle,
+            magnifierZoom: 2
+        )
+        let precedingAnnotations = [coveringAnnotation, text, mosaicLike]
+        let window = fixedCanvasOverlayWindow(backgroundImage: base, canvasSize: imageSize)
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations(precedingAnnotations + [magnifier])
+
+        let overlayImage = try XCTUnwrap(window.test_renderedOverlayImage())
+        let annotationComposite = CaptureAnnotationRenderer.render(
+            image: base,
+            annotations: precedingAnnotations.map { overlayAnnotation($0, selection: selection) }
+        )
+        let overlayMagnifier = overlayAnnotation(magnifier, selection: selection)
+        let expectedOriginalMagnified = CaptureAnnotationRenderer.render(
+            image: base,
+            annotations: [overlayMagnifier]
+        )
+        let compositedMagnified = CaptureAnnotationRenderer.render(
+            image: annotationComposite,
+            annotations: [overlayMagnifier]
+        )
+        let exported = CaptureAnnotationRenderer.render(
+            image: base,
+            annotations: precedingAnnotations.map { overlayAnnotation($0, selection: selection) } + [overlayMagnifier]
+        )
+        let overlayCenter = NSPoint(
+            x: selection.minX + localCenter.x,
+            y: selection.minY + localCenter.y
+        )
+        let destinationOffsets = [
+            NSPoint(x: 0, y: 0),
+            NSPoint(x: 8, y: 0),
+            NSPoint(x: 0, y: 8),
+            NSPoint(x: -8, y: -8),
+        ]
+
+        for offset in destinationOffsets {
+            let outputPoint = NSPoint(x: overlayCenter.x + offset.x, y: overlayCenter.y + offset.y)
+            let expectedPixel = try XCTUnwrap(rgbaPixel(in: expectedOriginalMagnified, at: outputPoint))
+            let compositedPixel = try XCTUnwrap(rgbaPixel(in: compositedMagnified, at: outputPoint))
+            let overlayPixel = try XCTUnwrap(rgbaPixel(in: overlayImage, at: outputPoint))
+            let exportPixel = try XCTUnwrap(rgbaPixel(in: exported, at: outputPoint))
+
+            XCTAssertGreaterThan(pixelDistance(compositedPixel, expectedPixel), 40)
+            XCTAssertLessThanOrEqual(pixelDistance(overlayPixel, expectedPixel), 4)
+            XCTAssertLessThanOrEqual(pixelDistance(exportPixel, expectedPixel), 4)
+        }
+    }
+
     func testOverlayWindowDrawsOverlappingMosaicLayersSequentially() throws {
         let image = checkerboardImage(size: NSSize(width: 240, height: 160), squareSize: 4)
         let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
@@ -9600,6 +9730,28 @@ final class SelectionToolbarStateTests: XCTestCase {
             shouldInterpolate: false,
             intent: .defaultIntent
         )!
+    }
+
+    private func fixedCanvasOverlayWindow(backgroundImage: NSImage, canvasSize: NSSize) -> SelectionOverlayWindow {
+        let window = SelectionOverlayWindow(backgroundImage: backgroundImage) { _ in }
+        let frame = NSRect(origin: .zero, size: canvasSize)
+        window.setFrame(frame, display: false)
+        window.contentView?.frame = frame
+        return window
+    }
+
+    private func coordinateRedBlueImage(width: Int, height: Int) -> NSImage {
+        let pixels = (0..<height).map { y in
+            (0..<width).map { x in
+                let leftHalf = x < width / 2
+                let secondary = CGFloat((x * 13 + y * 29) % 180) / 255
+                let tertiary = CGFloat((x * 31 + y * 17) % 120) / 255
+                return leftHalf
+                    ? NSColor(srgbRed: 1, green: secondary, blue: tertiary, alpha: 1)
+                    : NSColor(srgbRed: tertiary, green: secondary, blue: 1, alpha: 1)
+            }
+        }
+        return pixelImage(width: width, height: height, pixels: pixels)
     }
 
     private func makeTestImage(size: NSSize, colorAt: (NSPoint) -> NSColor) -> NSImage {
