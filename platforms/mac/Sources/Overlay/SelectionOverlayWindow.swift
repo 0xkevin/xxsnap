@@ -799,6 +799,10 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_isTextSizeDropdownVisible ?? false
     }
 
+    var test_isMagnifierZoomDropdownVisible: Bool {
+        (contentView as? SelectionOverlayView)?.test_isMagnifierZoomDropdownVisible ?? false
+    }
+
     var test_textDropdownScrollOffset: Int {
         (contentView as? SelectionOverlayView)?.test_textDropdownScrollOffset ?? 0
     }
@@ -844,7 +848,7 @@ final class SelectionOverlayWindow: NSWindow {
     }
 
     var test_currentMagnifierShape: CaptureMagnifierShape {
-        (contentView as? SelectionOverlayView)?.test_currentMagnifierShape ?? .circle
+        (contentView as? SelectionOverlayView)?.test_currentMagnifierShape ?? .rectangle
     }
 
     var test_currentMagnifierZoom: CGFloat {
@@ -869,6 +873,10 @@ final class SelectionOverlayWindow: NSWindow {
 
     func test_numberMarkTypeMenuPoint(_ type: CaptureNumberMarkType) -> NSPoint? {
         (contentView as? SelectionOverlayView)?.test_numberMarkTypeMenuPoint(type)
+    }
+
+    func test_magnifierZoomMenuPoint(_ zoom: CGFloat) -> NSPoint? {
+        (contentView as? SelectionOverlayView)?.test_magnifierZoomMenuPoint(zoom)
     }
 
     func test_numberMarkTypeIconInteriorPoint() -> NSPoint? {
@@ -1720,7 +1728,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private var isTextToolActive = false
     private var isNumberToolActive = false
     private var isMagnifierToolActive = false
-    private var currentMagnifierShape: CaptureMagnifierShape = .circle
+    private var currentMagnifierShape: CaptureMagnifierShape = .rectangle
     private var currentMagnifierZoom: CGFloat = 2
     private var currentNumberMarkType: CaptureNumberMarkType = .number
     private var editingTextAnnotationIndex: Int?
@@ -1767,6 +1775,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private var showsStartArrowTypeMenu = false
     private var showsEndArrowTypeMenu = false
     private var activeNumberDropdown = false
+    private var activeMagnifierZoomDropdown = false
     private var activeTextDropdown: TextDropdownKind?
     private var textFontDropdownScrollOffset = 0
     private var textSizeDropdownScrollOffset = 0
@@ -1959,6 +1968,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             drawArrowTypeMenu(field: .end)
         }
         drawNumberMarkTypeMenuIfNeeded()
+        drawMagnifierZoomMenuIfNeeded()
         drawTextDropdownIfNeeded()
         drawTooltipIfNeeded()
         drawEyedropperMeasurementIfNeeded()
@@ -3471,6 +3481,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return
         }
         if activeNumberDropdown, handleOptionsClick(at: point) {
+            return
+        }
+        if activeMagnifierZoomDropdown, handleOptionsClick(at: point) {
             return
         }
 
@@ -5077,6 +5090,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         commitCurrentTextEdit()
         clearPendingTextEdit()
         closeTextDropdown()
+        closeMagnifierZoomDropdown()
         if isEyedropperToolActive {
             isEyedropperToolActive = false
             activeNumberDropdown = false
@@ -5111,6 +5125,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         clearPendingTextEdit()
         if isTextToolActive {
             closeTextDropdown()
+            closeMagnifierZoomDropdown()
             isTextToolActive = false
             activeNumberDropdown = false
             selectedAnnotationIndex = nil
@@ -5125,6 +5140,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         commitCurrentTextEdit()
         clearPendingTextEdit()
         closeTextDropdown()
+        closeMagnifierZoomDropdown()
         rememberCurrentStyleForActiveTool()
         isTextToolActive = true
         isEyedropperToolActive = false
@@ -5163,6 +5179,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         commitCurrentTextEdit()
         clearPendingTextEdit()
         closeTextDropdown()
+        closeMagnifierZoomDropdown()
         if isNumberToolActive {
             isNumberToolActive = false
             activeNumberDropdown = false
@@ -5179,6 +5196,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         commitCurrentTextEdit()
         clearPendingTextEdit()
         closeTextDropdown()
+        closeMagnifierZoomDropdown()
         rememberCurrentStyleForActiveTool()
         isNumberToolActive = true
         isTextToolActive = false
@@ -5213,6 +5231,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         clearPendingTextEdit()
         closeTextDropdown()
         if isMagnifierToolActive {
+            closeMagnifierZoomDropdown()
             isMagnifierToolActive = false
             selectedAnnotationIndex = nil
             invalidateCursorRectsAndRefresh()
@@ -5227,6 +5246,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         commitCurrentTextEdit()
         clearPendingTextEdit()
         closeTextDropdown()
+        closeMagnifierZoomDropdown()
         rememberCurrentStyleForActiveTool()
         isMagnifierToolActive = true
         isTextToolActive = false
@@ -5255,6 +5275,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         commitCurrentTextEdit()
         clearPendingTextEdit()
         closeTextDropdown()
+        closeMagnifierZoomDropdown()
         rememberCurrentStyleForActiveTool()
         isEyedropperToolActive = false
         clearEyedropperMeasurement()
@@ -5327,6 +5348,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         commitCurrentTextEdit()
         clearPendingTextEdit()
         closeTextDropdown()
+        closeMagnifierZoomDropdown()
         rememberCurrentStyleForActiveTool()
         isEyedropperToolActive = false
         clearEyedropperMeasurement()
@@ -5773,6 +5795,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         activeTextDropdown == .size
     }
 
+    var test_isMagnifierZoomDropdownVisible: Bool {
+        activeMagnifierZoomDropdown
+    }
+
     var test_textDropdownScrollOffset: Int {
         guard let activeTextDropdown else {
             return 0
@@ -5842,6 +5868,20 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
         let itemRects = numberMarkTypeMenuItemRects(in: numberMarkTypeMenuRect(in: optionsToolbarRect))
         guard let index = CaptureNumberMarkType.allCases.firstIndex(of: type), itemRects.indices.contains(index) else {
+            return nil
+        }
+        let rect = itemRects[index]
+        return NSPoint(x: rect.midX, y: rect.midY)
+    }
+
+    func test_magnifierZoomMenuPoint(_ zoom: CGFloat) -> NSPoint? {
+        guard let optionsToolbarRect,
+              let index = SelectionToolbarState.magnifierZoomValues.firstIndex(where: { abs($0 - zoom) < 0.001 })
+        else {
+            return nil
+        }
+        let itemRects = magnifierZoomMenuItemRects(in: magnifierZoomMenuRect(in: optionsToolbarRect))
+        guard itemRects.indices.contains(index) else {
             return nil
         }
         let rect = itemRects[index]
@@ -6805,6 +6845,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         let layout = optionsToolbarLayout(in: optionsRect)
         if layout.numberMarkType.contains(point) {
             closeTextDropdown()
+            closeMagnifierZoomDropdown()
             activeNumberDropdown.toggle()
             showsStrokeStyleMenu = false
             showsCornerRadiusPanel = false
@@ -6836,32 +6877,48 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     private func handleMagnifierOptionsClick(at point: NSPoint, optionsRect: NSRect) -> Bool {
         let layout = optionsToolbarLayout(in: optionsRect)
+        if activeMagnifierZoomDropdown {
+            let menu = magnifierZoomMenuRect(in: optionsRect)
+            if menu.contains(point) {
+                for (index, rect) in magnifierZoomMenuItemRects(in: menu).enumerated() where rect.contains(point) {
+                    applyMagnifierZoom(SelectionToolbarState.magnifierZoomValues[index])
+                    return true
+                }
+                return true
+            }
+            if !layout.magnifierZoom.contains(point) {
+                closeMagnifierZoomDropdown()
+            }
+        }
+
         if let rectangleButton = layout.rectangleMode, rectangleButton.contains(point) {
+            closeMagnifierZoomDropdown()
             currentMagnifierShape = .rectangle
             applyCurrentMagnifierSettingsToSelectedAnnotation()
             needsDisplay = true
             return true
         }
         if let circleButton = layout.ellipseMode, circleButton.contains(point) {
+            closeMagnifierZoomDropdown()
             currentMagnifierShape = .circle
             applyCurrentMagnifierSettingsToSelectedAnnotation()
             needsDisplay = true
             return true
         }
-        for (index, rect) in layout.magnifierZooms.enumerated() where rect.contains(point) {
-            currentMagnifierZoom = SelectionToolbarState.magnifierZoomValues[index]
-            applyCurrentMagnifierSettingsToSelectedAnnotation()
-            needsDisplay = true
+        if layout.magnifierZoom.contains(point) {
+            toggleMagnifierZoomDropdown()
             return true
         }
         let strokeWidths = SelectionToolbarState.strokeWidthValues(for: .magnifier)
         for (index, rect) in layout.strokeWidths.enumerated() where rect.contains(point) {
+            closeMagnifierZoomDropdown()
             currentStyle.strokeWidth = strokeWidths[index]
             rememberCurrentStyleForActiveTool()
             applyCurrentStyleToSelectedAnnotation()
             return true
         }
         if let swatch = SelectionToolbarState.swatchHitTarget(at: point, in: optionsRect, paletteCount: visiblePaletteCount, mode: optionsToolbarMode) {
+            closeMagnifierZoomDropdown()
             switch swatch {
             case .custom:
                 return handleColorSwatchClick(at: point, optionsRect: optionsRect)
@@ -6879,6 +6936,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 applyCurrentStyleToSelectedAnnotation()
                 return true
             }
+        }
+        if !optionsRect.contains(point) {
+            closeMagnifierZoomDropdown()
+            return false
         }
         return optionsRect.contains(point)
     }
@@ -7007,6 +7068,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return
         }
         activeTextDropdown = kind
+        closeMagnifierZoomDropdown()
         showsStrokeStyleMenu = false
         showsCornerRadiusPanel = false
         showsStartArrowTypeMenu = false
@@ -7021,6 +7083,32 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
         activeTextDropdown = nil
         textDropdownScrollRemainderY = 0
+        needsDisplay = true
+    }
+
+    private func toggleMagnifierZoomDropdown() {
+        activeMagnifierZoomDropdown.toggle()
+        activeNumberDropdown = false
+        closeTextDropdown()
+        showsStrokeStyleMenu = false
+        showsCornerRadiusPanel = false
+        showsStartArrowTypeMenu = false
+        showsEndArrowTypeMenu = false
+        needsDisplay = true
+    }
+
+    private func closeMagnifierZoomDropdown() {
+        guard activeMagnifierZoomDropdown else {
+            return
+        }
+        activeMagnifierZoomDropdown = false
+        needsDisplay = true
+    }
+
+    private func applyMagnifierZoom(_ zoom: CGFloat) {
+        currentMagnifierZoom = zoom
+        applyCurrentMagnifierSettingsToSelectedAnnotation()
+        closeMagnifierZoomDropdown()
         needsDisplay = true
     }
 
@@ -9976,7 +10064,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             if let geometry = CaptureAnnotationRenderer.magnifierDrawGeometry(
                 destination: destinationInImage,
                 sourceBounds: sourceBounds,
-                zoom: annotation.effectiveMagnifierZoom
+                zoom: annotation.effectiveMagnifierZoom,
+                contentXOffset: CaptureAnnotationRenderer.magnifierContentXOffset * scaleX,
+                contentYOffset: CaptureAnnotationRenderer.magnifierContentYOffset * scaleY
             ) {
                 let overlayDrawRect = NSRect(
                     x: geometry.drawRect.minX / scaleX,
@@ -10499,7 +10589,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         var style = CaptureAnnotationStyle()
         style.strokeColor = NSColor.systemBlue
         style.fillColor = NSColor.systemBlue
-        style.strokeWidth = SelectionToolbarState.strokeWidthValues(for: .magnifier)[1]
+        style.strokeWidth = SelectionToolbarState.strokeWidthValues(for: .magnifier)[0]
         style.strokePattern = .solid
         style.fillEnabled = false
         return style
@@ -11280,39 +11370,30 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private func drawMagnifierOptions(in optionsRect: NSRect) {
         let layout = optionsToolbarLayout(in: optionsRect)
         drawMagnifierShapeButtons(in: optionsRect)
-        for (index, rect) in layout.magnifierZooms.enumerated() {
-            let value = SelectionToolbarState.magnifierZoomValues[index]
-            let selected = abs(currentMagnifierZoom - value) < 0.001
-            drawToolbarButton(optionButtonBackgroundRect(for: rect), symbol: nil, selected: selected, enabled: true)
-            let attributes: [NSAttributedString.Key: Any] = [
-                .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium),
-                .foregroundColor: selected ? NSColor.controlAccentColor : NSColor.labelColor,
-            ]
-            let text = value == floor(value) ? "\(Int(value))x" : "\(value)x"
-            let size = NSString(string: text).size(withAttributes: attributes)
-            NSString(string: text).draw(
-                at: NSPoint(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2),
-                withAttributes: attributes
-            )
-        }
+        drawTextPopupField(magnifierZoomLabel(currentMagnifierZoom), in: layout.magnifierZoom, compact: true)
     }
 
     private func drawMagnifierShapeButtons(in optionsRect: NSRect) {
         let layout = optionsToolbarLayout(in: optionsRect)
         if let rectangleButton = layout.rectangleMode {
-            drawToolbarButton(optionButtonBackgroundRect(for: rectangleButton), symbol: nil, selected: currentMagnifierShape == .rectangle, enabled: true)
+            drawToolbarButton(shapeModeBackgroundRect(for: rectangleButton), symbol: nil, selected: currentMagnifierShape == .rectangle, enabled: true)
             (currentMagnifierShape == .rectangle ? NSColor.controlAccentColor : NSColor.labelColor).setStroke()
-            let path = NSBezierPath(roundedRect: rectangleButton.insetBy(dx: 7, dy: 7), xRadius: 1.5, yRadius: 1.5)
+            let path = NSBezierPath(roundedRect: rectangleIconRect(in: rectangleButton), xRadius: 1.5, yRadius: 1.5)
             path.lineWidth = 1.6
             path.stroke()
         }
         if let circleButton = layout.ellipseMode {
             drawToolbarButton(optionButtonBackgroundRect(for: circleButton), symbol: nil, selected: currentMagnifierShape == .circle, enabled: true)
             (currentMagnifierShape == .circle ? NSColor.controlAccentColor : NSColor.labelColor).setStroke()
-            let path = NSBezierPath(ovalIn: circleButton.insetBy(dx: 7, dy: 7))
+            let path = NSBezierPath(ovalIn: circleIconRect(in: circleButton))
             path.lineWidth = 1.6
             path.stroke()
         }
+    }
+
+    private func magnifierZoomLabel(_ zoom: CGFloat) -> String {
+        let normalized = SelectionToolbarState.magnifierZoomValues.first(where: { abs($0 - zoom) < 0.001 }) ?? zoom
+        return normalized == floor(normalized) ? "\(Int(normalized))x" : "\(normalized)x"
     }
 
     private func drawOptionsToolbarSeparators(in optionsRect: NSRect) {
@@ -11353,7 +11434,15 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         case .mosaic:
             break
         case .magnifier:
-            break
+            if let lastStrokeWidth = layout.strokeWidths.last,
+               let rectangle = layout.rectangleMode,
+               let ellipse = layout.ellipseMode {
+                separatorXs.append(lastStrokeWidth.maxX + (shapeModeBackgroundRect(for: rectangle).minX - lastStrokeWidth.maxX) / 2)
+                separatorXs.append(optionButtonBackgroundRect(for: ellipse).maxX + (layout.magnifierZoom.minX - optionButtonBackgroundRect(for: ellipse).maxX) / 2)
+            }
+            if let firstSwatchMinX {
+                separatorXs.append(layout.magnifierZoom.maxX + (firstSwatchMinX - layout.magnifierZoom.maxX) / 2)
+            }
         case .text:
             if let firstSwatchMinX {
                 separatorXs.append(layout.textOutline.maxX + (layout.textFont.minX - layout.textOutline.maxX) / 2)
@@ -11771,6 +11860,33 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 in: NSRect(x: item.midX - 8, y: item.midY - 8, width: 16, height: 16),
                 color: selected && type == .number ? NSColor.systemBlue : defaultNumberMenuColor(for: type),
                 toolbar: true
+            )
+        }
+    }
+
+    private func drawMagnifierZoomMenuIfNeeded() {
+        guard activeMagnifierZoomDropdown, let optionsToolbarRect else {
+            return
+        }
+
+        let menu = magnifierZoomMenuRect(in: optionsToolbarRect)
+        drawTextDropdownPanel(menu)
+        for (index, value) in SelectionToolbarState.magnifierZoomValues.enumerated() {
+            let item = magnifierZoomMenuItemRects(in: menu)[index]
+            let selected = abs(currentMagnifierZoom - value) < 0.001
+            if selected {
+                NSColor.systemBlue.withAlphaComponent(0.16).setFill()
+                NSBezierPath(roundedRect: item.insetBy(dx: 4, dy: 2), xRadius: 5, yRadius: 5).fill()
+            }
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: selected ? .semibold : .medium),
+                .foregroundColor: selected ? NSColor.systemBlue : NSColor.labelColor,
+            ]
+            let text = magnifierZoomLabel(value)
+            let size = NSString(string: text).size(withAttributes: attributes)
+            NSString(string: text).draw(
+                at: NSPoint(x: item.midX - size.width / 2, y: item.midY - size.height / 2),
+                withAttributes: attributes
             )
         }
     }
@@ -12869,6 +12985,12 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return true
         }
 
+        if activeMagnifierZoomDropdown,
+           let optionsToolbarRect,
+           magnifierZoomMenuRect(in: optionsToolbarRect).contains(point) {
+            return true
+        }
+
         if showsCornerRadiusPanel, let cornerRadiusPanelRect, cornerRadiusPanelRect.contains(point) {
             return true
         }
@@ -13043,6 +13165,26 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 y: menu.maxY - 4 - 26 * CGFloat(index + 1),
                 width: menu.width - 8,
                 height: 26
+            )
+        }
+    }
+
+    private func magnifierZoomMenuRect(in optionsRect: NSRect) -> NSRect {
+        let field = optionsToolbarLayout(in: optionsRect).magnifierZoom
+        return SelectionToolbarState.popoverRect(
+            size: NSSize(width: field.width, height: CGFloat(SelectionToolbarState.magnifierZoomValues.count) * 24 + 8),
+            anchoredTo: field,
+            inside: safeLayoutBounds
+        )
+    }
+
+    private func magnifierZoomMenuItemRects(in menu: NSRect) -> [NSRect] {
+        SelectionToolbarState.magnifierZoomValues.indices.map { index in
+            NSRect(
+                x: menu.minX + 4,
+                y: menu.maxY - 4 - 24 * CGFloat(index + 1),
+                width: menu.width - 8,
+                height: 24
             )
         }
     }

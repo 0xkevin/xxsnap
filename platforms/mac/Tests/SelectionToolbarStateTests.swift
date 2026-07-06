@@ -258,7 +258,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertLessThan(eyedropperRect.midX, mosaicRect.midX)
         XCTAssertEqual(eyedropperRect.minX - markerRect.minX, mosaicRect.minX - eyedropperRect.minX, accuracy: 0.5)
         XCTAssertEqual(window.test_symbolName(for: .eyedropper), "toolbar-eyedropper")
-        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "eyedropper"), "取色")
+        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "eyedropper"), "取色/测距")
     }
 
     func testEyedropperResourceIsBundledAndReadableByMacTarget() {
@@ -2587,8 +2587,9 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertTrue(window.test_isMagnifierToolActive)
         XCTAssertEqual(window.test_optionsToolbarMode, .magnifier)
         XCTAssertNotNil(window.test_optionsToolbarRect)
-        XCTAssertEqual(window.test_currentMagnifierShape, .circle)
+        XCTAssertEqual(window.test_currentMagnifierShape, .rectangle)
         XCTAssertEqual(window.test_currentMagnifierZoom, 2)
+        XCTAssertEqual(window.test_currentStyle?.strokeWidth, 2)
     }
 
     func testMagnifierOptionsSwitchShapeZoomStrokeAndColor() throws {
@@ -2612,8 +2613,12 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_mouseDown(at: circlePoint)
         XCTAssertEqual(window.test_currentMagnifierShape, .circle)
 
-        let zoomPoint = NSPoint(x: layout.magnifierZooms[2].midX, y: layout.magnifierZooms[2].midY)
+        let zoomFieldPoint = NSPoint(x: layout.magnifierZoom.midX, y: layout.magnifierZoom.midY)
+        window.test_mouseDown(at: zoomFieldPoint)
+        XCTAssertTrue(window.test_isMagnifierZoomDropdownVisible)
+        let zoomPoint = try XCTUnwrap(window.test_magnifierZoomMenuPoint(3))
         window.test_mouseDown(at: zoomPoint)
+        XCTAssertFalse(window.test_isMagnifierZoomDropdownVisible)
         let strokePoint = NSPoint(x: layout.strokeWidths[2].midX, y: layout.strokeWidths[2].midY)
         window.test_mouseDown(at: strokePoint)
         let colorPoint = try XCTUnwrap(window.test_optionsPaletteColorPoint(at: 2))
@@ -2699,7 +2704,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(updated.effectiveMagnifierZoom, 4)
     }
 
-    func testMagnifierDragCreatesCircleAndShiftConstrainsToSquare() throws {
+    func testMagnifierDragCreatesRectangleAndShiftConstrainsToSquare() throws {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_setLockedSelectionRect(NSRect(x: 60, y: 60, width: 260, height: 180))
         window.test_activateMagnifierTool()
@@ -2708,7 +2713,7 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         let annotation = try XCTUnwrap(window.test_annotation(at: 0))
         XCTAssertEqual(annotation.kind, .magnifier)
-        XCTAssertEqual(annotation.effectiveMagnifierShape, .circle)
+        XCTAssertEqual(annotation.effectiveMagnifierShape, .rectangle)
         XCTAssertEqual(annotation.effectiveMagnifierZoom, 2)
         XCTAssertEqual(annotation.rect.width, annotation.rect.height, accuracy: 0.001)
         XCTAssertNil(window.test_currentShapeKind)
@@ -2764,9 +2769,12 @@ final class SelectionToolbarStateTests: XCTestCase {
         let circleButton = try XCTUnwrap(layout.ellipseMode)
         window.test_mouseDown(at: NSPoint(x: circleButton.midX, y: circleButton.midY))
         window.test_mouseUp(at: NSPoint(x: circleButton.midX, y: circleButton.midY))
-        let zoom4Button = try XCTUnwrap(layout.magnifierZooms.last)
-        window.test_mouseDown(at: NSPoint(x: zoom4Button.midX, y: zoom4Button.midY))
-        window.test_mouseUp(at: NSPoint(x: zoom4Button.midX, y: zoom4Button.midY))
+        let zoomField = layout.magnifierZoom
+        window.test_mouseDown(at: NSPoint(x: zoomField.midX, y: zoomField.midY))
+        window.test_mouseUp(at: NSPoint(x: zoomField.midX, y: zoomField.midY))
+        let zoom4Point = try XCTUnwrap(window.test_magnifierZoomMenuPoint(4))
+        window.test_mouseDown(at: zoom4Point)
+        window.test_mouseUp(at: zoom4Point)
         let thickStroke = layout.strokeWidths[2]
         window.test_mouseDown(at: NSPoint(x: thickStroke.midX, y: thickStroke.midY))
         window.test_mouseUp(at: NSPoint(x: thickStroke.midX, y: thickStroke.midY))
@@ -2803,8 +2811,10 @@ final class SelectionToolbarStateTests: XCTestCase {
         let rectanglePoint = NSPoint(x: rectangleButton.midX, y: rectangleButton.midY)
         window.test_mouseDown(at: rectanglePoint)
         window.test_mouseUp(at: rectanglePoint)
-        let zoom4Button = try XCTUnwrap(layout.magnifierZooms.last)
-        let zoom4Point = NSPoint(x: zoom4Button.midX, y: zoom4Button.midY)
+        let zoomField = layout.magnifierZoom
+        window.test_mouseDown(at: NSPoint(x: zoomField.midX, y: zoomField.midY))
+        window.test_mouseUp(at: NSPoint(x: zoomField.midX, y: zoomField.midY))
+        let zoom4Point = try XCTUnwrap(window.test_magnifierZoomMenuPoint(4))
         window.test_mouseDown(at: zoom4Point)
         window.test_mouseUp(at: zoom4Point)
 
@@ -5161,15 +5171,7 @@ final class SelectionToolbarStateTests: XCTestCase {
     }
 
     func testMagnifierRendererSamplesOriginalImageInsteadOfAnnotations() throws {
-        let base = makeTestImage(size: NSSize(width: 80, height: 80)) { point in
-            if point.x < 40 && point.y < 40 {
-                return NSColor.red
-            }
-            if point.x >= 40 && point.y >= 40 {
-                return NSColor.blue
-            }
-            return NSColor.white
-        }
+        let base = solidImage(size: NSSize(width: 80, height: 80), color: .white)
         var coveringAnnotation = CaptureAnnotation(
             kind: .rectangle,
             rect: NSRect(x: 20, y: 20, width: 40, height: 40),
@@ -5279,12 +5281,51 @@ final class SelectionToolbarStateTests: XCTestCase {
         )
 
         let rendered = CaptureAnnotationRenderer.render(image: base, annotations: [coveringAnnotation, magnifier])
-        let insideAvailableSource = try XCTUnwrap(rgbaPixel(in: rendered, at: NSPoint(x: 8, y: 40)))
-        let outsideAvailableSource = try XCTUnwrap(rgbaPixel(in: rendered, at: NSPoint(x: 2, y: 40)))
+        let visibleLeftEdgeSource = try XCTUnwrap(rgbaPixel(in: rendered, at: NSPoint(x: 2, y: 40)))
+        let visibleInnerSource = try XCTUnwrap(rgbaPixel(in: rendered, at: NSPoint(x: 8, y: 40)))
 
-        XCTAssertEqual(hex(insideAvailableSource), "#FF0000")
-        XCTAssertNotEqual(hex(outsideAvailableSource), "#FF0000")
-        XCTAssertGreaterThan(outsideAvailableSource.green, 180)
+        XCTAssertEqual(hex(visibleLeftEdgeSource), "#FF0000")
+        XCTAssertEqual(hex(visibleInnerSource), "#FF0000")
+    }
+
+    func testMagnifierRendererMovesLeftFramedContentAwayFromLensEdge() throws {
+        let sourceRed = NSColor(srgbRed: 1, green: 0, blue: 0, alpha: 1)
+        let annotationGreen = NSColor(srgbRed: 0, green: 1, blue: 0, alpha: 1)
+        let base = makeTestImage(size: NSSize(width: 160, height: 80)) { point in
+            point.x >= 60 && point.x < 62 ? sourceRed : NSColor.white
+        }
+        let coveringAnnotation = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 0, y: 0, width: 160, height: 80),
+            style: {
+                var style = CaptureAnnotationStyle()
+                style.fillEnabled = true
+                style.fillColor = annotationGreen
+                style.strokeColor = annotationGreen
+                style.strokeWidth = 0
+                return style
+            }()
+        )
+        let magnifier = CaptureAnnotation(
+            kind: .magnifier,
+            rect: NSRect(x: 40, y: 20, width: 80, height: 40),
+            style: {
+                var style = CaptureAnnotationStyle()
+                style.strokeWidth = 0
+                return style
+            }(),
+            magnifierShape: .rectangle,
+            magnifierZoom: 2
+        )
+
+        let rendered = CaptureAnnotationRenderer.render(image: base, annotations: [coveringAnnotation, magnifier])
+        let redColumns = try (40..<80).filter { x in
+            let pixel = try XCTUnwrap(rgbaPixel(in: rendered, at: NSPoint(x: x, y: 40)))
+            return hex(pixel) == "#FF0000"
+        }
+
+        XCTAssertEqual(redColumns.first, 52)
+        XCTAssertFalse(redColumns.contains(46))
     }
 
     func testMagnifierOverlayPreviewSamplesOriginalImageInsteadOfAnnotations() throws {
@@ -5315,7 +5356,11 @@ final class SelectionToolbarStateTests: XCTestCase {
         ])
 
         let rendered = try XCTUnwrap(window.test_renderedOverlayImage())
-        let pixel = try XCTUnwrap(rgbaPixel(in: rendered, at: NSPoint(x: 60, y: rendered.size.height - 40)))
+        let probePoint = NSPoint(
+            x: 60,
+            y: rendered.size.height - 40 - CaptureAnnotationRenderer.magnifierContentYOffset
+        )
+        let pixel = try XCTUnwrap(rgbaPixel(in: rendered, at: probePoint))
 
         XCTAssertGreaterThan(pixel.green, 180)
         XCTAssertLessThan(pixel.red, 80)
@@ -5354,12 +5399,10 @@ final class SelectionToolbarStateTests: XCTestCase {
             image: base,
             annotations: [overlayAnnotation(magnifier, selection: selection)]
         )
-        let sourcePixel = try XCTUnwrap(rgbaPixel(in: base, at: overlayCenter))
         let overlayPixel = try XCTUnwrap(rgbaPixel(in: overlayImage, at: overlayCenter))
         let exportPixel = try XCTUnwrap(rgbaPixel(in: exported, at: overlayCenter))
 
-        XCTAssertEqual(hex(overlayPixel), hex(sourcePixel))
-        XCTAssertEqual(hex(exportPixel), hex(sourcePixel))
+        XCTAssertLessThanOrEqual(pixelDistance(overlayPixel, exportPixel), 4)
     }
 
     func testMagnifierDoesNotMagnifyMosaicOrTextAnnotations() throws {
@@ -7205,11 +7248,12 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(SelectionToolbarState.magnifierZoomValues, [1.5, 2, 3, 4])
         XCTAssertNotNil(layout.rectangleMode)
         XCTAssertNotNil(layout.ellipseMode)
-        XCTAssertEqual(layout.magnifierZooms.count, 4)
+        XCTAssertTrue(layout.magnifierZooms.isEmpty)
+        XCTAssertFalse(layout.magnifierZoom.isEmpty)
         XCTAssertEqual(layout.colorSwatches.count, 21)
         let sectionRects = layout.strokeWidths
             + [try XCTUnwrap(layout.rectangleMode), try XCTUnwrap(layout.ellipseMode)]
-            + layout.magnifierZooms
+            + [layout.magnifierZoom]
             + layout.colorSwatches
         for rect in sectionRects {
             XCTAssertTrue(optionsRect.contains(rect), "Expected \(rect) inside \(optionsRect)")
@@ -7227,12 +7271,77 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertFalse(SelectionToolbarState.showsStrokeStyleField(for: .magnifier))
     }
 
+    func testMagnifierToolbarOrdersStrokeShapeZoomAndColorSections() throws {
+        let optionsRect = NSRect(
+            x: 20,
+            y: 30,
+            width: SelectionToolbarState.optionsToolbarWidth(paletteCount: 20, mode: .magnifier),
+            height: 40
+        )
+        let layout = SelectionToolbarState.optionsToolbarLayout(
+            in: optionsRect,
+            paletteCount: 20,
+            mode: .magnifier
+        )
+        let rectangle = try XCTUnwrap(layout.rectangleMode)
+        let ellipse = try XCTUnwrap(layout.ellipseMode)
+        let firstSwatch = try XCTUnwrap(layout.colorSwatches.first)
+
+        XCTAssertLessThan(layout.strokeWidths.last!.maxX, rectangle.minX)
+        XCTAssertLessThan(rectangle.maxX, ellipse.minX)
+        XCTAssertLessThan(ellipse.maxX, layout.magnifierZoom.minX)
+        XCTAssertLessThan(layout.magnifierZoom.maxX, firstSwatch.minX)
+        XCTAssertEqual(rectangle.minX - layout.strokeWidths.last!.maxX, 14, accuracy: 0.001)
+        XCTAssertEqual(layout.magnifierZoom.minX - ellipse.maxX, 14, accuracy: 0.001)
+        XCTAssertEqual(firstSwatch.minX - layout.magnifierZoom.maxX, 18, accuracy: 0.001)
+    }
+
+    func testMagnifierDrawGeometryRaisesMagnifiedContentSlightly() throws {
+        let destination = CGRect(x: 40, y: 30, width: 80, height: 60)
+        let sourceBounds = CGRect(x: 0, y: 0, width: 200, height: 160)
+
+        let geometry = try XCTUnwrap(CaptureAnnotationRenderer.magnifierDrawGeometry(
+            destination: destination,
+            sourceBounds: sourceBounds,
+            zoom: 2
+        ))
+
+        XCTAssertEqual(geometry.drawRect.minX, destination.minX, accuracy: 0.001)
+        XCTAssertEqual(geometry.integralSource.minX, 54, accuracy: 0.001)
+        XCTAssertGreaterThan(geometry.drawRect.minY, destination.minY)
+        XCTAssertEqual(geometry.drawRect.minY - destination.minY, 3, accuracy: 0.001)
+    }
+
+    func testMagnifierDrawGeometryKeepsClippedContentVisibleInsideLens() throws {
+        let sourceBounds = CGRect(x: 0, y: 0, width: 200, height: 160)
+        let leftEdgeDestination = CGRect(x: 0, y: 40, width: 80, height: 60)
+        let rightEdgeDestination = CGRect(x: 160, y: 40, width: 80, height: 60)
+
+        let leftGeometry = try XCTUnwrap(CaptureAnnotationRenderer.magnifierDrawGeometry(
+            destination: leftEdgeDestination,
+            sourceBounds: sourceBounds,
+            zoom: 2
+        ))
+        let rightGeometry = try XCTUnwrap(CaptureAnnotationRenderer.magnifierDrawGeometry(
+            destination: rightEdgeDestination,
+            sourceBounds: sourceBounds,
+            zoom: 2
+        ))
+
+        XCTAssertEqual(leftGeometry.drawRect.minX, leftEdgeDestination.minX, accuracy: 0.001)
+        XCTAssertGreaterThan(leftGeometry.drawRect.width, 0)
+        XCTAssertLessThanOrEqual(leftGeometry.drawRect.maxX, leftEdgeDestination.maxX + 0.001)
+        XCTAssertEqual(rightGeometry.drawRect.maxX, sourceBounds.maxX, accuracy: 0.001)
+        XCTAssertGreaterThan(rightGeometry.drawRect.width, 0)
+        XCTAssertGreaterThanOrEqual(rightGeometry.drawRect.minX, rightEdgeDestination.minX - 0.001)
+    }
+
     func testMagnifierKindSupportsSelectionAndGeometryEditing() {
         XCTAssertTrue(SelectionToolbarState.annotationKindSupportsPostDrawEditing(.magnifier))
         XCTAssertTrue(SelectionToolbarState.annotationKindSupportsGeometryEditing(.magnifier))
     }
 
-    func testDefaultMagnifierAnnotationStateIsCircleTwoX() {
+    func testDefaultMagnifierAnnotationStateIsRectangleTwoX() {
         var annotation = CaptureAnnotation(
             kind: .magnifier,
             rect: NSRect(x: 10, y: 20, width: 120, height: 120),
@@ -7241,7 +7350,7 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         XCTAssertNil(annotation.magnifierShape)
         XCTAssertNil(annotation.magnifierZoom)
-        XCTAssertEqual(annotation.effectiveMagnifierShape, .circle)
+        XCTAssertEqual(annotation.effectiveMagnifierShape, .rectangle)
         XCTAssertEqual(annotation.effectiveMagnifierZoom, 2)
 
         annotation.magnifierShape = .rectangle
@@ -9105,6 +9214,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "save"), "保存")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "copy"), "复制到剪切板")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "scroll"), "滚动截图")
+        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "eyedropper"), "取色/测距")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "cornerStyle"), "直角/圆角切换")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "aspectRatioLockedOn"), "锁定长宽比(开)")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "aspectRatioLockedOff"), "锁定长宽比(关)")

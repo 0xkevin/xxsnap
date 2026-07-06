@@ -84,6 +84,7 @@ enum SelectionToolbarState {
         var textSize: NSRect
         var numberMarkType: NSRect
         var numberSize: NSRect
+        var magnifierZoom: NSRect
         var magnifierZooms: [NSRect]
         var fillToggle: NSRect?
         var rectangleMode: NSRect?
@@ -254,7 +255,7 @@ enum SelectionToolbarState {
             "polyline": "箭头线",
             "pen": "画笔",
             "marker": "标记",
-            "eyedropper": "取色",
+            "eyedropper": "取色/测距",
             "mosaic": "马赛克",
             "mosaicBlur": "高斯",
             "mosaicPixel": "马赛克",
@@ -530,7 +531,8 @@ enum SelectionToolbarState {
             textSize: mode == .text ? textSizeFieldRect(in: optionsRect) : .zero,
             numberMarkType: mode == .numberSequence ? numberMarkTypeFieldRect(in: optionsRect) : .zero,
             numberSize: mode == .numberSequence ? numberSizeFieldRect(in: optionsRect) : .zero,
-            magnifierZooms: mode == .magnifier ? magnifierZoomRects(in: optionsRect) : [],
+            magnifierZoom: mode == .magnifier ? magnifierZoomFieldRect(in: optionsRect) : .zero,
+            magnifierZooms: [],
             fillToggle: mode == .shape ? fillToggleRect(in: optionsRect) : nil,
             rectangleMode: rectangleModeRect(in: optionsRect, mode: mode),
             ellipseMode: ellipseModeRect(in: optionsRect, mode: mode),
@@ -946,7 +948,7 @@ enum SelectionToolbarState {
         case .marker:
             return 102
         case .magnifier:
-            return 284
+            return 236
         case .text:
             return 350
         case .numberSequence:
@@ -1000,14 +1002,11 @@ enum SelectionToolbarState {
     }
 
     static func magnifierZoomRects(in optionsRect: NSRect) -> [NSRect] {
-        (0..<magnifierZoomValues.count).map { index in
-            NSRect(
-                x: optionsRect.minX + 90 + CGFloat(index) * 32,
-                y: optionsRect.midY - 11,
-                width: 28,
-                height: 22
-            )
-        }
+        []
+    }
+
+    static func magnifierZoomFieldRect(in optionsRect: NSRect) -> NSRect {
+        NSRect(x: optionsRect.minX + 160, y: optionControlY(in: optionsRect), width: 58, height: 20)
     }
 
     static func installedTextFontFamilies() -> [String] {
@@ -1123,11 +1122,11 @@ enum SelectionToolbarState {
     }
 
     private static func magnifierRectangleModeButtonRect(in optionsRect: NSRect) -> NSRect {
-        NSRect(x: optionsRect.minX + 226, y: optionControlY(in: optionsRect), width: 26, height: 20)
+        NSRect(x: optionsRect.minX + 92, y: optionControlY(in: optionsRect), width: 26, height: 20)
     }
 
     private static func magnifierEllipseModeButtonRect(in optionsRect: NSRect) -> NSRect {
-        NSRect(x: optionsRect.minX + 258, y: optionControlY(in: optionsRect), width: 22, height: 20)
+        NSRect(x: optionsRect.minX + 124, y: optionControlY(in: optionsRect), width: 22, height: 20)
     }
 
     static func strokeStyleFieldRect(in optionsRect: NSRect) -> NSRect {

@@ -1080,7 +1080,7 @@ struct CaptureAnnotation {
     var mosaicRedaction: CaptureMosaicRedaction?
 
     var effectiveMagnifierShape: CaptureMagnifierShape {
-        magnifierShape ?? .circle
+        magnifierShape ?? .rectangle
     }
 
     var effectiveMagnifierZoom: CGFloat {
@@ -1548,7 +1548,13 @@ enum CaptureAnnotationRenderer {
             height: rect.height * scaleY
         )
         let imageBounds = CGRect(x: 0, y: 0, width: sourceImage.width, height: sourceImage.height)
-        let geometry = magnifierDrawGeometry(destination: destination, sourceBounds: imageBounds, zoom: zoom)
+        let geometry = magnifierDrawGeometry(
+            destination: destination,
+            sourceBounds: imageBounds,
+            zoom: zoom,
+            contentXOffset: magnifierContentXOffset * scaleX,
+            contentYOffset: magnifierContentYOffset * scaleY
+        )
 
         context.saveGState()
         addMagnifierClip(shape: shape, rect: destination, to: context)
@@ -1597,15 +1603,31 @@ enum CaptureAnnotationRenderer {
         var drawRect: CGRect
     }
 
-    static func magnifierDrawGeometry(destination: CGRect, sourceBounds: CGRect, zoom: CGFloat) -> MagnifierDrawGeometry? {
+    static let magnifierContentXOffset: CGFloat = 12
+    static let magnifierContentYOffset: CGFloat = 3
+
+    static func magnifierDrawGeometry(
+        destination: CGRect,
+        sourceBounds: CGRect,
+        zoom: CGFloat,
+        contentXOffset: CGFloat = magnifierContentXOffset,
+        contentYOffset: CGFloat = magnifierContentYOffset
+    ) -> MagnifierDrawGeometry? {
         guard destination.width > 0, destination.height > 0 else {
             return nil
         }
         let normalizedZoom = normalizedMagnifierZoom(zoom)
         let sourceWidth = destination.width / normalizedZoom
         let sourceHeight = destination.height / normalizedZoom
+        let centeredSourceX = destination.midX - sourceWidth / 2
+        let horizontalInset = contentXOffset / normalizedZoom
+        let shiftedSourceX = centeredSourceX - horizontalInset
+        let shouldOffsetContentHorizontally = shiftedSourceX >= sourceBounds.minX
+            && shiftedSourceX + sourceWidth <= sourceBounds.maxX
+            && destination.minX > sourceBounds.minX
+            && destination.maxX < sourceBounds.maxX
         let requestedSource = CGRect(
-            x: destination.midX - sourceWidth / 2,
+            x: shouldOffsetContentHorizontally ? shiftedSourceX : centeredSourceX,
             y: destination.midY - sourceHeight / 2,
             width: sourceWidth,
             height: sourceHeight
@@ -1618,13 +1640,36 @@ enum CaptureAnnotationRenderer {
 
         let xScale = destination.width / max(requestedSource.width, 1)
         let yScale = destination.height / max(requestedSource.height, 1)
+        let drawWidth = integralSource.width * xScale
+        let drawHeight = integralSource.height * yScale
+        let visibleDestination = destination.intersection(sourceBounds)
+        let visibleMinX = visibleDestination.isNull ? destination.minX : visibleDestination.minX
+        let visibleMaxX = visibleDestination.isNull ? destination.maxX : visibleDestination.maxX
+        let visibleMinY = visibleDestination.isNull ? destination.minY : visibleDestination.minY
+        let visibleMaxY = visibleDestination.isNull ? destination.maxY : visibleDestination.maxY
+        let drawX: CGFloat
+        if integralSource.minX <= sourceBounds.minX, requestedSource.minX < sourceBounds.minX {
+            drawX = visibleMinX
+        } else if integralSource.maxX >= sourceBounds.maxX, requestedSource.maxX > sourceBounds.maxX {
+            drawX = visibleMaxX - drawWidth
+        } else {
+            drawX = destination.minX + (integralSource.minX - requestedSource.minX) * xScale
+        }
+        let drawY: CGFloat
+        if integralSource.minY <= sourceBounds.minY, requestedSource.minY < sourceBounds.minY {
+            drawY = visibleMinY
+        } else if integralSource.maxY >= sourceBounds.maxY, requestedSource.maxY > sourceBounds.maxY {
+            drawY = visibleMaxY - drawHeight
+        } else {
+            drawY = destination.minY + (integralSource.minY - requestedSource.minY) * yScale
+        }
         return MagnifierDrawGeometry(
             integralSource: integralSource,
             drawRect: CGRect(
-                x: destination.minX + (integralSource.minX - requestedSource.minX) * xScale,
-                y: destination.minY + (integralSource.minY - requestedSource.minY) * yScale,
-                width: integralSource.width * xScale,
-                height: integralSource.height * yScale
+                x: drawX,
+                y: drawY + contentYOffset,
+                width: drawWidth,
+                height: drawHeight
             )
         )
     }
