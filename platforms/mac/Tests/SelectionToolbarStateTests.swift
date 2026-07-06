@@ -57,6 +57,38 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertFalse(window.test_isColorSamplerVisible)
     }
 
+    func testEyedropperSamplesBackgroundWhereEraserMaskClearsAnnotation() throws {
+        let backgroundColor = NSColor(srgbRed: 52 / 255, green: 204 / 255, blue: 102 / 255, alpha: 1)
+        let annotationColor = NSColor(srgbRed: 0, green: 0, blue: 1, alpha: 1)
+        let background = solidImage(size: NSSize(width: 240, height: 160), color: backgroundColor)
+        let selection = NSRect(x: 40, y: 30, width: 120, height: 80)
+        let annotation = filledRectangleAnnotation(
+            rect: NSRect(x: 20, y: 10, width: 80, height: 50),
+            color: annotationColor,
+            renderOrder: 1
+        )
+        let mask = CaptureEraserMask(
+            kind: .rectangle,
+            renderOrder: 2,
+            size: 24,
+            points: [],
+            rect: NSRect(x: 30, y: 20, width: 24, height: 24)
+        )
+        let samplePoint = NSPoint(x: 82, y: 62)
+        let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([annotation])
+        window.test_setEraserMasks([mask])
+
+        let eyedropperPoint = try XCTUnwrap(window.test_mainToolbarButtonPoint(for: .eyedropper))
+        window.test_mouseDown(at: eyedropperPoint)
+        window.test_mouseUp(at: eyedropperPoint)
+
+        let sampledHex = try XCTUnwrap(window.test_magnifierSampleColorHex(at: samplePoint))
+        XCTAssertEqual(sampledHex, SelectionToolbarState.colorSamplerHexString(for: backgroundColor))
+        XCTAssertNotEqual(sampledHex, SelectionToolbarState.colorSamplerHexString(for: annotationColor))
+    }
+
     func testEyedropperSamplesVisibleMarkerLineOnBlackBackground() throws {
         let background = solidImage(size: NSSize(width: 500, height: 400), color: .black)
         let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
@@ -557,7 +589,48 @@ final class SelectionToolbarStateTests: XCTestCase {
                 "Expected eraser preview to reveal original pixel at \(erasedOverlayPoint), got \(hex(previewPixel)) expected \(hex(originalPixel))"
             )
         }
+        let unerasedSamplePoint = NSPoint(x: 170, y: image.size.height - 72)
+        let unerasedPreviewPixel = try XCTUnwrap(rgbaPixel(in: previewImage, at: unerasedSamplePoint))
+        let unerasedOriginalPixel = try XCTUnwrap(rgbaPixel(in: image, at: unerasedSamplePoint))
+        XCTAssertTrue(
+            pixelDiffers(unerasedPreviewPixel, unerasedOriginalPixel),
+            "Expected unerased annotation pixel to remain visible"
+        )
         window.test_mouseUp(at: NSPoint(x: 152, y: 92))
+    }
+
+    func testPreviewCompositeIncludesMosaicRectangleDraftWithCommittedEraserMask() throws {
+        let image = checkerboardImage(size: NSSize(width: 240, height: 160), squareSize: 4)
+        let selection = NSRect(x: 20, y: 20, width: 180, height: 120)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(selection)
+        window.test_setEraserMasks([
+            CaptureEraserMask(
+                kind: .rectangle,
+                renderOrder: 1,
+                size: 24,
+                points: [],
+                rect: NSRect(x: 10, y: 10, width: 20, height: 20)
+            ),
+        ])
+        window.test_toggleShapeTool(.mosaicRectangle)
+
+        let typePoint = try XCTUnwrap(window.test_mosaicRedactionTypePoint(.gaussianBlur))
+        window.test_mouseDown(at: typePoint)
+        window.test_mouseUp(at: typePoint)
+        window.test_mouseDown(at: NSPoint(x: 80, y: 60))
+        window.test_mouseDragged(to: NSPoint(x: 160, y: 120))
+
+        let previewImage = try XCTUnwrap(window.test_eraserPreviewCompositeImage())
+        let samplePoint = NSPoint(x: 112, y: image.size.height - 92)
+        let previewPixel = try XCTUnwrap(rgbaPixel(in: previewImage, at: samplePoint))
+        let originalPixel = try XCTUnwrap(rgbaPixel(in: image, at: samplePoint))
+        XCTAssertTrue(
+            pixelDiffers(previewPixel, originalPixel),
+            "Expected mosaic draft to alter pixels even when an eraser mask is committed"
+        )
+
+        window.test_mouseUp(at: NSPoint(x: 160, y: 120))
     }
 
     func testDeleteSelectedAnnotationRecordsUndoHistory() {

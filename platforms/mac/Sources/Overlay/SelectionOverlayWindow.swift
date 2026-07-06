@@ -537,6 +537,10 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_setAnnotations(annotations)
     }
 
+    func test_setEraserMasks(_ masks: [CaptureEraserMask]) {
+        (contentView as? SelectionOverlayView)?.test_setEraserMasks(masks)
+    }
+
     func test_selectAnnotation(at index: Int) {
         (contentView as? SelectionOverlayView)?.test_selectAnnotation(at: index)
     }
@@ -5845,6 +5849,13 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         needsDisplay = true
     }
 
+    func test_setEraserMasks(_ masks: [CaptureEraserMask]) {
+        eraserMasks = masks
+        nextRenderOrderValue = max(nextRenderOrderValue, (masks.map(\.renderOrder).max() ?? 0) + 1)
+        resetMosaicPreviewCaches()
+        needsDisplay = true
+    }
+
     func test_selectAnnotation(at index: Int) {
         guard annotations.indices.contains(index) else {
             selectedAnnotationIndex = nil
@@ -9835,9 +9846,20 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
         return CaptureAnnotationRenderer.render(
             image: backgroundImage,
-            annotations: annotations.map(overlayAnnotation),
+            annotations: eraserPreviewAnnotations.map(overlayAnnotation),
             eraserMasks: masks.map(overlayEraserMask)
         )
+    }
+
+    private var eraserPreviewAnnotations: [CaptureAnnotation] {
+        guard
+            let draftAnnotation,
+            isMosaicAnnotation(draftAnnotation),
+            isUsableDraftAnnotation(draftAnnotation)
+        else {
+            return annotations
+        }
+        return annotations + [draftAnnotation]
     }
 
     private func drawSelectionBorder(_ rect: NSRect) {
@@ -13218,6 +13240,15 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
         if let markerColor = visibleDarkMarkerLineColor(at: point) {
             return markerColor
+        }
+
+        if !eraserMasks.isEmpty, let backgroundImage {
+            let composite = CaptureAnnotationRenderer.render(
+                image: backgroundImage,
+                annotations: annotations.map(overlayAnnotation),
+                eraserMasks: eraserMasks.map(overlayEraserMask)
+            )
+            return sampleColor(at: point, in: composite)
         }
 
         guard let composite = fullMosaicPreviewComposite(for: annotations) else {
