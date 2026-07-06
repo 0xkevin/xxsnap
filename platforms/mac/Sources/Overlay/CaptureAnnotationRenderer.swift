@@ -1539,7 +1539,7 @@ enum CaptureAnnotationRenderer {
             return
         }
 
-        let zoom = validMagnifierZoom(annotation.effectiveMagnifierZoom)
+        let zoom = normalizedMagnifierZoom(annotation.effectiveMagnifierZoom)
         let shape = annotation.effectiveMagnifierShape
         let destination = CGRect(
             x: rect.minX * scaleX,
@@ -1547,49 +1547,40 @@ enum CaptureAnnotationRenderer {
             width: rect.width * scaleX,
             height: rect.height * scaleY
         )
-        let sourceWidth = destination.width / zoom
-        let sourceHeight = destination.height / zoom
-        let requestedSource = CGRect(
-            x: destination.midX - sourceWidth / 2,
-            y: destination.midY - sourceHeight / 2,
-            width: sourceWidth,
-            height: sourceHeight
-        )
         let imageBounds = CGRect(x: 0, y: 0, width: sourceImage.width, height: sourceImage.height)
-        let clippedSource = requestedSource.intersection(imageBounds)
+        let geometry = magnifierDrawGeometry(destination: destination, sourceBounds: imageBounds, zoom: zoom)
 
         context.saveGState()
         addMagnifierClip(shape: shape, rect: destination, to: context)
         context.clip()
-        let integralSource = clippedSource.integral.intersection(imageBounds)
-        if !integralSource.isNull,
-           integralSource.width > 0,
-           integralSource.height > 0 {
+        if let geometry {
             let cropRect = CGRect(
-                x: integralSource.minX,
-                y: CGFloat(sourceImage.height) - integralSource.maxY,
-                width: integralSource.width,
-                height: integralSource.height
-            )
-            let xScale = destination.width / max(requestedSource.width, 1)
-            let yScale = destination.height / max(requestedSource.height, 1)
-            let drawRect = CGRect(
-                x: destination.minX + (integralSource.minX - requestedSource.minX) * xScale,
-                y: destination.minY + (integralSource.minY - requestedSource.minY) * yScale,
-                width: integralSource.width * xScale,
-                height: integralSource.height * yScale
+                x: geometry.integralSource.minX,
+                y: CGFloat(sourceImage.height) - geometry.integralSource.maxY,
+                width: geometry.integralSource.width,
+                height: geometry.integralSource.height
             )
             if let crop = sourceImage.cropping(to: cropRect) {
                 context.interpolationQuality = .none
-                context.draw(crop, in: drawRect)
+                context.draw(crop, in: geometry.drawRect)
             }
         }
         context.restoreGState()
 
+        strokeMagnifierBorder(annotation, in: context, rect: destination, shape: shape, lineScale: lineScale)
+    }
+
+    private static func strokeMagnifierBorder(
+        _ annotation: CaptureAnnotation,
+        in context: CGContext,
+        rect: CGRect,
+        shape: CaptureMagnifierShape,
+        lineScale: CGFloat
+    ) {
         context.saveGState()
         addMagnifierClip(
             shape: shape,
-            rect: destination.insetBy(
+            rect: rect.insetBy(
                 dx: annotation.style.strokeWidth * lineScale / 2,
                 dy: annotation.style.strokeWidth * lineScale / 2
             ),
@@ -1601,7 +1592,46 @@ enum CaptureAnnotationRenderer {
         context.restoreGState()
     }
 
-    private static func validMagnifierZoom(_ zoom: CGFloat) -> CGFloat {
+    struct MagnifierDrawGeometry {
+        var requestedSource: CGRect
+        var integralSource: CGRect
+        var drawRect: CGRect
+    }
+
+    static func magnifierDrawGeometry(destination: CGRect, sourceBounds: CGRect, zoom: CGFloat) -> MagnifierDrawGeometry? {
+        guard destination.width > 0, destination.height > 0 else {
+            return nil
+        }
+        let normalizedZoom = normalizedMagnifierZoom(zoom)
+        let sourceWidth = destination.width / normalizedZoom
+        let sourceHeight = destination.height / normalizedZoom
+        let requestedSource = CGRect(
+            x: destination.midX - sourceWidth / 2,
+            y: destination.midY - sourceHeight / 2,
+            width: sourceWidth,
+            height: sourceHeight
+        )
+        let clippedSource = requestedSource.intersection(sourceBounds)
+        let integralSource = clippedSource.integral.intersection(sourceBounds)
+        guard !integralSource.isNull, integralSource.width > 0, integralSource.height > 0 else {
+            return nil
+        }
+
+        let xScale = destination.width / max(requestedSource.width, 1)
+        let yScale = destination.height / max(requestedSource.height, 1)
+        return MagnifierDrawGeometry(
+            requestedSource: requestedSource,
+            integralSource: integralSource,
+            drawRect: CGRect(
+                x: destination.minX + (integralSource.minX - requestedSource.minX) * xScale,
+                y: destination.minY + (integralSource.minY - requestedSource.minY) * yScale,
+                width: integralSource.width * xScale,
+                height: integralSource.height * yScale
+            )
+        )
+    }
+
+    static func normalizedMagnifierZoom(_ zoom: CGFloat) -> CGFloat {
         let candidates: [CGFloat] = [1.5, 2, 3, 4]
         return candidates.min(by: { abs($0 - zoom) < abs($1 - zoom) }) ?? 2
     }

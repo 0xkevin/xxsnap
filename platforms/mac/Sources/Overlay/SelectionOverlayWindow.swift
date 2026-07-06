@@ -626,6 +626,12 @@ final class SelectionOverlayWindow: NSWindow {
         overlayView.mouseUp(with: test_mouseEvent(type: .leftMouseUp, at: point, modifierFlags: modifierFlags))
     }
 
+    func test_drag(from start: NSPoint, to end: NSPoint, modifiers: NSEvent.ModifierFlags = []) {
+        test_mouseDown(at: start, modifierFlags: modifiers)
+        test_mouseDragged(to: end, modifierFlags: modifiers)
+        test_mouseUp(at: end, modifierFlags: modifiers)
+    }
+
     func test_keyDown(
         keyCode: UInt16,
         charactersIgnoringModifiers: String = "",
@@ -819,6 +825,10 @@ final class SelectionOverlayWindow: NSWindow {
 
     func test_annotation(at index: Int) -> CaptureAnnotation? {
         (contentView as? SelectionOverlayView)?.test_annotation(at: index)
+    }
+
+    func test_deleteSelectedAnnotation() {
+        (contentView as? SelectionOverlayView)?.test_deleteSelectedAnnotation()
     }
 
     func test_activateNumberTool() {
@@ -2147,7 +2157,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         case .draggingToolbar:
             updateDraggingToolbar(to: point)
         case .annotating:
-            if isShapeToolActive {
+            if isShapeToolActive || isMagnifierToolActive {
                 let clampedPoint = clamp(point, to: bounds)
                 shapeStartPoint = shapeStartPoint ?? clampedPoint
                 shapeCurrentPoint = draftEndPoint(rawEnd: clampedPoint, modifierFlags: event.modifierFlags)
@@ -2532,10 +2542,14 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             if let draft = draftAnnotation, isUsableDraftAnnotation(draft) {
                 annotations.append(draft)
                 selectedAnnotationIndex = draft.kind == .brush || draft.kind == .mosaicStroke ? nil : annotations.indices.last
-                currentShapeKind = draft.kind
                 currentStyle = draft.style
+                if draft.kind == .magnifier {
+                    magnifierStyle = draft.style
+                } else {
+                    currentShapeKind = draft.kind
+                    activeShapeKind = draft.kind
+                }
                 rememberCurrentStyleForActiveTool()
-                activeShapeKind = draft.kind
                 redoAnnotations.removeAll()
                 if draft.kind == .mosaicStroke || draft.kind == .mosaicRectangle {
                     resetMosaicRedactionPreviewCaches()
@@ -2959,6 +2973,22 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private var draftAnnotation: CaptureAnnotation? {
         guard let shapeStartPoint, let shapeCurrentPoint, lockedSelectionRect != nil else {
             return nil
+        }
+
+        if isMagnifierToolActive {
+            let rect = NSRect(
+                x: min(shapeStartPoint.x, shapeCurrentPoint.x),
+                y: min(shapeStartPoint.y, shapeCurrentPoint.y),
+                width: abs(shapeCurrentPoint.x - shapeStartPoint.x),
+                height: abs(shapeCurrentPoint.y - shapeStartPoint.y)
+            )
+            return CaptureAnnotation(
+                kind: .magnifier,
+                rect: localAnnotationRect(from: rect),
+                style: currentStyle,
+                magnifierShape: currentMagnifierShape,
+                magnifierZoom: currentMagnifierZoom
+            )
         }
 
         if currentShapeKind == .brush {
@@ -3586,6 +3616,14 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return
         }
 
+        if isMagnifierToolActive,
+           textAwareResizeHandle(at: point) == nil,
+           annotationIndexForBorder(at: point) == nil,
+           selectionResizeHandle(at: point) == nil {
+            beginShapeDrawing(at: point)
+            return
+        }
+
         switch SelectionToolbarState.annotatingMouseDownTarget(
             shapeResizeHandle: textAwareResizeHandle(at: point)?.toolbarStateHandle,
             isAnnotationBorder: annotationIndexForBorder(at: point) != nil,
@@ -3617,7 +3655,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             break
         }
 
-        if isShapeToolActive {
+        if isShapeToolActive || isMagnifierToolActive {
             beginShapeDrawing(at: point)
             return
         }
@@ -4858,6 +4896,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return rawEnd
         }
 
+        if isMagnifierToolActive, modifierFlags.contains(.shift) {
+            return equalSidePoint(start: shapeStartPoint, rawEnd: rawEnd)
+        }
+
         if currentShapeKind == .marker {
             return SelectionToolbarState.snappedMarkerEndPoint(
                 start: shapeStartPoint,
@@ -5776,6 +5818,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     func test_annotation(at index: Int) -> CaptureAnnotation? {
         annotations.indices.contains(index) ? annotations[index] : nil
+    }
+
+    func test_deleteSelectedAnnotation() {
+        _ = deleteSelectedAnnotation()
     }
 
     var test_numberMarkType: CaptureNumberMarkType {
@@ -7504,6 +7550,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private func activeToolCanEdit(annotationKind kind: CaptureAnnotationKind) -> Bool {
         if isTextToolActive {
             return kind == .text
+        }
+
+        if isMagnifierToolActive {
+            return kind == .magnifier
         }
 
         guard isShapeToolActive else {
@@ -9862,6 +9912,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             drawMarkerLineAnnotation(annotation, inOverlay: inOverlay)
             return
         }
+        if annotation.kind == .magnifier {
+            drawMagnifierAnnotation(annotation, inOverlay: inOverlay)
+            return
+        }
 
         let rect = inOverlay ? overlayRect(fromLocalAnnotationRect: annotation.rect) : annotation.rect
         let insetRect = rect.standardized.insetBy(dx: annotation.style.strokeWidth / 2, dy: annotation.style.strokeWidth / 2)
@@ -9906,6 +9960,83 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             phase: 0
         )
         strokePath.stroke()
+    }
+
+    private func drawMagnifierAnnotation(_ annotation: CaptureAnnotation, inOverlay: Bool) {
+        let destination = (inOverlay ? overlayRect(fromLocalAnnotationRect: annotation.rect) : annotation.rect).standardized
+        guard destination.width > 0, destination.height > 0 else {
+            return
+        }
+
+        if let backgroundImage, bounds.width > 0, bounds.height > 0 {
+            let sourceDestination = inOverlay
+                ? destination
+                : overlayRect(fromLocalAnnotationRect: annotation.rect).standardized
+            let scaleX = backgroundImage.size.width / bounds.width
+            let scaleY = backgroundImage.size.height / bounds.height
+            let destinationInImage = CGRect(
+                x: sourceDestination.minX * scaleX,
+                y: sourceDestination.minY * scaleY,
+                width: sourceDestination.width * scaleX,
+                height: sourceDestination.height * scaleY
+            )
+            let sourceBounds = CGRect(origin: .zero, size: backgroundImage.size)
+            if let geometry = CaptureAnnotationRenderer.magnifierDrawGeometry(
+                destination: destinationInImage,
+                sourceBounds: sourceBounds,
+                zoom: annotation.effectiveMagnifierZoom
+            ) {
+                let overlayDrawRect = NSRect(
+                    x: geometry.drawRect.minX / scaleX,
+                    y: geometry.drawRect.minY / scaleY,
+                    width: geometry.drawRect.width / scaleX,
+                    height: geometry.drawRect.height / scaleY
+                )
+                let drawRect = inOverlay ? overlayDrawRect : localAnnotationRect(from: overlayDrawRect)
+                let sourceRect = NSRect(
+                    x: geometry.integralSource.minX,
+                    y: geometry.integralSource.minY,
+                    width: geometry.integralSource.width,
+                    height: geometry.integralSource.height
+                )
+
+                NSGraphicsContext.saveGraphicsState()
+                magnifierClipPath(shape: annotation.effectiveMagnifierShape, rect: destination).addClip()
+                NSGraphicsContext.current?.imageInterpolation = .none
+                backgroundImage.draw(in: drawRect, from: sourceRect, operation: .copy, fraction: 1)
+                NSGraphicsContext.restoreGraphicsState()
+            }
+        }
+
+        drawMagnifierBorder(annotation, rect: destination)
+    }
+
+    private func drawMagnifierBorder(_ annotation: CaptureAnnotation, rect: NSRect) {
+        let lineWidth = annotation.style.strokeWidth
+        guard lineWidth > 0 else {
+            return
+        }
+
+        let insetRect = rect.insetBy(dx: lineWidth / 2, dy: lineWidth / 2)
+        guard insetRect.width > 0, insetRect.height > 0 else {
+            return
+        }
+
+        let path = magnifierClipPath(shape: annotation.effectiveMagnifierShape, rect: insetRect)
+        annotation.style.strokeColor.setStroke()
+        path.lineWidth = lineWidth
+        path.lineJoinStyle = .round
+        path.lineCapStyle = .round
+        path.stroke()
+    }
+
+    private func magnifierClipPath(shape: CaptureMagnifierShape, rect: NSRect) -> NSBezierPath {
+        switch shape {
+        case .circle:
+            return NSBezierPath(ovalIn: rect)
+        case .rectangle:
+            return NSBezierPath(rect: rect)
+        }
     }
 
     private func drawNumberSequenceAnnotation(_ annotation: CaptureAnnotation, inOverlay: Bool) {

@@ -2699,6 +2699,126 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(updated.effectiveMagnifierZoom, 4)
     }
 
+    func testMagnifierDragCreatesCircleAndShiftConstrainsToSquare() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 60, y: 60, width: 260, height: 180))
+        window.test_activateMagnifierTool()
+
+        window.test_drag(from: NSPoint(x: 100, y: 110), to: NSPoint(x: 190, y: 160), modifiers: [.shift])
+
+        let annotation = try XCTUnwrap(window.test_annotation(at: 0))
+        XCTAssertEqual(annotation.kind, .magnifier)
+        XCTAssertEqual(annotation.effectiveMagnifierShape, .circle)
+        XCTAssertEqual(annotation.effectiveMagnifierZoom, 2)
+        XCTAssertEqual(annotation.rect.width, annotation.rect.height, accuracy: 0.001)
+        XCTAssertNil(window.test_currentShapeKind)
+    }
+
+    func testMagnifierTinyDragDoesNotCreateAnnotation() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 60, y: 60, width: 260, height: 180))
+        window.test_activateMagnifierTool()
+
+        window.test_drag(from: NSPoint(x: 100, y: 110), to: NSPoint(x: 103, y: 112))
+
+        XCTAssertEqual(window.test_annotationCount, 0)
+    }
+
+    func testSelectedMagnifierCanResizeMoveDeleteAndRestyle() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 60, y: 60, width: 260, height: 180))
+        window.test_activateMagnifierTool()
+        window.test_setMagnifierShape(.rectangle)
+        window.test_setMagnifierZoom(3)
+        window.test_drag(from: NSPoint(x: 100, y: 110), to: NSPoint(x: 190, y: 160))
+
+        let before = try XCTUnwrap(window.test_annotation(at: 0))
+        XCTAssertEqual(before.effectiveMagnifierShape, .rectangle)
+        XCTAssertEqual(before.effectiveMagnifierZoom, 3)
+
+        let resizeHandle = try XCTUnwrap(window.test_shapeResizeHandlePoint(.topRight))
+        window.test_mouseDown(at: resizeHandle)
+        window.test_mouseDragged(to: NSPoint(x: resizeHandle.x + 24, y: resizeHandle.y + 16))
+        window.test_mouseUp(at: NSPoint(x: resizeHandle.x + 24, y: resizeHandle.y + 16))
+
+        let afterResize = try XCTUnwrap(window.test_annotation(at: 0))
+        XCTAssertGreaterThan(afterResize.rect.width, before.rect.width)
+        XCTAssertGreaterThan(afterResize.rect.height, before.rect.height)
+
+        let moveRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+        let moveStart = NSPoint(x: moveRect.midX, y: moveRect.midY)
+        window.test_mouseDown(at: moveStart)
+        window.test_mouseDragged(to: NSPoint(x: moveStart.x + 30, y: moveStart.y + 20))
+        window.test_mouseUp(at: NSPoint(x: moveStart.x + 30, y: moveStart.y + 20))
+
+        let afterMove = try XCTUnwrap(window.test_annotation(at: 0))
+        XCTAssertEqual(afterMove.rect.origin.x, afterResize.rect.origin.x + 30, accuracy: 0.1)
+        XCTAssertEqual(afterMove.rect.origin.y, afterResize.rect.origin.y + 20, accuracy: 0.1)
+
+        let optionsRect = try XCTUnwrap(window.test_optionsToolbarRect)
+        let layout = SelectionToolbarState.optionsToolbarLayout(
+            in: optionsRect,
+            paletteCount: SelectionOverlayWindow.defaultPaletteColors.count,
+            mode: .magnifier
+        )
+        let circleButton = try XCTUnwrap(layout.ellipseMode)
+        window.test_mouseDown(at: NSPoint(x: circleButton.midX, y: circleButton.midY))
+        window.test_mouseUp(at: NSPoint(x: circleButton.midX, y: circleButton.midY))
+        let zoom4Button = try XCTUnwrap(layout.magnifierZooms.last)
+        window.test_mouseDown(at: NSPoint(x: zoom4Button.midX, y: zoom4Button.midY))
+        window.test_mouseUp(at: NSPoint(x: zoom4Button.midX, y: zoom4Button.midY))
+        let thickStroke = layout.strokeWidths[2]
+        window.test_mouseDown(at: NSPoint(x: thickStroke.midX, y: thickStroke.midY))
+        window.test_mouseUp(at: NSPoint(x: thickStroke.midX, y: thickStroke.midY))
+        let redPoint = try XCTUnwrap(window.test_optionsPaletteColorPoint(at: 0))
+        window.test_mouseDown(at: redPoint)
+        window.test_mouseUp(at: redPoint)
+
+        let afterStyle = try XCTUnwrap(window.test_annotation(at: 0))
+        XCTAssertEqual(afterStyle.kind, .magnifier)
+        XCTAssertEqual(afterStyle.effectiveMagnifierShape, .circle)
+        XCTAssertEqual(afterStyle.effectiveMagnifierZoom, 4)
+        XCTAssertEqual(afterStyle.style.strokeWidth, 7)
+        XCTAssertEqual(afterStyle.style.strokeColor, SelectionOverlayWindow.defaultPaletteColors[0])
+
+        window.test_keyDown(keyCode: 51)
+        XCTAssertEqual(window.test_annotationCount, 0)
+    }
+
+    func testMagnifierToolbarShapeZoomOptionsApplyToDraggedAnnotation() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 60, y: 60, width: 260, height: 180))
+
+        let magnifierPoint = try XCTUnwrap(window.test_mainToolbarButtonPoint(for: .magnifier))
+        window.test_mouseDown(at: magnifierPoint)
+        window.test_mouseUp(at: magnifierPoint)
+
+        let optionsRect = try XCTUnwrap(window.test_optionsToolbarRect)
+        let layout = SelectionToolbarState.optionsToolbarLayout(
+            in: optionsRect,
+            paletteCount: SelectionOverlayWindow.defaultPaletteColors.count,
+            mode: .magnifier
+        )
+        let rectangleButton = try XCTUnwrap(layout.rectangleMode)
+        let rectanglePoint = NSPoint(x: rectangleButton.midX, y: rectangleButton.midY)
+        window.test_mouseDown(at: rectanglePoint)
+        window.test_mouseUp(at: rectanglePoint)
+        let zoom4Button = try XCTUnwrap(layout.magnifierZooms.last)
+        let zoom4Point = NSPoint(x: zoom4Button.midX, y: zoom4Button.midY)
+        window.test_mouseDown(at: zoom4Point)
+        window.test_mouseUp(at: zoom4Point)
+
+        window.test_drag(from: NSPoint(x: 100, y: 110), to: NSPoint(x: 190, y: 160))
+
+        let annotation = try XCTUnwrap(window.test_annotation(at: 0))
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(annotation.kind, .magnifier)
+        XCTAssertEqual(annotation.effectiveMagnifierShape, .rectangle)
+        XCTAssertEqual(annotation.effectiveMagnifierZoom, 4)
+        XCTAssertEqual(annotation.style.strokeWidth, window.test_currentStyle?.strokeWidth)
+        XCTAssertEqual(annotation.style.strokeColor, window.test_currentStyle?.strokeColor)
+    }
+
     func testNumberToolbarIconStaysBlackWhenColorChanges() throws {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 260, height: 160))
@@ -5165,6 +5285,40 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(hex(insideAvailableSource), "#FF0000")
         XCTAssertNotEqual(hex(outsideAvailableSource), "#FF0000")
         XCTAssertGreaterThan(outsideAvailableSource.green, 180)
+    }
+
+    func testMagnifierOverlayPreviewSamplesOriginalImageInsteadOfAnnotations() throws {
+        let sourceGreen = NSColor(srgbRed: 0, green: 1, blue: 0, alpha: 1)
+        let annotationRed = NSColor(srgbRed: 1, green: 0, blue: 0, alpha: 1)
+        let base = solidImage(size: NSSize(width: 120, height: 80), color: sourceGreen)
+        let window = SelectionOverlayWindow(backgroundImage: base) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 0, y: 0, width: 120, height: 80))
+        var coverStyle = CaptureAnnotationStyle()
+        coverStyle.strokeWidth = 0
+        coverStyle.fillEnabled = true
+        coverStyle.fillColor = annotationRed
+        var magnifierStyle = CaptureAnnotationStyle()
+        magnifierStyle.strokeWidth = 0
+        window.test_setAnnotations([
+            CaptureAnnotation(
+                kind: .rectangle,
+                rect: NSRect(x: 0, y: 0, width: 120, height: 80),
+                style: coverStyle
+            ),
+            CaptureAnnotation(
+                kind: .magnifier,
+                rect: NSRect(x: 40, y: 20, width: 40, height: 40),
+                style: magnifierStyle,
+                magnifierShape: .rectangle,
+                magnifierZoom: 2
+            ),
+        ])
+
+        let rendered = try XCTUnwrap(window.test_renderedOverlayImage())
+        let pixel = try XCTUnwrap(rgbaPixel(in: rendered, at: NSPoint(x: 60, y: rendered.size.height - 40)))
+
+        XCTAssertGreaterThan(pixel.green, 180)
+        XCTAssertLessThan(pixel.red, 80)
     }
 
     func testOverlayWindowDrawsOverlappingMosaicLayersSequentially() throws {
