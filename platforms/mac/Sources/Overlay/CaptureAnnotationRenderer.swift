@@ -1234,10 +1234,20 @@ enum CaptureAnnotationRenderer {
         let scaleX = CGFloat(cgImage.width) / max(image.size.width, 1)
         let scaleY = CGFloat(cgImage.height) / max(image.size.height, 1)
 
-        let entries = renderEntries(annotations: annotations, eraserMasks: eraserMasks)
-        if !eraserMasks.isEmpty {
-            context.beginTransparencyLayer(auxiliaryInfo: nil)
+        guard !eraserMasks.isEmpty else {
+            for annotation in annotations {
+                drawRenderAnnotation(annotation, in: context, sourceImage: cgImage, scaleX: scaleX, scaleY: scaleY)
+            }
+
+            guard let renderedImage = context.makeImage() else {
+                return nil
+            }
+
+            return NSImage(cgImage: renderedImage, size: image.size)
         }
+
+        let entries = renderEntries(annotations: annotations, eraserMasks: eraserMasks)
+        context.beginTransparencyLayer(auxiliaryInfo: nil)
 
         for entry in entries {
             switch entry.kind {
@@ -1248,9 +1258,7 @@ enum CaptureAnnotationRenderer {
             }
         }
 
-        if !eraserMasks.isEmpty {
-            context.endTransparencyLayer()
-        }
+        context.endTransparencyLayer()
 
         guard let renderedImage = context.makeImage() else {
             return nil
@@ -1323,6 +1331,7 @@ enum CaptureAnnotationRenderer {
         }
 
         context.saveGState()
+        context.beginPath()
         context.addPath(path)
         context.setBlendMode(.clear)
         context.fillPath()

@@ -102,8 +102,8 @@ final class xxsnapMacTests: XCTestCase {
             eraserMasks: [mask]
         )
 
-        assertMostlyRed(renderedColor(rendered, x: 14, y: 14))
-        assertMostlyWhite(renderedColor(rendered, x: 28, y: 27))
+        assertMostlyRed(renderedColor(rendered, x: 22, y: 20))
+        assertMostlyWhite(renderedColor(rendered, x: 40, y: 36))
     }
 
     func testFreehandEraserMaskClearsAnnotationButLeavesScreenshotPixels() {
@@ -139,7 +139,47 @@ final class xxsnapMacTests: XCTestCase {
         )
 
         assertMostlyRed(renderedColor(rendered, x: 14, y: 18))
-        assertMostlyWhite(renderedColor(rendered, x: 35, y: 18))
+        assertMostlyWhite(renderedColor(rendered, x: 67, y: 18))
+    }
+
+    func testEraserMaskClearsMosaicAnnotationWithoutClearingScreenshotPixels() throws {
+        let image = checkerboardImage(size: NSSize(width: 120, height: 80), squareSize: 4)
+        let annotation = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(x: 20, y: 16, width: 80, height: 48),
+            style: CaptureAnnotationStyle(),
+            renderOrder: 1,
+            mosaicRedaction: CaptureMosaicRedaction(type: .gaussianBlur, value: 12)
+        )
+        let mask = CaptureEraserMask(
+            kind: .rectangle,
+            renderOrder: 2,
+            size: 24,
+            points: [],
+            rect: NSRect(x: 56, y: 32, width: 18, height: 18)
+        )
+
+        let rendered = CaptureAnnotationRenderer.render(
+            image: image,
+            annotations: [annotation],
+            eraserMasks: [mask]
+        )
+
+        let originalMaskedPixel = try XCTUnwrap(rgbaPixel(in: image, x: 128, y: 80))
+        let renderedMaskedPixel = try XCTUnwrap(rgbaPixel(in: rendered, x: 128, y: 80))
+        XCTAssertEqual(renderedMaskedPixel.red, originalMaskedPixel.red)
+        XCTAssertEqual(renderedMaskedPixel.green, originalMaskedPixel.green)
+        XCTAssertEqual(renderedMaskedPixel.blue, originalMaskedPixel.blue)
+        XCTAssertEqual(renderedMaskedPixel.alpha, originalMaskedPixel.alpha)
+
+        let originalMosaicPixel = try XCTUnwrap(rgbaPixel(in: image, x: 88, y: 80))
+        let renderedMosaicPixel = try XCTUnwrap(rgbaPixel(in: rendered, x: 88, y: 80))
+        XCTAssertTrue(
+            renderedMosaicPixel.red != originalMosaicPixel.red
+                || renderedMosaicPixel.green != originalMosaicPixel.green
+                || renderedMosaicPixel.blue != originalMosaicPixel.blue
+                || renderedMosaicPixel.alpha != originalMosaicPixel.alpha
+        )
     }
 
     func testAnnotationRendererDrawsArrowLineOntoImage() throws {
@@ -1630,33 +1670,16 @@ final class xxsnapMacTests: XCTestCase {
     }
 
     private func renderedColor(_ image: NSImage, x: Int, y: Int) -> NSColor {
-        guard let tiff = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiff),
-              let color = bitmap.colorAt(x: x, y: y) else {
+        guard let pixel = try? rgbaPixel(in: image, x: x, y: y) else {
             XCTFail("Expected readable bitmap pixel at \(x),\(y)")
             return .clear
         }
-        let rowColor = color.usingColorSpace(.deviceRGB) ?? color
-        if x < 20, isMostlyWhite(rowColor),
-           let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
-            for candidateY in 0..<cgImage.height {
-                for candidateX in 0..<cgImage.width {
-                    guard let pixel = try? rgbaPixel(in: image, x: candidateX, y: candidateY) else {
-                        continue
-                    }
-                    let candidate = NSColor(
-                        deviceRed: CGFloat(pixel.red) / 255,
-                        green: CGFloat(pixel.green) / 255,
-                        blue: CGFloat(pixel.blue) / 255,
-                        alpha: CGFloat(pixel.alpha) / 255
-                    )
-                    if isMostlyRed(candidate) {
-                        return candidate
-                    }
-                }
-            }
-        }
-        return rowColor
+        return NSColor(
+            deviceRed: CGFloat(pixel.red) / 255,
+            green: CGFloat(pixel.green) / 255,
+            blue: CGFloat(pixel.blue) / 255,
+            alpha: CGFloat(pixel.alpha) / 255
+        )
     }
 
     private func assertMostlyRed(_ color: NSColor, file: StaticString = #filePath, line: UInt = #line) {
@@ -1671,16 +1694,6 @@ final class xxsnapMacTests: XCTestCase {
         XCTAssertGreaterThan(rgb.redComponent, 0.85, file: file, line: line)
         XCTAssertGreaterThan(rgb.greenComponent, 0.85, file: file, line: line)
         XCTAssertGreaterThan(rgb.blueComponent, 0.85, file: file, line: line)
-    }
-
-    private func isMostlyRed(_ color: NSColor) -> Bool {
-        let rgb = color.usingColorSpace(.deviceRGB) ?? color
-        return rgb.redComponent > 0.75 && rgb.greenComponent < 0.25 && rgb.blueComponent < 0.25
-    }
-
-    private func isMostlyWhite(_ color: NSColor) -> Bool {
-        let rgb = color.usingColorSpace(.deviceRGB) ?? color
-        return rgb.redComponent > 0.85 && rgb.greenComponent > 0.85 && rgb.blueComponent > 0.85
     }
 
     private func referenceArrowSignature(
