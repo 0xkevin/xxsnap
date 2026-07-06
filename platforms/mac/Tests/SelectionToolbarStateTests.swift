@@ -417,20 +417,58 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_annotationCount, 1)
     }
 
-    func testEraserDragDoesNotMoveSelectionBeforeMaskToolIsImplemented() {
+    func testEraserFreehandDragCreatesOneMaskAndUndoRedoTogglesIt() {
         let window = makeOverlayWindowWithLockedSelection()
-        window.test_setAnnotations([testRectangleAnnotation(x: 20, y: 20, width: 60, height: 40, renderOrder: 1)])
         click(window, button: .eraser)
-        let selectionBefore = window.test_lockedSelectionRect
 
-        window.test_mouseDown(at: NSPoint(x: 160, y: 150))
-        window.test_mouseDragged(to: NSPoint(x: 220, y: 190))
-        XCTAssertTrue(window.test_isDraggingEraser)
-        window.test_mouseUp(at: NSPoint(x: 220, y: 190))
+        window.test_mouseDown(at: NSPoint(x: 120, y: 120))
+        window.test_mouseDragged(to: NSPoint(x: 142, y: 124))
+        window.test_mouseDragged(to: NSPoint(x: 160, y: 130))
+        window.test_mouseUp(at: NSPoint(x: 160, y: 130))
 
-        XCTAssertEqual(window.test_lockedSelectionRect, selectionBefore)
-        XCTAssertEqual(window.test_annotationCount, 1)
-        XCTAssertEqual(window.test_undoActionCount, 0)
+        XCTAssertEqual(window.test_eraserMaskCount, 1)
+        XCTAssertEqual(window.test_eraserMask(at: 0)?.kind, .freehand)
+        XCTAssertEqual(window.test_eraserMask(at: 0)?.size, 24)
+        XCTAssertGreaterThanOrEqual(window.test_eraserMask(at: 0)?.points.count ?? 0, 3)
+
+        click(window, button: .undo)
+        XCTAssertEqual(window.test_eraserMaskCount, 0)
+
+        click(window, button: .redo)
+        XCTAssertEqual(window.test_eraserMaskCount, 1)
+    }
+
+    func testEraserRectangleDragCreatesStandardizedRectangleMask() {
+        let window = makeOverlayWindowWithLockedSelection()
+        click(window, button: .eraser)
+        click(window, eraserMode: "rectangle")
+
+        window.test_mouseDown(at: NSPoint(x: 180, y: 170))
+        window.test_mouseDragged(to: NSPoint(x: 130, y: 120))
+        window.test_mouseUp(at: NSPoint(x: 130, y: 120))
+
+        XCTAssertEqual(window.test_eraserMaskCount, 1)
+        let mask = window.test_eraserMask(at: 0)
+        XCTAssertEqual(mask?.kind, .rectangle)
+        XCTAssertEqual(mask?.rect, NSRect(x: 30, y: 20, width: 50, height: 50))
+    }
+
+    func testTinyEraserDragsDoNotCreateMasks() {
+        let window = makeOverlayWindowWithLockedSelection()
+        click(window, button: .eraser)
+
+        window.test_mouseDown(at: NSPoint(x: 120, y: 120))
+        window.test_mouseDragged(to: NSPoint(x: 121, y: 121))
+        window.test_mouseUp(at: NSPoint(x: 121, y: 121))
+
+        XCTAssertEqual(window.test_eraserMaskCount, 0)
+
+        click(window, eraserMode: "rectangle")
+        window.test_mouseDown(at: NSPoint(x: 130, y: 130))
+        window.test_mouseDragged(to: NSPoint(x: 131, y: 131))
+        window.test_mouseUp(at: NSPoint(x: 131, y: 131))
+
+        XCTAssertEqual(window.test_eraserMaskCount, 0)
     }
 
     func testDeleteSelectedAnnotationRecordsUndoHistory() {

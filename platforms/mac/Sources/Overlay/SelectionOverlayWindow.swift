@@ -885,6 +885,14 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_currentEraserSize ?? 24
     }
 
+    var test_eraserMaskCount: Int {
+        (contentView as? SelectionOverlayView)?.test_eraserMaskCount ?? 0
+    }
+
+    func test_eraserMask(at index: Int) -> CaptureEraserMask? {
+        (contentView as? SelectionOverlayView)?.test_eraserMask(at: index)
+    }
+
     var test_isShapeToolActive: Bool {
         (contentView as? SelectionOverlayView)?.test_isShapeToolActive ?? false
     }
@@ -1807,6 +1815,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private var isEraserToolActive = false
     private var currentEraserDrawingMode: EraserDrawingMode = .freehand
     private var currentEraserSize: CGFloat = 24
+    private let eraserDragThreshold: CGFloat = 3
     private var eraserCircleCursorCache: [CGFloat: NSCursor] = [:]
     private var eraserMasks: [CaptureEraserMask] = []
     private var eraserDraftPoints: [NSPoint] = []
@@ -2233,8 +2242,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
 
         if isEraserToolActive, interactionMode == .annotating {
-            isDraggingEraser = true
-            needsDisplay = true
+            updateEraserDrag(to: point)
             return
         }
 
@@ -5651,9 +5659,35 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     private func beginEraserInteraction(at point: NSPoint) {
         eraserMouseDownPoint = point
-        eraserDraftPoints = [lockedSelectionRect.map { localPoint(fromOverlayPoint: point, selectionRect: $0.standardized) } ?? point]
+        eraserDraftPoints = [localPoint(fromOverlayPoint: point)]
         eraserDraftRect = nil
         isDraggingEraser = false
+    }
+
+    private func updateEraserDrag(to point: NSPoint) {
+        guard let down = eraserMouseDownPoint else {
+            return
+        }
+        let distance = hypot(point.x - down.x, point.y - down.y)
+        if distance >= eraserDragThreshold {
+            isDraggingEraser = true
+        }
+        guard isDraggingEraser else {
+            return
+        }
+
+        switch currentEraserDrawingMode {
+        case .freehand:
+            eraserDraftPoints.append(localPoint(fromOverlayPoint: point))
+        case .rectangle:
+            eraserDraftRect = NSRect(
+                x: min(down.x, point.x),
+                y: min(down.y, point.y),
+                width: abs(point.x - down.x),
+                height: abs(point.y - down.y)
+            )
+        }
+        needsDisplay = true
     }
 
     private func finishEraserClick(at point: NSPoint) {
@@ -5666,9 +5700,51 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private func finishEraserDrag(at point: NSPoint) {
-        _ = point
+        switch currentEraserDrawingMode {
+        case .freehand:
+            eraserDraftPoints.append(localPoint(fromOverlayPoint: point))
+            guard eraserDraftPoints.count >= 2,
+                  freehandEraserPathLength(eraserDraftPoints) >= eraserDragThreshold else {
+                cancelEraserDraft()
+                return
+            }
+            let mask = CaptureEraserMask(
+                kind: .freehand,
+                renderOrder: nextRenderOrder(),
+                size: currentEraserSize,
+                points: eraserDraftPoints,
+                rect: .zero
+            )
+            eraserMasks.append(mask)
+            recordUndo(.addedEraserMask(mask))
+        case .rectangle:
+            guard let draft = eraserDraftRect?.standardized,
+                  draft.width >= eraserDragThreshold,
+                  draft.height >= eraserDragThreshold else {
+                cancelEraserDraft()
+                return
+            }
+            let mask = CaptureEraserMask(
+                kind: .rectangle,
+                renderOrder: nextRenderOrder(),
+                size: currentEraserSize,
+                points: [],
+                rect: localRect(fromOverlayRect: draft)
+            )
+            eraserMasks.append(mask)
+            recordUndo(.addedEraserMask(mask))
+        }
+        selectedAnnotationIndex = nil
+        resetMosaicPreviewCaches()
         cancelEraserDraft()
         needsDisplay = true
+    }
+
+    private func freehandEraserPathLength(_ points: [NSPoint]) -> CGFloat {
+        guard points.count > 1 else { return 0 }
+        return zip(points, points.dropFirst()).reduce(CGFloat(0)) { total, pair in
+            total + hypot(pair.1.x - pair.0.x, pair.1.y - pair.0.y)
+        }
     }
 
     private func rememberCurrentStyleForActiveTool() {
@@ -6574,6 +6650,17 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     var test_currentEraserSize: CGFloat {
         currentEraserSize
+    }
+
+    var test_eraserMaskCount: Int {
+        eraserMasks.count
+    }
+
+    func test_eraserMask(at index: Int) -> CaptureEraserMask? {
+        guard eraserMasks.indices.contains(index) else {
+            return nil
+        }
+        return eraserMasks[index]
     }
 
     var test_eraserCircleCursorInfo: (imageSize: NSSize, hotSpot: NSPoint, centerAlpha: CGFloat, ringAlpha: CGFloat)? {
@@ -13782,6 +13869,18 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
 
         return SelectionToolbarState.localAnnotationRect(fromOverlayRect: overlayRect, selectionRect: lockedSelectionRect)
+    }
+
+    private func localPoint(fromOverlayPoint point: NSPoint) -> NSPoint {
+        guard let lockedSelectionRect else {
+            return point
+        }
+
+        return localPoint(fromOverlayPoint: point, selectionRect: lockedSelectionRect.standardized)
+    }
+
+    private func localRect(fromOverlayRect rect: NSRect) -> NSRect {
+        localAnnotationRect(from: rect)
     }
 
     private func localArrowLine(fromOverlayArrowLine arrowLine: CaptureArrowLine) -> CaptureArrowLine {
