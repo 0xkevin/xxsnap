@@ -234,6 +234,190 @@ final class xxsnapMacTests: XCTestCase {
         )
     }
 
+    func testEraserMasksAffectAllAnnotationFamilies() throws {
+        let whiteImage = try makeBitmapImage(
+            pointSize: NSSize(width: 140, height: 100),
+            pixelWidth: 140,
+            pixelHeight: 100,
+            fill: .white
+        )
+        let patternedImage = try fixedPixelCheckerboardImage(
+            pointSize: NSSize(width: 140, height: 100),
+            pixelWidth: 140,
+            pixelHeight: 100,
+            squareSize: 6
+        )
+
+        var fillStyle = CaptureAnnotationStyle()
+        fillStyle.strokeColor = .systemRed
+        fillStyle.fillColor = .systemRed
+        fillStyle.fillEnabled = true
+
+        var strokeStyle = CaptureAnnotationStyle()
+        strokeStyle.strokeColor = .systemRed
+        strokeStyle.strokeWidth = 10
+
+        var markerStyle = CaptureAnnotationStyle()
+        markerStyle.strokeColor = SelectionToolbarState.defaultMarkerColor
+        markerStyle.strokeWidth = 18
+
+        var textStyle = CaptureAnnotationStyle()
+        textStyle.strokeColor = .systemRed
+        textStyle.textSize = 30
+
+        var numberStyle = CaptureAnnotationStyle()
+        numberStyle.strokeColor = .systemRed
+        numberStyle.textSize = 26
+
+        let arrowLine = CaptureArrowLine(
+            start: NSPoint(x: 18, y: 36),
+            end: NSPoint(x: 120, y: 36),
+            control: NSPoint(x: 69, y: 36),
+            startArrowType: .none,
+            endArrowType: .none
+        )
+        let brushPath = CaptureBrushPath(points: [
+            NSPoint(x: 18, y: 48),
+            NSPoint(x: 70, y: 48),
+            NSPoint(x: 122, y: 48),
+        ])
+        let markerLine = CaptureMarkerLine(start: NSPoint(x: 18, y: 54), end: NSPoint(x: 122, y: 54))
+
+        let scenarios: [(name: String, image: NSImage, annotation: CaptureAnnotation, searchRect: NSRect)] = [
+            (
+                "rectangle",
+                whiteImage,
+                CaptureAnnotation(
+                    kind: .rectangle,
+                    rect: NSRect(x: 20, y: 20, width: 64, height: 40),
+                    style: fillStyle,
+                    renderOrder: 1
+                ),
+                NSRect(x: 32, y: 30, width: 28, height: 20)
+            ),
+            (
+                "arrowLine",
+                whiteImage,
+                CaptureAnnotation(
+                    kind: .arrowLine,
+                    rect: arrowLine.boundingRect,
+                    style: strokeStyle,
+                    renderOrder: 1,
+                    arrowLine: arrowLine
+                ),
+                NSRect(x: 36, y: 31, width: 64, height: 10)
+            ),
+            (
+                "brush",
+                whiteImage,
+                CaptureAnnotation(
+                    kind: .brush,
+                    rect: brushPath.boundingRect,
+                    style: strokeStyle,
+                    renderOrder: 1,
+                    brushPath: brushPath
+                ),
+                NSRect(x: 36, y: 43, width: 64, height: 10)
+            ),
+            (
+                "marker",
+                whiteImage,
+                CaptureAnnotation(
+                    kind: .marker,
+                    rect: markerLine.boundingRect,
+                    style: markerStyle,
+                    renderOrder: 1,
+                    markerLine: markerLine
+                ),
+                NSRect(x: 36, y: 46, width: 64, height: 16)
+            ),
+            (
+                "text",
+                whiteImage,
+                CaptureAnnotation(
+                    kind: .text,
+                    rect: NSRect(x: 22, y: 24, width: 104, height: 46),
+                    style: textStyle,
+                    renderOrder: 1,
+                    text: "MASK"
+                ),
+                NSRect(x: 22, y: 24, width: 104, height: 46)
+            ),
+            (
+                "numberSequence",
+                whiteImage,
+                CaptureAnnotation(
+                    kind: .numberSequence,
+                    rect: NSRect(x: 48, y: 30, width: 42, height: 42),
+                    style: numberStyle,
+                    renderOrder: 1,
+                    numberMarkType: .number,
+                    numberSequenceIndex: 8
+                ),
+                NSRect(x: 54, y: 38, width: 30, height: 26)
+            ),
+            (
+                "magnifier",
+                whiteImage,
+                CaptureAnnotation(
+                    kind: .magnifier,
+                    rect: NSRect(x: 42, y: 24, width: 52, height: 52),
+                    style: strokeStyle,
+                    renderOrder: 1,
+                    magnifierShape: .rectangle,
+                    magnifierZoom: 2
+                ),
+                NSRect(x: 42, y: 24, width: 52, height: 52)
+            ),
+            (
+                "mosaicRectangle",
+                patternedImage,
+                CaptureAnnotation(
+                    kind: .mosaicRectangle,
+                    rect: NSRect(x: 20, y: 18, width: 96, height: 58),
+                    style: CaptureAnnotationStyle(),
+                    renderOrder: 1,
+                    mosaicRedaction: CaptureMosaicRedaction(type: .gaussianBlur, value: 12)
+                ),
+                NSRect(x: 32, y: 28, width: 72, height: 36)
+            ),
+        ]
+
+        for scenario in scenarios {
+            let unmasked = CaptureAnnotationRenderer.render(image: scenario.image, annotations: [scenario.annotation])
+            let changedPoint = try XCTUnwrap(
+                firstPixelChangedByAnnotation(in: unmasked, comparedTo: scenario.image, within: scenario.searchRect),
+                "Expected \(scenario.name) to draw a changed pixel before applying an eraser mask"
+            )
+            try assertPixel(
+                in: unmasked,
+                differsFrom: scenario.image,
+                at: changedPoint,
+                message: "\(scenario.name) should affect the sample pixel before masking"
+            )
+
+            let mask = CaptureEraserMask(
+                kind: .rectangle,
+                renderOrder: 2,
+                size: 24,
+                points: [],
+                rect: NSRect(x: CGFloat(changedPoint.x) - 5, y: CGFloat(changedPoint.y) - 5, width: 10, height: 10)
+            )
+            let masked = CaptureAnnotationRenderer.render(
+                image: scenario.image,
+                annotations: [scenario.annotation],
+                eraserMasks: [mask]
+            )
+
+            try assertPixel(
+                in: masked,
+                matches: scenario.image,
+                at: changedPoint,
+                message: "\(scenario.name) should return the erased sample pixel to the background"
+            )
+        }
+    }
+
     func testAnnotationRendererDrawsArrowLineOntoImage() throws {
         let image = try makeBitmapImage(
             pointSize: NSSize(width: 80, height: 50),
@@ -1746,6 +1930,72 @@ final class xxsnapMacTests: XCTestCase {
         XCTAssertGreaterThan(rgb.redComponent, 0.85, file: file, line: line)
         XCTAssertGreaterThan(rgb.greenComponent, 0.85, file: file, line: line)
         XCTAssertGreaterThan(rgb.blueComponent, 0.85, file: file, line: line)
+    }
+
+    private func firstPixelChangedByAnnotation(
+        in rendered: NSImage,
+        comparedTo background: NSImage,
+        within rect: NSRect,
+        threshold: UInt8 = 20
+    ) throws -> (x: Int, y: Int)? {
+        let cgImage = try XCTUnwrap(rendered.cgImage(forProposedRect: nil, context: nil, hints: nil))
+        let minX = max(0, Int(rect.minX.rounded(.down)))
+        let maxX = min(cgImage.width, Int(rect.maxX.rounded(.up)))
+        let minY = max(0, Int(rect.minY.rounded(.down)))
+        let maxY = min(cgImage.height, Int(rect.maxY.rounded(.up)))
+
+        guard minX < maxX, minY < maxY else {
+            return nil
+        }
+
+        for y in minY..<maxY {
+            for x in minX..<maxX {
+                guard try pixel(in: rendered, differsFrom: background, x: x, y: y, threshold: threshold) else {
+                    continue
+                }
+                return (x, y)
+            }
+        }
+        return nil
+    }
+
+    private func assertPixel(
+        in image: NSImage,
+        differsFrom background: NSImage,
+        at point: (x: Int, y: Int),
+        message: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let differs = try pixel(in: image, differsFrom: background, x: point.x, y: point.y, threshold: 20)
+        XCTAssertTrue(differs, message, file: file, line: line)
+    }
+
+    private func assertPixel(
+        in image: NSImage,
+        matches background: NSImage,
+        at point: (x: Int, y: Int),
+        message: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let differs = try pixel(in: image, differsFrom: background, x: point.x, y: point.y, threshold: 6)
+        XCTAssertFalse(differs, message, file: file, line: line)
+    }
+
+    private func pixel(
+        in image: NSImage,
+        differsFrom background: NSImage,
+        x: Int,
+        y: Int,
+        threshold: UInt8
+    ) throws -> Bool {
+        let pixel = try XCTUnwrap(rgbaPixel(in: image, x: x, y: y))
+        let backgroundPixel = try XCTUnwrap(rgbaPixel(in: background, x: x, y: y))
+        return abs(Int(pixel.red) - Int(backgroundPixel.red)) > Int(threshold)
+            || abs(Int(pixel.green) - Int(backgroundPixel.green)) > Int(threshold)
+            || abs(Int(pixel.blue) - Int(backgroundPixel.blue)) > Int(threshold)
+            || abs(Int(pixel.alpha) - Int(backgroundPixel.alpha)) > Int(threshold)
     }
 
     private func referenceArrowSignature(
