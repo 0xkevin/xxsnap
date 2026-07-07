@@ -9873,12 +9873,12 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         let dash: [CGFloat] = [6, 4]
         path.setLineDash(dash, count: dash.count, phase: 0)
 
-        NSColor.white.withAlphaComponent(0.92).setStroke()
+        NSColor.white.withAlphaComponent(0.72).setStroke()
         path.lineWidth = 3
         path.stroke()
 
-        NSColor.black.withAlphaComponent(0.88).setStroke()
-        path.lineWidth = 1.4
+        NSColor.systemBlue.withAlphaComponent(0.96).setStroke()
+        path.lineWidth = 1.8
         path.stroke()
         NSGraphicsContext.restoreGraphicsState()
     }

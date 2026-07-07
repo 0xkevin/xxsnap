@@ -527,7 +527,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(mask?.rect, NSRect(x: 30, y: 20, width: 50, height: 50))
     }
 
-    func testEraserRectangleDragShowsDashedPreviewUntilMouseUp() throws {
+    func testEraserRectangleDragShowsBlueDashedPreviewUntilMouseUp() throws {
         let image = solidImage(size: NSSize(width: 260, height: 180), color: .white)
         let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
         window.test_setLockedSelectionRect(NSRect(x: 20, y: 20, width: 220, height: 140))
@@ -539,18 +539,18 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         let draggingImage = try XCTUnwrap(window.test_renderedOverlayImage())
         let topEdge = NSRect(x: 82, y: 118, width: 66, height: 4)
-        let draggingDarkPixels = try matchingPixelCount(in: draggingImage, rect: topEdge) { pixel in
-            pixel.red < 90 && pixel.green < 90 && pixel.blue < 90 && pixel.alpha > 180
+        let draggingBluePixels = try matchingPixelCount(in: draggingImage, rect: topEdge) { pixel in
+            pixel.blue > 170 && pixel.green > 90 && pixel.red < 90 && pixel.alpha > 180
         }
-        XCTAssertGreaterThan(draggingDarkPixels, 8)
+        XCTAssertGreaterThan(draggingBluePixels, 8)
 
         window.test_mouseUp(at: NSPoint(x: 150, y: 120))
 
         let finishedImage = try XCTUnwrap(window.test_renderedOverlayImage())
-        let finishedDarkPixels = try matchingPixelCount(in: finishedImage, rect: topEdge) { pixel in
-            pixel.red < 90 && pixel.green < 90 && pixel.blue < 90 && pixel.alpha > 180
+        let finishedBluePixels = try matchingPixelCount(in: finishedImage, rect: topEdge) { pixel in
+            pixel.blue > 170 && pixel.green > 90 && pixel.red < 90 && pixel.alpha > 180
         }
-        XCTAssertEqual(finishedDarkPixels, 0)
+        XCTAssertEqual(finishedBluePixels, 0)
     }
 
     func testTinyEraserDragsDoNotCreateMasks() {
