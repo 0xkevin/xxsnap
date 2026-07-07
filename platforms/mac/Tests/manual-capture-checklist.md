@@ -45,6 +45,16 @@ Use this checklist to verify the native macOS screenshot MVP after building `xxs
 - [ ] Draw text or an arrow over the screenshot and verify the magnifier still shows original screenshot pixels.
 - [ ] Copy and save, then compare exported output with overlay preview.
 
+## Eraser Tool Smoke Check
+
+- [ ] Select a screenshot region and click Eraser; no unfinished placeholder appears.
+- [ ] In circular mode, verify the mouse cursor is a hollow circle and changes size for `12 / 24 / 40px`.
+- [ ] Draw overlapping annotations, click the topmost one with Eraser, then undo and redo.
+- [ ] Drag circular Eraser across rectangle, arrow, brush, marker, mosaic, text, number, and magnifier annotations; screenshot pixels remain visible.
+- [ ] Switch to rectangular mode, drag a box, and confirm the boxed annotation area is cleared.
+- [ ] Draw a new annotation after erasing; it remains visible above the earlier erase.
+- [ ] Copy and save the result; exported output matches the overlay preview.
+
 ## Notes
 
 - Task 6 wires clipboard output and prepares save behavior for later UI exposure.
