@@ -859,17 +859,33 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_cursorStyle(at: window.test_pointInsideLockedSelection()), .eraserCircle)
     }
 
-    func testEraserOptionsExposeSelectedModeAndSizeForDrawing() {
+    func testEraserOptionsExposeSelectedModeAndSizeForDrawing() throws {
         let window = makeOverlayWindowWithLockedSelection()
         click(window, button: .eraser)
 
         XCTAssertEqual(window.test_eraserSelectedModeIdentifier, "freehand")
         XCTAssertEqual(window.test_eraserSelectedSize, 24)
 
+        click(window, eraserSize: 40)
+        XCTAssertEqual(window.test_eraserSelectedSize, 40)
+
         click(window, eraserMode: "rectangle")
         click(window, eraserSize: 12)
 
         XCTAssertEqual(window.test_eraserSelectedModeIdentifier, "rectangle")
+        XCTAssertEqual(window.test_eraserSelectedSize, 40)
+
+        let disabledSizeRect = try XCTUnwrap(window.test_eraserSizeRect(40))
+        let rectangleModeImage = try XCTUnwrap(window.test_renderedOverlayImage())
+        let selectedPixelsInRectangleMode = try matchingPixelCount(in: rectangleModeImage, rect: disabledSizeRect) { pixel in
+            pixel.blue > 150 && pixel.red < 120 && pixel.green > 80 && pixel.alpha > 150
+        }
+        XCTAssertEqual(selectedPixelsInRectangleMode, 0)
+
+        click(window, eraserMode: "freehand")
+        click(window, eraserSize: 12)
+
+        XCTAssertEqual(window.test_eraserSelectedModeIdentifier, "freehand")
         XCTAssertEqual(window.test_eraserSelectedSize, 12)
     }
 

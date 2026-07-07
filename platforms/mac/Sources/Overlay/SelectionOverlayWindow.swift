@@ -709,6 +709,10 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_eraserSizePoint(size)
     }
 
+    func test_eraserSizeRect(_ size: CGFloat) -> NSRect? {
+        (contentView as? SelectionOverlayView)?.test_eraserSizeRect(size)
+    }
+
     var test_eraserCircleCursorInfo: (imageSize: NSSize, hotSpot: NSPoint, centerAlpha: CGFloat, ringAlpha: CGFloat)? {
         (contentView as? SelectionOverlayView)?.test_eraserCircleCursorInfo
     }
@@ -6254,6 +6258,19 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         return NSPoint(x: rect.midX, y: rect.midY)
     }
 
+    func test_eraserSizeRect(_ size: CGFloat) -> NSRect? {
+        guard let optionsToolbarRect,
+              let index = SelectionToolbarState.eraserSizeValues.firstIndex(where: { abs($0 - size) < 0.001 })
+        else {
+            return nil
+        }
+        let rects = optionsToolbarLayout(in: optionsToolbarRect).eraserSizes
+        guard rects.indices.contains(index) else {
+            return nil
+        }
+        return rects[index]
+    }
+
     func test_selectTextSize(_ size: CGFloat) {
         applyTextSize(size)
     }
@@ -7452,6 +7469,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return true
         }
         for (index, rect) in layout.eraserSizes.enumerated() where rect.contains(point) {
+            guard currentEraserDrawingMode == .freehand else {
+                return true
+            }
             currentEraserSize = SelectionToolbarState.eraserSizeValues[index]
             return true
         }
@@ -12195,15 +12215,29 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 enabled: true
             )
         }
+        let sizeControlsEnabled = currentEraserDrawingMode == .freehand
         for (index, rect) in layout.eraserSizes.enumerated() where SelectionToolbarState.eraserSizeValues.indices.contains(index) {
             let size = SelectionToolbarState.eraserSizeValues[index]
-            drawEraserSizeButton(rect, size: size, selected: currentEraserSize == size)
+            drawEraserSizeButton(
+                rect,
+                size: size,
+                selected: sizeControlsEnabled && currentEraserSize == size,
+                enabled: sizeControlsEnabled
+            )
         }
     }
 
-    private func drawEraserSizeButton(_ rect: NSRect, size: CGFloat, selected: Bool) {
+    private func drawEraserSizeButton(_ rect: NSRect, size: CGFloat, selected: Bool, enabled: Bool) {
         let background = NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5)
-        (selected ? NSColor.controlAccentColor : NSColor.windowBackgroundColor.withAlphaComponent(0.92)).setFill()
+        let backgroundColor: NSColor
+        if selected {
+            backgroundColor = NSColor.controlAccentColor
+        } else if enabled {
+            backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.92)
+        } else {
+            backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.42)
+        }
+        backgroundColor.setFill()
         background.fill()
 
         let diameter = min(rect.width - 10, max(6, size / 2))
@@ -12214,7 +12248,15 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             height: diameter
         ))
         circle.lineWidth = selected ? 2 : 1.5
-        (selected ? NSColor.white : NSColor.labelColor).setStroke()
+        let strokeColor: NSColor
+        if selected {
+            strokeColor = NSColor.white
+        } else if enabled {
+            strokeColor = NSColor.labelColor
+        } else {
+            strokeColor = NSColor.disabledControlTextColor
+        }
+        strokeColor.setStroke()
         circle.stroke()
     }
 
