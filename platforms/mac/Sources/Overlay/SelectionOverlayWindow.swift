@@ -2068,6 +2068,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         drawAnnotations()
         drawEditingTextCaretIfNeeded()
         drawDraftAnnotation()
+        drawEraserRectanglePreviewIfNeeded()
         drawMainToolbar(for: selectionRect)
         drawOptionsToolbar(for: selectionRect)
 
@@ -9852,6 +9853,34 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             fraction: 1
         )
         return true
+    }
+
+    private func drawEraserRectanglePreviewIfNeeded() {
+        guard
+            isDraggingEraser,
+            currentEraserDrawingMode == .rectangle,
+            let draft = eraserDraftRect?.standardized,
+            draft.width >= eraserDragThreshold,
+            draft.height >= eraserDragThreshold
+        else {
+            return
+        }
+
+        NSGraphicsContext.saveGraphicsState()
+        let rect = draft.insetBy(dx: 0.75, dy: 0.75)
+        let path = NSBezierPath(rect: rect)
+        path.lineJoinStyle = .miter
+        let dash: [CGFloat] = [6, 4]
+        path.setLineDash(dash, count: dash.count, phase: 0)
+
+        NSColor.white.withAlphaComponent(0.92).setStroke()
+        path.lineWidth = 3
+        path.stroke()
+
+        NSColor.black.withAlphaComponent(0.88).setStroke()
+        path.lineWidth = 1.4
+        path.stroke()
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     private func eraserPreviewCompositeImage(backgroundImage: NSImage) -> NSImage? {
