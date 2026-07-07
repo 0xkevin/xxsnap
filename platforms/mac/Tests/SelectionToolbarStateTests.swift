@@ -1072,6 +1072,43 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertNotNil(framePixel)
     }
 
+    func testTextTypingRemainsVisibleInsideEraserRectangleMask() throws {
+        let background = solidImage(size: NSSize(width: 320, height: 220), color: .white)
+        let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
+        let selection = NSRect(x: 20, y: 20, width: 240, height: 160)
+        window.test_setLockedSelectionRect(selection)
+
+        click(window, button: .eraser)
+        click(window, eraserMode: "rectangle")
+        window.test_mouseDown(at: NSPoint(x: 80, y: 70))
+        window.test_mouseDragged(to: NSPoint(x: 170, y: 130))
+        window.test_mouseUp(at: NSPoint(x: 170, y: 130))
+
+        click(window, button: .text)
+        window.test_selectTextSize(36)
+        window.test_mouseDown(at: NSPoint(x: 95, y: 88))
+        window.test_mouseUp(at: NSPoint(x: 95, y: 88))
+        window.firstResponder?.insertText("Hi")
+
+        let localTextRect = try XCTUnwrap(window.test_annotationRect(at: 0))
+        let overlayTextRect = NSRect(
+            x: selection.minX + localTextRect.minX,
+            y: selection.minY + localTextRect.minY,
+            width: localTextRect.width,
+            height: localTextRect.height
+        )
+        let editingImage = try XCTUnwrap(window.test_renderedOverlayImage())
+        let editingRedPixels = try matchingPixelCount(in: editingImage, rect: overlayTextRect) { pixel in
+            pixel.red > 180 && pixel.green < 100 && pixel.blue < 120 && pixel.alpha > 120
+        }
+        XCTAssertGreaterThan(editingRedPixels, 20)
+
+        window.test_commitTextEditing()
+
+        XCTAssertEqual(window.test_textAnnotation(at: 0)?.text, "Hi")
+        XCTAssertFalse(window.test_isEditingTextAnnotation)
+    }
+
     func testSelectedTextAnnotationUsesInputMoveResizeAndRotationCursorsInTextTool() throws {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         let selection = NSRect(x: 100, y: 100, width: 420, height: 280)

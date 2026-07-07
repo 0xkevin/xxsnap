@@ -9897,23 +9897,26 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private var eraserPreviewAnnotations: [CaptureAnnotation] {
+        let baseAnnotations = annotations.enumerated().compactMap { index, annotation in
+            shouldDrawEditingTextAboveEraserComposite(at: index) ? nil : annotation
+        }
         guard
             let draftAnnotation,
             isMosaicAnnotation(draftAnnotation),
             isUsableDraftAnnotation(draftAnnotation)
         else {
-            return annotations
+            return baseAnnotations
         }
         var previewDraft = draftAnnotation
         if previewDraft.renderOrder == 0 {
             let nextPreviewOrder = max(
                 nextRenderOrderValue,
-                (annotations.map(\.renderOrder).max() ?? 0) + 1,
+                (baseAnnotations.map(\.renderOrder).max() ?? 0) + 1,
                 (eraserMasks.map(\.renderOrder).max() ?? 0) + 1
             )
             previewDraft.renderOrder = nextPreviewOrder
         }
-        return annotations + [previewDraft]
+        return baseAnnotations + [previewDraft]
     }
 
     private func drawSelectionBorder(_ rect: NSRect) {
@@ -10126,6 +10129,11 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     private func drawAnnotations() {
         if usesEraserPreviewComposite {
+            if let editingTextAnnotationIndex,
+               annotations.indices.contains(editingTextAnnotationIndex),
+               shouldDrawEditingTextAboveEraserComposite(at: editingTextAnnotationIndex) {
+                drawAnnotation(annotations[editingTextAnnotationIndex], inOverlay: true)
+            }
             if let selectedAnnotation, shouldDrawSelectedAnnotationOutline(selectedAnnotation) {
                 drawSelectedAnnotationOutline(selectedAnnotation)
             }
@@ -10164,6 +10172,19 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     private var usesEraserPreviewComposite: Bool {
         backgroundImage != nil && !committedAndDraftEraserMasks.isEmpty
+    }
+
+    private func shouldDrawEditingTextAboveEraserComposite(at index: Int) -> Bool {
+        guard
+            let editingTextAnnotationIndex,
+            index == editingTextAnnotationIndex,
+            annotations.indices.contains(index),
+            annotations[index].kind == .text,
+            textEditor != nil
+        else {
+            return false
+        }
+        return true
     }
 
     private var committedAndDraftEraserMasks: [CaptureEraserMask] {
