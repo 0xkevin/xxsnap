@@ -8255,6 +8255,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         guard let selectedAnnotationIndex, annotations.indices.contains(selectedAnnotationIndex) else {
             return nil
         }
+        guard !isAnnotationErasedForInteraction(at: selectedAnnotationIndex) else {
+            return nil
+        }
 
         return annotations[selectedAnnotationIndex]
     }
@@ -8306,6 +8309,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     private func selectAnnotation(at index: Int) {
         guard annotations.indices.contains(index) else {
+            selectedAnnotationIndex = nil
+            return
+        }
+        guard !isAnnotationErasedForInteraction(at: index) else {
             selectedAnnotationIndex = nil
             return
         }
@@ -8601,6 +8608,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     private func annotationIndexForBorder(at point: NSPoint) -> Int? {
         for index in annotations.indices.reversed() {
+            guard !isAnnotationErasedForInteraction(at: index) else {
+                continue
+            }
             if annotationBorderContains(point, for: annotations[index]) {
                 return index
             }
@@ -8610,6 +8620,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     private func topmostAnnotationIndex(at point: NSPoint) -> Int? {
         for index in annotations.indices.reversed() {
+            guard !isAnnotationErasedForInteraction(at: index) else {
+                continue
+            }
             if annotationHitTest(point: point, annotation: annotations[index], index: index) {
                 return index
             }
@@ -8644,8 +8657,90 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
     }
 
+    private func isAnnotationErasedForInteraction(at index: Int) -> Bool {
+        guard annotations.indices.contains(index), !eraserMasks.isEmpty else {
+            return false
+        }
+        let annotation = annotations[index]
+        let annotationOrder = annotation.renderOrder == 0 ? index + 1 : annotation.renderOrder
+        let bounds = localInteractionBounds(for: annotation).standardized
+        guard !bounds.isEmpty else {
+            return false
+        }
+
+        return eraserMasks.contains { mask in
+            let maskOrder = mask.renderOrder == 0 ? Int.max : mask.renderOrder
+            guard maskOrder > annotationOrder else {
+                return false
+            }
+            guard let maskBounds = localInteractionBounds(for: mask)?.standardized, !maskBounds.isEmpty else {
+                return false
+            }
+            return bounds.intersects(maskBounds)
+        }
+    }
+
+    private func localInteractionBounds(for annotation: CaptureAnnotation) -> NSRect {
+        let strokeOutset = max(4, annotation.style.strokeWidth / 2 + 4)
+        switch annotation.kind {
+        case .arrowLine:
+            guard let arrowLine = annotation.arrowLine else {
+                return annotation.rect.standardized.insetBy(dx: -strokeOutset, dy: -strokeOutset)
+            }
+            return localBounds(of: [arrowLine.start, arrowLine.end, arrowLine.control])
+                .insetBy(dx: -strokeOutset, dy: -strokeOutset)
+        case .brush:
+            return localBounds(of: annotation.brushPath?.points ?? [])
+                .insetBy(dx: -strokeOutset, dy: -strokeOutset)
+        case .marker:
+            guard let markerLine = annotation.markerLine else {
+                return annotation.rect.standardized.insetBy(dx: -strokeOutset, dy: -strokeOutset)
+            }
+            return localBounds(of: [markerLine.start, markerLine.end])
+                .insetBy(dx: -strokeOutset, dy: -strokeOutset)
+        case .mosaicStroke:
+            return localBounds(of: annotation.mosaicStroke?.points ?? [])
+                .insetBy(dx: -strokeOutset, dy: -strokeOutset)
+        case .rectangle, .ellipse, .mosaicRectangle, .text, .numberSequence, .magnifier:
+            return annotation.rect.standardized
+        }
+    }
+
+    private func localInteractionBounds(for mask: CaptureEraserMask) -> NSRect? {
+        switch mask.kind {
+        case .rectangle:
+            return mask.rect.standardized
+        case .freehand:
+            guard !mask.points.isEmpty else {
+                return nil
+            }
+            let radius = max(1, mask.size / 2)
+            return localBounds(of: mask.points).insetBy(dx: -radius, dy: -radius)
+        }
+    }
+
+    private func localBounds(of points: [NSPoint]) -> NSRect {
+        guard let first = points.first else {
+            return .zero
+        }
+        var minX = first.x
+        var maxX = first.x
+        var minY = first.y
+        var maxY = first.y
+        for point in points.dropFirst() {
+            minX = min(minX, point.x)
+            maxX = max(maxX, point.x)
+            minY = min(minY, point.y)
+            maxY = max(maxY, point.y)
+        }
+        return NSRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
     private func numberAnnotationIndex(at point: NSPoint) -> Int? {
         for index in annotations.indices.reversed() where annotations[index].kind == .numberSequence {
+            guard !isAnnotationErasedForInteraction(at: index) else {
+                continue
+            }
             let rect = overlayRect(fromLocalAnnotationRect: annotations[index].rect).standardized.insetBy(dx: -6, dy: -6)
             if rect.contains(point) {
                 return index
@@ -8793,6 +8888,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     private func textAnnotationIndex(at point: NSPoint) -> Int? {
         for index in annotations.indices.reversed() where annotations[index].kind == .text {
+            guard !isAnnotationErasedForInteraction(at: index) else {
+                continue
+            }
             if textAnnotationHitContains(point: point, annotation: annotations[index]) {
                 return index
             }
@@ -8802,6 +8900,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     private func textAnnotationBorderIndex(at point: NSPoint) -> Int? {
         for index in annotations.indices.reversed() where annotations[index].kind == .text {
+            guard !isAnnotationErasedForInteraction(at: index) else {
+                continue
+            }
             if textAnnotationBorderContains(point: point, annotation: annotations[index]) {
                 return index
             }
@@ -8988,6 +9089,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     private func arrowLineHitTarget(at point: NSPoint) -> (index: Int, target: SelectionToolbarState.ArrowLineHitTarget)? {
         for index in annotations.indices.reversed() where annotations[index].kind == .arrowLine {
+            guard !isAnnotationErasedForInteraction(at: index) else {
+                continue
+            }
             guard let arrowLine = overlayArrowLine(fromLocalArrowLine: annotations[index].arrowLine) else {
                 continue
             }
@@ -9002,6 +9106,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private func brushRotationHitTarget(at point: NSPoint) -> (index: Int, target: SelectionToolbarState.BrushRotationHitTarget)? {
         guard let selectedAnnotationIndex,
               annotations.indices.contains(selectedAnnotationIndex),
+              !isAnnotationErasedForInteraction(at: selectedAnnotationIndex),
               annotations[selectedAnnotationIndex].kind == .brush,
               activeToolCanEdit(annotationKind: annotations[selectedAnnotationIndex].kind),
               let brushPath = overlayBrushPath(fromLocalBrushPath: annotations[selectedAnnotationIndex].brushPath)
@@ -9018,6 +9123,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     private func markerRotationHitTarget(at point: NSPoint) -> (index: Int, target: SelectionToolbarState.BrushRotationHitTarget)? {
         for index in annotations.indices.reversed() where annotations[index].kind == .marker {
+            guard !isAnnotationErasedForInteraction(at: index) else {
+                continue
+            }
             guard activeToolCanEdit(annotationKind: annotations[index].kind) else {
                 continue
             }
@@ -15430,6 +15538,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return nil
         }
         for index in annotations.indices.reversed() where annotationKindSupportsRotationHandle(annotations[index].kind) {
+            guard !isAnnotationErasedForInteraction(at: index) else {
+                continue
+            }
             if annotations[index].kind == .text, selectedAnnotationIndex != index {
                 continue
             }

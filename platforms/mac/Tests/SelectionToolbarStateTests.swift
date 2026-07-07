@@ -1125,6 +1125,87 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertFalse(window.test_isEditingTextAnnotation)
     }
 
+    func testErasedTextAnnotationCannotBeSelectedOrMovedBackIntoView() throws {
+        let background = solidImage(size: NSSize(width: 320, height: 220), color: .white)
+        let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
+        let selection = NSRect(x: 20, y: 20, width: 240, height: 160)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateTextTool()
+
+        window.test_mouseDown(at: NSPoint(x: 92, y: 90))
+        window.test_mouseUp(at: NSPoint(x: 92, y: 90))
+        window.test_selectTextSize(36)
+        window.firstResponder?.insertText("Gone")
+        window.test_commitTextEditing()
+
+        let originalRect = try XCTUnwrap(window.test_annotationRect(at: 0))
+        click(window, button: .eraser)
+        click(window, eraserMode: "rectangle")
+        window.test_mouseDown(at: NSPoint(
+            x: selection.minX + originalRect.minX - 8,
+            y: selection.minY + originalRect.minY - 8
+        ))
+        window.test_mouseDragged(to: NSPoint(
+            x: selection.minX + originalRect.maxX + 8,
+            y: selection.minY + originalRect.maxY + 8
+        ))
+        window.test_mouseUp(at: NSPoint(
+            x: selection.minX + originalRect.maxX + 8,
+            y: selection.minY + originalRect.maxY + 8
+        ))
+
+        click(window, button: .eraser)
+        let erasedBodyPoint = NSPoint(
+            x: selection.minX + originalRect.midX,
+            y: selection.minY + originalRect.midY
+        )
+        window.test_mouseDown(at: erasedBodyPoint)
+        window.test_mouseUp(at: erasedBodyPoint)
+
+        XCTAssertNil(window.test_selectedAnnotationKind)
+        XCTAssertEqual(window.test_annotationRect(at: 0), originalRect)
+        XCTAssertFalse(window.test_isEditingTextAnnotation)
+    }
+
+    func testErasedRectangleAnnotationCannotBeSelectedOrMovedBackIntoView() throws {
+        let background = solidImage(size: NSSize(width: 320, height: 220), color: .white)
+        let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
+        let selection = NSRect(x: 20, y: 20, width: 240, height: 160)
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([filledRectangleAnnotation(
+            rect: NSRect(x: 52, y: 46, width: 70, height: 44),
+            color: .red,
+            renderOrder: 1
+        )])
+
+        let originalRect = try XCTUnwrap(window.test_annotationRect(at: 0))
+        click(window, button: .eraser)
+        click(window, eraserMode: "rectangle")
+        window.test_mouseDown(at: NSPoint(
+            x: selection.minX + originalRect.minX - 6,
+            y: selection.minY + originalRect.minY - 6
+        ))
+        window.test_mouseDragged(to: NSPoint(
+            x: selection.minX + originalRect.maxX + 6,
+            y: selection.minY + originalRect.maxY + 6
+        ))
+        window.test_mouseUp(at: NSPoint(
+            x: selection.minX + originalRect.maxX + 6,
+            y: selection.minY + originalRect.maxY + 6
+        ))
+
+        click(window, button: .eraser)
+        let erasedBodyPoint = NSPoint(
+            x: selection.minX + originalRect.midX,
+            y: selection.minY + originalRect.midY
+        )
+        window.test_mouseDown(at: erasedBodyPoint)
+        window.test_mouseUp(at: erasedBodyPoint)
+
+        XCTAssertNil(window.test_selectedAnnotationKind)
+        XCTAssertEqual(window.test_annotationRect(at: 0), originalRect)
+    }
+
     func testSelectedTextAnnotationUsesInputMoveResizeAndRotationCursorsInTextTool() throws {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         let selection = NSRect(x: 100, y: 100, width: 420, height: 280)
