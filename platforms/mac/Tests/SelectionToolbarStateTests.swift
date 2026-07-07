@@ -1588,6 +1588,7 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         XCTAssertTrue(window.test_textEditorIsFirstResponder)
         XCTAssertEqual(window.test_textEditorAlphaValue, 0)
+        XCTAssertEqual(window.test_textEditorIsHidden, true)
         XCTAssertEqual(window.test_annotationRect(at: 0), textRect)
         XCTAssertEqual(window.test_annotationText(at: 0), "abcdef")
         let afterImage = try XCTUnwrap(window.test_renderedOverlayImage())
@@ -1595,6 +1596,48 @@ final class SelectionToolbarStateTests: XCTestCase {
             pixel.red > 180 && pixel.green < 100 && pixel.blue < 120 && pixel.alpha > 120
         })
         XCTAssertEqual(afterLeft, beforeLeft, accuracy: 0.5)
+    }
+
+    func testClickingMiddleOfAlreadyEditingTextDoesNotMoveTextFrame() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 420, height: 280)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateTextTool()
+
+        window.test_mouseDown(at: NSPoint(x: 180, y: selection.minY + 40))
+        window.test_mouseUp(at: NSPoint(x: 180, y: selection.minY + 40))
+        window.firstResponder?.insertText("abcdef")
+        window.test_commitTextEditing()
+
+        let textRect = try XCTUnwrap(window.test_annotationRect(at: 0))
+        let overlayRect = NSRect(
+            x: selection.minX + textRect.minX,
+            y: selection.minY + textRect.minY,
+            width: textRect.width,
+            height: textRect.height
+        )
+        let bodyPoint = NSPoint(x: selection.minX + textRect.midX, y: selection.minY + textRect.midY)
+        window.test_mouseDown(at: bodyPoint)
+        window.test_mouseUp(at: bodyPoint)
+
+        let beforeSecondClickImage = try XCTUnwrap(window.test_renderedOverlayImage())
+        let beforeSecondClickLeft = try XCTUnwrap(leftmostMatchingPixelX(in: beforeSecondClickImage, rect: overlayRect) { pixel in
+            pixel.red > 180 && pixel.green < 100 && pixel.blue < 120 && pixel.alpha > 120
+        })
+        let middleInsertionPoint = try XCTUnwrap(window.test_textEditorOverlayPointForInsertion(at: 3))
+        window.test_textEditorMouseDown(at: middleInsertionPoint)
+        window.test_textEditorMouseDragged(to: middleInsertionPoint)
+
+        XCTAssertTrue(window.test_textEditorIsFirstResponder)
+        XCTAssertEqual(window.test_textEditorAlphaValue, 0)
+        XCTAssertEqual(window.test_textEditorIsHidden, true)
+        XCTAssertEqual(window.test_annotationRect(at: 0), textRect)
+        XCTAssertEqual(window.test_annotationText(at: 0), "abcdef")
+        let afterSecondClickImage = try XCTUnwrap(window.test_renderedOverlayImage())
+        let afterSecondClickLeft = try XCTUnwrap(leftmostMatchingPixelX(in: afterSecondClickImage, rect: overlayRect) { pixel in
+            pixel.red > 180 && pixel.green < 100 && pixel.blue < 120 && pixel.alpha > 120
+        })
+        XCTAssertEqual(afterSecondClickLeft, beforeSecondClickLeft, accuracy: 0.5)
     }
 
     func testTextAnnotationExpandsPastPreviousMeasureWidthWhileTyping() {

@@ -1324,6 +1324,10 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_textEditorAlphaValue
     }
 
+    var test_textEditorIsHidden: Bool? {
+        (contentView as? SelectionOverlayView)?.test_textEditorIsHidden
+    }
+
     func test_commitTextEditing() {
         (contentView as? SelectionOverlayView)?.test_commitTextEditing()
     }
@@ -4448,6 +4452,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         editor.drawsBackground = false
         editor.backgroundColor = .clear
         editor.alphaValue = 0
+        editor.isHidden = true
         editor.insertionPointColor = .clear
         editor.textContainerInset = NSSize(width: CaptureAnnotationRenderer.textHorizontalPadding, height: 0)
         editor.textContainer?.lineFragmentPadding = 0
@@ -6934,6 +6939,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     var test_textEditorAlphaValue: CGFloat? {
         textEditor?.alphaValue
+    }
+
+    var test_textEditorIsHidden: Bool? {
+        textEditor?.isHidden
     }
 
     func test_textEditorContentOrigin() -> NSPoint? {
