@@ -1588,7 +1588,7 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         XCTAssertTrue(window.test_textEditorIsFirstResponder)
         XCTAssertEqual(window.test_textEditorAlphaValue, 0)
-        XCTAssertEqual(window.test_textEditorIsHidden, true)
+        XCTAssertEqual(window.test_textEditorIsHidden, false)
         XCTAssertEqual(window.test_annotationRect(at: 0), textRect)
         XCTAssertEqual(window.test_annotationText(at: 0), "abcdef")
         let afterImage = try XCTUnwrap(window.test_renderedOverlayImage())
@@ -1625,14 +1625,18 @@ final class SelectionToolbarStateTests: XCTestCase {
             pixel.red > 180 && pixel.green < 100 && pixel.blue < 120 && pixel.alpha > 120
         })
         let middleInsertionPoint = try XCTUnwrap(window.test_textEditorOverlayPointForInsertion(at: 3))
-        window.test_textEditorMouseDown(at: middleInsertionPoint)
-        window.test_textEditorMouseDragged(to: middleInsertionPoint)
+        window.test_textEditorDragSequence(from: middleInsertionPoint, to: middleInsertionPoint)
 
         XCTAssertTrue(window.test_textEditorIsFirstResponder)
+        XCTAssertEqual(window.test_textEditorSelectedRange()?.location, 3)
         XCTAssertEqual(window.test_textEditorAlphaValue, 0)
-        XCTAssertEqual(window.test_textEditorIsHidden, true)
+        XCTAssertEqual(window.test_textEditorIsHidden, false)
         XCTAssertEqual(window.test_annotationRect(at: 0), textRect)
         XCTAssertEqual(window.test_annotationText(at: 0), "abcdef")
+        let caretRect = try XCTUnwrap(window.test_editingTextCaretDrawRect())
+        let insertionPoint = try XCTUnwrap(window.test_textEditorOverlayPointForInsertion(at: 3))
+        XCTAssertGreaterThanOrEqual(caretRect.minX, insertionPoint.x)
+        XCTAssertLessThanOrEqual(caretRect.width, 1.1)
         let afterSecondClickImage = try XCTUnwrap(window.test_renderedOverlayImage())
         let afterSecondClickLeft = try XCTUnwrap(leftmostMatchingPixelX(in: afterSecondClickImage, rect: overlayRect) { pixel in
             pixel.red > 180 && pixel.green < 100 && pixel.blue < 120 && pixel.alpha > 120

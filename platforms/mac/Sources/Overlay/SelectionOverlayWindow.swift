@@ -4452,7 +4452,6 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         editor.drawsBackground = false
         editor.backgroundColor = .clear
         editor.alphaValue = 0
-        editor.isHidden = true
         editor.insertionPointColor = .clear
         editor.textContainerInset = NSSize(width: CaptureAnnotationRenderer.textHorizontalPadding, height: 0)
         editor.textContainer?.lineFragmentPadding = 0
@@ -11226,12 +11225,12 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return nil
         }
 
-        let caretWidth = max(1.5, min(3, annotation.style.textSize / 12))
+        let caretWidth: CGFloat = 1
         let caretHeight = min(max(1, caretRect.height), rect.height)
-        let clampedX = min(max(caretRect.midX, 0), rect.width)
+        let clampedX = min(max(caretRect.minX, 0), max(0, rect.width - caretWidth))
         let clampedY = min(max(rect.height - caretRect.maxY, 0), max(0, rect.height - caretHeight))
         let localCaretRect = NSRect(
-            x: clampedX - caretWidth / 2,
+            x: clampedX,
             y: clampedY,
             width: caretWidth,
             height: caretHeight
