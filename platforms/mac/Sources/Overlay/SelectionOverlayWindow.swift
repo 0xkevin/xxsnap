@@ -1320,6 +1320,10 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_textEditorUsesTransparentText ?? false
     }
 
+    var test_textEditorAlphaValue: CGFloat? {
+        (contentView as? SelectionOverlayView)?.test_textEditorAlphaValue
+    }
+
     func test_commitTextEditing() {
         (contentView as? SelectionOverlayView)?.test_commitTextEditing()
     }
@@ -4351,12 +4355,12 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         style.fillEnabled = false
         style.textSize = style.textSize > 0 ? style.textSize : Self.defaultTextSize
         currentStyle = style
-        let annotation = CaptureAnnotation(
+        let annotation = assignRenderOrder(to: CaptureAnnotation(
             kind: .text,
             rect: localAnnotationRect(from: textRect),
             style: style,
             text: ""
-        )
+        ))
         annotations.append(annotation)
         redoActions.removeAll()
         beginTextEditing(at: annotations.index(before: annotations.endIndex), draftCreated: true)
@@ -4443,7 +4447,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         editor.importsGraphics = false
         editor.drawsBackground = false
         editor.backgroundColor = .clear
-        editor.alphaValue = 1
+        editor.alphaValue = 0
         editor.insertionPointColor = .clear
         editor.textContainerInset = NSSize(width: CaptureAnnotationRenderer.textHorizontalPadding, height: 0)
         editor.textContainer?.lineFragmentPadding = 0
@@ -6926,6 +6930,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         let textAlpha = textEditor.textColor?.alphaComponent ?? 1
         let typingColor = textEditor.typingAttributes[.foregroundColor] as? NSColor
         return textAlpha == 0 && (typingColor?.alphaComponent ?? 1) == 0
+    }
+
+    var test_textEditorAlphaValue: CGFloat? {
+        textEditor?.alphaValue
     }
 
     func test_textEditorContentOrigin() -> NSPoint? {

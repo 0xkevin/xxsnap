@@ -1106,6 +1106,12 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_mouseUp(at: NSPoint(x: 95, y: 88))
         window.firstResponder?.insertText("Hi")
 
+        XCTAssertTrue(window.test_selectedAnnotationShowsOutline)
+        XCTAssertGreaterThan(
+            window.test_textAnnotation(at: 0)?.renderOrder ?? 0,
+            window.test_eraserMask(at: 0)?.renderOrder ?? Int.max
+        )
+
         let localTextRect = try XCTUnwrap(window.test_annotationRect(at: 0))
         let overlayTextRect = NSRect(
             x: selection.minX + localTextRect.minX,
@@ -1117,7 +1123,11 @@ final class SelectionToolbarStateTests: XCTestCase {
         let editingRedPixels = try matchingPixelCount(in: editingImage, rect: overlayTextRect) { pixel in
             pixel.red > 180 && pixel.green < 100 && pixel.blue < 120 && pixel.alpha > 120
         }
+        let editingFramePixels = try matchingPixelCount(in: editingImage, rect: overlayTextRect.insetBy(dx: -2, dy: -2)) { pixel in
+            pixel.red < 120 && pixel.green > 80 && pixel.blue > 180 && pixel.alpha > 120
+        }
         XCTAssertGreaterThan(editingRedPixels, 20)
+        XCTAssertGreaterThan(editingFramePixels, 8)
 
         window.test_commitTextEditing()
 
@@ -1548,6 +1558,43 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.firstResponder?.insertText("X")
 
         XCTAssertEqual(window.test_annotationText(at: 0), "XHello")
+    }
+
+    func testClickingMiddleOfFinishedTextDoesNotMoveTextFrame() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 420, height: 280)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateTextTool()
+
+        window.test_mouseDown(at: NSPoint(x: 180, y: selection.minY + 40))
+        window.test_mouseUp(at: NSPoint(x: 180, y: selection.minY + 40))
+        window.firstResponder?.insertText("abcdef")
+        window.test_commitTextEditing()
+
+        let textRect = try XCTUnwrap(window.test_annotationRect(at: 0))
+        let overlayRect = NSRect(
+            x: selection.minX + textRect.minX,
+            y: selection.minY + textRect.minY,
+            width: textRect.width,
+            height: textRect.height
+        )
+        let beforeImage = try XCTUnwrap(window.test_renderedOverlayImage())
+        let beforeLeft = try XCTUnwrap(leftmostMatchingPixelX(in: beforeImage, rect: overlayRect) { pixel in
+            pixel.red > 180 && pixel.green < 100 && pixel.blue < 120 && pixel.alpha > 120
+        })
+        let middlePoint = NSPoint(x: selection.minX + textRect.midX, y: selection.minY + textRect.midY)
+        window.test_mouseDown(at: middlePoint)
+        window.test_mouseUp(at: middlePoint)
+
+        XCTAssertTrue(window.test_textEditorIsFirstResponder)
+        XCTAssertEqual(window.test_textEditorAlphaValue, 0)
+        XCTAssertEqual(window.test_annotationRect(at: 0), textRect)
+        XCTAssertEqual(window.test_annotationText(at: 0), "abcdef")
+        let afterImage = try XCTUnwrap(window.test_renderedOverlayImage())
+        let afterLeft = try XCTUnwrap(leftmostMatchingPixelX(in: afterImage, rect: overlayRect) { pixel in
+            pixel.red > 180 && pixel.green < 100 && pixel.blue < 120 && pixel.alpha > 120
+        })
+        XCTAssertEqual(afterLeft, beforeLeft, accuracy: 0.5)
     }
 
     func testTextAnnotationExpandsPastPreviousMeasureWidthWhileTyping() {
@@ -10975,6 +11022,50 @@ final class SelectionToolbarStateTests: XCTestCase {
         matching predicate: ((red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8)) -> Bool
     ) throws -> (red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8)? {
         try pixels(in: image, rect: rect).first(where: predicate)
+    }
+
+    private func leftmostMatchingPixelX(
+        in image: NSImage,
+        rect: NSRect,
+        matching predicate: ((red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8)) -> Bool
+    ) throws -> CGFloat? {
+        let cgImage = try XCTUnwrap(image.cgImage(forProposedRect: nil, context: nil, hints: nil))
+        let bytes = try rgbaBytes(in: image)
+        let scaleX = CGFloat(cgImage.width) / max(image.size.width, 1)
+        let scaleY = CGFloat(cgImage.height) / max(image.size.height, 1)
+        let minX = max(0, Int((rect.minX * scaleX).rounded(.down)))
+        let maxX = min(cgImage.width - 1, Int((rect.maxX * scaleX).rounded(.up)))
+        let directY = (
+            min: max(0, Int((rect.minY * scaleY).rounded(.down))),
+            max: min(cgImage.height - 1, Int((rect.maxY * scaleY).rounded(.up)))
+        )
+        let flippedY = (
+            min: max(0, Int(((image.size.height - rect.maxY) * scaleY).rounded(.down))),
+            max: min(cgImage.height - 1, Int(((image.size.height - rect.minY) * scaleY).rounded(.up)))
+        )
+        guard minX <= maxX else {
+            return nil
+        }
+
+        var leftmost: Int?
+        for yRange in [directY, flippedY] where yRange.min <= yRange.max {
+            for y in yRange.min...yRange.max {
+                for x in minX...maxX {
+                    let index = (y * cgImage.width + x) * 4
+                    let pixel = (
+                        red: bytes[index],
+                        green: bytes[index + 1],
+                        blue: bytes[index + 2],
+                        alpha: bytes[index + 3]
+                    )
+                    guard predicate(pixel) else {
+                        continue
+                    }
+                    leftmost = min(leftmost ?? x, x)
+                }
+            }
+        }
+        return leftmost.map { CGFloat($0) / scaleX }
     }
 
     private func whiteDigitBounds(in image: NSImage, insideCircleRect rect: NSRect) throws -> NSRect? {
