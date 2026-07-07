@@ -1135,6 +1135,32 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertFalse(window.test_isEditingTextAnnotation)
     }
 
+    func testTextEditorFrameDoesNotJitterAfterTypingInsideEraserMask() throws {
+        let background = solidImage(size: NSSize(width: 320, height: 220), color: .white)
+        let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
+        let selection = NSRect(x: 20, y: 20, width: 240, height: 160)
+        window.test_setLockedSelectionRect(selection)
+
+        click(window, button: .eraser)
+        click(window, eraserMode: "rectangle")
+        window.test_mouseDown(at: NSPoint(x: 80, y: 70))
+        window.test_mouseDragged(to: NSPoint(x: 170, y: 130))
+        window.test_mouseUp(at: NSPoint(x: 170, y: 130))
+
+        click(window, button: .text)
+        window.test_selectTextSize(36)
+        window.test_mouseDown(at: NSPoint(x: 95, y: 88))
+        window.test_mouseUp(at: NSPoint(x: 95, y: 88))
+        window.firstResponder?.insertText("Hi")
+
+        _ = try XCTUnwrap(window.test_renderedOverlayImage())
+        let frameAfterRender = try XCTUnwrap(window.test_textEditorFrame)
+        _ = window.test_annotationText(at: 0)
+        let frameAfterNoopSync = try XCTUnwrap(window.test_textEditorFrame)
+
+        XCTAssertEqual(frameAfterNoopSync, frameAfterRender)
+    }
+
     func testErasedTextAnnotationCannotBeSelectedOrMovedBackIntoView() throws {
         let background = solidImage(size: NSSize(width: 320, height: 220), color: .white)
         let window = SelectionOverlayWindow(backgroundImage: background) { _ in }

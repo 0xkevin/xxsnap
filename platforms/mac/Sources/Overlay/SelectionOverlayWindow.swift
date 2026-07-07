@@ -1324,6 +1324,10 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_textEditorAlphaValue
     }
 
+    var test_textEditorFrame: NSRect? {
+        (contentView as? SelectionOverlayView)?.test_textEditorFrame
+    }
+
     var test_textEditorIsHidden: Bool? {
         (contentView as? SelectionOverlayView)?.test_textEditorIsHidden
     }
@@ -4456,9 +4460,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         editor.textContainerInset = NSSize(width: CaptureAnnotationRenderer.textHorizontalPadding, height: 0)
         editor.textContainer?.lineFragmentPadding = 0
         editor.textContainer?.widthTracksTextView = true
-        editor.textContainer?.heightTracksTextView = false
+        editor.textContainer?.heightTracksTextView = true
         editor.isHorizontallyResizable = false
-        editor.isVerticallyResizable = true
+        editor.isVerticallyResizable = false
         editor.minSize = NSSize(
             width: CaptureAnnotationRenderer.textHorizontalPadding * 2 + textCaretAnnotationWidth,
             height: 16
@@ -6938,6 +6942,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     var test_textEditorAlphaValue: CGFloat? {
         textEditor?.alphaValue
+    }
+
+    var test_textEditorFrame: NSRect? {
+        textEditor?.frame
     }
 
     var test_textEditorIsHidden: Bool? {
