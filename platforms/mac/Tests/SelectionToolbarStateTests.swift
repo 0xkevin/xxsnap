@@ -2487,6 +2487,28 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(mask.affectedAnnotationIDs, [annotation.id])
     }
 
+    func testExistingToolsStillCreateAnnotationsAfterUsingEraserTool() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 320, height: 240)
+        window.test_setLockedSelectionRect(selection)
+
+        window.test_activateEraserTool()
+        window.test_mouseDown(at: try XCTUnwrap(window.test_eraserRectangleOptionPoint()))
+        window.test_mouseUp(at: try XCTUnwrap(window.test_eraserRectangleOptionPoint()))
+
+        window.test_activateShapeTool(.rectangle)
+        window.test_drag(from: NSPoint(x: 130, y: 140), to: NSPoint(x: 220, y: 210))
+        window.test_activateShapeTool(.arrowLine)
+        window.test_drag(from: NSPoint(x: 150, y: 220), to: NSPoint(x: 280, y: 240))
+        window.test_activateShapeTool(.brush)
+        window.test_drag(from: NSPoint(x: 170, y: 180), to: NSPoint(x: 230, y: 190))
+        window.test_activateShapeTool(.mosaicRectangle)
+        window.test_drag(from: NSPoint(x: 240, y: 130), to: NSPoint(x: 300, y: 190))
+
+        XCTAssertEqual(window.test_annotationCount, 4)
+        XCTAssertEqual(window.test_eraserMaskCount, 0)
+    }
+
     func testCaptureResultIncludesEraserMasks() throws {
         let image = solidImage(size: NSSize(width: 240, height: 160), color: .white)
         var result: CaptureSelectionResult?
@@ -6180,6 +6202,13 @@ final class SelectionToolbarStateTests: XCTestCase {
             hex(try XCTUnwrap(rgbaRenderPixel(in: existing, at: NSPoint(x: 20, y: 20)))),
             hex(try XCTUnwrap(rgbaRenderPixel(in: maskedEntry, at: NSPoint(x: 20, y: 20))))
         )
+    }
+
+    func testRendererNoMaskFastPathReturnsOriginalImageWhenNoAnnotations() {
+        let image = solidImage(size: NSSize(width: 80, height: 60), color: .white)
+        let rendered = CaptureAnnotationRenderer.render(image: image, annotations: [], eraserMasks: [])
+
+        XCTAssertTrue(rendered === image)
     }
 
     func testRendererAppliesEraserMaskOnlyToAffectedAnnotationLayer() throws {
