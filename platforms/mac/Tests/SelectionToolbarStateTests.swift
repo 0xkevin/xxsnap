@@ -3175,6 +3175,26 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_annotation(at: 1)?.kind, .numberSequence)
     }
 
+    func testNumberCreationDragDoesNotMoveSelectionOrNewMark() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 120, y: 120, width: 220, height: 140)
+        let creationPoint = NSPoint(x: 170, y: 165)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateNumberTool()
+
+        window.test_mouseDown(at: creationPoint)
+        let createdRect = try XCTUnwrap(window.test_annotationRect(at: 0))
+        window.test_mouseDragged(to: NSPoint(x: creationPoint.x + 48, y: creationPoint.y + 32))
+        window.test_mouseDragged(to: NSPoint(x: creationPoint.x + 70, y: creationPoint.y + 46))
+        XCTAssertEqual(window.test_lockedSelectionRect, selection)
+        XCTAssertEqual(window.test_annotationRect(at: 0), createdRect)
+        window.test_mouseUp(at: NSPoint(x: creationPoint.x + 70, y: creationPoint.y + 46))
+
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(window.test_lockedSelectionRect, selection)
+        XCTAssertEqual(window.test_annotationRect(at: 0), createdRect)
+    }
+
     func testNumberSelectionOutlineSitsOutsideCircleAndControlsStayVisible() throws {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 180))

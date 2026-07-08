@@ -1561,6 +1561,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         case rotatingBrush
         case rotatingMosaicRectangle
         case resizingSelection
+        case placingNumberMark
     }
 
     private enum ToolbarButton {
@@ -2129,7 +2130,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             selectionStartPoint = point
             selectionCurrentPoint = point
             updateColorSampler(at: point)
-        case .annotating, .drawingShape, .draggingToolbar, .draggingCornerRadius, .draggingMosaicValue, .movingShape, .movingSelection, .resizingShape, .resizingArrowLine, .resizingMarkerLine, .rotatingBrush, .rotatingMosaicRectangle, .resizingSelection:
+        case .annotating, .drawingShape, .draggingToolbar, .draggingCornerRadius, .draggingMosaicValue, .movingShape, .movingSelection, .resizingShape, .resizingArrowLine, .resizingMarkerLine, .rotatingBrush, .rotatingMosaicRectangle, .resizingSelection, .placingNumberMark:
             handleAnnotatingMouseDown(at: point, clickCount: event.clickCount)
         }
 
@@ -2239,6 +2240,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             updateRotatingMosaicRectangle(to: point)
         case .resizingSelection:
             updateResizingSelection(to: point)
+        case .placingNumberMark:
+            break
         }
 
         needsDisplay = true
@@ -2611,6 +2614,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             interactionMode = .annotating
         case .resizingSelection:
             commitSelectionResize()
+            interactionMode = .annotating
+        case .placingNumberMark:
             interactionMode = .annotating
         case .annotating:
             if let pendingTextEditAnnotationIndex {
@@ -3732,6 +3737,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         annotation.numberSequenceIsManual = currentNumberMarkType == .number && isNumberSequenceManualModeActive()
         annotations.append(annotation)
         selectedAnnotationIndex = annotations.indices.last
+        interactionMode = .placingNumberMark
         revealedNumberControlsIndex = nil
         selectedNumberAnnotationCanFollowTypeDropdown = true
         numberStyle = style
