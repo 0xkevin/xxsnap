@@ -571,6 +571,15 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_setAnnotations(annotations)
     }
 
+    func test_setEraserMasks(_ masks: [EraserMask]) {
+        (contentView as? SelectionOverlayView)?.test_setEraserMasks(masks)
+    }
+
+    @discardableResult
+    func test_deleteAnnotations(at indexes: [Int]) -> Bool {
+        (contentView as? SelectionOverlayView)?.test_deleteAnnotations(at: indexes) ?? false
+    }
+
     func test_selectAnnotation(at index: Int) {
         (contentView as? SelectionOverlayView)?.test_selectAnnotation(at: index)
     }
@@ -1138,6 +1147,22 @@ final class SelectionOverlayWindow: NSWindow {
 
     var test_annotationCount: Int {
         (contentView as? SelectionOverlayView)?.test_annotationCount ?? 0
+    }
+
+    var test_eraserMaskCount: Int {
+        (contentView as? SelectionOverlayView)?.test_eraserMaskCount ?? 0
+    }
+
+    func test_eraserMask(at index: Int) -> EraserMask? {
+        (contentView as? SelectionOverlayView)?.test_eraserMask(at: index)
+    }
+
+    var test_damagedAnnotationIDs: Set<AnnotationID> {
+        (contentView as? SelectionOverlayView)?.test_damagedAnnotationIDs ?? []
+    }
+
+    var test_damagedAnnotationCount: Int {
+        (contentView as? SelectionOverlayView)?.test_damagedAnnotationCount ?? 0
     }
 
     var test_lockedSelectionRect: NSRect? {
@@ -1763,8 +1788,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private var annotations: [CaptureAnnotation] = []
     private enum AnnotationHistoryEntry {
         case add(annotation: CaptureAnnotation, index: Int)
-        case delete(annotation: CaptureAnnotation, index: Int)
-        case deleteMany(entries: [DeletedAnnotationEntry])
+        case delete(annotation: CaptureAnnotation, index: Int, masks: [EraserMask])
+        case deleteMany(entries: [DeletedAnnotationEntry], masks: [EraserMask])
+        case addEraserMask(mask: EraserMask)
     }
 
     private struct DeletedAnnotationEntry {
@@ -1774,6 +1800,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     private var undoAnnotationEntries: [AnnotationHistoryEntry] = []
     private var redoAnnotationEntries: [AnnotationHistoryEntry] = []
+    private var eraserMasks: [EraserMask] = []
+    private var damagedAnnotationIDs: Set<AnnotationID> {
+        Set(eraserMasks.flatMap(\.affectedAnnotationIDs))
+    }
     private var selectedAnnotationIndex: Int?
     private var selectedNumberAnnotationCanFollowTypeDropdown = false
     private var revealedNumberControlsIndex: Int?
@@ -5755,6 +5785,17 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         needsDisplay = true
     }
 
+    func test_setEraserMasks(_ masks: [EraserMask]) {
+        eraserMasks = masks
+        clearRedoAnnotationHistory()
+        needsDisplay = true
+    }
+
+    @discardableResult
+    func test_deleteAnnotations(at indexes: [Int]) -> Bool {
+        deleteAnnotations(at: indexes)
+    }
+
     func test_selectAnnotation(at index: Int) {
         guard annotations.indices.contains(index) else {
             selectedAnnotationIndex = nil
@@ -6535,6 +6576,22 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         annotations.count
     }
 
+    var test_eraserMaskCount: Int {
+        eraserMasks.count
+    }
+
+    func test_eraserMask(at index: Int) -> EraserMask? {
+        eraserMasks.indices.contains(index) ? eraserMasks[index] : nil
+    }
+
+    var test_damagedAnnotationIDs: Set<AnnotationID> {
+        damagedAnnotationIDs
+    }
+
+    var test_damagedAnnotationCount: Int {
+        damagedAnnotationIDs.count
+    }
+
     var test_lockedSelectionRect: NSRect? {
         lockedSelectionRect?.standardized
     }
@@ -7016,18 +7073,23 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             }
             selectedAnnotationIndex = annotations.indices.last
             finishAnnotationHistoryMutation(affectedKind: annotation.kind, selectedIndex: selectedAnnotationIndex)
-        case .delete(let annotation, let index):
+        case .delete(let annotation, let index, let masks):
             let insertionIndex = min(max(index, 0), annotations.count)
             annotations.insert(annotation, at: insertionIndex)
+            restoreEraserMasks(masks)
             selectedAnnotationIndex = insertionIndex
             finishAnnotationHistoryMutation(affectedKind: annotation.kind, selectedIndex: insertionIndex)
-        case .deleteMany(let entries):
+        case .deleteMany(let entries, let masks):
             let sorted = entries.sorted { $0.index < $1.index }
             for entry in sorted {
                 let insertionIndex = min(max(entry.index, 0), annotations.count)
                 annotations.insert(entry.annotation, at: insertionIndex)
             }
+            restoreEraserMasks(masks)
             finishAnnotationHistoryMutation(affectedKinds: sorted.map(\.annotation.kind), selectedIndex: nil)
+        case .addEraserMask(let mask):
+            eraserMasks.removeAll { $0.id == mask.id }
+            finishAnnotationHistoryMutation(affectedKinds: annotations.filter { mask.affectedAnnotationIDs.contains($0.id) }.map(\.kind), selectedIndex: nil)
         }
     }
 
@@ -7038,18 +7100,24 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             annotations.insert(annotation, at: insertionIndex)
             selectedAnnotationIndex = insertionIndex
             finishAnnotationHistoryMutation(affectedKind: annotation.kind, selectedIndex: insertionIndex)
-        case .delete(let annotation, let index):
+        case .delete(let annotation, let index, let masks):
             let removalIndex: Int? = annotations.indices.contains(index) ? index : nil
             if let removalIndex {
                 annotations.remove(at: removalIndex)
             }
+            reapplyEraserMaskPruning(originalMasks: masks, removing: Set([annotation.id]))
             selectedAnnotationIndex = nil
             finishAnnotationHistoryMutation(affectedKind: annotation.kind, selectedIndex: nil)
-        case .deleteMany(let entries):
+        case .deleteMany(let entries, let masks):
             for entry in entries.sorted(by: { $0.index > $1.index }) where annotations.indices.contains(entry.index) {
                 annotations.remove(at: entry.index)
             }
+            let deletedIDs = Set(entries.map(\.annotation.id))
+            reapplyEraserMaskPruning(originalMasks: masks, removing: deletedIDs)
             finishAnnotationHistoryMutation(affectedKinds: entries.map(\.annotation.kind), selectedIndex: nil)
+        case .addEraserMask(let mask):
+            eraserMasks.append(mask)
+            finishAnnotationHistoryMutation(affectedKinds: annotations.filter { mask.affectedAnnotationIDs.contains($0.id) }.map(\.kind), selectedIndex: nil)
         }
     }
 
@@ -7110,7 +7178,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             annotations.remove(at: index)
         }
 
-        undoAnnotationEntries.append(.deleteMany(entries: entries))
+        let removedAnnotationIDs = Set(entries.map(\.annotation.id))
+        let removedMasks = pruneEraserMasks(removing: removedAnnotationIDs)
+        undoAnnotationEntries.append(.deleteMany(entries: entries, masks: removedMasks))
         selectedAnnotationIndex = nil
         editingTextAnnotationIndex = nil
         clearNumberEditing()
@@ -7122,6 +7192,59 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         return true
     }
 
+    private func pruneEraserMasks(removing annotationIDs: Set<AnnotationID>) -> [EraserMask] {
+        guard !annotationIDs.isEmpty else {
+            return []
+        }
+        let originalMasks = eraserMasks.filter { !$0.affectedAnnotationIDs.isDisjoint(with: annotationIDs) }
+        eraserMasks = eraserMasks.compactMap { mask in
+            guard !mask.affectedAnnotationIDs.isDisjoint(with: annotationIDs) else {
+                return mask
+            }
+            var prunedMask = mask
+            prunedMask.affectedAnnotationIDs.subtract(annotationIDs)
+            return prunedMask.affectedAnnotationIDs.isEmpty ? nil : prunedMask
+        }
+        return originalMasks
+    }
+
+    private func restoreEraserMasks(_ masks: [EraserMask]) {
+        guard !masks.isEmpty else {
+            return
+        }
+        var replacementsByID = Dictionary(uniqueKeysWithValues: masks.map { ($0.id, $0) })
+        eraserMasks = eraserMasks.map { mask in
+            replacementsByID.removeValue(forKey: mask.id) ?? mask
+        }
+        let remainingIDs = Set(replacementsByID.keys)
+        eraserMasks.append(contentsOf: masks.filter { remainingIDs.contains($0.id) })
+    }
+
+    private func reapplyEraserMaskPruning(originalMasks masks: [EraserMask], removing annotationIDs: Set<AnnotationID>) {
+        guard !masks.isEmpty else {
+            return
+        }
+        let maskIDs = Set(masks.map(\.id))
+        let prunedMasks = masks.compactMap { mask -> EraserMask? in
+            var prunedMask = mask
+            prunedMask.affectedAnnotationIDs.subtract(annotationIDs)
+            return prunedMask.affectedAnnotationIDs.isEmpty ? nil : prunedMask
+        }
+        let prunedMasksByID = Dictionary(uniqueKeysWithValues: prunedMasks.map { ($0.id, $0) })
+        var replacedIDs = Set<UUID>()
+        eraserMasks = eraserMasks.compactMap { mask in
+            guard maskIDs.contains(mask.id) else {
+                return mask
+            }
+            guard let prunedMask = prunedMasksByID[mask.id] else {
+                return nil
+            }
+            replacedIDs.insert(mask.id)
+            return prunedMask
+        }
+        eraserMasks.append(contentsOf: prunedMasks.filter { !replacedIDs.contains($0.id) })
+    }
+
     private func deleteAnnotation(at deletionIndex: Int) -> Bool {
         guard annotations.indices.contains(deletionIndex) else {
             return false
@@ -7130,7 +7253,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         let removed = annotations[deletionIndex]
         let shouldRenumberNumberSequence = removed.kind == .numberSequence && !isNumberSequenceManualModeActive()
         annotations.remove(at: deletionIndex)
-        undoAnnotationEntries.append(.delete(annotation: removed, index: deletionIndex))
+        let removedMasks = pruneEraserMasks(removing: Set([removed.id]))
+        undoAnnotationEntries.append(.delete(annotation: removed, index: deletionIndex, masks: removedMasks))
         self.selectedAnnotationIndex = nil
         editingTextAnnotationIndex = nil
         clearNumberEditing()
@@ -8679,69 +8803,223 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private func commitEraserRectangle() {
-        guard let rect = eraserRectanglePreviewRect, rect.width >= 3, rect.height >= 3 else {
+        guard let overlayRect = eraserRectanglePreviewRect, overlayRect.width >= 3, overlayRect.height >= 3 else {
+            needsDisplay = true
+            return
+        }
+        guard let effectiveOverlayRect = effectiveOverlayEraserRect(from: overlayRect) else {
             needsDisplay = true
             return
         }
 
-        let indexes = annotations.indices.filter { index in
-            eraserRectangleIntersects(rect, annotation: annotations[index])
+        let affectedIDs = Set(
+            annotations.compactMap { annotation in
+                eraserRectangleIntersects(effectiveOverlayRect, annotation: annotation) ? annotation.id : nil
+            }
+        )
+        guard !affectedIDs.isEmpty,
+              let localRect = localRectFromOverlayEraserRect(effectiveOverlayRect)
+        else {
+            needsDisplay = true
+            return
         }
-        _ = deleteAnnotations(at: indexes)
+
+        let mask = EraserMask(rect: localRect, affectedAnnotationIDs: affectedIDs)
+        eraserMasks.append(mask)
+        undoAnnotationEntries.append(.addEraserMask(mask: mask))
+        clearRedoAnnotationHistory()
+        selectedAnnotationIndex = nil
+        editingTextAnnotationIndex = nil
+        clearNumberEditing()
+        clearPendingTextEdit()
+        removeTextEditor()
+        resetMosaicPreviewCaches()
+        needsDisplay = true
+    }
+
+    private func effectiveOverlayEraserRect(from rect: NSRect) -> NSRect? {
+        guard let lockedSelectionRect else {
+            return nil
+        }
+        let effectiveRect = rect.standardized.intersection(lockedSelectionRect.standardized)
+        guard effectiveRect.width > 0, effectiveRect.height > 0 else {
+            return nil
+        }
+        return effectiveRect
+    }
+
+    private func localRectFromOverlayEraserRect(_ rect: NSRect) -> NSRect? {
+        guard let lockedSelectionRect else {
+            return nil
+        }
+        let localRect = NSRect(
+            x: rect.minX - lockedSelectionRect.minX,
+            y: rect.minY - lockedSelectionRect.minY,
+            width: rect.width,
+            height: rect.height
+        ).standardized.intersection(NSRect(origin: .zero, size: lockedSelectionRect.size))
+        guard localRect.width > 0, localRect.height > 0 else {
+            return nil
+        }
+        return localRect
     }
 
     private func eraserRectangleIntersects(_ rect: NSRect, annotation: CaptureAnnotation) -> Bool {
-        guard let bounds = eraserRectangleBounds(for: annotation) else {
+        if annotationKindSupportsRotationHandle(annotation.kind),
+           abs(annotation.rotationAngle) >= 0.001 {
+            return eraserRectangleIntersectsRotatedAnnotationRect(rect, annotation: annotation)
+        }
+        guard let bounds = eraserRectangleVisualBounds(for: annotation) else {
             return false
         }
         return rect.intersects(bounds)
     }
 
-    private func eraserRectangleBounds(for annotation: CaptureAnnotation) -> NSRect? {
-        switch annotation.kind {
-        case .rectangle, .ellipse, .text, .numberSequence, .magnifier, .mosaicRectangle:
-            return overlayRect(fromLocalAnnotationRect: annotation.rect).standardized.insetBy(dx: -6, dy: -6)
-        case .arrowLine:
-            let fallback = eraserFallbackBounds(for: annotation)
-            guard let line = overlayArrowLine(fromLocalArrowLine: annotation.arrowLine) else {
-                return fallback
+    private func eraserRectangleIntersectsRotatedAnnotationRect(_ eraserRect: NSRect, annotation: CaptureAnnotation) -> Bool {
+        let rect = overlayRect(fromLocalAnnotationRect: annotation.rect).standardized
+        let eraserRect = eraserRect.standardized
+        guard rect.width > 0, rect.height > 0, eraserRect.width > 0, eraserRect.height > 0 else {
+            return false
+        }
+        let polygon = rotatedRectangleCorners(for: rect, angle: annotation.rotationAngle)
+        let eraserCorners = rectangleCorners(for: eraserRect)
+        if polygon.contains(where: { eraserRect.contains($0) }) {
+            return true
+        }
+        if eraserCorners.contains(where: { point($0, isInsideConvexPolygon: polygon) }) {
+            return true
+        }
+        let polygonEdges = edges(for: polygon)
+        let eraserEdges = edges(for: eraserCorners)
+        return polygonEdges.contains { polygonEdge in
+            eraserEdges.contains { eraserEdge in
+                segmentsIntersect(polygonEdge.0, polygonEdge.1, eraserEdge.0, eraserEdge.1)
             }
-            return eraserStrokeBounds(line.boundingRect, annotation: annotation, fallback: fallback)
-        case .brush:
-            let fallback = eraserFallbackBounds(for: annotation)
-            guard let path = overlayBrushPath(fromLocalBrushPath: annotation.brushPath) else {
-                return fallback
-            }
-            return eraserStrokeBounds(path.boundingRect, annotation: annotation, fallback: fallback)
-        case .marker:
-            let fallback = eraserFallbackBounds(for: annotation)
-            guard let line = overlayMarkerLine(fromLocalMarkerLine: annotation.markerLine) else {
-                return fallback
-            }
-            return eraserStrokeBounds(line.boundingRect, annotation: annotation, fallback: fallback)
-        case .mosaicStroke:
-            let fallback = eraserFallbackBounds(for: annotation)
-            guard let stroke = overlayMosaicStroke(fromLocalMosaicStroke: annotation.mosaicStroke) else {
-                return fallback
-            }
-            return eraserStrokeBounds(stroke.boundingRect, annotation: annotation, fallback: fallback)
         }
     }
 
-    private func eraserFallbackBounds(for annotation: CaptureAnnotation) -> NSRect {
-        let padding = max(8, annotation.style.strokeWidth / 2 + 6)
+    private func eraserRectangleVisualBounds(for annotation: CaptureAnnotation) -> NSRect? {
+        switch annotation.kind {
+        case .rectangle, .ellipse, .text, .numberSequence, .magnifier, .mosaicRectangle:
+            return overlayRect(fromLocalAnnotationRect: annotation.rect).standardized
+        case .arrowLine:
+            let fallback = eraserFallbackVisualBounds(for: annotation)
+            guard let line = overlayArrowLine(fromLocalArrowLine: annotation.arrowLine) else {
+                return fallback
+            }
+            return eraserStrokeVisualBounds(line.boundingRect, annotation: annotation, fallback: fallback)
+        case .brush:
+            let fallback = eraserFallbackVisualBounds(for: annotation)
+            guard let path = overlayBrushPath(fromLocalBrushPath: annotation.brushPath) else {
+                return fallback
+            }
+            return eraserStrokeVisualBounds(path.boundingRect, annotation: annotation, fallback: fallback)
+        case .marker:
+            let fallback = eraserFallbackVisualBounds(for: annotation)
+            guard let line = overlayMarkerLine(fromLocalMarkerLine: annotation.markerLine) else {
+                return fallback
+            }
+            return eraserStrokeVisualBounds(line.boundingRect, annotation: annotation, fallback: fallback)
+        case .mosaicStroke:
+            let fallback = eraserFallbackVisualBounds(for: annotation)
+            guard let stroke = overlayMosaicStroke(fromLocalMosaicStroke: annotation.mosaicStroke) else {
+                return fallback
+            }
+            return eraserStrokeVisualBounds(stroke.boundingRect, annotation: annotation, fallback: fallback)
+        }
+    }
+
+    private func eraserFallbackVisualBounds(for annotation: CaptureAnnotation) -> NSRect {
+        let padding = max(0, annotation.style.strokeWidth / 2)
         return overlayRect(fromLocalAnnotationRect: annotation.rect)
             .standardized
             .insetBy(dx: -padding, dy: -padding)
     }
 
-    private func eraserStrokeBounds(_ rect: NSRect, annotation: CaptureAnnotation, fallback: NSRect) -> NSRect {
+    private func eraserStrokeVisualBounds(_ rect: NSRect, annotation: CaptureAnnotation, fallback: NSRect) -> NSRect {
         let bounds = rect.standardized
         if bounds.isEmpty {
             return fallback
         }
-        let padding = max(8, annotation.style.strokeWidth / 2 + 6)
+        let padding = max(0, annotation.style.strokeWidth / 2)
         return bounds.insetBy(dx: -padding, dy: -padding)
+    }
+
+    private func rotatedRectangleCorners(for rect: NSRect, angle: CGFloat) -> [NSPoint] {
+        let center = NSPoint(x: rect.midX, y: rect.midY)
+        return rectangleCorners(for: rect).map { rotatedPoint($0, around: center, angle: angle) }
+    }
+
+    private func rectangleCorners(for rect: NSRect) -> [NSPoint] {
+        [
+            NSPoint(x: rect.minX, y: rect.minY),
+            NSPoint(x: rect.maxX, y: rect.minY),
+            NSPoint(x: rect.maxX, y: rect.maxY),
+            NSPoint(x: rect.minX, y: rect.maxY),
+        ]
+    }
+
+    private func edges(for points: [NSPoint]) -> [(NSPoint, NSPoint)] {
+        guard points.count >= 2 else {
+            return []
+        }
+        return points.indices.map { index in
+            (points[index], points[(index + 1) % points.count])
+        }
+    }
+
+    private func point(_ point: NSPoint, isInsideConvexPolygon polygon: [NSPoint]) -> Bool {
+        guard polygon.count >= 3 else {
+            return false
+        }
+        let epsilon: CGFloat = 0.0001
+        var hasPositive = false
+        var hasNegative = false
+        for (start, end) in edges(for: polygon) {
+            let cross = crossProduct(start, end, point)
+            if cross > epsilon {
+                hasPositive = true
+            } else if cross < -epsilon {
+                hasNegative = true
+            }
+            if hasPositive && hasNegative {
+                return false
+            }
+        }
+        return true
+    }
+
+    private func segmentsIntersect(_ a: NSPoint, _ b: NSPoint, _ c: NSPoint, _ d: NSPoint) -> Bool {
+        let epsilon: CGFloat = 0.0001
+        let abC = crossProduct(a, b, c)
+        let abD = crossProduct(a, b, d)
+        let cdA = crossProduct(c, d, a)
+        let cdB = crossProduct(c, d, b)
+        if abs(abC) <= epsilon, point(c, isOnSegmentFrom: a, to: b) {
+            return true
+        }
+        if abs(abD) <= epsilon, point(d, isOnSegmentFrom: a, to: b) {
+            return true
+        }
+        if abs(cdA) <= epsilon, point(a, isOnSegmentFrom: c, to: d) {
+            return true
+        }
+        if abs(cdB) <= epsilon, point(b, isOnSegmentFrom: c, to: d) {
+            return true
+        }
+        return (abC > 0) != (abD > 0) && (cdA > 0) != (cdB > 0)
+    }
+
+    private func point(_ point: NSPoint, isOnSegmentFrom start: NSPoint, to end: NSPoint) -> Bool {
+        let epsilon: CGFloat = 0.0001
+        return point.x >= min(start.x, end.x) - epsilon &&
+            point.x <= max(start.x, end.x) + epsilon &&
+            point.y >= min(start.y, end.y) - epsilon &&
+            point.y <= max(start.y, end.y) + epsilon
+    }
+
+    private func crossProduct(_ start: NSPoint, _ end: NSPoint, _ point: NSPoint) -> CGFloat {
+        (end.x - start.x) * (point.y - start.y) - (end.y - start.y) * (point.x - start.x)
     }
 
     private func annotationBorderContains(_ point: NSPoint, for annotation: CaptureAnnotation) -> Bool {
