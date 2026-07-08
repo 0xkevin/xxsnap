@@ -2096,6 +2096,12 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return
         }
 
+        let drawsMaskedAnnotationsBeforeChrome = lockedSelectionRect != nil && !eraserMasks.isEmpty
+        if drawsMaskedAnnotationsBeforeChrome {
+            drawAnnotations()
+            drawMosaicDraftPreviewIfNeeded()
+        }
+
         drawSelectionBorder(selectionRect)
         drawSelectionHandles(selectionRect)
         drawMeasurementLabel(selectionRect)
@@ -2105,7 +2111,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return
         }
 
-        drawAnnotations()
+        if !drawsMaskedAnnotationsBeforeChrome {
+            drawAnnotations()
+        }
         drawEditingTextCaretIfNeeded()
         drawDraftAnnotation()
         drawEraserRectanglePreview()
@@ -10099,12 +10107,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                     }
                 }
             }
-            // Masked committed annotations render as a selection crop in drawAnnotationsWithEraserMasks(),
-            // so the mosaic preview cache key intentionally stays unchanged for the no-mask fast path.
-            if let draftAnnotation,
-               isMosaicAnnotation(draftAnnotation),
-               isUsableDraftAnnotation(draftAnnotation) {
-                drawMosaicDraftPreview(draftAnnotation)
+            if eraserMasks.isEmpty {
+                drawMosaicDraftPreviewIfNeeded()
             }
             for (index, annotation) in annotations.enumerated()
                 where annotation.kind == .mosaicRectangle
@@ -10127,6 +10131,14 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
         NSColor.black.withAlphaComponent(0.34).setFill()
         path.fill()
+    }
+
+    private func drawMosaicDraftPreviewIfNeeded() {
+        if let draftAnnotation,
+           isMosaicAnnotation(draftAnnotation),
+           isUsableDraftAnnotation(draftAnnotation) {
+            drawMosaicDraftPreview(draftAnnotation)
+        }
     }
 
     private func drawSelectionBorder(_ rect: NSRect) {
@@ -14723,9 +14735,35 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         var parts: [String] = [
             mosaicBackgroundKey(for: backgroundImage),
         ]
-        parts.reserveCapacity(annotations.count + 1)
+        parts.reserveCapacity(annotations.count + (eraserMasks.isEmpty ? 1 : 2))
         annotations.forEach { parts.append(annotationCompositeKey(overlayAnnotation($0))) }
+        if !eraserMasks.isEmpty {
+            parts.append(eraserMaskCacheSignature(for: annotations))
+        }
         return parts.joined(separator: "|")
+    }
+
+    private func eraserMaskCacheSignature(for annotations: [CaptureAnnotation]) -> String {
+        guard !eraserMasks.isEmpty else {
+            return "no-mask"
+        }
+        let annotationIDs = Set(annotations.map(\.id))
+        let maskParts = eraserMasks
+            .filter { !$0.affectedAnnotationIDs.isDisjoint(with: annotationIDs) }
+            .sorted { $0.id.uuidString < $1.id.uuidString }
+            .map { mask in
+                let rect = mask.rect.standardized
+                let affectedIDs = mask.affectedAnnotationIDs
+                    .map(\.uuidString)
+                    .sorted()
+                    .joined(separator: ",")
+                return [
+                    mask.id.uuidString,
+                    mosaicKey(rect),
+                    affectedIDs,
+                ].joined(separator: ":")
+            }
+        return "masks:" + maskParts.joined(separator: ";")
     }
 
     private func annotationCompositeKey(_ annotation: CaptureAnnotation) -> String {
