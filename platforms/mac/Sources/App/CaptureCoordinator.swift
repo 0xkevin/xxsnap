@@ -309,3 +309,16 @@ final class CaptureCoordinator {
         return "xxsnap 截图 \(formatter.string(from: date)).png"
     }
 }
+
+#if DEBUG
+extension CaptureCoordinator {
+    var test_lastCapture: NSImage? {
+        lastCapture
+    }
+
+    func test_handleSelection(_ result: CaptureSelectionResult?, frozenDesktopImage: NSImage?) {
+        self.frozenDesktopImage = frozenDesktopImage
+        handleSelection(result)
+    }
+}
+#endif

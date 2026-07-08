@@ -7151,7 +7151,12 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 annotations.remove(at: entry.index)
             }
             let deletedIDs = Set(entries.map(\.annotation.id))
-            reapplyEraserMaskPruning(originalMasks: masks, removing: deletedIDs)
+            if annotations.isEmpty {
+                let maskIDs = Set(masks.map(\.id))
+                eraserMasks.removeAll { maskIDs.contains($0.id) }
+            } else {
+                reapplyEraserMaskPruning(originalMasks: masks, removing: deletedIDs)
+            }
             finishAnnotationHistoryMutation(affectedKinds: entries.map(\.annotation.kind), selectedIndex: nil)
         case .addEraserMask(let mask):
             eraserMasks.append(mask)

@@ -2654,6 +2654,34 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_eraserMaskCount, 0)
     }
 
+    func testEraserClearAllRedoRemovesMasksWhenNoAnnotationsWereCleared() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        let mask = EraserMask(
+            rect: NSRect(x: 40, y: 45, width: 10, height: 10),
+            affectedAnnotationIDs: [UUID()]
+        )
+        window.test_setLockedSelectionRect(selection)
+        window.test_setEraserMasks([mask])
+        window.test_activateEraserTool()
+
+        let clearAllPoint = try XCTUnwrap(window.test_eraserClearAllOptionPoint())
+        window.test_mouseDown(at: clearAllPoint)
+        window.test_mouseUp(at: clearAllPoint)
+
+        XCTAssertEqual(window.test_annotationCount, 0)
+        XCTAssertEqual(window.test_eraserMaskCount, 0)
+
+        window.test_keyDown(keyCode: 6, charactersIgnoringModifiers: "z", modifierFlags: [.command])
+        XCTAssertEqual(window.test_annotationCount, 0)
+        XCTAssertEqual(window.test_eraserMaskCount, 1)
+        XCTAssertEqual(window.test_eraserMask(at: 0)?.id, mask.id)
+
+        window.test_keyDown(keyCode: 6, charactersIgnoringModifiers: "z", modifierFlags: [.command, .shift])
+        XCTAssertEqual(window.test_annotationCount, 0)
+        XCTAssertEqual(window.test_eraserMaskCount, 0)
+    }
+
     func testEraserRectangleDragShowsBlueDashedPreview() throws {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
@@ -6224,6 +6252,39 @@ final class SelectionToolbarStateTests: XCTestCase {
         let maskedPixel = try XCTUnwrap(rgbaRenderPixel(in: maskedEntry, at: probePoint))
 
         XCTAssertLessThanOrEqual(pixelDistance(existingPixel, maskedPixel), 4)
+    }
+
+    @MainActor
+    func testCaptureCoordinatorExportAppliesEraserMasks() async throws {
+        let image = solidImage(size: NSSize(width: 80, height: 60), color: .white)
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = .red
+        style.fillEnabled = true
+        style.fillColor = .red
+        let annotation = CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 10, y: 10, width: 60, height: 40), style: style)
+        let mask = EraserMask(rect: NSRect(x: 30, y: 25, width: 20, height: 20), affectedAnnotationIDs: [annotation.id])
+        let result = CaptureSelectionResult(
+            screenRect: NSRect(origin: .zero, size: image.size),
+            snapshotRect: NSRect(origin: .zero, size: image.size),
+            annotations: [annotation],
+            eraserMasks: [mask],
+            action: .copy
+        )
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService()
+        )
+        let expectation = expectation(description: "capture")
+        coordinator.captureSessionDidEnd = {
+            expectation.fulfill()
+        }
+
+        coordinator.test_handleSelection(result, frozenDesktopImage: image)
+        await fulfillment(of: [expectation], timeout: 2)
+
+        let exported = try XCTUnwrap(coordinator.test_lastCapture)
+        XCTAssertEqual(hex(try XCTUnwrap(rgbaRenderPixel(in: exported, at: NSPoint(x: 36, y: 32)))), "#FFFFFF")
+        XCTAssertEqual(hex(try XCTUnwrap(rgbaRenderPixel(in: exported, at: NSPoint(x: 16, y: 16)))), "#FF0000")
     }
 
     func testMagnifierRendererSamplesOriginalImageInsteadOfAnnotations() throws {
