@@ -5923,6 +5923,80 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertTrue(pixelDiffers(overlayPixel, rectangleOnlyPixel))
     }
 
+    func testOverlayAppliesLocalEraserMaskToAnnotationPixels() throws {
+        let image = solidImage(size: NSSize(width: 320, height: 220), color: .white)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        let selection = NSRect(x: 40, y: 30, width: 220, height: 140)
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = .red
+        style.fillEnabled = true
+        style.fillColor = .red
+        let annotation = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 30, y: 30, width: 100, height: 70),
+            style: style
+        )
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([annotation])
+        window.test_addEraserMask(EraserMask(
+            rect: NSRect(x: 55, y: 45, width: 25, height: 25),
+            affectedAnnotationIDs: [annotation.id]
+        ))
+
+        let rendered = try XCTUnwrap(window.test_renderedOverlayImage())
+        let maskedPoint = NSPoint(
+            x: selection.minX + 60,
+            y: rendered.size.height - selection.minY - 50
+        )
+        let unmaskedPoint = NSPoint(
+            x: selection.minX + 35,
+            y: rendered.size.height - selection.minY - 35
+        )
+
+        XCTAssertEqual(hex(try XCTUnwrap(rgbaPixel(in: rendered, at: maskedPoint))), "#FFFFFF")
+        XCTAssertEqual(hex(try XCTUnwrap(rgbaPixel(in: rendered, at: unmaskedPoint))), "#FF0000")
+    }
+
+    func testOverlayEraserMaskRevealsOriginalScreenshotThroughMosaic() throws {
+        let image = gradientImage(size: NSSize(width: 320, height: 220))
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        let selection = NSRect(x: 40, y: 30, width: 220, height: 140)
+        let mosaic = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(x: 30, y: 30, width: 100, height: 70),
+            style: CaptureAnnotationStyle(),
+            mosaicRedaction: CaptureMosaicRedaction(type: .pixelMosaic, value: 10)
+        )
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([mosaic])
+        window.test_addEraserMask(EraserMask(
+            rect: NSRect(x: 55, y: 45, width: 25, height: 25),
+            affectedAnnotationIDs: [mosaic.id]
+        ))
+
+        let rendered = try XCTUnwrap(window.test_renderedOverlayImage())
+        let overlayPoint = NSPoint(
+            x: selection.minX + 60,
+            y: rendered.size.height - selection.minY - 50
+        )
+        let originalPoint = NSPoint(
+            x: selection.minX + 60,
+            y: image.size.height - selection.minY - 50
+        )
+        let original = try XCTUnwrap(rgbaPixel(
+            in: image,
+            at: originalPoint
+        ))
+        let overlay = try XCTUnwrap(rgbaPixel(
+            in: rendered,
+            at: overlayPoint
+        ))
+
+        XCTAssertLessThan(abs(Int(overlay.red) - Int(original.red)), 4)
+        XCTAssertLessThan(abs(Int(overlay.green) - Int(original.green)), 4)
+        XCTAssertLessThan(abs(Int(overlay.blue) - Int(original.blue)), 4)
+    }
+
     func testRendererWithoutEraserMasksMatchesExistingRenderPath() throws {
         let image = solidImage(size: NSSize(width: 80, height: 60), color: .white)
         var style = CaptureAnnotationStyle()

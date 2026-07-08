@@ -10077,26 +10077,30 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private func drawOverlay() {
         if let backgroundImage {
             backgroundImage.draw(in: bounds, from: NSRect(origin: .zero, size: backgroundImage.size), operation: .copy, fraction: 1)
-            let usesSequentialMosaicOrdering = shouldRenderAnnotationsWithMosaicOrdering
-            if let rotatingIndex = rotatingMosaicRectangleAnnotationIndex(),
-               !usesSequentialMosaicOrdering,
-               rotatingIndex == annotations.indices.last,
-               drawRotatingMosaicRectanglePreview(at: rotatingIndex) {
-                // Rotation changes only the clip path; reuse the filtered base image.
-            } else if usesSequentialMosaicOrdering {
-                drawAnnotationsRespectingMosaicOrder()
-            } else {
-                let liveValueIndex = selectedMosaicValuePreviewIndex()
-                let mosaicAnnotations = annotations.enumerated().compactMap { index, annotation in
-                    isMosaicAnnotation(annotation) && index != liveValueIndex ? annotation : nil
-                }
-                if let composite = mosaicPreviewComposite(for: mosaicAnnotations) {
-                    drawMosaicComposite(composite, clippedTo: mosaicAnnotations)
-                }
-                if let liveValueIndex {
-                    drawLiveMosaicValuePreview(at: liveValueIndex)
+            if eraserMasks.isEmpty {
+                let usesSequentialMosaicOrdering = shouldRenderAnnotationsWithMosaicOrdering
+                if let rotatingIndex = rotatingMosaicRectangleAnnotationIndex(),
+                   !usesSequentialMosaicOrdering,
+                   rotatingIndex == annotations.indices.last,
+                   drawRotatingMosaicRectanglePreview(at: rotatingIndex) {
+                    // Rotation changes only the clip path; reuse the filtered base image.
+                } else if usesSequentialMosaicOrdering {
+                    drawAnnotationsRespectingMosaicOrder()
+                } else {
+                    let liveValueIndex = selectedMosaicValuePreviewIndex()
+                    let mosaicAnnotations = annotations.enumerated().compactMap { index, annotation in
+                        isMosaicAnnotation(annotation) && index != liveValueIndex ? annotation : nil
+                    }
+                    if let composite = mosaicPreviewComposite(for: mosaicAnnotations) {
+                        drawMosaicComposite(composite, clippedTo: mosaicAnnotations)
+                    }
+                    if let liveValueIndex {
+                        drawLiveMosaicValuePreview(at: liveValueIndex)
+                    }
                 }
             }
+            // Masked committed annotations render as a selection crop in drawAnnotationsWithEraserMasks(),
+            // so the mosaic preview cache key intentionally stays unchanged for the no-mask fast path.
             if let draftAnnotation,
                isMosaicAnnotation(draftAnnotation),
                isUsableDraftAnnotation(draftAnnotation) {
@@ -10334,6 +10338,14 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private func drawAnnotations() {
+        guard !eraserMasks.isEmpty else {
+            drawAnnotationsWithoutEraserMasks()
+            return
+        }
+        drawAnnotationsWithEraserMasks()
+    }
+
+    private func drawAnnotationsWithoutEraserMasks() {
         let alreadyRenderedWithMosaicOrdering = shouldRenderAnnotationsWithMosaicOrdering
         let selectedIndex = selectedAnnotationIndex
         for (index, annotation) in annotations.enumerated() {
@@ -10361,6 +10373,35 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
         if shouldDrawSelectedAnnotationOutline(selectedAnnotation) {
             drawSelectedAnnotationOutline(selectedAnnotation)
+        }
+    }
+
+    private func drawAnnotationsWithEraserMasks() {
+        guard let lockedSelectionRect,
+              let backgroundImage,
+              let crop = crop(image: backgroundImage, to: lockedSelectionRect)
+        else {
+            drawAnnotationsWithoutEraserMasks()
+            return
+        }
+
+        let rendered = CaptureAnnotationRenderer.render(
+            image: crop,
+            annotations: annotations,
+            eraserMasks: eraserMasks
+        )
+        rendered.draw(
+            in: lockedSelectionRect,
+            from: NSRect(origin: .zero, size: rendered.size),
+            operation: .sourceOver,
+            fraction: 1
+        )
+
+        if let selectedIndex = selectedAnnotationIndex,
+           annotations.indices.contains(selectedIndex),
+           annotationIsEditable(at: selectedIndex),
+           shouldDrawSelectedAnnotationOutline(annotations[selectedIndex]) {
+            drawSelectedAnnotationOutline(annotations[selectedIndex])
         }
     }
 
