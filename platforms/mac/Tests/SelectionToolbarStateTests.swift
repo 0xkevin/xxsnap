@@ -5699,6 +5699,95 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertTrue(pixelDiffers(overlayPixel, rectangleOnlyPixel))
     }
 
+    func testRendererWithoutEraserMasksMatchesExistingRenderPath() throws {
+        let image = solidImage(size: NSSize(width: 80, height: 60), color: .white)
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = .red
+        style.fillEnabled = true
+        style.fillColor = .red
+        let annotation = CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 10, y: 10, width: 40, height: 30), style: style)
+
+        let existing = CaptureAnnotationRenderer.render(image: image, annotations: [annotation])
+        let maskedEntry = CaptureAnnotationRenderer.render(image: image, annotations: [annotation], eraserMasks: [])
+
+        XCTAssertEqual(
+            hex(try XCTUnwrap(rgbaRenderPixel(in: existing, at: NSPoint(x: 20, y: 20)))),
+            hex(try XCTUnwrap(rgbaRenderPixel(in: maskedEntry, at: NSPoint(x: 20, y: 20))))
+        )
+    }
+
+    func testRendererAppliesEraserMaskOnlyToAffectedAnnotationLayer() throws {
+        let image = solidImage(size: NSSize(width: 80, height: 60), color: .white)
+        var redStyle = CaptureAnnotationStyle()
+        redStyle.strokeColor = .red
+        redStyle.fillEnabled = true
+        redStyle.fillColor = .red
+        var blueStyle = CaptureAnnotationStyle()
+        blueStyle.strokeColor = NSColor(srgbRed: 0, green: 0, blue: 1, alpha: 1)
+        blueStyle.fillEnabled = true
+        blueStyle.fillColor = NSColor(srgbRed: 0, green: 0, blue: 1, alpha: 1)
+
+        let red = CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 10, y: 10, width: 40, height: 30), style: redStyle)
+        let blue = CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 50, y: 10, width: 20, height: 30), style: blueStyle)
+        let mask = EraserMask(rect: NSRect(x: 18, y: 18, width: 12, height: 12), affectedAnnotationIDs: [red.id])
+
+        let rendered = CaptureAnnotationRenderer.render(image: image, annotations: [red, blue], eraserMasks: [mask])
+
+        XCTAssertEqual(hex(try XCTUnwrap(rgbaRenderPixel(in: rendered, at: NSPoint(x: 22, y: 22)))), "#FFFFFF")
+        XCTAssertEqual(hex(try XCTUnwrap(rgbaRenderPixel(in: rendered, at: NSPoint(x: 14, y: 14)))), "#FF0000")
+        let bluePixel = try XCTUnwrap(rgbaRenderPixel(in: rendered, at: NSPoint(x: 58, y: 22)))
+        XCTAssertLessThanOrEqual(bluePixel.red, 8)
+        XCTAssertLessThanOrEqual(bluePixel.green, 8)
+        XCTAssertGreaterThanOrEqual(bluePixel.blue, 247)
+    }
+
+    func testRendererKeepsOverlappingUnaffectedAnnotationVisibleInsideMask() throws {
+        let image = solidImage(size: NSSize(width: 80, height: 60), color: .white)
+        var redStyle = CaptureAnnotationStyle()
+        redStyle.strokeColor = .red
+        redStyle.fillEnabled = true
+        redStyle.fillColor = .red
+        var blueStyle = CaptureAnnotationStyle()
+        blueStyle.strokeColor = NSColor(srgbRed: 0, green: 0, blue: 1, alpha: 1)
+        blueStyle.fillEnabled = true
+        blueStyle.fillColor = NSColor(srgbRed: 0, green: 0, blue: 1, alpha: 1)
+
+        let red = CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 10, y: 10, width: 44, height: 34), style: redStyle)
+        let blue = CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 22, y: 18, width: 34, height: 26), style: blueStyle)
+        let mask = EraserMask(rect: NSRect(x: 26, y: 22, width: 18, height: 12), affectedAnnotationIDs: [red.id])
+
+        let rendered = CaptureAnnotationRenderer.render(image: image, annotations: [red, blue], eraserMasks: [mask])
+
+        let overlapPixel = try XCTUnwrap(rgbaRenderPixel(in: rendered, at: NSPoint(x: 30, y: 26)))
+        XCTAssertLessThanOrEqual(overlapPixel.red, 8)
+        XCTAssertLessThanOrEqual(overlapPixel.green, 8)
+        XCTAssertGreaterThanOrEqual(overlapPixel.blue, 247)
+    }
+
+    func testRendererWithUnrelatedEraserMaskPreservesMosaicAnnotation() throws {
+        let image = checkerboardImage(size: NSSize(width: 96, height: 72), squareSize: 2)
+        var style = CaptureAnnotationStyle()
+        style.strokeWidth = 0
+        let mosaic = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(x: 16, y: 14, width: 54, height: 36),
+            style: style,
+            mosaicRedaction: CaptureMosaicRedaction(type: .pixelMosaic, value: 8)
+        )
+        let unrelatedMask = EraserMask(
+            rect: NSRect(x: 20, y: 18, width: 12, height: 12),
+            affectedAnnotationIDs: [UUID()]
+        )
+
+        let existing = CaptureAnnotationRenderer.render(image: image, annotations: [mosaic])
+        let maskedEntry = CaptureAnnotationRenderer.render(image: image, annotations: [mosaic], eraserMasks: [unrelatedMask])
+        let probePoint = NSPoint(x: 42, y: 32)
+        let existingPixel = try XCTUnwrap(rgbaRenderPixel(in: existing, at: probePoint))
+        let maskedPixel = try XCTUnwrap(rgbaRenderPixel(in: maskedEntry, at: probePoint))
+
+        XCTAssertLessThanOrEqual(pixelDistance(existingPixel, maskedPixel), 4)
+    }
+
     func testMagnifierRendererSamplesOriginalImageInsteadOfAnnotations() throws {
         let base = solidImage(size: NSSize(width: 80, height: 80), color: .white)
         var coveringAnnotation = CaptureAnnotation(
@@ -10656,6 +10745,22 @@ final class SelectionToolbarStateTests: XCTestCase {
         }
 
         let bytes = try rgbaBytes(in: image)
+        let index = (pixelY * cgImage.width + pixelX) * 4
+        return (bytes[index], bytes[index + 1], bytes[index + 2], bytes[index + 3])
+    }
+
+    private func rgbaRenderPixel(in image: NSImage, at point: NSPoint) throws -> (red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8)? {
+        let cgImage = try XCTUnwrap(image.cgImage(forProposedRect: nil, context: nil, hints: nil))
+        let scaleX = CGFloat(cgImage.width) / max(image.size.width, 1)
+        let scaleY = CGFloat(cgImage.height) / max(image.size.height, 1)
+        let pixelX = Int((point.x * scaleX).rounded(.down))
+        let renderY = Int((point.y * scaleY).rounded(.down))
+        guard pixelX >= 0, pixelX < cgImage.width, renderY >= 0, renderY < cgImage.height else {
+            return nil
+        }
+
+        let bytes = try rgbaBytes(in: image)
+        let pixelY = cgImage.height - 1 - renderY
         let index = (pixelY * cgImage.width + pixelX) * 4
         return (bytes[index], bytes[index + 1], bytes[index + 2], bytes[index + 3])
     }

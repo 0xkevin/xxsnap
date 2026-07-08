@@ -1205,9 +1205,21 @@ enum CaptureAnnotationRenderer {
         return renderImage(image: image, annotations: annotations) ?? image
     }
 
+    static func render(image: NSImage, annotations: [CaptureAnnotation], eraserMasks: [EraserMask]) -> NSImage {
+        guard !eraserMasks.isEmpty else {
+            return render(image: image, annotations: annotations)
+        }
+        guard !annotations.isEmpty else {
+            return image
+        }
+
+        return renderImage(image: image, annotations: annotations, eraserMasks: eraserMasks) ?? image
+    }
+
     private static func renderImage(
         image: NSImage,
-        annotations: [CaptureAnnotation]
+        annotations: [CaptureAnnotation],
+        eraserMasks: [EraserMask] = []
     ) -> NSImage? {
         guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
             return nil
@@ -1223,6 +1235,34 @@ enum CaptureAnnotationRenderer {
 
         let scaleX = CGFloat(cgImage.width) / max(image.size.width, 1)
         let scaleY = CGFloat(cgImage.height) / max(image.size.height, 1)
+        if eraserMasks.isEmpty {
+            drawAnnotations(annotations, in: context, sourceImage: cgImage, scaleX: scaleX, scaleY: scaleY)
+        } else {
+            drawAnnotations(
+                annotations: annotations,
+                in: context,
+                colorSpace: colorSpace,
+                sourceImage: cgImage,
+                eraserMasks: eraserMasks,
+                scaleX: scaleX,
+                scaleY: scaleY
+            )
+        }
+
+        guard let renderedImage = context.makeImage() else {
+            return nil
+        }
+
+        return NSImage(cgImage: renderedImage, size: image.size)
+    }
+
+    private static func drawAnnotations(
+        _ annotations: [CaptureAnnotation],
+        in context: CGContext,
+        sourceImage: CGImage,
+        scaleX: CGFloat,
+        scaleY: CGFloat
+    ) {
         for annotation in annotations {
             if isMosaicAnnotation(annotation) {
                 drawMosaicAnnotation(
@@ -1232,15 +1272,77 @@ enum CaptureAnnotationRenderer {
                     scaleY: scaleY
                 )
             } else {
-                draw(annotation, in: context, sourceImage: cgImage, scaleX: scaleX, scaleY: scaleY)
+                draw(annotation, in: context, sourceImage: sourceImage, scaleX: scaleX, scaleY: scaleY)
             }
         }
+    }
 
-        guard let renderedImage = context.makeImage() else {
+    private static func drawAnnotations(
+        annotations: [CaptureAnnotation],
+        in context: CGContext,
+        colorSpace: CGColorSpace,
+        sourceImage: CGImage,
+        eraserMasks: [EraserMask],
+        scaleX: CGFloat,
+        scaleY: CGFloat
+    ) {
+        for annotation in annotations {
+            let masksForAnnotation = eraserMasks.filter { $0.affectedAnnotationIDs.contains(annotation.id) }
+            guard !masksForAnnotation.isEmpty else {
+                drawAnnotations([annotation], in: context, sourceImage: sourceImage, scaleX: scaleX, scaleY: scaleY)
+                continue
+            }
+            guard let annotationImage = makeMaskedAnnotationImage(
+                width: context.width,
+                height: context.height,
+                colorSpace: colorSpace,
+                currentImage: snapshotContext(context),
+                sourceImage: sourceImage,
+                annotation: annotation,
+                eraserMasks: masksForAnnotation,
+                scaleX: scaleX,
+                scaleY: scaleY
+            ) else {
+                continue
+            }
+            context.draw(annotationImage, in: CGRect(x: 0, y: 0, width: context.width, height: context.height))
+        }
+    }
+
+    private static func makeMaskedAnnotationImage(
+        width: Int,
+        height: Int,
+        colorSpace: CGColorSpace,
+        currentImage: CGImage?,
+        sourceImage: CGImage,
+        annotation: CaptureAnnotation,
+        eraserMasks: [EraserMask],
+        scaleX: CGFloat,
+        scaleY: CGFloat
+    ) -> CGImage? {
+        guard let context = makeRenderContext(width: width, height: height, colorSpace: colorSpace) else {
             return nil
         }
+        context.interpolationQuality = .none
+        if let currentImage {
+            context.draw(currentImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        }
+        drawAnnotations([annotation], in: context, sourceImage: sourceImage, scaleX: scaleX, scaleY: scaleY)
 
-        return NSImage(cgImage: renderedImage, size: image.size)
+        context.saveGState()
+        context.setBlendMode(.clear)
+        for mask in eraserMasks {
+            let pixelRect = CGRect(
+                x: mask.rect.minX * scaleX,
+                y: mask.rect.minY * scaleY,
+                width: mask.rect.width * scaleX,
+                height: mask.rect.height * scaleY
+            ).standardized
+            context.fill(pixelRect)
+        }
+        context.restoreGState()
+
+        return context.makeImage()
     }
 
     private static func makeRenderContext(width: Int, height: Int, colorSpace: CGColorSpace) -> CGContext? {
