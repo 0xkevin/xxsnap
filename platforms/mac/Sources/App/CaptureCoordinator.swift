@@ -205,7 +205,11 @@ final class CaptureCoordinator {
                 } else {
                     image = try await screenCaptureService.captureImage(in: result.screenRect)
                 }
-                let exportedImage = CaptureAnnotationRenderer.render(image: image, annotations: result.annotations)
+                let exportedImage = CaptureAnnotationRenderer.render(
+                    image: image,
+                    annotations: result.annotations,
+                    eraserMasks: result.eraserMasks
+                )
                 lastCapture = exportedImage
                 self.frozenDesktopImage = nil
                 switch result.action {

@@ -7058,6 +7058,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 screenRect: window.convertToScreen(lockedSelectionRect).standardized,
                 snapshotRect: lockedSelectionRect.standardized,
                 annotations: annotations,
+                eraserMasks: eraserMasks,
                 action: action
             )
         )
@@ -7223,6 +7224,22 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         clearNumberEditing()
         clearPendingTextEdit()
         removeTextEditor()
+        clearRedoAnnotationHistory()
+        finishAnnotationHistoryMutation(affectedKinds: entries.map(\.annotation.kind), selectedIndex: nil)
+        needsDisplay = true
+        return true
+    }
+
+    private func clearAllAnnotationsAndMasks() -> Bool {
+        let entries = annotations.indices.map { DeletedAnnotationEntry(annotation: annotations[$0], index: $0) }
+        let masks = eraserMasks
+        guard !entries.isEmpty || !masks.isEmpty else {
+            needsDisplay = true
+            return false
+        }
+        annotations.removeAll()
+        eraserMasks.removeAll()
+        undoAnnotationEntries.append(.deleteMany(entries: entries, masks: masks))
         clearRedoAnnotationHistory()
         finishAnnotationHistoryMutation(affectedKinds: entries.map(\.annotation.kind), selectedIndex: nil)
         needsDisplay = true
@@ -7484,7 +7501,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
            optionButtonBackgroundRect(for: clearAllButton).contains(point) {
             eraserRectangleStartPoint = nil
             eraserRectangleCurrentPoint = nil
-            _ = deleteAnnotations(at: Array(annotations.indices))
+            _ = clearAllAnnotationsAndMasks()
             invalidateCursorRectsAndRefresh(at: point)
             needsDisplay = true
             return true

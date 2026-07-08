@@ -2487,6 +2487,27 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(mask.affectedAnnotationIDs, [annotation.id])
     }
 
+    func testCaptureResultIncludesEraserMasks() throws {
+        let image = solidImage(size: NSSize(width: 240, height: 160), color: .white)
+        var result: CaptureSelectionResult?
+        let expectation = expectation(description: "copy")
+        let window = SelectionOverlayWindow(backgroundImage: image) { selectionResult in
+            result = selectionResult
+            expectation.fulfill()
+        }
+        let selection = NSRect(x: 40, y: 30, width: 160, height: 100)
+        let annotation = CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 20, y: 20, width: 80, height: 60), style: CaptureAnnotationStyle())
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([annotation])
+        window.test_addEraserMask(EraserMask(rect: NSRect(x: 30, y: 30, width: 20, height: 20), affectedAnnotationIDs: [annotation.id]))
+
+        window.test_keyDown(keyCode: 8, charactersIgnoringModifiers: "c", modifierFlags: [.command])
+        wait(for: [expectation], timeout: 2)
+
+        XCTAssertEqual(result?.annotations.count, 1)
+        XCTAssertEqual(result?.eraserMasks.count, 1)
+    }
+
     func testEraserToolClearsAndSuppressesColorSampler() {
         let background = solidImage(size: NSSize(width: 260, height: 160), color: NSColor(srgbRed: 0.2, green: 0.4, blue: 0.8, alpha: 1))
         let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
@@ -2606,6 +2627,31 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         window.test_keyDown(keyCode: 6, charactersIgnoringModifiers: "z", modifierFlags: [.command, .shift])
         XCTAssertEqual(window.test_annotationCount, 0)
+    }
+
+    func testEraserClearAllRemovesAnnotationsAndMasksAndSupportsUndoRedo() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        let annotation = CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 35, y: 45, width: 60, height: 60), style: CaptureAnnotationStyle())
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([annotation])
+        window.test_addEraserMask(EraserMask(rect: NSRect(x: 40, y: 45, width: 10, height: 10), affectedAnnotationIDs: [annotation.id]))
+        window.test_activateEraserTool()
+
+        let clearAllPoint = try XCTUnwrap(window.test_eraserClearAllOptionPoint())
+        window.test_mouseDown(at: clearAllPoint)
+        window.test_mouseUp(at: clearAllPoint)
+
+        XCTAssertEqual(window.test_annotationCount, 0)
+        XCTAssertEqual(window.test_eraserMaskCount, 0)
+
+        window.test_keyDown(keyCode: 6, charactersIgnoringModifiers: "z", modifierFlags: [.command])
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(window.test_eraserMaskCount, 1)
+
+        window.test_keyDown(keyCode: 6, charactersIgnoringModifiers: "z", modifierFlags: [.command, .shift])
+        XCTAssertEqual(window.test_annotationCount, 0)
+        XCTAssertEqual(window.test_eraserMaskCount, 0)
     }
 
     func testEraserRectangleDragShowsBlueDashedPreview() throws {
