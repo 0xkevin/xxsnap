@@ -78,6 +78,7 @@ private extension NSCursor {
 
     static let xxsnapEyedropper: NSCursor = eyedropperCursor(tint: nil)
     static let xxsnapEyedropperLight: NSCursor = eyedropperCursor(tint: .white)
+    static let xxsnapEraser: NSCursor = eraserCursor()
 
     private static func eyedropperCursor(tint: NSColor?) -> NSCursor {
         let size = SelectionToolbarState.eyedropperCursorSize
@@ -104,6 +105,41 @@ private extension NSCursor {
         }
         cursorImage.unlockFocus()
         return NSCursor(image: cursorImage, hotSpot: hotSpot)
+    }
+
+    private static func eraserCursor() -> NSCursor {
+        let size = NSSize(width: 24, height: 24)
+        let hotSpot = NSPoint(x: 7, y: 17)
+        let iconSize: CGFloat = 18
+        let inset = (size.width - iconSize) / 2
+
+        if let image = svgImage(named: SelectionToolbarState.eraserCursorIconResourceName) {
+            let cursorImage = NSImage(size: size)
+            cursorImage.lockFocus()
+            NSGraphicsContext.current?.imageInterpolation = .high
+            image.draw(
+                in: NSRect(x: inset, y: inset, width: iconSize, height: iconSize),
+                from: .zero,
+                operation: .copy,
+                fraction: 1.0
+            )
+            cursorImage.unlockFocus()
+            return NSCursor(image: cursorImage, hotSpot: hotSpot)
+        }
+
+        if let symbol = NSImage(
+            systemSymbolName: "eraser",
+            accessibilityDescription: "Eraser"
+        )?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 18, weight: .medium)) {
+            let cursorImage = NSImage(size: size)
+            cursorImage.lockFocus()
+            NSGraphicsContext.current?.imageInterpolation = .high
+            symbol.draw(in: NSRect(x: inset, y: inset, width: iconSize, height: iconSize))
+            cursorImage.unlockFocus()
+            return NSCursor(image: cursorImage, hotSpot: hotSpot)
+        }
+
+        return NSCursor.arrow
     }
 
     static func drawBrushRotationHandleIcon() {
@@ -844,6 +880,34 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_activateEraserTool()
     }
 
+    func test_eraserPointOptionPoint() -> NSPoint? {
+        (contentView as? SelectionOverlayView)?.test_eraserPointOptionPoint()
+    }
+
+    func test_eraserRectangleOptionPoint() -> NSPoint? {
+        (contentView as? SelectionOverlayView)?.test_eraserRectangleOptionPoint()
+    }
+
+    func test_eraserClearAllOptionPoint() -> NSPoint? {
+        (contentView as? SelectionOverlayView)?.test_eraserClearAllOptionPoint()
+    }
+
+    var test_eraserPointOptionRect: NSRect? {
+        (contentView as? SelectionOverlayView)?.test_eraserPointOptionRect
+    }
+
+    var test_eraserRectangleOptionRect: NSRect? {
+        (contentView as? SelectionOverlayView)?.test_eraserRectangleOptionRect
+    }
+
+    var test_eraserClearAllSeparatorRect: NSRect? {
+        (contentView as? SelectionOverlayView)?.test_eraserClearAllSeparatorRect
+    }
+
+    var test_eraserClearAllOptionRect: NSRect? {
+        (contentView as? SelectionOverlayView)?.test_eraserClearAllOptionRect
+    }
+
     var test_numberMarkType: CaptureNumberMarkType {
         (contentView as? SelectionOverlayView)?.test_numberMarkType ?? .number
     }
@@ -854,6 +918,14 @@ final class SelectionOverlayWindow: NSWindow {
 
     var test_isEraserToolActive: Bool {
         (contentView as? SelectionOverlayView)?.test_isEraserToolActive ?? false
+    }
+
+    var test_isEraserRectangleModeActive: Bool {
+        (contentView as? SelectionOverlayView)?.test_isEraserRectangleModeActive ?? false
+    }
+
+    var test_eraserRectanglePreviewRect: NSRect? {
+        (contentView as? SelectionOverlayView)?.test_eraserRectanglePreviewRect
     }
 
     var test_eraserToolbarButtonIsSelected: Bool {
@@ -1576,6 +1648,12 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         case resizingSelection
         case placingNumberMark
         case erasingAnnotation
+        case drawingEraserRectangle
+    }
+
+    private enum EraserMode {
+        case point
+        case rectangle
     }
 
     private enum ToolbarButton {
@@ -1678,12 +1756,20 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private var lockedSelectionRect: NSRect?
     private var shapeStartPoint: NSPoint?
     private var shapeCurrentPoint: NSPoint?
+    private var eraserRectangleStartPoint: NSPoint?
+    private var eraserRectangleCurrentPoint: NSPoint?
     private var brushDraftPoints: [NSPoint] = []
     private var mosaicDraftPoints: [NSPoint] = []
     private var annotations: [CaptureAnnotation] = []
     private enum AnnotationHistoryEntry {
         case add(annotation: CaptureAnnotation, index: Int)
         case delete(annotation: CaptureAnnotation, index: Int)
+        case deleteMany(entries: [DeletedAnnotationEntry])
+    }
+
+    private struct DeletedAnnotationEntry {
+        var annotation: CaptureAnnotation
+        var index: Int
     }
 
     private var undoAnnotationEntries: [AnnotationHistoryEntry] = []
@@ -1750,6 +1836,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private var isNumberToolActive = false
     private var isMagnifierToolActive = false
     private var isEraserToolActive = false
+    private var eraserMode: EraserMode = .point
     private var currentMagnifierShape: CaptureMagnifierShape = .rectangle
     private var currentMagnifierZoom: CGFloat = 2
     private var currentNumberMarkType: CaptureNumberMarkType = .number
@@ -1974,6 +2061,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         drawAnnotations()
         drawEditingTextCaretIfNeeded()
         drawDraftAnnotation()
+        drawEraserRectanglePreview()
         drawMainToolbar(for: selectionRect)
         drawOptionsToolbar(for: selectionRect)
 
@@ -2151,7 +2239,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             selectionStartPoint = point
             selectionCurrentPoint = point
             updateColorSampler(at: point)
-        case .annotating, .drawingShape, .draggingToolbar, .draggingCornerRadius, .draggingMosaicValue, .movingShape, .movingSelection, .resizingShape, .resizingArrowLine, .resizingMarkerLine, .rotatingBrush, .rotatingMosaicRectangle, .resizingSelection, .placingNumberMark, .erasingAnnotation:
+        case .annotating, .drawingShape, .drawingEraserRectangle, .draggingToolbar, .draggingCornerRadius, .draggingMosaicValue, .movingShape, .movingSelection, .resizingShape, .resizingArrowLine, .resizingMarkerLine, .rotatingBrush, .rotatingMosaicRectangle, .resizingSelection, .placingNumberMark, .erasingAnnotation:
             handleAnnotatingMouseDown(at: point, clickCount: event.clickCount)
         }
 
@@ -2182,6 +2270,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             let draftPoint = shapeCurrentPoint ?? clampedPoint
             appendBrushDraftPointIfNeeded(clampedPoint, modifierFlags: event.modifierFlags)
             appendMosaicDraftPointIfNeeded(draftPoint, modifierFlags: event.modifierFlags)
+        case .drawingEraserRectangle:
+            eraserRectangleCurrentPoint = clamp(point, to: bounds)
         case .draggingToolbar:
             updateDraggingToolbar(to: point)
         case .annotating:
@@ -2288,6 +2378,13 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 return .arrow
             }
             return backgroundAwareCursorStyle(.eyedropper, at: point)
+        }
+
+        if isEraserToolActive {
+            if isToolbarOrPanelPoint(point) || !isInsideSelection {
+                return .arrow
+            }
+            return eraserMode == .rectangle ? .crosshair : .eraser
         }
 
         let selectionResizeHandle = interactionMode == .annotating && !shouldPreferMosaicDrawingOutsideSelection(at: point)
@@ -2591,6 +2688,12 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             shapeCurrentPoint = nil
             brushDraftPoints.removeAll()
             mosaicDraftPoints.removeAll()
+            interactionMode = .annotating
+        case .drawingEraserRectangle:
+            eraserRectangleCurrentPoint = clamp(point, to: bounds)
+            commitEraserRectangle()
+            eraserRectangleStartPoint = nil
+            eraserRectangleCurrentPoint = nil
             interactionMode = .annotating
         case .draggingToolbar:
             updateDraggingToolbar(to: point)
@@ -2953,6 +3056,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return NSCursor.xxsnapResizeBottomRightLight
         case .rotationHandle:
             return NSCursor.xxsnapMosaicRectangleRotationHandle
+        case .eraser:
+            return NSCursor.xxsnapEraser
         case .brush:
             return NSCursor.xxsnapBrush
         case .brushLight:
@@ -3187,6 +3292,11 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return
         }
 
+        if isEraserToolActive {
+            clearColorSampler()
+            return
+        }
+
         guard SelectionToolbarState.shouldShowColorSampler(
             isShapeToolActive: isShapeToolActive,
             hasAnnotations: !annotations.isEmpty,
@@ -3213,6 +3323,14 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         sampledPointerPoint = point
         sampledColor = color
         needsDisplay = true
+    }
+
+    private func clearColorSampler() {
+        if sampledPointerPoint != nil || sampledColor != nil {
+            sampledPointerPoint = nil
+            sampledColor = nil
+            needsDisplay = true
+        }
     }
 
     private func eyedropperSamplePoint(forMousePoint point: NSPoint) -> NSPoint {
@@ -3422,6 +3540,23 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 let identifier = mosaicRedactionType == .gaussianBlur ? "mosaicBlur" : "mosaicPixel"
                 if let title = SelectionToolbarState.tooltipTitle(for: identifier) {
                     return (title, redactionTypeRect)
+                }
+            }
+        }
+
+        if optionsToolbarMode == .eraser {
+            let eraserTargets: [(NSRect?, String)] = [
+                (layout.eraserPointMode, "eraserPoint"),
+                (layout.eraserRectangleMode, "eraserRectangle"),
+                (layout.eraserClearAll, "eraserClearAll"),
+            ]
+            for (rect, identifier) in eraserTargets {
+                guard let rect else {
+                    continue
+                }
+                let button = optionButtonBackgroundRect(for: rect)
+                if button.contains(point), let title = SelectionToolbarState.tooltipTitle(for: identifier) {
+                    return (title, button)
                 }
             }
         }
@@ -3713,6 +3848,16 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
         commitCurrentTextEdit()
         commitNumberEditingIfNeeded()
+        if eraserMode == .rectangle {
+            let clampedPoint = clamp(point, to: bounds)
+            eraserRectangleStartPoint = clampedPoint
+            eraserRectangleCurrentPoint = clampedPoint
+            interactionMode = .drawingEraserRectangle
+            selectedAnnotationIndex = nil
+            needsDisplay = true
+            return true
+        }
+
         if let index = eraserAnnotationIndex(at: point) {
             _ = deleteAnnotation(at: index)
         }
@@ -5137,6 +5282,14 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         return convert(window.mouseLocationOutsideOfEventStream, from: nil)
     }
 
+    private func clearEraserRectangleState() {
+        eraserRectangleStartPoint = nil
+        eraserRectangleCurrentPoint = nil
+        if interactionMode == .drawingEraserRectangle {
+            interactionMode = .annotating
+        }
+    }
+
     private func toggleEyedropperTool() {
         commitCurrentTextEdit()
         clearPendingTextEdit()
@@ -5153,6 +5306,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         rememberCurrentStyleForActiveTool()
         isEyedropperToolActive = true
         isEraserToolActive = false
+        clearEraserRectangleState()
         clearEyedropperMeasurement()
         isTextToolActive = false
         isNumberToolActive = false
@@ -5179,6 +5333,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         closeMagnifierZoomDropdown()
         if isEraserToolActive {
             isEraserToolActive = false
+            clearEraserRectangleState()
             selectedAnnotationIndex = nil
             invalidateCursorRectsAndRefresh()
             needsDisplay = true
@@ -5195,6 +5350,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         closeMagnifierZoomDropdown()
         rememberCurrentStyleForActiveTool()
         isEraserToolActive = true
+        eraserMode = .point
+        clearEraserRectangleState()
         isShapeToolActive = false
         activeShapeKind = nil
         isTextToolActive = false
@@ -5203,6 +5360,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         isEyedropperToolActive = false
         activeNumberDropdown = false
         clearEyedropperMeasurement()
+        clearColorSampler()
         selectedAnnotationIndex = nil
         showsCornerRadiusPanel = false
         showsStrokeStyleMenu = false
@@ -5240,6 +5398,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         rememberCurrentStyleForActiveTool()
         isTextToolActive = true
         isEraserToolActive = false
+        clearEraserRectangleState()
         isEyedropperToolActive = false
         clearEyedropperMeasurement()
         isNumberToolActive = false
@@ -5297,6 +5456,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         rememberCurrentStyleForActiveTool()
         isNumberToolActive = true
         isEraserToolActive = false
+        clearEraserRectangleState()
         isTextToolActive = false
         isEyedropperToolActive = false
         clearEyedropperMeasurement()
@@ -5348,6 +5508,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         rememberCurrentStyleForActiveTool()
         isMagnifierToolActive = true
         isEraserToolActive = false
+        clearEraserRectangleState()
         isTextToolActive = false
         isNumberToolActive = false
         isEyedropperToolActive = false
@@ -5377,6 +5538,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         closeMagnifierZoomDropdown()
         rememberCurrentStyleForActiveTool()
         isEraserToolActive = false
+        clearEraserRectangleState()
         isEyedropperToolActive = false
         clearEyedropperMeasurement()
         isTextToolActive = false
@@ -5451,6 +5613,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         closeMagnifierZoomDropdown()
         rememberCurrentStyleForActiveTool()
         isEraserToolActive = false
+        clearEraserRectangleState()
         isEyedropperToolActive = false
         clearEyedropperMeasurement()
         isTextToolActive = false
@@ -6040,6 +6203,61 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         return NSPoint(x: rect.midX, y: rect.midY)
     }
 
+    func test_eraserPointOptionPoint() -> NSPoint? {
+        guard let optionsToolbarRect,
+              let rect = optionsToolbarLayout(in: optionsToolbarRect).eraserPointMode
+        else {
+            return nil
+        }
+        return NSPoint(x: rect.midX, y: rect.midY)
+    }
+
+    var test_eraserPointOptionRect: NSRect? {
+        guard let optionsToolbarRect else {
+            return nil
+        }
+        return optionsToolbarLayout(in: optionsToolbarRect).eraserPointMode
+    }
+
+    var test_eraserRectangleOptionRect: NSRect? {
+        guard let optionsToolbarRect else {
+            return nil
+        }
+        return optionsToolbarLayout(in: optionsToolbarRect).eraserRectangleMode
+    }
+
+    func test_eraserRectangleOptionPoint() -> NSPoint? {
+        guard let optionsToolbarRect,
+              let rect = optionsToolbarLayout(in: optionsToolbarRect).eraserRectangleMode
+        else {
+            return nil
+        }
+        return NSPoint(x: rect.midX, y: rect.midY)
+    }
+
+    func test_eraserClearAllOptionPoint() -> NSPoint? {
+        guard let optionsToolbarRect,
+              let rect = optionsToolbarLayout(in: optionsToolbarRect).eraserClearAll
+        else {
+            return nil
+        }
+        return NSPoint(x: rect.midX, y: rect.midY)
+    }
+
+    var test_eraserClearAllSeparatorRect: NSRect? {
+        guard let optionsToolbarRect else {
+            return nil
+        }
+        return optionsToolbarLayout(in: optionsToolbarRect).eraserClearAllSeparator
+    }
+
+    var test_eraserClearAllOptionRect: NSRect? {
+        guard let optionsToolbarRect else {
+            return nil
+        }
+        return optionsToolbarLayout(in: optionsToolbarRect).eraserClearAll
+    }
+
     func test_mosaicRedactionTypePoint(_ type: CaptureMosaicRedactionType) -> NSPoint? {
         guard let optionsToolbarRect else {
             return nil
@@ -6357,6 +6575,14 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         buttonMatchesCurrentTool(.eraser)
     }
 
+    var test_isEraserRectangleModeActive: Bool {
+        eraserMode == .rectangle
+    }
+
+    var test_eraserRectanglePreviewRect: NSRect? {
+        eraserRectanglePreviewRect
+    }
+
     var test_currentMagnifierShape: CaptureMagnifierShape {
         currentMagnifierShape
     }
@@ -6376,7 +6602,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     var test_optionsToolbarMode: SelectionToolbarState.OptionsToolbarMode? {
-        guard isShapeToolActive || isTextToolActive || isNumberToolActive || isMagnifierToolActive else {
+        guard isShapeToolActive || isTextToolActive || isNumberToolActive || isMagnifierToolActive || isEraserToolActive else {
             return nil
         }
         return optionsToolbarMode
@@ -6795,6 +7021,13 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             annotations.insert(annotation, at: insertionIndex)
             selectedAnnotationIndex = insertionIndex
             finishAnnotationHistoryMutation(affectedKind: annotation.kind, selectedIndex: insertionIndex)
+        case .deleteMany(let entries):
+            let sorted = entries.sorted { $0.index < $1.index }
+            for entry in sorted {
+                let insertionIndex = min(max(entry.index, 0), annotations.count)
+                annotations.insert(entry.annotation, at: insertionIndex)
+            }
+            finishAnnotationHistoryMutation(affectedKinds: sorted.map(\.annotation.kind), selectedIndex: nil)
         }
     }
 
@@ -6812,22 +7045,31 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             }
             selectedAnnotationIndex = nil
             finishAnnotationHistoryMutation(affectedKind: annotation.kind, selectedIndex: nil)
+        case .deleteMany(let entries):
+            for entry in entries.sorted(by: { $0.index > $1.index }) where annotations.indices.contains(entry.index) {
+                annotations.remove(at: entry.index)
+            }
+            finishAnnotationHistoryMutation(affectedKinds: entries.map(\.annotation.kind), selectedIndex: nil)
         }
     }
 
     private func finishAnnotationHistoryMutation(affectedKind: CaptureAnnotationKind, selectedIndex: Int?) {
+        finishAnnotationHistoryMutation(affectedKinds: [affectedKind], selectedIndex: selectedIndex)
+    }
+
+    private func finishAnnotationHistoryMutation(affectedKinds: [CaptureAnnotationKind], selectedIndex: Int?) {
         editingTextAnnotationIndex = nil
         clearNumberEditing()
         clearPendingTextEdit()
         removeTextEditor()
-        if affectedKind == .numberSequence && !isNumberSequenceManualModeActive() {
+        if affectedKinds.contains(.numberSequence) && !isNumberSequenceManualModeActive() {
             renumberNumberSequenceAnnotations()
         }
-        if affectedKind == .numberSequence {
+        if affectedKinds.contains(.numberSequence) {
             revealedNumberControlsIndex = nil
             invalidateCursorRectsAndRefresh()
         }
-        if affectedKind == .mosaicStroke || affectedKind == .mosaicRectangle {
+        if affectedKinds.contains(.mosaicStroke) || affectedKinds.contains(.mosaicRectangle) {
             resetMosaicPreviewCaches()
         }
         selectedAnnotationIndex = selectedIndex.flatMap { annotations.indices.contains($0) ? $0 : nil }
@@ -6854,6 +7096,30 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
 
         return deleteAnnotation(at: deletionIndex)
+    }
+
+    private func deleteAnnotations(at indexes: [Int]) -> Bool {
+        let uniqueIndexes = Array(Set(indexes)).filter { annotations.indices.contains($0) }.sorted()
+        guard !uniqueIndexes.isEmpty else {
+            needsDisplay = true
+            return false
+        }
+
+        let entries = uniqueIndexes.map { DeletedAnnotationEntry(annotation: annotations[$0], index: $0) }
+        for index in uniqueIndexes.reversed() {
+            annotations.remove(at: index)
+        }
+
+        undoAnnotationEntries.append(.deleteMany(entries: entries))
+        selectedAnnotationIndex = nil
+        editingTextAnnotationIndex = nil
+        clearNumberEditing()
+        clearPendingTextEdit()
+        removeTextEditor()
+        clearRedoAnnotationHistory()
+        finishAnnotationHistoryMutation(affectedKinds: entries.map(\.annotation.kind), selectedIndex: nil)
+        needsDisplay = true
+        return true
     }
 
     private func deleteAnnotation(at deletionIndex: Int) -> Bool {
@@ -6905,6 +7171,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
         if optionsToolbarMode == .magnifier {
             return handleMagnifierOptionsClick(at: point, optionsRect: optionsRect)
+        }
+        if optionsToolbarMode == .eraser {
+            return handleEraserOptionsClick(at: point, optionsRect: optionsRect)
         }
         let layout = optionsToolbarLayout(in: optionsRect)
         let strokeWidths = SelectionToolbarState.strokeWidthValues(for: optionsToolbarMode)
@@ -7028,6 +7297,38 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
 
         return true
+    }
+
+    private func handleEraserOptionsClick(at point: NSPoint, optionsRect: NSRect) -> Bool {
+        let layout = optionsToolbarLayout(in: optionsRect)
+        if let eraserButton = layout.eraserPointMode,
+           optionButtonBackgroundRect(for: eraserButton).contains(point) {
+            eraserMode = .point
+            eraserRectangleStartPoint = nil
+            eraserRectangleCurrentPoint = nil
+            invalidateCursorRectsAndRefresh(at: point)
+            needsDisplay = true
+            return true
+        }
+        if let rectangleButton = layout.eraserRectangleMode,
+           optionButtonBackgroundRect(for: rectangleButton).contains(point) {
+            eraserMode = .rectangle
+            eraserRectangleStartPoint = nil
+            eraserRectangleCurrentPoint = nil
+            invalidateCursorRectsAndRefresh(at: point)
+            needsDisplay = true
+            return true
+        }
+        if let clearAllButton = layout.eraserClearAll,
+           optionButtonBackgroundRect(for: clearAllButton).contains(point) {
+            eraserRectangleStartPoint = nil
+            eraserRectangleCurrentPoint = nil
+            _ = deleteAnnotations(at: Array(annotations.indices))
+            invalidateCursorRectsAndRefresh(at: point)
+            needsDisplay = true
+            return true
+        }
+        return optionsRect.contains(point)
     }
 
     private func handleNumberOptionsClick(at point: NSPoint, optionsRect: NSRect) -> Bool {
@@ -8363,6 +8664,84 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             }
             return mosaicStrokeContains(point, stroke: stroke, hitOutset: max(8, annotation.style.strokeWidth / 2 + 4))
         }
+    }
+
+    private var eraserRectanglePreviewRect: NSRect? {
+        guard let start = eraserRectangleStartPoint, let current = eraserRectangleCurrentPoint else {
+            return nil
+        }
+        return NSRect(
+            x: min(start.x, current.x),
+            y: min(start.y, current.y),
+            width: abs(current.x - start.x),
+            height: abs(current.y - start.y)
+        ).standardized
+    }
+
+    private func commitEraserRectangle() {
+        guard let rect = eraserRectanglePreviewRect, rect.width >= 3, rect.height >= 3 else {
+            needsDisplay = true
+            return
+        }
+
+        let indexes = annotations.indices.filter { index in
+            eraserRectangleIntersects(rect, annotation: annotations[index])
+        }
+        _ = deleteAnnotations(at: indexes)
+    }
+
+    private func eraserRectangleIntersects(_ rect: NSRect, annotation: CaptureAnnotation) -> Bool {
+        guard let bounds = eraserRectangleBounds(for: annotation) else {
+            return false
+        }
+        return rect.intersects(bounds)
+    }
+
+    private func eraserRectangleBounds(for annotation: CaptureAnnotation) -> NSRect? {
+        switch annotation.kind {
+        case .rectangle, .ellipse, .text, .numberSequence, .magnifier, .mosaicRectangle:
+            return overlayRect(fromLocalAnnotationRect: annotation.rect).standardized.insetBy(dx: -6, dy: -6)
+        case .arrowLine:
+            let fallback = eraserFallbackBounds(for: annotation)
+            guard let line = overlayArrowLine(fromLocalArrowLine: annotation.arrowLine) else {
+                return fallback
+            }
+            return eraserStrokeBounds(line.boundingRect, annotation: annotation, fallback: fallback)
+        case .brush:
+            let fallback = eraserFallbackBounds(for: annotation)
+            guard let path = overlayBrushPath(fromLocalBrushPath: annotation.brushPath) else {
+                return fallback
+            }
+            return eraserStrokeBounds(path.boundingRect, annotation: annotation, fallback: fallback)
+        case .marker:
+            let fallback = eraserFallbackBounds(for: annotation)
+            guard let line = overlayMarkerLine(fromLocalMarkerLine: annotation.markerLine) else {
+                return fallback
+            }
+            return eraserStrokeBounds(line.boundingRect, annotation: annotation, fallback: fallback)
+        case .mosaicStroke:
+            let fallback = eraserFallbackBounds(for: annotation)
+            guard let stroke = overlayMosaicStroke(fromLocalMosaicStroke: annotation.mosaicStroke) else {
+                return fallback
+            }
+            return eraserStrokeBounds(stroke.boundingRect, annotation: annotation, fallback: fallback)
+        }
+    }
+
+    private func eraserFallbackBounds(for annotation: CaptureAnnotation) -> NSRect {
+        let padding = max(8, annotation.style.strokeWidth / 2 + 6)
+        return overlayRect(fromLocalAnnotationRect: annotation.rect)
+            .standardized
+            .insetBy(dx: -padding, dy: -padding)
+    }
+
+    private func eraserStrokeBounds(_ rect: NSRect, annotation: CaptureAnnotation, fallback: NSRect) -> NSRect {
+        let bounds = rect.standardized
+        if bounds.isEmpty {
+            return fallback
+        }
+        let padding = max(8, annotation.style.strokeWidth / 2 + 6)
+        return bounds.insetBy(dx: -padding, dy: -padding)
     }
 
     private func annotationBorderContains(_ point: NSPoint, for annotation: CaptureAnnotation) -> Bool {
@@ -9861,6 +10240,23 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         } else if SelectionToolbarState.annotationKindSupportsGeometryEditing(draftAnnotation.kind) {
             drawResizeHandles(for: overlayRect(fromLocalAnnotationRect: draftAnnotation.rect), kind: draftAnnotation.kind)
         }
+    }
+
+    private func drawEraserRectanglePreview() {
+        guard eraserMode == .rectangle,
+              interactionMode == .drawingEraserRectangle,
+              let rect = eraserRectanglePreviewRect,
+              rect.width >= 1,
+              rect.height >= 1
+        else {
+            return
+        }
+
+        NSColor.systemBlue.setStroke()
+        let path = NSBezierPath(rect: rect)
+        path.lineWidth = 2
+        path.setLineDash([6, 4], count: 2, phase: 0)
+        path.stroke()
     }
 
     private func drawMosaicRectangleDraftBorder(_ annotation: CaptureAnnotation) {
@@ -11594,12 +11990,42 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             drawNumberOptions(in: optionsRect)
         case .magnifier:
             drawMagnifierOptions(in: optionsRect)
+        case .eraser:
+            drawEraserOptions(in: optionsRect)
         }
         if SelectionToolbarState.showsStrokeStyleField(for: optionsToolbarMode) {
             drawStrokeStyleField(in: optionsRect)
         }
-        if optionsToolbarMode != .mosaic {
+        if optionsToolbarMode != .mosaic && optionsToolbarMode != .eraser {
             drawColorSwatches(in: optionsRect)
+        }
+    }
+
+    private func drawEraserOptions(in optionsRect: NSRect) {
+        let layout = optionsToolbarLayout(in: optionsRect)
+        if let eraserButton = layout.eraserPointMode {
+            drawToolbarButton(
+                eraserButton,
+                symbol: "toolbar-eraser-tool",
+                selected: eraserMode == .point,
+                enabled: true
+            )
+        }
+        if let rectangleButton = layout.eraserRectangleMode {
+            drawToolbarButton(
+                rectangleButton,
+                symbol: "toolbar-screenshot",
+                selected: eraserMode == .rectangle,
+                enabled: true
+            )
+        }
+        if let clearAllButton = layout.eraserClearAll {
+            drawToolbarButton(
+                clearAllButton,
+                symbol: "toolbar-trash",
+                selected: false,
+                enabled: true
+            )
         }
     }
 
@@ -11666,6 +12092,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         case .marker:
             if let lastStrokeWidth = layout.strokeWidths.last, let firstSwatchMinX {
                 separatorXs.append(lastStrokeWidth.maxX + (firstSwatchMinX - lastStrokeWidth.maxX) / 2)
+            }
+        case .eraser:
+            if let separator = layout.eraserClearAllSeparator {
+                separatorXs.append(separator.minX)
             }
         case .mosaic:
             break
@@ -13110,7 +13540,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         case .marker:
             return "toolbar-highlighter-tool"
         case .eyedropper:
-            return "toolbar-eyedropper"
+            return "toolbar-straw-ranging"
         case .mosaic:
             return "toolbar-masaike2"
         case .text:
@@ -13252,6 +13682,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private var optionsToolbarMode: SelectionToolbarState.OptionsToolbarMode {
+        if isEraserToolActive {
+            return .eraser
+        }
+
         if isTextToolActive {
             return .text
         }
@@ -13290,20 +13724,49 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     private var optionsToolbarRect: NSRect? {
         guard
-            SelectionToolbarState.shouldShowOptionsToolbar(isPrimaryShapeToolActive: isShapeToolActive || isTextToolActive || isNumberToolActive || isMagnifierToolActive),
+            SelectionToolbarState.shouldShowOptionsToolbar(isPrimaryShapeToolActive: isShapeToolActive || isTextToolActive || isNumberToolActive || isMagnifierToolActive || isEraserToolActive),
             let selectionRect,
             let toolbar = mainToolbarRect(for: selectionRect)
         else {
             return nil
         }
 
-        return toolbarRect(
-            size: NSSize(
-                width: SelectionToolbarState.optionsToolbarWidth(paletteCount: visiblePaletteCount, mode: optionsToolbarMode),
-                height: SelectionToolbarState.optionsToolbarHeight(paletteCount: visiblePaletteCount, mode: optionsToolbarMode)
-            ),
-            anchoredTo: toolbar
+        let optionsSize = NSSize(
+            width: SelectionToolbarState.optionsToolbarWidth(paletteCount: visiblePaletteCount, mode: optionsToolbarMode),
+            height: SelectionToolbarState.optionsToolbarHeight(paletteCount: visiblePaletteCount, mode: optionsToolbarMode)
         )
+        if optionsToolbarMode == .eraser,
+           let eraserButton = toolbarButtonRects(in: toolbar).first(where: { $0.0 == .eraser })?.1 {
+            return eraserOptionsToolbarRect(size: optionsSize, anchoredTo: eraserButton)
+        }
+
+        return toolbarRect(size: optionsSize, anchoredTo: toolbar)
+    }
+
+    private func eraserOptionsToolbarRect(size: NSSize, anchoredTo anchor: NSRect) -> NSRect {
+        let gap: CGFloat = 8
+        let safeBounds = safeLayoutBounds.insetBy(dx: gap, dy: gap)
+        let below = NSRect(
+            x: anchor.midX - size.width / 2,
+            y: anchor.minY - gap - size.height,
+            width: size.width,
+            height: size.height
+        )
+        if safeBounds.contains(below) {
+            return below
+        }
+
+        let above = NSRect(
+            x: anchor.midX - size.width / 2,
+            y: anchor.maxY + gap,
+            width: size.width,
+            height: size.height
+        )
+        if safeBounds.contains(above) {
+            return above
+        }
+
+        return clamp(rect: below, inside: safeBounds)
     }
 
     private var cornerRadiusPanelRect: NSRect? {

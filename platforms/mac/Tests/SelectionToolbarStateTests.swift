@@ -257,15 +257,18 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertLessThan(markerRect.midX, eyedropperRect.midX)
         XCTAssertLessThan(eyedropperRect.midX, mosaicRect.midX)
         XCTAssertEqual(eyedropperRect.minX - markerRect.minX, mosaicRect.minX - eyedropperRect.minX, accuracy: 0.5)
-        XCTAssertEqual(window.test_symbolName(for: .eyedropper), "toolbar-eyedropper")
-        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "eyedropper"), "取色/测距")
+        XCTAssertEqual(window.test_symbolName(for: .eyedropper), "toolbar-straw-ranging")
+        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "eyedropper"), "取色 ｜ 测距")
     }
 
-    func testEyedropperResourceIsBundledAndReadableByMacTarget() {
-        let url = Bundle.main.url(forResource: "eyedropper", withExtension: "svg")
+    func testEyedropperResourcesAreBundledAndReadableByMacTarget() {
+        let originalUrl = Bundle.main.url(forResource: "eyedropper", withExtension: "svg")
+        let toolbarUrl = Bundle.main.url(forResource: "straw-ranging", withExtension: "svg")
 
-        XCTAssertNotNil(url)
-        XCTAssertGreaterThan((try? Data(contentsOf: XCTUnwrap(url)).count) ?? 0, 0)
+        XCTAssertNotNil(originalUrl)
+        XCTAssertGreaterThan((try? Data(contentsOf: XCTUnwrap(originalUrl)).count) ?? 0, 0)
+        XCTAssertNotNil(toolbarUrl)
+        XCTAssertGreaterThan((try? Data(contentsOf: XCTUnwrap(toolbarUrl)).count) ?? 0, 0)
     }
 
     func testClickingEyedropperTogglesExplicitModeAndSelectedState() {
@@ -2440,7 +2443,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_mosaicRedactionValue(for: .pixelMosaic), 8)
     }
 
-    func testOverlayWindowActivatesEraserToolWithoutOptionsToolbar() throws {
+    func testOverlayWindowActivatesEraserToolWithPointModeOptionsToolbar() throws {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 260, height: 160))
 
@@ -2450,12 +2453,245 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         XCTAssertTrue(window.test_isEraserToolActive)
         XCTAssertTrue(window.test_eraserToolbarButtonIsSelected)
-        XCTAssertNil(window.test_optionsToolbarMode)
+        XCTAssertEqual(window.test_optionsToolbarMode, .eraser)
+        XCTAssertNotNil(window.test_eraserPointOptionPoint())
+        XCTAssertNotNil(window.test_eraserRectangleOptionPoint())
+        XCTAssertNotNil(window.test_eraserClearAllOptionPoint())
+        XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: 160, y: 160)), .eraser)
         XCTAssertFalse(window.test_isEyedropperToolActive)
         XCTAssertFalse(window.test_isTextToolActive)
         XCTAssertFalse(window.test_isNumberToolActive)
         XCTAssertFalse(window.test_isMagnifierToolActive)
         XCTAssertNil(window.test_currentShapeKind)
+    }
+
+    func testEraserToolClearsAndSuppressesColorSampler() {
+        let background = solidImage(size: NSSize(width: 260, height: 160), color: NSColor(srgbRed: 0.2, green: 0.4, blue: 0.8, alpha: 1))
+        let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 40, y: 30, width: 160, height: 100))
+
+        window.test_updateColorSampler(at: NSPoint(x: 80, y: 80))
+        XCTAssertTrue(window.test_isColorSamplerVisible)
+        XCTAssertNotNil(window.test_sampledColorHex)
+
+        window.test_activateEraserTool()
+        XCTAssertFalse(window.test_isColorSamplerVisible)
+        XCTAssertNil(window.test_sampledColorHex)
+
+        window.test_mouseMoved(to: NSPoint(x: 90, y: 90))
+        window.test_updateColorSampler(at: NSPoint(x: 90, y: 90))
+        XCTAssertFalse(window.test_isColorSamplerVisible)
+        XCTAssertNil(window.test_sampledColorHex)
+    }
+
+    func testEraserOptionsSwitchRectangleModeAndCursor() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 260, height: 160))
+        window.test_activateEraserTool()
+
+        let rectanglePoint = try XCTUnwrap(window.test_eraserRectangleOptionPoint())
+        window.test_mouseDown(at: rectanglePoint)
+        window.test_mouseUp(at: rectanglePoint)
+
+        XCTAssertEqual(window.test_optionsToolbarMode, .eraser)
+        XCTAssertTrue(window.test_isEraserRectangleModeActive)
+        XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: 160, y: 160)), .crosshair)
+
+        let pointEraserPoint = try XCTUnwrap(window.test_eraserPointOptionPoint())
+        window.test_mouseDown(at: pointEraserPoint)
+        window.test_mouseUp(at: pointEraserPoint)
+
+        XCTAssertFalse(window.test_isEraserRectangleModeActive)
+        XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: 160, y: 160)), .eraser)
+    }
+
+    func testEraserOptionsToolbarTipsFollowOptionButtons() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 260, height: 160))
+        window.test_activateEraserTool()
+
+        window.test_mouseMoved(to: try XCTUnwrap(window.test_eraserPointOptionPoint()))
+        XCTAssertEqual(window.test_hoveredTooltipText, "橡皮擦")
+
+        window.test_mouseMoved(to: try XCTUnwrap(window.test_eraserRectangleOptionPoint()))
+        XCTAssertEqual(window.test_hoveredTooltipText, "矩形擦除")
+
+        window.test_mouseMoved(to: try XCTUnwrap(window.test_eraserClearAllOptionPoint()))
+        XCTAssertEqual(window.test_hoveredTooltipText, "清除所有")
+    }
+
+    func testEraserOptionsToolbarIsCompactAndAnchoredUnderEraserButton() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 260, height: 160))
+        window.test_activateEraserTool()
+
+        let mainEraserRect = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .eraser))
+        let optionsRect = try XCTUnwrap(window.test_optionsToolbarRect)
+        let pointRect = try XCTUnwrap(window.test_eraserPointOptionRect)
+        let rectangleRect = try XCTUnwrap(window.test_eraserRectangleOptionRect)
+        let separatorRect = try XCTUnwrap(window.test_eraserClearAllSeparatorRect)
+        let clearAllRect = try XCTUnwrap(window.test_eraserClearAllOptionRect)
+
+        XCTAssertEqual(optionsRect.height, 28)
+        XCTAssertEqual(pointRect.size, mainEraserRect.size)
+        XCTAssertEqual(rectangleRect.size, mainEraserRect.size)
+        XCTAssertEqual(clearAllRect.size, mainEraserRect.size)
+        XCTAssertLessThan(rectangleRect.maxX, separatorRect.minX)
+        XCTAssertLessThan(separatorRect.maxX, clearAllRect.minX)
+        XCTAssertEqual(optionsRect.maxX - clearAllRect.maxX, 8, accuracy: 0.5)
+        XCTAssertEqual(optionsRect.midX, mainEraserRect.midX, accuracy: 0.5)
+        XCTAssertLessThan(optionsRect.maxY, mainEraserRect.minY)
+    }
+
+    func testEraserClearAllDeletesAllAnnotationsAndSupportsUndoRedo() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_setAnnotations([
+            CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 35, y: 45, width: 60, height: 60), style: CaptureAnnotationStyle()),
+            CaptureAnnotation(
+                kind: .mosaicStroke,
+                rect: NSRect(x: 80, y: 80, width: 50, height: 20),
+                style: CaptureAnnotationStyle(),
+                mosaicStroke: CaptureMosaicStroke(points: [
+                    NSPoint(x: 80, y: 80),
+                    NSPoint(x: 130, y: 100),
+                ]),
+                mosaicRedaction: CaptureMosaicRedaction(type: .pixelMosaic, value: 8)
+            ),
+            CaptureAnnotation(
+                kind: .arrowLine,
+                rect: NSRect(x: 20, y: 20, width: 130, height: 70),
+                style: CaptureAnnotationStyle(),
+                arrowLine: CaptureArrowLine(
+                    start: NSPoint(x: 20, y: 20),
+                    end: NSPoint(x: 150, y: 90),
+                    control: NSPoint(x: 85, y: 55),
+                    startArrowType: .none,
+                    endArrowType: .normal
+                )
+            ),
+        ])
+        window.test_activateEraserTool()
+
+        let clearAllPoint = try XCTUnwrap(window.test_eraserClearAllOptionPoint())
+        window.test_mouseDown(at: clearAllPoint)
+        window.test_mouseUp(at: clearAllPoint)
+
+        XCTAssertEqual(window.test_annotationCount, 0)
+
+        window.test_keyDown(keyCode: 6, charactersIgnoringModifiers: "z", modifierFlags: [.command])
+        XCTAssertEqual(window.test_annotationCount, 3)
+
+        window.test_keyDown(keyCode: 6, charactersIgnoringModifiers: "z", modifierFlags: [.command, .shift])
+        XCTAssertEqual(window.test_annotationCount, 0)
+    }
+
+    func testEraserRectangleDragShowsBlueDashedPreview() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateEraserTool()
+        window.test_mouseDown(at: try XCTUnwrap(window.test_eraserRectangleOptionPoint()))
+        window.test_mouseUp(at: try XCTUnwrap(window.test_eraserRectangleOptionPoint()))
+
+        let start = NSPoint(x: 150, y: 150)
+        let end = NSPoint(x: 240, y: 205)
+        window.test_mouseDown(at: start)
+        window.test_mouseDragged(to: end)
+
+        XCTAssertEqual(window.test_eraserRectanglePreviewRect, NSRect(x: 150, y: 150, width: 90, height: 55))
+        let image = try XCTUnwrap(window.test_renderedOverlayImage())
+        let previewProbe = NSRect(x: start.x - 2, y: start.y - 2, width: 94, height: 59)
+        XCTAssertNotNil(try firstPixel(in: image, rect: previewProbe) { pixel in
+            pixel.red < 90 && pixel.green > 90 && pixel.blue > 180 && pixel.alpha > 120
+        })
+    }
+
+    func testEraserRectangleDeletesIntersectingAnnotationsAndSupportsUndoRedo() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([
+            CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 35, y: 45, width: 60, height: 60), style: CaptureAnnotationStyle()),
+            CaptureAnnotation(kind: .ellipse, rect: NSRect(x: 120, y: 75, width: 70, height: 60), style: CaptureAnnotationStyle()),
+            CaptureAnnotation(kind: .text, rect: NSRect(x: 210, y: 125, width: 64, height: 36), style: CaptureAnnotationStyle(), text: "keep")
+        ])
+        window.test_activateEraserTool()
+        window.test_mouseDown(at: try XCTUnwrap(window.test_eraserRectangleOptionPoint()))
+        window.test_mouseUp(at: try XCTUnwrap(window.test_eraserRectangleOptionPoint()))
+
+        window.test_drag(from: NSPoint(x: 120, y: 130), to: NSPoint(x: 300, y: 225))
+
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(window.test_annotation(at: 0)?.kind, .text)
+
+        window.test_keyDown(keyCode: 6, charactersIgnoringModifiers: "z", modifierFlags: [.command])
+        XCTAssertEqual(window.test_annotationCount, 3)
+        XCTAssertEqual(window.test_annotation(at: 0)?.kind, .rectangle)
+        XCTAssertEqual(window.test_annotation(at: 1)?.kind, .ellipse)
+        XCTAssertEqual(window.test_annotation(at: 2)?.kind, .text)
+
+        window.test_keyDown(keyCode: 6, charactersIgnoringModifiers: "z", modifierFlags: [.command, .shift])
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(window.test_annotation(at: 0)?.kind, .text)
+    }
+
+    func testEraserRectangleDeletesLineAndMosaicAnnotations() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        var wideStyle = CaptureAnnotationStyle()
+        wideStyle.strokeWidth = 12
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([
+            CaptureAnnotation(
+                kind: .arrowLine,
+                rect: NSRect(x: 30, y: 40, width: 110, height: 80),
+                style: wideStyle,
+                arrowLine: CaptureArrowLine(
+                    start: NSPoint(x: 30, y: 40),
+                    end: NSPoint(x: 140, y: 80),
+                    control: NSPoint(x: 80, y: 120),
+                    startArrowType: .none,
+                    endArrowType: .normal
+                )
+            ),
+            CaptureAnnotation(
+                kind: .brush,
+                rect: NSRect(x: 45, y: 95, width: 105, height: 45),
+                style: wideStyle,
+                brushPath: CaptureBrushPath(points: [
+                    NSPoint(x: 45, y: 95),
+                    NSPoint(x: 90, y: 130),
+                    NSPoint(x: 150, y: 140),
+                ])
+            ),
+            CaptureAnnotation(
+                kind: .mosaicStroke,
+                rect: NSRect(x: 160, y: 50, width: 90, height: 80),
+                style: wideStyle,
+                mosaicStroke: CaptureMosaicStroke(points: [
+                    NSPoint(x: 160, y: 50),
+                    NSPoint(x: 190, y: 95),
+                    NSPoint(x: 250, y: 130),
+                ]),
+                mosaicRedaction: CaptureMosaicRedaction(type: .pixelMosaic, value: 8)
+            ),
+            CaptureAnnotation(
+                kind: .mosaicRectangle,
+                rect: NSRect(x: 245, y: 145, width: 45, height: 40),
+                style: CaptureAnnotationStyle(),
+                mosaicRedaction: CaptureMosaicRedaction(type: .pixelMosaic, value: 8)
+            ),
+            CaptureAnnotation(kind: .text, rect: NSRect(x: 285, y: 5, width: 8, height: 8), style: CaptureAnnotationStyle(), text: "keep")
+        ])
+        window.test_activateEraserTool()
+        window.test_mouseDown(at: try XCTUnwrap(window.test_eraserRectangleOptionPoint()))
+        window.test_mouseUp(at: try XCTUnwrap(window.test_eraserRectangleOptionPoint()))
+
+        window.test_drag(from: NSPoint(x: 120, y: 130), to: NSPoint(x: 375, y: 285))
+
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(window.test_annotation(at: 0)?.kind, .text)
     }
 
     func testEraserClickDeletesRectangleAnnotation() throws {
@@ -7083,6 +7319,8 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "redo-enabled"), 0)
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "redo-disabled"), 0)
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "pencil-tool"), 2)
+        XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "straw-ranging"), 0)
+        XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "trash"), 3)
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "eyedropper"), 2)
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "copy-to-clipboard"), 2)
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "settings-more"), 2)
@@ -7104,10 +7342,15 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertFalse(svg.contains("#334CE6"))
     }
 
+    func testEraserClearAllToolbarIconIsBundled() {
+        XCTAssertNotNil(Bundle.main.url(forResource: "trash", withExtension: "svg"))
+    }
+
     func testCurrentColorToolbarIconsUseTemplateTint() {
         XCTAssertFalse(SelectionToolbarState.usesFixedColorToolbarIconResource("pencil-tool"))
         XCTAssertFalse(SelectionToolbarState.usesFixedColorToolbarIconResource("arrow"))
         XCTAssertFalse(SelectionToolbarState.usesFixedColorToolbarIconResource("mosaic-tool"))
+        XCTAssertFalse(SelectionToolbarState.usesFixedColorToolbarIconResource("straw-ranging"))
         XCTAssertTrue(SelectionToolbarState.usesFixedColorToolbarIconResource("undo-enabled"))
     }
 
@@ -7115,6 +7358,16 @@ final class SelectionToolbarStateTests: XCTestCase {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
 
         XCTAssertEqual(window.test_symbolName(for: .mosaic), "toolbar-masaike2")
+    }
+
+    func testEraserCursorUsesSameResourceAsToolbarButton() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let toolbarSymbol = try XCTUnwrap(window.test_symbolName(for: .eraser))
+        let toolbarResource = toolbarSymbol.replacingOccurrences(of: "toolbar-", with: "")
+
+        XCTAssertEqual(toolbarResource, "eraser-tool")
+        XCTAssertEqual(SelectionToolbarState.eraserCursorIconResourceName, toolbarResource)
+        XCTAssertNotNil(Bundle.main.url(forResource: toolbarResource, withExtension: "svg"))
     }
 
     func testMosaicPreviewProgressMapsRangeEndpoints() {
@@ -8135,6 +8388,28 @@ final class SelectionToolbarStateTests: XCTestCase {
         let selectedBackgroundPixel = try XCTUnwrap(rgbaPixel(in: overlayImage, at: NSPoint(x: button.minX + 1, y: button.minY + 1)))
         let unselectedBackgroundPixel = try XCTUnwrap(rgbaPixel(in: overlayImage, at: NSPoint(x: unselectedButton.minX + 1, y: unselectedButton.minY + 1)))
 
+        XCTAssertGreaterThan(iconPixel.blue, iconPixel.red)
+        XCTAssertGreaterThan(iconPixel.blue, iconPixel.green)
+        XCTAssertLessThan(pixelDistance(selectedBackgroundPixel, unselectedBackgroundPixel), 8)
+    }
+
+    func testSelectedEyedropperToolbarIconIsBlueWithoutSelectedBackground() throws {
+        let image = solidImage(size: NSSize(width: 900, height: 520), color: .white)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+
+        let eyedropperPoint = try XCTUnwrap(window.test_mainToolbarButtonPoint(for: .eyedropper))
+        window.test_mouseDown(at: eyedropperPoint)
+        window.test_mouseUp(at: eyedropperPoint)
+
+        let button = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .eyedropper))
+        let unselectedButton = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .mosaic))
+        let overlayImage = try XCTUnwrap(window.test_renderedOverlayImage())
+        let iconPixel = try XCTUnwrap(firstBlueDominantPixel(in: overlayImage, rect: button))
+        let selectedBackgroundPixel = try XCTUnwrap(rgbaPixel(in: overlayImage, at: NSPoint(x: button.minX + 1, y: button.minY + 1)))
+        let unselectedBackgroundPixel = try XCTUnwrap(rgbaPixel(in: overlayImage, at: NSPoint(x: unselectedButton.minX + 1, y: unselectedButton.minY + 1)))
+
+        XCTAssertTrue(window.test_eyedropperToolbarButtonIsSelected)
         XCTAssertGreaterThan(iconPixel.blue, iconPixel.red)
         XCTAssertGreaterThan(iconPixel.blue, iconPixel.green)
         XCTAssertLessThan(pixelDistance(selectedBackgroundPixel, unselectedBackgroundPixel), 8)
@@ -9485,7 +9760,10 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "save"), "保存")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "copy"), "复制到剪切板")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "scroll"), "滚动截图")
-        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "eyedropper"), "取色/测距")
+        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "eyedropper"), "取色 ｜ 测距")
+        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "eraserPoint"), "橡皮擦")
+        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "eraserRectangle"), "矩形擦除")
+        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "eraserClearAll"), "清除所有")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "cornerStyle"), "直角/圆角切换")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "aspectRatioLockedOn"), "锁定长宽比(开)")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "aspectRatioLockedOff"), "锁定长宽比(关)")

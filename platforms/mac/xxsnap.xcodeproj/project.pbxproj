@@ -36,6 +36,8 @@
 		56462BFC968000298B727BC1 /* number-sequence.svg in Resources */ = {isa = PBXBuildFile; fileRef = 7B73F549F3FDCF8AF73E5868 /* number-sequence.svg */; };
 		569284AA817376C3F20348F1 /* WindowSelectionStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3617A169724914AB97DA76C4 /* WindowSelectionStateTests.swift */; };
 		576F043C01E6CBB1493C8100 /* eyedropper.svg in Resources */ = {isa = PBXBuildFile; fileRef = 30F8BFFDF14E4559FB86BF58 /* eyedropper.svg */; };
+		AA4100000000000000000001 /* straw-ranging.svg in Resources */ = {isa = PBXBuildFile; fileRef = AA4100000000000000000002 /* straw-ranging.svg */; };
+		AA4200000000000000000001 /* trash.svg in Resources */ = {isa = PBXBuildFile; fileRef = AA4200000000000000000002 /* trash.svg */; };
 		5A59D8B15DBEFA8A46BAC5D6 /* SelectionToolbarState.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE931250563980B3056AED56 /* SelectionToolbarState.swift */; };
 		5AD588EE52771BA51C173307 /* palette-tool.svg in Resources */ = {isa = PBXBuildFile; fileRef = 90511938797AF565EB5E63DF /* palette-tool.svg */; };
 		A1B2C3D4E5F60718293A4B5E /* stroke.svg in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B6E /* stroke.svg */; };
@@ -131,6 +133,8 @@
 		24BFA4790A577CD9B35EBC9C /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		2707D35D06AF1C4CB212F441 /* settings-more.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "settings-more.png"; sourceTree = "<group>"; };
 		30F8BFFDF14E4559FB86BF58 /* eyedropper.svg */ = {isa = PBXFileReference; path = eyedropper.svg; sourceTree = "<group>"; };
+		AA4100000000000000000002 /* straw-ranging.svg */ = {isa = PBXFileReference; path = "straw-ranging.svg"; sourceTree = "<group>"; };
+		AA4200000000000000000002 /* trash.svg */ = {isa = PBXFileReference; path = trash.svg; sourceTree = "<group>"; };
 		31142970D1AD9FA528A7EC7C /* scroll-capture.svg */ = {isa = PBXFileReference; path = "scroll-capture.svg"; sourceTree = "<group>"; };
 		3617A169724914AB97DA76C4 /* WindowSelectionStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowSelectionStateTests.swift; sourceTree = "<group>"; };
 		38AFFB5955898C995A84FFAA /* undo-disabled.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "undo-disabled.png"; sourceTree = "<group>"; };
@@ -333,6 +337,8 @@
 				3EA6D152633E6E31441322EA /* eraser-tool.png */,
 				B26783A4C11DFDC68390DE99 /* eraser-tool.svg */,
 				30F8BFFDF14E4559FB86BF58 /* eyedropper.svg */,
+				AA4100000000000000000002 /* straw-ranging.svg */,
+				AA4200000000000000000002 /* trash.svg */,
 				6569DD68B9D82807BFE9B8B4 /* highlighter-tool.png */,
 				DB0753FB16E984A9D3A9EC65 /* highlighter-tool.svg */,
 				FBEF0716BFD5842580A18284 /* masaike2.svg */,
@@ -483,6 +489,8 @@
 				8B88348E80AD052EBD21197B /* eraser-tool.png in Resources */,
 				875D73FF8B4029D231901AE2 /* eraser-tool.svg in Resources */,
 				576F043C01E6CBB1493C8100 /* eyedropper.svg in Resources */,
+				AA4100000000000000000001 /* straw-ranging.svg in Resources */,
+				AA4200000000000000000001 /* trash.svg in Resources */,
 				3B68E276F3F9D035C6BAC9CC /* highlighter-tool.png in Resources */,
 				512F956DF83061A47167C08B /* highlighter-tool.svg in Resources */,
 				D718076D391C3FF271311F18 /* masaike2.svg in Resources */,
