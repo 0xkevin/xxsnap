@@ -13,6 +13,7 @@ enum TestToolbarButton {
     case text
     case number
     case magnifier
+    case eraser
     case settings
 }
 
@@ -839,12 +840,24 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_activateMagnifierTool()
     }
 
+    func test_activateEraserTool() {
+        (contentView as? SelectionOverlayView)?.test_activateEraserTool()
+    }
+
     var test_numberMarkType: CaptureNumberMarkType {
         (contentView as? SelectionOverlayView)?.test_numberMarkType ?? .number
     }
 
     var test_isMagnifierToolActive: Bool {
         (contentView as? SelectionOverlayView)?.test_isMagnifierToolActive ?? false
+    }
+
+    var test_isEraserToolActive: Bool {
+        (contentView as? SelectionOverlayView)?.test_isEraserToolActive ?? false
+    }
+
+    var test_eraserToolbarButtonIsSelected: Bool {
+        (contentView as? SelectionOverlayView)?.test_eraserToolbarButtonIsSelected ?? false
     }
 
     var test_currentMagnifierShape: CaptureMagnifierShape {
@@ -1562,6 +1575,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         case rotatingMosaicRectangle
         case resizingSelection
         case placingNumberMark
+        case erasingAnnotation
     }
 
     private enum ToolbarButton {
@@ -1667,7 +1681,13 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private var brushDraftPoints: [NSPoint] = []
     private var mosaicDraftPoints: [NSPoint] = []
     private var annotations: [CaptureAnnotation] = []
-    private var redoAnnotations: [CaptureAnnotation] = []
+    private enum AnnotationHistoryEntry {
+        case add(annotation: CaptureAnnotation, index: Int)
+        case delete(annotation: CaptureAnnotation, index: Int)
+    }
+
+    private var undoAnnotationEntries: [AnnotationHistoryEntry] = []
+    private var redoAnnotationEntries: [AnnotationHistoryEntry] = []
     private var selectedAnnotationIndex: Int?
     private var selectedNumberAnnotationCanFollowTypeDropdown = false
     private var revealedNumberControlsIndex: Int?
@@ -1729,6 +1749,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private var isTextToolActive = false
     private var isNumberToolActive = false
     private var isMagnifierToolActive = false
+    private var isEraserToolActive = false
     private var currentMagnifierShape: CaptureMagnifierShape = .rectangle
     private var currentMagnifierZoom: CGFloat = 2
     private var currentNumberMarkType: CaptureNumberMarkType = .number
@@ -2130,7 +2151,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             selectionStartPoint = point
             selectionCurrentPoint = point
             updateColorSampler(at: point)
-        case .annotating, .drawingShape, .draggingToolbar, .draggingCornerRadius, .draggingMosaicValue, .movingShape, .movingSelection, .resizingShape, .resizingArrowLine, .resizingMarkerLine, .rotatingBrush, .rotatingMosaicRectangle, .resizingSelection, .placingNumberMark:
+        case .annotating, .drawingShape, .draggingToolbar, .draggingCornerRadius, .draggingMosaicValue, .movingShape, .movingSelection, .resizingShape, .resizingArrowLine, .resizingMarkerLine, .rotatingBrush, .rotatingMosaicRectangle, .resizingSelection, .placingNumberMark, .erasingAnnotation:
             handleAnnotatingMouseDown(at: point, clickCount: event.clickCount)
         }
 
@@ -2240,7 +2261,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             updateRotatingMosaicRectangle(to: point)
         case .resizingSelection:
             updateResizingSelection(to: point)
-        case .placingNumberMark:
+        case .placingNumberMark, .erasingAnnotation:
             break
         }
 
@@ -2550,6 +2571,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             appendMosaicDraftPointIfNeeded(draftPoint, modifierFlags: event.modifierFlags)
             if let draft = draftAnnotation, isUsableDraftAnnotation(draft) {
                 annotations.append(draft)
+                recordAnnotationAdd(at: annotations.index(before: annotations.endIndex))
                 selectedAnnotationIndex = draft.kind == .brush || draft.kind == .mosaicStroke ? nil : annotations.indices.last
                 currentStyle = draft.style
                 if draft.kind == .magnifier {
@@ -2559,7 +2581,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                     activeShapeKind = draft.kind
                 }
                 rememberCurrentStyleForActiveTool()
-                redoAnnotations.removeAll()
+                clearRedoAnnotationHistory()
                 if draft.kind == .mosaicStroke || draft.kind == .mosaicRectangle {
                     resetMosaicRedactionPreviewCaches()
                 }
@@ -2615,7 +2637,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         case .resizingSelection:
             commitSelectionResize()
             interactionMode = .annotating
-        case .placingNumberMark:
+        case .placingNumberMark, .erasingAnnotation:
             interactionMode = .annotating
         case .annotating:
             if let pendingTextEditAnnotationIndex {
@@ -3519,6 +3541,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return
         }
 
+        if handleEraserMouseDown(at: point) {
+            return
+        }
+
         if isNumberToolActive, handleNumberToolMouseDown(at: point, clickCount: clickCount) {
             return
         }
@@ -3680,6 +3706,21 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         needsDisplay = true
     }
 
+    private func handleEraserMouseDown(at point: NSPoint) -> Bool {
+        guard isEraserToolActive, !isToolbarOrPanelPoint(point) else {
+            return false
+        }
+
+        commitCurrentTextEdit()
+        commitNumberEditingIfNeeded()
+        if let index = eraserAnnotationIndex(at: point) {
+            _ = deleteAnnotation(at: index)
+        }
+        interactionMode = .erasingAnnotation
+        needsDisplay = true
+        return true
+    }
+
     private func handleNumberToolMouseDown(at point: NSPoint, clickCount: Int) -> Bool {
         guard lockedSelectionRect != nil, !isToolbarOrPanelPoint(point) else {
             return false
@@ -3736,12 +3777,13 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         annotation.numberSequenceIndex = currentNumberMarkType == .number ? nextNumberSequenceIndex() : nil
         annotation.numberSequenceIsManual = currentNumberMarkType == .number && isNumberSequenceManualModeActive()
         annotations.append(annotation)
+        recordAnnotationAdd(at: annotations.index(before: annotations.endIndex))
         selectedAnnotationIndex = annotations.indices.last
         interactionMode = .placingNumberMark
         revealedNumberControlsIndex = nil
         selectedNumberAnnotationCanFollowTypeDropdown = true
         numberStyle = style
-        redoAnnotations.removeAll()
+        clearRedoAnnotationHistory()
         invalidateCursorRectsAndRefresh(at: point)
         needsDisplay = true
     }
@@ -3816,7 +3858,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         let value = annotations[index].numberSequenceIndex ?? 1
         annotations[index].numberSequenceIndex = min(999, max(1, value + delta))
         selectedAnnotationIndex = index
-        redoAnnotations.removeAll()
+        clearRedoAnnotationHistory()
         needsDisplay = true
     }
 
@@ -3829,7 +3871,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
         annotations[index].numberSequenceIndex = 1
         selectedAnnotationIndex = index
-        redoAnnotations.removeAll()
+        clearRedoAnnotationHistory()
         needsDisplay = true
     }
 
@@ -3870,7 +3912,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             }
         }
         clearNumberEditing()
-        redoAnnotations.removeAll()
+        clearRedoAnnotationHistory()
         needsDisplay = true
     }
 
@@ -3988,7 +4030,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 : clampedText.count
             markNumberSequenceManualMode()
             annotations[editingNumberAnnotationIndex].numberSequenceIndex = clamped
-            redoAnnotations.removeAll()
+            clearRedoAnnotationHistory()
             showNumberCaretNow()
         }
         return true
@@ -4143,7 +4185,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             text: ""
         )
         annotations.append(annotation)
-        redoAnnotations.removeAll()
+        recordAnnotationAdd(at: annotations.index(before: annotations.endIndex))
+        clearRedoAnnotationHistory()
         beginTextEditing(at: annotations.index(before: annotations.endIndex), draftCreated: true)
         NSLog(
             "xxsnap text draft created index=%ld rect=(%.0f, %.0f, %.0f, %.0f)",
@@ -4720,7 +4763,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 from: clamp(rect: overlayRect, inside: lockedSelectionRect.standardized)
             )
         }
-        redoAnnotations.removeAll()
+        clearRedoAnnotationHistory()
         layoutTextEditorForCurrentAnnotation()
         needsDisplay = true
     }
@@ -4745,7 +4788,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         textDraftCreatedDuringCurrentEdit = false
         textEditor?.alphaValue = 0
         textEditor?.isEditable = false
-        redoAnnotations.removeAll()
+        clearRedoAnnotationHistory()
         needsDisplay = true
         return true
     }
@@ -4773,7 +4816,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         textDraftCreatedDuringCurrentEdit = false
         clearPendingTextEdit()
         removeTextEditor(restoreWindowLevel: restoreWindowLevel)
-        redoAnnotations.removeAll()
+        clearRedoAnnotationHistory()
         needsDisplay = true
     }
 
@@ -4792,7 +4835,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         clearPendingTextEdit()
         removeTextEditor()
         selectedAnnotationIndex = nil
-        redoAnnotations.removeAll()
+        clearRedoAnnotationHistory()
     }
 
     private func clearPendingTextEdit() {
@@ -5059,6 +5102,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             showsCornerRadiusPanel = false
             showsStartArrowTypeMenu = false
             showsEndArrowTypeMenu = false
+        case .eraser:
+            toggleEraserTool()
         case .undo:
             undoLastAnnotation()
         case .redo:
@@ -5069,7 +5114,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             finish(action: .save)
         case .cancel:
             selectionDidFinish?(nil)
-        case .pin, .eraser, .scroll, .settings:
+        case .pin, .scroll, .settings:
             showPlaceholder(for: button)
         }
 
@@ -5107,6 +5152,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
         rememberCurrentStyleForActiveTool()
         isEyedropperToolActive = true
+        isEraserToolActive = false
         clearEyedropperMeasurement()
         isTextToolActive = false
         isNumberToolActive = false
@@ -5124,6 +5170,50 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         brushDraftPoints.removeAll()
         mosaicDraftPoints.removeAll()
         invalidateCursorRectsAndRefresh()
+    }
+
+    private func toggleEraserTool() {
+        commitCurrentTextEdit()
+        clearPendingTextEdit()
+        closeTextDropdown()
+        closeMagnifierZoomDropdown()
+        if isEraserToolActive {
+            isEraserToolActive = false
+            selectedAnnotationIndex = nil
+            invalidateCursorRectsAndRefresh()
+            needsDisplay = true
+            return
+        }
+
+        activateEraserTool()
+    }
+
+    private func activateEraserTool() {
+        commitCurrentTextEdit()
+        clearPendingTextEdit()
+        closeTextDropdown()
+        closeMagnifierZoomDropdown()
+        rememberCurrentStyleForActiveTool()
+        isEraserToolActive = true
+        isShapeToolActive = false
+        activeShapeKind = nil
+        isTextToolActive = false
+        isNumberToolActive = false
+        isMagnifierToolActive = false
+        isEyedropperToolActive = false
+        activeNumberDropdown = false
+        clearEyedropperMeasurement()
+        selectedAnnotationIndex = nil
+        showsCornerRadiusPanel = false
+        showsStrokeStyleMenu = false
+        showsStartArrowTypeMenu = false
+        showsEndArrowTypeMenu = false
+        shapeStartPoint = nil
+        shapeCurrentPoint = nil
+        brushDraftPoints.removeAll()
+        mosaicDraftPoints.removeAll()
+        invalidateCursorRectsAndRefresh()
+        needsDisplay = true
     }
 
     private func toggleTextTool() {
@@ -5149,6 +5239,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         closeMagnifierZoomDropdown()
         rememberCurrentStyleForActiveTool()
         isTextToolActive = true
+        isEraserToolActive = false
         isEyedropperToolActive = false
         clearEyedropperMeasurement()
         isNumberToolActive = false
@@ -5205,6 +5296,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         closeMagnifierZoomDropdown()
         rememberCurrentStyleForActiveTool()
         isNumberToolActive = true
+        isEraserToolActive = false
         isTextToolActive = false
         isEyedropperToolActive = false
         clearEyedropperMeasurement()
@@ -5255,6 +5347,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         closeMagnifierZoomDropdown()
         rememberCurrentStyleForActiveTool()
         isMagnifierToolActive = true
+        isEraserToolActive = false
         isTextToolActive = false
         isNumberToolActive = false
         isEyedropperToolActive = false
@@ -5283,6 +5376,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         closeTextDropdown()
         closeMagnifierZoomDropdown()
         rememberCurrentStyleForActiveTool()
+        isEraserToolActive = false
         isEyedropperToolActive = false
         clearEyedropperMeasurement()
         isTextToolActive = false
@@ -5356,6 +5450,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         closeTextDropdown()
         closeMagnifierZoomDropdown()
         rememberCurrentStyleForActiveTool()
+        isEraserToolActive = false
         isEyedropperToolActive = false
         clearEyedropperMeasurement()
         isTextToolActive = false
@@ -5471,6 +5566,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         activateMagnifierTool()
     }
 
+    func test_activateEraserTool() {
+        activateEraserTool()
+    }
+
     func test_toggleShapeTool(_ shape: CaptureAnnotationKind) {
         toggleShapeTool(shape)
     }
@@ -5487,7 +5586,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     func test_setAnnotations(_ newAnnotations: [CaptureAnnotation]) {
         annotations = newAnnotations
-        redoAnnotations.removeAll()
+        clearRedoAnnotationHistory()
         selectedAnnotationIndex = nil
         resetMosaicPreviewCaches()
         needsDisplay = true
@@ -5607,6 +5706,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             toolbarButton = .number
         case .magnifier:
             toolbarButton = .magnifier
+        case .eraser:
+            toolbarButton = .eraser
         case .settings:
             toolbarButton = .settings
         }
@@ -5632,6 +5733,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             toolbarButton = .number
         case .magnifier:
             toolbarButton = .magnifier
+        case .eraser:
+            toolbarButton = .eraser
         case .settings:
             toolbarButton = .settings
         }
@@ -6246,6 +6349,14 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         isMagnifierToolActive
     }
 
+    var test_isEraserToolActive: Bool {
+        isEraserToolActive
+    }
+
+    var test_eraserToolbarButtonIsSelected: Bool {
+        buttonMatchesCurrentTool(.eraser)
+    }
+
     var test_currentMagnifierShape: CaptureMagnifierShape {
         currentMagnifierShape
     }
@@ -6633,27 +6744,97 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private func undoLastAnnotation() {
-        guard let removed = annotations.popLast() else {
-            return
-        }
-        redoAnnotations.append(removed)
-        selectedAnnotationIndex = annotations.indices.last
-        if removed.kind == .mosaicStroke || removed.kind == .mosaicRectangle {
-            resetMosaicPreviewCaches()
+        if let entry = undoAnnotationEntries.popLast() {
+            applyUndo(entry)
+            redoAnnotationEntries.append(entry)
+        } else {
+            guard let removed = annotations.popLast() else {
+                return
+            }
+            redoAnnotationEntries.append(.add(annotation: removed, index: annotations.count))
+            selectedAnnotationIndex = annotations.indices.last
+            if removed.kind == .mosaicStroke || removed.kind == .mosaicRectangle {
+                resetMosaicPreviewCaches()
+            }
         }
         needsDisplay = true
     }
 
     private func redoLastAnnotation() {
-        guard let restored = redoAnnotations.popLast() else {
+        guard let entry = redoAnnotationEntries.popLast() else {
             return
         }
-        annotations.append(restored)
-        selectedAnnotationIndex = annotations.indices.last
-        if restored.kind == .mosaicStroke || restored.kind == .mosaicRectangle {
+        applyRedo(entry)
+        undoAnnotationEntries.append(entry)
+        needsDisplay = true
+    }
+
+    private func recordAnnotationAdd(at index: Int) {
+        guard annotations.indices.contains(index) else {
+            return
+        }
+        undoAnnotationEntries.append(.add(annotation: annotations[index], index: index))
+        redoAnnotationEntries.removeAll()
+    }
+
+    private func clearRedoAnnotationHistory() {
+        redoAnnotationEntries.removeAll()
+    }
+
+    private func applyUndo(_ entry: AnnotationHistoryEntry) {
+        switch entry {
+        case .add(let annotation, let index):
+            let removalIndex: Int? = annotations.indices.contains(index) ? index : annotations.indices.last
+            if let removalIndex {
+                annotations.remove(at: removalIndex)
+            }
+            selectedAnnotationIndex = annotations.indices.last
+            finishAnnotationHistoryMutation(affectedKind: annotation.kind, selectedIndex: selectedAnnotationIndex)
+        case .delete(let annotation, let index):
+            let insertionIndex = min(max(index, 0), annotations.count)
+            annotations.insert(annotation, at: insertionIndex)
+            selectedAnnotationIndex = insertionIndex
+            finishAnnotationHistoryMutation(affectedKind: annotation.kind, selectedIndex: insertionIndex)
+        }
+    }
+
+    private func applyRedo(_ entry: AnnotationHistoryEntry) {
+        switch entry {
+        case .add(let annotation, let index):
+            let insertionIndex = min(max(index, 0), annotations.count)
+            annotations.insert(annotation, at: insertionIndex)
+            selectedAnnotationIndex = insertionIndex
+            finishAnnotationHistoryMutation(affectedKind: annotation.kind, selectedIndex: insertionIndex)
+        case .delete(let annotation, let index):
+            let removalIndex: Int? = annotations.indices.contains(index) ? index : nil
+            if let removalIndex {
+                annotations.remove(at: removalIndex)
+            }
+            selectedAnnotationIndex = nil
+            finishAnnotationHistoryMutation(affectedKind: annotation.kind, selectedIndex: nil)
+        }
+    }
+
+    private func finishAnnotationHistoryMutation(affectedKind: CaptureAnnotationKind, selectedIndex: Int?) {
+        editingTextAnnotationIndex = nil
+        clearNumberEditing()
+        clearPendingTextEdit()
+        removeTextEditor()
+        if affectedKind == .numberSequence && !isNumberSequenceManualModeActive() {
+            renumberNumberSequenceAnnotations()
+        }
+        if affectedKind == .numberSequence {
+            revealedNumberControlsIndex = nil
+            invalidateCursorRectsAndRefresh()
+        }
+        if affectedKind == .mosaicStroke || affectedKind == .mosaicRectangle {
             resetMosaicPreviewCaches()
         }
-        needsDisplay = true
+        selectedAnnotationIndex = selectedIndex.flatMap { annotations.indices.contains($0) ? $0 : nil }
+        showsStrokeStyleMenu = false
+        showsCornerRadiusPanel = false
+        showsStartArrowTypeMenu = false
+        showsEndArrowTypeMenu = false
     }
 
     private func deleteSelectedAnnotation() -> Bool {
@@ -6672,15 +6853,24 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return false
         }
 
+        return deleteAnnotation(at: deletionIndex)
+    }
+
+    private func deleteAnnotation(at deletionIndex: Int) -> Bool {
+        guard annotations.indices.contains(deletionIndex) else {
+            return false
+        }
+
         let removed = annotations[deletionIndex]
         let shouldRenumberNumberSequence = removed.kind == .numberSequence && !isNumberSequenceManualModeActive()
         annotations.remove(at: deletionIndex)
+        undoAnnotationEntries.append(.delete(annotation: removed, index: deletionIndex))
         self.selectedAnnotationIndex = nil
         editingTextAnnotationIndex = nil
         clearNumberEditing()
         clearPendingTextEdit()
         removeTextEditor()
-        redoAnnotations.removeAll()
+        clearRedoAnnotationHistory()
         showsStrokeStyleMenu = false
         showsCornerRadiusPanel = false
         showsStartArrowTypeMenu = false
@@ -7046,7 +7236,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             annotations[selectedAnnotationIndex].numberSequenceIndex = nil
             annotations[selectedAnnotationIndex].numberSequenceIsManual = false
         }
-        redoAnnotations.removeAll()
+        clearRedoAnnotationHistory()
         needsDisplay = true
     }
 
@@ -7768,7 +7958,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         } else if SelectionToolbarState.annotationKindSupportsPostDrawEditing(annotations[selectedAnnotationIndex].kind) {
             annotations[selectedAnnotationIndex].kind = currentShapeKind
         }
-        redoAnnotations.removeAll()
+        clearRedoAnnotationHistory()
         needsDisplay = true
     }
 
@@ -7782,7 +7972,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
         annotations[selectedAnnotationIndex].magnifierShape = currentMagnifierShape
         annotations[selectedAnnotationIndex].magnifierZoom = currentMagnifierZoom
-        redoAnnotations.removeAll()
+        clearRedoAnnotationHistory()
         rememberCurrentStyleForActiveTool()
     }
 
@@ -7875,7 +8065,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         mosaicGeometryEditingStartAnnotations.removeAll()
         mosaicGeometryEditingStartComposite = nil
         mosaicGeometryEditingStartCompositeKey = nil
-        redoAnnotations.removeAll()
+        clearRedoAnnotationHistory()
         needsDisplay = true
     }
 
@@ -7906,7 +8096,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         resizingSelectionStartRect = nil
         resizingSelectionStartAnnotationRects.removeAll()
         resizingSelectionStartAnnotations.removeAll()
-        redoAnnotations.removeAll()
+        clearRedoAnnotationHistory()
         needsDisplay = true
     }
 
@@ -8133,6 +8323,46 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             }
         }
         return nil
+    }
+
+    private func eraserAnnotationIndex(at point: NSPoint) -> Int? {
+        for index in annotations.indices.reversed() where eraserContains(point, annotation: annotations[index], index: index) {
+            return index
+        }
+        return nil
+    }
+
+    private func eraserContains(_ point: NSPoint, annotation: CaptureAnnotation, index: Int) -> Bool {
+        switch annotation.kind {
+        case .rectangle, .ellipse:
+            let rect = overlayRect(fromLocalAnnotationRect: annotation.rect).standardized
+            return rect.insetBy(dx: -4, dy: -4).contains(point)
+        case .arrowLine:
+            return arrowLineHitTarget(at: point)?.index == index
+        case .brush:
+            guard let path = overlayBrushPath(fromLocalBrushPath: annotation.brushPath) else {
+                return false
+            }
+            return brushPathContains(point, path: path, hitOutset: max(8, annotation.style.strokeWidth / 2 + 4))
+        case .marker:
+            guard let line = overlayMarkerLine(fromLocalMarkerLine: annotation.markerLine) else {
+                return false
+            }
+            return SelectionToolbarState.markerLineContains(
+                point: point,
+                line: line,
+                hitOutset: max(8, annotation.style.strokeWidth / 2 + 4)
+            )
+        case .text, .magnifier, .mosaicRectangle:
+            return rotatedAnnotationRectContains(point, annotation: annotation, hitOutset: 6)
+        case .numberSequence:
+            return numberAnnotationIndex(at: point) == index
+        case .mosaicStroke:
+            guard let stroke = overlayMosaicStroke(fromLocalMosaicStroke: annotation.mosaicStroke) else {
+                return false
+            }
+            return mosaicStrokeContains(point, stroke: stroke, hitOutset: max(8, annotation.style.strokeWidth / 2 + 4))
+        }
     }
 
     private func annotationBorderContains(_ point: NSPoint, for annotation: CaptureAnnotation) -> Bool {
@@ -11019,9 +11249,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private func isToolbarButtonEnabled(_ button: ToolbarButton) -> Bool {
         switch button {
         case .undo:
-            return !annotations.isEmpty
+            return !undoAnnotationEntries.isEmpty || !annotations.isEmpty
         case .redo:
-            return !redoAnnotations.isEmpty
+            return !redoAnnotationEntries.isEmpty
         default:
             return true
         }
@@ -12930,6 +13160,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return isNumberToolActive
         case .magnifier:
             return isMagnifierToolActive
+        case .eraser:
+            return isEraserToolActive
         default:
             return false
         }

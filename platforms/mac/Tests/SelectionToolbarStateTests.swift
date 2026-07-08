@@ -2440,6 +2440,257 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_mosaicRedactionValue(for: .pixelMosaic), 8)
     }
 
+    func testOverlayWindowActivatesEraserToolWithoutOptionsToolbar() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 260, height: 160))
+
+        let point = try XCTUnwrap(window.test_mainToolbarButtonPoint(for: .eraser))
+        window.test_mouseDown(at: point)
+        window.test_mouseUp(at: point)
+
+        XCTAssertTrue(window.test_isEraserToolActive)
+        XCTAssertTrue(window.test_eraserToolbarButtonIsSelected)
+        XCTAssertNil(window.test_optionsToolbarMode)
+        XCTAssertFalse(window.test_isEyedropperToolActive)
+        XCTAssertFalse(window.test_isTextToolActive)
+        XCTAssertFalse(window.test_isNumberToolActive)
+        XCTAssertFalse(window.test_isMagnifierToolActive)
+        XCTAssertNil(window.test_currentShapeKind)
+    }
+
+    func testEraserClickDeletesRectangleAnnotation() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([
+            CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 40, y: 50, width: 80, height: 60), style: CaptureAnnotationStyle())
+        ])
+        window.test_activateEraserTool()
+
+        let hit = NSPoint(x: selection.minX + 80, y: selection.minY + 80)
+        window.test_mouseDown(at: hit)
+        window.test_mouseUp(at: hit)
+
+        XCTAssertEqual(window.test_annotationCount, 0)
+        XCTAssertEqual(window.test_lockedSelectionRect, selection)
+    }
+
+    func testEraserClickDeletesTopmostAnnotationOnly() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([
+            CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 40, y: 50, width: 90, height: 70), style: CaptureAnnotationStyle()),
+            CaptureAnnotation(kind: .ellipse, rect: NSRect(x: 50, y: 60, width: 90, height: 70), style: CaptureAnnotationStyle())
+        ])
+        window.test_activateEraserTool()
+
+        let hit = NSPoint(x: selection.minX + 80, y: selection.minY + 90)
+        window.test_mouseDown(at: hit)
+        window.test_mouseUp(at: hit)
+
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(window.test_annotation(at: 0)?.kind, .rectangle)
+    }
+
+    func testEraserEmptyDragDoesNotMoveSelection() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([
+            CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 40, y: 50, width: 80, height: 60), style: CaptureAnnotationStyle())
+        ])
+        window.test_activateEraserTool()
+
+        let miss = NSPoint(x: selection.maxX - 20, y: selection.maxY - 20)
+        window.test_mouseDown(at: miss)
+        window.test_mouseDragged(to: NSPoint(x: miss.x - 80, y: miss.y - 40))
+        window.test_mouseUp(at: NSPoint(x: miss.x - 80, y: miss.y - 40))
+
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(window.test_lockedSelectionRect, selection)
+    }
+
+    func testEraserMissDoesNotResetMosaicPreviewCache() throws {
+        let image = gradientImage(size: NSSize(width: 420, height: 300))
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 260, height: 160)
+        window.test_setLockedSelectionRect(selection)
+        let annotation = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(x: 20, y: 20, width: 80, height: 60),
+            style: CaptureAnnotationStyle(),
+            mosaicRedaction: CaptureMosaicRedaction(type: .pixelMosaic, value: 8)
+        )
+        window.test_setAnnotations([annotation])
+
+        XCTAssertNotNil(window.test_mosaicPreviewComposite(for: [annotation]))
+        XCTAssertTrue(window.test_hasMosaicCompositeCache)
+        let renderCountBeforeMiss = window.test_mosaicCompositeRenderCount
+        window.test_activateEraserTool()
+
+        let miss = NSPoint(x: selection.maxX - 16, y: selection.maxY - 16)
+        window.test_mouseDown(at: miss)
+        window.test_mouseDragged(to: NSPoint(x: miss.x - 40, y: miss.y - 20))
+        window.test_mouseUp(at: NSPoint(x: miss.x - 40, y: miss.y - 20))
+
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertTrue(window.test_hasMosaicCompositeCache)
+        XCTAssertEqual(window.test_mosaicCompositeRenderCount, renderCountBeforeMiss)
+    }
+
+    func testEraserDeleteSupportsUndoAndRedo() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([
+            CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 40, y: 50, width: 90, height: 70), style: CaptureAnnotationStyle()),
+            CaptureAnnotation(kind: .ellipse, rect: NSRect(x: 50, y: 60, width: 90, height: 70), style: CaptureAnnotationStyle())
+        ])
+        window.test_activateEraserTool()
+
+        let hit = NSPoint(x: selection.minX + 80, y: selection.minY + 90)
+        window.test_mouseDown(at: hit)
+        window.test_mouseUp(at: hit)
+        XCTAssertEqual(window.test_annotationCount, 1)
+
+        window.test_keyDown(keyCode: 6, charactersIgnoringModifiers: "z", modifierFlags: [.command])
+        XCTAssertEqual(window.test_annotationCount, 2)
+        XCTAssertEqual(window.test_annotation(at: 0)?.kind, .rectangle)
+        XCTAssertEqual(window.test_annotation(at: 1)?.kind, .ellipse)
+
+        window.test_keyDown(keyCode: 6, charactersIgnoringModifiers: "z", modifierFlags: [.command, .shift])
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(window.test_annotation(at: 0)?.kind, .rectangle)
+    }
+
+    func testEraserDeleteOnlyAnnotationCanUndo() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        let annotation = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 40, y: 50, width: 80, height: 60),
+            style: CaptureAnnotationStyle()
+        )
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([annotation])
+        window.test_activateEraserTool()
+
+        let hit = NSPoint(x: selection.minX + 80, y: selection.minY + 80)
+        window.test_mouseDown(at: hit)
+        window.test_mouseUp(at: hit)
+        XCTAssertEqual(window.test_annotationCount, 0)
+
+        window.test_keyDown(keyCode: 6, charactersIgnoringModifiers: "z", modifierFlags: [.command])
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(window.test_annotation(at: 0)?.kind, .rectangle)
+    }
+
+    func testEraserDeletesRepresentativeAnnotationKinds() throws {
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        var wideStyle = CaptureAnnotationStyle()
+        wideStyle.strokeWidth = 12
+        var textStyle = CaptureAnnotationStyle()
+        textStyle.strokeWidth = 0
+        textStyle.textSize = 24
+
+        let cases: [(name: String, annotation: CaptureAnnotation, hit: NSPoint)] = [
+            (
+                "arrow line",
+                CaptureAnnotation(
+                    kind: .arrowLine,
+                    rect: NSRect(x: 40, y: 40, width: 120, height: 80),
+                    style: wideStyle,
+                    arrowLine: CaptureArrowLine(
+                        start: NSPoint(x: 40, y: 40),
+                        end: NSPoint(x: 140, y: 40),
+                        control: NSPoint(x: 90, y: 90),
+                        startArrowType: .none,
+                        endArrowType: .normal
+                    )
+                ),
+                NSPoint(x: selection.minX + 90, y: selection.minY + 65)
+            ),
+            (
+                "brush",
+                CaptureAnnotation(
+                    kind: .brush,
+                    rect: NSRect(x: 40, y: 50, width: 80, height: 60),
+                    style: wideStyle,
+                    brushPath: CaptureBrushPath(points: [NSPoint(x: 40, y: 50), NSPoint(x: 120, y: 110)])
+                ),
+                NSPoint(x: selection.minX + 80, y: selection.minY + 80)
+            ),
+            (
+                "marker",
+                CaptureAnnotation(
+                    kind: .marker,
+                    rect: NSRect(x: 40, y: 70, width: 100, height: 20),
+                    style: wideStyle,
+                    markerLine: CaptureMarkerLine(start: NSPoint(x: 40, y: 80), end: NSPoint(x: 140, y: 80))
+                ),
+                NSPoint(x: selection.minX + 90, y: selection.minY + 80)
+            ),
+            (
+                "text",
+                CaptureAnnotation(
+                    kind: .text,
+                    rect: NSRect(x: 60, y: 70, width: 120, height: 44),
+                    style: textStyle,
+                    text: "hello"
+                ),
+                NSPoint(x: selection.minX + 100, y: selection.minY + 90)
+            ),
+            (
+                "number",
+                CaptureAnnotation(
+                    kind: .numberSequence,
+                    rect: NSRect(x: 66, y: 66, width: 28, height: 28),
+                    style: textStyle,
+                    numberMarkType: .number,
+                    numberSequenceIndex: 1
+                ),
+                NSPoint(x: selection.minX + 80, y: selection.minY + 80)
+            ),
+            (
+                "mosaic stroke",
+                CaptureAnnotation(
+                    kind: .mosaicStroke,
+                    rect: NSRect(x: 50, y: 70, width: 100, height: 40),
+                    style: wideStyle,
+                    mosaicStroke: CaptureMosaicStroke(points: [NSPoint(x: 50, y: 70), NSPoint(x: 150, y: 110)]),
+                    mosaicRedaction: CaptureMosaicRedaction(type: .pixelMosaic, value: 8)
+                ),
+                NSPoint(x: selection.minX + 100, y: selection.minY + 90)
+            ),
+            (
+                "mosaic rectangle",
+                CaptureAnnotation(
+                    kind: .mosaicRectangle,
+                    rect: NSRect(x: 70, y: 80, width: 90, height: 50),
+                    style: CaptureAnnotationStyle(),
+                    mosaicRedaction: CaptureMosaicRedaction(type: .pixelMosaic, value: 8)
+                ),
+                NSPoint(x: selection.minX + 100, y: selection.minY + 100)
+            ),
+        ]
+
+        for testCase in cases {
+            XCTContext.runActivity(named: testCase.name) { _ in
+                let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+                window.test_setLockedSelectionRect(selection)
+                window.test_setAnnotations([testCase.annotation])
+                window.test_activateEraserTool()
+
+                window.test_mouseDown(at: testCase.hit)
+                window.test_mouseUp(at: testCase.hit)
+
+                XCTAssertEqual(window.test_annotationCount, 0)
+                XCTAssertEqual(window.test_lockedSelectionRect, selection)
+            }
+        }
+    }
+
     func testNumberSequenceOptionsToolbarLayoutHasTypeSizeAndColorSections() {
         let rect = NSRect(x: 10, y: 20, width: 250, height: 30)
         let layout = SelectionToolbarState.optionsToolbarLayout(in: rect, paletteCount: 8, mode: .numberSequence)
