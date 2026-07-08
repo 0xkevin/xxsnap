@@ -2747,6 +2747,40 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_eraserMask(at: 0)?.affectedAnnotationIDs, Set([second.id]))
     }
 
+    func testDamagedAnnotationCannotBeSelectedOrDragged() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        let annotation = CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 40, y: 50, width: 90, height: 70), style: CaptureAnnotationStyle())
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([annotation])
+        window.test_addEraserMask(EraserMask(rect: NSRect(x: 50, y: 60, width: 20, height: 20), affectedAnnotationIDs: [annotation.id]))
+
+        let hit = NSPoint(x: selection.minX + 80, y: selection.minY + 90)
+        window.test_mouseDown(at: hit)
+        window.test_mouseDragged(to: NSPoint(x: hit.x + 40, y: hit.y + 20))
+        window.test_mouseUp(at: NSPoint(x: hit.x + 40, y: hit.y + 20))
+
+        XCTAssertNil(window.test_selectedAnnotationIndex)
+        XCTAssertEqual(window.test_annotation(at: 0)?.rect, annotation.rect)
+    }
+
+    func testPointEraserCanDeleteDamagedAnnotationAndItsMasks() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        let annotation = CaptureAnnotation(kind: .ellipse, rect: NSRect(x: 40, y: 50, width: 90, height: 70), style: CaptureAnnotationStyle())
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([annotation])
+        window.test_addEraserMask(EraserMask(rect: NSRect(x: 50, y: 60, width: 20, height: 20), affectedAnnotationIDs: [annotation.id]))
+        window.test_activateEraserTool()
+
+        let hit = NSPoint(x: selection.minX + 80, y: selection.minY + 90)
+        window.test_mouseDown(at: hit)
+        window.test_mouseUp(at: hit)
+
+        XCTAssertEqual(window.test_annotationCount, 0)
+        XCTAssertEqual(window.test_eraserMaskCount, 0)
+    }
+
     func testDeleteManyPrunesDeletedIDsFromSharedMaskAndUndoRedoRestoresIt() throws {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
