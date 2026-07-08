@@ -1062,7 +1062,16 @@ struct CaptureAnnotationStyle {
     var textOutlineColor: NSColor = .white
 }
 
+typealias AnnotationID = UUID
+
+struct EraserMask: Equatable {
+    var id: UUID = UUID()
+    var rect: NSRect
+    var affectedAnnotationIDs: Set<AnnotationID>
+}
+
 struct CaptureAnnotation {
+    var id: AnnotationID = UUID()
     var kind: CaptureAnnotationKind
     var rect: NSRect
     var style: CaptureAnnotationStyle
@@ -1098,6 +1107,7 @@ struct CaptureSelectionResult {
     var screenRect: NSRect
     var snapshotRect: NSRect
     var annotations: [CaptureAnnotation]
+    var eraserMasks: [EraserMask] = []
     var action: CaptureCompletionAction
 }
 

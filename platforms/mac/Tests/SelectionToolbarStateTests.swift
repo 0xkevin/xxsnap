@@ -2465,6 +2465,28 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertNil(window.test_currentShapeKind)
     }
 
+    func testCaptureAnnotationsReceiveStableUniqueIDs() {
+        let first = CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 10, y: 10, width: 40, height: 30), style: CaptureAnnotationStyle())
+        let second = CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 10, y: 10, width: 40, height: 30), style: CaptureAnnotationStyle())
+
+        XCTAssertNotEqual(first.id, second.id)
+
+        var edited = first
+        edited.rect.origin.x += 12
+        XCTAssertEqual(edited.id, first.id)
+    }
+
+    func testEraserMaskStoresLocalRectAndAffectedAnnotationIDs() {
+        let annotation = CaptureAnnotation(kind: .ellipse, rect: NSRect(x: 20, y: 30, width: 80, height: 40), style: CaptureAnnotationStyle())
+        let mask = EraserMask(
+            rect: NSRect(x: 25, y: 35, width: 20, height: 18),
+            affectedAnnotationIDs: [annotation.id]
+        )
+
+        XCTAssertEqual(mask.rect, NSRect(x: 25, y: 35, width: 20, height: 18))
+        XCTAssertEqual(mask.affectedAnnotationIDs, [annotation.id])
+    }
+
     func testEraserToolClearsAndSuppressesColorSampler() {
         let background = solidImage(size: NSSize(width: 260, height: 160), color: NSColor(srgbRed: 0.2, green: 0.4, blue: 0.8, alpha: 1))
         let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
