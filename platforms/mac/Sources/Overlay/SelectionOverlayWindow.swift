@@ -1818,6 +1818,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private func annotationIsEditable(at index: Int) -> Bool {
         annotations.indices.contains(index) && !isDamagedAnnotation(annotations[index])
     }
+    private var hasDamagedAnnotations: Bool {
+        annotations.contains { isDamagedAnnotation($0) }
+    }
     private var selectedAnnotationIndex: Int?
     private var selectedNumberAnnotationCanFollowTypeDropdown = false
     private var revealedNumberControlsIndex: Int?
@@ -5203,6 +5206,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private func beginSelectionResize(handle: SelectionToolbarState.OverlayResizeHandle) {
+        guard !hasDamagedAnnotations else {
+            return
+        }
         activeSelectionResizeHandle = handle
         resizingSelectionStartRect = lockedSelectionRect?.standardized
         resizingSelectionStartAnnotationRects = annotations.map { overlayRect(fromLocalAnnotationRect: $0.rect) }
@@ -7163,7 +7169,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         if affectedKinds.contains(.mosaicStroke) || affectedKinds.contains(.mosaicRectangle) {
             resetMosaicPreviewCaches()
         }
-        selectedAnnotationIndex = selectedIndex.flatMap { annotations.indices.contains($0) ? $0 : nil }
+        selectedAnnotationIndex = selectedIndex.flatMap { annotationIsEditable(at: $0) ? $0 : nil }
         showsStrokeStyleMenu = false
         showsCornerRadiusPanel = false
         showsStartArrowTypeMenu = false
@@ -7172,10 +7178,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     private func deleteSelectedAnnotation() -> Bool {
         let deletionIndex: Int?
-        if let selectedAnnotationIndex, annotations.indices.contains(selectedAnnotationIndex) {
+        if let selectedAnnotationIndex, annotationIsEditable(at: selectedAnnotationIndex) {
             deletionIndex = selectedAnnotationIndex
         } else if let revealedNumberControlsIndex,
-                  annotations.indices.contains(revealedNumberControlsIndex),
+                  annotationIsEditable(at: revealedNumberControlsIndex),
                   annotations[revealedNumberControlsIndex].kind == .numberSequence {
             deletionIndex = revealedNumberControlsIndex
         } else {
@@ -7666,7 +7672,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     private func applyCurrentNumberMarkTypeToSelectedAnnotation(_ type: CaptureNumberMarkType) {
         guard let selectedAnnotationIndex,
-              annotations.indices.contains(selectedAnnotationIndex),
+              annotationIsEditable(at: selectedAnnotationIndex),
               annotations[selectedAnnotationIndex].kind == .numberSequence,
               selectedNumberAnnotationCanFollowTypeDropdown
         else {
@@ -8039,7 +8045,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private func applyCurrentMosaicRedactionToSelectedAnnotation() {
-        guard let selectedAnnotationIndex, annotations.indices.contains(selectedAnnotationIndex) else {
+        guard let selectedAnnotationIndex, annotationIsEditable(at: selectedAnnotationIndex) else {
             return
         }
         guard annotations[selectedAnnotationIndex].kind == .mosaicStroke || annotations[selectedAnnotationIndex].kind == .mosaicRectangle else {
@@ -8362,7 +8368,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private func applyCurrentStyleToSelectedAnnotation() {
-        guard let selectedAnnotationIndex, annotations.indices.contains(selectedAnnotationIndex) else {
+        guard let selectedAnnotationIndex, annotationIsEditable(at: selectedAnnotationIndex) else {
             return
         }
 
@@ -8413,7 +8419,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     private func applyCurrentMagnifierSettingsToSelectedAnnotation() {
         guard let selectedAnnotationIndex,
-              annotations.indices.contains(selectedAnnotationIndex),
+              annotationIsEditable(at: selectedAnnotationIndex),
               annotations[selectedAnnotationIndex].kind == .magnifier
         else {
             rememberCurrentStyleForActiveTool()
@@ -9317,7 +9323,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return false
         }
 
-        if damagedAnnotationIndex(at: point) != nil {
+        if hasDamagedAnnotations {
             return false
         }
 
@@ -9365,7 +9371,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private func updateMovingShape(to point: NSPoint) {
         guard
             let selectedAnnotationIndex,
-            annotations.indices.contains(selectedAnnotationIndex),
+            annotationIsEditable(at: selectedAnnotationIndex),
             let movingAnnotationStartRect
         else {
             return
@@ -9473,7 +9479,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private func updateResizingShape(to point: NSPoint) {
         guard
             let selectedAnnotationIndex,
-            annotations.indices.contains(selectedAnnotationIndex),
+            annotationIsEditable(at: selectedAnnotationIndex),
             let activeResizeHandle,
             let resizingAnnotationStartRect
         else {
@@ -9721,7 +9727,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private func updateResizingArrowLine(to point: NSPoint, modifierFlags: NSEvent.ModifierFlags = []) {
         guard
             let selectedAnnotationIndex,
-            annotations.indices.contains(selectedAnnotationIndex),
+            annotationIsEditable(at: selectedAnnotationIndex),
             let originalLine = resizingArrowLineStart,
             let activeArrowLineHandle
         else {
@@ -9770,7 +9776,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private func updateResizingMarkerLine(to point: NSPoint) {
         guard
             let selectedAnnotationIndex,
-            annotations.indices.contains(selectedAnnotationIndex),
+            annotationIsEditable(at: selectedAnnotationIndex),
             let originalLine = resizingMarkerLineStart,
             let activeMarkerLineHandle
         else {
@@ -9795,7 +9801,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private func updateRotatingBrush(to point: NSPoint) {
         guard
             let selectedAnnotationIndex,
-            annotations.indices.contains(selectedAnnotationIndex),
+            annotationIsEditable(at: selectedAnnotationIndex),
             let rotatingBrushStartPath,
             let activeBrushRotationHandle
         else {
@@ -9816,7 +9822,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private func updateRotatingMosaicRectangle(to point: NSPoint) {
         guard
             let selectedAnnotationIndex,
-            annotations.indices.contains(selectedAnnotationIndex),
+            annotationIsEditable(at: selectedAnnotationIndex),
             annotationKindSupportsRotationHandle(annotations[selectedAnnotationIndex].kind),
             let startPointerAngle = rotatingMosaicRectangleStartPointerAngle
         else {
@@ -9893,6 +9899,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     private func handleSelectionZoom(at point: NSPoint, deltaY: CGFloat) -> Bool {
         guard let lockedSelectionRect else {
+            return false
+        }
+        guard !hasDamagedAnnotations else {
             return false
         }
         guard !isToolbarOrPanelPoint(point) else {

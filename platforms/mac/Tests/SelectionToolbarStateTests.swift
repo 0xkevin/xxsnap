@@ -2781,6 +2781,98 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_eraserMaskCount, 0)
     }
 
+    func testDamagedAnnotationBlocksSelectionMoveFromBlankArea() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        let annotation = CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 40, y: 50, width: 90, height: 70), style: CaptureAnnotationStyle())
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([annotation])
+        window.test_addEraserMask(EraserMask(rect: NSRect(x: 50, y: 60, width: 20, height: 20), affectedAnnotationIDs: [annotation.id]))
+
+        let blankPoint = NSPoint(x: selection.maxX - 20, y: selection.maxY - 20)
+        window.test_mouseDown(at: blankPoint)
+        window.test_mouseDragged(to: NSPoint(x: blankPoint.x - 40, y: blankPoint.y - 20))
+        window.test_mouseUp(at: NSPoint(x: blankPoint.x - 40, y: blankPoint.y - 20))
+
+        XCTAssertEqual(window.test_lockedSelectionRect, selection)
+        XCTAssertEqual(window.test_annotation(at: 0)?.rect, annotation.rect)
+    }
+
+    func testDamagedAnnotationBlocksSelectionResizeAndWheelZoom() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        let annotation = CaptureAnnotation(kind: .ellipse, rect: NSRect(x: 40, y: 50, width: 90, height: 70), style: CaptureAnnotationStyle())
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([annotation])
+        window.test_addEraserMask(EraserMask(rect: NSRect(x: 50, y: 60, width: 20, height: 20), affectedAnnotationIDs: [annotation.id]))
+
+        let resizePoint = NSPoint(x: selection.maxX + 10, y: selection.midY)
+        window.test_mouseDown(at: resizePoint)
+        window.test_mouseDragged(to: NSPoint(x: resizePoint.x + 40, y: resizePoint.y))
+        window.test_mouseUp(at: NSPoint(x: resizePoint.x + 40, y: resizePoint.y))
+
+        XCTAssertEqual(window.test_lockedSelectionRect, selection)
+        XCTAssertEqual(window.test_annotation(at: 0)?.rect, annotation.rect)
+
+        XCTAssertFalse(window.test_handleScrollWheel(at: NSPoint(x: selection.midX, y: selection.midY), deltaY: 12))
+        window.test_completeSelectionWheelAnimation()
+        XCTAssertEqual(window.test_lockedSelectionRect, selection)
+        XCTAssertEqual(window.test_annotation(at: 0)?.rect, annotation.rect)
+    }
+
+    func testUndoPointEraserDeleteRestoresDamagedAnnotationUnselected() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        let annotation = CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 40, y: 50, width: 90, height: 70), style: CaptureAnnotationStyle())
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([annotation])
+        window.test_addEraserMask(EraserMask(rect: NSRect(x: 50, y: 60, width: 20, height: 20), affectedAnnotationIDs: [annotation.id]))
+        window.test_activateEraserTool()
+
+        let hit = NSPoint(x: selection.minX + 80, y: selection.minY + 90)
+        window.test_mouseDown(at: hit)
+        window.test_mouseUp(at: hit)
+        XCTAssertEqual(window.test_annotationCount, 0)
+
+        window.test_keyDown(keyCode: 6, charactersIgnoringModifiers: "z", modifierFlags: [.command])
+
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(window.test_eraserMaskCount, 1)
+        XCTAssertNil(window.test_selectedAnnotationIndex)
+        XCTAssertEqual(window.test_annotation(at: 0)?.rect, annotation.rect)
+    }
+
+    func testDamagedArrowCannotBeSelectedOrDragged() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        var style = CaptureAnnotationStyle()
+        style.strokeWidth = 12
+        let annotation = CaptureAnnotation(
+            kind: .arrowLine,
+            rect: NSRect(x: 40, y: 50, width: 120, height: 80),
+            style: style,
+            arrowLine: CaptureArrowLine(
+                start: NSPoint(x: 40, y: 50),
+                end: NSPoint(x: 160, y: 90),
+                control: NSPoint(x: 100, y: 130),
+                startArrowType: .none,
+                endArrowType: .normal
+            )
+        )
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([annotation])
+        window.test_addEraserMask(EraserMask(rect: NSRect(x: 80, y: 80, width: 20, height: 20), affectedAnnotationIDs: [annotation.id]))
+
+        let hit = NSPoint(x: selection.minX + 100, y: selection.minY + 90)
+        window.test_mouseDown(at: hit)
+        window.test_mouseDragged(to: NSPoint(x: hit.x + 40, y: hit.y + 20))
+        window.test_mouseUp(at: NSPoint(x: hit.x + 40, y: hit.y + 20))
+
+        XCTAssertNil(window.test_selectedAnnotationIndex)
+        XCTAssertEqual(window.test_annotation(at: 0)?.rect, annotation.rect)
+        XCTAssertEqual(window.test_annotation(at: 0)?.arrowLine, annotation.arrowLine)
+    }
+
     func testDeleteManyPrunesDeletedIDsFromSharedMaskAndUndoRedoRestoresIt() throws {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
