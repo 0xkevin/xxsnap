@@ -12371,10 +12371,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             width: iconSize,
             height: iconSize
         )
-        if let image = NSCursor.svgImage(named: shortcut.iconName) {
+        if let image = SelectionToolbarState.tooltipShortcutIconImage(named: shortcut.iconName, tint: .white, size: iconSize) {
             image.draw(in: iconRect, from: .zero, operation: .sourceOver, fraction: 1)
-            NSColor.white.setFill()
-            iconRect.fill(using: .sourceAtop)
         }
         NSString(string: keyText).draw(
             in: NSRect(

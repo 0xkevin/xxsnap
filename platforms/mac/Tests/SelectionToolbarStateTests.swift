@@ -2219,6 +2219,23 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertFalse(window.hasShadow)
         XCTAssertTrue(controller.test_drawsBlueShadow)
         XCTAssertFalse(controller.test_drawsCloseButton)
+        let rendered = controller.test_renderedContentImage()
+        let topEdgePixel = try XCTUnwrap(firstPixel(in: rendered, rect: NSRect(x: 12, y: sourceRect.height - 8, width: sourceRect.width - 24, height: 6)) { pixel in
+            pixel.blue > pixel.red && pixel.blue > pixel.green && pixel.alpha > 40
+        })
+        let bottomEdgePixel = try XCTUnwrap(firstPixel(in: rendered, rect: NSRect(x: 12, y: 2, width: sourceRect.width - 24, height: 6)) { pixel in
+            pixel.blue > pixel.red && pixel.blue > pixel.green && pixel.alpha > 40
+        })
+        let leftEdgePixel = try XCTUnwrap(firstPixel(in: rendered, rect: NSRect(x: 2, y: 12, width: 6, height: sourceRect.height - 24)) { pixel in
+            pixel.blue > pixel.red && pixel.blue > pixel.green && pixel.alpha > 40
+        })
+        let rightEdgePixel = try XCTUnwrap(firstPixel(in: rendered, rect: NSRect(x: sourceRect.width - 8, y: 12, width: 6, height: sourceRect.height - 24)) { pixel in
+            pixel.blue > pixel.red && pixel.blue > pixel.green && pixel.alpha > 40
+        })
+        XCTAssertGreaterThan(topEdgePixel.blue, topEdgePixel.red)
+        XCTAssertGreaterThan(bottomEdgePixel.blue, bottomEdgePixel.red)
+        XCTAssertGreaterThan(leftEdgePixel.blue, leftEdgePixel.red)
+        XCTAssertGreaterThan(rightEdgePixel.blue, rightEdgePixel.red)
 
         var closeCount = 0
         controller.onClose = {
@@ -11110,6 +11127,14 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "refreshCapture"), "刷新截图")
         XCTAssertNil(SelectionToolbarState.tooltipTitle(for: "ocr"))
         XCTAssertNil(SelectionToolbarState.tooltipTitle(for: "settings"))
+    }
+
+    func testCommandTooltipIconRendersVisibleWhitePixels() throws {
+        let image = try XCTUnwrap(SelectionToolbarState.tooltipShortcutIconImage(named: "command", tint: .white, size: 12))
+        let whitePixel = try firstPixel(in: image, rect: NSRect(origin: .zero, size: image.size)) { pixel in
+            pixel.red > 220 && pixel.green > 220 && pixel.blue > 220 && pixel.alpha > 120
+        }
+        XCTAssertNotNil(whitePixel)
     }
 
     func testTooltipRectStaysInsideVisibleBounds() {

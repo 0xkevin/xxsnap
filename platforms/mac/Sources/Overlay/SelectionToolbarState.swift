@@ -317,6 +317,21 @@ enum SelectionToolbarState {
         }
     }
 
+    static func tooltipShortcutIconImage(named name: String, tint: NSColor, size: CGFloat) -> NSImage? {
+        guard let source = Bundle.main.url(forResource: name, withExtension: "svg").flatMap(NSImage.init(contentsOf:)) else {
+            return nil
+        }
+
+        let targetSize = NSSize(width: size, height: size)
+        let image = NSImage(size: targetSize)
+        image.lockFocus()
+        source.draw(in: NSRect(origin: .zero, size: targetSize), from: .zero, operation: .sourceOver, fraction: 1)
+        tint.setFill()
+        NSRect(origin: .zero, size: targetSize).fill(using: .sourceAtop)
+        image.unlockFocus()
+        return image
+    }
+
     static func toolbarIconInset(for resourceName: String) -> CGFloat {
         switch resourceName {
         case "screenshot":

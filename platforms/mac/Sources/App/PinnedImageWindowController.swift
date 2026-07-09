@@ -172,7 +172,7 @@ private final class PinnedImageContentView: NSView {
         NSColor.black.setFill()
         bounds.fill()
         image.draw(in: bounds)
-        drawBlueBottomShadow()
+        drawBlueEdgeShadow()
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -217,14 +217,24 @@ private final class PinnedImageContentView: NSView {
         super.keyDown(with: event)
     }
 
-    private func drawBlueBottomShadow() {
-        let shadowHeight = min(max(bounds.height * 0.16, 8), 24)
-        let shadowRect = NSRect(x: bounds.minX, y: bounds.minY, width: bounds.width, height: shadowHeight)
+    private func drawBlueEdgeShadow() {
+        let edge = min(max(min(bounds.width, bounds.height) * 0.14, 6), 18)
+        let blue = NSColor.systemBlue
+        let bottomRect = NSRect(x: bounds.minX, y: bounds.minY, width: bounds.width, height: edge)
         let gradient = NSGradient(colors: [
-            NSColor.systemBlue.withAlphaComponent(0.46),
-            NSColor.systemBlue.withAlphaComponent(0),
+            blue.withAlphaComponent(0.46),
+            blue.withAlphaComponent(0),
         ])
-        gradient?.draw(in: shadowRect, angle: 90)
+        gradient?.draw(in: bottomRect, angle: 90)
+
+        let topRect = NSRect(x: bounds.minX, y: bounds.maxY - edge, width: bounds.width, height: edge)
+        gradient?.draw(in: topRect, angle: 270)
+
+        let leftRect = NSRect(x: bounds.minX, y: bounds.minY, width: edge, height: bounds.height)
+        gradient?.draw(in: leftRect, angle: 0)
+
+        let rightRect = NSRect(x: bounds.maxX - edge, y: bounds.minY, width: edge, height: bounds.height)
+        gradient?.draw(in: rightRect, angle: 180)
     }
 }
 
@@ -257,6 +267,15 @@ extension PinnedImageWindowController {
         if let event {
             contentView.keyDown(with: event)
         }
+    }
+
+    func test_renderedContentImage() -> NSImage {
+        let contentBounds = window?.contentView?.bounds ?? NSRect(origin: .zero, size: image.size)
+        let rendered = NSImage(size: contentBounds.size)
+        rendered.lockFocus()
+        window?.contentView?.draw(contentBounds)
+        rendered.unlockFocus()
+        return rendered
     }
 }
 #endif

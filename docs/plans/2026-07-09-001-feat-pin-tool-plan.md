@@ -28,7 +28,7 @@ execution: code
 
 The Pin toolbar button and Command+1 shortcut should create a floating, always-on-top image window from the current locked selection instead of showing a placeholder.
 The pinned image uses the same rendered pixels as copy/save, including annotations, magnifier effects, mosaics, and eraser masks.
-The first version opens the pinned image at the original selection position, adds a blue bottom shadow, supports moving, scaling, and keyboard closing, while deferring opacity, click-through, layer presets, and multi-window management UI.
+The first version opens the pinned image at the original selection position, adds a faint blue edge shadow, supports moving, scaling, and keyboard closing, while deferring opacity, click-through, layer presets, and multi-window management UI.
 
 ### Problem Frame
 
@@ -41,7 +41,7 @@ The legacy Qt app already proves the product shape by compositing the selected r
 - R1. Clicking Pin or pressing Command+1 on a locked selection creates a pinned image window and closes the capture overlay instead of showing `贴图功能开发中。`.
 - R2. The pinned image is rendered from the current selection with the same annotation, magnifier, mosaic, and eraser-mask output as copy/save.
 - R3. Pin auto-commits any active non-empty text edit and drops blank text drafts, matching copy/save completion behavior.
-- R4. A pinned image window stays above normal app windows, starts at the original selection position, has a blue bottom shadow, can be dragged to move, can be scaled without changing aspect ratio, and can be closed with Escape or Delete.
+- R4. A pinned image window stays above normal app windows, starts at the original selection position, has a faint blue shadow on all four edges, can be dragged to move, can be scaled without changing aspect ratio, and can be closed with Escape or Delete.
 - R5. Pin failure or empty selection does not write to the pasteboard or open a save panel.
 - R6. Existing copy, save, cancel, annotation editing, undo/redo, and scroll placeholder behavior remain unchanged.
 - R7. Product docs record that Pin is now supported and describe the first-version controls.
@@ -126,13 +126,13 @@ flowchart TB
 
 ### U2. Create Pinned Window Geometry and Controller
 
-- **Goal:** Add a mac pinned-window implementation that owns image display, original-position placement, blue bottom shadow, move, scale, and close behavior.
+- **Goal:** Add a mac pinned-window implementation that owns image display, original-position placement, faint blue edge shadow, move, scale, and close behavior.
 - **Requirements:** R4, R5.
 - **Dependencies:** None.
 - **Files:** `platforms/mac/Sources/App/PinnedImageWindowController.swift`, `platforms/mac/xxsnap.xcodeproj/project.pbxproj`, `platforms/mac/Tests/SelectionToolbarStateTests.swift`.
-- **Approach:** Add a dedicated AppKit controller/view pair for a borderless floating window. The image view draws the rendered capture with a blue bottom shadow, body drag moves the window, supported scale input resizes around the current frame while preserving aspect ratio, and Escape/Delete close the window. Extract size clamping into a pure helper so tests can cover min/max and aspect behavior.
+- **Approach:** Add a dedicated AppKit controller/view pair for a borderless floating window. The image view draws the rendered capture with a faint blue shadow on all four edges, body drag moves the window, supported scale input resizes around the current frame while preserving aspect ratio, and Escape/Delete close the window. Extract size clamping into a pure helper so tests can cover min/max and aspect behavior.
 - **Patterns to follow:** Legacy `PinnedImageWindow` in `snipory/src/platform/DesktopPlatformServices.cpp`, plus existing mac project file source registration patterns.
-- **Test scenarios:** Initial window frame uses the source screen rect; scaling up and down preserves aspect and clamps to min/max; Escape/Delete close actions mark the controller/window closed; drag calculation preserves the click offset; blue bottom shadow is enabled and no visible close button is drawn.
+- **Test scenarios:** Initial window frame uses the source screen rect; scaling up and down preserves aspect and clamps to min/max; Escape/Delete close actions mark the controller/window closed; drag calculation preserves the click offset; four-edge blue shadow is enabled and no visible close button is drawn.
 - **Verification:** Focused tests cover the geometry helper and controller-visible state without relying on manual screen interaction.
 
 ### U3. Wire Pin Export into CaptureCoordinator
@@ -165,7 +165,7 @@ flowchart TB
 |---|---|---|---|
 | Focused mac tests | U1-U4 | `xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived -only-testing:xxsnapMacTests/SelectionToolbarStateTests test` | Pin routing, geometry, coordinator, and toolbar tests pass. |
 | mac app build | U1-U4 | `xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived build` | The app builds with the new source file registered. |
-| Manual smoke | U1-U4 | Launch the debug app from `build/xcode-derived`, capture a region, click Pin or press Command+1, move/scale/close the pinned window. | Pinned window appears at the source position above normal windows, has blue bottom shadow, and can be moved, scaled, and closed. |
+| Manual smoke | U1-U4 | Launch the debug app from `build/xcode-derived`, capture a region, click Pin or press Command+1, move/scale/close the pinned window. | Pinned window appears at the source position above normal windows, has a faint blue shadow on all four edges, and can be moved, scaled, and closed. |
 
 Full `SelectionToolbarStateTests` currently has known historical magnifier pixel sensitivity, so focused tests plus build are the required gates for this branch unless full-suite failures are unrelated and easy to separate.
 
