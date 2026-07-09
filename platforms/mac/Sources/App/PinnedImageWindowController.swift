@@ -3,6 +3,7 @@ import AppKit
 struct PinnedImageWindowGeometry {
     static let maxScreenFraction: CGFloat = 0.8
     static let minLongSide: CGFloat = 96
+    static let shadowOutset: CGFloat = 18
 
     static func fittedImageSize(imageSize: NSSize, visibleFrame: NSRect) -> NSSize {
         guard imageSize.width > 0, imageSize.height > 0 else {
@@ -50,6 +51,14 @@ struct PinnedImageWindowGeometry {
     static func movedOrigin(globalMouse: NSPoint, dragOffset: NSPoint) -> NSPoint {
         NSPoint(x: globalMouse.x - dragOffset.x, y: globalMouse.y - dragOffset.y)
     }
+
+    static func windowFrame(forImageFrame imageFrame: NSRect) -> NSRect {
+        imageFrame.insetBy(dx: -shadowOutset, dy: -shadowOutset)
+    }
+
+    static func imageFrame(inWindowFrame windowFrame: NSRect) -> NSRect {
+        windowFrame.insetBy(dx: shadowOutset, dy: shadowOutset)
+    }
 }
 
 @MainActor
@@ -72,7 +81,7 @@ final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPr
         self.screenRect = requestedRect.isEmpty ? NSRect(origin: .zero, size: image.size) : requestedRect
         self.imageAspectRatio = image.size.width / max(image.size.height, 1)
         let screenFrame = visibleFrame ?? NSRect(x: 0, y: 0, width: 800, height: 600)
-        let initialFrame = self.screenRect.isEmpty
+        let initialImageFrame = self.screenRect.isEmpty
             ? NSRect(
                 x: screenFrame.midX - image.size.width / 2,
                 y: screenFrame.midY - image.size.height / 2,
@@ -80,6 +89,7 @@ final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPr
                 height: image.size.height
             )
             : self.screenRect
+        let initialFrame = PinnedImageWindowGeometry.windowFrame(forImageFrame: initialImageFrame)
         let window = PinnedImageWindow(
             contentRect: initialFrame,
             styleMask: [.borderless],
@@ -93,6 +103,8 @@ final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPr
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
         let view = PinnedImageContentView(image: image)
+        view.frame = NSRect(origin: .zero, size: initialFrame.size)
+        view.autoresizingMask = [.width, .height]
         window.contentView = view
         super.init(window: window)
         window.delegate = self
@@ -115,24 +127,26 @@ final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPr
             return
         }
         let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
-        let newSize = PinnedImageWindowGeometry.scaledSize(
-            currentSize: window.frame.size,
+        let currentImageFrame = PinnedImageWindowGeometry.imageFrame(inWindowFrame: window.frame)
+        let newImageSize = PinnedImageWindowGeometry.scaledSize(
+            currentSize: currentImageFrame.size,
             aspectRatio: imageAspectRatio,
             scaleFactor: factor,
             visibleFrame: visibleFrame
         )
-        guard newSize.width > 0, newSize.height > 0 else {
+        guard newImageSize.width > 0, newImageSize.height > 0 else {
             return
         }
 
-        let anchor = anchorInScreen ?? NSPoint(x: window.frame.midX, y: window.frame.midY)
-        let xRatio = (anchor.x - window.frame.minX) / max(window.frame.width, 1)
-        let yRatio = (anchor.y - window.frame.minY) / max(window.frame.height, 1)
-        let newOrigin = NSPoint(
-            x: anchor.x - newSize.width * xRatio,
-            y: anchor.y - newSize.height * yRatio
+        let anchor = anchorInScreen ?? NSPoint(x: currentImageFrame.midX, y: currentImageFrame.midY)
+        let xRatio = (anchor.x - currentImageFrame.minX) / max(currentImageFrame.width, 1)
+        let yRatio = (anchor.y - currentImageFrame.minY) / max(currentImageFrame.height, 1)
+        let newImageOrigin = NSPoint(
+            x: anchor.x - newImageSize.width * xRatio,
+            y: anchor.y - newImageSize.height * yRatio
         )
-        window.setFrame(NSRect(origin: newOrigin, size: newSize), display: true)
+        let newImageFrame = NSRect(origin: newImageOrigin, size: newImageSize)
+        window.setFrame(PinnedImageWindowGeometry.windowFrame(forImageFrame: newImageFrame), display: true)
     }
 }
 
@@ -168,11 +182,17 @@ private final class PinnedImageContentView: NSView {
         true
     }
 
+    override var isOpaque: Bool {
+        false
+    }
+
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.black.setFill()
-        bounds.fill()
-        image.draw(in: bounds)
-        drawBlueEdgeShadow()
+        let imageRect = bounds.insetBy(
+            dx: PinnedImageWindowGeometry.shadowOutset,
+            dy: PinnedImageWindowGeometry.shadowOutset
+        )
+        drawBlueOuterShadow(around: imageRect)
+        image.draw(in: imageRect)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -217,24 +237,35 @@ private final class PinnedImageContentView: NSView {
         super.keyDown(with: event)
     }
 
-    private func drawBlueEdgeShadow() {
-        let edge = min(max(min(bounds.width, bounds.height) * 0.14, 6), 18)
-        let blue = NSColor.systemBlue
-        let bottomRect = NSRect(x: bounds.minX, y: bounds.minY, width: bounds.width, height: edge)
-        let gradient = NSGradient(colors: [
-            blue.withAlphaComponent(0.46),
-            blue.withAlphaComponent(0),
-        ])
-        gradient?.draw(in: bottomRect, angle: 90)
+    private func drawBlueOuterShadow(around imageRect: NSRect) {
+        drawShadowLayer(
+            around: imageRect,
+            color: NSColor(calibratedRed: 0.12, green: 0.45, blue: 0.82, alpha: 0.42),
+            blur: 16,
+            offset: .zero
+        )
+        drawShadowLayer(
+            around: imageRect,
+            color: NSColor(calibratedRed: 0.28, green: 0.64, blue: 1, alpha: 0.34),
+            blur: 7,
+            offset: NSSize(width: 0, height: -1)
+        )
+        NSColor(calibratedRed: 0.36, green: 0.65, blue: 0.92, alpha: 0.28).setStroke()
+        let edge = NSBezierPath(rect: imageRect.insetBy(dx: 0.5, dy: 0.5))
+        edge.lineWidth = 1
+        edge.stroke()
+    }
 
-        let topRect = NSRect(x: bounds.minX, y: bounds.maxY - edge, width: bounds.width, height: edge)
-        gradient?.draw(in: topRect, angle: 270)
-
-        let leftRect = NSRect(x: bounds.minX, y: bounds.minY, width: edge, height: bounds.height)
-        gradient?.draw(in: leftRect, angle: 0)
-
-        let rightRect = NSRect(x: bounds.maxX - edge, y: bounds.minY, width: edge, height: bounds.height)
-        gradient?.draw(in: rightRect, angle: 180)
+    private func drawShadowLayer(around imageRect: NSRect, color: NSColor, blur: CGFloat, offset: NSSize) {
+        NSGraphicsContext.saveGraphicsState()
+        let shadow = NSShadow()
+        shadow.shadowColor = color
+        shadow.shadowBlurRadius = blur
+        shadow.shadowOffset = offset
+        shadow.set()
+        NSColor.white.setFill()
+        NSBezierPath(rect: imageRect).fill()
+        NSGraphicsContext.restoreGraphicsState()
     }
 }
 

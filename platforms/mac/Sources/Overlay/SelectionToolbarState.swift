@@ -323,11 +323,21 @@ enum SelectionToolbarState {
         }
 
         let targetSize = NSSize(width: size, height: size)
+        let targetRect = NSRect(origin: .zero, size: targetSize)
+        let mask = NSImage(size: targetSize)
+        mask.lockFocus()
+        NSColor.clear.setFill()
+        targetRect.fill()
+        source.draw(in: targetRect, from: .zero, operation: .sourceOver, fraction: 1)
+        mask.unlockFocus()
+
         let image = NSImage(size: targetSize)
         image.lockFocus()
-        source.draw(in: NSRect(origin: .zero, size: targetSize), from: .zero, operation: .sourceOver, fraction: 1)
+        NSColor.clear.setFill()
+        targetRect.fill()
         tint.setFill()
-        NSRect(origin: .zero, size: targetSize).fill(using: .sourceAtop)
+        targetRect.fill()
+        mask.draw(in: targetRect, from: .zero, operation: .destinationIn, fraction: 1)
         image.unlockFocus()
         return image
     }
