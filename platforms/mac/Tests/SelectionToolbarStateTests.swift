@@ -5,10 +5,12 @@ import XCTest
 @MainActor
 private final class FakePinnedWindow: PinnedImageWindowPresenting {
     let image: NSImage
+    let screenRect: NSRect
     private(set) var didShow = false
 
-    init(image: NSImage) {
+    init(image: NSImage, screenRect: NSRect) {
         self.image = image
+        self.screenRect = screenRect
     }
 
     func show() {
@@ -2151,6 +2153,21 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(result?.annotations.first?.text, "pinned")
     }
 
+    func testCommandOneCompletesSelectionAsPin() {
+        var result: CaptureSelectionResult?
+        let expectation = expectation(description: "pin shortcut")
+        let window = SelectionOverlayWindow(backgroundImage: nil) { selectionResult in
+            result = selectionResult
+            expectation.fulfill()
+        }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+
+        window.test_keyDown(keyCode: 18, charactersIgnoringModifiers: "1", modifierFlags: [.command])
+        wait(for: [expectation], timeout: 0.5)
+
+        XCTAssertEqual(result?.action, .pin)
+    }
+
     func testPinnedImageGeometryFitsAndScalesWithoutChangingAspectRatio() {
         let visibleFrame = NSRect(x: 0, y: 0, width: 1000, height: 700)
 
@@ -2184,6 +2201,31 @@ final class SelectionToolbarStateTests: XCTestCase {
             visibleFrame: visibleFrame
         )
         XCTAssertEqual(max(clamped.width, clamped.height), PinnedImageWindowGeometry.minLongSide, accuracy: 0.1)
+    }
+
+    @MainActor
+    func testPinnedImageWindowUsesSourceFrameBlueShadowAndKeyboardClose() throws {
+        let sourceRect = NSRect(x: 120, y: 220, width: 160, height: 90)
+        let controller = PinnedImageWindowController(
+            image: solidImage(size: sourceRect.size, color: .white),
+            screenRect: sourceRect
+        )
+        let window = try XCTUnwrap(controller.window)
+
+        XCTAssertEqual(window.frame.origin.x, sourceRect.origin.x, accuracy: 0.1)
+        XCTAssertEqual(window.frame.origin.y, sourceRect.origin.y, accuracy: 0.1)
+        XCTAssertEqual(window.frame.size.width, sourceRect.width, accuracy: 0.1)
+        XCTAssertEqual(window.frame.size.height, sourceRect.height, accuracy: 0.1)
+        XCTAssertFalse(window.hasShadow)
+        XCTAssertTrue(controller.test_drawsBlueShadow)
+        XCTAssertFalse(controller.test_drawsCloseButton)
+
+        var closeCount = 0
+        controller.onClose = {
+            closeCount += 1
+        }
+        controller.test_keyDown(keyCode: 117)
+        XCTAssertEqual(closeCount, 1)
     }
 
     func testActivatingAnotherToolExitsEyedropperMode() {
@@ -6938,7 +6980,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         style.fillColor = .red
         let annotation = CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 10, y: 10, width: 40, height: 30), style: style)
         let result = CaptureSelectionResult(
-            screenRect: NSRect(origin: .zero, size: image.size),
+            screenRect: NSRect(x: 40, y: 50, width: image.size.width, height: image.size.height),
             snapshotRect: NSRect(origin: .zero, size: image.size),
             annotations: [annotation],
             action: .pin
@@ -6947,8 +6989,8 @@ final class SelectionToolbarStateTests: XCTestCase {
         let coordinator = CaptureCoordinator(
             permissionCoordinator: PermissionCoordinator(),
             screenCaptureService: ScreenCaptureService(),
-            pinnedWindowFactory: { image in
-                let window = FakePinnedWindow(image: image)
+            pinnedWindowFactory: { image, screenRect in
+                let window = FakePinnedWindow(image: image, screenRect: screenRect)
                 pinnedWindows.append(window)
                 return window
             }
@@ -6966,6 +7008,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(coordinator.test_pinnedWindowCount, 1)
         let pinned = try XCTUnwrap(pinnedWindows.first)
         XCTAssertTrue(pinned.didShow)
+        XCTAssertEqual(pinned.screenRect, result.screenRect)
         XCTAssertEqual(hex(try XCTUnwrap(rgbaRenderPixel(in: pinned.image, at: NSPoint(x: 16, y: 16)))), "#FF0000")
         XCTAssertEqual(NSPasteboard.general.string(forType: .string), "keep-me")
     }
@@ -11053,6 +11096,9 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "mosaicPixel"), "马赛克")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "save"), "保存")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "copy"), "复制到剪切板")
+        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "pin"), "贴图")
+        XCTAssertEqual(SelectionToolbarState.tooltipShortcut(for: "pin")?.iconName, "command")
+        XCTAssertEqual(SelectionToolbarState.tooltipShortcut(for: "pin")?.keyText, "1")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "scroll"), "滚动截图")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "eyedropper"), "取色 ｜ 测距")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "eraserPoint"), "橡皮擦")

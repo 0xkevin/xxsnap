@@ -1786,7 +1786,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private var displayedWindowRect: NSRect?
     private var pendingWindowSelectionRect: NSRect?
     private var hoverAnimationTimer: Timer?
-    private var hoveredTooltip: (text: String, anchor: NSRect)?
+    private var hoveredTooltip: (identifier: String, text: String, anchor: NSRect)?
     private var interactionMode = InteractionMode.selecting
     private var selectionStartPoint: NSPoint?
     private var selectionCurrentPoint: NSPoint?
@@ -2919,6 +2919,11 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return true
         }
 
+        if event.charactersIgnoringModifiers == "1", event.modifierFlags.contains(.command) {
+            finish(action: .pin)
+            return true
+        }
+
         if event.charactersIgnoringModifiers == "c", event.modifierFlags.contains(.command) {
             finish(action: .copy)
             return true
@@ -3539,34 +3544,35 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         )
     }
 
-    private func tooltipTarget(at point: NSPoint) -> (text: String, anchor: NSRect)? {
+    private func tooltipTarget(at point: NSPoint) -> (identifier: String, text: String, anchor: NSRect)? {
         guard lockedSelectionRect != nil, let selectionRect else {
             return nil
         }
 
         if let toolbar = mainToolbarRect(for: selectionRect) {
             for (button, rect) in toolbarButtonRects(in: toolbar) where rect.contains(point) {
-                guard let title = SelectionToolbarState.tooltipTitle(for: tooltipIdentifier(for: button)) else {
+                let identifier = tooltipIdentifier(for: button)
+                guard let title = SelectionToolbarState.tooltipTitle(for: identifier) else {
                     return nil
                 }
-                return (title, rect)
+                return (identifier, title, rect)
             }
         }
 
         let measurementLayout = measurementControlLayout(for: selectionRect)
         if measurementLayout.cornerStyle.contains(point),
            let title = SelectionToolbarState.tooltipTitle(for: "cornerStyle") {
-            return (title, measurementLayout.cornerStyle)
+            return ("cornerStyle", title, measurementLayout.cornerStyle)
         }
         if measurementLayout.aspectRatio.contains(point) {
             let identifier = isSelectionAspectRatioLocked ? "aspectRatioLockedOn" : "aspectRatioLockedOff"
             if let title = SelectionToolbarState.tooltipTitle(for: identifier) {
-                return (title, measurementLayout.aspectRatio)
+                return (identifier, title, measurementLayout.aspectRatio)
             }
         }
         if measurementLayout.refresh.contains(point),
            let title = SelectionToolbarState.tooltipTitle(for: "refreshCapture") {
-            return (title, measurementLayout.refresh)
+            return ("refreshCapture", title, measurementLayout.refresh)
         }
 
         guard let optionsRect = optionsToolbarRect else {
@@ -3576,27 +3582,28 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
         for (index, rect) in layout.strokeWidths.enumerated() where rect.contains(point) {
             let identifiers = ["strokeWidthThin", "strokeWidthMedium", "strokeWidthThick"]
-            return (SelectionToolbarState.tooltipTitle(for: identifiers[index]) ?? "线条粗细", rect)
+            let identifier = identifiers[index]
+            return (identifier, SelectionToolbarState.tooltipTitle(for: identifier) ?? "线条粗细", rect)
         }
 
         if let fillRect = layout.fillToggle,
            fillRect.contains(point),
            let title = SelectionToolbarState.tooltipTitle(for: "fill") {
-            return (title, fillRect)
+            return ("fill", title, fillRect)
         }
 
         if let rectangleMode = layout.rectangleMode {
             let rectangleButton = shapeModeBackgroundRect(for: rectangleMode)
             let identifier = optionsToolbarMode == .mosaic ? "mosaicRectangle" : "shapeRectangle"
             if rectangleButton.contains(point), let title = SelectionToolbarState.tooltipTitle(for: identifier) {
-                return (title, rectangleButton)
+                return (identifier, title, rectangleButton)
             }
         }
 
         if let ellipseButton = layout.ellipseMode,
            ellipseButton.contains(point),
            let title = SelectionToolbarState.tooltipTitle(for: "shapeEllipse") {
-            return (title, ellipseButton)
+            return ("shapeEllipse", title, ellipseButton)
         }
 
         if optionsToolbarMode == .mosaic {
@@ -3604,7 +3611,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             if redactionTypeRect.contains(point) {
                 let identifier = mosaicRedactionType == .gaussianBlur ? "mosaicBlur" : "mosaicPixel"
                 if let title = SelectionToolbarState.tooltipTitle(for: identifier) {
-                    return (title, redactionTypeRect)
+                    return (identifier, title, redactionTypeRect)
                 }
             }
         }
@@ -3621,40 +3628,40 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 }
                 let button = optionButtonBackgroundRect(for: rect)
                 if button.contains(point), let title = SelectionToolbarState.tooltipTitle(for: identifier) {
-                    return (title, button)
+                    return (identifier, title, button)
                 }
             }
         }
 
         if optionsToolbarMode == .text {
             if layout.textBold.contains(point), let title = SelectionToolbarState.tooltipTitle(for: "textBold") {
-                return (title, layout.textBold)
+                return ("textBold", title, layout.textBold)
             }
             if layout.textItalic.contains(point), let title = SelectionToolbarState.tooltipTitle(for: "textItalic") {
-                return (title, layout.textItalic)
+                return ("textItalic", title, layout.textItalic)
             }
             if layout.textOutline.contains(point), let title = SelectionToolbarState.tooltipTitle(for: "textOutline") {
-                return (title, layout.textOutline)
+                return ("textOutline", title, layout.textOutline)
             }
         }
 
         if SelectionToolbarState.showsStrokeStyleField(for: optionsToolbarMode),
            layout.strokeStyle.contains(point),
            let title = SelectionToolbarState.tooltipTitle(for: "strokeStyle") {
-            return (title, layout.strokeStyle)
+            return ("strokeStyle", title, layout.strokeStyle)
         }
 
         if let startArrowType = layout.startArrowType, startArrowType.contains(point) {
-            return (SelectionToolbarState.tooltipTitle(for: "startArrowType") ?? "开始箭头", startArrowType)
+            return ("startArrowType", SelectionToolbarState.tooltipTitle(for: "startArrowType") ?? "开始箭头", startArrowType)
         }
 
         if let endArrowType = layout.endArrowType, endArrowType.contains(point) {
-            return (SelectionToolbarState.tooltipTitle(for: "endArrowType") ?? "结束箭头", endArrowType)
+            return ("endArrowType", SelectionToolbarState.tooltipTitle(for: "endArrowType") ?? "结束箭头", endArrowType)
         }
 
         for (index, rect) in layout.colorSwatches.enumerated() where rect.insetBy(dx: -4, dy: -4).contains(point) {
             if index == visiblePaletteCount, let title = SelectionToolbarState.tooltipTitle(for: "customColor") {
-                return (title, rect)
+                return ("customColor", title, rect)
             }
             return nil
         }
@@ -12338,11 +12345,46 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             .font: samplerInfoFont(ofSize: 12, weight: .medium),
             .foregroundColor: NSColor.white,
         ]
-        let textSize = NSString(string: hoveredTooltip.text).size(withAttributes: attributes)
+        let shortcut = SelectionToolbarState.tooltipShortcut(for: hoveredTooltip.identifier)
+        let iconSize: CGFloat = shortcut == nil ? 0 : 12
+        let iconSpacing: CGFloat = shortcut == nil ? 0 : 3
+        let titleText = hoveredTooltip.text + (shortcut == nil ? "" : " (")
+        let titleSize = NSString(string: titleText).size(withAttributes: attributes)
+        let keyText = shortcut.map { $0.keyText + ")" } ?? ""
+        let keySize = NSString(string: keyText).size(withAttributes: attributes)
+        let textSize = NSSize(
+            width: titleSize.width + iconSize + iconSpacing + keySize.width,
+            height: max(titleSize.height, iconSize)
+        )
         let rect = SelectionToolbarState.tooltipRect(textSize: textSize, anchoredTo: hoveredTooltip.anchor, inside: safeLayoutBounds)
         NSColor(calibratedWhite: 0.08, alpha: 0.94).setFill()
         NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5).fill()
-        NSString(string: hoveredTooltip.text).draw(in: rect.insetBy(dx: 8, dy: 5), withAttributes: attributes)
+        let contentRect = rect.insetBy(dx: 8, dy: 5)
+        NSString(string: titleText).draw(in: contentRect, withAttributes: attributes)
+        guard let shortcut else {
+            return
+        }
+
+        let iconRect = NSRect(
+            x: contentRect.minX + titleSize.width,
+            y: contentRect.midY - iconSize / 2,
+            width: iconSize,
+            height: iconSize
+        )
+        if let image = NSCursor.svgImage(named: shortcut.iconName) {
+            image.draw(in: iconRect, from: .zero, operation: .sourceOver, fraction: 1)
+            NSColor.white.setFill()
+            iconRect.fill(using: .sourceAtop)
+        }
+        NSString(string: keyText).draw(
+            in: NSRect(
+                x: iconRect.maxX + iconSpacing,
+                y: contentRect.minY,
+                width: keySize.width,
+                height: contentRect.height
+            ),
+            withAttributes: attributes
+        )
     }
 
     private func drawEyedropperMeasurementIfNeeded() {

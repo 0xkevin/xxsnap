@@ -13,6 +13,7 @@
 		1946755CEC8BB7B55222E436 /* refresh-left-svgrepo-com.svg in Resources */ = {isa = PBXBuildFile; fileRef = CB99BC81E0DE791D15922EE9 /* refresh-left-svgrepo-com.svg */; };
 		1B5895AA097D70AAED7E5046 /* undo-enabled.svg in Resources */ = {isa = PBXBuildFile; fileRef = 69C2B328D25C6F4DEFCD575D /* undo-enabled.svg */; };
 		1BCC88D12C8AEDFC68A01425 /* cancel-capture.svg in Resources */ = {isa = PBXBuildFile; fileRef = 9A98FE556582ECA9DC75EEAB /* cancel-capture.svg */; };
+		1F4A7C50AA4E1B2300000001 /* command.svg in Resources */ = {isa = PBXBuildFile; fileRef = 1F4A7C50AA4E1B2300000002 /* command.svg */; };
 		251C81FE4D348158346520EB /* scroll-capture.png in Resources */ = {isa = PBXBuildFile; fileRef = C17198BAD6AFCEB4159B4687 /* scroll-capture.png */; };
 		260B435ACF404D352087F565 /* border-corner-rounded.svg in Resources */ = {isa = PBXBuildFile; fileRef = 0209BE008E9C5F0571BE4B9F /* border-corner-rounded.svg */; };
 		28874BF6C20345BE1676B963 /* CaptureAnnotationRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C662C2A250F475591381BB05 /* CaptureAnnotationRenderer.swift */; };
@@ -126,6 +127,7 @@
 		19A9DB1B5DDF521A858E0762 /* mosaic-tool.svg */ = {isa = PBXFileReference; path = "mosaic-tool.svg"; sourceTree = "<group>"; };
 		1ADEAA166682CB019207C3A4 /* shape-marker.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "shape-marker.png"; sourceTree = "<group>"; };
 		1DB60D2449C038C54679162D /* refresh (1).svg */ = {isa = PBXFileReference; path = "refresh (1).svg"; sourceTree = "<group>"; };
+		1F4A7C50AA4E1B2300000002 /* command.svg */ = {isa = PBXFileReference; path = command.svg; sourceTree = "<group>"; };
 		1FE4C4C27283A5FAF4CBCC58 /* text-tool.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "text-tool.png"; sourceTree = "<group>"; };
 		1FEF485A40BED01A907F0106 /* refresh-svgrepo-com2.svg */ = {isa = PBXFileReference; path = "refresh-svgrepo-com2.svg"; sourceTree = "<group>"; };
 		216073E47CB43ABDD6AD1B83 /* StatusItemController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusItemController.swift; sourceTree = "<group>"; };
@@ -332,8 +334,9 @@
 				0209BE008E9C5F0571BE4B9F /* border-corner-rounded.svg */,
 				851C3F8F7298C801D1874B4C /* border-corner-square.svg */,
 				A49BB4756C571CD2E8B2066E /* cancel-capture.png */,
-				9A98FE556582ECA9DC75EEAB /* cancel-capture.svg */,
-				746D4C73B253F54E1E56C5C6 /* copy-to-clipboard.png */,
+					9A98FE556582ECA9DC75EEAB /* cancel-capture.svg */,
+					1F4A7C50AA4E1B2300000002 /* command.svg */,
+					746D4C73B253F54E1E56C5C6 /* copy-to-clipboard.png */,
 				16F9496957D9500C499D44CB /* copy-to-clipboard.svg */,
 				0EF17E8A625E11836314572B /* crop.png */,
 				A89C77B7643079BE8890E43B /* crop.svg */,
@@ -483,9 +486,10 @@
 				92F6E38660876DEACA421E80 /* aspect-ratio.svg in Resources */,
 				260B435ACF404D352087F565 /* border-corner-rounded.svg in Resources */,
 				C679C275101C830B61421469 /* border-corner-square.svg in Resources */,
-				6941D40E459A086383AA836D /* cancel-capture.png in Resources */,
-				1BCC88D12C8AEDFC68A01425 /* cancel-capture.svg in Resources */,
-				31B529E62D217D2F5B13FB85 /* copy-to-clipboard.png in Resources */,
+					6941D40E459A086383AA836D /* cancel-capture.png in Resources */,
+					1BCC88D12C8AEDFC68A01425 /* cancel-capture.svg in Resources */,
+					1F4A7C50AA4E1B2300000001 /* command.svg in Resources */,
+					31B529E62D217D2F5B13FB85 /* copy-to-clipboard.png in Resources */,
 				C9074FF569D4610572CFE532 /* copy-to-clipboard.svg in Resources */,
 				5F56CD50B9AD87B11791D4DE /* crop.png in Resources */,
 				D9FA6CC87275C43C69EE7826 /* crop.svg in Resources */,

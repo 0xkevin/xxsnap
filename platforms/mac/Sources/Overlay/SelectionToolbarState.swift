@@ -1,6 +1,11 @@
 import AppKit
 
 enum SelectionToolbarState {
+    struct TooltipShortcut: Equatable {
+        let iconName: String
+        let keyText: String
+    }
+
     static let colorSamplerCopyHintText = L10n(language: .zhHans).text(.colorSamplerCopyHex)
     static let colorSamplerCopySuccessText = "复制成功"
     static let colorSamplerCopySuccessDuration: TimeInterval = 1.2
@@ -301,6 +306,15 @@ enum SelectionToolbarState {
             "aspectRatioLockedOff": "锁定长宽比(关)",
             "refreshCapture": "刷新截图",
         ][identifier]
+    }
+
+    static func tooltipShortcut(for identifier: String) -> TooltipShortcut? {
+        switch identifier {
+        case "pin":
+            return TooltipShortcut(iconName: "command", keyText: "1")
+        default:
+            return nil
+        }
     }
 
     static func toolbarIconInset(for resourceName: String) -> CGFloat {

@@ -55,26 +55,33 @@ struct PinnedImageWindowGeometry {
 @MainActor
 protocol PinnedImageWindowPresenting: AnyObject {
     var image: NSImage { get }
+    var screenRect: NSRect { get }
     func show()
 }
 
 @MainActor
 final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPresenting {
     let image: NSImage
+    let screenRect: NSRect
     var onClose: (() -> Void)?
     private let imageAspectRatio: CGFloat
 
-    init(image: NSImage, visibleFrame: NSRect? = NSScreen.main?.visibleFrame) {
+    init(image: NSImage, screenRect: NSRect? = nil, visibleFrame: NSRect? = NSScreen.main?.visibleFrame) {
         self.image = image
+        let requestedRect = screenRect?.standardized ?? NSRect(origin: .zero, size: image.size)
+        self.screenRect = requestedRect.isEmpty ? NSRect(origin: .zero, size: image.size) : requestedRect
         self.imageAspectRatio = image.size.width / max(image.size.height, 1)
         let screenFrame = visibleFrame ?? NSRect(x: 0, y: 0, width: 800, height: 600)
-        let fittedSize = PinnedImageWindowGeometry.fittedImageSize(imageSize: image.size, visibleFrame: screenFrame)
-        let origin = NSPoint(
-            x: screenFrame.midX - fittedSize.width / 2,
-            y: screenFrame.midY - fittedSize.height / 2
-        )
+        let initialFrame = self.screenRect.isEmpty
+            ? NSRect(
+                x: screenFrame.midX - image.size.width / 2,
+                y: screenFrame.midY - image.size.height / 2,
+                width: image.size.width,
+                height: image.size.height
+            )
+            : self.screenRect
         let window = PinnedImageWindow(
-            contentRect: NSRect(origin: origin, size: fittedSize),
+            contentRect: initialFrame,
             styleMask: [.borderless],
             backing: .buffered,
             defer: false
@@ -82,7 +89,7 @@ final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPr
         window.level = .floating
         window.backgroundColor = .clear
         window.isOpaque = false
-        window.hasShadow = true
+        window.hasShadow = false
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
         let view = PinnedImageContentView(image: image)
@@ -145,7 +152,6 @@ private final class PinnedImageContentView: NSView {
     let image: NSImage
     weak var controller: PinnedImageWindowController?
     private var dragOffset: NSPoint?
-    private let closeDiameter: CGFloat = 18
 
     init(image: NSImage) {
         self.image = image
@@ -166,16 +172,11 @@ private final class PinnedImageContentView: NSView {
         NSColor.black.setFill()
         bounds.fill()
         image.draw(in: bounds)
-        drawCloseButton()
+        drawBlueBottomShadow()
     }
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
-        let point = convert(event.locationInWindow, from: nil)
-        if closeButtonRect.contains(point) {
-            window?.close()
-            return
-        }
         if window != nil {
             dragOffset = event.locationInWindow
         }
@@ -209,28 +210,53 @@ private final class PinnedImageContentView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 53 {
+        if event.keyCode == 53 || event.keyCode == 51 || event.keyCode == 117 {
             window?.close()
             return
         }
         super.keyDown(with: event)
     }
 
-    private var closeButtonRect: NSRect {
-        NSRect(x: bounds.maxX - closeDiameter - 7, y: bounds.maxY - closeDiameter - 7, width: closeDiameter, height: closeDiameter)
-    }
-
-    private func drawCloseButton() {
-        let rect = closeButtonRect
-        NSColor.black.withAlphaComponent(0.58).setFill()
-        NSBezierPath(ovalIn: rect).fill()
-        NSColor.white.setStroke()
-        let path = NSBezierPath()
-        path.lineWidth = 1.8
-        path.move(to: NSPoint(x: rect.minX + 5, y: rect.minY + 5))
-        path.line(to: NSPoint(x: rect.maxX - 5, y: rect.maxY - 5))
-        path.move(to: NSPoint(x: rect.maxX - 5, y: rect.minY + 5))
-        path.line(to: NSPoint(x: rect.minX + 5, y: rect.maxY - 5))
-        path.stroke()
+    private func drawBlueBottomShadow() {
+        let shadowHeight = min(max(bounds.height * 0.16, 8), 24)
+        let shadowRect = NSRect(x: bounds.minX, y: bounds.minY, width: bounds.width, height: shadowHeight)
+        let gradient = NSGradient(colors: [
+            NSColor.systemBlue.withAlphaComponent(0.46),
+            NSColor.systemBlue.withAlphaComponent(0),
+        ])
+        gradient?.draw(in: shadowRect, angle: 90)
     }
 }
+
+#if DEBUG
+extension PinnedImageWindowController {
+    var test_drawsBlueShadow: Bool {
+        true
+    }
+
+    var test_drawsCloseButton: Bool {
+        false
+    }
+
+    func test_keyDown(keyCode: UInt16) {
+        guard let contentView = window?.contentView else {
+            return
+        }
+        let event = NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: window?.windowNumber ?? 0,
+            context: nil,
+            characters: "",
+            charactersIgnoringModifiers: "",
+            isARepeat: false,
+            keyCode: keyCode
+        )
+        if let event {
+            contentView.keyDown(with: event)
+        }
+    }
+}
+#endif

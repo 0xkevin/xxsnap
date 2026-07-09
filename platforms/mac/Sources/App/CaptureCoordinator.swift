@@ -16,13 +16,15 @@ final class CaptureCoordinator {
     private var retiredOverlayWindows: [SelectionOverlayWindow] = []
     private var pinnedWindowControllers: [PinnedImageWindowPresenting] = []
     private var frozenDesktopImage: NSImage?
-    private let pinnedWindowFactory: @MainActor (NSImage) -> PinnedImageWindowPresenting
+    private let pinnedWindowFactory: @MainActor (NSImage, NSRect) -> PinnedImageWindowPresenting
 
     init(
         permissionCoordinator: PermissionCoordinator,
         screenCaptureService: ScreenCaptureService,
         settingsStore: SettingsStore = SettingsStore(),
-        pinnedWindowFactory: @escaping @MainActor (NSImage) -> PinnedImageWindowPresenting = { PinnedImageWindowController(image: $0) }
+        pinnedWindowFactory: @escaping @MainActor (NSImage, NSRect) -> PinnedImageWindowPresenting = {
+            PinnedImageWindowController(image: $0, screenRect: $1)
+        }
     ) {
         self.permissionCoordinator = permissionCoordinator
         self.screenCaptureService = screenCaptureService
@@ -224,7 +226,7 @@ final class CaptureCoordinator {
                         NSLog("xxsnap save was cancelled or failed")
                     }
                 case .pin:
-                    let controller = pinnedWindowFactory(exportedImage)
+                    let controller = pinnedWindowFactory(exportedImage, result.screenRect)
                     pinnedWindowControllers.append(controller)
                     if let pinnedController = controller as? PinnedImageWindowController {
                         pinnedController.onClose = { [weak self, weak pinnedController] in
