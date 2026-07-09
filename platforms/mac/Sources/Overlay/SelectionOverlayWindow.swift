@@ -15,7 +15,6 @@ enum TestToolbarButton {
     case number
     case magnifier
     case eraser
-    case settings
 }
 
 private extension NSAlert {
@@ -1712,7 +1711,6 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         case save
         case copy
         case scroll
-        case settings
     }
 
     private enum TextDropdownKind {
@@ -1892,6 +1890,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private var currentMagnifierShape: CaptureMagnifierShape = .rectangle
     private var currentMagnifierZoom: CGFloat = 2
     private var currentNumberMarkType: CaptureNumberMarkType = .number
+    private var currentNumberSequenceGroupID: UUID?
+    private var nextNumberSequenceIndexAfterReset: Int?
     private var editingTextAnnotationIndex: Int?
     private var textDraftCreatedDuringCurrentEdit = false
     private var pendingTextEditAnnotationIndex: Int?
@@ -2101,7 +2101,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return
         }
 
-        let drawsMaskedAnnotationsBeforeChrome = lockedSelectionRect != nil && !eraserMasks.isEmpty
+        let drawsMaskedAnnotationsBeforeChrome = lockedSelectionRect != nil && hasEraserMasksForDrawing
         if drawsMaskedAnnotationsBeforeChrome {
             drawAnnotations()
             drawMosaicDraftPreviewIfNeeded()
@@ -3697,8 +3697,6 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return "copy"
         case .scroll:
             return "scroll"
-        case .settings:
-            return "settings"
         }
     }
 
@@ -3983,9 +3981,17 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             style: style,
             numberMarkType: currentNumberMarkType
         )
-        annotation.numberSequenceIndex = currentNumberMarkType == .number ? nextNumberSequenceIndex() : nil
-        annotation.numberSequenceIsManual = currentNumberMarkType == .number && isNumberSequenceManualModeActive()
+        let assignedNumberSequenceIndex = currentNumberMarkType == .number ? nextNumberSequenceIndex() : nil
+        annotation.numberSequenceIndex = assignedNumberSequenceIndex
+        annotation.numberSequenceIsManual = currentNumberMarkType == .number &&
+            isNumberSequenceManualModeActive(in: currentNumberSequenceGroupID)
+        annotation.numberSequenceGroupID = currentNumberMarkType == .number ? currentNumberSequenceGroupID : nil
         annotations.append(annotation)
+        if currentNumberMarkType == .number,
+           let assignedNumberSequenceIndex,
+           nextNumberSequenceIndexAfterReset != nil {
+            nextNumberSequenceIndexAfterReset = min(999, assignedNumberSequenceIndex + 1)
+        }
         recordAnnotationAdd(at: annotations.index(before: annotations.endIndex))
         selectedAnnotationIndex = annotations.indices.last
         interactionMode = .placingNumberMark
@@ -3998,38 +4004,55 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private func nextNumberSequenceIndex(excluding excludedIndex: Int? = nil) -> Int {
-        numericNumberAnnotationIndices()
+        if excludedIndex == nil, let nextNumberSequenceIndexAfterReset {
+            return nextNumberSequenceIndexAfterReset
+        }
+        return numericNumberAnnotationIndices()
             .filter { $0 != excludedIndex }
+            .filter { annotations[$0].numberSequenceGroupID == currentNumberSequenceGroupID }
             .compactMap { annotations[$0].numberSequenceIndex }
             .max()
             .map { min(999, $0 + 1) } ?? 1
     }
 
-    private func renumberNumberSequenceAnnotations() {
+    private func renumberNumberSequenceAnnotations(in groupID: UUID? = nil) {
         var next = 1
         for index in annotations.indices where annotations[index].kind == .numberSequence {
-            if annotations[index].numberMarkType == .number || annotations[index].numberMarkType == nil {
+            if (annotations[index].numberMarkType == .number || annotations[index].numberMarkType == nil) &&
+                annotations[index].numberSequenceGroupID == groupID {
                 annotations[index].numberSequenceIndex = next
                 annotations[index].numberSequenceIsManual = false
                 next += 1
-            } else {
+            } else if annotations[index].numberMarkType != .number && annotations[index].numberMarkType != nil {
                 annotations[index].numberSequenceIndex = nil
                 annotations[index].numberSequenceIsManual = false
             }
         }
     }
 
-    private func isNumberSequenceManualModeActive() -> Bool {
+    private func numberSequenceGroupIDs(in annotations: [CaptureAnnotation]) -> Set<UUID?> {
+        var groupIDs = Set<UUID?>()
+        for annotation in annotations
+            where annotation.kind == .numberSequence &&
+            (annotation.numberMarkType == .number || annotation.numberMarkType == nil) {
+            groupIDs.insert(annotation.numberSequenceGroupID)
+        }
+        return groupIDs
+    }
+
+    private func isNumberSequenceManualModeActive(in groupID: UUID?) -> Bool {
         annotations.contains {
             $0.kind == .numberSequence &&
                 ($0.numberMarkType == .number || $0.numberMarkType == nil) &&
+                $0.numberSequenceGroupID == groupID &&
                 $0.numberSequenceIsManual
         }
     }
 
-    private func markNumberSequenceManualMode() {
+    private func markNumberSequenceManualMode(in groupID: UUID?) {
         for index in annotations.indices where annotations[index].kind == .numberSequence {
-            if annotations[index].numberMarkType == .number || annotations[index].numberMarkType == nil {
+            if (annotations[index].numberMarkType == .number || annotations[index].numberMarkType == nil) &&
+                annotations[index].numberSequenceGroupID == groupID {
                 annotations[index].numberSequenceIsManual = true
             }
         }
@@ -4053,6 +4076,13 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return false
         }
         let value = annotations[selectedAnnotationIndex].numberSequenceIndex ?? 1
+        if !isNumberSequenceManualModeActive(in: annotations[selectedAnnotationIndex].numberSequenceGroupID) {
+            return numberAnnotationIndex(
+                with: value + delta,
+                in: annotations[selectedAnnotationIndex].numberSequenceGroupID,
+                excluding: selectedAnnotationIndex
+            ) != nil
+        }
         return (1...999).contains(value + delta)
     }
 
@@ -4065,10 +4095,27 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
 
         let value = annotations[index].numberSequenceIndex ?? 1
-        annotations[index].numberSequenceIndex = min(999, max(1, value + delta))
+        let nextValue = min(999, max(1, value + delta))
+        let isManualSequence = isNumberSequenceManualModeActive(in: annotations[index].numberSequenceGroupID)
+        if let adjacentIndex = numberAnnotationIndex(with: nextValue, in: annotations[index].numberSequenceGroupID, excluding: index) {
+            annotations[adjacentIndex].numberSequenceIndex = value
+        } else if !isManualSequence {
+            return
+        }
+        annotations[index].numberSequenceIndex = nextValue
         selectedAnnotationIndex = index
         clearRedoAnnotationHistory()
         needsDisplay = true
+    }
+
+    private func numberAnnotationIndex(with value: Int, in groupID: UUID?, excluding excludedIndex: Int) -> Int? {
+        annotations.indices.first { index in
+            index != excludedIndex &&
+                annotations[index].kind == .numberSequence &&
+                (annotations[index].numberMarkType == .number || annotations[index].numberMarkType == nil) &&
+                annotations[index].numberSequenceGroupID == groupID &&
+                annotations[index].numberSequenceIndex == value
+        }
     }
 
     private func resetNumberAnnotation(at index: Int) {
@@ -4078,7 +4125,12 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         else {
             return
         }
+        let newGroupID = UUID()
         annotations[index].numberSequenceIndex = 1
+        annotations[index].numberSequenceIsManual = false
+        annotations[index].numberSequenceGroupID = newGroupID
+        currentNumberSequenceGroupID = newGroupID
+        nextNumberSequenceIndexAfterReset = 2
         selectedAnnotationIndex = index
         clearRedoAnnotationHistory()
         needsDisplay = true
@@ -4113,7 +4165,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return
         }
         if editingNumberDraftWasEdited {
-            markNumberSequenceManualMode()
+            markNumberSequenceManualMode(in: annotations[editingNumberAnnotationIndex].numberSequenceGroupID)
             if let value = Int(editingNumberDraft), value > 0 {
                 annotations[editingNumberAnnotationIndex].numberSequenceIndex = min(999, max(1, value))
             } else if editingNumberDraft.isEmpty {
@@ -4214,7 +4266,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 editingNumberDraft.remove(at: removeIndex)
                 editingNumberCaretIndex -= 1
             }
-            markNumberSequenceManualMode()
+            markNumberSequenceManualMode(in: annotations[editingNumberAnnotationIndex].numberSequenceGroupID)
             showNumberCaretNow()
             return true
         }
@@ -4237,7 +4289,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             editingNumberCaretIndex = clampedText == nextDraft
                 ? min(clampedText.count, editingNumberCaretIndex + characters.count)
                 : clampedText.count
-            markNumberSequenceManualMode()
+            markNumberSequenceManualMode(in: annotations[editingNumberAnnotationIndex].numberSequenceGroupID)
             annotations[editingNumberAnnotationIndex].numberSequenceIndex = clamped
             clearRedoAnnotationHistory()
             showNumberCaretNow()
@@ -5313,7 +5365,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             finish(action: .save)
         case .cancel:
             selectionDidFinish?(nil)
-        case .pin, .scroll, .settings:
+        case .pin, .scroll:
             showPlaceholder(for: button)
         }
 
@@ -5833,6 +5885,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
         selectedAnnotationIndex = index
         selectedNumberAnnotationCanFollowTypeDropdown = annotations[index].kind == .numberSequence
+        if annotations[index].kind == .numberSequence {
+            selectNumberSequenceGroup(for: annotations[index])
+        }
         needsDisplay = true
     }
 
@@ -5950,8 +6005,6 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             toolbarButton = .magnifier
         case .eraser:
             toolbarButton = .eraser
-        case .settings:
-            toolbarButton = .settings
         }
         return toolbarButtonRects(in: toolbar).first(where: { $0.0 == toolbarButton })?.1
     }
@@ -5979,8 +6032,6 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             toolbarButton = .magnifier
         case .eraser:
             toolbarButton = .eraser
-        case .settings:
-            toolbarButton = .settings
         }
         return symbolName(for: toolbarButton)
     }
@@ -7033,8 +7084,6 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             label = "橡皮擦"
         case .scroll:
             label = "滚动截图"
-        case .settings:
-            label = "设置"
         case .undo:
             label = "撤销"
         case .redo:
@@ -7117,13 +7166,21 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 annotations.remove(at: removalIndex)
             }
             selectedAnnotationIndex = annotations.indices.last
-            finishAnnotationHistoryMutation(affectedKind: annotation.kind, selectedIndex: selectedAnnotationIndex)
+            finishAnnotationHistoryMutation(
+                affectedKind: annotation.kind,
+                selectedIndex: selectedAnnotationIndex,
+                numberSequenceGroupIDs: numberSequenceGroupIDs(in: [annotation])
+            )
         case .delete(let annotation, let index, let masks):
             let insertionIndex = min(max(index, 0), annotations.count)
             annotations.insert(annotation, at: insertionIndex)
             restoreEraserMasks(masks)
             selectedAnnotationIndex = insertionIndex
-            finishAnnotationHistoryMutation(affectedKind: annotation.kind, selectedIndex: insertionIndex)
+            finishAnnotationHistoryMutation(
+                affectedKind: annotation.kind,
+                selectedIndex: insertionIndex,
+                numberSequenceGroupIDs: numberSequenceGroupIDs(in: [annotation])
+            )
         case .deleteMany(let entries, let masks):
             let sorted = entries.sorted { $0.index < $1.index }
             for entry in sorted {
@@ -7131,7 +7188,11 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 annotations.insert(entry.annotation, at: insertionIndex)
             }
             restoreEraserMasks(masks)
-            finishAnnotationHistoryMutation(affectedKinds: sorted.map(\.annotation.kind), selectedIndex: nil)
+            finishAnnotationHistoryMutation(
+                affectedKinds: sorted.map(\.annotation.kind),
+                selectedIndex: nil,
+                numberSequenceGroupIDs: numberSequenceGroupIDs(in: sorted.map(\.annotation))
+            )
         case .addEraserMask(let mask):
             eraserMasks.removeAll { $0.id == mask.id }
             finishAnnotationHistoryMutation(affectedKinds: annotations.filter { mask.affectedAnnotationIDs.contains($0.id) }.map(\.kind), selectedIndex: nil)
@@ -7144,7 +7205,11 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             let insertionIndex = min(max(index, 0), annotations.count)
             annotations.insert(annotation, at: insertionIndex)
             selectedAnnotationIndex = insertionIndex
-            finishAnnotationHistoryMutation(affectedKind: annotation.kind, selectedIndex: insertionIndex)
+            finishAnnotationHistoryMutation(
+                affectedKind: annotation.kind,
+                selectedIndex: insertionIndex,
+                numberSequenceGroupIDs: numberSequenceGroupIDs(in: [annotation])
+            )
         case .delete(let annotation, let index, let masks):
             let removalIndex: Int? = annotations.indices.contains(index) ? index : nil
             if let removalIndex {
@@ -7152,7 +7217,11 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             }
             reapplyEraserMaskPruning(originalMasks: masks, removing: Set([annotation.id]))
             selectedAnnotationIndex = nil
-            finishAnnotationHistoryMutation(affectedKind: annotation.kind, selectedIndex: nil)
+            finishAnnotationHistoryMutation(
+                affectedKind: annotation.kind,
+                selectedIndex: nil,
+                numberSequenceGroupIDs: numberSequenceGroupIDs(in: [annotation])
+            )
         case .deleteMany(let entries, let masks):
             for entry in entries.sorted(by: { $0.index > $1.index }) where annotations.indices.contains(entry.index) {
                 annotations.remove(at: entry.index)
@@ -7164,24 +7233,46 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             } else {
                 reapplyEraserMaskPruning(originalMasks: masks, removing: deletedIDs)
             }
-            finishAnnotationHistoryMutation(affectedKinds: entries.map(\.annotation.kind), selectedIndex: nil)
+            finishAnnotationHistoryMutation(
+                affectedKinds: entries.map(\.annotation.kind),
+                selectedIndex: nil,
+                numberSequenceGroupIDs: numberSequenceGroupIDs(in: entries.map(\.annotation))
+            )
         case .addEraserMask(let mask):
             eraserMasks.append(mask)
             finishAnnotationHistoryMutation(affectedKinds: annotations.filter { mask.affectedAnnotationIDs.contains($0.id) }.map(\.kind), selectedIndex: nil)
         }
     }
 
-    private func finishAnnotationHistoryMutation(affectedKind: CaptureAnnotationKind, selectedIndex: Int?) {
-        finishAnnotationHistoryMutation(affectedKinds: [affectedKind], selectedIndex: selectedIndex)
+    private func finishAnnotationHistoryMutation(
+        affectedKind: CaptureAnnotationKind,
+        selectedIndex: Int?,
+        numberSequenceGroupIDs: Set<UUID?>? = nil
+    ) {
+        finishAnnotationHistoryMutation(
+            affectedKinds: [affectedKind],
+            selectedIndex: selectedIndex,
+            numberSequenceGroupIDs: numberSequenceGroupIDs
+        )
     }
 
-    private func finishAnnotationHistoryMutation(affectedKinds: [CaptureAnnotationKind], selectedIndex: Int?) {
+    private func finishAnnotationHistoryMutation(
+        affectedKinds: [CaptureAnnotationKind],
+        selectedIndex: Int?,
+        numberSequenceGroupIDs: Set<UUID?>? = nil
+    ) {
         editingTextAnnotationIndex = nil
         clearNumberEditing()
         clearPendingTextEdit()
         removeTextEditor()
-        if affectedKinds.contains(.numberSequence) && !isNumberSequenceManualModeActive() {
-            renumberNumberSequenceAnnotations()
+        if affectedKinds.contains(.numberSequence) {
+            if let numberSequenceGroupIDs, !numberSequenceGroupIDs.isEmpty {
+                for groupID in numberSequenceGroupIDs where !isNumberSequenceManualModeActive(in: groupID) {
+                    renumberNumberSequenceAnnotations(in: groupID)
+                }
+            } else if !isNumberSequenceManualModeActive(in: nil) {
+                renumberNumberSequenceAnnotations()
+            }
         }
         if affectedKinds.contains(.numberSequence) {
             revealedNumberControlsIndex = nil
@@ -7237,7 +7328,11 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         clearPendingTextEdit()
         removeTextEditor()
         clearRedoAnnotationHistory()
-        finishAnnotationHistoryMutation(affectedKinds: entries.map(\.annotation.kind), selectedIndex: nil)
+        finishAnnotationHistoryMutation(
+            affectedKinds: entries.map(\.annotation.kind),
+            selectedIndex: nil,
+            numberSequenceGroupIDs: numberSequenceGroupIDs(in: entries.map(\.annotation))
+        )
         needsDisplay = true
         return true
     }
@@ -7253,7 +7348,11 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         eraserMasks.removeAll()
         undoAnnotationEntries.append(.deleteMany(entries: entries, masks: masks))
         clearRedoAnnotationHistory()
-        finishAnnotationHistoryMutation(affectedKinds: entries.map(\.annotation.kind), selectedIndex: nil)
+        finishAnnotationHistoryMutation(
+            affectedKinds: entries.map(\.annotation.kind),
+            selectedIndex: nil,
+            numberSequenceGroupIDs: numberSequenceGroupIDs(in: entries.map(\.annotation))
+        )
         needsDisplay = true
         return true
     }
@@ -7317,7 +7416,14 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
 
         let removed = annotations[deletionIndex]
-        let shouldRenumberNumberSequence = removed.kind == .numberSequence && !isNumberSequenceManualModeActive()
+        let removedNumberSequenceGroupID = removed.numberSequenceGroupID
+        let shouldRenumberNumberSequence = removed.kind == .numberSequence &&
+            !isNumberSequenceManualModeActive(in: removedNumberSequenceGroupID)
+        if removed.kind == .numberSequence,
+           removed.numberMarkType == .number || removed.numberMarkType == nil {
+            currentNumberSequenceGroupID = removedNumberSequenceGroupID
+            nextNumberSequenceIndexAfterReset = nil
+        }
         annotations.remove(at: deletionIndex)
         let removedMasks = pruneEraserMasks(removing: Set([removed.id]))
         undoAnnotationEntries.append(.delete(annotation: removed, index: deletionIndex, masks: removedMasks))
@@ -7333,7 +7439,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         showsEndArrowTypeMenu = false
         if removed.kind == .numberSequence {
             if shouldRenumberNumberSequence {
-                renumberNumberSequenceAnnotations()
+                renumberNumberSequenceAnnotations(in: removedNumberSequenceGroupID)
             }
             revealedNumberControlsIndex = nil
             invalidateCursorRectsAndRefresh()
@@ -8366,6 +8472,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         if annotation.kind == .numberSequence {
             activateNumberTool()
             selectedAnnotationIndex = index
+            selectNumberSequenceGroup(for: annotation)
             selectedNumberAnnotationCanFollowTypeDropdown = true
             currentNumberMarkType = annotation.numberMarkType ?? .number
             currentStyle = annotation.style
@@ -8402,6 +8509,17 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         if annotation.kind == .marker {
             invalidateCursorRectsAndRefresh()
         }
+    }
+
+    private func selectNumberSequenceGroup(for annotation: CaptureAnnotation) {
+        guard annotation.kind == .numberSequence,
+              annotation.numberMarkType == .number || annotation.numberMarkType == nil
+        else {
+            return
+        }
+
+        currentNumberSequenceGroupID = annotation.numberSequenceGroupID
+        nextNumberSequenceIndexAfterReset = nil
     }
 
     private func applyCurrentStyleToSelectedAnnotation() {
@@ -8881,6 +8999,47 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             width: abs(current.x - start.x),
             height: abs(current.y - start.y)
         ).standardized
+    }
+
+    private var draftEraserRectangleMask: EraserMask? {
+        guard eraserMode == .rectangle,
+              interactionMode == .drawingEraserRectangle,
+              let overlayRect = eraserRectanglePreviewRect,
+              overlayRect.width >= 3,
+              overlayRect.height >= 3,
+              let effectiveOverlayRect = effectiveOverlayEraserRect(from: overlayRect)
+        else {
+            return nil
+        }
+
+        let affectedIDs = Set(
+            annotations.compactMap { annotation in
+                eraserRectangleIntersects(effectiveOverlayRect, annotation: annotation) ? annotation.id : nil
+            }
+        )
+        guard !affectedIDs.isEmpty,
+              let localRect = localRectFromOverlayEraserRect(effectiveOverlayRect)
+        else {
+            return nil
+        }
+
+        return EraserMask(rect: localRect, affectedAnnotationIDs: affectedIDs)
+    }
+
+    private var hasEraserMasksForDrawing: Bool {
+        !eraserMasks.isEmpty || hasDraftEraserRectanglePreview
+    }
+
+    private var hasDraftEraserRectanglePreview: Bool {
+        guard eraserMode == .rectangle,
+              interactionMode == .drawingEraserRectangle,
+              let overlayRect = eraserRectanglePreviewRect,
+              overlayRect.width >= 3,
+              overlayRect.height >= 3
+        else {
+            return false
+        }
+        return effectiveOverlayEraserRect(from: overlayRect) != nil
     }
 
     private func commitEraserRectangle() {
@@ -10114,7 +10273,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private func drawOverlay() {
         if let backgroundImage {
             backgroundImage.draw(in: bounds, from: NSRect(origin: .zero, size: backgroundImage.size), operation: .copy, fraction: 1)
-            if eraserMasks.isEmpty {
+            if !hasEraserMasksForDrawing {
                 let usesSequentialMosaicOrdering = shouldRenderAnnotationsWithMosaicOrdering
                 if let rotatingIndex = rotatingMosaicRectangleAnnotationIndex(),
                    !usesSequentialMosaicOrdering,
@@ -10136,7 +10295,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                     }
                 }
             }
-            if eraserMasks.isEmpty {
+            if !hasEraserMasksForDrawing {
                 drawMosaicDraftPreviewIfNeeded()
             }
             for (index, annotation) in annotations.enumerated()
@@ -10379,11 +10538,12 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private func drawAnnotations() {
-        guard !eraserMasks.isEmpty else {
+        let effectiveEraserMasks = eraserMasks + [draftEraserRectangleMask].compactMap { $0 }
+        guard !effectiveEraserMasks.isEmpty else {
             drawAnnotationsWithoutEraserMasks()
             return
         }
-        drawAnnotationsWithEraserMasks()
+        drawAnnotationsWithEraserMasks(effectiveEraserMasks)
     }
 
     private func drawAnnotationsWithoutEraserMasks() {
@@ -10417,7 +10577,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
     }
 
-    private func drawAnnotationsWithEraserMasks() {
+    private func drawAnnotationsWithEraserMasks(_ masks: [EraserMask]) {
         guard let lockedSelectionRect,
               let backgroundImage,
               let crop = crop(image: backgroundImage, to: lockedSelectionRect)
@@ -10429,7 +10589,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         let rendered = CaptureAnnotationRenderer.render(
             image: crop,
             annotations: annotations,
-            eraserMasks: eraserMasks
+            eraserMasks: masks
         )
         rendered.draw(
             in: lockedSelectionRect,
@@ -10437,7 +10597,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             operation: .sourceOver,
             fraction: 1
         )
-        drawAnnotationsOutsideLockedSelection(lockedSelectionRect)
+        drawAnnotationsOutsideLockedSelection(lockedSelectionRect, masks: masks)
 
         if let selectedIndex = selectedAnnotationIndex,
            annotations.indices.contains(selectedIndex),
@@ -10447,14 +10607,14 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
     }
 
-    private func drawAnnotationsOutsideLockedSelection(_ lockedSelectionRect: NSRect) {
+    private func drawAnnotationsOutsideLockedSelection(_ lockedSelectionRect: NSRect, masks: [EraserMask]) {
         let clippedSelectionRect = lockedSelectionRect.standardized
         let selectedIndex = selectedAnnotationIndex
         for (index, annotation) in annotations.enumerated() {
             if index == selectedIndex || isMosaicAnnotation(annotation) || !annotationHasVisibleAreaOutsideLockedSelection(annotation, clippedSelectionRect) {
                 continue
             }
-            drawAnnotationOutsideLockedSelection(annotation, clippedSelectionRect)
+            drawAnnotationOutsideLockedSelection(annotation, clippedSelectionRect, masks: masks)
         }
 
         if let selectedIndex,
@@ -10463,7 +10623,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             let selectedAnnotation = annotations[selectedIndex]
             if !isMosaicAnnotation(selectedAnnotation),
                annotationHasVisibleAreaOutsideLockedSelection(selectedAnnotation, clippedSelectionRect) {
-                drawAnnotationOutsideLockedSelection(selectedAnnotation, clippedSelectionRect)
+                drawAnnotationOutsideLockedSelection(selectedAnnotation, clippedSelectionRect, masks: masks)
                 if shouldDrawSelectedAnnotationOutline(selectedAnnotation) {
                     drawSelectedAnnotationOutline(selectedAnnotation)
                 }
@@ -10471,8 +10631,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
     }
 
-    private func drawAnnotationOutsideLockedSelection(_ annotation: CaptureAnnotation, _ lockedSelectionRect: NSRect) {
-        let masksForAnnotation = eraserMasks.filter { $0.affectedAnnotationIDs.contains(annotation.id) }
+    private func drawAnnotationOutsideLockedSelection(_ annotation: CaptureAnnotation, _ lockedSelectionRect: NSRect, masks: [EraserMask]) {
+        let masksForAnnotation = masks.filter { $0.affectedAnnotationIDs.contains(annotation.id) }
 
         NSGraphicsContext.saveGraphicsState()
         outsideLockedSelectionClipPath(lockedSelectionRect).addClip()
@@ -11841,13 +12001,20 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         case .delete:
             drawNumberDeleteHandle(in: rect, enabled: enabled)
         case .resize:
-            (enabled ? NSColor.systemBlue : NSColor.disabledControlTextColor).setFill()
-            NSBezierPath(ovalIn: rect).fill()
+            drawNumberCircleHandle(in: rect, enabled: enabled)
         case .increment, .decrement:
             drawNumberSquareHandle(kind, in: rect, enabled: enabled)
         case .reset:
             drawNumberResetHandle(in: rect, enabled: enabled)
         }
+    }
+
+    private func drawNumberCircleHandle(in rect: NSRect, enabled: Bool) {
+        let color = enabled ? NSColor.systemBlue : NSColor.disabledControlTextColor
+        NSColor.white.setFill()
+        NSBezierPath(ovalIn: rect).fill()
+        color.setFill()
+        NSBezierPath(ovalIn: rect.insetBy(dx: 1.2, dy: 1.2)).fill()
     }
 
     private func drawNumberSquareHandle(_ kind: NumberHandleKind, in rect: NSRect, enabled: Bool) {
@@ -11891,20 +12058,14 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private func drawNumberResetHandle(in rect: NSRect, enabled: Bool) {
         let color = enabled ? NSColor.systemBlue : NSColor.disabledControlTextColor
 
-        if let image = Bundle.main.url(forResource: "reset2", withExtension: "svg")
-            .flatMap(NSImage.init(contentsOf:)) {
-            image.isTemplate = true
-            NSGraphicsContext.saveGraphicsState()
-            NSBezierPath(rect: rect.insetBy(dx: 1.5, dy: 1.5)).addClip()
-            drawTintedToolbarImage(image, in: rect.insetBy(dx: -0.75, dy: -0.75), color: color)
-            NSGraphicsContext.restoreGraphicsState()
-            return
-        }
-
-        drawNumberResetFallback(in: rect, color: color)
+        NSColor.white.setFill()
+        NSBezierPath(ovalIn: rect).fill()
+        color.setFill()
+        NSBezierPath(ovalIn: rect.insetBy(dx: 1.2, dy: 1.2)).fill()
+        drawNumberResetFallback(in: rect, color: .white, lineWidth: 1.7)
     }
 
-    private func drawNumberResetFallback(in rect: NSRect, color: NSColor) {
+    private func drawNumberResetFallback(in rect: NSRect, color: NSColor, lineWidth: CGFloat = 1.25) {
         guard let context = NSGraphicsContext.current?.cgContext else {
             return
         }
@@ -11926,7 +12087,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             endAngle: 334,
             clockwise: false
         )
-        arc.lineWidth = 1.25
+        arc.lineWidth = lineWidth
         arc.lineCapStyle = .round
         color.setStroke()
         arc.stroke()
@@ -12092,12 +12253,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
         for (button, rect) in toolbarButtonRects(in: toolbar) {
             let enabled = isToolbarButtonEnabled(button)
-            if button == .settings {
-                drawMainToolbarDragHandle(rect, enabled: enabled)
-                continue
-            }
             drawToolbarButton(rect, symbol: symbolName(for: button, enabled: enabled), selected: buttonMatchesCurrentTool(button), enabled: enabled)
         }
+        drawMainToolbarDragHandle(mainToolbarDragHandleRect(in: toolbar), enabled: true)
     }
 
     private func drawMainToolbarDragHandle(_ rect: NSRect, enabled: Bool) {
@@ -13957,7 +14115,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
 
         return toolbarButtonRects(in: toolbar)
-            .first(where: { $0.0 != .settings && $0.1.contains(point) })?
+            .first(where: { $0.1.contains(point) })?
             .0
     }
 
@@ -13976,12 +14134,15 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
 
         return toolbarButtonRects(in: toolbar)
-            .filter { $0.0 != .settings }
             .allSatisfy { !$0.1.insetBy(dx: -2, dy: -2).contains(point) }
     }
 
     private func mainToolbarDragHandleRect(in toolbar: NSRect) -> NSRect {
-        toolbarButtonRects(in: toolbar).first(where: { $0.0 == .settings })?.1 ?? .zero
+        var x = toolbar.minX + mainToolbarHorizontalPadding + mainToolbarButtonStep
+        for button in mainToolbarButtons() {
+            x += mainToolbarButtonStep + mainToolbarExtraGap(after: button)
+        }
+        return NSRect(x: x, y: toolbar.minY + 4, width: 20, height: 20)
     }
 
     private func mainToolbarLeadingDragHandleRect(in toolbar: NSRect) -> NSRect {
@@ -14020,7 +14181,6 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             .pin,
             .save,
             .copy,
-            .settings,
         ])
         return buttons
     }
@@ -14037,7 +14197,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private func mainToolbarWidth() -> CGFloat {
         return mainToolbarHorizontalPadding + mainToolbarButtonStep + mainToolbarButtons().reduce(CGFloat(0)) { width, button in
             width + mainToolbarButtonStep + mainToolbarExtraGap(after: button)
-        }
+        } + mainToolbarButtonStep
     }
 
     private func symbolName(for button: ToolbarButton, enabled: Bool = true) -> String {
@@ -14076,8 +14236,6 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return "toolbar-pin-to-screen"
         case .scroll:
             return "toolbar-scroll-capture"
-        case .settings:
-            return "toolbar-settings-more"
         }
     }
 

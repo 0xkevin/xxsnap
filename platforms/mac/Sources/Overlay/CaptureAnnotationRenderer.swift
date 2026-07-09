@@ -1083,6 +1083,7 @@ struct CaptureAnnotation {
     var numberMarkType: CaptureNumberMarkType?
     var numberSequenceIndex: Int?
     var numberSequenceIsManual = false
+    var numberSequenceGroupID: UUID?
     var magnifierShape: CaptureMagnifierShape?
     var magnifierZoom: CGFloat?
     var mosaicStroke: CaptureMosaicStroke?
@@ -1337,7 +1338,7 @@ enum CaptureAnnotationRenderer {
                 y: mask.rect.minY * scaleY,
                 width: mask.rect.width * scaleX,
                 height: mask.rect.height * scaleY
-            ).standardized
+            ).standardized.insetBy(dx: -scaleX, dy: -scaleY)
             context.fill(pixelRect)
         }
         context.restoreGState()

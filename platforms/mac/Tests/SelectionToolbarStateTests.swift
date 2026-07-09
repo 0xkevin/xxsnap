@@ -2834,6 +2834,46 @@ final class SelectionToolbarStateTests: XCTestCase {
         })
     }
 
+    func testEraserRectangleDragPreviewsMaskBeforeCommit() throws {
+        let background = solidImage(size: NSSize(width: 620, height: 460), color: .white)
+        let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        var redTextStyle = CaptureAnnotationStyle()
+        redTextStyle.strokeColor = .systemRed
+        redTextStyle.textSize = 32
+        redTextStyle.textOutlineEnabled = false
+        let text = CaptureAnnotation(
+            kind: .text,
+            rect: NSRect(x: 50, y: 80, width: 180, height: 44),
+            style: redTextStyle,
+            text: "Preview"
+        )
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([text])
+
+        let erasedProbe = NSRect(x: 150, y: 176, width: 72, height: 62)
+        let beforeImage = try XCTUnwrap(window.test_renderedOverlayImage())
+        XCTAssertGreaterThan(try overlayPixelCount(in: beforeImage, rect: erasedProbe) { pixel in
+            pixel.red > 180 && pixel.green < 120 && pixel.blue < 120 && pixel.alpha > 120
+        }, 0)
+
+        window.test_activateEraserTool()
+        window.test_mouseDown(at: try XCTUnwrap(window.test_eraserRectangleOptionPoint()))
+        window.test_mouseUp(at: try XCTUnwrap(window.test_eraserRectangleOptionPoint()))
+        window.test_mouseDown(at: NSPoint(x: 150, y: 176))
+        window.test_mouseDragged(to: NSPoint(x: 222, y: 238))
+
+        XCTAssertEqual(window.test_eraserMaskCount, 0)
+        let previewImage = try XCTUnwrap(window.test_renderedOverlayImage())
+        XCTAssertEqual(try overlayPixelCount(in: previewImage, rect: erasedProbe) { pixel in
+            pixel.red > 180 && pixel.green < 120 && pixel.blue < 120 && pixel.alpha > 120
+        }, 0)
+        let remainingProbe = NSRect(x: 252, y: 176, width: 70, height: 62)
+        XCTAssertGreaterThan(try overlayPixelCount(in: previewImage, rect: remainingProbe) { pixel in
+            pixel.red > 180 && pixel.green < 120 && pixel.blue < 120 && pixel.alpha > 120
+        }, 0)
+    }
+
     func testEraserRectangleCreatesLocalMaskAndKeepsAnnotations() throws {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
@@ -4417,12 +4457,14 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 3)
     }
 
-    func testNumberPlusMinusAdjustCurrentValueAndResetWhenGreaterThanOne() throws {
+    func testNumberPlusMinusSwapAndResetWhenGreaterThanOne() throws {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 360, height: 180))
         window.test_activateNumberTool()
-        window.test_mouseDown(at: NSPoint(x: 150, y: 150))
-        window.test_mouseUp(at: NSPoint(x: 150, y: 150))
+        [150, 260].forEach { x in
+            window.test_mouseDown(at: NSPoint(x: x, y: 150))
+            window.test_mouseUp(at: NSPoint(x: x, y: 150))
+        }
 
         window.test_selectAnnotation(at: 0)
         let selectedRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
@@ -4433,6 +4475,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_mouseUp(at: plusPoint)
 
         XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 2)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 1), 1)
         let resetPoint = try XCTUnwrap(window.test_numberResetHandlePoint())
         window.test_mouseDown(at: resetPoint)
         window.test_mouseUp(at: resetPoint)
@@ -4444,6 +4487,262 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_mouseUp(at: minusPoint)
 
         XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 1)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 1), 1)
+    }
+
+    func testNumberResetRestartsNextCreatedNumberSequence() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 420, height: 180))
+        window.test_activateNumberTool()
+        [150, 260, 370].forEach { x in
+            window.test_mouseDown(at: NSPoint(x: x, y: 150))
+            window.test_mouseUp(at: NSPoint(x: x, y: 150))
+        }
+
+        window.test_selectAnnotation(at: 2)
+        let thirdRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 2))
+        window.test_mouseMoved(to: NSPoint(x: thirdRect.midX, y: thirdRect.midY))
+        let resetPoint = try XCTUnwrap(window.test_numberResetHandlePoint())
+        window.test_mouseDown(at: resetPoint)
+        window.test_mouseUp(at: resetPoint)
+
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 2), 1)
+        XCTAssertEqual(window.test_numberCursorText(for: .number), "2")
+
+        window.test_mouseDown(at: NSPoint(x: 470, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 470, y: 150))
+
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 1)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 1), 2)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 2), 1)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 3), 2)
+        XCTAssertEqual(window.test_numberCursorText(for: .number), "3")
+    }
+
+    private func makeSplitNumberSequenceWindow() throws -> SelectionOverlayWindow {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 760, height: 180))
+        window.test_activateNumberTool()
+        [150, 260, 370].forEach { x in
+            window.test_mouseDown(at: NSPoint(x: x, y: 150))
+            window.test_mouseUp(at: NSPoint(x: x, y: 150))
+        }
+
+        window.test_selectAnnotation(at: 2)
+        let thirdRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 2))
+        window.test_mouseMoved(to: NSPoint(x: thirdRect.midX, y: thirdRect.midY))
+        let resetPoint = try XCTUnwrap(window.test_numberResetHandlePoint())
+        window.test_mouseDown(at: resetPoint)
+        window.test_mouseUp(at: resetPoint)
+
+        [480, 590].forEach { x in
+            window.test_mouseDown(at: NSPoint(x: x, y: 150))
+            window.test_mouseUp(at: NSPoint(x: x, y: 150))
+        }
+
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 1)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 1), 2)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 2), 1)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 3), 2)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 4), 3)
+        XCTAssertEqual(window.test_numberCursorText(for: .number), "4")
+        return window
+    }
+
+    func testSelectingEarlierSequenceMakesNextNumberFollowThatSequence() throws {
+        let window = try makeSplitNumberSequenceWindow()
+
+        let oldSecondRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 1))
+        let oldSecondPoint = NSPoint(x: oldSecondRect.midX, y: oldSecondRect.midY)
+        window.test_mouseDown(at: oldSecondPoint)
+        window.test_mouseUp(at: oldSecondPoint)
+
+        XCTAssertEqual(window.test_numberCursorText(for: .number), "3")
+        window.test_mouseDown(at: NSPoint(x: 700, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 700, y: 150))
+
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 5), 3)
+    }
+
+    func testNumberHandleInteractionsMakeNextNumberFollowThatSequence() throws {
+        do {
+            let window = try makeSplitNumberSequenceWindow()
+            window.test_selectAnnotation(at: 1)
+            let oldSecondRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 1))
+            window.test_mouseMoved(to: NSPoint(x: oldSecondRect.midX, y: oldSecondRect.midY))
+            let minusPoint = try XCTUnwrap(window.test_numberDecrementHandlePoint())
+            window.test_mouseDown(at: minusPoint)
+            window.test_mouseUp(at: minusPoint)
+            XCTAssertEqual(window.test_numberCursorText(for: .number), "3")
+        }
+
+        do {
+            let window = try makeSplitNumberSequenceWindow()
+            window.test_selectAnnotation(at: 1)
+            let oldSecondRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 1))
+            window.test_mouseMoved(to: NSPoint(x: oldSecondRect.midX, y: oldSecondRect.midY))
+            let deletePoint = try XCTUnwrap(window.test_numberDeleteHandlePoint())
+            window.test_mouseDown(at: deletePoint)
+            window.test_mouseUp(at: deletePoint)
+            XCTAssertEqual(window.test_numberCursorText(for: .number), "2")
+        }
+
+        do {
+            let window = try makeSplitNumberSequenceWindow()
+            window.test_selectAnnotation(at: 1)
+            let oldSecondRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 1))
+            window.test_mouseMoved(to: NSPoint(x: oldSecondRect.midX, y: oldSecondRect.midY))
+            let resizePoint = try XCTUnwrap(window.test_numberResizeHandlePoint())
+            window.test_mouseDown(at: resizePoint)
+            window.test_mouseDragged(to: NSPoint(x: resizePoint.x + 16, y: resizePoint.y - 16))
+            window.test_mouseUp(at: NSPoint(x: resizePoint.x + 16, y: resizePoint.y - 16))
+            XCTAssertEqual(window.test_numberCursorText(for: .number), "3")
+        }
+
+        do {
+            let window = try makeSplitNumberSequenceWindow()
+            window.test_selectAnnotation(at: 1)
+            let oldSecondRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 1))
+            window.test_mouseMoved(to: NSPoint(x: oldSecondRect.midX, y: oldSecondRect.midY))
+            let resetPoint = try XCTUnwrap(window.test_numberResetHandlePoint())
+            window.test_mouseDown(at: resetPoint)
+            window.test_mouseUp(at: resetPoint)
+            XCTAssertEqual(window.test_numberCursorText(for: .number), "2")
+        }
+    }
+
+    func testDeletingNumberAfterResetRenumbersOnlyCurrentSequence() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 620, height: 180))
+        window.test_activateNumberTool()
+        [150, 260, 370].forEach { x in
+            window.test_mouseDown(at: NSPoint(x: x, y: 150))
+            window.test_mouseUp(at: NSPoint(x: x, y: 150))
+        }
+
+        window.test_selectAnnotation(at: 2)
+        let thirdRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 2))
+        window.test_mouseMoved(to: NSPoint(x: thirdRect.midX, y: thirdRect.midY))
+        let resetPoint = try XCTUnwrap(window.test_numberResetHandlePoint())
+        window.test_mouseDown(at: resetPoint)
+        window.test_mouseUp(at: resetPoint)
+
+        [480, 590].forEach { x in
+            window.test_mouseDown(at: NSPoint(x: x, y: 150))
+            window.test_mouseUp(at: NSPoint(x: x, y: 150))
+        }
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 1)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 1), 2)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 2), 1)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 3), 2)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 4), 3)
+
+        window.test_selectAnnotation(at: 3)
+        let newSecondRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 3))
+        window.test_mouseMoved(to: NSPoint(x: newSecondRect.midX, y: newSecondRect.midY))
+        let deletePoint = try XCTUnwrap(window.test_numberDeleteHandlePoint())
+        window.test_mouseDown(at: deletePoint)
+        window.test_mouseUp(at: deletePoint)
+
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 1)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 1), 2)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 2), 1)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 3), 2)
+    }
+
+    func testManualSequenceDoesNotPreventAutoSequenceDeleteRenumbering() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 620, height: 180))
+        window.test_activateNumberTool()
+        [150, 260, 370].forEach { x in
+            window.test_mouseDown(at: NSPoint(x: x, y: 150))
+            window.test_mouseUp(at: NSPoint(x: x, y: 150))
+        }
+
+        let firstRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+        window.test_doubleClick(at: NSPoint(x: firstRect.midX, y: firstRect.midY))
+        window.test_keyDown(keyCode: 51)
+        window.test_keyDown(keyCode: 0, charactersIgnoringModifiers: "9")
+        window.test_keyDown(keyCode: 36)
+
+        window.test_selectAnnotation(at: 2)
+        let thirdRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 2))
+        window.test_mouseMoved(to: NSPoint(x: thirdRect.midX, y: thirdRect.midY))
+        let resetPoint = try XCTUnwrap(window.test_numberResetHandlePoint())
+        window.test_mouseDown(at: resetPoint)
+        window.test_mouseUp(at: resetPoint)
+
+        [480, 590].forEach { x in
+            window.test_mouseDown(at: NSPoint(x: x, y: 150))
+            window.test_mouseUp(at: NSPoint(x: x, y: 150))
+        }
+
+        window.test_selectAnnotation(at: 3)
+        let newSecondRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 3))
+        window.test_mouseMoved(to: NSPoint(x: newSecondRect.midX, y: newSecondRect.midY))
+        let deletePoint = try XCTUnwrap(window.test_numberDeleteHandlePoint())
+        window.test_mouseDown(at: deletePoint)
+        window.test_mouseUp(at: deletePoint)
+
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 9)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 1), 2)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 2), 1)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 3), 2)
+    }
+
+    func testAutoNumberPlusMinusSwapsAdjacentValues() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 360, height: 180))
+        window.test_activateNumberTool()
+        [150, 260, 370].forEach { x in
+            window.test_mouseDown(at: NSPoint(x: x, y: 150))
+            window.test_mouseUp(at: NSPoint(x: x, y: 150))
+        }
+
+        window.test_selectAnnotation(at: 2)
+        let thirdRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 2))
+        window.test_mouseMoved(to: NSPoint(x: thirdRect.midX, y: thirdRect.midY))
+        XCTAssertFalse(window.test_numberIncrementHandleIsHitTarget())
+        let minusPoint = try XCTUnwrap(window.test_numberDecrementHandlePoint())
+        window.test_mouseDown(at: minusPoint)
+        window.test_mouseUp(at: minusPoint)
+
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 1)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 1), 3)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 2), 2)
+
+        let plusPoint = try XCTUnwrap(window.test_numberIncrementHandlePoint())
+        window.test_mouseDown(at: plusPoint)
+        window.test_mouseUp(at: plusPoint)
+
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 1)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 1), 2)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 2), 3)
+    }
+
+    func testManualNumberPlusMinusSwapsAdjacentValues() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 360, height: 180))
+        window.test_activateNumberTool()
+        [150, 260, 370].forEach { x in
+            window.test_mouseDown(at: NSPoint(x: x, y: 150))
+            window.test_mouseUp(at: NSPoint(x: x, y: 150))
+        }
+
+        let thirdRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 2))
+        window.test_doubleClick(at: NSPoint(x: thirdRect.midX, y: thirdRect.midY))
+        window.test_keyDown(keyCode: 51)
+        window.test_keyDown(keyCode: 0, charactersIgnoringModifiers: "3")
+        window.test_keyDown(keyCode: 36)
+        window.test_selectAnnotation(at: 2)
+        window.test_mouseMoved(to: NSPoint(x: thirdRect.midX, y: thirdRect.midY))
+        let minusPoint = try XCTUnwrap(window.test_numberDecrementHandlePoint())
+        window.test_mouseDown(at: minusPoint)
+        window.test_mouseUp(at: minusPoint)
+
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 0), 1)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 1), 3)
+        XCTAssertEqual(window.test_numberSequenceIndex(at: 2), 2)
     }
 
     func testNumberPlusHandleDisablesAt999AndMinusStaysActive() throws {
@@ -4555,6 +4854,33 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertGreaterThan(blueOrWhitePixels, 12)
     }
 
+    func testNumberResizeHandleDrawsWhiteRingOnDarkBackground() throws {
+        let window = SelectionOverlayWindow(
+            backgroundImage: solidImage(
+                size: NSSize(width: 360, height: 240),
+                color: NSColor(srgbRed: 0.18, green: 0.18, blue: 0.18, alpha: 1)
+            )
+        ) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 220, height: 120))
+        window.test_activateNumberTool()
+        window.test_mouseDown(at: NSPoint(x: 170, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 170, y: 150))
+        window.test_selectAnnotation(at: 0)
+        let selectedRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+        window.test_mouseMoved(to: NSPoint(x: selectedRect.midX, y: selectedRect.midY))
+
+        let resizeRect = try XCTUnwrap(window.test_numberResizeHandleRect())
+        let image = try XCTUnwrap(window.test_renderedOverlayImage())
+        let ringBand = NSRect(
+            x: resizeRect.midX - 1,
+            y: resizeRect.maxY - 2,
+            width: 2,
+            height: 2
+        )
+        XCTAssertNotNil(try firstLightPixel(in: image, rect: ringBand))
+        XCTAssertNotNil(try firstBlueDominantPixel(in: image, rect: resizeRect.insetBy(dx: 2, dy: 2)))
+    }
+
     func testNumberResetHandleDrawsIconWithoutBoxBackground() throws {
         let window = SelectionOverlayWindow(
             backgroundImage: solidImage(
@@ -4579,9 +4905,20 @@ final class SelectionToolbarStateTests: XCTestCase {
             in: image,
             at: NSPoint(x: resetRect.minX + 1, y: image.size.height - resetRect.maxY + 2)
         ))
-        XCTAssertLessThan(topLeftCorner.red, 80)
-        XCTAssertLessThan(topLeftCorner.green, 80)
-        XCTAssertLessThan(topLeftCorner.blue, 80)
+        XCTAssertLessThan(topLeftCorner.red, 170)
+        XCTAssertLessThan(topLeftCorner.green, 170)
+        XCTAssertLessThan(topLeftCorner.blue, 170)
+        let ringBand = NSRect(
+            x: resetRect.midX - 1,
+            y: resetRect.maxY - 2,
+            width: 2,
+            height: 2
+        )
+        XCTAssertNotNil(try firstLightPixel(in: image, rect: ringBand))
+        let glyphArea = resetRect.insetBy(dx: 3, dy: 3)
+        XCTAssertGreaterThan(try matchingPixelCount(in: image, rect: glyphArea) { pixel in
+            pixel.red > 220 && pixel.green > 220 && pixel.blue > 220 && pixel.alpha > 180
+        }, 5)
         XCTAssertNotNil(
             try firstBlueDominantPixel(
                 in: image,
@@ -9195,10 +9532,10 @@ final class SelectionToolbarStateTests: XCTestCase {
         let leadingPoint = try XCTUnwrap(window.test_mainToolbarLeadingDragPoint())
         let trailingPoint = try XCTUnwrap(window.test_mainToolbarTrailingDragPoint())
         let firstButton = try XCTUnwrap(window.test_mainToolbarButtonRects().first)
-        let settingsButton = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .settings))
+        let lastButton = try XCTUnwrap(window.test_mainToolbarButtonRects().last)
 
         XCTAssertLessThan(leadingPoint.x, firstButton.minX)
-        XCTAssertEqual(trailingPoint.x, settingsButton.midX, accuracy: 0.1)
+        XCTAssertGreaterThan(trailingPoint.x, lastButton.maxX)
         XCTAssertEqual(window.test_cursorStyle(at: leadingPoint), .move)
         XCTAssertEqual(window.test_cursorStyle(at: trailingPoint), .move)
     }
