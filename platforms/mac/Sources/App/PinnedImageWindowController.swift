@@ -307,17 +307,43 @@ private final class PinnedImageContentView: NSView {
     private var dragOffset: NSPoint?
     fileprivate var showsEditingToolbar = false {
         didSet {
-            draftAnnotationRect = nil
+            draftAnnotation = nil
             annotationStartPoint = nil
             needsDisplay = true
         }
     }
     private var annotationStartPoint: NSPoint?
-    private var draftAnnotationRect: NSRect?
-    private var pendingAnnotationRects: [NSRect] = []
+    private var draftAnnotation: PendingAnnotation?
+    private var pendingAnnotations: [PendingAnnotation] = []
+    private var currentEditingTool: EditingToolbarButton = .rectangle
+
+    private struct PendingAnnotation {
+        var tool: EditingToolbarButton
+        var points: [NSPoint]
+
+        var boundingRect: NSRect {
+            guard let first = points.first else {
+                return .zero
+            }
+            var minX = first.x
+            var maxX = first.x
+            var minY = first.y
+            var maxY = first.y
+            for point in points.dropFirst() {
+                minX = min(minX, point.x)
+                maxX = max(maxX, point.x)
+                minY = min(minY, point.y)
+                maxY = max(maxY, point.y)
+            }
+            return NSRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+        }
+    }
 
     private enum EditingToolbarButton: CaseIterable {
         case rectangle
+        case arrow
+        case pen
+        case marker
         case save
         case copy
         case done
@@ -326,6 +352,12 @@ private final class PinnedImageContentView: NSView {
             switch self {
             case .rectangle:
                 return "矩形"
+            case .arrow:
+                return "箭头"
+            case .pen:
+                return "画笔"
+            case .marker:
+                return "标记"
             case .save:
                 return "保存图片"
             case .copy:
@@ -339,12 +371,27 @@ private final class PinnedImageContentView: NSView {
             switch self {
             case .rectangle:
                 return "screenshot"
+            case .arrow:
+                return "arrow"
+            case .pen:
+                return "pencil-tool"
+            case .marker:
+                return "highlighter-tool"
             case .save:
                 return "save-to-file"
             case .copy:
                 return "copy-to-clipboard"
             case .done:
                 return nil
+            }
+        }
+
+        var isAnnotationTool: Bool {
+            switch self {
+            case .rectangle, .arrow, .pen, .marker:
+                return true
+            case .save, .copy, .done:
+                return false
             }
         }
     }
@@ -390,7 +437,7 @@ private final class PinnedImageContentView: NSView {
                 return
             }
             annotationStartPoint = imagePoint(from: point)
-            draftAnnotationRect = nil
+            draftAnnotation = nil
             return
         }
         if window != nil {
@@ -400,7 +447,11 @@ private final class PinnedImageContentView: NSView {
 
     override func mouseDragged(with event: NSEvent) {
         if showsEditingToolbar, let annotationStartPoint {
-            draftAnnotationRect = normalizedRect(from: annotationStartPoint, to: imagePoint(from: event.locationInWindow))
+            draftAnnotation = makeAnnotation(
+                tool: currentEditingTool,
+                from: annotationStartPoint,
+                to: imagePoint(from: event.locationInWindow)
+            )
             needsDisplay = true
             return
         }
@@ -417,12 +468,16 @@ private final class PinnedImageContentView: NSView {
 
     override func mouseUp(with event: NSEvent) {
         if showsEditingToolbar, let annotationStartPoint {
-            let rect = normalizedRect(from: annotationStartPoint, to: imagePoint(from: event.locationInWindow))
-            if rect.width >= 2, rect.height >= 2 {
-                pendingAnnotationRects.append(rect)
+            let annotation = makeAnnotation(
+                tool: currentEditingTool,
+                from: annotationStartPoint,
+                to: imagePoint(from: event.locationInWindow)
+            )
+            if isDrawableAnnotation(annotation) {
+                pendingAnnotations.append(annotation)
             }
             self.annotationStartPoint = nil
-            draftAnnotationRect = nil
+            draftAnnotation = nil
             needsDisplay = true
             return
         }
@@ -464,32 +519,47 @@ private final class PinnedImageContentView: NSView {
         EditingToolbarButton.allCases.map(\.title)
     }
 
+    fileprivate var currentEditingToolTitle: String {
+        currentEditingTool.title
+    }
+
+    fileprivate var pendingAnnotationKindTitles: [String] {
+        var titles = pendingAnnotations.map { $0.tool.title }
+        if let draftAnnotation {
+            titles.append(draftAnnotation.tool.title)
+        }
+        return titles
+    }
+
     fileprivate var pendingRectsForTesting: [NSRect] {
-        var rects = pendingAnnotationRects
-        if let draftAnnotationRect {
-            rects.append(draftAnnotationRect)
+        var rects = pendingAnnotations.map(\.boundingRect)
+        if let draftAnnotation {
+            rects.append(draftAnnotation.boundingRect)
         }
         return rects
     }
 
     fileprivate func bakePendingAnnotations() -> NSImage? {
-        let rects = pendingRectsForTesting
-        guard !rects.isEmpty else {
-            pendingAnnotationRects.removeAll()
-            draftAnnotationRect = nil
+        var annotations = pendingAnnotations
+        if let draftAnnotation {
+            annotations.append(draftAnnotation)
+        }
+        guard !annotations.isEmpty else {
+            pendingAnnotations.removeAll()
+            draftAnnotation = nil
             return nil
         }
 
         let baked = NSImage(size: image.size)
         baked.lockFocus()
         image.draw(in: NSRect(origin: .zero, size: image.size))
-        for rect in rects {
-            drawAnnotationRect(rect)
+        for annotation in annotations {
+            drawAnnotation(annotation)
         }
         baked.unlockFocus()
         image = baked
-        pendingAnnotationRects.removeAll()
-        draftAnnotationRect = nil
+        pendingAnnotations.removeAll()
+        draftAnnotation = nil
         needsDisplay = true
         return baked
     }
@@ -498,11 +568,19 @@ private final class PinnedImageContentView: NSView {
         showsEditingToolbar = true
         let startPoint = imagePoint(from: start)
         let endPoint = imagePoint(from: end)
-        let rect = normalizedRect(from: startPoint, to: endPoint)
-        if rect.width >= 2, rect.height >= 2 {
-            pendingAnnotationRects.append(rect)
+        let annotation = makeAnnotation(tool: currentEditingTool, from: startPoint, to: endPoint)
+        if isDrawableAnnotation(annotation) {
+            pendingAnnotations.append(annotation)
             needsDisplay = true
         }
+    }
+
+    fileprivate func selectEditingTool(named title: String) {
+        guard let tool = EditingToolbarButton.allCases.first(where: { $0.title == title && $0.isAnnotationTool }) else {
+            return
+        }
+        currentEditingTool = tool
+        needsDisplay = true
     }
 
     private func drawBlueOuterShadow(around imageRect: NSRect) {
@@ -557,6 +635,38 @@ private final class PinnedImageContentView: NSView {
         )
     }
 
+    private func makeAnnotation(tool: EditingToolbarButton, from start: NSPoint, to end: NSPoint) -> PendingAnnotation {
+        switch tool {
+        case .rectangle:
+            let rect = normalizedRect(from: start, to: end)
+            return PendingAnnotation(
+                tool: tool,
+                points: [
+                    rect.origin,
+                    NSPoint(x: rect.maxX, y: rect.maxY),
+                ]
+            )
+        case .arrow, .pen, .marker:
+            return PendingAnnotation(tool: tool, points: [start, end])
+        case .save, .copy, .done:
+            return PendingAnnotation(tool: .rectangle, points: [start, end])
+        }
+    }
+
+    private func isDrawableAnnotation(_ annotation: PendingAnnotation) -> Bool {
+        switch annotation.tool {
+        case .rectangle:
+            return annotation.boundingRect.width >= 2 && annotation.boundingRect.height >= 2
+        case .arrow, .pen, .marker:
+            guard let start = annotation.points.first, let end = annotation.points.last else {
+                return false
+            }
+            return hypot(end.x - start.x, end.y - start.y) >= 2
+        case .save, .copy, .done:
+            return false
+        }
+    }
+
     private func viewRect(from imageRelativeRect: NSRect, in imageRect: NSRect) -> NSRect {
         NSRect(
             x: imageRect.minX + imageRelativeRect.minX / max(image.size.width, 1) * imageRect.width,
@@ -566,9 +676,47 @@ private final class PinnedImageContentView: NSView {
         )
     }
 
+    private func viewPoint(from imageRelativePoint: NSPoint, in imageRect: NSRect) -> NSPoint {
+        NSPoint(
+            x: imageRect.minX + imageRelativePoint.x / max(image.size.width, 1) * imageRect.width,
+            y: imageRect.minY + imageRelativePoint.y / max(image.size.height, 1) * imageRect.height
+        )
+    }
+
     private func drawPendingAnnotations(in imageRect: NSRect) {
-        for rect in pendingRectsForTesting {
-            drawAnnotationRect(viewRect(from: rect, in: imageRect))
+        for annotation in pendingAnnotations {
+            drawAnnotation(annotation, in: imageRect)
+        }
+        if let draftAnnotation {
+            drawAnnotation(draftAnnotation, in: imageRect)
+        }
+    }
+
+    private func drawAnnotation(_ annotation: PendingAnnotation, in imageRect: NSRect? = nil) {
+        let points = annotation.points.map { point in
+            imageRect.map { viewPoint(from: point, in: $0) } ?? point
+        }
+        switch annotation.tool {
+        case .rectangle:
+            let rect = imageRect.map { viewRect(from: annotation.boundingRect, in: $0) } ?? annotation.boundingRect
+            drawAnnotationRect(rect)
+        case .arrow:
+            guard points.count >= 2 else {
+                return
+            }
+            drawLine(points: points, color: .systemRed, lineWidth: 3, alpha: 1)
+            drawArrowHead(from: points[0], to: points[1])
+        case .pen:
+            drawLine(points: points, color: .systemRed, lineWidth: 3, alpha: 1)
+        case .marker:
+            drawLine(
+                points: points,
+                color: NSColor(calibratedRed: 1, green: 0.82, blue: 0.04, alpha: 1),
+                lineWidth: 10,
+                alpha: 0.72
+            )
+        case .save, .copy, .done:
+            break
         }
     }
 
@@ -576,6 +724,45 @@ private final class PinnedImageContentView: NSView {
         NSColor.systemRed.setStroke()
         let path = NSBezierPath(rect: rect.insetBy(dx: 1.5, dy: 1.5))
         path.lineWidth = 3
+        path.stroke()
+    }
+
+    private func drawLine(points: [NSPoint], color: NSColor, lineWidth: CGFloat, alpha: CGFloat) {
+        guard let first = points.first else {
+            return
+        }
+        let path = NSBezierPath()
+        path.move(to: first)
+        for point in points.dropFirst() {
+            path.line(to: point)
+        }
+        color.withAlphaComponent(alpha).setStroke()
+        path.lineWidth = lineWidth
+        path.lineCapStyle = .round
+        path.lineJoinStyle = .round
+        path.stroke()
+    }
+
+    private func drawArrowHead(from start: NSPoint, to end: NSPoint) {
+        let angle = atan2(end.y - start.y, end.x - start.x)
+        let headLength: CGFloat = 14
+        let headAngle: CGFloat = .pi / 7
+        let left = NSPoint(
+            x: end.x - headLength * cos(angle - headAngle),
+            y: end.y - headLength * sin(angle - headAngle)
+        )
+        let right = NSPoint(
+            x: end.x - headLength * cos(angle + headAngle),
+            y: end.y - headLength * sin(angle + headAngle)
+        )
+        let path = NSBezierPath()
+        path.move(to: left)
+        path.line(to: end)
+        path.line(to: right)
+        NSColor.systemRed.setStroke()
+        path.lineWidth = 3
+        path.lineCapStyle = .round
+        path.lineJoinStyle = .round
         path.stroke()
     }
 
@@ -606,8 +793,9 @@ private final class PinnedImageContentView: NSView {
 
     private func performEditingToolbarButton(_ button: EditingToolbarButton) {
         switch button {
-        case .rectangle:
-            break
+        case .rectangle, .arrow, .pen, .marker:
+            currentEditingTool = button
+            needsDisplay = true
         case .save:
             controller?.saveImage()
         case .copy:
@@ -627,7 +815,10 @@ private final class PinnedImageContentView: NSView {
         for (button, rect) in editingToolbarButtonRects() {
             NSColor.white.withAlphaComponent(0.92).setFill()
             NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4).fill()
-            NSColor.black.withAlphaComponent(0.75).setStroke()
+            let borderColor = button == currentEditingTool && button.isAnnotationTool
+                ? NSColor.systemBlue
+                : NSColor.black.withAlphaComponent(0.75)
+            borderColor.setStroke()
             NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4).stroke()
             if button == .done {
                 drawDoneCheck(in: rect)
@@ -715,6 +906,14 @@ extension PinnedImageWindowController {
         contentView?.pendingRectsForTesting ?? []
     }
 
+    var test_currentEditingToolTitle: String {
+        contentView?.currentEditingToolTitle ?? ""
+    }
+
+    var test_pendingAnnotationKinds: [String] {
+        contentView?.pendingAnnotationKindTitles ?? []
+    }
+
     func test_showEditingToolbar() {
         showEditingToolbar()
     }
@@ -725,6 +924,10 @@ extension PinnedImageWindowController {
 
     func test_toolbarContains(_ title: String) -> Bool {
         contentView?.editingToolbarTitles.contains(title) == true
+    }
+
+    func test_selectEditingTool(_ title: String) {
+        contentView?.selectEditingTool(named: title)
     }
 
     func test_dragAnnotation(from start: NSPoint, to end: NSPoint) {

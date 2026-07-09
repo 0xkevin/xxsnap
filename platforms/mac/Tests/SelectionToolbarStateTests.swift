@@ -2298,11 +2298,13 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertTrue(controller.test_toolbarContains("完成编辑"))
 
         let imageRect = controller.test_imageRectInContent
+        XCTAssertEqual(controller.test_currentEditingToolTitle, "矩形")
         controller.test_dragAnnotation(
             from: NSPoint(x: imageRect.minX - 20, y: imageRect.minY - 20),
             to: NSPoint(x: imageRect.maxX + 24, y: imageRect.maxY + 24)
         )
         XCTAssertEqual(controller.test_pendingAnnotationCount, 1)
+        XCTAssertEqual(controller.test_pendingAnnotationKinds, ["矩形"])
         XCTAssertEqual(controller.test_pendingAnnotationRects.first?.origin.x ?? -1, 0, accuracy: 0.1)
         XCTAssertEqual(controller.test_pendingAnnotationRects.first?.origin.y ?? -1, 0, accuracy: 0.1)
         XCTAssertEqual(controller.test_pendingAnnotationRects.first?.width ?? -1, sourceRect.width, accuracy: 0.1)
@@ -2314,6 +2316,43 @@ final class SelectionToolbarStateTests: XCTestCase {
         let baked = controller.image
         XCTAssertNotNil(try firstPixel(in: baked, rect: NSRect(x: 1, y: 1, width: baked.size.width - 2, height: 3)) { pixel in
             pixel.red > 180 && pixel.green < 80 && pixel.blue < 80 && pixel.alpha > 150
+        })
+    }
+
+    @MainActor
+    func testPinnedImageToolbarSupportsArrowPenAndMarkerBaking() throws {
+        let sourceRect = NSRect(x: 120, y: 220, width: 180, height: 120)
+        let controller = PinnedImageWindowController(
+            image: solidImage(size: sourceRect.size, color: .white),
+            screenRect: sourceRect
+        )
+        controller.test_showEditingToolbar()
+        XCTAssertTrue(controller.test_toolbarContains("箭头"))
+        XCTAssertTrue(controller.test_toolbarContains("画笔"))
+        XCTAssertTrue(controller.test_toolbarContains("标记"))
+
+        let imageRect = controller.test_imageRectInContent
+        controller.test_selectEditingTool("箭头")
+        XCTAssertEqual(controller.test_currentEditingToolTitle, "箭头")
+        controller.test_dragAnnotation(from: NSPoint(x: imageRect.minX + 12, y: imageRect.minY + 18), to: NSPoint(x: imageRect.maxX - 14, y: imageRect.maxY - 20))
+
+        controller.test_selectEditingTool("画笔")
+        XCTAssertEqual(controller.test_currentEditingToolTitle, "画笔")
+        controller.test_dragAnnotation(from: NSPoint(x: imageRect.minX + 24, y: imageRect.midY), to: NSPoint(x: imageRect.maxX - 24, y: imageRect.midY + 12))
+
+        controller.test_selectEditingTool("标记")
+        XCTAssertEqual(controller.test_currentEditingToolTitle, "标记")
+        controller.test_dragAnnotation(from: NSPoint(x: imageRect.minX + 20, y: imageRect.minY + 26), to: NSPoint(x: imageRect.maxX - 20, y: imageRect.minY + 26))
+
+        XCTAssertEqual(controller.test_pendingAnnotationKinds, ["箭头", "画笔", "标记"])
+        controller.test_finishEditing()
+
+        let baked = controller.image
+        XCTAssertNotNil(try firstPixel(in: baked, rect: NSRect(x: 10, y: 10, width: baked.size.width - 20, height: baked.size.height - 20)) { pixel in
+            pixel.red > 180 && pixel.green < 120 && pixel.blue < 120 && pixel.alpha > 140
+        })
+        XCTAssertNotNil(try firstPixel(in: baked, rect: NSRect(x: 10, y: 10, width: baked.size.width - 20, height: baked.size.height - 20)) { pixel in
+            pixel.red > 220 && pixel.green > 190 && pixel.blue < 90 && pixel.alpha > 120
         })
     }
 
