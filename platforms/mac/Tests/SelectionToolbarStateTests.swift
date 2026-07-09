@@ -2274,11 +2274,28 @@ final class SelectionToolbarStateTests: XCTestCase {
             "重置大小",
             "透明度",
             "置顶",
-            "鼠标穿透",
             nil,
             "关闭",
             "关闭全部贴图",
         ])
+    }
+
+    @MainActor
+    func testPinnedImageContextMenuShowToolbarAlwaysDisplaysToolbar() throws {
+        let controller = PinnedImageWindowController(
+            image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+            screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
+        )
+
+        let showItem = try XCTUnwrap(controller.makeContextMenu().items.first { $0.title == "显示工具条" })
+        XCTAssertFalse(controller.test_isToolbarVisible)
+        XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(showItem.action), to: showItem.target, from: showItem))
+        XCTAssertTrue(controller.test_isToolbarVisible)
+
+        XCTAssertEqual(controller.makeContextMenu().items.first?.title, "显示工具条")
+        let visibleShowItem = try XCTUnwrap(controller.makeContextMenu().items.first { $0.title == "显示工具条" })
+        XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(visibleShowItem.action), to: visibleShowItem.target, from: visibleShowItem))
+        XCTAssertTrue(controller.test_isToolbarVisible)
     }
 
     @MainActor

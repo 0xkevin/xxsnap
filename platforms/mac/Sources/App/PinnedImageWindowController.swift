@@ -178,7 +178,7 @@ final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPr
 
     func makeContextMenu() -> NSMenu {
         let menu = NSMenu()
-        menu.addItem(menuItem(title: contentView?.showsEditingToolbar == true ? "隐藏工具条" : "显示工具条", action: #selector(toggleEditingToolbar)))
+        menu.addItem(menuItem(title: "显示工具条", action: #selector(showEditingToolbarFromMenu)))
         menu.addItem(menuItem(title: "复制图片", action: #selector(copyImage)))
         menu.addItem(menuItem(title: "保存图片...", action: #selector(saveImage)))
         menu.addItem(.separator())
@@ -199,10 +199,6 @@ final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPr
         topItem.state = window?.level == .floating ? .on : .off
         menu.addItem(topItem)
 
-        let clickThroughItem = menuItem(title: "鼠标穿透", action: #selector(toggleMouseClickThrough))
-        clickThroughItem.state = window?.ignoresMouseEvents == true ? .on : .off
-        menu.addItem(clickThroughItem)
-
         menu.addItem(.separator())
         menu.addItem(menuItem(title: "关闭", action: #selector(closePinnedWindow)))
         menu.addItem(menuItem(title: "关闭全部贴图", action: #selector(closeAllPinnedWindows)))
@@ -222,12 +218,8 @@ final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPr
         return item
     }
 
-    @objc private func toggleEditingToolbar() {
-        if contentView?.showsEditingToolbar == true {
-            hideEditingToolbar()
-        } else {
-            showEditingToolbar()
-        }
+    @objc private func showEditingToolbarFromMenu() {
+        showEditingToolbar()
     }
 
     @objc fileprivate func copyImage() {
@@ -267,10 +259,6 @@ final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPr
 
     @objc private func toggleAlwaysOnTop() {
         window?.level = window?.level == .floating ? .normal : .floating
-    }
-
-    @objc private func toggleMouseClickThrough() {
-        window?.ignoresMouseEvents.toggle()
     }
 
     @objc private func closePinnedWindow() {
