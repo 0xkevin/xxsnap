@@ -355,25 +355,6 @@ private final class PinnedImageContentView: NSView {
             }
         }
 
-        var iconName: String? {
-            switch self {
-            case .rectangle:
-                return "screenshot"
-            case .arrow:
-                return "arrow"
-            case .pen:
-                return "pencil-tool"
-            case .marker:
-                return "highlighter-tool"
-            case .save:
-                return "save-to-file"
-            case .copy:
-                return "copy-to-clipboard"
-            case .done:
-                return nil
-            }
-        }
-
         var isAnnotationTool: Bool {
             switch self {
             case .rectangle, .arrow, .pen, .marker:
@@ -808,15 +789,142 @@ private final class PinnedImageContentView: NSView {
                 : NSColor.black.withAlphaComponent(0.75)
             borderColor.setStroke()
             NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4).stroke()
-            if button == .done {
-                drawDoneCheck(in: rect)
-            } else if let iconName = button.iconName,
-                      let image = Bundle.main.url(forResource: iconName, withExtension: "svg").flatMap(NSImage.init(contentsOf:)) {
-                image.draw(in: rect.insetBy(dx: 3, dy: 3), from: .zero, operation: .sourceOver, fraction: 1)
-                NSColor.black.setFill()
-                rect.insetBy(dx: 3, dy: 3).fill(using: .sourceAtop)
-            }
+            drawEditingToolbarIcon(button, in: rect.insetBy(dx: 3, dy: 3))
         }
+    }
+
+    private func drawEditingToolbarIcon(_ button: EditingToolbarButton, in rect: NSRect) {
+        switch button {
+        case .rectangle:
+            drawToolbarRectangleIcon(in: rect)
+        case .arrow:
+            drawToolbarArrowIcon(in: rect)
+        case .pen:
+            drawToolbarPenIcon(in: rect)
+        case .marker:
+            drawToolbarMarkerIcon(in: rect)
+        case .save:
+            drawToolbarSaveIcon(in: rect)
+        case .copy:
+            drawToolbarCopyIcon(in: rect)
+        case .done:
+            drawDoneCheck(in: rect.insetBy(dx: -3, dy: -3))
+        }
+    }
+
+    private func drawToolbarRectangleIcon(in rect: NSRect) {
+        NSColor.black.setStroke()
+        let path = NSBezierPath(rect: rect.insetBy(dx: 1.5, dy: 2.5))
+        path.lineWidth = 1.8
+        path.stroke()
+    }
+
+    private func drawToolbarArrowIcon(in rect: NSRect) {
+        drawToolbarLine(
+            points: [
+                NSPoint(x: rect.minX + 2, y: rect.minY + 3),
+                NSPoint(x: rect.maxX - 2, y: rect.maxY - 3),
+            ],
+            lineWidth: 1.9
+        )
+        let end = NSPoint(x: rect.maxX - 2, y: rect.maxY - 3)
+        drawToolbarLine(
+            points: [
+                NSPoint(x: end.x - 5, y: end.y - 0.5),
+                end,
+                NSPoint(x: end.x + 0.5, y: end.y - 5),
+            ],
+            lineWidth: 1.9
+        )
+    }
+
+    private func drawToolbarPenIcon(in rect: NSRect) {
+        let shaft = NSBezierPath()
+        shaft.move(to: NSPoint(x: rect.minX + 3, y: rect.minY + 2))
+        shaft.line(to: NSPoint(x: rect.maxX - 2, y: rect.maxY - 5))
+        shaft.line(to: NSPoint(x: rect.maxX - 5, y: rect.maxY - 2))
+        shaft.close()
+        NSColor.black.setStroke()
+        shaft.lineWidth = 1.6
+        shaft.stroke()
+
+        drawToolbarLine(
+            points: [
+                NSPoint(x: rect.minX + 2, y: rect.minY + 1),
+                NSPoint(x: rect.minX + 5, y: rect.minY + 1),
+            ],
+            lineWidth: 1.5
+        )
+    }
+
+    private func drawToolbarMarkerIcon(in rect: NSRect) {
+        let body = NSBezierPath()
+        body.move(to: NSPoint(x: rect.minX + 2, y: rect.minY + 4))
+        body.line(to: NSPoint(x: rect.maxX - 4, y: rect.maxY - 2))
+        body.line(to: NSPoint(x: rect.maxX - 1, y: rect.maxY - 5))
+        body.line(to: NSPoint(x: rect.minX + 5, y: rect.minY + 1))
+        body.close()
+        NSColor.black.setStroke()
+        body.lineWidth = 1.6
+        body.stroke()
+        drawToolbarLine(
+            points: [
+                NSPoint(x: rect.minX + 2, y: rect.minY + 2),
+                NSPoint(x: rect.minX + 6, y: rect.minY + 2),
+            ],
+            lineWidth: 2.2
+        )
+    }
+
+    private func drawToolbarSaveIcon(in rect: NSRect) {
+        drawToolbarLine(
+            points: [
+                NSPoint(x: rect.midX, y: rect.maxY - 1),
+                NSPoint(x: rect.midX, y: rect.minY + 5),
+            ],
+            lineWidth: 1.8
+        )
+        drawToolbarLine(
+            points: [
+                NSPoint(x: rect.midX - 4, y: rect.minY + 8),
+                NSPoint(x: rect.midX, y: rect.minY + 4),
+                NSPoint(x: rect.midX + 4, y: rect.minY + 8),
+            ],
+            lineWidth: 1.8
+        )
+        drawToolbarLine(
+            points: [
+                NSPoint(x: rect.minX + 2, y: rect.minY + 2),
+                NSPoint(x: rect.maxX - 2, y: rect.minY + 2),
+            ],
+            lineWidth: 1.8
+        )
+    }
+
+    private func drawToolbarCopyIcon(in rect: NSRect) {
+        NSColor.black.setStroke()
+        let back = NSBezierPath(rect: NSRect(x: rect.minX + 1, y: rect.minY + 4, width: 8, height: 8))
+        back.lineWidth = 1.5
+        back.stroke()
+        let front = NSBezierPath(rect: NSRect(x: rect.minX + 5, y: rect.minY + 1, width: 8, height: 8))
+        front.lineWidth = 1.5
+        front.stroke()
+    }
+
+    private func drawToolbarLine(points: [NSPoint], lineWidth: CGFloat) {
+        guard let first = points.first else {
+            return
+        }
+        let path = NSBezierPath()
+        path.move(to: first)
+        for point in points.dropFirst() {
+            path.line(to: point)
+        }
+        NSColor.black.setStroke()
+        path.lineWidth = lineWidth
+        path.lineCapStyle = .round
+        path.lineJoinStyle = .round
+        path.stroke()
     }
 
     private func drawDoneCheck(in rect: NSRect) {

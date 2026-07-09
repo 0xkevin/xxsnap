@@ -2373,6 +2373,39 @@ final class SelectionToolbarStateTests: XCTestCase {
         })
     }
 
+    @MainActor
+    func testPinnedImageToolbarIconsDoNotRenderAsSolidBlackBlocks() throws {
+        let sourceRect = NSRect(x: 120, y: 220, width: 240, height: 160)
+        let controller = PinnedImageWindowController(
+            image: solidImage(size: sourceRect.size, color: .white),
+            screenRect: sourceRect
+        )
+        controller.test_showEditingToolbar()
+
+        let rendered = controller.test_renderedContentImage()
+        let imageRect = controller.test_imageRectInContent
+        let toolbarWidth = CGFloat(7 * 28 + 10)
+        let toolbarMinX = imageRect.midX - toolbarWidth / 2
+        let toolbarMinY = imageRect.maxY - 34
+        for index in 0..<6 {
+            let iconRect = NSRect(
+                x: toolbarMinX + 5 + CGFloat(index) * 28 + 3,
+                y: toolbarMinY + 4 + 3,
+                width: 14,
+                height: 14
+            )
+            let blackPixels = try overlayPixelCount(in: rendered, rect: iconRect) { pixel in
+                pixel.red < 20 && pixel.green < 20 && pixel.blue < 20 && pixel.alpha > 220
+            }
+            let sampledPixels = try overlayPixelCount(in: rendered, rect: iconRect) { _ in true }
+            XCTAssertLessThan(
+                Double(blackPixels) / Double(max(sampledPixels, 1)),
+                0.5,
+                "Toolbar icon \(index) rendered as a solid black block"
+            )
+        }
+    }
+
     func testActivatingAnotherToolExitsEyedropperMode() {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 200, height: 120))
