@@ -257,10 +257,10 @@ enum SelectionToolbarState {
 
     static func tooltipTitle(for identifier: String) -> String? {
         [
-            "rectangle": "形状标注",
+            "rectangle": "形状",
             "polyline": "箭头线",
             "pen": "画笔",
-            "marker": "标记",
+            "marker": "荧光笔",
             "eyedropper": "取色 ｜ 测距",
             "mosaic": "马赛克",
             "mosaicBlur": "高斯",

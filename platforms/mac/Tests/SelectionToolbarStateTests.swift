@@ -2608,6 +2608,115 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertLessThan(optionsRect.maxY, mainEraserRect.minY)
     }
 
+    func testBrushOptionsToolbarIsAnchoredUnderBrushButton() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 360, height: 220))
+        window.test_activateShapeTool(.brush)
+
+        let brushRect = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .pen))
+        let toolbarRect = try XCTUnwrap(window.test_mainToolbarRect())
+        let optionsRect = try XCTUnwrap(window.test_optionsToolbarRect)
+
+        XCTAssertLessThan(brushRect.midX - optionsRect.width / 2, toolbarRect.minX)
+        XCTAssertLessThanOrEqual(optionsRect.maxX, toolbarRect.maxX + 0.5)
+        XCTAssertEqual(optionsRect.minX, toolbarRect.minX, accuracy: 0.5)
+        XCTAssertLessThan(optionsRect.maxY, brushRect.minY)
+    }
+
+    func testMarkerOptionsToolbarIsAnchoredUnderMarkerButton() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 360, height: 220))
+        window.test_activateShapeTool(.marker)
+
+        let markerRect = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .marker))
+        let toolbarRect = try XCTUnwrap(window.test_mainToolbarRect())
+        let optionsRect = try XCTUnwrap(window.test_optionsToolbarRect)
+
+        XCTAssertLessThan(markerRect.midX - optionsRect.width / 2, toolbarRect.minX)
+        XCTAssertLessThanOrEqual(optionsRect.maxX, toolbarRect.maxX + 0.5)
+        XCTAssertEqual(optionsRect.minX, toolbarRect.minX, accuracy: 0.5)
+        XCTAssertLessThan(optionsRect.maxY, markerRect.minY)
+    }
+
+    func testMosaicOptionsToolbarIsAnchoredUnderMosaicButton() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 360, height: 220))
+        window.test_activateShapeTool(.mosaicStroke)
+
+        let mosaicRect = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .mosaic))
+        let optionsRect = try XCTUnwrap(window.test_optionsToolbarRect)
+
+        XCTAssertEqual(optionsRect.midX, mosaicRect.midX, accuracy: 0.5)
+        XCTAssertLessThan(optionsRect.maxY, mosaicRect.minY)
+    }
+
+    func testShapeArrowAndTextOptionsToolbarsAreLeftAlignedWithMainToolbar() throws {
+        let shapeWindow = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        shapeWindow.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 360, height: 220))
+        shapeWindow.test_activateShapeTool(.rectangle)
+        XCTAssertEqual(
+            try XCTUnwrap(shapeWindow.test_optionsToolbarRect).minX,
+            try XCTUnwrap(shapeWindow.test_mainToolbarRect()).minX,
+            accuracy: 0.5
+        )
+
+        let arrowWindow = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        arrowWindow.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 360, height: 220))
+        arrowWindow.test_activateShapeTool(.arrowLine)
+        XCTAssertEqual(
+            try XCTUnwrap(arrowWindow.test_optionsToolbarRect).minX,
+            try XCTUnwrap(arrowWindow.test_mainToolbarRect()).minX,
+            accuracy: 0.5
+        )
+
+        let textWindow = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        textWindow.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 360, height: 220))
+        textWindow.test_activateTextTool()
+        XCTAssertEqual(
+            try XCTUnwrap(textWindow.test_optionsToolbarRect).minX,
+            try XCTUnwrap(textWindow.test_mainToolbarRect()).minX,
+            accuracy: 0.5
+        )
+    }
+
+    func testTextEraserAndMagnifierUseDrawingCursorsOutsideSelection() throws {
+        let selection = NSRect(x: 100, y: 100, width: 260, height: 160)
+        let outsidePoint = NSPoint(x: selection.maxX + 36, y: selection.midY)
+
+        let textWindow = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        textWindow.test_setLockedSelectionRect(selection)
+        textWindow.test_activateTextTool()
+        XCTAssertEqual(textWindow.test_cursorStyle(at: outsidePoint), .textInput)
+        XCTAssertEqual(textWindow.test_cursorStyle(at: try XCTUnwrap(textWindow.test_mainToolbarButtonPoint(for: .text))), .arrow)
+
+        let eraserWindow = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        eraserWindow.test_setLockedSelectionRect(selection)
+        eraserWindow.test_activateEraserTool()
+        XCTAssertEqual(eraserWindow.test_cursorStyle(at: outsidePoint), .eraser)
+        XCTAssertEqual(eraserWindow.test_cursorStyle(at: try XCTUnwrap(eraserWindow.test_mainToolbarButtonPoint(for: .eraser))), .arrow)
+
+        let magnifierWindow = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        magnifierWindow.test_setLockedSelectionRect(selection)
+        magnifierWindow.test_activateMagnifierTool()
+        XCTAssertEqual(magnifierWindow.test_cursorStyle(at: outsidePoint), .crosshair)
+        XCTAssertEqual(magnifierWindow.test_cursorStyle(at: try XCTUnwrap(magnifierWindow.test_mainToolbarButtonPoint(for: .magnifier))), .arrow)
+    }
+
+    func testTextToolCreatesTextAnnotationOutsideSelection() throws {
+        let selection = NSRect(x: 100, y: 100, width: 260, height: 160)
+        let outsidePoint = NSPoint(x: selection.maxX + 48, y: selection.midY)
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateTextTool()
+
+        window.test_mouseDown(at: outsidePoint)
+        window.test_mouseUp(at: outsidePoint)
+
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertTrue(window.test_isEditingTextAnnotation)
+        XCTAssertGreaterThan(try XCTUnwrap(window.test_annotationOverlayRect(at: 0)).minX, selection.maxX)
+    }
+
     func testEraserClearAllDeletesAllAnnotationsAndSupportsUndoRedo() throws {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
@@ -2755,6 +2864,100 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_eraserMaskCount, 1)
         XCTAssertEqual(window.test_damagedAnnotationCount, 2)
         XCTAssertEqual(window.test_eraserMask(at: 0)?.affectedAnnotationIDs, Set([rectangle.id, ellipse.id]))
+    }
+
+    func testEraserRectangleMaskKeepsTextOutsideSelectionVisible() throws {
+        let background = solidImage(size: NSSize(width: 620, height: 460), color: .white)
+        let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        var redTextStyle = CaptureAnnotationStyle()
+        redTextStyle.strokeColor = .systemRed
+        redTextStyle.textSize = 28
+        redTextStyle.textOutlineEnabled = false
+        let rectangle = CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 35, y: 45, width: 60, height: 60), style: CaptureAnnotationStyle())
+        let outsideText = CaptureAnnotation(
+            kind: .text,
+            rect: NSRect(x: selection.width + 28, y: 86, width: 120, height: 36),
+            style: redTextStyle,
+            text: "Outside"
+        )
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([rectangle, outsideText])
+        window.test_activateEraserTool()
+        window.test_mouseDown(at: try XCTUnwrap(window.test_eraserRectangleOptionPoint()))
+        window.test_mouseUp(at: try XCTUnwrap(window.test_eraserRectangleOptionPoint()))
+
+        window.test_drag(from: NSPoint(x: 120, y: 130), to: NSPoint(x: 210, y: 220))
+
+        XCTAssertEqual(window.test_eraserMaskCount, 1)
+        XCTAssertFalse(window.test_damagedAnnotationIDs.contains(outsideText.id))
+        let image = try XCTUnwrap(window.test_renderedOverlayImage())
+        let outsideTextRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 1)).insetBy(dx: -4, dy: -4)
+        XCTAssertNotNil(try firstPixel(in: image, rect: outsideTextRect) { pixel in
+            pixel.red > 180 && pixel.green < 120 && pixel.blue < 120 && pixel.alpha > 120
+        })
+    }
+
+    func testEraserRectangleMasksTextOutsideSelection() throws {
+        let background = solidImage(size: NSSize(width: 720, height: 460), color: .white)
+        let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        var redTextStyle = CaptureAnnotationStyle()
+        redTextStyle.strokeColor = .systemRed
+        redTextStyle.textSize = 32
+        redTextStyle.textOutlineEnabled = false
+        let outsideText = CaptureAnnotation(
+            kind: .text,
+            rect: NSRect(x: selection.width + 32, y: 86, width: 180, height: 44),
+            style: redTextStyle,
+            text: "Outside"
+        )
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([outsideText])
+        window.test_activateEraserTool()
+        window.test_mouseDown(at: try XCTUnwrap(window.test_eraserRectangleOptionPoint()))
+        window.test_mouseUp(at: try XCTUnwrap(window.test_eraserRectangleOptionPoint()))
+
+        window.test_drag(from: NSPoint(x: selection.maxX + 34, y: 178), to: NSPoint(x: selection.maxX + 86, y: 236))
+
+        XCTAssertEqual(window.test_eraserMaskCount, 1)
+        XCTAssertTrue(window.test_damagedAnnotationIDs.contains(outsideText.id))
+        let image = try XCTUnwrap(window.test_renderedOverlayImage())
+        let erasedProbe = NSRect(x: selection.maxX + 34, y: 178, width: 52, height: 58)
+        XCTAssertEqual(try overlayPixelCount(in: image, rect: erasedProbe) { pixel in
+            pixel.red > 180 && pixel.green < 120 && pixel.blue < 120 && pixel.alpha > 120
+        }, 0)
+        let remainingProbe = NSRect(x: selection.maxX + 118, y: 178, width: 90, height: 58)
+        XCTAssertGreaterThan(try overlayPixelCount(in: image, rect: remainingProbe) { pixel in
+            pixel.red > 180 && pixel.green < 120 && pixel.blue < 120 && pixel.alpha > 120
+        }, 0)
+    }
+
+    func testTextCreatedOutsideSelectionStaysVisibleWhileEditingAfterEraserMask() throws {
+        let background = solidImage(size: NSSize(width: 620, height: 460), color: .white)
+        let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        let rectangle = CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 35, y: 45, width: 60, height: 60), style: CaptureAnnotationStyle())
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([rectangle])
+        window.test_activateEraserTool()
+        window.test_mouseDown(at: try XCTUnwrap(window.test_eraserRectangleOptionPoint()))
+        window.test_mouseUp(at: try XCTUnwrap(window.test_eraserRectangleOptionPoint()))
+        window.test_drag(from: NSPoint(x: 120, y: 130), to: NSPoint(x: 210, y: 220))
+        XCTAssertEqual(window.test_eraserMaskCount, 1)
+
+        window.test_activateTextTool()
+        window.test_mouseDown(at: NSPoint(x: selection.maxX + 44, y: selection.midY))
+        window.test_mouseUp(at: NSPoint(x: selection.maxX + 44, y: selection.midY))
+        window.firstResponder?.insertText("Visible")
+
+        XCTAssertTrue(window.test_isEditingTextAnnotation)
+        XCTAssertTrue(window.test_textEditorUsesTransparentText)
+        let image = try XCTUnwrap(window.test_renderedOverlayImage())
+        let outsideTextRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 1)).insetBy(dx: -4, dy: -4)
+        XCTAssertNotNil(try firstPixel(in: image, rect: outsideTextRect) { pixel in
+            pixel.red > 180 && pixel.green < 120 && pixel.blue < 120 && pixel.alpha > 120
+        })
     }
 
     func testEraserRectangleOutsideSelectionDoesNotCreateEmptyMaskFromPaddedBounds() throws {
@@ -10392,7 +10595,8 @@ final class SelectionToolbarStateTests: XCTestCase {
     }
 
     func testToolbarTooltipTitlesAreAvailableForPrimaryButtons() {
-        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "rectangle"), "形状标注")
+        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "rectangle"), "形状")
+        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "marker"), "荧光笔")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "mosaicRectangle"), "矩形模糊")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "mosaicBlur"), "高斯")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "mosaicPixel"), "马赛克")
@@ -11387,6 +11591,41 @@ final class SelectionToolbarStateTests: XCTestCase {
         matching predicate: ((red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8)) -> Bool
     ) throws -> Int {
         try pixels(in: image, rect: rect).filter(predicate).count
+    }
+
+    private func overlayPixelCount(
+        in image: NSImage,
+        rect: NSRect,
+        matching predicate: ((red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8)) -> Bool
+    ) throws -> Int {
+        let cgImage = try XCTUnwrap(image.cgImage(forProposedRect: nil, context: nil, hints: nil))
+        let bytes = try rgbaBytes(in: image)
+        let scaleX = CGFloat(cgImage.width) / max(image.size.width, 1)
+        let scaleY = CGFloat(cgImage.height) / max(image.size.height, 1)
+        let minX = max(0, Int((rect.minX * scaleX).rounded(.down)))
+        let maxX = min(cgImage.width - 1, Int((rect.maxX * scaleX).rounded(.up)))
+        let minY = max(0, Int(((image.size.height - rect.maxY) * scaleY).rounded(.down)))
+        let maxY = min(cgImage.height - 1, Int(((image.size.height - rect.minY) * scaleY).rounded(.up)))
+        guard minX < maxX, minY < maxY else {
+            return 0
+        }
+
+        var count = 0
+        for y in minY...maxY {
+            for x in minX...maxX {
+                let index = (y * cgImage.width + x) * 4
+                let pixel = (
+                    red: bytes[index],
+                    green: bytes[index + 1],
+                    blue: bytes[index + 2],
+                    alpha: bytes[index + 3]
+                )
+                if predicate(pixel) {
+                    count += 1
+                }
+            }
+        }
+        return count
     }
 
     private func pixels(

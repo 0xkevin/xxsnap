@@ -7,6 +7,7 @@ enum TestMosaicRectangleRotationHandleGlyph {
 enum TestToolbarButton {
     case rectangle
     case arrow
+    case pen
     case marker
     case eyedropper
     case mosaic
@@ -727,6 +728,10 @@ final class SelectionOverlayWindow: NSWindow {
 
     func test_mainToolbarButtonRects() -> [NSRect] {
         (contentView as? SelectionOverlayView)?.test_mainToolbarButtonRects() ?? []
+    }
+
+    func test_mainToolbarRect() -> NSRect? {
+        (contentView as? SelectionOverlayView)?.test_mainToolbarRect()
     }
 
     func test_mainToolbarButtonRect(for button: TestToolbarButton) -> NSRect? {
@@ -2436,7 +2441,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
 
         if isEraserToolActive {
-            if isToolbarOrPanelPoint(point) || !isInsideSelection {
+            if isToolbarOrPanelPoint(point) {
                 return .arrow
             }
             return eraserMode == .rectangle ? .crosshair : .eraser
@@ -2507,7 +2512,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return backgroundAwareCursorStyle(SelectionToolbarState.overlayCursorStyle(for: selectionResizeHandle), at: point)
         }
 
-        if isTextToolActive, !isToolbarOrPanelPoint(point), isInsideSelection {
+        if isTextToolActive, !isToolbarOrPanelPoint(point) {
             return .textInput
         }
 
@@ -2578,6 +2583,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
         if !isShapeToolActive, isMainToolbarDragPoint(point) {
             return backgroundAwareCursorStyle(.move, at: point)
+        }
+
+        if isMagnifierToolActive, !isToolbarOrPanelPoint(point) {
+            return .crosshair
         }
 
         let style = SelectionToolbarState.overlayCursorStyle(
@@ -4367,10 +4376,6 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return true
         }
 
-        guard selectionRect.contains(point) else {
-            return true
-        }
-
         let textRect = textAnnotationRect(anchoredAt: point, inside: selectionRect)
         var style = currentStyle
         style.strokeWidth = 0
@@ -4957,12 +4962,6 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
         annotations[editingTextAnnotationIndex].text = text
         annotations[editingTextAnnotationIndex].rect.size = updatedSize
-        if let lockedSelectionRect {
-            let overlayRect = overlayRect(fromLocalAnnotationRect: annotations[editingTextAnnotationIndex].rect)
-            annotations[editingTextAnnotationIndex].rect = localAnnotationRect(
-                from: clamp(rect: overlayRect, inside: lockedSelectionRect.standardized)
-            )
-        }
         clearRedoAnnotationHistory()
         layoutTextEditorForCurrentAnnotation()
         needsDisplay = true
@@ -5045,18 +5044,15 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         pendingTextEditShouldBeginEditing = true
     }
 
-    private func textAnnotationRect(anchoredAt point: NSPoint, inside selectionRect: NSRect) -> NSRect {
+    private func textAnnotationRect(anchoredAt point: NSPoint, inside _: NSRect) -> NSRect {
         let horizontalPadding = CaptureAnnotationRenderer.textHorizontalPadding
         let size = textAnnotationSize(text: "", style: currentStyle)
         let verticalOffset = size.height / 2
-        return clamp(
-            rect: NSRect(
-                x: point.x - horizontalPadding,
-                y: point.y - verticalOffset,
-                width: size.width,
-                height: size.height
-            ),
-            inside: selectionRect
+        return NSRect(
+            x: point.x - horizontalPadding,
+            y: point.y - verticalOffset,
+            width: size.width,
+            height: size.height
         )
     }
 
@@ -5921,6 +5917,13 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         return toolbarButtonRects(in: toolbar).map(\.1)
     }
 
+    func test_mainToolbarRect() -> NSRect? {
+        guard let selectionRect else {
+            return nil
+        }
+        return mainToolbarRect(for: selectionRect)
+    }
+
     func test_mainToolbarButtonRect(for button: TestToolbarButton) -> NSRect? {
         guard let selectionRect, let toolbar = mainToolbarRect(for: selectionRect) else {
             return nil
@@ -5931,6 +5934,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             toolbarButton = .rectangle
         case .arrow:
             toolbarButton = .polyline
+        case .pen:
+            toolbarButton = .pen
         case .marker:
             toolbarButton = .marker
         case .eyedropper:
@@ -5958,6 +5963,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             toolbarButton = .rectangle
         case .arrow:
             toolbarButton = .polyline
+        case .pen:
+            toolbarButton = .pen
         case .marker:
             toolbarButton = .marker
         case .eyedropper:
@@ -8912,10 +8919,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private func effectiveOverlayEraserRect(from rect: NSRect) -> NSRect? {
-        guard let lockedSelectionRect else {
+        guard lockedSelectionRect != nil else {
             return nil
         }
-        let effectiveRect = rect.standardized.intersection(lockedSelectionRect.standardized)
+        let effectiveRect = rect.standardized
         guard effectiveRect.width > 0, effectiveRect.height > 0 else {
             return nil
         }
@@ -8931,7 +8938,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             y: rect.minY - lockedSelectionRect.minY,
             width: rect.width,
             height: rect.height
-        ).standardized.intersection(NSRect(origin: .zero, size: lockedSelectionRect.size))
+        ).standardized
         guard localRect.width > 0, localRect.height > 0 else {
             return nil
         }
@@ -10430,6 +10437,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             operation: .sourceOver,
             fraction: 1
         )
+        drawAnnotationsOutsideLockedSelection(lockedSelectionRect)
 
         if let selectedIndex = selectedAnnotationIndex,
            annotations.indices.contains(selectedIndex),
@@ -10437,6 +10445,103 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
            shouldDrawSelectedAnnotationOutline(annotations[selectedIndex]) {
             drawSelectedAnnotationOutline(annotations[selectedIndex])
         }
+    }
+
+    private func drawAnnotationsOutsideLockedSelection(_ lockedSelectionRect: NSRect) {
+        let clippedSelectionRect = lockedSelectionRect.standardized
+        let selectedIndex = selectedAnnotationIndex
+        for (index, annotation) in annotations.enumerated() {
+            if index == selectedIndex || isMosaicAnnotation(annotation) || !annotationHasVisibleAreaOutsideLockedSelection(annotation, clippedSelectionRect) {
+                continue
+            }
+            drawAnnotationOutsideLockedSelection(annotation, clippedSelectionRect)
+        }
+
+        if let selectedIndex,
+           annotations.indices.contains(selectedIndex),
+           annotationIsEditable(at: selectedIndex) {
+            let selectedAnnotation = annotations[selectedIndex]
+            if !isMosaicAnnotation(selectedAnnotation),
+               annotationHasVisibleAreaOutsideLockedSelection(selectedAnnotation, clippedSelectionRect) {
+                drawAnnotationOutsideLockedSelection(selectedAnnotation, clippedSelectionRect)
+                if shouldDrawSelectedAnnotationOutline(selectedAnnotation) {
+                    drawSelectedAnnotationOutline(selectedAnnotation)
+                }
+            }
+        }
+    }
+
+    private func drawAnnotationOutsideLockedSelection(_ annotation: CaptureAnnotation, _ lockedSelectionRect: NSRect) {
+        let masksForAnnotation = eraserMasks.filter { $0.affectedAnnotationIDs.contains(annotation.id) }
+
+        NSGraphicsContext.saveGraphicsState()
+        outsideLockedSelectionClipPath(lockedSelectionRect).addClip()
+        if masksForAnnotation.isEmpty {
+            drawAnnotation(annotation, inOverlay: true)
+        } else if let maskedAnnotation = outsideMaskedAnnotationImage(for: annotation, masks: masksForAnnotation) {
+            maskedAnnotation.image.draw(
+                in: maskedAnnotation.rect,
+                from: NSRect(origin: .zero, size: maskedAnnotation.image.size),
+                operation: .sourceOver,
+                fraction: 1
+            )
+        }
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    private func outsideLockedSelectionClipPath(_ lockedSelectionRect: NSRect) -> NSBezierPath {
+        let clipPath = NSBezierPath(rect: bounds)
+        clipPath.append(selectionPath(in: lockedSelectionRect))
+        clipPath.windingRule = .evenOdd
+        return clipPath
+    }
+
+    private func outsideMaskedAnnotationImage(for annotation: CaptureAnnotation, masks: [EraserMask]) -> (image: NSImage, rect: NSRect)? {
+        guard let visualBounds = eraserRectangleVisualBounds(for: annotation)?.standardized else {
+            return nil
+        }
+        let imageRect = visualBounds.insetBy(dx: -2, dy: -2).intersection(bounds).standardized
+        guard imageRect.width > 0, imageRect.height > 0 else {
+            return nil
+        }
+
+        let image = NSImage(size: imageRect.size)
+
+        image.lockFocus()
+        NSColor.clear.setFill()
+        NSRect(origin: .zero, size: imageRect.size).fill()
+        let transform = NSAffineTransform()
+        transform.translateX(by: -imageRect.minX, yBy: -imageRect.minY)
+        transform.concat()
+        drawAnnotation(annotation, inOverlay: true)
+        for mask in masks {
+            NSColor.black.setFill()
+            overlayRect(fromLocalEraserMaskRect: mask.rect).insetBy(dx: -1, dy: -1).fill(using: .destinationOut)
+        }
+        image.unlockFocus()
+        return (image, imageRect)
+    }
+
+    private func overlayRect(fromLocalEraserMaskRect rect: NSRect) -> NSRect {
+        guard let lockedSelectionRect else {
+            return rect
+        }
+        return NSRect(
+            x: lockedSelectionRect.minX + rect.minX,
+            y: lockedSelectionRect.minY + rect.minY,
+            width: rect.width,
+            height: rect.height
+        ).standardized
+    }
+
+    private func annotationHasVisibleAreaOutsideLockedSelection(_ annotation: CaptureAnnotation, _ lockedSelectionRect: NSRect) -> Bool {
+        guard let visualBounds = eraserRectangleVisualBounds(for: annotation)?.standardized,
+              visualBounds.width > 0,
+              visualBounds.height > 0
+        else {
+            return false
+        }
+        return !lockedSelectionRect.contains(visualBounds)
     }
 
     private var shouldRenderAnnotationsWithMosaicOrdering: Bool {
@@ -14141,19 +14246,79 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             width: SelectionToolbarState.optionsToolbarWidth(paletteCount: visiblePaletteCount, mode: optionsToolbarMode),
             height: SelectionToolbarState.optionsToolbarHeight(paletteCount: visiblePaletteCount, mode: optionsToolbarMode)
         )
-        if optionsToolbarMode == .eraser,
-           let eraserButton = toolbarButtonRects(in: toolbar).first(where: { $0.0 == .eraser })?.1 {
-            return eraserOptionsToolbarRect(size: optionsSize, anchoredTo: eraserButton)
+        if shouldLeftAlignOptionsToolbarWithMainToolbar(optionsToolbarMode) {
+            return leftAlignedOptionsToolbarRect(size: optionsSize, alignedWith: toolbar)
+        }
+        if let anchorButton = optionsToolbarAnchorButton(for: optionsToolbarMode),
+           let anchorRect = toolbarButtonRects(in: toolbar).first(where: { $0.0 == anchorButton })?.1 {
+            return anchoredOptionsToolbarRect(size: optionsSize, anchoredTo: anchorRect, within: toolbar)
         }
 
         return toolbarRect(size: optionsSize, anchoredTo: toolbar)
     }
 
-    private func eraserOptionsToolbarRect(size: NSSize, anchoredTo anchor: NSRect) -> NSRect {
+    private func shouldLeftAlignOptionsToolbarWithMainToolbar(_ mode: SelectionToolbarState.OptionsToolbarMode) -> Bool {
+        switch mode {
+        case .shape, .arrowLine, .text:
+            return true
+        case .brush, .marker, .mosaic, .numberSequence, .magnifier, .eraser:
+            return false
+        }
+    }
+
+    private func optionsToolbarAnchorButton(for mode: SelectionToolbarState.OptionsToolbarMode) -> ToolbarButton? {
+        switch mode {
+        case .brush:
+            return .pen
+        case .marker:
+            return .marker
+        case .mosaic:
+            return .mosaic
+        case .eraser:
+            return .eraser
+        case .shape, .arrowLine, .text, .numberSequence, .magnifier:
+            return nil
+        }
+    }
+
+    private func leftAlignedOptionsToolbarRect(size: NSSize, alignedWith toolbar: NSRect) -> NSRect {
         let gap: CGFloat = 8
         let safeBounds = safeLayoutBounds.insetBy(dx: gap, dy: gap)
         let below = NSRect(
-            x: anchor.midX - size.width / 2,
+            x: toolbar.minX,
+            y: toolbar.minY - gap - size.height,
+            width: size.width,
+            height: size.height
+        )
+        if safeBounds.contains(below) {
+            return below
+        }
+
+        let above = NSRect(
+            x: toolbar.minX,
+            y: toolbar.maxY + gap,
+            width: size.width,
+            height: size.height
+        )
+        if safeBounds.contains(above) {
+            return above
+        }
+
+        return clamp(rect: below, inside: safeBounds)
+    }
+
+    private func anchoredOptionsToolbarRect(size: NSSize, anchoredTo anchor: NSRect, within toolbar: NSRect) -> NSRect {
+        let gap: CGFloat = 8
+        let safeBounds = safeLayoutBounds.insetBy(dx: gap, dy: gap)
+        let centeredX = anchor.midX - size.width / 2
+        let x: CGFloat
+        if size.width <= toolbar.width {
+            x = min(max(centeredX, toolbar.minX), toolbar.maxX - size.width)
+        } else {
+            x = centeredX
+        }
+        let below = NSRect(
+            x: x,
             y: anchor.minY - gap - size.height,
             width: size.width,
             height: size.height
@@ -14163,7 +14328,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
 
         let above = NSRect(
-            x: anchor.midX - size.width / 2,
+            x: x,
             y: anchor.maxY + gap,
             width: size.width,
             height: size.height
