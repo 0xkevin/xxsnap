@@ -49,7 +49,7 @@ The legacy Qt app already proves the product shape by compositing the selected r
 ### Scope Boundaries
 
 - In scope: mac native pin flow, pinned-window lifecycle, move/scale/close interactions, toolbar routing, documentation updates, and focused tests.
-- Deferred to Follow-Up Work: opacity controls, mouse click-through, window-level presets, multi-pin window management UI, context menus, and Windows parity.
+- Deferred to Follow-Up Work: full original-toolbar parity inside pinned images, multi-pin window management UI, and Windows parity.
 - Outside this plan: changing annotation model semantics, changing export clipping rules, implementing scroll capture, and changing screen-recording permission behavior.
 
 ### Acceptance Examples

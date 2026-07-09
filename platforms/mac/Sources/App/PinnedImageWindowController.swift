@@ -70,13 +70,20 @@ protocol PinnedImageWindowPresenting: AnyObject {
 
 @MainActor
 final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPresenting {
-    let image: NSImage
+    private static let activeControllers = NSHashTable<PinnedImageWindowController>.weakObjects()
+
+    var image: NSImage {
+        pinnedImage
+    }
+
     let screenRect: NSRect
     var onClose: (() -> Void)?
+    private var pinnedImage: NSImage
+    private let initialImageFrame: NSRect
     private let imageAspectRatio: CGFloat
 
     init(image: NSImage, screenRect: NSRect? = nil, visibleFrame: NSRect? = NSScreen.main?.visibleFrame) {
-        self.image = image
+        self.pinnedImage = image
         let requestedRect = screenRect?.standardized ?? NSRect(origin: .zero, size: image.size)
         self.screenRect = requestedRect.isEmpty ? NSRect(origin: .zero, size: image.size) : requestedRect
         self.imageAspectRatio = image.size.width / max(image.size.height, 1)
@@ -89,6 +96,7 @@ final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPr
                 height: image.size.height
             )
             : self.screenRect
+        self.initialImageFrame = initialImageFrame
         let initialFrame = PinnedImageWindowGeometry.windowFrame(forImageFrame: initialImageFrame)
         let window = PinnedImageWindow(
             contentRect: initialFrame,
@@ -109,6 +117,7 @@ final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPr
         super.init(window: window)
         window.delegate = self
         view.controller = self
+        Self.activeControllers.add(self)
     }
 
     @available(*, unavailable)
@@ -148,10 +157,140 @@ final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPr
         let newImageFrame = NSRect(origin: newImageOrigin, size: newImageSize)
         window.setFrame(PinnedImageWindowGeometry.windowFrame(forImageFrame: newImageFrame), display: true)
     }
+
+    func showEditingToolbar() {
+        contentView?.showsEditingToolbar = true
+    }
+
+    func hideEditingToolbar() {
+        contentView?.showsEditingToolbar = false
+    }
+
+    func finishEditing() {
+        guard let contentView else {
+            return
+        }
+        if let baked = contentView.bakePendingAnnotations() {
+            pinnedImage = baked
+        }
+        hideEditingToolbar()
+    }
+
+    func makeContextMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.addItem(menuItem(title: contentView?.showsEditingToolbar == true ? "隐藏工具条" : "显示工具条", action: #selector(toggleEditingToolbar)))
+        menu.addItem(menuItem(title: "复制图片", action: #selector(copyImage)))
+        menu.addItem(menuItem(title: "保存图片...", action: #selector(saveImage)))
+        menu.addItem(.separator())
+        menu.addItem(menuItem(title: "重置大小", action: #selector(resetSize)))
+
+        let opacityItem = NSMenuItem(title: "透明度", action: nil, keyEquivalent: "")
+        let opacityMenu = NSMenu()
+        for option in [1.0, 0.8, 0.6, 0.4] as [CGFloat] {
+            let item = menuItem(title: "\(Int(option * 100))%", action: #selector(setOpacity(_:)))
+            item.representedObject = option
+            item.state = abs((window?.alphaValue ?? 1) - option) < 0.01 ? .on : .off
+            opacityMenu.addItem(item)
+        }
+        opacityItem.submenu = opacityMenu
+        menu.addItem(opacityItem)
+
+        let topItem = menuItem(title: "置顶", action: #selector(toggleAlwaysOnTop))
+        topItem.state = window?.level == .floating ? .on : .off
+        menu.addItem(topItem)
+
+        let clickThroughItem = menuItem(title: "鼠标穿透", action: #selector(toggleMouseClickThrough))
+        clickThroughItem.state = window?.ignoresMouseEvents == true ? .on : .off
+        menu.addItem(clickThroughItem)
+
+        menu.addItem(.separator())
+        menu.addItem(menuItem(title: "关闭", action: #selector(closePinnedWindow)))
+        menu.addItem(menuItem(title: "关闭全部贴图", action: #selector(closeAllPinnedWindows)))
+        return menu
+    }
+
+    func showContextMenu(with event: NSEvent) {
+        guard let contentView = window?.contentView else {
+            return
+        }
+        NSMenu.popUpContextMenu(makeContextMenu(), with: event, for: contentView)
+    }
+
+    private func menuItem(title: String, action: Selector) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        return item
+    }
+
+    @objc private func toggleEditingToolbar() {
+        if contentView?.showsEditingToolbar == true {
+            hideEditingToolbar()
+        } else {
+            showEditingToolbar()
+        }
+    }
+
+    @objc fileprivate func copyImage() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.writeObjects([pinnedImage])
+    }
+
+    @objc fileprivate func saveImage() {
+        guard
+            let tiffData = pinnedImage.tiffRepresentation,
+            let bitmap = NSBitmapImageRep(data: tiffData),
+            let pngData = bitmap.representation(using: .png, properties: [:])
+        else {
+            return
+        }
+        let savePanel = NSSavePanel()
+        savePanel.allowedContentTypes = [.png]
+        savePanel.nameFieldStringValue = CaptureCoordinator.defaultCaptureFilename()
+        savePanel.level = .modalPanel
+        NSApp.activate(ignoringOtherApps: true)
+        guard savePanel.runModal() == .OK, let destinationURL = savePanel.url else {
+            return
+        }
+        try? pngData.write(to: destinationURL)
+    }
+
+    @objc private func resetSize() {
+        window?.setFrame(PinnedImageWindowGeometry.windowFrame(forImageFrame: initialImageFrame), display: true)
+    }
+
+    @objc private func setOpacity(_ sender: NSMenuItem) {
+        guard let opacity = sender.representedObject as? CGFloat else {
+            return
+        }
+        window?.alphaValue = opacity
+    }
+
+    @objc private func toggleAlwaysOnTop() {
+        window?.level = window?.level == .floating ? .normal : .floating
+    }
+
+    @objc private func toggleMouseClickThrough() {
+        window?.ignoresMouseEvents.toggle()
+    }
+
+    @objc private func closePinnedWindow() {
+        window?.close()
+    }
+
+    @objc private func closeAllPinnedWindows() {
+        for controller in Self.activeControllers.allObjects {
+            controller.window?.close()
+        }
+    }
+
+    private var contentView: PinnedImageContentView? {
+        window?.contentView as? PinnedImageContentView
+    }
 }
 
 extension PinnedImageWindowController: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
+        Self.activeControllers.remove(self)
         onClose?()
     }
 }
@@ -163,9 +302,52 @@ private final class PinnedImageWindow: NSWindow {
 }
 
 private final class PinnedImageContentView: NSView {
-    let image: NSImage
+    var image: NSImage
     weak var controller: PinnedImageWindowController?
     private var dragOffset: NSPoint?
+    fileprivate var showsEditingToolbar = false {
+        didSet {
+            draftAnnotationRect = nil
+            annotationStartPoint = nil
+            needsDisplay = true
+        }
+    }
+    private var annotationStartPoint: NSPoint?
+    private var draftAnnotationRect: NSRect?
+    private var pendingAnnotationRects: [NSRect] = []
+
+    private enum EditingToolbarButton: CaseIterable {
+        case rectangle
+        case save
+        case copy
+        case done
+
+        var title: String {
+            switch self {
+            case .rectangle:
+                return "矩形"
+            case .save:
+                return "保存图片"
+            case .copy:
+                return "复制图片"
+            case .done:
+                return "完成编辑"
+            }
+        }
+
+        var iconName: String? {
+            switch self {
+            case .rectangle:
+                return "screenshot"
+            case .save:
+                return "save-to-file"
+            case .copy:
+                return "copy-to-clipboard"
+            case .done:
+                return nil
+            }
+        }
+    }
 
     init(image: NSImage) {
         self.image = image
@@ -187,22 +369,42 @@ private final class PinnedImageContentView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        let imageRect = bounds.insetBy(
-            dx: PinnedImageWindowGeometry.shadowOutset,
-            dy: PinnedImageWindowGeometry.shadowOutset
-        )
+        let imageRect = currentImageRect
         drawBlueOuterShadow(around: imageRect)
         image.draw(in: imageRect)
+        drawPendingAnnotations(in: imageRect)
+        if showsEditingToolbar {
+            drawEditingToolbar(in: imageRect)
+        }
     }
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
+        let point = event.locationInWindow
+        if showsEditingToolbar {
+            if let button = editingToolbarButton(at: point) {
+                performEditingToolbarButton(button)
+                return
+            }
+            guard currentImageRect.contains(point) else {
+                return
+            }
+            annotationStartPoint = imagePoint(from: point)
+            draftAnnotationRect = nil
+            return
+        }
         if window != nil {
             dragOffset = event.locationInWindow
         }
     }
 
     override func mouseDragged(with event: NSEvent) {
+        if showsEditingToolbar, let annotationStartPoint {
+            draftAnnotationRect = normalizedRect(from: annotationStartPoint, to: imagePoint(from: event.locationInWindow))
+            needsDisplay = true
+            return
+        }
+
         guard let dragOffset, let window else {
             return
         }
@@ -214,7 +416,21 @@ private final class PinnedImageContentView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if showsEditingToolbar, let annotationStartPoint {
+            let rect = normalizedRect(from: annotationStartPoint, to: imagePoint(from: event.locationInWindow))
+            if rect.width >= 2, rect.height >= 2 {
+                pendingAnnotationRects.append(rect)
+            }
+            self.annotationStartPoint = nil
+            draftAnnotationRect = nil
+            needsDisplay = true
+            return
+        }
         dragOffset = nil
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        controller?.showContextMenu(with: event)
     }
 
     override func scrollWheel(with event: NSEvent) {
@@ -235,6 +451,58 @@ private final class PinnedImageContentView: NSView {
             return
         }
         super.keyDown(with: event)
+    }
+
+    fileprivate var currentImageRect: NSRect {
+        bounds.insetBy(
+            dx: PinnedImageWindowGeometry.shadowOutset,
+            dy: PinnedImageWindowGeometry.shadowOutset
+        )
+    }
+
+    fileprivate var editingToolbarTitles: [String] {
+        EditingToolbarButton.allCases.map(\.title)
+    }
+
+    fileprivate var pendingRectsForTesting: [NSRect] {
+        var rects = pendingAnnotationRects
+        if let draftAnnotationRect {
+            rects.append(draftAnnotationRect)
+        }
+        return rects
+    }
+
+    fileprivate func bakePendingAnnotations() -> NSImage? {
+        let rects = pendingRectsForTesting
+        guard !rects.isEmpty else {
+            pendingAnnotationRects.removeAll()
+            draftAnnotationRect = nil
+            return nil
+        }
+
+        let baked = NSImage(size: image.size)
+        baked.lockFocus()
+        image.draw(in: NSRect(origin: .zero, size: image.size))
+        for rect in rects {
+            drawAnnotationRect(rect)
+        }
+        baked.unlockFocus()
+        image = baked
+        pendingAnnotationRects.removeAll()
+        draftAnnotationRect = nil
+        needsDisplay = true
+        return baked
+    }
+
+    fileprivate func addAnnotationByDragging(from start: NSPoint, to end: NSPoint) {
+        showsEditingToolbar = true
+        let startPoint = imagePoint(from: start)
+        let endPoint = imagePoint(from: end)
+        let rect = normalizedRect(from: startPoint, to: endPoint)
+        if rect.width >= 2, rect.height >= 2 {
+            pendingAnnotationRects.append(rect)
+            needsDisplay = true
+        }
     }
 
     private func drawBlueOuterShadow(around imageRect: NSRect) {
@@ -266,6 +534,122 @@ private final class PinnedImageContentView: NSView {
         NSColor.white.setFill()
         NSBezierPath(rect: imageRect).fill()
         NSGraphicsContext.restoreGraphicsState()
+    }
+
+    private func imagePoint(from viewPoint: NSPoint) -> NSPoint {
+        let imageRect = currentImageRect
+        let clamped = NSPoint(
+            x: min(max(viewPoint.x, imageRect.minX), imageRect.maxX),
+            y: min(max(viewPoint.y, imageRect.minY), imageRect.maxY)
+        )
+        return NSPoint(
+            x: (clamped.x - imageRect.minX) / max(imageRect.width, 1) * image.size.width,
+            y: (clamped.y - imageRect.minY) / max(imageRect.height, 1) * image.size.height
+        )
+    }
+
+    private func normalizedRect(from start: NSPoint, to end: NSPoint) -> NSRect {
+        NSRect(
+            x: min(start.x, end.x),
+            y: min(start.y, end.y),
+            width: abs(start.x - end.x),
+            height: abs(start.y - end.y)
+        )
+    }
+
+    private func viewRect(from imageRelativeRect: NSRect, in imageRect: NSRect) -> NSRect {
+        NSRect(
+            x: imageRect.minX + imageRelativeRect.minX / max(image.size.width, 1) * imageRect.width,
+            y: imageRect.minY + imageRelativeRect.minY / max(image.size.height, 1) * imageRect.height,
+            width: imageRelativeRect.width / max(image.size.width, 1) * imageRect.width,
+            height: imageRelativeRect.height / max(image.size.height, 1) * imageRect.height
+        )
+    }
+
+    private func drawPendingAnnotations(in imageRect: NSRect) {
+        for rect in pendingRectsForTesting {
+            drawAnnotationRect(viewRect(from: rect, in: imageRect))
+        }
+    }
+
+    private func drawAnnotationRect(_ rect: NSRect) {
+        NSColor.systemRed.setStroke()
+        let path = NSBezierPath(rect: rect.insetBy(dx: 1.5, dy: 1.5))
+        path.lineWidth = 3
+        path.stroke()
+    }
+
+    private func editingToolbarRect(in imageRect: NSRect) -> NSRect {
+        let buttonCount = CGFloat(EditingToolbarButton.allCases.count)
+        let width = buttonCount * 28 + 10
+        return NSRect(
+            x: imageRect.midX - width / 2,
+            y: imageRect.maxY - 34,
+            width: width,
+            height: 28
+        )
+    }
+
+    private func editingToolbarButtonRects() -> [(EditingToolbarButton, NSRect)] {
+        let toolbar = editingToolbarRect(in: currentImageRect)
+        var x = toolbar.minX + 5
+        return EditingToolbarButton.allCases.map { button in
+            let rect = NSRect(x: x, y: toolbar.minY + 4, width: 20, height: 20)
+            x += 28
+            return (button, rect)
+        }
+    }
+
+    private func editingToolbarButton(at point: NSPoint) -> EditingToolbarButton? {
+        editingToolbarButtonRects().first { _, rect in rect.insetBy(dx: -4, dy: -4).contains(point) }?.0
+    }
+
+    private func performEditingToolbarButton(_ button: EditingToolbarButton) {
+        switch button {
+        case .rectangle:
+            break
+        case .save:
+            controller?.saveImage()
+        case .copy:
+            controller?.copyImage()
+        case .done:
+            controller?.finishEditing()
+        }
+    }
+
+    private func drawEditingToolbar(in imageRect: NSRect) {
+        let toolbar = editingToolbarRect(in: imageRect)
+        NSColor(calibratedWhite: 0.98, alpha: 0.95).setFill()
+        NSBezierPath(roundedRect: toolbar, xRadius: 5, yRadius: 5).fill()
+        NSColor(calibratedWhite: 0.7, alpha: 0.7).setStroke()
+        NSBezierPath(roundedRect: toolbar, xRadius: 5, yRadius: 5).stroke()
+
+        for (button, rect) in editingToolbarButtonRects() {
+            NSColor.white.withAlphaComponent(0.92).setFill()
+            NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4).fill()
+            NSColor.black.withAlphaComponent(0.75).setStroke()
+            NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4).stroke()
+            if button == .done {
+                drawDoneCheck(in: rect)
+            } else if let iconName = button.iconName,
+                      let image = Bundle.main.url(forResource: iconName, withExtension: "svg").flatMap(NSImage.init(contentsOf:)) {
+                image.draw(in: rect.insetBy(dx: 3, dy: 3), from: .zero, operation: .sourceOver, fraction: 1)
+                NSColor.black.setFill()
+                rect.insetBy(dx: 3, dy: 3).fill(using: .sourceAtop)
+            }
+        }
+    }
+
+    private func drawDoneCheck(in rect: NSRect) {
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: rect.minX + 4.5, y: rect.midY - 0.5))
+        path.line(to: NSPoint(x: rect.midX - 1, y: rect.minY + 5))
+        path.line(to: NSPoint(x: rect.maxX - 4, y: rect.maxY - 5))
+        NSColor.black.setStroke()
+        path.lineWidth = 2.4
+        path.lineCapStyle = .round
+        path.lineJoinStyle = .round
+        path.stroke()
     }
 }
 
@@ -307,6 +691,44 @@ extension PinnedImageWindowController {
         window?.contentView?.draw(contentBounds)
         rendered.unlockFocus()
         return rendered
+    }
+
+    var test_contextMenuTitles: [String?] {
+        makeContextMenu().items.map { item in
+            item.isSeparatorItem ? nil : item.title
+        }
+    }
+
+    var test_isToolbarVisible: Bool {
+        contentView?.showsEditingToolbar == true
+    }
+
+    var test_imageRectInContent: NSRect {
+        contentView?.currentImageRect ?? .zero
+    }
+
+    var test_pendingAnnotationCount: Int {
+        contentView?.pendingRectsForTesting.count ?? 0
+    }
+
+    var test_pendingAnnotationRects: [NSRect] {
+        contentView?.pendingRectsForTesting ?? []
+    }
+
+    func test_showEditingToolbar() {
+        showEditingToolbar()
+    }
+
+    func test_finishEditing() {
+        finishEditing()
+    }
+
+    func test_toolbarContains(_ title: String) -> Bool {
+        contentView?.editingToolbarTitles.contains(title) == true
+    }
+
+    func test_dragAnnotation(from start: NSPoint, to end: NSPoint) {
+        contentView?.addAnnotationByDragging(from: start, to: end)
     }
 }
 #endif

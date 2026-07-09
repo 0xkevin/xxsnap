@@ -2259,6 +2259,64 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(closeCount, 1)
     }
 
+    @MainActor
+    func testPinnedImageContextMenuUsesRequestedOrder() throws {
+        let controller = PinnedImageWindowController(
+            image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+            screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
+        )
+
+        XCTAssertEqual(controller.test_contextMenuTitles, [
+            "显示工具条",
+            "复制图片",
+            "保存图片...",
+            nil,
+            "重置大小",
+            "透明度",
+            "置顶",
+            "鼠标穿透",
+            nil,
+            "关闭",
+            "关闭全部贴图",
+        ])
+    }
+
+    @MainActor
+    func testPinnedImageToolbarBakesAnnotationsInsideImageBounds() throws {
+        let sourceRect = NSRect(x: 120, y: 220, width: 160, height: 90)
+        let controller = PinnedImageWindowController(
+            image: solidImage(size: sourceRect.size, color: .white),
+            screenRect: sourceRect
+        )
+
+        XCTAssertFalse(controller.test_isToolbarVisible)
+        controller.test_showEditingToolbar()
+        XCTAssertTrue(controller.test_isToolbarVisible)
+        XCTAssertFalse(controller.test_toolbarContains("滚动截图"))
+        XCTAssertFalse(controller.test_toolbarContains("取消"))
+        XCTAssertFalse(controller.test_toolbarContains("贴图"))
+        XCTAssertTrue(controller.test_toolbarContains("完成编辑"))
+
+        let imageRect = controller.test_imageRectInContent
+        controller.test_dragAnnotation(
+            from: NSPoint(x: imageRect.minX - 20, y: imageRect.minY - 20),
+            to: NSPoint(x: imageRect.maxX + 24, y: imageRect.maxY + 24)
+        )
+        XCTAssertEqual(controller.test_pendingAnnotationCount, 1)
+        XCTAssertEqual(controller.test_pendingAnnotationRects.first?.origin.x ?? -1, 0, accuracy: 0.1)
+        XCTAssertEqual(controller.test_pendingAnnotationRects.first?.origin.y ?? -1, 0, accuracy: 0.1)
+        XCTAssertEqual(controller.test_pendingAnnotationRects.first?.width ?? -1, sourceRect.width, accuracy: 0.1)
+        XCTAssertEqual(controller.test_pendingAnnotationRects.first?.height ?? -1, sourceRect.height, accuracy: 0.1)
+
+        controller.test_finishEditing()
+        XCTAssertFalse(controller.test_isToolbarVisible)
+        XCTAssertEqual(controller.test_pendingAnnotationCount, 0)
+        let baked = controller.image
+        XCTAssertNotNil(try firstPixel(in: baked, rect: NSRect(x: 1, y: 1, width: baked.size.width - 2, height: 3)) { pixel in
+            pixel.red > 180 && pixel.green < 80 && pixel.blue < 80 && pixel.alpha > 150
+        })
+    }
+
     func testActivatingAnotherToolExitsEyedropperMode() {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 200, height: 120))
