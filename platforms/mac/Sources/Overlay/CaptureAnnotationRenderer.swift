@@ -5,6 +5,7 @@ import CoreText
 enum CaptureCompletionAction {
     case copy
     case save
+    case pin
 }
 
 enum CaptureAnnotationKind {

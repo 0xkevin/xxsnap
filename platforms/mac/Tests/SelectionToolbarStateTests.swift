@@ -2,6 +2,20 @@ import AppKit
 import XCTest
 @testable import xxsnap
 
+@MainActor
+private final class FakePinnedWindow: PinnedImageWindowPresenting {
+    let image: NSImage
+    private(set) var didShow = false
+
+    init(image: NSImage) {
+        self.image = image
+    }
+
+    func show() {
+        didShow = true
+    }
+}
+
 final class SelectionToolbarStateTests: XCTestCase {
     func testEyedropperSamplesVisibleAnnotationAndCopiesOnlyColor() throws {
         let background = solidImage(size: NSSize(width: 240, height: 160), color: NSColor(srgbRed: 0.95, green: 0.8, blue: 0.1, alpha: 1))
@@ -2111,6 +2125,65 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(textResult?.annotations.count, 1)
         XCTAssertEqual(textResult?.annotations.first?.kind, .text)
         XCTAssertEqual(textResult?.annotations.first?.text, "x")
+    }
+
+    func testPinToolbarCompletesSelectionAndCommitsActiveTextEdit() throws {
+        var result: CaptureSelectionResult?
+        let expectation = expectation(description: "pin action")
+        let window = SelectionOverlayWindow(backgroundImage: nil) { selectionResult in
+            result = selectionResult
+            expectation.fulfill()
+        }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateTextTool()
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 150))
+        window.firstResponder?.insertText("pinned")
+
+        let pinPoint = try XCTUnwrap(window.test_mainToolbarButtonPoint(for: .pin))
+        window.test_mouseDown(at: pinPoint)
+        window.test_mouseUp(at: pinPoint)
+        wait(for: [expectation], timeout: 0.5)
+
+        XCTAssertEqual(result?.action, .pin)
+        XCTAssertEqual(result?.annotations.count, 1)
+        XCTAssertEqual(result?.annotations.first?.kind, .text)
+        XCTAssertEqual(result?.annotations.first?.text, "pinned")
+    }
+
+    func testPinnedImageGeometryFitsAndScalesWithoutChangingAspectRatio() {
+        let visibleFrame = NSRect(x: 0, y: 0, width: 1000, height: 700)
+
+        let fitted = PinnedImageWindowGeometry.fittedImageSize(
+            imageSize: NSSize(width: 2000, height: 1000),
+            visibleFrame: visibleFrame
+        )
+        XCTAssertEqual(fitted.width, 800, accuracy: 0.1)
+        XCTAssertEqual(fitted.height, 400, accuracy: 0.1)
+
+        let tiny = PinnedImageWindowGeometry.fittedImageSize(
+            imageSize: NSSize(width: 12, height: 6),
+            visibleFrame: visibleFrame
+        )
+        XCTAssertEqual(max(tiny.width, tiny.height), PinnedImageWindowGeometry.minLongSide, accuracy: 0.1)
+        XCTAssertEqual(tiny.width / tiny.height, 2, accuracy: 0.01)
+
+        let scaled = PinnedImageWindowGeometry.scaledSize(
+            currentSize: NSSize(width: 200, height: 100),
+            aspectRatio: 2,
+            scaleFactor: 1.5,
+            visibleFrame: visibleFrame
+        )
+        XCTAssertEqual(scaled.width, 300, accuracy: 0.1)
+        XCTAssertEqual(scaled.height, 150, accuracy: 0.1)
+
+        let clamped = PinnedImageWindowGeometry.scaledSize(
+            currentSize: NSSize(width: 200, height: 100),
+            aspectRatio: 2,
+            scaleFactor: 0.1,
+            visibleFrame: visibleFrame
+        )
+        XCTAssertEqual(max(clamped.width, clamped.height), PinnedImageWindowGeometry.minLongSide, accuracy: 0.1)
     }
 
     func testActivatingAnotherToolExitsEyedropperMode() {
@@ -6854,6 +6927,47 @@ final class SelectionToolbarStateTests: XCTestCase {
         let exported = try XCTUnwrap(coordinator.test_lastCapture)
         XCTAssertEqual(hex(try XCTUnwrap(rgbaRenderPixel(in: exported, at: NSPoint(x: 36, y: 32)))), "#FFFFFF")
         XCTAssertEqual(hex(try XCTUnwrap(rgbaRenderPixel(in: exported, at: NSPoint(x: 16, y: 16)))), "#FF0000")
+    }
+
+    @MainActor
+    func testCaptureCoordinatorPinCreatesPinnedWindowWithRenderedImage() async throws {
+        let image = solidImage(size: NSSize(width: 80, height: 60), color: .white)
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = .red
+        style.fillEnabled = true
+        style.fillColor = .red
+        let annotation = CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 10, y: 10, width: 40, height: 30), style: style)
+        let result = CaptureSelectionResult(
+            screenRect: NSRect(origin: .zero, size: image.size),
+            snapshotRect: NSRect(origin: .zero, size: image.size),
+            annotations: [annotation],
+            action: .pin
+        )
+        var pinnedWindows: [FakePinnedWindow] = []
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            pinnedWindowFactory: { image in
+                let window = FakePinnedWindow(image: image)
+                pinnedWindows.append(window)
+                return window
+            }
+        )
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString("keep-me", forType: .string)
+        let expectation = expectation(description: "pin capture")
+        coordinator.captureSessionDidEnd = {
+            expectation.fulfill()
+        }
+
+        coordinator.test_handleSelection(result, frozenDesktopImage: image)
+        await fulfillment(of: [expectation], timeout: 2)
+
+        XCTAssertEqual(coordinator.test_pinnedWindowCount, 1)
+        let pinned = try XCTUnwrap(pinnedWindows.first)
+        XCTAssertTrue(pinned.didShow)
+        XCTAssertEqual(hex(try XCTUnwrap(rgbaRenderPixel(in: pinned.image, at: NSPoint(x: 16, y: 16)))), "#FF0000")
+        XCTAssertEqual(NSPasteboard.general.string(forType: .string), "keep-me")
     }
 
     func testMagnifierRendererSamplesOriginalImageInsteadOfAnnotations() throws {

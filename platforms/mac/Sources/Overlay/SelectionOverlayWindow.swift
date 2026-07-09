@@ -15,6 +15,7 @@ enum TestToolbarButton {
     case number
     case magnifier
     case eraser
+    case pin
 }
 
 private extension NSAlert {
@@ -5365,7 +5366,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             finish(action: .save)
         case .cancel:
             selectionDidFinish?(nil)
-        case .pin, .scroll:
+        case .pin:
+            finish(action: .pin)
+        case .scroll:
             showPlaceholder(for: button)
         }
 
@@ -6005,6 +6008,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             toolbarButton = .magnifier
         case .eraser:
             toolbarButton = .eraser
+        case .pin:
+            toolbarButton = .pin
         }
         return toolbarButtonRects(in: toolbar).first(where: { $0.0 == toolbarButton })?.1
     }
@@ -6032,6 +6037,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             toolbarButton = .magnifier
         case .eraser:
             toolbarButton = .eraser
+        case .pin:
+            toolbarButton = .pin
         }
         return symbolName(for: toolbarButton)
     }

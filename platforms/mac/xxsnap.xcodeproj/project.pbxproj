@@ -44,6 +44,7 @@
 		5B59F889F6FD562691B28716 /* save-to-file.svg in Resources */ = {isa = PBXBuildFile; fileRef = BE0A667A6A11313F9B532FC2 /* save-to-file.svg */; };
 		5F56CD50B9AD87B11791D4DE /* crop.png in Resources */ = {isa = PBXBuildFile; fileRef = 0EF17E8A625E11836314572B /* crop.png */; };
 		5FABC128915B0C423DD63EC6 /* CaptureCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A177154367D4DF7657018B06 /* CaptureCoordinator.swift */; };
+		5FABC128915B0C423DD63EC7 /* PinnedImageWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A177154367D4DF7657018B07 /* PinnedImageWindowController.swift */; };
 		607387F890210EC5A615E46D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B777570511CE72D6B6E9D175 /* Assets.xcassets */; };
 		63ABE3D1EE77013000AD73F0 /* manual-capture-checklist.md in Resources */ = {isa = PBXBuildFile; fileRef = 9A119E98789DE049AE5BBF54 /* manual-capture-checklist.md */; };
 		A1B2C3D4E5F60718293A4B5F /* screenshot.svg in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B6F /* screenshot.svg */; };
@@ -172,6 +173,7 @@
 		AA2000000000000000000002 /* reset2.svg */ = {isa = PBXFileReference; path = reset2.svg; sourceTree = "<group>"; };
 		AA3000000000000000000002 /* close.svg */ = {isa = PBXFileReference; path = close.svg; sourceTree = "<group>"; };
 		A177154367D4DF7657018B06 /* CaptureCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureCoordinator.swift; sourceTree = "<group>"; };
+		A177154367D4DF7657018B07 /* PinnedImageWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinnedImageWindowController.swift; sourceTree = "<group>"; };
 		A49BB4756C571CD2E8B2066E /* cancel-capture.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "cancel-capture.png"; sourceTree = "<group>"; };
 		A7EABCA72191CADC6E20729C /* mosaic-tool.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "mosaic-tool.png"; sourceTree = "<group>"; };
 		A89C77B7643079BE8890E43B /* crop.svg */ = {isa = PBXFileReference; path = crop.svg; sourceTree = "<group>"; };
@@ -219,6 +221,7 @@
 				A177154367D4DF7657018B06 /* CaptureCoordinator.swift */,
 				DE8CA0660F22BC823E1A8DBC /* main.swift */,
 				6F196A38351C3089668432BA /* PermissionCoordinator.swift */,
+				A177154367D4DF7657018B07 /* PinnedImageWindowController.swift */,
 				216073E47CB43ABDD6AD1B83 /* StatusItemController.swift */,
 			);
 			path = App;
@@ -568,6 +571,7 @@
 				5FABC128915B0C423DD63EC6 /* CaptureCoordinator.swift in Sources */,
 				4A423183222F53C45C9E493F /* CaptureToolbarWindowController.swift in Sources */,
 				3255124AE9CD7B90D40C887F /* PermissionCoordinator.swift in Sources */,
+				5FABC128915B0C423DD63EC7 /* PinnedImageWindowController.swift in Sources */,
 				8409AD72830E942955B95FE9 /* ScreenCaptureService.swift in Sources */,
 				8D2D0027AE3671BF227FE0B4 /* SelectionOverlayWindow.swift in Sources */,
 				5A59D8B15DBEFA8A46BAC5D6 /* SelectionToolbarState.swift in Sources */,

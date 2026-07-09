@@ -14,16 +14,20 @@ final class CaptureCoordinator {
     private var startTask: Task<Void, Never>?
     private var overlayWindow: SelectionOverlayWindow?
     private var retiredOverlayWindows: [SelectionOverlayWindow] = []
+    private var pinnedWindowControllers: [PinnedImageWindowPresenting] = []
     private var frozenDesktopImage: NSImage?
+    private let pinnedWindowFactory: @MainActor (NSImage) -> PinnedImageWindowPresenting
 
     init(
         permissionCoordinator: PermissionCoordinator,
         screenCaptureService: ScreenCaptureService,
-        settingsStore: SettingsStore = SettingsStore()
+        settingsStore: SettingsStore = SettingsStore(),
+        pinnedWindowFactory: @escaping @MainActor (NSImage) -> PinnedImageWindowPresenting = { PinnedImageWindowController(image: $0) }
     ) {
         self.permissionCoordinator = permissionCoordinator
         self.screenCaptureService = screenCaptureService
         self.settingsStore = settingsStore
+        self.pinnedWindowFactory = pinnedWindowFactory
     }
 
     convenience init() {
@@ -219,6 +223,18 @@ final class CaptureCoordinator {
                     if !saveLastCapture(exportedImage) {
                         NSLog("xxsnap save was cancelled or failed")
                     }
+                case .pin:
+                    let controller = pinnedWindowFactory(exportedImage)
+                    pinnedWindowControllers.append(controller)
+                    if let pinnedController = controller as? PinnedImageWindowController {
+                        pinnedController.onClose = { [weak self, weak pinnedController] in
+                            guard let pinnedController else {
+                                return
+                            }
+                            self?.pinnedWindowControllers.removeAll { $0 === pinnedController }
+                        }
+                    }
+                    controller.show()
                 }
                 NSLog(
                     "xxsnap capture completed: %.0fx%.0f",
@@ -314,6 +330,10 @@ final class CaptureCoordinator {
 extension CaptureCoordinator {
     var test_lastCapture: NSImage? {
         lastCapture
+    }
+
+    var test_pinnedWindowCount: Int {
+        pinnedWindowControllers.count
     }
 
     func test_handleSelection(_ result: CaptureSelectionResult?, frozenDesktopImage: NSImage?) {
