@@ -4,7 +4,7 @@
 
 **Goal:** Replace the macOS app icon with the supplied color icon set and the menu-bar icon with the supplied transparent monochrome artwork.
 
-**Architecture:** Keep the existing AppIcon asset catalog layout and status-item loading code unchanged. Copy source PNGs into the existing resource filenames so Xcode and runtime resource lookups continue to work without new code paths.
+**Architecture:** Keep the existing AppIcon asset catalog layout, `CFBundleIconFile`, and status-item loading code unchanged. Copy source PNGs into the existing resource filenames and regenerate the existing ICNS so Xcode and runtime resource lookups continue to work without new code paths.
 
 **Tech Stack:** macOS AppKit, Xcode asset catalogs, PNG resources, `xcodebuild`.
 
@@ -23,7 +23,8 @@
 - Modify: `platforms/mac/Resources/Assets.xcassets/AppIcon.appiconset/icon_256x256@2x.png`
 - Modify: `platforms/mac/Resources/Assets.xcassets/AppIcon.appiconset/icon_512x512.png`
 - Modify: `platforms/mac/Resources/Assets.xcassets/AppIcon.appiconset/icon_512x512@2x.png`
-- Modify: `platforms/mac/Resources/Icons/xxsnap.png`
+- Modify: `platforms/mac/Resources/xxsnap.icns`
+- Modify: `platforms/mac/Resources/xxsnap.png`
 
 - [ ] **Step 1: Verify source dimensions and transparency**
 
@@ -35,21 +36,25 @@ Expected: color dimensions are 16, 32, 32, 64, 128, 256, 256, 512, 512, and 1024
 
 Copy each `icon-<size>[@2x].png` from `xxsnap-icons-v1-彩色/mac/AppIcon.appiconset` to the corresponding `icon_<size>x<size>[@2x].png` destination. Do not resize or re-encode the supplied artwork.
 
-- [ ] **Step 3: Replace the menu-bar resource**
+- [ ] **Step 3: Generate the application ICNS**
 
-Copy `xxsnap-icons-v1-黑白/mac/AppIcon.appiconset/icon-128.png` to `platforms/mac/Resources/Icons/xxsnap.png`. Keep `StatusItemController.statusBarImage()` unchanged so the image remains an 18×18 point template image.
+Copy the ten color PNGs into a temporary `.iconset` directory using `icon_16x16.png` through `icon_512x512@2x.png` names, then run `iconutil -c icns` to replace `platforms/mac/Resources/xxsnap.icns`. Keep `CFBundleIconFile = xxsnap` unchanged.
 
-- [ ] **Step 4: Verify copied content and asset metadata**
+- [ ] **Step 4: Replace the menu-bar resource**
 
-Run SHA-256 comparisons between every source/destination pair, validate destination dimensions with `sips`, and run `git diff --check`.
+Copy `xxsnap-icons-v1-黑白/mac/AppIcon.appiconset/icon-128.png` to `platforms/mac/Resources/xxsnap.png`. Keep `StatusItemController.statusBarImage()` unchanged so the image remains an 18×18 point template image.
 
-Expected: every source/destination hash pair matches; all ten AppIcon slots have their declared pixel dimensions; status icon is 128×128 with alpha; `git diff --check` exits successfully.
+- [ ] **Step 5: Verify copied content and asset metadata**
 
-- [ ] **Step 5: Commit the isolated resource replacement**
+Run SHA-256 comparisons between every PNG source/destination pair, expand `xxsnap.icns` with `iconutil`, validate dimensions with `sips`, and run `git diff --check`.
+
+Expected: every PNG source/destination hash pair matches; all ten AppIcon slots and expanded ICNS entries have their declared pixel dimensions; status icon is 128×128 with alpha; `git diff --check` exits successfully.
+
+- [ ] **Step 6: Commit the isolated resource replacement**
 
 ```bash
 git add platforms/mac/Resources/Assets.xcassets/AppIcon.appiconset/*.png \
-  platforms/mac/Resources/Icons/xxsnap.png
+  platforms/mac/Resources/xxsnap.icns platforms/mac/Resources/xxsnap.png
 git commit -m "feat(mac): refresh app and status icons"
 ```
 
@@ -72,7 +77,7 @@ Expected: `** BUILD SUCCEEDED **` with no asset-catalog errors.
 
 - [ ] **Step 2: Verify packaged resources**
 
-Check the built app's `Assets.car` and copied `xxsnap.png`; verify the packaged status icon is 128×128 with alpha and matches the monochrome source hash.
+Check the built app's copied `xxsnap.icns` and `xxsnap.png`; verify the packaged status icon is 128×128 with alpha and matches the monochrome source hash, and verify the packaged ICNS matches the regenerated source ICNS.
 
 - [ ] **Step 3: Restart and verify the process**
 
