@@ -3570,18 +3570,25 @@ final class SelectionToolbarStateTests: XCTestCase {
     }
 
     @MainActor
-    func testDefaultSelectionOverlayUsesMoveCursorAndMovesSelectionWhenNoToolSelected() throws {
+    func testDefaultSelectionOverlayUsesCrosshairUntilSelectionMoveBegins() throws {
         let background = solidImage(size: NSSize(width: 640, height: 420), color: .white)
         let selection = NSRect(x: 120, y: 90, width: 260, height: 160)
         let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
         window.test_setLockedSelectionRect(selection)
+        let start = NSPoint(x: selection.midX, y: selection.midY)
+        let end = NSPoint(x: selection.midX + 24, y: selection.midY - 16)
 
-        XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: selection.midX, y: selection.midY)), .move)
+        window.test_updateColorSampler(at: start)
+        XCTAssertTrue(window.test_isColorSamplerVisible)
+        XCTAssertEqual(window.test_cursorStyle(at: start), .crosshair)
 
-        window.test_drag(
-            from: NSPoint(x: selection.midX, y: selection.midY),
-            to: NSPoint(x: selection.midX + 24, y: selection.midY - 16)
-        )
+        window.test_mouseDown(at: start)
+        XCTAssertEqual(window.test_cursorStyle(at: start), .move)
+        window.test_mouseDragged(to: end)
+        XCTAssertEqual(window.test_cursorStyle(at: end), .move)
+        window.test_mouseUp(at: end)
+        window.test_updateColorSampler(at: end)
+        XCTAssertEqual(window.test_cursorStyle(at: end), .crosshair)
 
         let moved = try XCTUnwrap(window.test_lockedSelectionRect)
         XCTAssertEqual(moved.minX, selection.minX + 24, accuracy: 0.5)
@@ -3589,7 +3596,7 @@ final class SelectionToolbarStateTests: XCTestCase {
     }
 
     @MainActor
-    func testSelectionOverlayUsesMoveCursorAfterShapeToolIsToggledOff() throws {
+    func testSelectionOverlayUsesCrosshairAfterShapeToolIsToggledOff() throws {
         let background = solidImage(size: NSSize(width: 640, height: 420), color: .white)
         let selection = NSRect(x: 120, y: 90, width: 260, height: 160)
         let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
@@ -3597,7 +3604,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_toggleShapeTool(.rectangle)
         window.test_toggleShapeTool(.rectangle)
 
-        XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: selection.midX, y: selection.midY)), .move)
+        XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: selection.midX, y: selection.midY)), .crosshair)
     }
 
     @MainActor
@@ -4316,7 +4323,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_cursorStyle(at: refreshPoint), .arrow)
     }
 
-    func testPassiveColorSamplerUsesMoveCursorForFullScreenSelection() throws {
+    func testPassiveColorSamplerUsesCrosshairForFullScreenSelection() throws {
         let background = solidImage(size: desktopImageSize(), color: .white)
         let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
         let screen = try XCTUnwrap(NSScreen.main)
@@ -4332,10 +4339,10 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_updateColorSampler(at: point)
 
         XCTAssertTrue(window.test_isColorSamplerVisible)
-        XCTAssertEqual(window.test_cursorStyle(at: point), .move)
+        XCTAssertEqual(window.test_cursorStyle(at: point), .crosshair)
     }
 
-    func testPassiveColorSamplerUsesLightMoveCursorOnDarkFullScreenSelection() throws {
+    func testPassiveColorSamplerUsesCrosshairOnDarkFullScreenSelection() throws {
         let background = solidImage(size: desktopImageSize(), color: .black)
         let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
         let screen = try XCTUnwrap(NSScreen.main)
@@ -4351,7 +4358,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_updateColorSampler(at: point)
 
         XCTAssertTrue(window.test_isColorSamplerVisible)
-        XCTAssertEqual(window.test_cursorStyle(at: point), .moveLight)
+        XCTAssertEqual(window.test_cursorStyle(at: point), .crosshair)
     }
 
     func testFullScreenSelectionKeepsCrosshairUntilPassiveSamplerIsVisible() throws {
