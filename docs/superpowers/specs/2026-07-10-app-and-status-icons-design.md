@@ -10,7 +10,7 @@
 
 彩色 AppIcon 的 16、32、128、256、512 点及对应 2x PNG 与现有资产槽位逐一映射，不进行缩放或重新编码。由于当前 `Info.plist` 通过 `CFBundleIconFile = xxsnap` 使用 `Resources/xxsnap.icns`，还需要用同一套十个彩色 PNG 重新生成并替换该 ICNS；不改变现有应用图标加载配置。
 
-菜单栏继续使用工程实际打包的 `Resources/xxsnap.png` 作为资源名，并替换为黑白套件的 `icon-128.png`。该文件包含透明通道，适合现有 `isTemplate = true` 的深浅色自动着色；黑白套件的 16、32 和 64 像素文件没有透明通道，不能直接作为模板图，否则透明区域会成为实色方块。`Resources/Icons/xxsnap.png` 未被工程引用，保持原样。
+菜单栏继续使用工程实际打包的 `Resources/xxsnap.png` 作为资源名。黑白套件中的 PNG 虽然部分文件声明了 alpha 通道，但画布像素实际全部不透明，不能直接用于 `isTemplate = true`，否则整幅画布会成为实色方块。使用 `icon-128.png` 的反相亮度生成透明度：浅灰背景和白色分隔线变透明，黑色折纸主体保持可见，再将处理后的 PNG 写入运行时资源。`Resources/Icons/xxsnap.png` 未被工程引用，保持原样。
 
 ## 范围与性能
 
@@ -19,6 +19,6 @@
 ## 验收
 
 - AppIcon 资产目录中的十个槽位尺寸和 scale 均有效，生成的 `xxsnap.icns` 可由 `iconutil` 正常展开。
-- 菜单栏源图具有透明通道，仍按模板图显示。
+- 菜单栏源图超过一半像素完全透明，同时至少十分之一像素保持可见，仍按模板图显示。
 - Xcode Debug 构建成功。
 - 重启 `build/xcode-derived` 中的最新版 XxSnap，并确认进程已运行。

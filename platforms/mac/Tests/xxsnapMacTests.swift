@@ -1311,6 +1311,28 @@ final class xxsnapMacTests: XCTestCase {
         XCTAssertNotEqual(sketchDashed, dashed)
     }
 
+    func testStatusBarTemplateIconHasTransparentBackgroundAndVisibleGlyph() throws {
+        let url = try XCTUnwrap(Bundle.main.url(forResource: "xxsnap", withExtension: "png"))
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(data: Data(contentsOf: url)))
+        var transparentPixelCount = 0
+        var visiblePixelCount = 0
+
+        for y in 0..<bitmap.pixelsHigh {
+            for x in 0..<bitmap.pixelsWide {
+                let alpha = try XCTUnwrap(bitmap.colorAt(x: x, y: y)).alphaComponent
+                if alpha <= 0.01 {
+                    transparentPixelCount += 1
+                } else if alpha >= 0.5 {
+                    visiblePixelCount += 1
+                }
+            }
+        }
+
+        let pixelCount = bitmap.pixelsWide * bitmap.pixelsHigh
+        XCTAssertGreaterThan(transparentPixelCount, pixelCount / 2)
+        XCTAssertGreaterThan(visiblePixelCount, pixelCount / 10)
+    }
+
     func testToolbarSvgIconsAreBundledAndReadable() throws {
         for resource in [
             "arrow",

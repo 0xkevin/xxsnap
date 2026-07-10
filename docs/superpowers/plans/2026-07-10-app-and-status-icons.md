@@ -42,13 +42,13 @@ Copy the ten color PNGs into a temporary `.iconset` directory using `icon_16x16.
 
 - [ ] **Step 4: Replace the menu-bar resource**
 
-Copy `xxsnap-icons-v1-黑白/mac/AppIcon.appiconset/icon-128.png` to `platforms/mac/Resources/xxsnap.png`. Keep `StatusItemController.statusBarImage()` unchanged so the image remains an 18×18 point template image.
+Convert `xxsnap-icons-v1-黑白/mac/AppIcon.appiconset/icon-128.png` into a template PNG by using inverse luminance as alpha and removing the source's light checkerboard background. Write the processed result to `platforms/mac/Resources/xxsnap.png`. Keep `StatusItemController.statusBarImage()` unchanged so the image remains an 18×18 point template image.
 
 - [ ] **Step 5: Verify copied content and asset metadata**
 
-Run SHA-256 comparisons between every PNG source/destination pair, expand `xxsnap.icns` with `iconutil`, validate dimensions with `sips`, and run `git diff --check`.
+Run SHA-256 comparisons between every AppIcon PNG source/destination pair, expand `xxsnap.icns` with `iconutil`, validate dimensions with `sips`, verify the status PNG has more than 50% fully transparent pixels and more than 10% visible pixels, and run `git diff --check`.
 
-Expected: every PNG source/destination hash pair matches; all ten AppIcon slots and expanded ICNS entries have their declared pixel dimensions; status icon is 128×128 with alpha; `git diff --check` exits successfully.
+Expected: every AppIcon source/destination hash pair matches; all ten AppIcon slots and expanded ICNS entries have their declared pixel dimensions; status icon is 128×128 with a transparent background and visible glyph; `git diff --check` exits successfully.
 
 - [ ] **Step 6: Commit the isolated resource replacement**
 
@@ -77,7 +77,7 @@ Expected: `** BUILD SUCCEEDED **` with no asset-catalog errors.
 
 - [ ] **Step 2: Verify packaged resources**
 
-Check the built app's copied `xxsnap.icns` and `xxsnap.png`; verify the packaged status icon is 128×128 with alpha and matches the monochrome source hash, and verify the packaged ICNS matches the regenerated source ICNS.
+Check the built app's copied `xxsnap.icns` and `xxsnap.png`; verify the packaged status icon is 128×128 and byte-identical to the processed runtime resource, and verify the packaged ICNS matches the regenerated source ICNS.
 
 - [ ] **Step 3: Restart and verify the process**
 
