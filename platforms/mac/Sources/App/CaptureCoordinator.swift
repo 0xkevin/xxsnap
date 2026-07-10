@@ -237,6 +237,8 @@ final class CaptureCoordinator {
                         }
                     }
                     controller.show()
+                case .finishEditing:
+                    break
                 }
                 NSLog(
                     "xxsnap capture completed: %.0fx%.0f",

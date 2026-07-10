@@ -14,6 +14,7 @@
 		1B5895AA097D70AAED7E5046 /* undo-enabled.svg in Resources */ = {isa = PBXBuildFile; fileRef = 69C2B328D25C6F4DEFCD575D /* undo-enabled.svg */; };
 		1BCC88D12C8AEDFC68A01425 /* cancel-capture.svg in Resources */ = {isa = PBXBuildFile; fileRef = 9A98FE556582ECA9DC75EEAB /* cancel-capture.svg */; };
 		1F4A7C50AA4E1B2300000001 /* command.svg in Resources */ = {isa = PBXBuildFile; fileRef = 1F4A7C50AA4E1B2300000002 /* command.svg */; };
+		1F4A7C50AA4E1B2300000003 /* done.svg in Resources */ = {isa = PBXBuildFile; fileRef = 1F4A7C50AA4E1B2300000004 /* done.svg */; };
 		251C81FE4D348158346520EB /* scroll-capture.png in Resources */ = {isa = PBXBuildFile; fileRef = C17198BAD6AFCEB4159B4687 /* scroll-capture.png */; };
 		260B435ACF404D352087F565 /* border-corner-rounded.svg in Resources */ = {isa = PBXBuildFile; fileRef = 0209BE008E9C5F0571BE4B9F /* border-corner-rounded.svg */; };
 		28874BF6C20345BE1676B963 /* CaptureAnnotationRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C662C2A250F475591381BB05 /* CaptureAnnotationRenderer.swift */; };
@@ -128,6 +129,7 @@
 		1ADEAA166682CB019207C3A4 /* shape-marker.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "shape-marker.png"; sourceTree = "<group>"; };
 		1DB60D2449C038C54679162D /* refresh (1).svg */ = {isa = PBXFileReference; path = "refresh (1).svg"; sourceTree = "<group>"; };
 		1F4A7C50AA4E1B2300000002 /* command.svg */ = {isa = PBXFileReference; path = command.svg; sourceTree = "<group>"; };
+		1F4A7C50AA4E1B2300000004 /* done.svg */ = {isa = PBXFileReference; path = done.svg; sourceTree = "<group>"; };
 		1FE4C4C27283A5FAF4CBCC58 /* text-tool.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "text-tool.png"; sourceTree = "<group>"; };
 		1FEF485A40BED01A907F0106 /* refresh-svgrepo-com2.svg */ = {isa = PBXFileReference; path = "refresh-svgrepo-com2.svg"; sourceTree = "<group>"; };
 		216073E47CB43ABDD6AD1B83 /* StatusItemController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusItemController.swift; sourceTree = "<group>"; };
@@ -340,6 +342,7 @@
 				16F9496957D9500C499D44CB /* copy-to-clipboard.svg */,
 				0EF17E8A625E11836314572B /* crop.png */,
 				A89C77B7643079BE8890E43B /* crop.svg */,
+				1F4A7C50AA4E1B2300000004 /* done.svg */,
 				3EA6D152633E6E31441322EA /* eraser-tool.png */,
 				B26783A4C11DFDC68390DE99 /* eraser-tool.svg */,
 				30F8BFFDF14E4559FB86BF58 /* eyedropper.svg */,
@@ -493,6 +496,7 @@
 				C9074FF569D4610572CFE532 /* copy-to-clipboard.svg in Resources */,
 				5F56CD50B9AD87B11791D4DE /* crop.png in Resources */,
 				D9FA6CC87275C43C69EE7826 /* crop.svg in Resources */,
+				1F4A7C50AA4E1B2300000003 /* done.svg in Resources */,
 				8B88348E80AD052EBD21197B /* eraser-tool.png in Resources */,
 				875D73FF8B4029D231901AE2 /* eraser-tool.svg in Resources */,
 				576F043C01E6CBB1493C8100 /* eyedropper.svg in Resources */,

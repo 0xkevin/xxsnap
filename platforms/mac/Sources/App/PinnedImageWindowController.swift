@@ -4,6 +4,8 @@ struct PinnedImageWindowGeometry {
     static let maxScreenFraction: CGFloat = 0.8
     static let minLongSide: CGFloat = 96
     static let shadowOutset: CGFloat = 18
+    static let toolbarGap: CGFloat = 6
+    static let toolbarHeight: CGFloat = 28
 
     static func fittedImageSize(imageSize: NSSize, visibleFrame: NSRect) -> NSSize {
         guard imageSize.width > 0, imageSize.height > 0 else {
@@ -81,6 +83,11 @@ final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPr
     private var pinnedImage: NSImage
     private let initialImageFrame: NSRect
     private let imageAspectRatio: CGFloat
+    private var editingOverlayWindow: SelectionOverlayWindow?
+    private var editingDragOffsetInScreen: NSPoint?
+#if DEBUG
+    private var imageActionHandlerForTesting: ((CaptureCompletionAction) -> Void)?
+#endif
 
     init(image: NSImage, screenRect: NSRect? = nil, visibleFrame: NSRect? = NSScreen.main?.visibleFrame) {
         self.pinnedImage = image
@@ -136,7 +143,7 @@ final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPr
             return
         }
         let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
-        let currentImageFrame = PinnedImageWindowGeometry.imageFrame(inWindowFrame: window.frame)
+        let currentImageFrame = currentImageFrameInScreen()
         let newImageSize = PinnedImageWindowGeometry.scaledSize(
             currentSize: currentImageFrame.size,
             aspectRatio: imageAspectRatio,
@@ -155,34 +162,91 @@ final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPr
             y: anchor.y - newImageSize.height * yRatio
         )
         let newImageFrame = NSRect(origin: newImageOrigin, size: newImageSize)
-        window.setFrame(PinnedImageWindowGeometry.windowFrame(forImageFrame: newImageFrame), display: true)
+        applyWindowFrame(forImageFrame: newImageFrame)
     }
 
     func showEditingToolbar() {
-        contentView?.showsEditingToolbar = true
+        if let editingOverlayWindow {
+            editingOverlayWindow.alphaValue = 1
+            editingOverlayWindow.present()
+            return
+        }
+        let imageFrame = currentImageFrameInScreen()
+        let overlayGeometry = editingOverlayGeometry(for: imageFrame)
+        let backgroundImage = editingOverlayBackgroundImage(
+            frameSize: overlayGeometry.windowFrame.size,
+            imageRect: overlayGeometry.selectionRect
+        )
+        let overlayWindow = SelectionOverlayWindow(
+            backgroundImage: backgroundImage,
+            configuration: .pinnedImageEditor(
+                windowFrame: overlayGeometry.windowFrame,
+                selectionRect: overlayGeometry.selectionRect,
+                pinnedImageScaleHandler: { [weak self] factor, anchor in
+                    self?.scaleEditingOverlay(by: factor, around: anchor)
+                },
+                pinnedImageDragBegan: { [weak self] point in
+                    self?.beginEditingOverlayDrag(at: point)
+                },
+                pinnedImageDragChanged: { [weak self] point in
+                    self?.dragEditingOverlay(to: point)
+                },
+                pinnedImageDragEnded: { [weak self] in
+                    self?.endEditingOverlayDrag()
+                },
+                pinnedImageContextMenuHandler: { [weak self] point in
+                    self?.showContextMenu(atScreenPoint: point)
+                },
+                pinnedImageWindowCommandHandler: { [weak self] command in
+                    self?.performWindowCommand(command)
+                },
+                pinnedImageToolbarToggleHandler: { [weak self] in
+                    self?.toggleEditingToolbar()
+                }
+            )
+        ) { [weak self] result in
+            self?.completeEditingOverlay(with: result)
+        }
+        editingOverlayWindow = overlayWindow
+        overlayWindow.level = window?.level ?? .floating
+        overlayWindow.alphaValue = 1
+        overlayWindow.present()
     }
 
     func hideEditingToolbar() {
-        contentView?.showsEditingToolbar = false
+        editingDragOffsetInScreen = nil
+        editingOverlayWindow?.cancelOperation(nil)
+        editingOverlayWindow = nil
     }
 
     func finishEditing() {
-        guard let contentView else {
-            return
-        }
-        if let baked = contentView.bakePendingAnnotations() {
-            pinnedImage = baked
-        }
         hideEditingToolbar()
     }
 
     func makeContextMenu() -> NSMenu {
         let menu = NSMenu()
-        menu.addItem(menuItem(title: "显示工具条", action: #selector(showEditingToolbarFromMenu)))
-        menu.addItem(menuItem(title: "复制图片", action: #selector(copyImage)))
-        menu.addItem(menuItem(title: "保存图片...", action: #selector(saveImage)))
+        let toolbarItem = menuItem(title: "显示工具条 (⇧)", action: #selector(toggleEditingToolbarFromMenu))
+        toolbarItem.state = editingOverlayWindow == nil ? .off : .on
+        menu.addItem(toolbarItem)
+        menu.addItem(menuItem(
+            title: "复制图片",
+            action: #selector(copyImage),
+            keyEquivalent: "c",
+            modifierMask: [.command]
+        ))
+        menu.addItem(menuItem(
+            title: "保存图片",
+            action: #selector(saveImage),
+            keyEquivalent: "s",
+            modifierMask: [.command]
+        ))
         menu.addItem(.separator())
-        menu.addItem(menuItem(title: "重置大小", action: #selector(resetSize)))
+        menu.addItem(menuItem(
+            title: "重置大小",
+            action: #selector(resetSize),
+            keyEquivalent: "r",
+            modifierMask: [.command]
+        ))
 
         let opacityItem = NSMenuItem(title: "透明度", action: nil, keyEquivalent: "")
         let opacityMenu = NSMenu()
@@ -195,13 +259,28 @@ final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPr
         opacityItem.submenu = opacityMenu
         menu.addItem(opacityItem)
 
-        let topItem = menuItem(title: "置顶", action: #selector(toggleAlwaysOnTop))
+        let topItem = menuItem(
+            title: "置顶",
+            action: #selector(toggleAlwaysOnTop),
+            keyEquivalent: "t",
+            modifierMask: [.command]
+        )
         topItem.state = window?.level == .floating ? .on : .off
         menu.addItem(topItem)
 
         menu.addItem(.separator())
-        menu.addItem(menuItem(title: "关闭", action: #selector(closePinnedWindow)))
-        menu.addItem(menuItem(title: "关闭全部贴图", action: #selector(closeAllPinnedWindows)))
+        menu.addItem(menuItem(
+            title: "关闭",
+            action: #selector(closePinnedWindow),
+            keyEquivalent: "w",
+            modifierMask: [.command]
+        ))
+        menu.addItem(menuItem(
+            title: "关闭全部贴图",
+            action: #selector(closeAllPinnedWindows),
+            keyEquivalent: "w",
+            modifierMask: [.command, .shift]
+        ))
         return menu
     }
 
@@ -212,24 +291,400 @@ final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPr
         NSMenu.popUpContextMenu(makeContextMenu(), with: event, for: contentView)
     }
 
-    private func menuItem(title: String, action: Selector) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+    func showContextMenu(atScreenPoint screenPoint: NSPoint) {
+        guard let window, let contentView = window.contentView else {
+            return
+        }
+        let location = NSPoint(x: screenPoint.x - window.frame.minX, y: screenPoint.y - window.frame.minY)
+        guard let event = NSEvent.mouseEvent(
+            with: .rightMouseDown,
+            location: location,
+            modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 1
+        ) else {
+            return
+        }
+        NSMenu.popUpContextMenu(makeContextMenu(), with: event, for: contentView)
+    }
+
+    private func menuItem(
+        title: String,
+        action: Selector,
+        keyEquivalent: String = "",
+        modifierMask: NSEvent.ModifierFlags = []
+    ) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: keyEquivalent)
+        item.keyEquivalentModifierMask = modifierMask
         item.target = self
         return item
     }
 
-    @objc private func showEditingToolbarFromMenu() {
-        showEditingToolbar()
+    @objc private func toggleEditingToolbarFromMenu() {
+        toggleEditingToolbar()
+    }
+
+    fileprivate func toggleEditingToolbar() {
+        if editingOverlayWindow == nil {
+            showEditingToolbar()
+        } else {
+            hideEditingToolbar()
+        }
     }
 
     @objc fileprivate func copyImage() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.writeObjects([pinnedImage])
+        copyImageToPasteboard(pinnedImage)
     }
 
     @objc fileprivate func saveImage() {
+        writeImageToFile(pinnedImage)
+    }
+
+    @objc private func resetSize() {
+        applyWindowFrame(forImageFrame: initialImageFrame)
+        refreshEditingOverlay()
+    }
+
+    @objc private func setOpacity(_ sender: NSMenuItem) {
+        guard let opacity = sender.representedObject as? CGFloat else {
+            return
+        }
+        window?.alphaValue = opacity
+    }
+
+    @objc private func toggleAlwaysOnTop() {
+        let nextLevel: NSWindow.Level = window?.level == .floating ? .normal : .floating
+        window?.level = nextLevel
+        editingOverlayWindow?.level = nextLevel
+    }
+
+    @objc private func closePinnedWindow() {
+        window?.close()
+    }
+
+    @objc private func closeAllPinnedWindows() {
+        for controller in Self.activeControllers.allObjects {
+            controller.window?.close()
+        }
+    }
+
+    fileprivate func handleKeyDown(_ event: NSEvent) -> Bool {
+        if SelectionToolbarState.toolbarShortcut(for: "copy")?.matches(
+            charactersIgnoringModifiers: event.charactersIgnoringModifiers,
+            modifierFlags: event.modifierFlags
+        ) == true {
+            copyImage()
+            return true
+        }
+        if SelectionToolbarState.toolbarShortcut(for: "save")?.matches(
+            charactersIgnoringModifiers: event.charactersIgnoringModifiers,
+            modifierFlags: event.modifierFlags
+        ) == true {
+            saveImage()
+            return true
+        }
+        guard let command = PinnedImageWindowCommand(event: event) else {
+            return false
+        }
+        performWindowCommand(command)
+        return true
+    }
+
+    private func performWindowCommand(_ command: PinnedImageWindowCommand) {
+        switch command {
+        case .resetSize:
+            resetSize()
+        case .toggleAlwaysOnTop:
+            toggleAlwaysOnTop()
+        case .closeCurrent:
+            closePinnedWindow()
+        case .closeAll:
+            closeAllPinnedWindows()
+        }
+    }
+
+    private var contentView: PinnedImageContentView? {
+        window?.contentView as? PinnedImageContentView
+    }
+
+    fileprivate var isEditingToolbarVisible: Bool {
+        editingOverlayWindow != nil
+    }
+
+    fileprivate func refreshEditingToolbarLayout() {
+        applyWindowFrame(forImageFrame: currentImageFrameInScreen())
+    }
+
+    private func currentImageFrameInScreen() -> NSRect {
+        guard let window, let contentView else {
+            return window.map { PinnedImageWindowGeometry.imageFrame(inWindowFrame: $0.frame) } ?? initialImageFrame
+        }
+        let imageRect = contentView.currentImageRect
+        return NSRect(
+            x: window.frame.minX + imageRect.minX,
+            y: window.frame.minY + imageRect.minY,
+            width: imageRect.width,
+            height: imageRect.height
+        )
+    }
+
+    private func applyWindowFrame(forImageFrame imageFrame: NSRect) {
+        guard let window, let contentView else {
+            return
+        }
+        let insets = contentView.requiredContentInsets(forImageWidth: imageFrame.width)
+        contentView.contentInsets = insets
+        let frame = NSRect(
+            x: imageFrame.minX - insets.left,
+            y: imageFrame.minY - insets.bottom,
+            width: imageFrame.width + insets.left + insets.right,
+            height: imageFrame.height + insets.top + insets.bottom
+        )
+        window.setFrame(frame, display: true)
+    }
+
+    private func editingOverlayGeometry(for imageFrame: NSRect) -> (windowFrame: NSRect, selectionRect: NSRect) {
+        let visibleFrame = window?.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? imageFrame
+        let minimumToolbarWidth: CGFloat = 600
+        let bottomReserve: CGFloat = 132
+        let topReserve: CGFloat = 24
+        var frame = NSRect(
+            x: imageFrame.maxX - max(imageFrame.width, minimumToolbarWidth),
+            y: imageFrame.minY - bottomReserve,
+            width: max(imageFrame.width, minimumToolbarWidth),
+            height: imageFrame.height + bottomReserve + topReserve
+        )
+
+        if frame.width > visibleFrame.width {
+            frame.size.width = visibleFrame.width
+            frame.origin.x = visibleFrame.minX
+        } else {
+            frame.origin.x = min(max(frame.minX, visibleFrame.minX), visibleFrame.maxX - frame.width)
+        }
+
+        if frame.height > visibleFrame.height {
+            frame.size.height = visibleFrame.height
+            frame.origin.y = visibleFrame.minY
+        } else {
+            frame.origin.y = min(max(frame.minY, visibleFrame.minY), visibleFrame.maxY - frame.height)
+        }
+
+        let selectionRect = NSRect(
+            x: imageFrame.minX - frame.minX,
+            y: imageFrame.minY - frame.minY,
+            width: imageFrame.width,
+            height: imageFrame.height
+        )
+        return (frame, selectionRect)
+    }
+
+    private func scaleEditingOverlay(by factor: CGFloat, around anchorInScreen: NSPoint) {
+        scale(by: factor, around: anchorInScreen)
+        refreshEditingOverlay()
+    }
+
+    private func beginEditingOverlayDrag(at screenPoint: NSPoint) {
+        let imageFrame = currentImageFrameInScreen()
+        editingDragOffsetInScreen = NSPoint(
+            x: screenPoint.x - imageFrame.minX,
+            y: screenPoint.y - imageFrame.minY
+        )
+        editingOverlayWindow?.alphaValue = 0
+    }
+
+    private func dragEditingOverlay(to screenPoint: NSPoint) {
+        guard let editingDragOffsetInScreen else {
+            return
+        }
+        let imageFrame = currentImageFrameInScreen()
+        let movedFrame = NSRect(
+            x: screenPoint.x - editingDragOffsetInScreen.x,
+            y: screenPoint.y - editingDragOffsetInScreen.y,
+            width: imageFrame.width,
+            height: imageFrame.height
+        )
+        applyWindowFrame(forImageFrame: movedFrame)
+        refreshEditingOverlay()
+    }
+
+    private func endEditingOverlayDrag() {
+        editingDragOffsetInScreen = nil
+        refreshEditingOverlay()
+        editingOverlayWindow?.alphaValue = 1
+    }
+
+    private func refreshEditingOverlay() {
+        guard let editingOverlayWindow else {
+            return
+        }
+        let imageFrame = currentImageFrameInScreen()
+        let overlayGeometry = editingOverlayGeometry(for: imageFrame)
+        let backgroundImage = editingOverlayBackgroundImage(
+            frameSize: overlayGeometry.windowFrame.size,
+            imageRect: overlayGeometry.selectionRect
+        )
+        editingOverlayWindow.updatePinnedImageEditor(
+            windowFrame: overlayGeometry.windowFrame,
+            backgroundImage: backgroundImage,
+            selectionRect: overlayGeometry.selectionRect
+        )
+    }
+
+    private func editingOverlayBackgroundImage(frameSize: NSSize, imageRect: NSRect) -> NSImage {
+        let image = NSImage(size: frameSize)
+        image.lockFocus()
+        NSColor.clear.setFill()
+        NSRect(origin: .zero, size: frameSize).fill()
+        pinnedImage.draw(
+            in: imageRect,
+            from: NSRect(origin: .zero, size: pinnedImage.size),
+            operation: .sourceOver,
+            fraction: 1
+        )
+        image.unlockFocus()
+        return image
+    }
+
+    private func completeEditingOverlay(with result: CaptureSelectionResult?) {
+        editingDragOffsetInScreen = nil
+        editingOverlayWindow = nil
+        guard let result else {
+            return
+        }
+
+        let annotations = scaledAnnotationsForPinnedImage(
+            result.annotations,
+            from: result.snapshotRect.size
+        )
+        let eraserMasks = scaledEraserMasksForPinnedImage(
+            result.eraserMasks,
+            from: result.snapshotRect.size
+        )
+        let bakedImage = CaptureAnnotationRenderer.render(
+            image: pinnedImage,
+            annotations: annotations,
+            eraserMasks: eraserMasks
+        )
+        updatePinnedImage(bakedImage)
+
+        switch result.action {
+        case .copy:
+            copyImageToPasteboard(bakedImage)
+        case .save:
+            writeImageToFile(bakedImage)
+        case .pin, .finishEditing:
+            break
+        }
+    }
+
+    private func updatePinnedImage(_ image: NSImage) {
+        pinnedImage = image
+        contentView?.image = image
+        contentView?.needsDisplay = true
+    }
+
+    private func scaledAnnotationsForPinnedImage(
+        _ annotations: [CaptureAnnotation],
+        from sourceSize: NSSize
+    ) -> [CaptureAnnotation] {
+        let scale = pinnedImageScale(from: sourceSize)
+        guard scale.x != 1 || scale.y != 1 else {
+            return annotations
+        }
+        let strokeScale = (scale.x + scale.y) / 2
+        return annotations.map { annotation in
+            var annotation = annotation
+            annotation.rect = scaledRect(annotation.rect, scale: scale)
+            annotation.style.strokeWidth *= strokeScale
+            annotation.style.cornerRadius *= strokeScale
+            annotation.style.textSize *= strokeScale
+            if var arrowLine = annotation.arrowLine {
+                arrowLine.start = scaledPoint(arrowLine.start, scale: scale)
+                arrowLine.end = scaledPoint(arrowLine.end, scale: scale)
+                arrowLine.control = scaledPoint(arrowLine.control, scale: scale)
+                annotation.arrowLine = arrowLine
+            }
+            if var brushPath = annotation.brushPath {
+                brushPath.points = brushPath.points.map { scaledPoint($0, scale: scale) }
+                annotation.brushPath = brushPath
+            }
+            if var markerLine = annotation.markerLine {
+                markerLine.start = scaledPoint(markerLine.start, scale: scale)
+                markerLine.end = scaledPoint(markerLine.end, scale: scale)
+                annotation.markerLine = markerLine
+            }
+            if var mosaicStroke = annotation.mosaicStroke {
+                mosaicStroke.points = mosaicStroke.points.map { scaledPoint($0, scale: scale) }
+                annotation.mosaicStroke = mosaicStroke
+            }
+            return annotation
+        }
+    }
+
+    private func scaledEraserMasksForPinnedImage(
+        _ masks: [EraserMask],
+        from sourceSize: NSSize
+    ) -> [EraserMask] {
+        let scale = pinnedImageScale(from: sourceSize)
+        guard scale.x != 1 || scale.y != 1 else {
+            return masks
+        }
+        return masks.map { mask in
+            EraserMask(
+                id: mask.id,
+                rect: scaledRect(mask.rect, scale: scale),
+                affectedAnnotationIDs: mask.affectedAnnotationIDs
+            )
+        }
+    }
+
+    private func pinnedImageScale(from sourceSize: NSSize) -> NSPoint {
+        guard sourceSize.width > 0, sourceSize.height > 0 else {
+            return NSPoint(x: 1, y: 1)
+        }
+        return NSPoint(
+            x: pinnedImage.size.width / sourceSize.width,
+            y: pinnedImage.size.height / sourceSize.height
+        )
+    }
+
+    private func scaledPoint(_ point: NSPoint, scale: NSPoint) -> NSPoint {
+        NSPoint(x: point.x * scale.x, y: point.y * scale.y)
+    }
+
+    private func scaledRect(_ rect: NSRect, scale: NSPoint) -> NSRect {
+        NSRect(
+            x: rect.minX * scale.x,
+            y: rect.minY * scale.y,
+            width: rect.width * scale.x,
+            height: rect.height * scale.y
+        )
+    }
+
+    private func copyImageToPasteboard(_ image: NSImage) {
+#if DEBUG
+        if let imageActionHandlerForTesting {
+            imageActionHandlerForTesting(.copy)
+            return
+        }
+#endif
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.writeObjects([image])
+    }
+
+    private func writeImageToFile(_ image: NSImage) {
+#if DEBUG
+        if let imageActionHandlerForTesting {
+            imageActionHandlerForTesting(.save)
+            return
+        }
+#endif
         guard
-            let tiffData = pinnedImage.tiffRepresentation,
+            let tiffData = image.tiffRepresentation,
             let bitmap = NSBitmapImageRep(data: tiffData),
             let pngData = bitmap.representation(using: .png, properties: [:])
         else {
@@ -245,39 +700,13 @@ final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPr
         }
         try? pngData.write(to: destinationURL)
     }
-
-    @objc private func resetSize() {
-        window?.setFrame(PinnedImageWindowGeometry.windowFrame(forImageFrame: initialImageFrame), display: true)
-    }
-
-    @objc private func setOpacity(_ sender: NSMenuItem) {
-        guard let opacity = sender.representedObject as? CGFloat else {
-            return
-        }
-        window?.alphaValue = opacity
-    }
-
-    @objc private func toggleAlwaysOnTop() {
-        window?.level = window?.level == .floating ? .normal : .floating
-    }
-
-    @objc private func closePinnedWindow() {
-        window?.close()
-    }
-
-    @objc private func closeAllPinnedWindows() {
-        for controller in Self.activeControllers.allObjects {
-            controller.window?.close()
-        }
-    }
-
-    private var contentView: PinnedImageContentView? {
-        window?.contentView as? PinnedImageContentView
-    }
 }
 
 extension PinnedImageWindowController: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
+        editingDragOffsetInScreen = nil
+        editingOverlayWindow?.cancelOperation(nil)
+        editingOverlayWindow = nil
         Self.activeControllers.remove(self)
         onClose?()
     }
@@ -290,9 +719,15 @@ private final class PinnedImageWindow: NSWindow {
 }
 
 private final class PinnedImageContentView: NSView {
+    fileprivate enum HoverCursorStyle: Equatable {
+        case arrow
+        case move
+    }
+
     var image: NSImage
     weak var controller: PinnedImageWindowController?
     private var dragOffset: NSPoint?
+    private var shiftToolbarShortcutCandidate = false
     fileprivate var showsEditingToolbar = false {
         didSet {
             draftAnnotation = nil
@@ -303,7 +738,20 @@ private final class PinnedImageContentView: NSView {
     private var annotationStartPoint: NSPoint?
     private var draftAnnotation: PendingAnnotation?
     private var pendingAnnotations: [PendingAnnotation] = []
-    private var currentEditingTool: EditingToolbarButton = .rectangle
+    fileprivate var contentInsets = NSEdgeInsets(
+        top: PinnedImageWindowGeometry.shadowOutset,
+        left: PinnedImageWindowGeometry.shadowOutset,
+        bottom: PinnedImageWindowGeometry.shadowOutset,
+        right: PinnedImageWindowGeometry.shadowOutset
+    ) {
+        didSet {
+            needsDisplay = true
+        }
+    }
+    private var currentEditingTool: EditingToolbarButton?
+    private let pinnedToolbarButtonStep: CGFloat = 28
+    private let pinnedToolbarHorizontalPadding: CGFloat = 4
+    private let pinnedToolbarHandleWidth: CGFloat = 28
 
     private struct PendingAnnotation {
         var tool: EditingToolbarButton
@@ -327,31 +775,125 @@ private final class PinnedImageContentView: NSView {
         }
     }
 
-    private enum EditingToolbarButton: CaseIterable {
+    private enum EditingToolbarButton: CaseIterable, Hashable {
         case rectangle
         case arrow
         case pen
         case marker
+        case eyedropper
+        case mosaic
+        case text
+        case number
+        case magnifier
+        case eraser
+        case undo
+        case redo
         case save
         case copy
         case done
 
+        static let pinnedToolbarCases: [EditingToolbarButton] = [
+            .rectangle,
+            .arrow,
+            .pen,
+            .marker,
+            .eyedropper,
+            .mosaic,
+            .text,
+            .number,
+            .magnifier,
+            .eraser,
+            .undo,
+            .redo,
+            .save,
+            .copy,
+            .done,
+        ]
+
         var title: String {
+            SelectionToolbarState.tooltipTitle(for: tooltipIdentifier) ?? "完成编辑"
+        }
+
+        var kindTitle: String {
             switch self {
             case .rectangle:
                 return "矩形"
             case .arrow:
                 return "箭头"
-            case .pen:
-                return "画笔"
             case .marker:
                 return "标记"
+            default:
+                return title
+            }
+        }
+
+        var tooltipIdentifier: String {
+            switch self {
+            case .rectangle:
+                return "rectangle"
+            case .arrow:
+                return "polyline"
+            case .pen:
+                return "pen"
+            case .marker:
+                return "marker"
+            case .eyedropper:
+                return "eyedropper"
+            case .mosaic:
+                return "mosaic"
+            case .text:
+                return "text"
+            case .number:
+                return "number"
+            case .magnifier:
+                return "magnifier"
+            case .eraser:
+                return "eraser"
+            case .undo:
+                return "undo"
+            case .redo:
+                return "redo"
             case .save:
-                return "保存图片"
+                return "save"
             case .copy:
-                return "复制图片"
+                return "copy"
             case .done:
-                return "完成编辑"
+                return "done"
+            }
+        }
+
+        var iconName: String? {
+            switch self {
+            case .rectangle:
+                return "toolbar-screenshot"
+            case .arrow:
+                return "toolbar-arrow"
+            case .pen:
+                return "toolbar-pencil-tool"
+            case .marker:
+                return "toolbar-highlighter-tool"
+            case .eyedropper:
+                return "toolbar-straw-ranging"
+            case .mosaic:
+                return "toolbar-masaike2"
+            case .text:
+                return "toolbar-text-tool"
+            case .number:
+                return "toolbar-number-sequence"
+            case .magnifier:
+                return "toolbar-zoom-in-tool"
+            case .eraser:
+                return "toolbar-eraser-tool"
+            case .undo:
+                return "toolbar-undo-disabled"
+            case .redo:
+                return "toolbar-redo-disabled"
+            case .save:
+                return "toolbar-save-to-file"
+            case .copy:
+                return "toolbar-copy-to-clipboard"
+            case .done:
+                return nil
             }
         }
 
@@ -359,9 +901,22 @@ private final class PinnedImageContentView: NSView {
             switch self {
             case .rectangle, .arrow, .pen, .marker:
                 return true
-            case .save, .copy, .done:
+            case .eyedropper, .mosaic, .text, .number, .magnifier, .eraser, .undo, .redo, .save, .copy, .done:
                 return false
             }
+        }
+
+        var isEnabled: Bool {
+            switch self {
+            case .rectangle, .arrow, .pen, .marker, .eyedropper, .mosaic, .text, .number, .magnifier, .eraser, .save, .copy, .done:
+                return true
+            case .undo, .redo:
+                return false
+            }
+        }
+
+        func matches(title: String) -> Bool {
+            self.title == title || kindTitle == title
         }
     }
 
@@ -384,17 +939,41 @@ private final class PinnedImageContentView: NSView {
         false
     }
 
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas {
+            removeTrackingArea(area)
+        }
+        addTrackingArea(
+            NSTrackingArea(
+                rect: bounds,
+                options: [.activeAlways, .mouseMoved, .mouseEnteredAndExited, .inVisibleRect],
+                owner: self,
+                userInfo: nil
+            )
+        )
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(currentImageRect, cursor: NSCursor.xxsnapMove)
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         let imageRect = currentImageRect
         drawBlueOuterShadow(around: imageRect)
         image.draw(in: imageRect)
         drawPendingAnnotations(in: imageRect)
         if showsEditingToolbar {
+            if currentEditingTool != nil {
+                drawOptionsToolbar(for: imageRect)
+            }
             drawEditingToolbar(in: imageRect)
         }
     }
 
     override func mouseDown(with event: NSEvent) {
+        cancelShiftToolbarShortcutCandidate()
         window?.makeFirstResponder(self)
         let point = event.locationInWindow
         if showsEditingToolbar {
@@ -402,7 +981,7 @@ private final class PinnedImageContentView: NSView {
                 performEditingToolbarButton(button)
                 return
             }
-            guard currentImageRect.contains(point) else {
+            guard currentEditingTool != nil, currentImageRect.contains(point) else {
                 return
             }
             annotationStartPoint = imagePoint(from: point)
@@ -411,11 +990,13 @@ private final class PinnedImageContentView: NSView {
         }
         if window != nil {
             dragOffset = event.locationInWindow
+            NSCursor.xxsnapMove.set()
         }
     }
 
     override func mouseDragged(with event: NSEvent) {
-        if showsEditingToolbar, let annotationStartPoint {
+        cancelShiftToolbarShortcutCandidate()
+        if showsEditingToolbar, let annotationStartPoint, let currentEditingTool {
             draftAnnotation = makeAnnotation(
                 tool: currentEditingTool,
                 from: annotationStartPoint,
@@ -436,7 +1017,8 @@ private final class PinnedImageContentView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        if showsEditingToolbar, let annotationStartPoint {
+        cancelShiftToolbarShortcutCandidate()
+        if showsEditingToolbar, let annotationStartPoint, let currentEditingTool {
             let annotation = makeAnnotation(
                 tool: currentEditingTool,
                 from: annotationStartPoint,
@@ -451,13 +1033,51 @@ private final class PinnedImageContentView: NSView {
             return
         }
         dragOffset = nil
+        updateHoverCursor(at: event.locationInWindow)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        updateHoverCursor(at: event.locationInWindow)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        NSCursor.arrow.set()
     }
 
     override func rightMouseDown(with event: NSEvent) {
+        cancelShiftToolbarShortcutCandidate()
         controller?.showContextMenu(with: event)
     }
 
+    override func flagsChanged(with event: NSEvent) {
+        let relevantModifiers = event.modifierFlags.intersection([.command, .shift, .control, .option])
+        if relevantModifiers == [.shift],
+           dragOffset == nil {
+            shiftToolbarShortcutCandidate = true
+        } else if relevantModifiers.isEmpty, shiftToolbarShortcutCandidate {
+            shiftToolbarShortcutCandidate = false
+            controller?.toggleEditingToolbar()
+        } else {
+            shiftToolbarShortcutCandidate = false
+        }
+        super.flagsChanged(with: event)
+    }
+
+    fileprivate func hoverCursorStyle(at point: NSPoint) -> HoverCursorStyle {
+        currentImageRect.contains(point) ? .move : .arrow
+    }
+
+    private func updateHoverCursor(at point: NSPoint) {
+        switch hoverCursorStyle(at: point) {
+        case .move:
+            NSCursor.xxsnapMove.set()
+        case .arrow:
+            NSCursor.arrow.set()
+        }
+    }
+
     override func scrollWheel(with event: NSEvent) {
+        cancelShiftToolbarShortcutCandidate()
         guard event.deltaY != 0 else {
             return
         }
@@ -466,10 +1086,15 @@ private final class PinnedImageContentView: NSView {
     }
 
     override func magnify(with event: NSEvent) {
+        cancelShiftToolbarShortcutCandidate()
         controller?.scale(by: 1 + event.magnification, around: NSEvent.mouseLocation)
     }
 
     override func keyDown(with event: NSEvent) {
+        cancelShiftToolbarShortcutCandidate()
+        if controller?.handleKeyDown(event) == true {
+            return
+        }
         if event.keyCode == 53 || event.keyCode == 51 || event.keyCode == 117 {
             window?.close()
             return
@@ -477,25 +1102,31 @@ private final class PinnedImageContentView: NSView {
         super.keyDown(with: event)
     }
 
+    private func cancelShiftToolbarShortcutCandidate() {
+        shiftToolbarShortcutCandidate = false
+    }
+
     fileprivate var currentImageRect: NSRect {
-        bounds.insetBy(
-            dx: PinnedImageWindowGeometry.shadowOutset,
-            dy: PinnedImageWindowGeometry.shadowOutset
+        NSRect(
+            x: contentInsets.left,
+            y: contentInsets.bottom,
+            width: max(1, bounds.width - contentInsets.left - contentInsets.right),
+            height: max(1, bounds.height - contentInsets.top - contentInsets.bottom)
         )
     }
 
     fileprivate var editingToolbarTitles: [String] {
-        EditingToolbarButton.allCases.map(\.title)
+        EditingToolbarButton.pinnedToolbarCases.map(\.title)
     }
 
     fileprivate var currentEditingToolTitle: String {
-        currentEditingTool.title
+        currentEditingTool?.title ?? ""
     }
 
     fileprivate var pendingAnnotationKindTitles: [String] {
-        var titles = pendingAnnotations.map { $0.tool.title }
+        var titles = pendingAnnotations.map { $0.tool.kindTitle }
         if let draftAnnotation {
-            titles.append(draftAnnotation.tool.title)
+            titles.append(draftAnnotation.tool.kindTitle)
         }
         return titles
     }
@@ -506,6 +1137,17 @@ private final class PinnedImageContentView: NSView {
             rects.append(draftAnnotation.boundingRect)
         }
         return rects
+    }
+
+    fileprivate var editingToolbarIconRectsForTesting: [NSRect] {
+        editingToolbarButtonRects().map { button, rect in
+            if button == .done {
+                return rect.insetBy(dx: 2, dy: 2)
+            }
+            let resourceName = (button.iconName ?? "").replacingOccurrences(of: "toolbar-", with: "")
+            let inset = SelectionToolbarState.toolbarIconInset(for: resourceName)
+            return rect.insetBy(dx: inset, dy: inset)
+        }
     }
 
     fileprivate func bakePendingAnnotations() -> NSImage? {
@@ -535,6 +1177,9 @@ private final class PinnedImageContentView: NSView {
 
     fileprivate func addAnnotationByDragging(from start: NSPoint, to end: NSPoint) {
         showsEditingToolbar = true
+        guard let currentEditingTool else {
+            return
+        }
         let startPoint = imagePoint(from: start)
         let endPoint = imagePoint(from: end)
         let annotation = makeAnnotation(tool: currentEditingTool, from: startPoint, to: endPoint)
@@ -545,11 +1190,43 @@ private final class PinnedImageContentView: NSView {
     }
 
     fileprivate func selectEditingTool(named title: String) {
-        guard let tool = EditingToolbarButton.allCases.first(where: { $0.title == title && $0.isAnnotationTool }) else {
+        guard let tool = EditingToolbarButton.pinnedToolbarCases.first(where: { $0.matches(title: title) && $0.isAnnotationTool }) else {
             return
         }
         currentEditingTool = tool
+        controller?.refreshEditingToolbarLayout()
         needsDisplay = true
+    }
+
+    fileprivate func beginEditingToolbar() {
+        currentEditingTool = nil
+        showsEditingToolbar = true
+    }
+
+    fileprivate func endEditingToolbar() {
+        showsEditingToolbar = false
+        currentEditingTool = nil
+    }
+
+    fileprivate func requiredContentInsets(forImageWidth imageWidth: CGFloat) -> NSEdgeInsets {
+        let shadow = PinnedImageWindowGeometry.shadowOutset
+        guard showsEditingToolbar else {
+            return NSEdgeInsets(top: shadow, left: shadow, bottom: shadow, right: shadow)
+        }
+
+        let optionsHeight = currentEditingTool == nil ? 0 : editingOptionsToolbarHeight()
+        let toolbarStackHeight = PinnedImageWindowGeometry.toolbarGap
+            + PinnedImageWindowGeometry.toolbarHeight
+            + (optionsHeight > 0 ? PinnedImageWindowGeometry.toolbarGap + optionsHeight : 0)
+        let requiredToolbarWidth = max(editingToolbarWidth(), currentEditingTool == nil ? 0 : editingOptionsToolbarWidth())
+        let extraLeft = max(0, requiredToolbarWidth - max(imageWidth, 1))
+
+        return NSEdgeInsets(
+            top: shadow,
+            left: shadow + extraLeft,
+            bottom: shadow + toolbarStackHeight,
+            right: shadow
+        )
     }
 
     private func drawBlueOuterShadow(around imageRect: NSRect) {
@@ -617,7 +1294,7 @@ private final class PinnedImageContentView: NSView {
             )
         case .arrow, .pen, .marker:
             return PendingAnnotation(tool: tool, points: [start, end])
-        case .save, .copy, .done:
+        case .eyedropper, .mosaic, .text, .number, .magnifier, .eraser, .undo, .redo, .save, .copy, .done:
             return PendingAnnotation(tool: .rectangle, points: [start, end])
         }
     }
@@ -631,7 +1308,7 @@ private final class PinnedImageContentView: NSView {
                 return false
             }
             return hypot(end.x - start.x, end.y - start.y) >= 2
-        case .save, .copy, .done:
+        case .eyedropper, .mosaic, .text, .number, .magnifier, .eraser, .undo, .redo, .save, .copy, .done:
             return false
         }
     }
@@ -684,7 +1361,7 @@ private final class PinnedImageContentView: NSView {
                 lineWidth: 10,
                 alpha: 0.72
             )
-        case .save, .copy, .done:
+        case .eyedropper, .mosaic, .text, .number, .magnifier, .eraser, .undo, .redo, .save, .copy, .done:
             break
         }
     }
@@ -735,23 +1412,44 @@ private final class PinnedImageContentView: NSView {
         path.stroke()
     }
 
-    private func editingToolbarRect(in imageRect: NSRect) -> NSRect {
-        let buttonCount = CGFloat(EditingToolbarButton.allCases.count)
-        let width = buttonCount * 28 + 10
+    fileprivate func editingToolbarRect(in imageRect: NSRect) -> NSRect {
+        let width = editingToolbarWidth()
+        let proposedX = imageRect.maxX - width
+        let minX = bounds.minX + 4
+        let maxX = bounds.maxX - width - 4
+        let x = maxX >= minX ? min(max(proposedX, minX), maxX) : minX
         return NSRect(
-            x: imageRect.midX - width / 2,
-            y: imageRect.maxY - 34,
+            x: x,
+            y: imageRect.minY - PinnedImageWindowGeometry.toolbarGap - PinnedImageWindowGeometry.toolbarHeight,
             width: width,
-            height: 28
+            height: PinnedImageWindowGeometry.toolbarHeight
         )
+    }
+
+    private func editingToolbarWidth() -> CGFloat {
+        var width = pinnedToolbarHorizontalPadding * 2 + pinnedToolbarHandleWidth * 2
+        for button in EditingToolbarButton.pinnedToolbarCases {
+            width += pinnedToolbarButtonStep
+            width += editingToolbarExtraGap(after: button)
+        }
+        return width
+    }
+
+    private func editingToolbarExtraGap(after button: EditingToolbarButton) -> CGFloat {
+        switch button {
+        case .eraser, .redo:
+            return 8
+        default:
+            return 0
+        }
     }
 
     private func editingToolbarButtonRects() -> [(EditingToolbarButton, NSRect)] {
         let toolbar = editingToolbarRect(in: currentImageRect)
-        var x = toolbar.minX + 5
-        return EditingToolbarButton.allCases.map { button in
+        var x = toolbar.minX + pinnedToolbarHorizontalPadding + pinnedToolbarHandleWidth
+        return EditingToolbarButton.pinnedToolbarCases.map { button in
             let rect = NSRect(x: x, y: toolbar.minY + 4, width: 20, height: 20)
-            x += 28
+            x += pinnedToolbarButtonStep + editingToolbarExtraGap(after: button)
             return (button, rect)
         }
     }
@@ -761,10 +1459,16 @@ private final class PinnedImageContentView: NSView {
     }
 
     private func performEditingToolbarButton(_ button: EditingToolbarButton) {
+        guard button.isEnabled else {
+            return
+        }
         switch button {
         case .rectangle, .arrow, .pen, .marker:
             currentEditingTool = button
+            controller?.refreshEditingToolbarLayout()
             needsDisplay = true
+        case .eyedropper, .mosaic, .text, .number, .magnifier, .eraser, .undo, .redo:
+            break
         case .save:
             controller?.saveImage()
         case .copy:
@@ -776,167 +1480,345 @@ private final class PinnedImageContentView: NSView {
 
     private func drawEditingToolbar(in imageRect: NSRect) {
         let toolbar = editingToolbarRect(in: imageRect)
-        NSColor(calibratedWhite: 0.98, alpha: 0.95).setFill()
-        NSBezierPath(roundedRect: toolbar, xRadius: 5, yRadius: 5).fill()
-        NSColor(calibratedWhite: 0.7, alpha: 0.7).setStroke()
-        NSBezierPath(roundedRect: toolbar, xRadius: 5, yRadius: 5).stroke()
+        drawToolbarPanel(toolbar)
+        drawMainToolbarDragHandle(NSRect(
+            x: toolbar.minX + pinnedToolbarHorizontalPadding,
+            y: toolbar.minY + 4,
+            width: 20,
+            height: 20
+        ))
+        drawMainToolbarDragHandle(NSRect(
+            x: toolbar.maxX - pinnedToolbarHorizontalPadding - 20,
+            y: toolbar.minY + 4,
+            width: 20,
+            height: 20
+        ))
+        drawEditingToolbarSeparators(in: toolbar)
 
         for (button, rect) in editingToolbarButtonRects() {
-            NSColor.white.withAlphaComponent(0.92).setFill()
-            NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4).fill()
-            let borderColor = button == currentEditingTool && button.isAnnotationTool
-                ? NSColor.systemBlue
-                : NSColor.black.withAlphaComponent(0.75)
-            borderColor.setStroke()
-            NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4).stroke()
-            drawEditingToolbarIcon(button, in: rect.insetBy(dx: 3, dy: 3))
+            let selected = currentEditingTool == button && button.isAnnotationTool
+            drawToolbarButton(rect, selected: selected, enabled: button.isEnabled)
+            if let iconName = button.iconName {
+                drawToolbarIcon(named: iconName, in: rect, enabled: button.isEnabled, selected: selected)
+            } else {
+                drawDoneCheck(in: rect, enabled: button.isEnabled)
+            }
         }
     }
 
-    private func drawEditingToolbarIcon(_ button: EditingToolbarButton, in rect: NSRect) {
-        switch button {
-        case .rectangle:
-            drawToolbarRectangleIcon(in: rect)
-        case .arrow:
-            drawToolbarArrowIcon(in: rect)
-        case .pen:
-            drawToolbarPenIcon(in: rect)
-        case .marker:
-            drawToolbarMarkerIcon(in: rect)
-        case .save:
-            drawToolbarSaveIcon(in: rect)
-        case .copy:
-            drawToolbarCopyIcon(in: rect)
-        case .done:
-            drawDoneCheck(in: rect.insetBy(dx: -3, dy: -3))
+    private func drawEditingToolbarSeparators(in toolbar: NSRect) {
+        let buttonRects = Dictionary(uniqueKeysWithValues: editingToolbarButtonRects())
+        let separators: [(EditingToolbarButton, EditingToolbarButton)] = [
+            (.eraser, .undo),
+            (.redo, .save),
+        ]
+        NSColor.tertiaryLabelColor.withAlphaComponent(0.5).setFill()
+
+        for (leftButton, rightButton) in separators {
+            guard let left = buttonRects[leftButton], let right = buttonRects[rightButton] else {
+                continue
+            }
+            let x = left.maxX + (right.minX - left.maxX) / 2
+            let separatorRect = NSRect(
+                x: floor(x) + 0.25,
+                y: toolbar.midY - 6,
+                width: 1.5,
+                height: 12
+            )
+            NSBezierPath(roundedRect: separatorRect, xRadius: 0.75, yRadius: 0.75).fill()
         }
     }
 
-    private func drawToolbarRectangleIcon(in rect: NSRect) {
-        NSColor.black.setStroke()
-        let path = NSBezierPath(rect: rect.insetBy(dx: 1.5, dy: 2.5))
-        path.lineWidth = 1.8
-        path.stroke()
-    }
-
-    private func drawToolbarArrowIcon(in rect: NSRect) {
-        drawToolbarLine(
-            points: [
-                NSPoint(x: rect.minX + 2, y: rect.minY + 3),
-                NSPoint(x: rect.maxX - 2, y: rect.maxY - 3),
-            ],
-            lineWidth: 1.9
-        )
-        let end = NSPoint(x: rect.maxX - 2, y: rect.maxY - 3)
-        drawToolbarLine(
-            points: [
-                NSPoint(x: end.x - 5, y: end.y - 0.5),
-                end,
-                NSPoint(x: end.x + 0.5, y: end.y - 5),
-            ],
-            lineWidth: 1.9
-        )
-    }
-
-    private func drawToolbarPenIcon(in rect: NSRect) {
-        let shaft = NSBezierPath()
-        shaft.move(to: NSPoint(x: rect.minX + 3, y: rect.minY + 2))
-        shaft.line(to: NSPoint(x: rect.maxX - 2, y: rect.maxY - 5))
-        shaft.line(to: NSPoint(x: rect.maxX - 5, y: rect.maxY - 2))
-        shaft.close()
-        NSColor.black.setStroke()
-        shaft.lineWidth = 1.6
-        shaft.stroke()
-
-        drawToolbarLine(
-            points: [
-                NSPoint(x: rect.minX + 2, y: rect.minY + 1),
-                NSPoint(x: rect.minX + 5, y: rect.minY + 1),
-            ],
-            lineWidth: 1.5
-        )
-    }
-
-    private func drawToolbarMarkerIcon(in rect: NSRect) {
-        let body = NSBezierPath()
-        body.move(to: NSPoint(x: rect.minX + 2, y: rect.minY + 4))
-        body.line(to: NSPoint(x: rect.maxX - 4, y: rect.maxY - 2))
-        body.line(to: NSPoint(x: rect.maxX - 1, y: rect.maxY - 5))
-        body.line(to: NSPoint(x: rect.minX + 5, y: rect.minY + 1))
-        body.close()
-        NSColor.black.setStroke()
-        body.lineWidth = 1.6
-        body.stroke()
-        drawToolbarLine(
-            points: [
-                NSPoint(x: rect.minX + 2, y: rect.minY + 2),
-                NSPoint(x: rect.minX + 6, y: rect.minY + 2),
-            ],
-            lineWidth: 2.2
-        )
-    }
-
-    private func drawToolbarSaveIcon(in rect: NSRect) {
-        drawToolbarLine(
-            points: [
-                NSPoint(x: rect.midX, y: rect.maxY - 1),
-                NSPoint(x: rect.midX, y: rect.minY + 5),
-            ],
-            lineWidth: 1.8
-        )
-        drawToolbarLine(
-            points: [
-                NSPoint(x: rect.midX - 4, y: rect.minY + 8),
-                NSPoint(x: rect.midX, y: rect.minY + 4),
-                NSPoint(x: rect.midX + 4, y: rect.minY + 8),
-            ],
-            lineWidth: 1.8
-        )
-        drawToolbarLine(
-            points: [
-                NSPoint(x: rect.minX + 2, y: rect.minY + 2),
-                NSPoint(x: rect.maxX - 2, y: rect.minY + 2),
-            ],
-            lineWidth: 1.8
-        )
-    }
-
-    private func drawToolbarCopyIcon(in rect: NSRect) {
-        NSColor.black.setStroke()
-        let back = NSBezierPath(rect: NSRect(x: rect.minX + 1, y: rect.minY + 4, width: 8, height: 8))
-        back.lineWidth = 1.5
-        back.stroke()
-        let front = NSBezierPath(rect: NSRect(x: rect.minX + 5, y: rect.minY + 1, width: 8, height: 8))
-        front.lineWidth = 1.5
-        front.stroke()
-    }
-
-    private func drawToolbarLine(points: [NSPoint], lineWidth: CGFloat) {
-        guard let first = points.first else {
-            return
-        }
+    private func drawDoneCheck(in rect: NSRect, enabled: Bool) {
+        (enabled ? NSColor.black : NSColor.disabledControlTextColor).setStroke()
+        let checkRect = rect.insetBy(dx: 2, dy: 2)
         let path = NSBezierPath()
-        path.move(to: first)
-        for point in points.dropFirst() {
-            path.line(to: point)
-        }
-        NSColor.black.setStroke()
-        path.lineWidth = lineWidth
-        path.lineCapStyle = .round
-        path.lineJoinStyle = .round
-        path.stroke()
-    }
-
-    private func drawDoneCheck(in rect: NSRect) {
-        let path = NSBezierPath()
-        path.move(to: NSPoint(x: rect.minX + 4.5, y: rect.midY - 0.5))
-        path.line(to: NSPoint(x: rect.midX - 1, y: rect.minY + 5))
-        path.line(to: NSPoint(x: rect.maxX - 4, y: rect.maxY - 5))
-        NSColor.black.setStroke()
+        path.move(to: NSPoint(x: checkRect.minX + 2.5, y: checkRect.midY - 0.5))
+        path.line(to: NSPoint(x: checkRect.midX - 1, y: checkRect.minY + 4))
+        path.line(to: NSPoint(x: checkRect.maxX - 2, y: checkRect.maxY - 4))
         path.lineWidth = 2.4
         path.lineCapStyle = .round
         path.lineJoinStyle = .round
         path.stroke()
+    }
+
+    private func drawOptionsToolbar(for imageRect: NSRect) {
+        guard let optionsRect = editingOptionsToolbarRect(in: imageRect) else {
+            return
+        }
+        let mode = currentOptionsToolbarMode
+        let layout = SelectionToolbarState.optionsToolbarLayout(
+            in: optionsRect,
+            paletteCount: SelectionOverlayWindow.defaultPaletteColors.count,
+            mode: mode
+        )
+        drawToolbarPanel(optionsRect)
+
+        let widths = SelectionToolbarState.strokeWidthValues(for: mode)
+        for (index, rect) in layout.strokeWidths.enumerated() {
+            let width = widths[index]
+            let selected = width == defaultStrokeWidth(for: mode)
+            drawToolbarButton(optionButtonBackgroundRect(for: rect), selected: selected, enabled: true)
+            (selected ? NSColor.controlAccentColor : NSColor.labelColor).setStroke()
+            let line = NSBezierPath()
+            line.move(to: NSPoint(x: rect.minX + 4, y: rect.midY))
+            line.line(to: NSPoint(x: rect.maxX - 4, y: rect.midY))
+            line.lineWidth = SelectionToolbarState.strokeWidthPreviewLineWidth(for: width, mode: mode)
+            line.lineCapStyle = .round
+            line.stroke()
+        }
+
+        if mode == .shape {
+            drawFillPreview(in: layout.fillToggle)
+            drawShapePreviewButtons(rectangle: layout.rectangleMode, ellipse: layout.ellipseMode)
+        }
+        if SelectionToolbarState.showsStrokeStyleField(for: mode) {
+            drawStrokeStylePreview(in: layout.strokeStyle)
+        }
+        drawPinnedColorSwatches(layout.colorSwatches)
+    }
+
+    private var currentOptionsToolbarMode: SelectionToolbarState.OptionsToolbarMode {
+        switch currentEditingTool {
+        case .rectangle:
+            return .shape
+        case .arrow:
+            return .arrowLine
+        case .pen:
+            return .brush
+        case .marker:
+            return .marker
+        case .eyedropper, .mosaic, .text, .number, .magnifier, .eraser, .undo, .redo, .save, .copy, .done, nil:
+            return .shape
+        }
+    }
+
+    fileprivate func editingOptionsToolbarRect(in imageRect: NSRect) -> NSRect? {
+        guard currentEditingTool != nil else {
+            return nil
+        }
+        let size = NSSize(
+            width: editingOptionsToolbarWidth(),
+            height: editingOptionsToolbarHeight()
+        )
+        let mainToolbar = editingToolbarRect(in: imageRect)
+        let proposedX = imageRect.maxX - size.width
+        let minX = bounds.minX + 4
+        let maxX = bounds.maxX - size.width - 4
+        let x = maxX >= minX ? min(max(proposedX, minX), maxX) : minX
+        let proposedY = mainToolbar.minY - size.height - PinnedImageWindowGeometry.toolbarGap
+        let y = max(bounds.minY + 4, proposedY)
+        return NSRect(origin: NSPoint(x: x, y: y), size: size)
+    }
+
+    private func editingOptionsToolbarWidth() -> CGFloat {
+        SelectionToolbarState.optionsToolbarWidth(
+            paletteCount: SelectionOverlayWindow.defaultPaletteColors.count,
+            mode: currentOptionsToolbarMode
+        )
+    }
+
+    private func editingOptionsToolbarHeight() -> CGFloat {
+        SelectionToolbarState.optionsToolbarHeight(
+            paletteCount: SelectionOverlayWindow.defaultPaletteColors.count,
+            mode: currentOptionsToolbarMode
+        )
+    }
+
+    private func defaultStrokeWidth(for mode: SelectionToolbarState.OptionsToolbarMode) -> CGFloat {
+        let widths = SelectionToolbarState.strokeWidthValues(for: mode)
+        switch mode {
+        case .brush:
+            return widths.first ?? 3
+        case .marker:
+            return widths.dropFirst().first ?? widths.first ?? 10
+        default:
+            return widths.dropFirst().first ?? widths.first ?? 3
+        }
+    }
+
+    private func drawToolbarPanel(_ rect: NSRect) {
+        NSColor.windowBackgroundColor.withAlphaComponent(0.9).setFill()
+        NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6).fill()
+        NSColor.separatorColor.setStroke()
+        let border = NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6)
+        border.lineWidth = 1
+        border.stroke()
+    }
+
+    private func drawToolbarButton(_ rect: NSRect, selected: Bool, enabled: Bool) {
+        (selected ? NSColor.controlAccentColor.withAlphaComponent(SelectionToolbarState.toolbarSelectedBackgroundAlpha) : NSColor.clear).setFill()
+        NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4).fill()
+        _ = enabled
+    }
+
+    private func drawToolbarIcon(named name: String, in rect: NSRect, enabled: Bool, selected: Bool) {
+        let resourceName = name.replacingOccurrences(of: "toolbar-", with: "")
+        let imageInset = SelectionToolbarState.toolbarIconInset(for: resourceName)
+        let usesFixedColorResource = SelectionToolbarState.usesFixedColorToolbarIconResource(resourceName)
+        if drawToolbarImage(
+            named: resourceName,
+            in: rect,
+            template: !usesFixedColorResource,
+            enabled: enabled,
+            selected: selected,
+            inset: imageInset
+        ) || drawToolbarImage(
+            named: name,
+            in: rect,
+            template: !usesFixedColorResource,
+            enabled: enabled,
+            selected: selected,
+            inset: imageInset
+        ) {
+            return
+        }
+
+        let configuration = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+        if let image = NSImage(systemSymbolName: name, accessibilityDescription: nil)?.withSymbolConfiguration(configuration) {
+            image.isTemplate = true
+            drawTintedToolbarImage(image, in: rect.insetBy(dx: 4, dy: 4), color: toolbarIconColor(enabled: enabled, selected: selected))
+        }
+    }
+
+    @discardableResult
+    private func drawToolbarImage(
+        named name: String,
+        in rect: NSRect,
+        template: Bool,
+        enabled: Bool,
+        selected: Bool = false,
+        inset: CGFloat = 3,
+        tintColor: NSColor? = nil
+    ) -> Bool {
+        let resource = NSImage(named: name)
+            ?? Bundle.main.url(forResource: name, withExtension: "svg").flatMap(NSImage.init(contentsOf:))
+            ?? Bundle.main.url(forResource: name, withExtension: "png").flatMap(NSImage.init(contentsOf:))
+            ?? Bundle.main.url(forResource: "Icons/\(name)", withExtension: "svg").flatMap(NSImage.init(contentsOf:))
+            ?? Bundle.main.url(forResource: "Icons/\(name)", withExtension: "png").flatMap(NSImage.init(contentsOf:))
+        guard let image = resource else {
+            return false
+        }
+
+        image.isTemplate = template
+        let targetRect = rect.insetBy(dx: inset, dy: inset)
+        if template {
+            drawTintedToolbarImage(
+                image,
+                in: targetRect,
+                color: tintColor ?? toolbarIconColor(enabled: enabled, selected: selected)
+            )
+        } else {
+            image.draw(in: targetRect)
+        }
+        return true
+    }
+
+    private func drawTintedToolbarImage(_ image: NSImage, in rect: NSRect, color: NSColor) {
+        let imageSize = image.size.width > 0 && image.size.height > 0 ? image.size : rect.size
+        let imageRect = NSRect(origin: .zero, size: imageSize)
+        let tintedImage = NSImage(size: imageSize)
+        tintedImage.lockFocus()
+        color.setFill()
+        imageRect.fill()
+        image.draw(in: imageRect, from: imageRect, operation: .destinationIn, fraction: 1)
+        tintedImage.unlockFocus()
+        tintedImage.draw(in: rect)
+    }
+
+    private func toolbarIconColor(enabled: Bool, selected: Bool) -> NSColor {
+        if !enabled {
+            return .disabledControlTextColor
+        }
+        return selected ? .systemBlue : .labelColor
+    }
+
+    private func drawMainToolbarDragHandle(_ rect: NSRect) {
+        drawToolbarButton(rect, selected: false, enabled: true)
+        let color = SelectionToolbarState.mainToolbarDragHandleIconColor(enabled: true)
+        let imageInset = SelectionToolbarState.toolbarIconInset(for: "settings-more")
+        if drawToolbarImage(
+            named: "settings-more",
+            in: rect,
+            template: true,
+            enabled: true,
+            inset: imageInset,
+            tintColor: color
+        ) || drawToolbarImage(
+            named: "toolbar-settings-more",
+            in: rect,
+            template: true,
+            enabled: true,
+            inset: imageInset,
+            tintColor: color
+        ) {
+            return
+        }
+    }
+
+    private func optionButtonBackgroundRect(for rect: NSRect) -> NSRect {
+        NSRect(x: rect.minX - 2, y: rect.minY - 1, width: rect.width + 4, height: rect.height + 2)
+    }
+
+    private func drawFillPreview(in rect: NSRect?) {
+        guard let rect else {
+            return
+        }
+        drawToolbarButton(optionButtonBackgroundRect(for: rect), selected: false, enabled: true)
+        NSColor.systemRed.withAlphaComponent(0.22).setFill()
+        NSBezierPath(rect: rect.insetBy(dx: 5, dy: 4)).fill()
+        NSColor.systemRed.setStroke()
+        let path = NSBezierPath(rect: rect.insetBy(dx: 5, dy: 4))
+        path.lineWidth = 1.5
+        path.stroke()
+    }
+
+    private func drawShapePreviewButtons(rectangle: NSRect?, ellipse: NSRect?) {
+        if let rectangle {
+            drawToolbarButton(optionButtonBackgroundRect(for: rectangle), selected: true, enabled: true)
+            NSColor.controlAccentColor.setStroke()
+            let path = NSBezierPath(roundedRect: rectangle.insetBy(dx: 5, dy: 4), xRadius: 1.5, yRadius: 1.5)
+            path.lineWidth = 1.6
+            path.stroke()
+        }
+        if let ellipse {
+            drawToolbarButton(optionButtonBackgroundRect(for: ellipse), selected: false, enabled: true)
+            NSColor.labelColor.setStroke()
+            let path = NSBezierPath(ovalIn: ellipse.insetBy(dx: 5, dy: 4))
+            path.lineWidth = 1.6
+            path.stroke()
+        }
+    }
+
+    private func drawStrokeStylePreview(in rect: NSRect) {
+        drawToolbarButton(rect, selected: false, enabled: true)
+        NSColor.labelColor.setStroke()
+        let line = NSBezierPath()
+        line.move(to: NSPoint(x: rect.minX + 5, y: rect.midY))
+        line.line(to: NSPoint(x: rect.maxX - 9, y: rect.midY))
+        line.lineWidth = 2
+        line.lineCapStyle = .round
+        line.stroke()
+        NSColor.black.setFill()
+        let triangle = NSBezierPath()
+        triangle.move(to: NSPoint(x: rect.maxX - 7, y: rect.midY + 2))
+        triangle.line(to: NSPoint(x: rect.maxX - 3, y: rect.midY + 2))
+        triangle.line(to: NSPoint(x: rect.maxX - 5, y: rect.midY - 2))
+        triangle.close()
+        triangle.fill()
+    }
+
+    private func drawPinnedColorSwatches(_ swatches: [NSRect]) {
+        let colors = SelectionOverlayWindow.defaultPaletteColors
+        for (index, rect) in swatches.enumerated() {
+            let color = colors[index % max(colors.count, 1)]
+            color.setFill()
+            NSBezierPath(ovalIn: rect).fill()
+            NSColor.separatorColor.setStroke()
+            let border = NSBezierPath(ovalIn: rect)
+            border.lineWidth = 1
+            border.stroke()
+        }
     }
 }
 
@@ -950,25 +1832,49 @@ extension PinnedImageWindowController {
         false
     }
 
-    func test_keyDown(keyCode: UInt16) {
+    func test_keyDown(
+        keyCode: UInt16,
+        charactersIgnoringModifiers: String = "",
+        modifierFlags: NSEvent.ModifierFlags = []
+    ) {
         guard let contentView = window?.contentView else {
             return
         }
         let event = NSEvent.keyEvent(
             with: .keyDown,
             location: .zero,
-            modifierFlags: [],
+            modifierFlags: modifierFlags,
             timestamp: 0,
             windowNumber: window?.windowNumber ?? 0,
             context: nil,
-            characters: "",
-            charactersIgnoringModifiers: "",
+            characters: charactersIgnoringModifiers,
+            charactersIgnoringModifiers: charactersIgnoringModifiers,
             isARepeat: false,
             keyCode: keyCode
         )
         if let event {
             contentView.keyDown(with: event)
         }
+    }
+
+    func test_setImageActionHandler(_ handler: @escaping (CaptureCompletionAction) -> Void) {
+        imageActionHandlerForTesting = handler
+    }
+
+    func test_editingOverlayKeyDown(
+        keyCode: UInt16,
+        charactersIgnoringModifiers: String,
+        modifierFlags: NSEvent.ModifierFlags
+    ) {
+        editingOverlayWindow?.test_keyDown(
+            keyCode: keyCode,
+            charactersIgnoringModifiers: charactersIgnoringModifiers,
+            modifierFlags: modifierFlags
+        )
+    }
+
+    func test_editingOverlayFlagsChanged(modifierFlags: NSEvent.ModifierFlags) {
+        editingOverlayWindow?.test_flagsChanged(modifierFlags: modifierFlags)
     }
 
     func test_renderedContentImage() -> NSImage {
@@ -986,12 +1892,126 @@ extension PinnedImageWindowController {
         }
     }
 
+    var test_contextMenuToolbarItemState: NSControl.StateValue {
+        makeContextMenu().items.first { $0.title == "显示工具条 (⇧)" }?.state ?? .off
+    }
+
     var test_isToolbarVisible: Bool {
-        contentView?.showsEditingToolbar == true
+        editingOverlayWindow != nil
+    }
+
+    var test_isEditingOverlayDraggingPinnedImage: Bool {
+        editingOverlayWindow?.test_isPinnedImageDragInProgress ?? false
+    }
+
+    var test_editingOverlayAlpha: CGFloat? {
+        editingOverlayWindow?.alphaValue
+    }
+
+    var test_editingOverlayMainToolbarRect: NSRect? {
+        editingOverlayWindow?.test_mainToolbarRect()
+    }
+
+    func test_editingOverlayToolbarButtonRect(for button: TestToolbarButton) -> NSRect? {
+        editingOverlayWindow?.test_mainToolbarButtonRect(for: button)
+    }
+
+    func test_setEditingOverlayState(
+        annotations: [CaptureAnnotation],
+        eraserMasks: [EraserMask]
+    ) {
+        editingOverlayWindow?.test_setAnnotations(annotations)
+        editingOverlayWindow?.test_setEraserMasks(eraserMasks)
+    }
+
+    func test_editingOverlayAnnotation(at index: Int) -> CaptureAnnotation? {
+        editingOverlayWindow?.test_annotation(at: index)
+    }
+
+    func test_editingOverlayEraserMask(at index: Int) -> EraserMask? {
+        editingOverlayWindow?.test_eraserMask(at: index)
     }
 
     var test_imageRectInContent: NSRect {
         contentView?.currentImageRect ?? .zero
+    }
+
+    var test_imageFrameInScreen: NSRect {
+        currentImageFrameInScreen()
+    }
+
+    var test_editingOverlayImageFrameInScreen: NSRect? {
+        guard
+            let editingOverlayWindow,
+            let selectionRect = editingOverlayWindow.test_lockedSelectionRect
+        else {
+            return nil
+        }
+        return selectionRect.offsetBy(dx: editingOverlayWindow.frame.minX, dy: editingOverlayWindow.frame.minY)
+    }
+
+    var test_windowLevel: NSWindow.Level? {
+        window?.level
+    }
+
+    var test_editingOverlayWindowLevel: NSWindow.Level? {
+        editingOverlayWindow?.level
+    }
+
+    func test_flagsChanged(modifierFlags: NSEvent.ModifierFlags) {
+        guard
+            let contentView,
+            let event = NSEvent.keyEvent(
+                with: .flagsChanged,
+                location: .zero,
+                modifierFlags: modifierFlags,
+                timestamp: 0,
+                windowNumber: window?.windowNumber ?? 0,
+                context: nil,
+                characters: "",
+                charactersIgnoringModifiers: "",
+                isARepeat: false,
+                keyCode: 56
+            )
+        else {
+            return
+        }
+        contentView.flagsChanged(with: event)
+    }
+
+    func test_mouseDownForShiftShortcutCancellation() {
+        guard
+            let contentView,
+            let event = NSEvent.mouseEvent(
+                with: .leftMouseDown,
+                location: NSPoint(x: contentView.currentImageRect.midX, y: contentView.currentImageRect.midY),
+                modifierFlags: [.shift],
+                timestamp: 0,
+                windowNumber: window?.windowNumber ?? 0,
+                context: nil,
+                eventNumber: 0,
+                clickCount: 1,
+                pressure: 1
+            )
+        else {
+            return
+        }
+        contentView.mouseDown(with: event)
+    }
+
+    var test_hoverCursorAtImageCenterIsMove: Bool {
+        guard let contentView else {
+            return false
+        }
+        let imageRect = contentView.currentImageRect
+        return contentView.hoverCursorStyle(at: NSPoint(x: imageRect.midX, y: imageRect.midY)) == .move
+    }
+
+    var test_hoverCursorAtShadowIsArrow: Bool {
+        guard let contentView else {
+            return false
+        }
+        return contentView.hoverCursorStyle(at: NSPoint(x: 2, y: 2)) == .arrow
     }
 
     var test_pendingAnnotationCount: Int {
@@ -1014,12 +2034,83 @@ extension PinnedImageWindowController {
         showEditingToolbar()
     }
 
+    func test_toggleEditingToolbarFromMenu() {
+        guard let item = makeContextMenu().items.first(where: { $0.title == "显示工具条 (⇧)" }),
+              let action = item.action
+        else {
+            return
+        }
+        NSApp.sendAction(action, to: item.target, from: item)
+    }
+
     func test_finishEditing() {
         finishEditing()
     }
 
+    @discardableResult
+    func test_dragEditingOverlayBy(dx: CGFloat, dy: CGFloat) -> Bool {
+        guard let editingOverlayWindow else {
+            return false
+        }
+        let imageFrame = currentImageFrameInScreen()
+        let overlayFrame = editingOverlayWindow.frame
+        let startScreen = NSPoint(x: imageFrame.midX, y: imageFrame.midY)
+        let start = NSPoint(x: startScreen.x - overlayFrame.minX, y: startScreen.y - overlayFrame.minY)
+        let end = NSPoint(x: start.x + dx, y: start.y + dy)
+        editingOverlayWindow.test_mouseDown(at: start)
+        let wasDragging = editingOverlayWindow.test_isPinnedImageDragInProgress
+        let wasHiddenDuringDrag = editingOverlayWindow.alphaValue == 0
+        editingOverlayWindow.test_mouseDragged(to: end)
+        editingOverlayWindow.test_mouseUp(at: end)
+        return wasDragging && wasHiddenDuringDrag
+    }
+
+    func test_scrollEditingOverlay(deltaY: CGFloat) {
+        let point = editingOverlayWindow?.test_mainToolbarRect().map { NSPoint(x: $0.midX, y: $0.midY + 40) }
+            ?? NSPoint(x: currentImageFrameInScreen().midX, y: currentImageFrameInScreen().midY)
+        editingOverlayWindow?.test_scrollWheel(at: point, deltaY: deltaY)
+    }
+
+    func test_completeEditingOverlay(
+        annotations: [CaptureAnnotation],
+        eraserMasks: [EraserMask] = [],
+        action: CaptureCompletionAction = .finishEditing
+    ) {
+        completeEditingOverlay(
+            with: CaptureSelectionResult(
+                screenRect: currentImageFrameInScreen(),
+                snapshotRect: NSRect(origin: .zero, size: pinnedImage.size),
+                annotations: annotations,
+                eraserMasks: eraserMasks,
+                action: action
+            )
+        )
+    }
+
     func test_toolbarContains(_ title: String) -> Bool {
         contentView?.editingToolbarTitles.contains(title) == true
+    }
+
+    func test_toolbarTitleIndex(_ title: String) -> Int? {
+        contentView?.editingToolbarTitles.firstIndex(of: title)
+    }
+
+    var test_editingToolbarIconRects: [NSRect] {
+        contentView?.editingToolbarIconRectsForTesting ?? []
+    }
+
+    var test_editingToolbarRect: NSRect {
+        guard let contentView else {
+            return .zero
+        }
+        return contentView.editingToolbarRect(in: contentView.currentImageRect)
+    }
+
+    var test_optionsToolbarRect: NSRect? {
+        guard let contentView else {
+            return nil
+        }
+        return contentView.editingOptionsToolbarRect(in: contentView.currentImageRect)
     }
 
     func test_selectEditingTool(_ title: String) {
