@@ -1331,6 +1331,7 @@ final class xxsnapMacTests: XCTestCase {
         let pixelCount = bitmap.pixelsWide * bitmap.pixelsHigh
         XCTAssertGreaterThan(transparentPixelCount, pixelCount / 2)
         XCTAssertGreaterThan(visiblePixelCount, pixelCount / 10)
+        XCTAssertLessThan(visiblePixelCount, pixelCount / 5)
     }
 
     func testToolbarSvgIconsAreBundledAndReadable() throws {
