@@ -9209,6 +9209,78 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(NSPasteboard.general.string(forType: .string), "keep-me")
     }
 
+    @MainActor
+    func testCaptureCoordinatorRestoresMostRecentlyHiddenPinnedWindow() async throws {
+        let image = solidImage(size: NSSize(width: 80, height: 60), color: .white)
+        var pinnedWindows: [FakePinnedWindow] = []
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            pinnedWindowFactory: { image, screenRect in
+                let window = FakePinnedWindow(image: image, screenRect: screenRect)
+                pinnedWindows.append(window)
+                return window
+            }
+        )
+
+        for index in 0..<2 {
+            let completion = expectation(description: "pin \(index)")
+            coordinator.captureSessionDidEnd = { completion.fulfill() }
+            coordinator.test_handleSelection(
+                CaptureSelectionResult(
+                    screenRect: NSRect(x: CGFloat(index * 100), y: 0, width: 80, height: 60),
+                    snapshotRect: NSRect(origin: .zero, size: image.size),
+                    annotations: [],
+                    action: .pin
+                ),
+                frozenDesktopImage: image
+            )
+            await fulfillment(of: [completion], timeout: 2)
+        }
+
+        pinnedWindows[0].simulateHide()
+        pinnedWindows[1].simulateHide()
+
+        XCTAssertTrue(coordinator.restoreMostRecentlyHiddenPinnedWindow())
+        XCTAssertEqual(pinnedWindows[0].showCount, 1)
+        XCTAssertEqual(pinnedWindows[1].showCount, 2)
+        XCTAssertFalse(coordinator.restoreMostRecentlyHiddenPinnedWindow())
+    }
+
+    @MainActor
+    func testCaptureCoordinatorCloseInvalidatesRecentHiddenPinnedWindow() async throws {
+        let image = solidImage(size: NSSize(width: 80, height: 60), color: .white)
+        var createdPinnedWindow: FakePinnedWindow?
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            pinnedWindowFactory: { image, screenRect in
+                let window = FakePinnedWindow(image: image, screenRect: screenRect)
+                createdPinnedWindow = window
+                return window
+            }
+        )
+        let completion = expectation(description: "pin")
+        coordinator.captureSessionDidEnd = { completion.fulfill() }
+        coordinator.test_handleSelection(
+            CaptureSelectionResult(
+                screenRect: NSRect(x: 0, y: 0, width: 80, height: 60),
+                snapshotRect: NSRect(origin: .zero, size: image.size),
+                annotations: [],
+                action: .pin
+            ),
+            frozenDesktopImage: image
+        )
+        await fulfillment(of: [completion], timeout: 2)
+
+        let pinnedWindow = try XCTUnwrap(createdPinnedWindow)
+        pinnedWindow.simulateHide()
+        pinnedWindow.simulateClose()
+
+        XCTAssertFalse(coordinator.restoreMostRecentlyHiddenPinnedWindow())
+        XCTAssertEqual(coordinator.test_pinnedWindowCount, 0)
+    }
+
     func testMagnifierRendererSamplesOriginalImageInsteadOfAnnotations() throws {
         let base = solidImage(size: NSSize(width: 80, height: 80), color: .white)
         var coveringAnnotation = CaptureAnnotation(

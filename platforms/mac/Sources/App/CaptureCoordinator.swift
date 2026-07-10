@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 @MainActor
 final class CaptureCoordinator {
+    var captureOverlayDidPresent: (() -> Void)?
     var captureSessionDidEnd: (() -> Void)?
 
     private var lastCapture: NSImage?
@@ -15,6 +16,7 @@ final class CaptureCoordinator {
     private var overlayWindow: SelectionOverlayWindow?
     private var retiredOverlayWindows: [SelectionOverlayWindow] = []
     private var pinnedWindowControllers: [PinnedImageWindowPresenting] = []
+    private var mostRecentlyHiddenPinnedWindow: PinnedImageWindowPresenting?
     private var frozenDesktopImage: NSImage?
     private let pinnedWindowFactory: @MainActor (NSImage, NSRect) -> PinnedImageWindowPresenting
 
@@ -37,6 +39,18 @@ final class CaptureCoordinator {
             permissionCoordinator: PermissionCoordinator(),
             screenCaptureService: ScreenCaptureService()
         )
+    }
+
+    @discardableResult
+    func restoreMostRecentlyHiddenPinnedWindow() -> Bool {
+        guard overlayWindow == nil,
+              let controller = mostRecentlyHiddenPinnedWindow
+        else {
+            return false
+        }
+        mostRecentlyHiddenPinnedWindow = nil
+        controller.show()
+        return true
     }
 
     func startCapture() {
@@ -107,6 +121,7 @@ final class CaptureCoordinator {
             }
 
             self.overlayWindow = overlayWindow
+            self.captureOverlayDidPresent?()
             overlayWindow.present()
         }
     }
@@ -228,12 +243,27 @@ final class CaptureCoordinator {
                 case .pin:
                     let controller = pinnedWindowFactory(exportedImage, result.screenRect)
                     pinnedWindowControllers.append(controller)
-                    if let pinnedController = controller as? PinnedImageWindowController {
-                        pinnedController.onClose = { [weak self, weak pinnedController] in
-                            guard let pinnedController else {
-                                return
-                            }
-                            self?.pinnedWindowControllers.removeAll { $0 === pinnedController }
+                    let controllerID = ObjectIdentifier(controller)
+                    controller.onHide = { [weak self] in
+                        guard let self,
+                              let hiddenController = self.pinnedWindowControllers.first(where: {
+                                  ObjectIdentifier($0) == controllerID
+                              })
+                        else {
+                            return
+                        }
+                        self.mostRecentlyHiddenPinnedWindow = hiddenController
+                    }
+                    controller.onClose = { [weak self] in
+                        guard let self else {
+                            return
+                        }
+                        self.pinnedWindowControllers.removeAll {
+                            ObjectIdentifier($0) == controllerID
+                        }
+                        if let recent = self.mostRecentlyHiddenPinnedWindow,
+                           ObjectIdentifier(recent) == controllerID {
+                            self.mostRecentlyHiddenPinnedWindow = nil
                         }
                     }
                     controller.show()
