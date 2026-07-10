@@ -4316,6 +4316,60 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_cursorStyle(at: refreshPoint), .arrow)
     }
 
+    func testPassiveColorSamplerUsesMoveCursorForFullScreenSelection() throws {
+        let background = solidImage(size: desktopImageSize(), color: .white)
+        let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
+        let screen = try XCTUnwrap(NSScreen.main)
+        let selection = NSRect(
+            x: screen.frame.minX - window.frame.minX,
+            y: screen.frame.minY - window.frame.minY,
+            width: screen.frame.width,
+            height: screen.frame.height
+        )
+        let point = NSPoint(x: selection.midX, y: selection.midY)
+        window.test_setLockedSelectionRect(selection)
+
+        window.test_updateColorSampler(at: point)
+
+        XCTAssertTrue(window.test_isColorSamplerVisible)
+        XCTAssertEqual(window.test_cursorStyle(at: point), .move)
+    }
+
+    func testPassiveColorSamplerUsesLightMoveCursorOnDarkFullScreenSelection() throws {
+        let background = solidImage(size: desktopImageSize(), color: .black)
+        let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
+        let screen = try XCTUnwrap(NSScreen.main)
+        let selection = NSRect(
+            x: screen.frame.minX - window.frame.minX,
+            y: screen.frame.minY - window.frame.minY,
+            width: screen.frame.width,
+            height: screen.frame.height
+        )
+        let point = NSPoint(x: selection.midX, y: selection.midY)
+        window.test_setLockedSelectionRect(selection)
+
+        window.test_updateColorSampler(at: point)
+
+        XCTAssertTrue(window.test_isColorSamplerVisible)
+        XCTAssertEqual(window.test_cursorStyle(at: point), .moveLight)
+    }
+
+    func testFullScreenSelectionKeepsCrosshairUntilPassiveSamplerIsVisible() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let screen = try XCTUnwrap(NSScreen.main)
+        let selection = NSRect(
+            x: screen.frame.minX - window.frame.minX,
+            y: screen.frame.minY - window.frame.minY,
+            width: screen.frame.width,
+            height: screen.frame.height
+        )
+        let point = NSPoint(x: selection.midX, y: selection.midY)
+        window.test_setLockedSelectionRect(selection)
+
+        XCTAssertFalse(window.test_isColorSamplerVisible)
+        XCTAssertEqual(window.test_cursorStyle(at: point), .crosshair)
+    }
+
     func testOverlayWindowUsesDrawingCursorInsideSelectionImmediatelyAfterToolSwitch() {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         let selection = NSRect(x: 100, y: 100, width: 200, height: 120)

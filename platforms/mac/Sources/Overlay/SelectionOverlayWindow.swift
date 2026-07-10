@@ -2981,6 +2981,13 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return backgroundAwareCursorStyle(SelectionToolbarState.overlayCursorStyle(for: selectionResizeHandle), at: point)
         }
 
+        if interactionMode == .annotating,
+           isPassiveColorSamplerVisible,
+           isInsideSelection,
+           !isToolbarOrPanelPoint(point) {
+            return backgroundAwareCursorStyle(.move, at: point)
+        }
+
         if interactionMode == .annotating, shouldStartSelectionMove(at: point) {
             return backgroundAwareCursorStyle(.move, at: point)
         }
@@ -3895,6 +3902,23 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         sampledPointerPoint = point
         sampledColor = color
         invalidateColorSampler(from: previousPoint, to: point)
+    }
+
+    private var isPassiveColorSamplerVisible: Bool {
+        guard configuration.allowsPassiveColorSampler,
+              !isEyedropperToolActive,
+              let sampledPointerPoint,
+              sampledColor != nil
+        else {
+            return false
+        }
+
+        return SelectionToolbarState.shouldShowColorSampler(
+            isShapeToolActive: isShapeToolActive,
+            hasAnnotations: !annotations.isEmpty,
+            pointer: sampledPointerPoint,
+            selectionRect: colorSamplerSelectionRect
+        )
     }
 
     private func clearColorSampler() {
