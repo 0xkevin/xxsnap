@@ -58,7 +58,7 @@ final class StatusItemController: NSObject {
             ?? NSImage(systemSymbolName: "camera.viewfinder", accessibilityDescription: "xxsnap")
 
         image?.accessibilityDescription = "xxsnap"
-        image?.size = NSSize(width: 18, height: 18)
+        image?.size = NSSize(width: 20, height: 20)
         image?.isTemplate = true
         return image
     }
