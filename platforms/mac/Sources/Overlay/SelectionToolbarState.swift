@@ -1,6 +1,52 @@
 import AppKit
 
 enum SelectionToolbarState {
+    struct ToolbarShortcut: Equatable {
+        let key: String
+        let modifiers: NSEvent.ModifierFlags
+        let iconName: String?
+        let displayText: String
+
+        func matches(
+            charactersIgnoringModifiers: String?,
+            modifierFlags: NSEvent.ModifierFlags
+        ) -> Bool {
+            guard charactersIgnoringModifiers?.lowercased() == key.lowercased() else {
+                return false
+            }
+
+            let relevantModifiers = modifierFlags.intersection([.command, .control, .option, .shift])
+            let isPlainLetter = modifiers.isEmpty && key.count == 1 && key.first?.isLetter == true
+            if isPlainLetter {
+                return relevantModifiers.intersection([.command, .control, .option]).isEmpty
+            }
+            return relevantModifiers == modifiers
+        }
+    }
+
+    private static let toolbarShortcuts: [String: ToolbarShortcut] = {
+        let command = NSEvent.ModifierFlags.command
+        return [
+            "rectangle": ToolbarShortcut(key: "s", modifiers: [], iconName: nil, displayText: "S"),
+            "polyline": ToolbarShortcut(key: "a", modifiers: [], iconName: nil, displayText: "A"),
+            "pen": ToolbarShortcut(key: "b", modifiers: [], iconName: nil, displayText: "B"),
+            "marker": ToolbarShortcut(key: "h", modifiers: [], iconName: nil, displayText: "H"),
+            "eyedropper": ToolbarShortcut(key: "p", modifiers: [], iconName: nil, displayText: "P"),
+            "mosaic": ToolbarShortcut(key: "m", modifiers: [], iconName: nil, displayText: "M"),
+            "text": ToolbarShortcut(key: "t", modifiers: [], iconName: nil, displayText: "T"),
+            "number": ToolbarShortcut(key: "n", modifiers: [], iconName: nil, displayText: "N"),
+            "magnifier": ToolbarShortcut(key: "g", modifiers: [], iconName: nil, displayText: "G"),
+            "eraser": ToolbarShortcut(key: "e", modifiers: [], iconName: nil, displayText: "E"),
+            "undo": ToolbarShortcut(key: "z", modifiers: command, iconName: "command", displayText: "Z"),
+            "redo": ToolbarShortcut(key: "z", modifiers: [command, .shift], iconName: "command", displayText: "⇧Z"),
+            "cancel": ToolbarShortcut(key: "\u{1b}", modifiers: [], iconName: nil, displayText: "ESC"),
+            "pin": ToolbarShortcut(key: "1", modifiers: command, iconName: "command", displayText: "1"),
+            "save": ToolbarShortcut(key: "s", modifiers: command, iconName: "command", displayText: "S"),
+            "copy": ToolbarShortcut(key: "c", modifiers: command, iconName: "command", displayText: "C"),
+            "finishEditing": ToolbarShortcut(key: "\u{1b}", modifiers: [], iconName: nil, displayText: "ESC"),
+        ]
+    }()
+
     static let colorSamplerCopyHintText = L10n(language: .zhHans).text(.colorSamplerCopyHex)
     static let colorSamplerCopySuccessText = "复制成功"
     static let colorSamplerCopySuccessDuration: TimeInterval = 1.2
@@ -282,6 +328,7 @@ enum SelectionToolbarState {
             "pin": "贴图",
             "save": "保存",
             "copy": "复制到剪切板",
+            "finishEditing": "完成编辑",
             "scroll": "滚动截图",
             "strokeWidthThin": "细",
             "strokeWidthMedium": "中",
@@ -301,6 +348,35 @@ enum SelectionToolbarState {
             "aspectRatioLockedOff": "锁定长宽比(关)",
             "refreshCapture": "刷新截图",
         ][identifier]
+    }
+
+    static func toolbarShortcut(for identifier: String) -> ToolbarShortcut? {
+        toolbarShortcuts[identifier]
+    }
+
+    static func tooltipShortcutIconImage(named name: String, tint: NSColor, size: CGFloat) -> NSImage? {
+        guard let source = Bundle.main.url(forResource: name, withExtension: "svg").flatMap(NSImage.init(contentsOf:)) else {
+            return nil
+        }
+
+        let targetSize = NSSize(width: size, height: size)
+        let targetRect = NSRect(origin: .zero, size: targetSize)
+        let mask = NSImage(size: targetSize)
+        mask.lockFocus()
+        NSColor.clear.setFill()
+        targetRect.fill()
+        source.draw(in: targetRect, from: .zero, operation: .sourceOver, fraction: 1)
+        mask.unlockFocus()
+
+        let image = NSImage(size: targetSize)
+        image.lockFocus()
+        NSColor.clear.setFill()
+        targetRect.fill()
+        tint.setFill()
+        targetRect.fill()
+        mask.draw(in: targetRect, from: .zero, operation: .destinationIn, fraction: 1)
+        image.unlockFocus()
+        return image
     }
 
     static func toolbarIconInset(for resourceName: String) -> CGFloat {

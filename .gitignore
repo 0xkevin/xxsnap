@@ -12,3 +12,5 @@ DerivedData/
 *.perspectivev3
 xcuserdata/
 .DS_Store
+.codex/
+docs/

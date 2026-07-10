@@ -5,6 +5,8 @@ import CoreText
 enum CaptureCompletionAction {
     case copy
     case save
+    case pin
+    case finishEditing
 }
 
 enum CaptureAnnotationKind {
@@ -1393,7 +1395,7 @@ enum CaptureAnnotationRenderer {
             return
         }
         if annotation.kind == .text {
-            drawTextAnnotation(annotation, in: context, scaleX: scaleX, scaleY: scaleY, textScale: lineScale)
+            drawTextAnnotation(annotation, in: context, scaleX: scaleX, scaleY: scaleY)
             return
         }
         if annotation.kind == .numberSequence {
@@ -1475,8 +1477,7 @@ enum CaptureAnnotationRenderer {
         _ annotation: CaptureAnnotation,
         in context: CGContext,
         scaleX: CGFloat,
-        scaleY: CGFloat,
-        textScale: CGFloat
+        scaleY: CGFloat
     ) {
         guard
             let text = annotation.text,
@@ -1485,26 +1486,19 @@ enum CaptureAnnotationRenderer {
             return
         }
 
-        var style = annotation.style
-        style.textSize *= textScale
         let textRect = annotation.rect.standardized
-        let pixelRect = NSRect(
-            x: textRect.minX * scaleX,
-            y: textRect.minY * scaleY,
-            width: textRect.width * scaleX,
-            height: textRect.height * scaleY
-        )
 
         context.saveGState()
+        context.scaleBy(x: scaleX, y: scaleY)
         if abs(annotation.rotationAngle) >= 0.001 {
-            context.translateBy(x: pixelRect.midX, y: pixelRect.midY)
+            context.translateBy(x: textRect.midX, y: textRect.midY)
             context.rotate(by: annotation.rotationAngle)
-            context.translateBy(x: -pixelRect.midX, y: -pixelRect.midY)
+            context.translateBy(x: -textRect.midX, y: -textRect.midY)
         }
         let previousGraphicsContext = NSGraphicsContext.current
         let graphicsContext = NSGraphicsContext(cgContext: context, flipped: false)
         NSGraphicsContext.current = graphicsContext
-        drawText(text, in: pixelRect, style: style)
+        drawText(text, in: textRect, style: annotation.style)
         NSGraphicsContext.current = previousGraphicsContext
         context.restoreGState()
     }

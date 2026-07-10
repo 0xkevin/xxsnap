@@ -2,6 +2,33 @@ import AppKit
 import XCTest
 @testable import xxsnap
 
+@MainActor
+private final class FakePinnedWindow: PinnedImageWindowPresenting {
+    let image: NSImage
+    let screenRect: NSRect
+    var onHide: (() -> Void)?
+    var onClose: (() -> Void)?
+    private(set) var showCount = 0
+    var didShow: Bool { showCount > 0 }
+
+    init(image: NSImage, screenRect: NSRect) {
+        self.image = image
+        self.screenRect = screenRect
+    }
+
+    func show() {
+        showCount += 1
+    }
+
+    func simulateHide() {
+        onHide?()
+    }
+
+    func simulateClose() {
+        onClose?()
+    }
+}
+
 final class SelectionToolbarStateTests: XCTestCase {
     func testEyedropperSamplesVisibleAnnotationAndCopiesOnlyColor() throws {
         let background = solidImage(size: NSSize(width: 240, height: 160), color: NSColor(srgbRed: 0.95, green: 0.8, blue: 0.1, alpha: 1))
@@ -2048,7 +2075,8 @@ final class SelectionToolbarStateTests: XCTestCase {
     }
 
     func testEmptyTextDraftIsDiscardedOnEscape() {
-        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        var completions = 0
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in completions += 1 }
         window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
         window.test_activateTextTool()
 
@@ -2062,7 +2090,28 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         XCTAssertEqual(window.test_annotationCount, 0)
         XCTAssertFalse(window.test_isEditingTextAnnotation)
+        XCTAssertFalse(window.test_isTextToolActive)
         XCTAssertNil(window.test_selectedAnnotationKind)
+        XCTAssertEqual(completions, 0)
+    }
+
+    func testEscapeDiscardsShapeDraftWithoutClosingCapture() {
+        var completions = 0
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in completions += 1 }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.rectangle)
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseDragged(to: NSPoint(x: 220, y: 210))
+
+        XCTAssertEqual(window.test_annotationCount, 0)
+        XCTAssertEqual(window.test_currentShapeKind, .rectangle)
+
+        window.test_keyDown(keyCode: 53, charactersIgnoringModifiers: "\u{1b}")
+
+        XCTAssertEqual(window.test_annotationCount, 0)
+        XCTAssertNil(window.test_currentShapeKind)
+        XCTAssertEqual(completions, 0)
     }
 
     func testWhitespaceOnlyTextDraftIsDiscardedOnEscape() {
@@ -2111,6 +2160,2000 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(textResult?.annotations.count, 1)
         XCTAssertEqual(textResult?.annotations.first?.kind, .text)
         XCTAssertEqual(textResult?.annotations.first?.text, "x")
+    }
+
+    func testPinToolbarCompletesSelectionAndCommitsActiveTextEdit() throws {
+        var result: CaptureSelectionResult?
+        let expectation = expectation(description: "pin action")
+        let window = SelectionOverlayWindow(backgroundImage: nil) { selectionResult in
+            result = selectionResult
+            expectation.fulfill()
+        }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateTextTool()
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 150))
+        window.firstResponder?.insertText("pinned")
+
+        let pinPoint = try XCTUnwrap(window.test_mainToolbarButtonPoint(for: .pin))
+        window.test_mouseDown(at: pinPoint)
+        window.test_mouseUp(at: pinPoint)
+        wait(for: [expectation], timeout: 0.5)
+
+        XCTAssertEqual(result?.action, .pin)
+        XCTAssertEqual(result?.annotations.count, 1)
+        XCTAssertEqual(result?.annotations.first?.kind, .text)
+        XCTAssertEqual(result?.annotations.first?.text, "pinned")
+    }
+
+    func testCommandOneCompletesSelectionAsPin() {
+        var result: CaptureSelectionResult?
+        let expectation = expectation(description: "pin shortcut")
+        let window = SelectionOverlayWindow(backgroundImage: nil) { selectionResult in
+            result = selectionResult
+            expectation.fulfill()
+        }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+
+        window.test_keyDown(keyCode: 18, charactersIgnoringModifiers: "1", modifierFlags: [.command])
+        wait(for: [expectation], timeout: 0.5)
+
+        XCTAssertEqual(result?.action, .pin)
+    }
+
+    func testToolbarToolShortcutsSelectMatchingButtonForLowercaseAndShiftUppercase() {
+        let shortcuts: [(key: String, button: TestToolbarButton)] = [
+            ("s", .rectangle),
+            ("a", .arrow),
+            ("b", .pen),
+            ("h", .marker),
+            ("p", .eyedropper),
+            ("m", .mosaic),
+            ("t", .text),
+            ("n", .number),
+            ("g", .magnifier),
+            ("e", .eraser),
+        ]
+
+        for shortcut in shortcuts {
+            let lowercaseWindow = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+            lowercaseWindow.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+
+            XCTAssertTrue(
+                lowercaseWindow.test_handleKeyDown(
+                    keyCode: 0,
+                    charactersIgnoringModifiers: shortcut.key
+                ),
+                shortcut.key
+            )
+            XCTAssertTrue(lowercaseWindow.test_toolbarButtonIsSelected(shortcut.button), shortcut.key)
+
+            let uppercaseWindow = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+            uppercaseWindow.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+
+            XCTAssertTrue(
+                uppercaseWindow.test_handleKeyDown(
+                    keyCode: 0,
+                    charactersIgnoringModifiers: shortcut.key.uppercased(),
+                    modifierFlags: [.shift]
+                ),
+                shortcut.key.uppercased()
+            )
+            XCTAssertTrue(uppercaseWindow.test_toolbarButtonIsSelected(shortcut.button), shortcut.key.uppercased())
+        }
+    }
+
+    func testModifiedToolLettersDoNotSwitchAnnotationTools() {
+        for modifiers: NSEvent.ModifierFlags in [[.command], [.control], [.option]] {
+            let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+            window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+
+            XCTAssertFalse(
+                window.test_handleKeyDown(
+                    keyCode: 0,
+                    charactersIgnoringModifiers: "a",
+                    modifierFlags: modifiers
+                )
+            )
+            XCTAssertFalse(window.test_toolbarButtonIsSelected(.arrow))
+        }
+    }
+
+    func testActiveTextEditorKeepsToolShortcutLettersAsTextInput() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateTextTool()
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 150))
+
+        XCTAssertTrue(window.test_textEditorIsFirstResponder)
+        XCTAssertFalse(window.test_handleKeyDown(keyCode: 1, charactersIgnoringModifiers: "s"))
+        window.firstResponder?.insertText("s")
+
+        XCTAssertEqual(window.test_annotationText(at: 0), "s")
+        XCTAssertTrue(window.test_toolbarButtonIsSelected(.text))
+        XCTAssertFalse(window.test_toolbarButtonIsSelected(.rectangle))
+    }
+
+    func testActiveTextEditorKeepsToolShortcutLetterOwnedByMarkedTextInput() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateTextTool()
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 150))
+
+        let editor = try XCTUnwrap(window.firstResponder as? NSTextView)
+        editor.setMarkedText(
+            "sh",
+            selectedRange: NSRange(location: 2, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
+        let markedRange = editor.markedRange()
+        XCTAssertTrue(editor.hasMarkedText())
+        XCTAssertEqual(markedRange, NSRange(location: 0, length: 2))
+
+        XCTAssertFalse(window.test_handleKeyDown(keyCode: 1, charactersIgnoringModifiers: "s"))
+
+        XCTAssertTrue(editor.hasMarkedText())
+        XCTAssertEqual(editor.markedRange(), markedRange)
+        XCTAssertEqual(window.test_annotationText(at: 0), "sh")
+        XCTAssertTrue(window.test_toolbarButtonIsSelected(.text))
+        XCTAssertFalse(window.test_toolbarButtonIsSelected(.rectangle))
+    }
+
+    func testDisabledUndoAndRedoShortcutsAreConsumedWithoutChangingAnnotations() {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+
+        XCTAssertTrue(
+            window.test_handleKeyDown(
+                keyCode: 6,
+                charactersIgnoringModifiers: "z",
+                modifierFlags: [.command]
+            )
+        )
+        XCTAssertTrue(
+            window.test_handleKeyDown(
+                keyCode: 6,
+                charactersIgnoringModifiers: "z",
+                modifierFlags: [.command, .shift]
+            )
+        )
+        XCTAssertEqual(window.test_annotationCount, 0)
+    }
+
+    func testCommandCopyAndSaveDispatchThroughVisibleToolbarButtons() {
+        let shortcuts: [(key: String, keyCode: UInt16, action: CaptureCompletionAction)] = [
+            ("c", 8, .copy),
+            ("s", 1, .save),
+        ]
+
+        for shortcut in shortcuts {
+            var result: CaptureSelectionResult?
+            let completion = expectation(description: "\(shortcut.action) shortcut")
+            let window = SelectionOverlayWindow(backgroundImage: nil) { selectionResult in
+                result = selectionResult
+                completion.fulfill()
+            }
+            window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+
+            window.test_keyDown(
+                keyCode: shortcut.keyCode,
+                charactersIgnoringModifiers: shortcut.key,
+                modifierFlags: [.command]
+            )
+            wait(for: [completion], timeout: 0.5)
+
+            XCTAssertEqual(result?.action, shortcut.action)
+        }
+    }
+
+    func testNormalCaptureEscapeCancelsSelection() {
+        var didComplete = false
+        var result: CaptureSelectionResult?
+        let completion = expectation(description: "cancel shortcut")
+        let window = SelectionOverlayWindow(backgroundImage: nil) { selectionResult in
+            didComplete = true
+            result = selectionResult
+            completion.fulfill()
+        }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+
+        window.test_keyDown(keyCode: 53, charactersIgnoringModifiers: "\u{1b}")
+        wait(for: [completion], timeout: 0.5)
+
+        XCTAssertTrue(didComplete)
+        XCTAssertNil(result)
+    }
+
+    func testActivePrimaryToolsRequireTwoEscapesToCloseCapture() {
+        for key in ["s", "a", "b", "h", "p", "m", "t", "n", "g", "e"] {
+            var completions = 0
+            var result: CaptureSelectionResult?
+            let completion = expectation(description: "cancel after leaving \(key) tool")
+            let window = SelectionOverlayWindow(backgroundImage: nil) {
+                completions += 1
+                result = $0
+                completion.fulfill()
+            }
+            window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+            window.test_keyDown(keyCode: 0, charactersIgnoringModifiers: key)
+
+            window.test_keyDown(keyCode: 53, charactersIgnoringModifiers: "\u{1b}")
+            XCTAssertEqual(completions, 0, key)
+
+            window.test_keyDown(keyCode: 53, charactersIgnoringModifiers: "\u{1b}")
+            wait(for: [completion], timeout: 0.5)
+            XCTAssertEqual(completions, 1, key)
+            XCTAssertNil(result, key)
+        }
+    }
+
+    @MainActor
+    func testPinnedImageEditorBaseEscapeFinishesEditingWithoutClosingPin() {
+        let controller = PinnedImageWindowController(
+            image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+            screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
+        )
+        var closeCount = 0
+        controller.onClose = { closeCount += 1 }
+        controller.show()
+        controller.test_showEditingToolbar()
+
+        controller.test_editingOverlayKeyDown(
+            keyCode: 53,
+            charactersIgnoringModifiers: "\u{1b}",
+            modifierFlags: []
+        )
+
+        XCTAssertEqual(closeCount, 0)
+        XCTAssertFalse(controller.test_isToolbarVisible)
+        XCTAssertEqual(controller.window?.isVisible, true)
+        controller.window?.close()
+    }
+
+    @MainActor
+    func testPinnedImageActivePrimaryToolsEscapeThenFinishEditing() {
+        for key in ["s", "a", "b", "h", "p", "m", "t", "n", "g", "e"] {
+            let controller = PinnedImageWindowController(
+                image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+                screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
+            )
+            var hideCount = 0
+            var closeCount = 0
+            controller.onHide = { hideCount += 1 }
+            controller.onClose = { closeCount += 1 }
+            controller.show()
+            controller.test_showEditingToolbar()
+            controller.test_editingOverlayKeyDown(
+                keyCode: 0,
+                charactersIgnoringModifiers: key,
+                modifierFlags: []
+            )
+
+            controller.test_editingOverlayKeyDown(
+                keyCode: 53,
+                charactersIgnoringModifiers: "\u{1b}",
+                modifierFlags: []
+            )
+            XCTAssertEqual(closeCount, 0, key)
+            XCTAssertTrue(controller.test_isToolbarVisible, key)
+
+            controller.test_editingOverlayKeyDown(
+                keyCode: 53,
+                charactersIgnoringModifiers: "\u{1b}",
+                modifierFlags: []
+            )
+            XCTAssertEqual(closeCount, 0, key)
+            XCTAssertFalse(controller.test_isToolbarVisible, key)
+            XCTAssertEqual(controller.window?.isVisible, true, key)
+            controller.test_keyDown(keyCode: 53)
+            XCTAssertEqual(hideCount, 1, key)
+            XCTAssertEqual(closeCount, 0, key)
+            XCTAssertEqual(controller.window?.isVisible, false, key)
+            controller.window?.close()
+        }
+    }
+
+    @MainActor
+    func testPinnedImageEditorEscapeFinishBakesAnnotations() throws {
+        let controller = PinnedImageWindowController(
+            image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+            screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
+        )
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = .red
+        style.fillEnabled = true
+        style.fillColor = .red
+        let rectangle = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 20, y: 20, width: 50, height: 30),
+            style: style
+        )
+        controller.show()
+        controller.test_showEditingToolbar()
+        controller.test_setEditingOverlayState(annotations: [rectangle], eraserMasks: [])
+
+        controller.test_editingOverlayKeyDown(
+            keyCode: 53,
+            charactersIgnoringModifiers: "\u{1b}",
+            modifierFlags: []
+        )
+
+        let pixel = try XCTUnwrap(rgbaRenderPixel(in: controller.image, at: NSPoint(x: 30, y: 30)))
+        XCTAssertGreaterThan(pixel.red, 220)
+        XCTAssertLessThan(pixel.green, 40)
+        XCTAssertLessThan(pixel.blue, 40)
+        XCTAssertFalse(controller.test_isToolbarVisible)
+        controller.window?.close()
+    }
+
+    func testMonitoredKeyEventIsOwnedOnlyByItsPinnedEditorWindow() throws {
+        let selection = NSRect(x: 40, y: 40, width: 240, height: 160)
+        let firstWindow = SelectionOverlayWindow(
+            backgroundImage: nil,
+            configuration: .pinnedImageEditor(selectionRect: selection)
+        ) { _ in }
+        let secondWindow = SelectionOverlayWindow(
+            backgroundImage: nil,
+            configuration: .pinnedImageEditor(selectionRect: selection)
+        ) { _ in }
+        firstWindow.orderFront(nil)
+        secondWindow.orderFront(nil)
+        defer {
+            firstWindow.orderOut(nil)
+            secondWindow.orderOut(nil)
+        }
+
+        let event = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: firstWindow.windowNumber,
+            context: nil,
+            characters: "s",
+            charactersIgnoringModifiers: "s",
+            isARepeat: false,
+            keyCode: 1
+        ))
+
+        XCTAssertTrue(event.window === firstWindow)
+        XCTAssertTrue(firstWindow.test_ownsMonitoredKeyEvent(event))
+        XCTAssertFalse(secondWindow.test_ownsMonitoredKeyEvent(event))
+    }
+
+    func testMonitoredToolShortcutChangesOnlyItsTargetPinnedEditor() throws {
+        let selection = NSRect(x: 40, y: 40, width: 240, height: 160)
+        let targetWindow = SelectionOverlayWindow(
+            backgroundImage: nil,
+            configuration: .pinnedImageEditor(selectionRect: selection)
+        ) { _ in }
+        let otherWindow = SelectionOverlayWindow(
+            backgroundImage: nil,
+            configuration: .pinnedImageEditor(selectionRect: selection)
+        ) { _ in }
+        targetWindow.orderFront(nil)
+        otherWindow.orderFront(nil)
+        defer {
+            targetWindow.orderOut(nil)
+            otherWindow.orderOut(nil)
+        }
+
+        let event = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: targetWindow.windowNumber,
+            context: nil,
+            characters: "s",
+            charactersIgnoringModifiers: "s",
+            isARepeat: false,
+            keyCode: 1
+        ))
+
+        XCTAssertNotNil(otherWindow.test_handleMonitoredKeyDown(event))
+        XCTAssertFalse(otherWindow.test_toolbarButtonIsSelected(.rectangle))
+        XCTAssertNil(targetWindow.test_handleMonitoredKeyDown(event))
+        XCTAssertTrue(targetWindow.test_toolbarButtonIsSelected(.rectangle))
+        XCTAssertFalse(otherWindow.test_toolbarButtonIsSelected(.rectangle))
+    }
+
+    func testInstalledMonitorHandlerKeepsConsumedShortcutNil() throws {
+        let selection = NSRect(x: 40, y: 40, width: 240, height: 160)
+        let window = SelectionOverlayWindow(
+            backgroundImage: nil,
+            configuration: .pinnedImageEditor(selectionRect: selection)
+        ) { _ in }
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+
+        let event = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            characters: "s",
+            charactersIgnoringModifiers: "s",
+            isARepeat: false,
+            keyCode: 1
+        ))
+
+        XCTAssertNil(window.test_handleInstalledKeyMonitorEvent(event))
+        XCTAssertTrue(window.test_toolbarButtonIsSelected(.rectangle))
+    }
+
+    func testWindowlessMonitoredKeyEventIsRejectedByNonKeyPinnedEditors() throws {
+        let selection = NSRect(x: 40, y: 40, width: 240, height: 160)
+        let firstWindow = SelectionOverlayWindow(
+            backgroundImage: nil,
+            configuration: .pinnedImageEditor(selectionRect: selection)
+        ) { _ in }
+        let secondWindow = SelectionOverlayWindow(
+            backgroundImage: nil,
+            configuration: .pinnedImageEditor(selectionRect: selection)
+        ) { _ in }
+
+        let event = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "s",
+            charactersIgnoringModifiers: "s",
+            isARepeat: false,
+            keyCode: 1
+        ))
+
+        XCTAssertNil(event.window)
+        XCTAssertFalse(firstWindow.isKeyWindow)
+        XCTAssertFalse(secondWindow.isKeyWindow)
+        XCTAssertFalse(firstWindow.test_ownsMonitoredKeyEvent(event))
+        XCTAssertFalse(secondWindow.test_ownsMonitoredKeyEvent(event))
+    }
+
+    func testWindowlessMonitoredToolShortcutIsHandledOnlyByKeyPinnedEditor() throws {
+        let selection = NSRect(x: 40, y: 40, width: 240, height: 160)
+        let keyWindow = SelectionOverlayWindow(
+            backgroundImage: nil,
+            configuration: .pinnedImageEditor(selectionRect: selection)
+        ) { _ in }
+        let otherWindow = SelectionOverlayWindow(
+            backgroundImage: nil,
+            configuration: .pinnedImageEditor(selectionRect: selection)
+        ) { _ in }
+
+        let event = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "s",
+            charactersIgnoringModifiers: "s",
+            isARepeat: false,
+            keyCode: 1
+        ))
+
+        XCTAssertNil(event.window)
+        XCTAssertNotNil(otherWindow.test_handleMonitoredKeyDown(
+            event,
+            treatingWindowlessEventAsKey: false
+        ))
+        XCTAssertFalse(otherWindow.test_toolbarButtonIsSelected(.rectangle))
+        XCTAssertNil(keyWindow.test_handleMonitoredKeyDown(
+            event,
+            treatingWindowlessEventAsKey: true
+        ))
+        XCTAssertTrue(keyWindow.test_toolbarButtonIsSelected(.rectangle))
+        XCTAssertFalse(otherWindow.test_toolbarButtonIsSelected(.rectangle))
+    }
+
+    func testPinnedImageGeometryFitsAndScalesWithoutChangingAspectRatio() {
+        let visibleFrame = NSRect(x: 0, y: 0, width: 1000, height: 700)
+
+        let fitted = PinnedImageWindowGeometry.fittedImageSize(
+            imageSize: NSSize(width: 2000, height: 1000),
+            visibleFrame: visibleFrame
+        )
+        XCTAssertEqual(fitted.width, 800, accuracy: 0.1)
+        XCTAssertEqual(fitted.height, 400, accuracy: 0.1)
+
+        let tiny = PinnedImageWindowGeometry.fittedImageSize(
+            imageSize: NSSize(width: 12, height: 6),
+            visibleFrame: visibleFrame
+        )
+        XCTAssertEqual(max(tiny.width, tiny.height), PinnedImageWindowGeometry.minLongSide, accuracy: 0.1)
+        XCTAssertEqual(tiny.width / tiny.height, 2, accuracy: 0.01)
+
+        let scaled = PinnedImageWindowGeometry.scaledSize(
+            currentSize: NSSize(width: 200, height: 100),
+            aspectRatio: 2,
+            scaleFactor: 1.5,
+            visibleFrame: visibleFrame
+        )
+        XCTAssertEqual(scaled.width, 300, accuracy: 0.1)
+        XCTAssertEqual(scaled.height, 150, accuracy: 0.1)
+
+        let clamped = PinnedImageWindowGeometry.scaledSize(
+            currentSize: NSSize(width: 200, height: 100),
+            aspectRatio: 2,
+            scaleFactor: 0.1,
+            visibleFrame: visibleFrame
+        )
+        XCTAssertEqual(max(clamped.width, clamped.height), PinnedImageWindowGeometry.minLongSide, accuracy: 0.1)
+    }
+
+    @MainActor
+    func testPinnedImageWindowUsesSourceFrameBlueShadowAndKeyboardClose() throws {
+        let sourceRect = NSRect(x: 120, y: 220, width: 160, height: 90)
+        let shadowOutset = PinnedImageWindowGeometry.shadowOutset
+        let controller = PinnedImageWindowController(
+            image: solidImage(size: sourceRect.size, color: .white),
+            screenRect: sourceRect
+        )
+        let window = try XCTUnwrap(controller.window)
+
+        XCTAssertEqual(window.frame.origin.x, sourceRect.origin.x - shadowOutset, accuracy: 0.1)
+        XCTAssertEqual(window.frame.origin.y, sourceRect.origin.y - shadowOutset, accuracy: 0.1)
+        XCTAssertEqual(window.frame.size.width, sourceRect.width + shadowOutset * 2, accuracy: 0.1)
+        XCTAssertEqual(window.frame.size.height, sourceRect.height + shadowOutset * 2, accuracy: 0.1)
+        XCTAssertEqual(window.frame.insetBy(dx: shadowOutset, dy: shadowOutset).origin.x, sourceRect.origin.x, accuracy: 0.1)
+        XCTAssertEqual(window.frame.insetBy(dx: shadowOutset, dy: shadowOutset).origin.y, sourceRect.origin.y, accuracy: 0.1)
+        XCTAssertFalse(window.hasShadow)
+        XCTAssertTrue(controller.test_drawsBlueShadow)
+        XCTAssertFalse(controller.test_drawsCloseButton)
+        let rendered = controller.test_renderedContentImage()
+        XCTAssertEqual(rendered.size.width, sourceRect.width + shadowOutset * 2, accuracy: 0.1)
+        XCTAssertEqual(rendered.size.height, sourceRect.height + shadowOutset * 2, accuracy: 0.1)
+
+        let imageRect = NSRect(x: shadowOutset, y: shadowOutset, width: sourceRect.width, height: sourceRect.height)
+        XCTAssertNotNil(try firstPixel(in: rendered, rect: imageRect.insetBy(dx: 2, dy: 2)) { pixel in
+            pixel.red > 245 && pixel.green > 245 && pixel.blue > 245 && pixel.alpha > 245
+        })
+        XCTAssertNil(try firstPixel(in: rendered, rect: imageRect.insetBy(dx: 4, dy: 4)) { pixel in
+            pixel.blue > pixel.red && pixel.blue > pixel.green && pixel.alpha > 40
+        })
+
+        let topGlowPixel = try XCTUnwrap(firstPixel(in: rendered, rect: NSRect(x: imageRect.minX + 12, y: imageRect.maxY + 2, width: imageRect.width - 24, height: 8)) { pixel in
+            pixel.blue > pixel.red && pixel.blue > pixel.green && pixel.alpha > 30
+        })
+        let bottomGlowPixel = try XCTUnwrap(firstPixel(in: rendered, rect: NSRect(x: imageRect.minX + 12, y: 8, width: imageRect.width - 24, height: 8)) { pixel in
+            pixel.blue > pixel.red && pixel.blue > pixel.green && pixel.alpha > 30
+        })
+        let leftGlowPixel = try XCTUnwrap(firstPixel(in: rendered, rect: NSRect(x: 8, y: imageRect.minY + 12, width: 8, height: imageRect.height - 24)) { pixel in
+            pixel.blue > pixel.red && pixel.blue > pixel.green && pixel.alpha > 30
+        })
+        let rightGlowPixel = try XCTUnwrap(firstPixel(in: rendered, rect: NSRect(x: imageRect.maxX + 2, y: imageRect.minY + 12, width: 8, height: imageRect.height - 24)) { pixel in
+            pixel.blue > pixel.red && pixel.blue > pixel.green && pixel.alpha > 30
+        })
+        XCTAssertGreaterThan(topGlowPixel.blue, topGlowPixel.red)
+        XCTAssertGreaterThan(bottomGlowPixel.blue, bottomGlowPixel.red)
+        XCTAssertGreaterThan(leftGlowPixel.blue, leftGlowPixel.red)
+        XCTAssertGreaterThan(rightGlowPixel.blue, rightGlowPixel.red)
+
+        var closeCount = 0
+        controller.onClose = {
+            closeCount += 1
+        }
+        controller.test_keyDown(keyCode: 117)
+        XCTAssertEqual(closeCount, 1)
+    }
+
+    @MainActor
+    func testPinnedImageContextMenuUsesRequestedOrder() throws {
+        let controller = PinnedImageWindowController(
+            image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+            screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
+        )
+
+        XCTAssertEqual(controller.test_contextMenuTitles, [
+            "显示工具条 (⇧)",
+            "复制图片",
+            "保存图片",
+            nil,
+            "重置大小",
+            "透明度",
+            "置顶",
+            nil,
+            "关闭",
+            "关闭全部贴图",
+        ])
+    }
+
+    @MainActor
+    func testPinnedImageContextMenuUsesApprovedKeyboardEquivalents() throws {
+        let controller = PinnedImageWindowController(
+            image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+            screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
+        )
+        let menu = controller.makeContextMenu()
+
+        let copy = try XCTUnwrap(menu.items.first { $0.title == "复制图片" })
+        XCTAssertEqual(copy.keyEquivalent, "c")
+        XCTAssertEqual(copy.keyEquivalentModifierMask, [.command])
+
+        let save = try XCTUnwrap(menu.items.first { $0.title == "保存图片" })
+        XCTAssertEqual(save.keyEquivalent, "s")
+        XCTAssertEqual(save.keyEquivalentModifierMask, [.command])
+
+        let toolbar = try XCTUnwrap(menu.items.first { $0.title == "显示工具条 (⇧)" })
+        XCTAssertEqual(toolbar.keyEquivalent, "")
+        XCTAssertEqual(toolbar.keyEquivalentModifierMask, [])
+
+        let reset = try XCTUnwrap(menu.items.first { $0.title == "重置大小" })
+        XCTAssertEqual(reset.keyEquivalent, "r")
+        XCTAssertEqual(reset.keyEquivalentModifierMask, [.command])
+
+        let alwaysOnTop = try XCTUnwrap(menu.items.first { $0.title == "置顶" })
+        XCTAssertEqual(alwaysOnTop.keyEquivalent, "t")
+        XCTAssertEqual(alwaysOnTop.keyEquivalentModifierMask, [.command])
+
+        let close = try XCTUnwrap(menu.items.first { $0.title == "关闭" })
+        XCTAssertEqual(close.keyEquivalent, "w")
+        XCTAssertEqual(close.keyEquivalentModifierMask, [.command])
+
+        let closeAll = try XCTUnwrap(menu.items.first { $0.title == "关闭全部贴图" })
+        XCTAssertEqual(closeAll.keyEquivalent, "w")
+        XCTAssertEqual(closeAll.keyEquivalentModifierMask, [.command, .shift])
+    }
+
+    @MainActor
+    func testPinnedImageKeyboardCopyAndSaveReuseImageActionsWhenToolbarIsHidden() {
+        let controller = PinnedImageWindowController(
+            image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+            screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
+        )
+        var actions: [CaptureCompletionAction] = []
+        controller.test_setImageActionHandler { actions.append($0) }
+
+        controller.test_keyDown(
+            keyCode: 8,
+            charactersIgnoringModifiers: "c",
+            modifierFlags: [.command]
+        )
+        controller.test_keyDown(
+            keyCode: 1,
+            charactersIgnoringModifiers: "s",
+            modifierFlags: [.command]
+        )
+
+        XCTAssertEqual(actions, [.copy, .save])
+        XCTAssertFalse(controller.test_isToolbarVisible)
+    }
+
+    @MainActor
+    func testPinnedImageEditorKeyboardCopyAndSaveReuseOverlayCompletionPath() {
+        let shortcuts: [(keyCode: UInt16, key: String, action: CaptureCompletionAction)] = [
+            (8, "c", .copy),
+            (1, "s", .save),
+        ]
+
+        for shortcut in shortcuts {
+            let controller = PinnedImageWindowController(
+                image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+                screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
+            )
+            var actions: [CaptureCompletionAction] = []
+            controller.test_setImageActionHandler { actions.append($0) }
+            controller.test_showEditingToolbar()
+
+            controller.test_editingOverlayKeyDown(
+                keyCode: shortcut.keyCode,
+                charactersIgnoringModifiers: shortcut.key,
+                modifierFlags: [.command]
+            )
+
+            XCTAssertEqual(actions, [shortcut.action])
+            XCTAssertFalse(controller.test_isToolbarVisible)
+        }
+    }
+
+    @MainActor
+    func testPinnedImageKeyboardCloseUsesExactModifiersWhenToolbarIsHidden() {
+        let current = PinnedImageWindowController(
+            image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+            screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
+        )
+        let other = PinnedImageWindowController(
+            image: solidImage(size: NSSize(width: 100, height: 70), color: .white),
+            screenRect: NSRect(x: 220, y: 50, width: 100, height: 70)
+        )
+        var currentCloseCount = 0
+        var otherCloseCount = 0
+        current.onClose = { currentCloseCount += 1 }
+        other.onClose = { otherCloseCount += 1 }
+
+        current.test_keyDown(
+            keyCode: 13,
+            charactersIgnoringModifiers: "w",
+            modifierFlags: [.command]
+        )
+
+        XCTAssertEqual(currentCloseCount, 1)
+        XCTAssertEqual(otherCloseCount, 0)
+        other.window?.close()
+    }
+
+    @MainActor
+    func testPinnedImageKeyboardCloseAllUsesCommandShiftWAndLeavesOtherWindowsOpen() {
+        let first = PinnedImageWindowController(
+            image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+            screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
+        )
+        let second = PinnedImageWindowController(
+            image: solidImage(size: NSSize(width: 100, height: 70), color: .white),
+            screenRect: NSRect(x: 220, y: 50, width: 100, height: 70)
+        )
+        let ordinaryWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 80, height: 60),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        ordinaryWindow.isReleasedWhenClosed = false
+        ordinaryWindow.orderFront(nil)
+        defer { ordinaryWindow.close() }
+        var firstCloseCount = 0
+        var secondCloseCount = 0
+        first.onClose = { firstCloseCount += 1 }
+        second.onClose = { secondCloseCount += 1 }
+
+        first.test_keyDown(
+            keyCode: 13,
+            charactersIgnoringModifiers: "w",
+            modifierFlags: [.command, .shift]
+        )
+
+        XCTAssertEqual(firstCloseCount, 1)
+        XCTAssertEqual(secondCloseCount, 1)
+        XCTAssertTrue(ordinaryWindow.isVisible)
+    }
+
+    @MainActor
+    func testPinnedImageKeyboardCloseRejectsInvalidModifiersWhenToolbarIsHidden() {
+        let invalidModifiers: [(name: String, flags: NSEvent.ModifierFlags)] = [
+            ("command-option", [.command, .option]),
+            ("command-control", [.command, .control]),
+            ("shift", [.shift]),
+            ("command-shift-option", [.command, .shift, .option]),
+        ]
+
+        for invalid in invalidModifiers {
+            let controller = PinnedImageWindowController(
+                image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+                screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
+            )
+            var closeCount = 0
+            controller.onClose = { closeCount += 1 }
+
+            controller.test_keyDown(
+                keyCode: 13,
+                charactersIgnoringModifiers: "w",
+                modifierFlags: invalid.flags
+            )
+
+            XCTAssertEqual(closeCount, 0, invalid.name)
+            controller.window?.close()
+        }
+    }
+
+    @MainActor
+    func testPinnedImageEditorKeyboardCloseRoutesToOwningController() {
+        let current = PinnedImageWindowController(
+            image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+            screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
+        )
+        let other = PinnedImageWindowController(
+            image: solidImage(size: NSSize(width: 100, height: 70), color: .white),
+            screenRect: NSRect(x: 220, y: 50, width: 100, height: 70)
+        )
+        var currentCloseCount = 0
+        var otherCloseCount = 0
+        current.onClose = { currentCloseCount += 1 }
+        other.onClose = { otherCloseCount += 1 }
+        current.test_showEditingToolbar()
+
+        current.test_editingOverlayKeyDown(
+            keyCode: 13,
+            charactersIgnoringModifiers: "w",
+            modifierFlags: [.command]
+        )
+
+        XCTAssertEqual(currentCloseCount, 1)
+        XCTAssertEqual(otherCloseCount, 0)
+        other.window?.close()
+    }
+
+    @MainActor
+    func testPinnedImageEditorKeyboardCloseAllRoutesToPinnedControllers() {
+        let first = PinnedImageWindowController(
+            image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+            screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
+        )
+        let second = PinnedImageWindowController(
+            image: solidImage(size: NSSize(width: 100, height: 70), color: .white),
+            screenRect: NSRect(x: 220, y: 50, width: 100, height: 70)
+        )
+        var firstCloseCount = 0
+        var secondCloseCount = 0
+        first.onClose = { firstCloseCount += 1 }
+        second.onClose = { secondCloseCount += 1 }
+        first.test_showEditingToolbar()
+
+        first.test_editingOverlayKeyDown(
+            keyCode: 13,
+            charactersIgnoringModifiers: "w",
+            modifierFlags: [.command, .shift]
+        )
+
+        XCTAssertEqual(firstCloseCount, 1)
+        XCTAssertEqual(secondCloseCount, 1)
+    }
+
+    @MainActor
+    func testPinnedImageEditorKeyboardCloseRejectsInvalidModifiers() {
+        let invalidModifiers: [(name: String, flags: NSEvent.ModifierFlags)] = [
+            ("command-option", [.command, .option]),
+            ("command-control", [.command, .control]),
+            ("shift", [.shift]),
+            ("command-shift-option", [.command, .shift, .option]),
+        ]
+
+        for invalid in invalidModifiers {
+            let controller = PinnedImageWindowController(
+                image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+                screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
+            )
+            var closeCount = 0
+            controller.onClose = { closeCount += 1 }
+            controller.test_showEditingToolbar()
+
+            controller.test_editingOverlayKeyDown(
+                keyCode: 13,
+                charactersIgnoringModifiers: "w",
+                modifierFlags: invalid.flags
+            )
+
+            XCTAssertEqual(closeCount, 0, invalid.name)
+            XCTAssertTrue(controller.test_isToolbarVisible, invalid.name)
+            controller.window?.close()
+        }
+    }
+
+    @MainActor
+    func testPinnedImageEscapeHidesWithoutClosingWhenToolbarIsHidden() {
+        let controller = PinnedImageWindowController(
+            image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+            screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
+        )
+        var hideCount = 0
+        var closeCount = 0
+        controller.onHide = { hideCount += 1 }
+        controller.onClose = { closeCount += 1 }
+        controller.show()
+
+        controller.test_keyDown(keyCode: 53)
+
+        XCTAssertEqual(hideCount, 1)
+        XCTAssertEqual(closeCount, 0)
+        XCTAssertEqual(controller.window?.isVisible, false)
+        controller.window?.close()
+    }
+
+    @MainActor
+    func testPinnedImageDeleteKeysStillCloseWhenToolbarIsHidden() {
+        for keyCode in [UInt16(51), UInt16(117)] {
+            let controller = PinnedImageWindowController(
+                image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+                screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
+            )
+            var hideCount = 0
+            var closeCount = 0
+            controller.onHide = { hideCount += 1 }
+            controller.onClose = { closeCount += 1 }
+
+            controller.test_keyDown(keyCode: keyCode)
+
+            XCTAssertEqual(hideCount, 0, "keyCode=\(keyCode)")
+            XCTAssertEqual(closeCount, 1, "keyCode=\(keyCode)")
+        }
+    }
+
+    @MainActor
+    func testPinnedImageContextMenuTogglesToolbarVisibilityAndState() throws {
+        let controller = PinnedImageWindowController(
+            image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+            screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
+        )
+
+        XCTAssertFalse(controller.test_isToolbarVisible)
+        XCTAssertEqual(controller.test_contextMenuToolbarItemState, .off)
+
+        controller.test_toggleEditingToolbarFromMenu()
+
+        XCTAssertTrue(controller.test_isToolbarVisible)
+        XCTAssertEqual(controller.test_contextMenuToolbarItemState, .on)
+
+        controller.test_toggleEditingToolbarFromMenu()
+
+        XCTAssertFalse(controller.test_isToolbarVisible)
+        XCTAssertEqual(controller.test_contextMenuToolbarItemState, .off)
+    }
+
+    @MainActor
+    func testPinnedImageShiftReleaseTogglesToolbarOnAndOff() {
+        let controller = PinnedImageWindowController(
+            image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+            screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
+        )
+
+        controller.test_flagsChanged(modifierFlags: [.shift])
+        XCTAssertFalse(controller.test_isToolbarVisible)
+
+        controller.test_flagsChanged(modifierFlags: [])
+        XCTAssertTrue(controller.test_isToolbarVisible)
+
+        controller.test_flagsChanged(modifierFlags: [.shift])
+        controller.test_flagsChanged(modifierFlags: [])
+        XCTAssertFalse(controller.test_isToolbarVisible)
+    }
+
+    @MainActor
+    func testPinnedImageShiftReleaseHidesToolbarWhenEditingOverlayOwnsFocus() {
+        let controller = PinnedImageWindowController(
+            image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+            screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
+        )
+        controller.test_showEditingToolbar()
+        XCTAssertTrue(controller.test_isToolbarVisible)
+
+        controller.test_editingOverlayFlagsChanged(modifierFlags: [.shift])
+        XCTAssertTrue(controller.test_isToolbarVisible)
+
+        controller.test_editingOverlayFlagsChanged(modifierFlags: [])
+        XCTAssertFalse(controller.test_isToolbarVisible)
+    }
+
+    @MainActor
+    func testPinnedImageEditingOverlayShiftShortcutCancelsForMixedModifiers() {
+        let controller = PinnedImageWindowController(
+            image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+            screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
+        )
+        controller.test_showEditingToolbar()
+
+        controller.test_editingOverlayFlagsChanged(modifierFlags: [.shift])
+        controller.test_editingOverlayFlagsChanged(modifierFlags: [.shift, .option])
+        controller.test_editingOverlayFlagsChanged(modifierFlags: [])
+
+        XCTAssertTrue(controller.test_isToolbarVisible)
+    }
+
+    @MainActor
+    func testPinnedImageShiftShortcutCancelsWhenCombinedWithOtherInput() {
+        let invalidSequences: [(name: String, perform: (PinnedImageWindowController) -> Void)] = [
+            ("other modifier", { controller in
+                controller.test_flagsChanged(modifierFlags: [.shift])
+                controller.test_flagsChanged(modifierFlags: [.shift, .option])
+                controller.test_flagsChanged(modifierFlags: [])
+            }),
+            ("keyboard", { controller in
+                controller.test_flagsChanged(modifierFlags: [.shift])
+                controller.test_keyDown(
+                    keyCode: 0,
+                    charactersIgnoringModifiers: "a",
+                    modifierFlags: [.shift]
+                )
+                controller.test_flagsChanged(modifierFlags: [])
+            }),
+            ("mouse", { controller in
+                controller.test_flagsChanged(modifierFlags: [.shift])
+                controller.test_mouseDownForShiftShortcutCancellation()
+                controller.test_flagsChanged(modifierFlags: [])
+            }),
+        ]
+
+        for sequence in invalidSequences {
+            let controller = PinnedImageWindowController(
+                image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+                screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
+            )
+
+            sequence.perform(controller)
+
+            XCTAssertFalse(controller.test_isToolbarVisible, sequence.name)
+            controller.window?.close()
+        }
+    }
+
+    @MainActor
+    func testPinnedImageShiftShortcutDoesNotStartWhileDragging() throws {
+        let controller = PinnedImageWindowController(
+            image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+            screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
+        )
+        let mouseDown = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseDown,
+            location: NSPoint(x: 30, y: 30),
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: controller.window?.windowNumber ?? 0,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 1
+        ))
+        controller.window?.contentView?.mouseDown(with: mouseDown)
+
+        controller.test_flagsChanged(modifierFlags: [.shift])
+        controller.test_flagsChanged(modifierFlags: [])
+
+        let mouseUp = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseUp,
+            location: NSPoint(x: 42, y: 36),
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: controller.window?.windowNumber ?? 0,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 1
+        ))
+        controller.window?.contentView?.mouseUp(with: mouseUp)
+
+        XCTAssertFalse(controller.test_isToolbarVisible)
+    }
+
+    @MainActor
+    func testPinnedImageResetShortcutWorksWithToolbarHiddenAndVisible() {
+        for showsToolbar in [false, true] {
+            let initialFrame = NSRect(x: 40, y: 50, width: 120, height: 80)
+            let controller = PinnedImageWindowController(
+                image: solidImage(size: initialFrame.size, color: .white),
+                screenRect: initialFrame
+            )
+            if showsToolbar {
+                controller.test_showEditingToolbar()
+            }
+            controller.scale(by: 1.5)
+            XCTAssertNotEqual(controller.test_imageFrameInScreen.size, initialFrame.size)
+
+            if showsToolbar {
+                controller.test_editingOverlayKeyDown(
+                    keyCode: 15,
+                    charactersIgnoringModifiers: "r",
+                    modifierFlags: [.command]
+                )
+            } else {
+                controller.test_keyDown(
+                    keyCode: 15,
+                    charactersIgnoringModifiers: "r",
+                    modifierFlags: [.command]
+                )
+            }
+
+            XCTAssertEqual(controller.test_imageFrameInScreen, initialFrame)
+            if showsToolbar {
+                XCTAssertEqual(controller.test_editingOverlayImageFrameInScreen, initialFrame)
+            }
+            controller.window?.close()
+        }
+    }
+
+    @MainActor
+    func testPinnedImageResetMapsEraserMaskWithAnnotationCoordinates() throws {
+        let sourceRect = NSRect(x: 120, y: 220, width: 160, height: 90)
+        let controller = PinnedImageWindowController(
+            image: solidImage(size: sourceRect.size, color: .white),
+            screenRect: sourceRect
+        )
+        controller.test_showEditingToolbar()
+        controller.test_scrollEditingOverlay(deltaY: 8)
+
+        let annotation = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 20, y: 15, width: 60, height: 40),
+            style: CaptureAnnotationStyle()
+        )
+        let mask = EraserMask(
+            rect: NSRect(x: 30, y: 20, width: 15, height: 10),
+            affectedAnnotationIDs: [annotation.id]
+        )
+        controller.test_setEditingOverlayState(annotations: [annotation], eraserMasks: [mask])
+        let beforeAnnotation = try XCTUnwrap(controller.test_editingOverlayAnnotation(at: 0))
+
+        controller.test_editingOverlayKeyDown(
+            keyCode: 15,
+            charactersIgnoringModifiers: "r",
+            modifierFlags: [.command]
+        )
+
+        let afterAnnotation = try XCTUnwrap(controller.test_editingOverlayAnnotation(at: 0))
+        let afterMask = try XCTUnwrap(controller.test_editingOverlayEraserMask(at: 0))
+        let delta = NSPoint(
+            x: afterAnnotation.rect.minX - beforeAnnotation.rect.minX,
+            y: afterAnnotation.rect.minY - beforeAnnotation.rect.minY
+        )
+        XCTAssertNotEqual(delta, .zero)
+        XCTAssertEqual(afterMask.rect.minX, mask.rect.minX + delta.x, accuracy: 0.001)
+        XCTAssertEqual(afterMask.rect.minY, mask.rect.minY + delta.y, accuracy: 0.001)
+        XCTAssertEqual(afterMask.rect.size, mask.rect.size)
+        XCTAssertEqual(afterMask.id, mask.id)
+        XCTAssertEqual(afterMask.affectedAnnotationIDs, mask.affectedAnnotationIDs)
+    }
+
+    @MainActor
+    func testPinnedImageAlwaysOnTopShortcutSynchronizesEditingOverlayLevel() throws {
+        for showsToolbar in [false, true] {
+            let controller = PinnedImageWindowController(
+                image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+                screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
+            )
+            if showsToolbar {
+                controller.test_showEditingToolbar()
+                XCTAssertEqual(controller.test_editingOverlayWindowLevel, .floating)
+            }
+            XCTAssertEqual(
+                try XCTUnwrap(controller.makeContextMenu().items.first { $0.title == "置顶" }).state,
+                .on
+            )
+
+            let sendShortcut = {
+                if showsToolbar {
+                    controller.test_editingOverlayKeyDown(
+                        keyCode: 17,
+                        charactersIgnoringModifiers: "t",
+                        modifierFlags: [.command]
+                    )
+                } else {
+                    controller.test_keyDown(
+                        keyCode: 17,
+                        charactersIgnoringModifiers: "t",
+                        modifierFlags: [.command]
+                    )
+                }
+            }
+            sendShortcut()
+
+            XCTAssertEqual(controller.test_windowLevel, .normal)
+            XCTAssertEqual(
+                try XCTUnwrap(controller.makeContextMenu().items.first { $0.title == "置顶" }).state,
+                .off
+            )
+            if showsToolbar {
+                XCTAssertEqual(controller.test_editingOverlayWindowLevel, .normal)
+            }
+
+            sendShortcut()
+            XCTAssertEqual(controller.test_windowLevel, .floating)
+            XCTAssertEqual(
+                try XCTUnwrap(controller.makeContextMenu().items.first { $0.title == "置顶" }).state,
+                .on
+            )
+            if showsToolbar {
+                XCTAssertEqual(controller.test_editingOverlayWindowLevel, .floating)
+            }
+            controller.window?.close()
+        }
+    }
+
+    @MainActor
+    func testPinnedImageEditingOverlayInheritsCurrentWindowLevelWhenShown() {
+        let controller = PinnedImageWindowController(
+            image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+            screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
+        )
+        controller.test_keyDown(
+            keyCode: 17,
+            charactersIgnoringModifiers: "t",
+            modifierFlags: [.command]
+        )
+        XCTAssertEqual(controller.test_windowLevel, .normal)
+
+        controller.test_showEditingToolbar()
+
+        XCTAssertEqual(controller.test_editingOverlayWindowLevel, .normal)
+        controller.window?.close()
+    }
+
+    @MainActor
+    func testPinnedImageResetAndAlwaysOnTopShortcutsRequireExactModifiers() {
+        let invalidShortcuts: [(keyCode: UInt16, key: String, modifiers: NSEvent.ModifierFlags)] = [
+            (15, "r", [.command, .shift]),
+            (15, "r", [.command, .option]),
+            (17, "t", [.command, .shift]),
+            (17, "t", [.command, .control]),
+        ]
+
+        for showsToolbar in [false, true] {
+            for shortcut in invalidShortcuts {
+                let initialFrame = NSRect(x: 40, y: 50, width: 120, height: 80)
+                let controller = PinnedImageWindowController(
+                    image: solidImage(size: initialFrame.size, color: .white),
+                    screenRect: initialFrame
+                )
+                controller.scale(by: 1.5)
+                let scaledFrame = controller.test_imageFrameInScreen
+                if showsToolbar {
+                    controller.test_showEditingToolbar()
+                    controller.test_editingOverlayKeyDown(
+                        keyCode: shortcut.keyCode,
+                        charactersIgnoringModifiers: shortcut.key,
+                        modifierFlags: shortcut.modifiers
+                    )
+                } else {
+                    controller.test_keyDown(
+                        keyCode: shortcut.keyCode,
+                        charactersIgnoringModifiers: shortcut.key,
+                        modifierFlags: shortcut.modifiers
+                    )
+                }
+
+                XCTAssertEqual(controller.test_imageFrameInScreen, scaledFrame)
+                XCTAssertEqual(controller.test_windowLevel, .floating)
+                controller.window?.close()
+            }
+        }
+    }
+
+    @MainActor
+    func testPinnedImageCommandsOnlyAffectOwningPinAndNotCaptureOverlay() {
+        let current = PinnedImageWindowController(
+            image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+            screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
+        )
+        let other = PinnedImageWindowController(
+            image: solidImage(size: NSSize(width: 100, height: 70), color: .white),
+            screenRect: NSRect(x: 240, y: 50, width: 100, height: 70)
+        )
+        current.scale(by: 1.5)
+        other.scale(by: 1.5)
+        let otherFrame = other.test_imageFrameInScreen
+
+        current.test_keyDown(keyCode: 15, charactersIgnoringModifiers: "r", modifierFlags: [.command])
+        current.test_keyDown(keyCode: 17, charactersIgnoringModifiers: "t", modifierFlags: [.command])
+
+        XCTAssertEqual(current.test_imageFrameInScreen, NSRect(x: 40, y: 50, width: 120, height: 80))
+        XCTAssertEqual(current.test_windowLevel, .normal)
+        XCTAssertEqual(other.test_imageFrameInScreen, otherFrame)
+        XCTAssertEqual(other.test_windowLevel, .floating)
+
+        let captureOverlay = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        XCTAssertFalse(captureOverlay.test_handleKeyDown(
+            keyCode: 15,
+            charactersIgnoringModifiers: "r",
+            modifierFlags: [.command]
+        ))
+        XCTAssertFalse(captureOverlay.test_handleKeyDown(
+            keyCode: 17,
+            charactersIgnoringModifiers: "t",
+            modifierFlags: [.command]
+        ))
+        current.window?.close()
+        other.window?.close()
+    }
+
+    @MainActor
+    func testPinnedImageHoverUsesMoveCursorOverImage() throws {
+        let controller = PinnedImageWindowController(
+            image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+            screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
+        )
+
+        XCTAssertTrue(controller.test_hoverCursorAtImageCenterIsMove)
+        XCTAssertTrue(controller.test_hoverCursorAtShadowIsArrow)
+    }
+
+    @MainActor
+    func testPinnedImageEditorOverlayReusesMainToolbarExceptCaptureButtons() throws {
+        let background = solidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let selection = NSRect(x: 120, y: 90, width: 260, height: 160)
+        let window = SelectionOverlayWindow(
+            backgroundImage: background,
+            configuration: .pinnedImageEditor(selectionRect: selection)
+        ) { _ in }
+
+        XCTAssertNotNil(window.test_mainToolbarButtonRect(for: .rectangle))
+        XCTAssertNotNil(window.test_mainToolbarButtonRect(for: .arrow))
+        XCTAssertNotNil(window.test_mainToolbarButtonRect(for: .pen))
+        XCTAssertNotNil(window.test_mainToolbarButtonRect(for: .marker))
+        XCTAssertNotNil(window.test_mainToolbarButtonRect(for: .eyedropper))
+        XCTAssertNotNil(window.test_mainToolbarButtonRect(for: .mosaic))
+        XCTAssertNotNil(window.test_mainToolbarButtonRect(for: .text))
+        XCTAssertNotNil(window.test_mainToolbarButtonRect(for: .number))
+        XCTAssertNotNil(window.test_mainToolbarButtonRect(for: .magnifier))
+        XCTAssertNotNil(window.test_mainToolbarButtonRect(for: .eraser))
+        XCTAssertNotNil(window.test_mainToolbarButtonRect(for: .undo))
+        XCTAssertNotNil(window.test_mainToolbarButtonRect(for: .redo))
+        XCTAssertNotNil(window.test_mainToolbarButtonRect(for: .save))
+        XCTAssertNotNil(window.test_mainToolbarButtonRect(for: .copy))
+        XCTAssertNotNil(window.test_mainToolbarButtonRect(for: .finishEditing))
+
+        XCTAssertNil(window.test_mainToolbarButtonRect(for: .scroll))
+        XCTAssertNil(window.test_mainToolbarButtonRect(for: .cancel))
+        XCTAssertNil(window.test_mainToolbarButtonRect(for: .pin))
+    }
+
+    @MainActor
+    func testPinnedImageEditorOverlayHidesMeasurementAndPassiveColorSampler() throws {
+        let background = solidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let selection = NSRect(x: 120, y: 90, width: 260, height: 160)
+        let window = SelectionOverlayWindow(
+            backgroundImage: background,
+            configuration: .pinnedImageEditor(selectionRect: selection)
+        ) { _ in }
+
+        XCTAssertNil(window.test_measurementControlPoint(.cornerStyle))
+        XCTAssertNil(window.test_measurementControlPoint(.aspectRatioLock))
+        XCTAssertNil(window.test_measurementControlPoint(.refresh))
+
+        window.test_updateColorSampler(at: NSPoint(x: selection.midX, y: selection.midY))
+        XCTAssertNil(window.test_sampledColorHex)
+
+        let eyedropperPoint = try XCTUnwrap(window.test_mainToolbarButtonPoint(for: .eyedropper))
+        window.test_mouseDown(at: eyedropperPoint)
+        window.test_mouseUp(at: eyedropperPoint)
+        window.test_updateColorSampler(at: NSPoint(x: selection.midX, y: selection.midY))
+        XCTAssertNotNil(window.test_sampledColorHex)
+    }
+
+    @MainActor
+    func testPinnedImageEyedropperMeasurementInvalidatesDashedLineArea() throws {
+        let background = solidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let selection = NSRect(x: 120, y: 90, width: 260, height: 160)
+        let window = SelectionOverlayWindow(
+            backgroundImage: background,
+            configuration: .pinnedImageEditor(selectionRect: selection)
+        ) { _ in }
+        let eyedropperPoint = try XCTUnwrap(window.test_mainToolbarButtonPoint(for: .eyedropper))
+        window.test_mouseDown(at: eyedropperPoint)
+        window.test_mouseUp(at: eyedropperPoint)
+
+        let start = NSPoint(x: selection.minX + 36, y: selection.minY + 44)
+        let end = NSPoint(x: selection.maxX - 42, y: selection.maxY - 38)
+        window.test_mouseDown(at: start)
+        window.test_mouseMoved(to: end)
+
+        let line = try XCTUnwrap(window.test_eyedropperMeasurementLine)
+        let invalidationRect = try XCTUnwrap(window.test_eyedropperMeasurementInvalidationRect)
+        XCTAssertTrue(invalidationRect.contains(line.start))
+        XCTAssertTrue(invalidationRect.contains(line.end))
+    }
+
+    @MainActor
+    func testPinnedImageEyedropperMagnifierBuildsVisibleCompositeAtMostOncePerDraw() throws {
+        let background = solidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let selection = NSRect(x: 120, y: 90, width: 260, height: 160)
+        let window = SelectionOverlayWindow(
+            backgroundImage: background,
+            configuration: .pinnedImageEditor(selectionRect: selection)
+        ) { _ in }
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = .systemRed
+        window.test_setAnnotations([
+            CaptureAnnotation(
+                kind: .rectangle,
+                rect: NSRect(x: 24, y: 24, width: 120, height: 72),
+                style: style
+            ),
+        ])
+        let eyedropperPoint = try XCTUnwrap(window.test_mainToolbarButtonPoint(for: .eyedropper))
+        window.test_mouseDown(at: eyedropperPoint)
+        window.test_mouseUp(at: eyedropperPoint)
+        let samplePoint = NSPoint(x: selection.midX, y: selection.midY)
+        window.test_updateColorSampler(at: samplePoint)
+        let lookupsBeforeDraw = window.test_visibleSelectionCompositeLookupCount
+
+        XCTAssertNotNil(window.test_renderedOverlayImage())
+
+        XCTAssertLessThanOrEqual(window.test_visibleSelectionCompositeLookupCount - lookupsBeforeDraw, 1)
+    }
+
+    @MainActor
+    func testPinnedImageEditorOverlayUsesMoveCursorInsideSelectionWhenNoToolSelected() throws {
+        let background = solidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let selection = NSRect(x: 120, y: 90, width: 260, height: 160)
+        let window = SelectionOverlayWindow(
+            backgroundImage: background,
+            configuration: .pinnedImageEditor(selectionRect: selection)
+        ) { _ in }
+
+        XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: selection.midX, y: selection.midY)), .move)
+        XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: selection.maxX + 12, y: selection.midY)), .arrow)
+    }
+
+    @MainActor
+    func testDefaultSelectionOverlayUsesCrosshairUntilSelectionMoveBegins() throws {
+        let background = solidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let selection = NSRect(x: 120, y: 90, width: 260, height: 160)
+        let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
+        window.test_setLockedSelectionRect(selection)
+        let start = NSPoint(x: selection.midX, y: selection.midY)
+        let end = NSPoint(x: selection.midX + 24, y: selection.midY - 16)
+
+        window.test_updateColorSampler(at: start)
+        XCTAssertTrue(window.test_isColorSamplerVisible)
+        XCTAssertEqual(window.test_cursorStyle(at: start), .crosshair)
+
+        window.test_mouseDown(at: start)
+        XCTAssertEqual(window.test_cursorStyle(at: start), .move)
+        window.test_mouseDragged(to: end)
+        XCTAssertEqual(window.test_cursorStyle(at: end), .move)
+        window.test_mouseUp(at: end)
+        window.test_updateColorSampler(at: end)
+        XCTAssertEqual(window.test_cursorStyle(at: end), .crosshair)
+
+        let moved = try XCTUnwrap(window.test_lockedSelectionRect)
+        XCTAssertEqual(moved.minX, selection.minX + 24, accuracy: 0.5)
+        XCTAssertEqual(moved.minY, selection.minY - 16, accuracy: 0.5)
+    }
+
+    @MainActor
+    func testSelectionOverlayUsesCrosshairAfterShapeToolIsToggledOff() throws {
+        let background = solidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let selection = NSRect(x: 120, y: 90, width: 260, height: 160)
+        let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
+        window.test_setLockedSelectionRect(selection)
+        window.test_toggleShapeTool(.rectangle)
+        window.test_toggleShapeTool(.rectangle)
+
+        XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: selection.midX, y: selection.midY)), .crosshair)
+    }
+
+    @MainActor
+    func testPinnedImageEditorOverlayForwardsRightClickToContextMenuHandler() throws {
+        let background = solidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let selection = NSRect(x: 120, y: 90, width: 260, height: 160)
+        var contextMenuPoint: NSPoint?
+        let window = SelectionOverlayWindow(
+            backgroundImage: background,
+            configuration: .pinnedImageEditor(
+                windowFrame: NSRect(origin: .zero, size: background.size),
+                selectionRect: selection,
+                pinnedImageContextMenuHandler: { point in
+                    contextMenuPoint = point
+                }
+            )
+        ) { _ in }
+
+        window.test_rightMouseDown(at: NSPoint(x: selection.midX, y: selection.midY))
+
+        XCTAssertNotNil(contextMenuPoint)
+    }
+
+    @MainActor
+    func testPinnedImageEditorOverlayDoesNotDrawSelectionBorder() throws {
+        let background = solidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let selection = NSRect(x: 120, y: 90, width: 260, height: 160)
+        let window = SelectionOverlayWindow(
+            backgroundImage: background,
+            configuration: .pinnedImageEditor(selectionRect: selection)
+        ) { _ in }
+        let rendered = try XCTUnwrap(window.test_renderedOverlayImage())
+
+        let blueBorderPixels = try overlayPixelCount(in: rendered, rect: selection.insetBy(dx: -2, dy: -2)) { pixel in
+            pixel.blue > 180 && pixel.red < 120 && pixel.green > 90 && pixel.alpha > 160
+        }
+        XCTAssertEqual(blueBorderPixels, 0)
+    }
+
+    @MainActor
+    func testPinnedImageEditorSuppressesMosaicRectangleSelectionOutline() throws {
+        let background = solidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let selection = NSRect(x: 120, y: 90, width: 260, height: 160)
+        let window = SelectionOverlayWindow(
+            backgroundImage: background,
+            configuration: .pinnedImageEditor(selectionRect: selection)
+        ) { _ in }
+
+        window.test_activateShapeTool(.mosaicRectangle)
+        window.test_mouseDown(at: NSPoint(x: 160, y: 130))
+        window.test_mouseDragged(to: NSPoint(x: 260, y: 190))
+        window.test_mouseUp(at: NSPoint(x: 260, y: 190))
+
+        XCTAssertEqual(window.test_selectedAnnotationKind, .mosaicRectangle)
+        XCTAssertFalse(window.test_selectedAnnotationShowsOutline)
+    }
+
+    @MainActor
+    func testPinnedImageMosaicPreviewKeepsExistingTextPixelAligned() throws {
+        let background = checkerboardImage(size: NSSize(width: 640, height: 420), squareSize: 5)
+        let selection = NSRect(x: 173.5, y: 126.5, width: 260, height: 160)
+        let window = SelectionOverlayWindow(
+            backgroundImage: background,
+            configuration: .pinnedImageEditor(selectionRect: selection)
+        ) { _ in }
+
+        var textStyle = CaptureAnnotationStyle()
+        textStyle.textSize = 12
+        textStyle.strokeColor = .systemRed
+        let text = "贴图文字不会抖动"
+        let textAnnotation = CaptureAnnotation(
+            kind: .text,
+            rect: NSRect(
+                origin: NSPoint(x: 28.25, y: 34.25),
+                size: expectedTextAnnotationSize(text: text, style: textStyle)
+            ),
+            style: textStyle,
+            text: text
+        )
+        window.test_setAnnotations([textAnnotation])
+
+        var mosaicStyle = CaptureAnnotationStyle()
+        mosaicStyle.strokeWidth = 24
+        let mosaic = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(x: 18.75, y: 24.75, width: 205.5, height: 82.5),
+            style: mosaicStyle,
+            mosaicRedaction: CaptureMosaicRedaction(type: .pixelMosaic, value: 8)
+        )
+
+        let preview = try XCTUnwrap(window.test_mosaicDraftPreview(for: mosaic))
+        let expected = CaptureAnnotationRenderer.render(
+            image: background,
+            annotations: [textAnnotation, mosaic].map { overlayAnnotation($0, selection: selection) }
+        )
+
+        try assertPreview(preview, matchesCropFrom: expected)
+    }
+
+    @MainActor
+    func testPinnedImageSwitchingFromTypedTextToMosaicKeepsTextPixelsStationary() throws {
+        let background = retinaSolidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let selection = NSRect(x: 173.5, y: 126.5, width: 260, height: 160)
+        let window = SelectionOverlayWindow(
+            backgroundImage: background,
+            configuration: .pinnedImageEditor(selectionRect: selection)
+        ) { _ in }
+        window.test_activateTextTool()
+        window.test_mouseDown(at: NSPoint(x: selection.minX + 32.25, y: selection.minY + 52.25))
+        window.test_mouseUp(at: NSPoint(x: selection.minX + 32.25, y: selection.minY + 52.25))
+        window.firstResponder?.insertText("贴图文字")
+
+        let textRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+        let before = try XCTUnwrap(window.test_renderedOverlayImage())
+        let beforeBounds = try XCTUnwrap(overlayPixelBounds(in: before, rect: textRect) { pixel in
+            Int(pixel.red) > Int(pixel.green) + 60 && Int(pixel.red) > Int(pixel.blue) + 60 && pixel.alpha > 160
+        })
+
+        window.test_toggleShapeTool(.mosaicRectangle)
+
+        let after = try XCTUnwrap(window.test_renderedOverlayImage())
+        let afterBounds = try XCTUnwrap(overlayPixelBounds(in: after, rect: textRect) { pixel in
+            Int(pixel.red) > Int(pixel.green) + 60 && Int(pixel.red) > Int(pixel.blue) + 60 && pixel.alpha > 160
+        })
+        XCTAssertEqual(afterBounds.minX, beforeBounds.minX, accuracy: 0.1)
+        XCTAssertEqual(afterBounds.minY, beforeBounds.minY, accuracy: 0.1)
+        XCTAssertEqual(afterBounds.width, beforeBounds.width, accuracy: 0.1)
+        XCTAssertEqual(afterBounds.height, beforeBounds.height, accuracy: 0.1)
+    }
+
+    @MainActor
+    func testPinnedImageCommittingMosaicBesideTextKeepsTextPixelsStationary() throws {
+        let background = retinaSolidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let selection = NSRect(x: 173.5, y: 126.5, width: 260, height: 160)
+        let window = SelectionOverlayWindow(
+            backgroundImage: background,
+            configuration: .pinnedImageEditor(selectionRect: selection)
+        ) { _ in }
+        window.test_activateTextTool()
+        let textPoint = NSPoint(x: selection.minX + 28.25, y: selection.minY + 48.25)
+        window.test_mouseDown(at: textPoint)
+        window.test_mouseUp(at: textPoint)
+        window.firstResponder?.insertText("贴图文字")
+
+        let textRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+        let before = try XCTUnwrap(window.test_renderedOverlayImage())
+        let beforeBounds = try XCTUnwrap(overlayPixelBounds(in: before, rect: textRect) { pixel in
+            Int(pixel.red) > Int(pixel.green) + 60 && Int(pixel.red) > Int(pixel.blue) + 60 && pixel.alpha > 160
+        })
+
+        window.test_toggleShapeTool(.mosaicRectangle)
+        let mosaicStart = NSPoint(x: selection.maxX - 72.25, y: selection.maxY - 48.25)
+        let mosaicEnd = NSPoint(x: selection.maxX - 16.25, y: selection.maxY - 16.25)
+        window.test_mouseDown(at: mosaicStart)
+        window.test_mouseDragged(to: mosaicEnd)
+        window.test_mouseUp(at: mosaicEnd)
+
+        let after = try XCTUnwrap(window.test_renderedOverlayImage())
+        let afterBounds = try XCTUnwrap(overlayPixelBounds(in: after, rect: textRect) { pixel in
+            Int(pixel.red) > Int(pixel.green) + 60 && Int(pixel.red) > Int(pixel.blue) + 60 && pixel.alpha > 160
+        })
+        XCTAssertEqual(afterBounds.minX, beforeBounds.minX, accuracy: 0.1)
+        XCTAssertEqual(afterBounds.minY, beforeBounds.minY, accuracy: 0.1)
+        XCTAssertEqual(afterBounds.width, beforeBounds.width, accuracy: 0.1)
+        XCTAssertEqual(afterBounds.height, beforeBounds.height, accuracy: 0.1)
+    }
+
+    @MainActor
+    func testPinnedImageFractionalMosaicDraftMatchesFullCanvasTextRedaction() throws {
+        let background = retinaSolidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let selection = NSRect(x: 173.5, y: 126.5, width: 260, height: 160)
+        let window = SelectionOverlayWindow(
+            backgroundImage: background,
+            configuration: .pinnedImageEditor(selectionRect: selection)
+        ) { _ in }
+        window.test_activateTextTool()
+        let textPoint = NSPoint(x: selection.minX + 42.25, y: selection.minY + 62.25)
+        window.test_mouseDown(at: textPoint)
+        window.test_mouseUp(at: textPoint)
+        window.firstResponder?.insertText("贴图文字向左移动")
+        window.test_toggleShapeTool(.mosaicRectangle)
+
+        let start = NSPoint(x: selection.minX + 34.25, y: selection.minY + 44.25)
+        let end = NSPoint(x: selection.minX + 192.75, y: selection.minY + 92.75)
+        window.test_mouseDown(at: start)
+        window.test_mouseDragged(to: end)
+
+        let textAnnotation = try XCTUnwrap(window.test_annotation(at: 0))
+        var draftStyle = try XCTUnwrap(window.test_currentStyle)
+        draftStyle.strokeWidth = max(draftStyle.strokeWidth, 1)
+        let draft = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(
+                x: start.x - selection.minX,
+                y: start.y - selection.minY,
+                width: end.x - start.x,
+                height: end.y - start.y
+            ),
+            style: draftStyle,
+            mosaicRedaction: CaptureMosaicRedaction(
+                type: try XCTUnwrap(window.test_mosaicRedactionType),
+                value: window.test_mosaicRedactionValue(for: .pixelMosaic) ?? 8
+            )
+        )
+        let actual = try XCTUnwrap(window.test_renderedOverlayImage())
+        let expected = CaptureAnnotationRenderer.render(
+            image: background,
+            annotations: [textAnnotation, draft].map { overlayAnnotation($0, selection: selection) }
+        )
+        let comparisonRect = NSRect(x: start.x, y: start.y, width: end.x - start.x, height: end.y - start.y)
+            .insetBy(dx: 4, dy: 4)
+        let actualCrop = try XCTUnwrap(croppedImage(actual, to: comparisonRect))
+        let expectedCrop = try XCTUnwrap(croppedImage(expected, to: comparisonRect))
+
+        XCTAssertLessThan(try averagePixelDistance(actualCrop, expectedCrop), 2)
+    }
+
+    @MainActor
+    func testMosaicStrokeDraftAcrossTypedTextKeepsRenderedTextHorizontallyAligned() throws {
+        let background = retinaSolidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let selection = NSRect(x: 80.234375, y: 80.87890625, width: 480, height: 240)
+        let window = SelectionOverlayWindow(
+            backgroundImage: background,
+            configuration: .pinnedImageEditor(selectionRect: selection)
+        ) { _ in }
+        window.test_activateTextTool()
+        let textPoint = NSPoint(x: selection.minX + 92.6171875, y: selection.minY + 118.76171875)
+        window.test_mouseDown(at: textPoint)
+        window.test_mouseUp(at: textPoint)
+        window.firstResponder?.insertText("文字马赛克偏移测试")
+        window.test_toggleShapeTool(.mosaicStroke)
+
+        let textAnnotation = try XCTUnwrap(window.test_annotation(at: 0))
+
+        let start = NSPoint(x: textPoint.x - 4, y: textPoint.y)
+        let end = NSPoint(x: textPoint.x + 210, y: textPoint.y + 6)
+        window.test_mouseDown(at: start)
+        window.test_mouseDragged(to: end)
+
+        let localStroke = CaptureMosaicStroke(points: [
+            NSPoint(x: start.x - selection.minX, y: start.y - selection.minY),
+            NSPoint(x: end.x - selection.minX, y: end.y - selection.minY),
+        ])
+        let draft = CaptureAnnotation(
+            kind: .mosaicStroke,
+            rect: localStroke.boundingRect,
+            style: try XCTUnwrap(window.test_currentStyle),
+            mosaicStroke: localStroke,
+            mosaicRedaction: CaptureMosaicRedaction(
+                type: try XCTUnwrap(window.test_mosaicRedactionType),
+                value: window.test_mosaicRedactionValue(for: .pixelMosaic) ?? 8
+            )
+        )
+        let actual = try XCTUnwrap(window.test_renderedOverlayImage())
+        let expected = CaptureAnnotationRenderer.render(
+            image: background,
+            annotations: [textAnnotation, draft].map { overlayAnnotation($0, selection: selection) }
+        )
+        let comparisonRect = NSRect(
+            x: textPoint.x - 20,
+            y: textPoint.y - 32,
+            width: 260,
+            height: 64
+        )
+        let isTextPixel: ((red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8)) -> Bool = { pixel in
+            Int(pixel.red) > Int(pixel.green) + 60
+                && Int(pixel.red) > Int(pixel.blue) + 60
+                && pixel.alpha > 160
+        }
+        let actualBounds = try XCTUnwrap(overlayPixelBounds(in: actual, rect: comparisonRect, matching: isTextPixel))
+        let expectedBounds = try XCTUnwrap(overlayPixelBounds(in: expected, rect: comparisonRect, matching: isTextPixel))
+
+        XCTAssertEqual(actualBounds.minX, expectedBounds.minX, accuracy: 0.5)
+        XCTAssertEqual(actualBounds.minY, expectedBounds.minY, accuracy: 0.5)
+        XCTAssertEqual(actualBounds.width, expectedBounds.width, accuracy: 0.5)
+        XCTAssertEqual(actualBounds.height, expectedBounds.height, accuracy: 0.5)
+    }
+
+    @MainActor
+    func testDefaultSelectionOverlayKeepsMosaicRectangleSelectionOutline() throws {
+        let background = solidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let selection = NSRect(x: 120, y: 90, width: 260, height: 160)
+        let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
+        window.test_setLockedSelectionRect(selection)
+
+        window.test_activateShapeTool(.mosaicRectangle)
+        window.test_mouseDown(at: NSPoint(x: 160, y: 130))
+        window.test_mouseDragged(to: NSPoint(x: 260, y: 190))
+        window.test_mouseUp(at: NSPoint(x: 260, y: 190))
+
+        XCTAssertEqual(window.test_selectedAnnotationKind, .mosaicRectangle)
+        XCTAssertTrue(window.test_selectedAnnotationShowsOutline)
+    }
+
+    @MainActor
+    func testPinnedImageEditorFinishCompletesSynchronously() throws {
+        let background = solidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let selection = NSRect(x: 120, y: 90, width: 260, height: 160)
+        var result: CaptureSelectionResult?
+        let window = SelectionOverlayWindow(
+            backgroundImage: background,
+            configuration: .pinnedImageEditor(selectionRect: selection)
+        ) { selectionResult in
+            result = selectionResult
+        }
+        let finishPoint = try XCTUnwrap(window.test_mainToolbarButtonPoint(for: .finishEditing))
+
+        window.test_mouseDown(at: finishPoint)
+
+        XCTAssertEqual(result?.action, .finishEditing)
+    }
+
+    @MainActor
+    func testDefaultSelectionOverlayKeepsCaptureToolbarButtons() throws {
+        let background = solidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 120, y: 90, width: 260, height: 160))
+
+        XCTAssertNotNil(window.test_mainToolbarButtonRect(for: .cancel))
+        XCTAssertNotNil(window.test_mainToolbarButtonRect(for: .pin))
+        XCTAssertNotNil(window.test_mainToolbarButtonRect(for: .save))
+        XCTAssertNotNil(window.test_mainToolbarButtonRect(for: .copy))
+        XCTAssertNil(window.test_mainToolbarButtonRect(for: .finishEditing))
+    }
+
+    @MainActor
+    func testDefaultSelectionOverlayKeepsMeasurementAndPassiveColorSampler() throws {
+        let background = solidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let selection = NSRect(x: 120, y: 90, width: 260, height: 160)
+        let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
+        window.test_setLockedSelectionRect(selection)
+
+        XCTAssertNotNil(window.test_measurementControlPoint(.cornerStyle))
+        window.test_updateColorSampler(at: NSPoint(x: selection.midX, y: selection.midY))
+        XCTAssertNotNil(window.test_sampledColorHex)
+    }
+
+    @MainActor
+    func testPinnedImageEditorOverlayScrollWheelScalesPinnedImage() throws {
+        let sourceRect = NSRect(x: 120, y: 220, width: 160, height: 90)
+        let controller = PinnedImageWindowController(
+            image: solidImage(size: sourceRect.size, color: .white),
+            screenRect: sourceRect
+        )
+        controller.test_showEditingToolbar()
+        let before = controller.test_imageRectInContent
+
+        controller.test_scrollEditingOverlay(deltaY: 8)
+
+        let after = controller.test_imageRectInContent
+        XCTAssertGreaterThan(after.width, before.width)
+        XCTAssertGreaterThan(after.height, before.height)
+        XCTAssertTrue(controller.test_isToolbarVisible)
+        XCTAssertNotNil(controller.test_editingOverlayToolbarButtonRect(for: .finishEditing))
+    }
+
+    @MainActor
+    func testPinnedImageEditorScrollMapsEraserMaskWithAnnotationCoordinates() throws {
+        let sourceRect = NSRect(x: 120, y: 220, width: 160, height: 90)
+        let controller = PinnedImageWindowController(
+            image: solidImage(size: sourceRect.size, color: .white),
+            screenRect: sourceRect
+        )
+        controller.test_showEditingToolbar()
+        let annotation = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 20, y: 15, width: 60, height: 40),
+            style: CaptureAnnotationStyle()
+        )
+        let mask = EraserMask(
+            rect: NSRect(x: 30, y: 20, width: 15, height: 10),
+            affectedAnnotationIDs: [annotation.id]
+        )
+        controller.test_setEditingOverlayState(annotations: [annotation], eraserMasks: [mask])
+        let beforeAnnotation = try XCTUnwrap(controller.test_editingOverlayAnnotation(at: 0))
+
+        controller.test_scrollEditingOverlay(deltaY: 8)
+
+        let afterAnnotation = try XCTUnwrap(controller.test_editingOverlayAnnotation(at: 0))
+        let afterMask = try XCTUnwrap(controller.test_editingOverlayEraserMask(at: 0))
+        let delta = NSPoint(
+            x: afterAnnotation.rect.minX - beforeAnnotation.rect.minX,
+            y: afterAnnotation.rect.minY - beforeAnnotation.rect.minY
+        )
+        XCTAssertNotEqual(delta, .zero)
+        XCTAssertEqual(afterMask.rect.minX, mask.rect.minX + delta.x, accuracy: 0.001)
+        XCTAssertEqual(afterMask.rect.minY, mask.rect.minY + delta.y, accuracy: 0.001)
+        XCTAssertEqual(afterMask.rect.size, mask.rect.size)
+        XCTAssertEqual(afterMask.id, mask.id)
+        XCTAssertEqual(afterMask.affectedAnnotationIDs, mask.affectedAnnotationIDs)
+    }
+
+    @MainActor
+    func testPinnedImageEditorOverlayDragMovesPinnedImageAndKeepsToolbarVisible() throws {
+        let sourceRect = NSRect(x: 220, y: 260, width: 160, height: 90)
+        let controller = PinnedImageWindowController(
+            image: solidImage(size: sourceRect.size, color: .white),
+            screenRect: sourceRect
+        )
+        controller.test_showEditingToolbar()
+        let before = controller.test_imageFrameInScreen
+
+        let beganDrag = controller.test_dragEditingOverlayBy(dx: 24, dy: -16)
+
+        let after = controller.test_imageFrameInScreen
+        XCTAssertTrue(beganDrag)
+        XCTAssertEqual(after.minX, before.minX + 24, accuracy: 0.5)
+        XCTAssertEqual(after.minY, before.minY - 16, accuracy: 0.5)
+        XCTAssertTrue(controller.test_isToolbarVisible)
+        XCTAssertFalse(controller.test_isEditingOverlayDraggingPinnedImage)
+        XCTAssertEqual(controller.test_editingOverlayAlpha, 1)
+        XCTAssertNotNil(controller.test_editingOverlayToolbarButtonRect(for: .finishEditing))
+    }
+
+    @MainActor
+    func testPinnedImageToolbarBakesAnnotationsInsideImageBounds() throws {
+        let sourceRect = NSRect(x: 120, y: 220, width: 160, height: 90)
+        let controller = PinnedImageWindowController(
+            image: solidImage(size: sourceRect.size, color: .white),
+            screenRect: sourceRect
+        )
+
+        XCTAssertFalse(controller.test_isToolbarVisible)
+        controller.test_showEditingToolbar()
+        XCTAssertTrue(controller.test_isToolbarVisible)
+
+        XCTAssertNil(controller.test_editingOverlayToolbarButtonRect(for: .scroll))
+        XCTAssertNil(controller.test_editingOverlayToolbarButtonRect(for: .cancel))
+        XCTAssertNil(controller.test_editingOverlayToolbarButtonRect(for: .pin))
+        XCTAssertNotNil(controller.test_editingOverlayToolbarButtonRect(for: .rectangle))
+        XCTAssertNotNil(controller.test_editingOverlayToolbarButtonRect(for: .copy))
+        XCTAssertNotNil(controller.test_editingOverlayToolbarButtonRect(for: .save))
+        XCTAssertNotNil(controller.test_editingOverlayToolbarButtonRect(for: .finishEditing))
+
+        var style = CaptureAnnotationStyle()
+        style.strokeWidth = 6
+        style.strokeColor = NSColor(calibratedRed: 245 / 255, green: 34 / 255, blue: 45 / 255, alpha: 1)
+        let rectangle = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 0, y: 0, width: sourceRect.width, height: sourceRect.height),
+            style: style
+        )
+        controller.test_completeEditingOverlay(annotations: [rectangle])
+
+        XCTAssertFalse(controller.test_isToolbarVisible)
+        let baked = controller.image
+        XCTAssertNotNil(try firstPixel(in: baked, rect: NSRect(x: 1, y: 1, width: baked.size.width - 2, height: 3)) { pixel in
+            pixel.red > 180 && pixel.green < 80 && pixel.blue < 80 && pixel.alpha > 150
+        })
+    }
+
+    @MainActor
+    func testPinnedImageToolbarSupportsArrowPenAndMarkerBaking() throws {
+        let sourceRect = NSRect(x: 120, y: 220, width: 180, height: 120)
+        let controller = PinnedImageWindowController(
+            image: solidImage(size: sourceRect.size, color: .white),
+            screenRect: sourceRect
+        )
+        controller.test_showEditingToolbar()
+        XCTAssertNotNil(controller.test_editingOverlayToolbarButtonRect(for: .arrow))
+        XCTAssertNotNil(controller.test_editingOverlayToolbarButtonRect(for: .pen))
+        XCTAssertNotNil(controller.test_editingOverlayToolbarButtonRect(for: .marker))
+
+        var redStyle = CaptureAnnotationStyle()
+        redStyle.strokeWidth = 5
+        redStyle.strokeColor = .systemRed
+        let arrowLine = CaptureArrowLine(
+            start: NSPoint(x: 14, y: 20),
+            end: NSPoint(x: sourceRect.width - 18, y: sourceRect.height - 24),
+            control: NSPoint(x: sourceRect.width / 2, y: sourceRect.height / 2),
+            startArrowType: .none,
+            endArrowType: .normal
+        )
+        let arrow = CaptureAnnotation(
+            kind: .arrowLine,
+            rect: arrowLine.boundingRect,
+            style: redStyle,
+            arrowLine: arrowLine
+        )
+
+        var markerStyle = CaptureAnnotationStyle()
+        markerStyle.strokeWidth = 12
+        markerStyle.strokeColor = .systemYellow
+        let markerLine = CaptureMarkerLine(
+            start: NSPoint(x: 18, y: 30),
+            end: NSPoint(x: sourceRect.width - 18, y: 30)
+        )
+        let marker = CaptureAnnotation(
+            kind: .marker,
+            rect: markerLine.boundingRect,
+            style: markerStyle,
+            markerLine: markerLine
+        )
+
+        controller.test_completeEditingOverlay(annotations: [arrow, marker])
+
+        let baked = controller.image
+        XCTAssertNotNil(try firstPixel(in: baked, rect: NSRect(x: 10, y: 10, width: baked.size.width - 20, height: baked.size.height - 20)) { pixel in
+            pixel.red > 180 && pixel.green < 120 && pixel.blue < 120 && pixel.alpha > 140
+        })
+        XCTAssertNotNil(try firstPixel(in: baked, rect: NSRect(x: 10, y: 10, width: baked.size.width - 20, height: baked.size.height - 20)) { pixel in
+            pixel.red > 220 && pixel.green > 190 && pixel.blue < 90 && pixel.alpha > 120
+        })
+    }
+
+    @MainActor
+    func testPinnedImageToolbarIconsDoNotRenderAsSolidBlackBlocks() throws {
+        let background = solidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let selection = NSRect(x: 120, y: 160, width: 260, height: 160)
+        let window = SelectionOverlayWindow(
+            backgroundImage: background,
+            configuration: .pinnedImageEditor(selectionRect: selection)
+        ) { _ in }
+
+        let rendered = try XCTUnwrap(window.test_renderedOverlayImage())
+        let iconRects = window.test_mainToolbarButtonRects()
+        XCTAssertGreaterThanOrEqual(iconRects.count, 12)
+        for (index, iconRect) in iconRects.prefix(12).enumerated() {
+            let blackPixels = try overlayPixelCount(in: rendered, rect: iconRect) { pixel in
+                pixel.red < 20 && pixel.green < 20 && pixel.blue < 20 && pixel.alpha > 220
+            }
+            let sampledPixels = try overlayPixelCount(in: rendered, rect: iconRect) { _ in true }
+            XCTAssertLessThan(
+                Double(blackPixels) / Double(max(sampledPixels, 1)),
+                0.5,
+                "Toolbar icon \(index) rendered as a solid black block"
+            )
+        }
+    }
+
+    @MainActor
+    func testPinnedImageFinishEditingIconUsesFullButtonCanvas() throws {
+        let background = solidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let selection = NSRect(x: 120, y: 160, width: 260, height: 160)
+        let window = SelectionOverlayWindow(
+            backgroundImage: background,
+            configuration: .pinnedImageEditor(selectionRect: selection)
+        ) { _ in }
+
+        let rendered = try XCTUnwrap(window.test_renderedOverlayImage())
+        let buttonRect = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .finishEditing))
+        let leftEdgeBand = NSRect(x: buttonRect.minX + 2, y: buttonRect.minY, width: 4, height: buttonRect.height)
+        let rightEdgeBand = NSRect(x: buttonRect.maxX - 6, y: buttonRect.minY, width: 4, height: buttonRect.height)
+        let isBlackIconPixel: ((red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8)) -> Bool = { pixel in
+            pixel.red < 20 && pixel.green < 20 && pixel.blue < 20 && pixel.alpha > 220
+        }
+
+        XCTAssertGreaterThan(try overlayPixelCount(in: rendered, rect: leftEdgeBand, matching: isBlackIconPixel), 0)
+        XCTAssertGreaterThan(try overlayPixelCount(in: rendered, rect: rightEdgeBand, matching: isBlackIconPixel), 0)
     }
 
     func testActivatingAnotherToolExitsEyedropperMode() {
@@ -2278,6 +4321,60 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_activateShapeTool(.rectangle)
         XCTAssertEqual(window.test_cursorStyle(at: cornerPoint), .arrow)
         XCTAssertEqual(window.test_cursorStyle(at: refreshPoint), .arrow)
+    }
+
+    func testPassiveColorSamplerUsesCrosshairForFullScreenSelection() throws {
+        let background = solidImage(size: desktopImageSize(), color: .white)
+        let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
+        let screen = try XCTUnwrap(NSScreen.main)
+        let selection = NSRect(
+            x: screen.frame.minX - window.frame.minX,
+            y: screen.frame.minY - window.frame.minY,
+            width: screen.frame.width,
+            height: screen.frame.height
+        )
+        let point = NSPoint(x: selection.midX, y: selection.midY)
+        window.test_setLockedSelectionRect(selection)
+
+        window.test_updateColorSampler(at: point)
+
+        XCTAssertTrue(window.test_isColorSamplerVisible)
+        XCTAssertEqual(window.test_cursorStyle(at: point), .crosshair)
+    }
+
+    func testPassiveColorSamplerUsesCrosshairOnDarkFullScreenSelection() throws {
+        let background = solidImage(size: desktopImageSize(), color: .black)
+        let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
+        let screen = try XCTUnwrap(NSScreen.main)
+        let selection = NSRect(
+            x: screen.frame.minX - window.frame.minX,
+            y: screen.frame.minY - window.frame.minY,
+            width: screen.frame.width,
+            height: screen.frame.height
+        )
+        let point = NSPoint(x: selection.midX, y: selection.midY)
+        window.test_setLockedSelectionRect(selection)
+
+        window.test_updateColorSampler(at: point)
+
+        XCTAssertTrue(window.test_isColorSamplerVisible)
+        XCTAssertEqual(window.test_cursorStyle(at: point), .crosshair)
+    }
+
+    func testFullScreenSelectionKeepsCrosshairUntilPassiveSamplerIsVisible() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let screen = try XCTUnwrap(NSScreen.main)
+        let selection = NSRect(
+            x: screen.frame.minX - window.frame.minX,
+            y: screen.frame.minY - window.frame.minY,
+            width: screen.frame.width,
+            height: screen.frame.height
+        )
+        let point = NSPoint(x: selection.midX, y: selection.midY)
+        window.test_setLockedSelectionRect(selection)
+
+        XCTAssertFalse(window.test_isColorSamplerVisible)
+        XCTAssertEqual(window.test_cursorStyle(at: point), .crosshair)
     }
 
     func testOverlayWindowUsesDrawingCursorInsideSelectionImmediatelyAfterToolSwitch() {
@@ -2702,6 +4799,18 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(magnifierWindow.test_cursorStyle(at: try XCTUnwrap(magnifierWindow.test_mainToolbarButtonPoint(for: .magnifier))), .arrow)
     }
 
+    func testMagnifierKeepsCrosshairCursorInsideSelection() {
+        let selection = NSRect(x: 100, y: 100, width: 260, height: 160)
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateMagnifierTool()
+
+        XCTAssertEqual(
+            window.test_cursorStyle(at: NSPoint(x: selection.midX, y: selection.midY)),
+            .crosshair
+        )
+    }
+
     func testTextToolCreatesTextAnnotationOutsideSelection() throws {
         let selection = NSRect(x: 100, y: 100, width: 260, height: 160)
         let outsidePoint = NSPoint(x: selection.maxX + 48, y: selection.midY)
@@ -2834,10 +4943,10 @@ final class SelectionToolbarStateTests: XCTestCase {
         })
     }
 
-    func testEraserRectangleDragPreviewsMaskBeforeCommit() throws {
-        let background = solidImage(size: NSSize(width: 620, height: 460), color: .white)
+    func testEraserRectangleDragKeepsAnnotationsStableUntilCommit() throws {
+        let background = retinaSolidImage(size: NSSize(width: 620, height: 460), color: .white)
         let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
-        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        let selection = NSRect(x: 100.25, y: 100.25, width: 300.5, height: 220.5)
         var redTextStyle = CaptureAnnotationStyle()
         redTextStyle.strokeColor = .systemRed
         redTextStyle.textSize = 32
@@ -2851,27 +4960,248 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_setLockedSelectionRect(selection)
         window.test_setAnnotations([text])
 
-        let erasedProbe = NSRect(x: 150, y: 176, width: 72, height: 62)
+        let textProbe = NSRect(
+            x: selection.minX + text.rect.minX,
+            y: selection.minY + text.rect.minY,
+            width: text.rect.width,
+            height: text.rect.height
+        )
+        let erasedInteriorProbe = NSRect(
+            x: textProbe.minX + 4,
+            y: textProbe.minY + 4,
+            width: textProbe.width / 2 - 8,
+            height: textProbe.height - 8
+        )
         let beforeImage = try XCTUnwrap(window.test_renderedOverlayImage())
-        XCTAssertGreaterThan(try overlayPixelCount(in: beforeImage, rect: erasedProbe) { pixel in
+        let beforeRedPixelCount = try overlayPixelCount(in: beforeImage, rect: erasedInteriorProbe) { pixel in
             pixel.red > 180 && pixel.green < 120 && pixel.blue < 120 && pixel.alpha > 120
-        }, 0)
+        }
+        XCTAssertGreaterThan(beforeRedPixelCount, 0)
 
         window.test_activateEraserTool()
         window.test_mouseDown(at: try XCTUnwrap(window.test_eraserRectangleOptionPoint()))
         window.test_mouseUp(at: try XCTUnwrap(window.test_eraserRectangleOptionPoint()))
-        window.test_mouseDown(at: NSPoint(x: 150, y: 176))
-        window.test_mouseDragged(to: NSPoint(x: 222, y: 238))
+        window.test_mouseDown(at: NSPoint(x: textProbe.minX, y: textProbe.minY))
+        window.test_mouseDragged(to: NSPoint(x: textProbe.midX, y: textProbe.maxY))
 
         XCTAssertEqual(window.test_eraserMaskCount, 0)
         let previewImage = try XCTUnwrap(window.test_renderedOverlayImage())
-        XCTAssertEqual(try overlayPixelCount(in: previewImage, rect: erasedProbe) { pixel in
+        let previewRedPixelCount = try overlayPixelCount(in: previewImage, rect: erasedInteriorProbe) { pixel in
             pixel.red > 180 && pixel.green < 120 && pixel.blue < 120 && pixel.alpha > 120
-        }, 0)
-        let remainingProbe = NSRect(x: 252, y: 176, width: 70, height: 62)
-        XCTAssertGreaterThan(try overlayPixelCount(in: previewImage, rect: remainingProbe) { pixel in
-            pixel.red > 180 && pixel.green < 120 && pixel.blue < 120 && pixel.alpha > 120
-        }, 0)
+        }
+        XCTAssertEqual(previewRedPixelCount, beforeRedPixelCount)
+    }
+
+    func testEraserRectangleMaskKeepsFractionalRetinaBackgroundPixelsStableAfterCommit() throws {
+        let background = retinaColorStripeImage(size: NSSize(width: 620, height: 460))
+        let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
+        let selection = NSRect(x: 100.25, y: 100.25, width: 300.5, height: 220.5)
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = .systemRed
+        style.strokeWidth = 8
+        let annotation = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 32, y: 34, width: 72, height: 58),
+            style: style
+        )
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([annotation])
+        window.test_activateEraserTool()
+        window.test_mouseDown(at: try XCTUnwrap(window.test_eraserRectangleOptionPoint()))
+        window.test_mouseUp(at: try XCTUnwrap(window.test_eraserRectangleOptionPoint()))
+
+        let stableProbe = NSRect(
+            x: selection.minX + 176,
+            y: selection.minY + 132,
+            width: 48,
+            height: 36
+        )
+        let before = try XCTUnwrap(window.test_renderedOverlayImage())
+        let beforePixels = try rgbaRenderValues(in: before, rect: stableProbe)
+
+        window.test_drag(
+            from: NSPoint(x: selection.minX + 38, y: selection.minY + 40),
+            to: NSPoint(x: selection.minX + 92, y: selection.minY + 82)
+        )
+
+        XCTAssertEqual(window.test_eraserMaskCount, 1)
+        let after = try XCTUnwrap(window.test_renderedOverlayImage())
+        let drawRect = try XCTUnwrap(window.test_eraserMaskedCompositeDrawRect)
+        let pixelRect = try XCTUnwrap(window.test_eraserMaskedCompositePixelRect)
+        XCTAssertEqual(drawRect.width * 2, pixelRect.width, accuracy: 0.001)
+        XCTAssertEqual(drawRect.height * 2, pixelRect.height, accuracy: 0.001)
+        XCTAssertEqual(drawRect.minX * 2, pixelRect.minX, accuracy: 0.001)
+        XCTAssertEqual(
+            (background.size.height - drawRect.maxY) * 2,
+            pixelRect.minY,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(try rgbaRenderValues(in: after, rect: stableProbe), beforePixels)
+    }
+
+    func testSecondEraserRectangleDragReusesCommittedMaskedCompositeUntilMouseUp() throws {
+        let background = checkerboardImage(size: NSSize(width: 620, height: 460), squareSize: 3)
+        let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
+        let selection = NSRect(x: 100.25, y: 100.25, width: 300.5, height: 220.5)
+        let first = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 30, y: 35, width: 70, height: 55),
+            style: CaptureAnnotationStyle()
+        )
+        let second = CaptureAnnotation(
+            kind: .ellipse,
+            rect: NSRect(x: 180, y: 120, width: 70, height: 55),
+            style: CaptureAnnotationStyle()
+        )
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([first, second])
+        window.test_activateEraserTool()
+        window.test_mouseDown(at: try XCTUnwrap(window.test_eraserRectangleOptionPoint()))
+        window.test_mouseUp(at: try XCTUnwrap(window.test_eraserRectangleOptionPoint()))
+        window.test_drag(
+            from: NSPoint(x: selection.minX + 36, y: selection.minY + 40),
+            to: NSPoint(x: selection.minX + 88, y: selection.minY + 82)
+        )
+        XCTAssertEqual(window.test_eraserMaskCount, 1)
+
+        _ = try XCTUnwrap(window.test_renderedOverlayImage())
+        let renderCountAfterWarmup = window.test_eraserMaskedCompositeRenderCount
+        let cacheHitsAfterWarmup = window.test_eraserMaskedCompositeCacheHitCount
+        XCTAssertEqual(renderCountAfterWarmup, 1)
+
+        let start = NSPoint(x: selection.minX + 186, y: selection.minY + 126)
+        let dragPoints = [
+            NSPoint(x: selection.minX + 214, y: selection.minY + 146),
+            NSPoint(x: selection.minX + 232, y: selection.minY + 160),
+            NSPoint(x: selection.minX + 244, y: selection.minY + 168),
+        ]
+        window.test_mouseDown(at: start)
+        for point in dragPoints {
+            window.test_mouseDragged(to: point)
+            _ = try XCTUnwrap(window.test_renderedOverlayImage())
+        }
+
+        XCTAssertEqual(window.test_eraserMaskCount, 1)
+        XCTAssertEqual(window.test_eraserMaskedCompositeRenderCount, renderCountAfterWarmup)
+        XCTAssertEqual(
+            window.test_eraserMaskedCompositeCacheHitCount,
+            cacheHitsAfterWarmup + dragPoints.count
+        )
+
+        window.test_mouseUp(at: try XCTUnwrap(dragPoints.last))
+        XCTAssertEqual(window.test_eraserMaskCount, 2)
+        _ = try XCTUnwrap(window.test_renderedOverlayImage())
+        XCTAssertEqual(window.test_eraserMaskedCompositeRenderCount, renderCountAfterWarmup + 1)
+    }
+
+    func testSecondEraserRectangleDragReusesOutsideMaskedAnnotationUntilMouseUp() throws {
+        let background = solidImage(size: NSSize(width: 720, height: 460), color: .white)
+        let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 300, height: 220)
+        var textStyle = CaptureAnnotationStyle()
+        textStyle.strokeColor = .systemRed
+        textStyle.textSize = 30
+        textStyle.textOutlineEnabled = false
+        let crossingText = CaptureAnnotation(
+            kind: .text,
+            rect: NSRect(x: 270, y: 82, width: 170, height: 44),
+            style: textStyle,
+            text: "Crossing"
+        )
+        let insideRectangle = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 38, y: 42, width: 76, height: 62),
+            style: CaptureAnnotationStyle()
+        )
+        let existingMask = EraserMask(
+            rect: NSRect(x: 282, y: 88, width: 42, height: 32),
+            affectedAnnotationIDs: [crossingText.id]
+        )
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([crossingText, insideRectangle])
+        window.test_setEraserMasks([existingMask])
+        window.test_activateEraserTool()
+        window.test_mouseDown(at: try XCTUnwrap(window.test_eraserRectangleOptionPoint()))
+        window.test_mouseUp(at: try XCTUnwrap(window.test_eraserRectangleOptionPoint()))
+
+        _ = try XCTUnwrap(window.test_renderedOverlayImage())
+        let renderCountAfterWarmup = window.test_outsideMaskedAnnotationRenderCount
+        let cacheHitsAfterWarmup = window.test_outsideMaskedAnnotationCacheHitCount
+        XCTAssertEqual(renderCountAfterWarmup, 1)
+
+        let start = NSPoint(x: selection.minX + 44, y: selection.minY + 48)
+        let dragPoints = [
+            NSPoint(x: selection.minX + 78, y: selection.minY + 72),
+            NSPoint(x: selection.minX + 96, y: selection.minY + 88),
+            NSPoint(x: selection.minX + 108, y: selection.minY + 98),
+        ]
+        window.test_mouseDown(at: start)
+        for point in dragPoints {
+            window.test_mouseDragged(to: point)
+            _ = try XCTUnwrap(window.test_renderedOverlayImage())
+        }
+
+        XCTAssertEqual(window.test_eraserMaskCount, 1)
+        XCTAssertEqual(window.test_outsideMaskedAnnotationRenderCount, renderCountAfterWarmup)
+        XCTAssertEqual(
+            window.test_outsideMaskedAnnotationCacheHitCount,
+            cacheHitsAfterWarmup + dragPoints.count
+        )
+
+        window.test_mouseUp(at: try XCTUnwrap(dragPoints.last))
+        XCTAssertEqual(window.test_eraserMaskCount, 2)
+        _ = try XCTUnwrap(window.test_renderedOverlayImage())
+        XCTAssertEqual(window.test_outsideMaskedAnnotationRenderCount, renderCountAfterWarmup + 1)
+    }
+
+    func testEraserMaskedCompositeInvalidatesOnceForEachRenderedStateChange() throws {
+        let selection = NSRect(x: 100.25, y: 100.25, width: 300.5, height: 220.5)
+        let firstBackground = retinaColorStripeImage(size: NSSize(width: 620, height: 460))
+        let window = SelectionOverlayWindow(backgroundImage: firstBackground) { _ in }
+        var annotation = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 32, y: 34, width: 72, height: 58),
+            style: CaptureAnnotationStyle()
+        )
+        var mask = EraserMask(
+            rect: NSRect(x: 40, y: 42, width: 24, height: 20),
+            affectedAnnotationIDs: [annotation.id]
+        )
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([annotation])
+        window.test_setEraserMasks([mask])
+
+        _ = try XCTUnwrap(window.test_renderedOverlayImage())
+        var expectedRenderCount = window.test_eraserMaskedCompositeRenderCount
+        XCTAssertEqual(expectedRenderCount, 1)
+        _ = try XCTUnwrap(window.test_renderedOverlayImage())
+        XCTAssertEqual(window.test_eraserMaskedCompositeRenderCount, expectedRenderCount)
+
+        annotation.style.strokeWidth += 1
+        window.test_setAnnotations([annotation])
+        _ = try XCTUnwrap(window.test_renderedOverlayImage())
+        expectedRenderCount += 1
+        XCTAssertEqual(window.test_eraserMaskedCompositeRenderCount, expectedRenderCount)
+
+        mask.rect.origin.x += 1
+        window.test_setEraserMasks([mask])
+        _ = try XCTUnwrap(window.test_renderedOverlayImage())
+        expectedRenderCount += 1
+        XCTAssertEqual(window.test_eraserMaskedCompositeRenderCount, expectedRenderCount)
+
+        window.updatePinnedImageEditor(
+            windowFrame: window.frame,
+            backgroundImage: retinaColorStripeImage(size: NSSize(width: 620, height: 460)),
+            selectionRect: selection
+        )
+        _ = try XCTUnwrap(window.test_renderedOverlayImage())
+        expectedRenderCount += 1
+        XCTAssertEqual(window.test_eraserMaskedCompositeRenderCount, expectedRenderCount)
+
+        window.test_setLockedSelectionRect(selection.offsetBy(dx: 0.25, dy: 0.25))
+        _ = try XCTUnwrap(window.test_renderedOverlayImage())
+        expectedRenderCount += 1
+        XCTAssertEqual(window.test_eraserMaskedCompositeRenderCount, expectedRenderCount)
     }
 
     func testEraserRectangleCreatesLocalMaskAndKeepsAnnotations() throws {
@@ -3799,6 +6129,48 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_drag(from: NSPoint(x: 100, y: 110), to: NSPoint(x: 103, y: 112))
 
         XCTAssertEqual(window.test_annotationCount, 0)
+    }
+
+    func testSelectedMagnifierUsesMoveAndDirectionalResizeCursors() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        let selection = NSRect(x: 80, y: 80, width: 260, height: 180)
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([
+            CaptureAnnotation(
+                kind: .magnifier,
+                rect: NSRect(x: 40, y: 35, width: 100, height: 80),
+                style: CaptureAnnotationStyle(),
+                magnifierShape: .rectangle,
+                magnifierZoom: 2
+            ),
+        ])
+        window.test_activateMagnifierTool()
+        window.test_selectAnnotation(at: 0)
+
+        let expected: [(SelectionToolbarState.OverlayResizeHandle, SelectionToolbarState.OverlayCursorStyle)] = [
+            (.topLeft, .resizeTopLeft),
+            (.top, .resizeUpDown),
+            (.topRight, .resizeTopRight),
+            (.left, .resizeLeftRight),
+            (.right, .resizeLeftRight),
+            (.bottomLeft, .resizeBottomLeft),
+            (.bottom, .resizeUpDown),
+            (.bottomRight, .resizeBottomRight),
+        ]
+        for (handle, cursor) in expected {
+            let point = try XCTUnwrap(window.test_shapeResizeHandlePoint(handle))
+            XCTAssertEqual(window.test_cursorStyle(at: point), cursor, String(describing: handle))
+        }
+
+        let magnifierRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+        XCTAssertEqual(
+            window.test_cursorStyle(at: NSPoint(x: magnifierRect.midX, y: magnifierRect.midY)),
+            .move
+        )
+        XCTAssertEqual(
+            window.test_cursorStyle(at: NSPoint(x: selection.minX + 12, y: selection.minY + 12)),
+            .crosshair
+        )
     }
 
     func testSelectedMagnifierCanResizeMoveDeleteAndRestyle() throws {
@@ -6854,6 +9226,120 @@ final class SelectionToolbarStateTests: XCTestCase {
         let exported = try XCTUnwrap(coordinator.test_lastCapture)
         XCTAssertEqual(hex(try XCTUnwrap(rgbaRenderPixel(in: exported, at: NSPoint(x: 36, y: 32)))), "#FFFFFF")
         XCTAssertEqual(hex(try XCTUnwrap(rgbaRenderPixel(in: exported, at: NSPoint(x: 16, y: 16)))), "#FF0000")
+    }
+
+    @MainActor
+    func testCaptureCoordinatorPinCreatesPinnedWindowWithRenderedImage() async throws {
+        let image = solidImage(size: NSSize(width: 80, height: 60), color: .white)
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = .red
+        style.fillEnabled = true
+        style.fillColor = .red
+        let annotation = CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 10, y: 10, width: 40, height: 30), style: style)
+        let result = CaptureSelectionResult(
+            screenRect: NSRect(x: 40, y: 50, width: image.size.width, height: image.size.height),
+            snapshotRect: NSRect(origin: .zero, size: image.size),
+            annotations: [annotation],
+            action: .pin
+        )
+        var pinnedWindows: [FakePinnedWindow] = []
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            pinnedWindowFactory: { image, screenRect in
+                let window = FakePinnedWindow(image: image, screenRect: screenRect)
+                pinnedWindows.append(window)
+                return window
+            }
+        )
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString("keep-me", forType: .string)
+        let expectation = expectation(description: "pin capture")
+        coordinator.captureSessionDidEnd = {
+            expectation.fulfill()
+        }
+
+        coordinator.test_handleSelection(result, frozenDesktopImage: image)
+        await fulfillment(of: [expectation], timeout: 2)
+
+        XCTAssertEqual(coordinator.test_pinnedWindowCount, 1)
+        let pinned = try XCTUnwrap(pinnedWindows.first)
+        XCTAssertTrue(pinned.didShow)
+        XCTAssertEqual(pinned.screenRect, result.screenRect)
+        XCTAssertEqual(hex(try XCTUnwrap(rgbaRenderPixel(in: pinned.image, at: NSPoint(x: 16, y: 16)))), "#FF0000")
+        XCTAssertEqual(NSPasteboard.general.string(forType: .string), "keep-me")
+    }
+
+    @MainActor
+    func testCaptureCoordinatorRestoresMostRecentlyHiddenPinnedWindow() async throws {
+        let image = solidImage(size: NSSize(width: 80, height: 60), color: .white)
+        var pinnedWindows: [FakePinnedWindow] = []
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            pinnedWindowFactory: { image, screenRect in
+                let window = FakePinnedWindow(image: image, screenRect: screenRect)
+                pinnedWindows.append(window)
+                return window
+            }
+        )
+
+        for index in 0..<2 {
+            let completion = expectation(description: "pin \(index)")
+            coordinator.captureSessionDidEnd = { completion.fulfill() }
+            coordinator.test_handleSelection(
+                CaptureSelectionResult(
+                    screenRect: NSRect(x: CGFloat(index * 100), y: 0, width: 80, height: 60),
+                    snapshotRect: NSRect(origin: .zero, size: image.size),
+                    annotations: [],
+                    action: .pin
+                ),
+                frozenDesktopImage: image
+            )
+            await fulfillment(of: [completion], timeout: 2)
+        }
+
+        pinnedWindows[0].simulateHide()
+        pinnedWindows[1].simulateHide()
+
+        XCTAssertTrue(coordinator.restoreMostRecentlyHiddenPinnedWindow())
+        XCTAssertEqual(pinnedWindows[0].showCount, 1)
+        XCTAssertEqual(pinnedWindows[1].showCount, 2)
+        XCTAssertFalse(coordinator.restoreMostRecentlyHiddenPinnedWindow())
+    }
+
+    @MainActor
+    func testCaptureCoordinatorCloseInvalidatesRecentHiddenPinnedWindow() async throws {
+        let image = solidImage(size: NSSize(width: 80, height: 60), color: .white)
+        var createdPinnedWindow: FakePinnedWindow?
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            pinnedWindowFactory: { image, screenRect in
+                let window = FakePinnedWindow(image: image, screenRect: screenRect)
+                createdPinnedWindow = window
+                return window
+            }
+        )
+        let completion = expectation(description: "pin")
+        coordinator.captureSessionDidEnd = { completion.fulfill() }
+        coordinator.test_handleSelection(
+            CaptureSelectionResult(
+                screenRect: NSRect(x: 0, y: 0, width: 80, height: 60),
+                snapshotRect: NSRect(origin: .zero, size: image.size),
+                annotations: [],
+                action: .pin
+            ),
+            frozenDesktopImage: image
+        )
+        await fulfillment(of: [completion], timeout: 2)
+
+        let pinnedWindow = try XCTUnwrap(createdPinnedWindow)
+        pinnedWindow.simulateHide()
+        pinnedWindow.simulateClose()
+
+        XCTAssertFalse(coordinator.restoreMostRecentlyHiddenPinnedWindow())
+        XCTAssertEqual(coordinator.test_pinnedWindowCount, 0)
     }
 
     func testMagnifierRendererSamplesOriginalImageInsteadOfAnnotations() throws {
@@ -10939,6 +13425,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "mosaicPixel"), "马赛克")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "save"), "保存")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "copy"), "复制到剪切板")
+        XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "pin"), "贴图")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "scroll"), "滚动截图")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "eyedropper"), "取色 ｜ 测距")
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "eraserPoint"), "橡皮擦")
@@ -10950,6 +13437,81 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(SelectionToolbarState.tooltipTitle(for: "refreshCapture"), "刷新截图")
         XCTAssertNil(SelectionToolbarState.tooltipTitle(for: "ocr"))
         XCTAssertNil(SelectionToolbarState.tooltipTitle(for: "settings"))
+    }
+
+    func testPrimaryToolbarShortcutDescriptorsMatchApprovedMap() {
+        let expected: [String: (key: String, modifiers: NSEvent.ModifierFlags)] = [
+            "rectangle": ("s", []),
+            "polyline": ("a", []),
+            "pen": ("b", []),
+            "marker": ("h", []),
+            "eyedropper": ("p", []),
+            "mosaic": ("m", []),
+            "text": ("t", []),
+            "number": ("n", []),
+            "magnifier": ("g", []),
+            "eraser": ("e", []),
+            "undo": ("z", [.command]),
+            "redo": ("z", [.command, .shift]),
+            "cancel": ("\u{1b}", []),
+            "pin": ("1", [.command]),
+            "save": ("s", [.command]),
+            "copy": ("c", [.command]),
+            "finishEditing": ("\u{1b}", []),
+        ]
+
+        for (identifier, expectedShortcut) in expected {
+            let shortcut = SelectionToolbarState.toolbarShortcut(for: identifier)
+            XCTAssertEqual(shortcut?.key, expectedShortcut.key, identifier)
+            XCTAssertEqual(shortcut?.modifiers, expectedShortcut.modifiers, identifier)
+        }
+        XCTAssertNil(SelectionToolbarState.toolbarShortcut(for: "scroll"))
+    }
+
+    func testToolbarShortcutMatchingIsCaseInsensitiveAndRequiresExactRelevantModifiers() throws {
+        let shape = try XCTUnwrap(SelectionToolbarState.toolbarShortcut(for: "rectangle"))
+        XCTAssertTrue(shape.matches(charactersIgnoringModifiers: "s", modifierFlags: []))
+        XCTAssertTrue(shape.matches(charactersIgnoringModifiers: "S", modifierFlags: [.capsLock]))
+        XCTAssertTrue(shape.matches(charactersIgnoringModifiers: "S", modifierFlags: [.shift]))
+        XCTAssertTrue(shape.matches(charactersIgnoringModifiers: "S", modifierFlags: [.shift, .capsLock]))
+        XCTAssertFalse(shape.matches(charactersIgnoringModifiers: "s", modifierFlags: [.command]))
+        XCTAssertFalse(shape.matches(charactersIgnoringModifiers: "s", modifierFlags: [.control]))
+        XCTAssertFalse(shape.matches(charactersIgnoringModifiers: "s", modifierFlags: [.option]))
+
+        let save = try XCTUnwrap(SelectionToolbarState.toolbarShortcut(for: "save"))
+        XCTAssertTrue(save.matches(charactersIgnoringModifiers: "S", modifierFlags: [.command]))
+        XCTAssertFalse(save.matches(charactersIgnoringModifiers: "S", modifierFlags: [.command, .shift]))
+
+        let redo = try XCTUnwrap(SelectionToolbarState.toolbarShortcut(for: "redo"))
+        XCTAssertTrue(redo.matches(charactersIgnoringModifiers: "Z", modifierFlags: [.command, .shift, .capsLock]))
+        XCTAssertFalse(redo.matches(charactersIgnoringModifiers: "z", modifierFlags: [.command]))
+        XCTAssertFalse(redo.matches(charactersIgnoringModifiers: "z", modifierFlags: [.command, .shift, .option]))
+    }
+
+    func testToolbarShortcutDisplayMetadataSupportsPlainCommandRedoAndEscape() throws {
+        let shape = try XCTUnwrap(SelectionToolbarState.toolbarShortcut(for: "rectangle"))
+        XCTAssertNil(shape.iconName)
+        XCTAssertEqual(shape.displayText, "S")
+
+        let pin = try XCTUnwrap(SelectionToolbarState.toolbarShortcut(for: "pin"))
+        XCTAssertEqual(pin.iconName, "command")
+        XCTAssertEqual(pin.displayText, "1")
+
+        let redo = try XCTUnwrap(SelectionToolbarState.toolbarShortcut(for: "redo"))
+        XCTAssertEqual(redo.iconName, "command")
+        XCTAssertEqual(redo.displayText, "⇧Z")
+
+        let cancel = try XCTUnwrap(SelectionToolbarState.toolbarShortcut(for: "cancel"))
+        XCTAssertNil(cancel.iconName)
+        XCTAssertEqual(cancel.displayText, "ESC")
+    }
+
+    func testCommandTooltipIconRendersVisibleWhitePixels() throws {
+        let image = try XCTUnwrap(SelectionToolbarState.tooltipShortcutIconImage(named: "command", tint: .white, size: 12))
+        let whitePixels = try matchingPixelCount(in: image, rect: NSRect(origin: .zero, size: image.size)) { pixel in
+            pixel.red == 255 && pixel.green == 255 && pixel.blue == 255 && pixel.alpha > 180
+        }
+        XCTAssertGreaterThan(whitePixels, 12)
     }
 
     func testTooltipRectStaysInsideVisibleBounds() {
@@ -11697,6 +14259,47 @@ final class SelectionToolbarStateTests: XCTestCase {
         return image
     }
 
+    private func retinaSolidImage(size: NSSize, color: NSColor) -> NSImage {
+        let width = Int(size.width * 2)
+        let height = Int(size.height * 2)
+        let rgb = color.usingColorSpace(.sRGB) ?? color
+        let pixel = [
+            UInt8(round(rgb.redComponent * 255)),
+            UInt8(round(rgb.greenComponent * 255)),
+            UInt8(round(rgb.blueComponent * 255)),
+            UInt8(round(rgb.alphaComponent * 255)),
+        ]
+        let cgImage = makeTestImage(
+            width: width,
+            height: height,
+            pixels: Array(repeating: pixel, count: width * height).flatMap { $0 },
+            bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue
+        )
+        return NSImage(cgImage: cgImage, size: size)
+    }
+
+    private func retinaColorStripeImage(size: NSSize) -> NSImage {
+        let width = Int(size.width * 2)
+        let height = Int(size.height * 2)
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        for y in 0..<height {
+            for x in 0..<width {
+                let index = (y * width + x) * 4
+                bytes[index] = UInt8((x * 37 + y * 11) % 256)
+                bytes[index + 1] = UInt8((x * 17 + y * 29) % 256)
+                bytes[index + 2] = UInt8((x * 7 + y * 43) % 256)
+                bytes[index + 3] = 255
+            }
+        }
+        let cgImage = makeTestImage(
+            width: width,
+            height: height,
+            pixels: bytes,
+            bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue
+        )
+        return NSImage(cgImage: cgImage, size: size)
+    }
+
     private func blackImageWithWhitePatch(size: NSSize, centeredAt point: NSPoint, patchSize: NSSize) -> NSImage {
         let image = solidImage(size: size, color: .black)
         image.lockFocus()
@@ -11834,6 +14437,32 @@ final class SelectionToolbarStateTests: XCTestCase {
         return (bytes[index], bytes[index + 1], bytes[index + 2], bytes[index + 3])
     }
 
+    private func rgbaRenderValues(in image: NSImage, rect: NSRect) throws -> [UInt32] {
+        let cgImage = try XCTUnwrap(image.cgImage(forProposedRect: nil, context: nil, hints: nil))
+        let bytes = try rgbaBytes(in: image)
+        let scaleX = CGFloat(cgImage.width) / max(image.size.width, 1)
+        let scaleY = CGFloat(cgImage.height) / max(image.size.height, 1)
+        var values: [UInt32] = []
+        for y in Int(ceil(rect.minY))..<Int(floor(rect.maxY)) {
+            for x in Int(ceil(rect.minX))..<Int(floor(rect.maxX)) {
+                let pixelX = Int(((CGFloat(x) + 0.5) * scaleX).rounded(.down))
+                let renderY = Int(((CGFloat(y) + 0.5) * scaleY).rounded(.down))
+                guard pixelX >= 0, pixelX < cgImage.width, renderY >= 0, renderY < cgImage.height else {
+                    continue
+                }
+                let pixelY = cgImage.height - 1 - renderY
+                let index = (pixelY * cgImage.width + pixelX) * 4
+                values.append(
+                    UInt32(bytes[index]) << 24
+                        | UInt32(bytes[index + 1]) << 16
+                        | UInt32(bytes[index + 2]) << 8
+                        | UInt32(bytes[index + 3])
+                )
+            }
+        }
+        return values
+    }
+
     private func hex(_ pixel: (red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8)) -> String {
         String(format: "#%02X%02X%02X", pixel.red, pixel.green, pixel.blue)
     }
@@ -11963,6 +14592,48 @@ final class SelectionToolbarStateTests: XCTestCase {
             }
         }
         return count
+    }
+
+    private func overlayPixelBounds(
+        in image: NSImage,
+        rect: NSRect,
+        matching predicate: ((red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8)) -> Bool
+    ) throws -> NSRect? {
+        let cgImage = try XCTUnwrap(image.cgImage(forProposedRect: nil, context: nil, hints: nil))
+        let bytes = try rgbaBytes(in: image)
+        let scaleX = CGFloat(cgImage.width) / max(image.size.width, 1)
+        let scaleY = CGFloat(cgImage.height) / max(image.size.height, 1)
+        let minX = max(0, Int((rect.minX * scaleX).rounded(.down)))
+        let maxX = min(cgImage.width - 1, Int((rect.maxX * scaleX).rounded(.up)))
+        let minY = max(0, Int(((image.size.height - rect.maxY) * scaleY).rounded(.down)))
+        let maxY = min(cgImage.height - 1, Int(((image.size.height - rect.minY) * scaleY).rounded(.up)))
+        guard minX <= maxX, minY <= maxY else {
+            return nil
+        }
+
+        var bounds: NSRect?
+        for y in minY...maxY {
+            for x in minX...maxX {
+                let index = (y * cgImage.width + x) * 4
+                let pixel = (
+                    red: bytes[index],
+                    green: bytes[index + 1],
+                    blue: bytes[index + 2],
+                    alpha: bytes[index + 3]
+                )
+                guard predicate(pixel) else {
+                    continue
+                }
+                let pointRect = NSRect(
+                    x: CGFloat(x) / scaleX,
+                    y: image.size.height - CGFloat(y + 1) / scaleY,
+                    width: 1 / scaleX,
+                    height: 1 / scaleY
+                )
+                bounds = bounds.map { $0.union(pointRect) } ?? pointRect
+            }
+        }
+        return bounds
     }
 
     private func pixels(

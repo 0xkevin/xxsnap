@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 @MainActor
 final class CaptureCoordinator {
+    var captureOverlayDidPresent: (() -> Void)?
     var captureSessionDidEnd: (() -> Void)?
 
     private var lastCapture: NSImage?
@@ -14,16 +15,23 @@ final class CaptureCoordinator {
     private var startTask: Task<Void, Never>?
     private var overlayWindow: SelectionOverlayWindow?
     private var retiredOverlayWindows: [SelectionOverlayWindow] = []
+    private var pinnedWindowControllers: [PinnedImageWindowPresenting] = []
+    private var mostRecentlyHiddenPinnedWindow: PinnedImageWindowPresenting?
     private var frozenDesktopImage: NSImage?
+    private let pinnedWindowFactory: @MainActor (NSImage, NSRect) -> PinnedImageWindowPresenting
 
     init(
         permissionCoordinator: PermissionCoordinator,
         screenCaptureService: ScreenCaptureService,
-        settingsStore: SettingsStore = SettingsStore()
+        settingsStore: SettingsStore = SettingsStore(),
+        pinnedWindowFactory: @escaping @MainActor (NSImage, NSRect) -> PinnedImageWindowPresenting = {
+            PinnedImageWindowController(image: $0, screenRect: $1)
+        }
     ) {
         self.permissionCoordinator = permissionCoordinator
         self.screenCaptureService = screenCaptureService
         self.settingsStore = settingsStore
+        self.pinnedWindowFactory = pinnedWindowFactory
     }
 
     convenience init() {
@@ -31,6 +39,18 @@ final class CaptureCoordinator {
             permissionCoordinator: PermissionCoordinator(),
             screenCaptureService: ScreenCaptureService()
         )
+    }
+
+    @discardableResult
+    func restoreMostRecentlyHiddenPinnedWindow() -> Bool {
+        guard overlayWindow == nil,
+              let controller = mostRecentlyHiddenPinnedWindow
+        else {
+            return false
+        }
+        mostRecentlyHiddenPinnedWindow = nil
+        controller.show()
+        return true
     }
 
     func startCapture() {
@@ -101,6 +121,7 @@ final class CaptureCoordinator {
             }
 
             self.overlayWindow = overlayWindow
+            self.captureOverlayDidPresent?()
             overlayWindow.present()
         }
     }
@@ -219,6 +240,35 @@ final class CaptureCoordinator {
                     if !saveLastCapture(exportedImage) {
                         NSLog("xxsnap save was cancelled or failed")
                     }
+                case .pin:
+                    let controller = pinnedWindowFactory(exportedImage, result.screenRect)
+                    pinnedWindowControllers.append(controller)
+                    let controllerID = ObjectIdentifier(controller)
+                    controller.onHide = { [weak self] in
+                        guard let self,
+                              let hiddenController = self.pinnedWindowControllers.first(where: {
+                                  ObjectIdentifier($0) == controllerID
+                              })
+                        else {
+                            return
+                        }
+                        self.mostRecentlyHiddenPinnedWindow = hiddenController
+                    }
+                    controller.onClose = { [weak self] in
+                        guard let self else {
+                            return
+                        }
+                        self.pinnedWindowControllers.removeAll {
+                            ObjectIdentifier($0) == controllerID
+                        }
+                        if let recent = self.mostRecentlyHiddenPinnedWindow,
+                           ObjectIdentifier(recent) == controllerID {
+                            self.mostRecentlyHiddenPinnedWindow = nil
+                        }
+                    }
+                    controller.show()
+                case .finishEditing:
+                    break
                 }
                 NSLog(
                     "xxsnap capture completed: %.0fx%.0f",
@@ -314,6 +364,10 @@ final class CaptureCoordinator {
 extension CaptureCoordinator {
     var test_lastCapture: NSImage? {
         lastCapture
+    }
+
+    var test_pinnedWindowCount: Int {
+        pinnedWindowControllers.count
     }
 
     func test_handleSelection(_ result: CaptureSelectionResult?, frozenDesktopImage: NSImage?) {
