@@ -58,7 +58,58 @@ git add platforms/mac/Resources/Assets.xcassets/AppIcon.appiconset/*.png \
 git commit -m "feat(mac): refresh app and status icons"
 ```
 
-### Task 2: Build and restart the app
+### Task 2: Widen the status icon seams
+
+**Files:**
+- Modify: `platforms/mac/Resources/xxsnap.png`
+- Test: `platforms/mac/Tests/xxsnapMacTests.swift`
+
+- [ ] **Step 1: Add a failing visible-area upper bound**
+
+Add this assertion to `testStatusBarTemplateIconHasTransparentBackgroundAndVisibleGlyph()` after the existing lower bound:
+
+```swift
+XCTAssertLessThan(visiblePixelCount, pixelCount / 5)
+```
+
+The lower bound protects glyph visibility; the upper bound requires enough transparent seam area to keep all three joins readable.
+
+- [ ] **Step 2: Run the focused test and verify RED**
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+  xcodebuild -project platforms/mac/xxsnap.xcodeproj \
+  -scheme xxsnap -configuration Debug \
+  -derivedDataPath build/xcode-derived test \
+  -only-testing:xxsnapTests/xxsnapMacTests/testStatusBarTemplateIconHasTransparentBackgroundAndVisibleGlyph
+```
+
+Expected: FAIL because the current visible pixel count is not less than one fifth of the 128×128 canvas.
+
+- [ ] **Step 3: Apply the approved 3px alpha-mask erosion**
+
+Extract the current PNG alpha channel, apply ImageMagick `-morphology Erode Disk:3`, and copy the eroded mask back as opacity over a black 128×128 canvas. Replace only `platforms/mac/Resources/xxsnap.png`.
+
+- [ ] **Step 4: Run the focused test and verify GREEN**
+
+Run the command from Step 2 again.
+
+Expected: PASS; transparent pixels remain more than half, visible pixels remain more than one tenth and less than one fifth of the canvas.
+
+- [ ] **Step 5: Verify the 36px status-bar preview**
+
+Resize the alpha channel to 36×36 and inspect the three internal seams. Compare the opaque bounds with the previous `30x32+3+2` baseline.
+
+Expected: all three seams are approximately two pixels wide; each outer edge moves inward by no more than one display pixel.
+
+- [ ] **Step 6: Commit the seam refinement**
+
+```bash
+git add platforms/mac/Resources/xxsnap.png platforms/mac/Tests/xxsnapMacTests.swift
+git commit -m "fix(mac): widen status icon seams"
+```
+
+### Task 3: Build and restart the app
 
 **Files:**
 - Verify: `platforms/mac/xxsnap.xcodeproj`
