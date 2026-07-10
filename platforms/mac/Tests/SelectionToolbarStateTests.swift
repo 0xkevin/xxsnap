@@ -2064,7 +2064,8 @@ final class SelectionToolbarStateTests: XCTestCase {
     }
 
     func testEmptyTextDraftIsDiscardedOnEscape() {
-        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        var completions = 0
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in completions += 1 }
         window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
         window.test_activateTextTool()
 
@@ -2078,7 +2079,28 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         XCTAssertEqual(window.test_annotationCount, 0)
         XCTAssertFalse(window.test_isEditingTextAnnotation)
+        XCTAssertFalse(window.test_isTextToolActive)
         XCTAssertNil(window.test_selectedAnnotationKind)
+        XCTAssertEqual(completions, 0)
+    }
+
+    func testEscapeDiscardsShapeDraftWithoutClosingCapture() {
+        var completions = 0
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in completions += 1 }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_activateShapeTool(.rectangle)
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 150))
+        window.test_mouseDragged(to: NSPoint(x: 220, y: 210))
+
+        XCTAssertEqual(window.test_annotationCount, 0)
+        XCTAssertEqual(window.test_currentShapeKind, .rectangle)
+
+        window.test_keyDown(keyCode: 53, charactersIgnoringModifiers: "\u{1b}")
+
+        XCTAssertEqual(window.test_annotationCount, 0)
+        XCTAssertNil(window.test_currentShapeKind)
+        XCTAssertEqual(completions, 0)
     }
 
     func testWhitespaceOnlyTextDraftIsDiscardedOnEscape() {
@@ -2333,26 +2355,79 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertNil(result)
     }
 
-    func testPinnedImageEditorEscapeFinishesEditingAndKeepsAnnotations() {
-        let selection = NSRect(x: 40, y: 40, width: 240, height: 160)
-        let annotation = CaptureAnnotation(
-            kind: .rectangle,
-            rect: NSRect(x: 20, y: 20, width: 60, height: 40),
-            style: CaptureAnnotationStyle()
+    func testActivePrimaryToolsRequireTwoEscapesToCloseCapture() {
+        for key in ["s", "a", "b", "h", "p", "m", "t", "n", "g", "e"] {
+            var completions = 0
+            var result: CaptureSelectionResult?
+            let completion = expectation(description: "cancel after leaving \(key) tool")
+            let window = SelectionOverlayWindow(backgroundImage: nil) {
+                completions += 1
+                result = $0
+                completion.fulfill()
+            }
+            window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+            window.test_keyDown(keyCode: 0, charactersIgnoringModifiers: key)
+
+            window.test_keyDown(keyCode: 53, charactersIgnoringModifiers: "\u{1b}")
+            XCTAssertEqual(completions, 0, key)
+
+            window.test_keyDown(keyCode: 53, charactersIgnoringModifiers: "\u{1b}")
+            wait(for: [completion], timeout: 0.5)
+            XCTAssertEqual(completions, 1, key)
+            XCTAssertNil(result, key)
+        }
+    }
+
+    @MainActor
+    func testPinnedImageEditorBaseEscapeClosesCurrentPin() {
+        let controller = PinnedImageWindowController(
+            image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+            screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
         )
-        var result: CaptureSelectionResult?
-        let window = SelectionOverlayWindow(
-            backgroundImage: nil,
-            configuration: .pinnedImageEditor(selectionRect: selection)
-        ) { result = $0 }
-        window.test_setAnnotations([annotation])
+        var closeCount = 0
+        controller.onClose = { closeCount += 1 }
+        controller.test_showEditingToolbar()
 
-        window.test_keyDown(keyCode: 53, charactersIgnoringModifiers: "\u{1b}")
+        controller.test_editingOverlayKeyDown(
+            keyCode: 53,
+            charactersIgnoringModifiers: "\u{1b}",
+            modifierFlags: []
+        )
 
-        XCTAssertEqual(result?.action, .finishEditing)
-        XCTAssertEqual(result?.annotations.count, 1)
-        XCTAssertEqual(result?.annotations.first?.id, annotation.id)
-        XCTAssertEqual(result?.annotations.first?.kind, .rectangle)
+        XCTAssertEqual(closeCount, 1)
+    }
+
+    @MainActor
+    func testPinnedImageActivePrimaryToolsRequireTwoEscapesToClosePin() {
+        for key in ["s", "a", "b", "h", "p", "m", "t", "n", "g", "e"] {
+            let controller = PinnedImageWindowController(
+                image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+                screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
+            )
+            var closeCount = 0
+            controller.onClose = { closeCount += 1 }
+            controller.test_showEditingToolbar()
+            controller.test_editingOverlayKeyDown(
+                keyCode: 0,
+                charactersIgnoringModifiers: key,
+                modifierFlags: []
+            )
+
+            controller.test_editingOverlayKeyDown(
+                keyCode: 53,
+                charactersIgnoringModifiers: "\u{1b}",
+                modifierFlags: []
+            )
+            XCTAssertEqual(closeCount, 0, key)
+            XCTAssertTrue(controller.test_isToolbarVisible, key)
+
+            controller.test_editingOverlayKeyDown(
+                keyCode: 53,
+                charactersIgnoringModifiers: "\u{1b}",
+                modifierFlags: []
+            )
+            XCTAssertEqual(closeCount, 1, key)
+        }
     }
 
     func testMonitoredKeyEventIsOwnedOnlyByItsPinnedEditorWindow() throws {

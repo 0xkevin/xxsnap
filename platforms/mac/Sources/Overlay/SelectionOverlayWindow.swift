@@ -687,7 +687,7 @@ final class SelectionOverlayWindow: NSWindow {
         guard event.keyCode == 53 else {
             return event
         }
-        cancelOperation(nil)
+        performBaseEscape()
         return nil
     }
 
@@ -702,6 +702,15 @@ final class SelectionOverlayWindow: NSWindow {
         completeSelection(with: nil)
     }
 
+    private func performBaseEscape() {
+        if configuration.showsFinishEditingButton,
+           let handler = configuration.pinnedImageWindowCommandHandler {
+            handler(.closeCurrent)
+        } else {
+            cancelOperation(nil)
+        }
+    }
+
     override func keyDown(with event: NSEvent) {
         if let overlayView = contentView as? SelectionOverlayView,
            overlayView.handleKeyDown(event) {
@@ -709,7 +718,7 @@ final class SelectionOverlayWindow: NSWindow {
         }
 
         if event.keyCode == 53 {
-            cancelOperation(nil)
+            performBaseEscape()
             return
         }
 
@@ -3315,6 +3324,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return false
         }
 
+        if event.keyCode == 53 {
+            return cancelActiveToolForEscape()
+        }
+
         if let command = PinnedImageWindowCommand(event: event),
            let handler = configuration.pinnedImageWindowCommandHandler {
             handler(command)
@@ -3358,6 +3371,64 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
 
         return false
+    }
+
+    private func cancelActiveToolForEscape() -> Bool {
+        let hasActiveTool = isShapeToolActive
+            || isEyedropperToolActive
+            || isTextToolActive
+            || isNumberToolActive
+            || isMagnifierToolActive
+            || isEraserToolActive
+        let hasTransientToolState = isEditingTextAnnotation
+            || editingNumberAnnotationIndex != nil
+            || mosaicValueEditingText != nil
+            || activeTextDropdown != nil
+            || activeNumberDropdown
+            || activeMagnifierZoomDropdown
+            || showsStrokeStyleMenu
+            || showsCornerRadiusPanel
+            || showsStartArrowTypeMenu
+            || showsEndArrowTypeMenu
+        guard hasActiveTool || hasTransientToolState else {
+            return false
+        }
+
+        commitCurrentTextEdit()
+        commitNumberEditingIfNeeded()
+        mosaicValueEditingText = nil
+        clearPendingTextEdit()
+        closeTextDropdown()
+        closeMagnifierZoomDropdown()
+        rememberCurrentStyleForActiveTool()
+
+        isShapeToolActive = false
+        activeShapeKind = nil
+        isEyedropperToolActive = false
+        isTextToolActive = false
+        isNumberToolActive = false
+        isMagnifierToolActive = false
+        isEraserToolActive = false
+        activeNumberDropdown = false
+        clearEyedropperMeasurement()
+        clearColorSampler()
+        clearEraserRectangleState()
+
+        shapeStartPoint = nil
+        shapeCurrentPoint = nil
+        brushDraftPoints.removeAll()
+        mosaicDraftPoints.removeAll()
+        selectedAnnotationIndex = nil
+        revealedNumberControlsIndex = nil
+        showsStrokeStyleMenu = false
+        showsCornerRadiusPanel = false
+        showsStartArrowTypeMenu = false
+        showsEndArrowTypeMenu = false
+        interactionMode = lockedSelectionRect == nil ? .selecting : .annotating
+        resetMosaicRedactionPreviewCaches()
+        invalidateCursorRectsAndRefresh()
+        needsDisplay = true
+        return true
     }
 
     private func shouldPassKeyDownToTextEditor(_ event: NSEvent) -> Bool {
