@@ -67,6 +67,8 @@ struct PinnedImageWindowGeometry {
 protocol PinnedImageWindowPresenting: AnyObject {
     var image: NSImage { get }
     var screenRect: NSRect { get }
+    var onHide: (() -> Void)? { get set }
+    var onClose: (() -> Void)? { get set }
     func show()
 }
 
@@ -79,6 +81,7 @@ final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPr
     }
 
     let screenRect: NSRect
+    var onHide: (() -> Void)?
     var onClose: (() -> Void)?
     private var pinnedImage: NSImage
     private let initialImageFrame: NSRect
@@ -364,6 +367,14 @@ final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPr
 
     @objc private func closePinnedWindow() {
         window?.close()
+    }
+
+    fileprivate func hidePinnedWindow() {
+        guard window?.isVisible == true else {
+            return
+        }
+        window?.orderOut(nil)
+        onHide?()
     }
 
     @objc private func closeAllPinnedWindows() {
@@ -1095,7 +1106,11 @@ private final class PinnedImageContentView: NSView {
         if controller?.handleKeyDown(event) == true {
             return
         }
-        if event.keyCode == 53 || event.keyCode == 51 || event.keyCode == 117 {
+        if event.keyCode == 53 {
+            controller?.hidePinnedWindow()
+            return
+        }
+        if event.keyCode == 51 || event.keyCode == 117 {
             window?.close()
             return
         }

@@ -6,7 +6,10 @@ import XCTest
 private final class FakePinnedWindow: PinnedImageWindowPresenting {
     let image: NSImage
     let screenRect: NSRect
-    private(set) var didShow = false
+    var onHide: (() -> Void)?
+    var onClose: (() -> Void)?
+    private(set) var showCount = 0
+    var didShow: Bool { showCount > 0 }
 
     init(image: NSImage, screenRect: NSRect) {
         self.image = image
@@ -14,7 +17,15 @@ private final class FakePinnedWindow: PinnedImageWindowPresenting {
     }
 
     func show() {
-        didShow = true
+        showCount += 1
+    }
+
+    func simulateHide() {
+        onHide?()
+    }
+
+    func simulateClose() {
+        onClose?()
     }
 }
 
@@ -2408,7 +2419,9 @@ final class SelectionToolbarStateTests: XCTestCase {
                 image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
                 screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
             )
+            var hideCount = 0
             var closeCount = 0
+            controller.onHide = { hideCount += 1 }
             controller.onClose = { closeCount += 1 }
             controller.show()
             controller.test_showEditingToolbar()
@@ -2434,6 +2447,10 @@ final class SelectionToolbarStateTests: XCTestCase {
             XCTAssertEqual(closeCount, 0, key)
             XCTAssertFalse(controller.test_isToolbarVisible, key)
             XCTAssertEqual(controller.window?.isVisible, true, key)
+            controller.test_keyDown(keyCode: 53)
+            XCTAssertEqual(hideCount, 1, key)
+            XCTAssertEqual(closeCount, 0, key)
+            XCTAssertEqual(controller.window?.isVisible, false, key)
             controller.window?.close()
         }
     }
@@ -3011,17 +3028,40 @@ final class SelectionToolbarStateTests: XCTestCase {
     }
 
     @MainActor
-    func testPinnedImageEscapeAndDeleteStillCloseWhenToolbarIsHidden() {
-        for keyCode in [UInt16(53), UInt16(51), UInt16(117)] {
+    func testPinnedImageEscapeHidesWithoutClosingWhenToolbarIsHidden() {
+        let controller = PinnedImageWindowController(
+            image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+            screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
+        )
+        var hideCount = 0
+        var closeCount = 0
+        controller.onHide = { hideCount += 1 }
+        controller.onClose = { closeCount += 1 }
+        controller.show()
+
+        controller.test_keyDown(keyCode: 53)
+
+        XCTAssertEqual(hideCount, 1)
+        XCTAssertEqual(closeCount, 0)
+        XCTAssertEqual(controller.window?.isVisible, false)
+        controller.window?.close()
+    }
+
+    @MainActor
+    func testPinnedImageDeleteKeysStillCloseWhenToolbarIsHidden() {
+        for keyCode in [UInt16(51), UInt16(117)] {
             let controller = PinnedImageWindowController(
                 image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
                 screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
             )
+            var hideCount = 0
             var closeCount = 0
+            controller.onHide = { hideCount += 1 }
             controller.onClose = { closeCount += 1 }
 
             controller.test_keyDown(keyCode: keyCode)
 
+            XCTAssertEqual(hideCount, 0, "keyCode=\(keyCode)")
             XCTAssertEqual(closeCount, 1, "keyCode=\(keyCode)")
         }
     }
