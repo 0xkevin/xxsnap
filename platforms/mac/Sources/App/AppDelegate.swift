@@ -12,8 +12,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let captureCoordinator = CaptureCoordinator()
         self.captureCoordinator = captureCoordinator
         statusItemController = StatusItemController(captureCoordinator: captureCoordinator)
-        hotKeyController = CaptureHotKeyController {
-            captureCoordinator.startCapture()
+        let hotKeyController = CaptureHotKeyController(
+            captureHandler: {
+                captureCoordinator.startCapture()
+            },
+            restorePinnedImageHandler: {
+                captureCoordinator.restoreMostRecentlyHiddenPinnedWindow()
+            }
+        )
+        self.hotKeyController = hotKeyController
+        captureCoordinator.captureOverlayDidPresent = { [weak hotKeyController] in
+            hotKeyController?.setRestorePinnedImageHotKeyEnabled(false)
+        }
+        captureCoordinator.captureSessionDidEnd = { [weak hotKeyController] in
+            hotKeyController?.setRestorePinnedImageHotKeyEnabled(true)
         }
     }
 
@@ -31,25 +43,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 private final class CaptureHotKeyController {
-    private var hotKeyRef: EventHotKeyRef?
+    private enum HotKeyID {
+        static let capture: UInt32 = 1
+        static let restorePinnedImage: UInt32 = 2
+    }
+
+    private var captureHotKeyRef: EventHotKeyRef?
+    private var restorePinnedImageHotKeyRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
     private let captureHandler: () -> Void
+    private let restorePinnedImageHandler: () -> Void
 
-    init(captureHandler: @escaping () -> Void) {
+    init(
+        captureHandler: @escaping () -> Void,
+        restorePinnedImageHandler: @escaping () -> Void
+    ) {
         self.captureHandler = captureHandler
-        install()
+        self.restorePinnedImageHandler = restorePinnedImageHandler
+        installEventHandler()
+        captureHotKeyRef = registerHotKey(
+            keyCode: UInt32(kVK_ANSI_Grave),
+            modifiers: UInt32(cmdKey),
+            id: HotKeyID.capture
+        )
+        setRestorePinnedImageHotKeyEnabled(true)
     }
 
     deinit {
-        if let hotKeyRef {
-            UnregisterEventHotKey(hotKeyRef)
+        if let captureHotKeyRef {
+            UnregisterEventHotKey(captureHotKeyRef)
+        }
+        if let restorePinnedImageHotKeyRef {
+            UnregisterEventHotKey(restorePinnedImageHotKeyRef)
         }
         if let eventHandlerRef {
             RemoveEventHandler(eventHandlerRef)
         }
     }
 
-    private func install() {
+    func setRestorePinnedImageHotKeyEnabled(_ isEnabled: Bool) {
+        if isEnabled {
+            guard restorePinnedImageHotKeyRef == nil else {
+                return
+            }
+            restorePinnedImageHotKeyRef = registerHotKey(
+                keyCode: UInt32(kVK_ANSI_1),
+                modifiers: UInt32(cmdKey),
+                id: HotKeyID.restorePinnedImage
+            )
+        } else if let restorePinnedImageHotKeyRef {
+            UnregisterEventHotKey(restorePinnedImageHotKeyRef)
+            self.restorePinnedImageHotKeyRef = nil
+        }
+    }
+
+    private func installEventHandler() {
         var eventType = EventTypeSpec(
             eventClass: OSType(kEventClassKeyboard),
             eventKind: UInt32(kEventHotKeyPressed)
@@ -72,13 +120,20 @@ private final class CaptureHotKeyController {
                     nil,
                     &hotKeyID
                 )
-                guard parameterStatus == noErr, hotKeyID.id == 1 else {
+                guard parameterStatus == noErr else {
                     return noErr
                 }
 
                 let controller = Unmanaged<CaptureHotKeyController>.fromOpaque(userData).takeUnretainedValue()
                 DispatchQueue.main.async {
-                    controller.captureHandler()
+                    switch hotKeyID.id {
+                    case HotKeyID.capture:
+                        controller.captureHandler()
+                    case HotKeyID.restorePinnedImage:
+                        controller.restorePinnedImageHandler()
+                    default:
+                        break
+                    }
                 }
                 return noErr
             },
@@ -91,21 +146,27 @@ private final class CaptureHotKeyController {
             NSLog("xxsnap hotkey handler install failed status=%d", handlerStatus)
             return
         }
+    }
 
-        let hotKeyID = EventHotKeyID(signature: fourCharacterCode("xxsp"), id: 1)
-        let hotKeyStatus = RegisterEventHotKey(
-            UInt32(kVK_ANSI_Grave),
-            UInt32(cmdKey),
+    private func registerHotKey(
+        keyCode: UInt32,
+        modifiers: UInt32,
+        id: UInt32
+    ) -> EventHotKeyRef? {
+        var reference: EventHotKeyRef?
+        let hotKeyID = EventHotKeyID(signature: fourCharacterCode("xxsp"), id: id)
+        let status = RegisterEventHotKey(
+            keyCode,
+            modifiers,
             hotKeyID,
             GetApplicationEventTarget(),
             0,
-            &hotKeyRef
+            &reference
         )
-        if hotKeyStatus == noErr {
-            NSLog("xxsnap registered hotkey command-backtick")
-        } else {
-            NSLog("xxsnap hotkey registration failed status=%d", hotKeyStatus)
+        if status != noErr {
+            NSLog("xxsnap hotkey registration failed id=%u status=%d", id, status)
         }
+        return status == noErr ? reference : nil
     }
 }
 
