@@ -2379,13 +2379,14 @@ final class SelectionToolbarStateTests: XCTestCase {
     }
 
     @MainActor
-    func testPinnedImageEditorBaseEscapeClosesCurrentPin() {
+    func testPinnedImageEditorBaseEscapeFinishesEditingWithoutClosingPin() {
         let controller = PinnedImageWindowController(
             image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
             screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
         )
         var closeCount = 0
         controller.onClose = { closeCount += 1 }
+        controller.show()
         controller.test_showEditingToolbar()
 
         controller.test_editingOverlayKeyDown(
@@ -2394,11 +2395,14 @@ final class SelectionToolbarStateTests: XCTestCase {
             modifierFlags: []
         )
 
-        XCTAssertEqual(closeCount, 1)
+        XCTAssertEqual(closeCount, 0)
+        XCTAssertFalse(controller.test_isToolbarVisible)
+        XCTAssertEqual(controller.window?.isVisible, true)
+        controller.window?.close()
     }
 
     @MainActor
-    func testPinnedImageActivePrimaryToolsRequireTwoEscapesToClosePin() {
+    func testPinnedImageActivePrimaryToolsEscapeThenFinishEditing() {
         for key in ["s", "a", "b", "h", "p", "m", "t", "n", "g", "e"] {
             let controller = PinnedImageWindowController(
                 image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
@@ -2406,6 +2410,7 @@ final class SelectionToolbarStateTests: XCTestCase {
             )
             var closeCount = 0
             controller.onClose = { closeCount += 1 }
+            controller.show()
             controller.test_showEditingToolbar()
             controller.test_editingOverlayKeyDown(
                 keyCode: 0,
@@ -2426,8 +2431,44 @@ final class SelectionToolbarStateTests: XCTestCase {
                 charactersIgnoringModifiers: "\u{1b}",
                 modifierFlags: []
             )
-            XCTAssertEqual(closeCount, 1, key)
+            XCTAssertEqual(closeCount, 0, key)
+            XCTAssertFalse(controller.test_isToolbarVisible, key)
+            XCTAssertEqual(controller.window?.isVisible, true, key)
+            controller.window?.close()
         }
+    }
+
+    @MainActor
+    func testPinnedImageEditorEscapeFinishBakesAnnotations() throws {
+        let controller = PinnedImageWindowController(
+            image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+            screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
+        )
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = .red
+        style.fillEnabled = true
+        style.fillColor = .red
+        let rectangle = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 20, y: 20, width: 50, height: 30),
+            style: style
+        )
+        controller.show()
+        controller.test_showEditingToolbar()
+        controller.test_setEditingOverlayState(annotations: [rectangle], eraserMasks: [])
+
+        controller.test_editingOverlayKeyDown(
+            keyCode: 53,
+            charactersIgnoringModifiers: "\u{1b}",
+            modifierFlags: []
+        )
+
+        let pixel = try XCTUnwrap(rgbaRenderPixel(in: controller.image, at: NSPoint(x: 30, y: 30)))
+        XCTAssertGreaterThan(pixel.red, 220)
+        XCTAssertLessThan(pixel.green, 40)
+        XCTAssertLessThan(pixel.blue, 40)
+        XCTAssertFalse(controller.test_isToolbarVisible)
+        controller.window?.close()
     }
 
     func testMonitoredKeyEventIsOwnedOnlyByItsPinnedEditorWindow() throws {

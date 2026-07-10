@@ -703,12 +703,11 @@ final class SelectionOverlayWindow: NSWindow {
     }
 
     private func performBaseEscape() {
-        if configuration.showsFinishEditingButton,
-           let handler = configuration.pinnedImageWindowCommandHandler {
-            handler(.closeCurrent)
-        } else {
-            cancelOperation(nil)
+        if let overlayView = contentView as? SelectionOverlayView,
+           overlayView.finishPinnedImageEditingForEscape() {
+            return
         }
+        cancelOperation(nil)
     }
 
     override func keyDown(with event: NSEvent) {
@@ -3371,6 +3370,14 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
 
         return false
+    }
+
+    func finishPinnedImageEditingForEscape() -> Bool {
+        guard configuration.showsFinishEditingButton else {
+            return false
+        }
+        finish(action: .finishEditing)
+        return true
     }
 
     private func cancelActiveToolForEscape() -> Bool {
