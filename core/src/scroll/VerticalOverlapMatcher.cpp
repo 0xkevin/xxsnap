@@ -1,7 +1,6 @@
 #include "snipory/core/scroll/VerticalOverlapMatcher.h"
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -12,7 +11,9 @@ namespace snipory::core::scroll {
 namespace {
 
 constexpr int CoarseScale = 4;
+constexpr int PeakSuppressionRadius = CoarseScale - 1;
 constexpr std::size_t CoarseCandidateCount = 8;
+constexpr int MaximumCoarseColumns = 64;
 
 struct LuminanceImage final
 {
@@ -26,11 +27,6 @@ struct ScoredAdvance final
     int advance = 0;
     double error = std::numeric_limits<double>::infinity();
 };
-
-[[nodiscard]] constexpr int ceilDivide(int value, int divisor)
-{
-    return value / divisor + (value % divisor == 0 ? 0 : 1);
-}
 
 [[nodiscard]] bool validConfig(const OverlapConfig& config)
 {
@@ -61,110 +57,117 @@ struct ScoredAdvance final
     return static_cast<std::uint8_t>((29U * blue + 150U * green + 77U * red + 128U) >> 8U);
 }
 
-[[nodiscard]] LuminanceImage quarterScaleLuminance(const ScrollFrame& frame)
+[[nodiscard]] LuminanceImage makeLuminance(const ScrollFrame& frame)
 {
     LuminanceImage result;
-    result.width = ceilDivide(frame.width, CoarseScale);
-    result.height = ceilDivide(frame.height, CoarseScale);
+    result.width = frame.width;
+    result.height = frame.height;
     result.pixels.resize(
-        static_cast<std::size_t>(result.width) * static_cast<std::size_t>(result.height));
-
-    for (int coarseY = 0; coarseY < result.height; ++coarseY) {
-        const int firstY = coarseY * CoarseScale;
-        const int lastY = std::min(firstY + CoarseScale, frame.height);
-        for (int coarseX = 0; coarseX < result.width; ++coarseX) {
-            const int firstX = coarseX * CoarseScale;
-            const int lastX = std::min(firstX + CoarseScale, frame.width);
-            std::uint32_t sum = 0;
-            std::uint32_t count = 0;
-            for (int y = firstY; y < lastY; ++y) {
-                for (int x = firstX; x < lastX; ++x) {
-                    sum += luminanceAt(frame, x, y);
-                    ++count;
-                }
-            }
-            const auto destination = static_cast<std::size_t>(coarseY)
-                    * static_cast<std::size_t>(result.width)
-                + static_cast<std::size_t>(coarseX);
-            result.pixels[destination] = static_cast<std::uint8_t>((sum + count / 2U) / count);
+        static_cast<std::size_t>(frame.width) * static_cast<std::size_t>(frame.height));
+    for (int y = 0; y < frame.height; ++y) {
+        for (int x = 0; x < frame.width; ++x) {
+            const auto destination = static_cast<std::size_t>(y)
+                    * static_cast<std::size_t>(frame.width)
+                + static_cast<std::size_t>(x);
+            result.pixels[destination] = luminanceAt(frame, x, y);
         }
     }
     return result;
 }
 
-template<typename PixelAt>
 [[nodiscard]] double normalizedError(
-    int width,
-    int height,
-    int advance,
-    const PixelCrop& excludedBands,
-    int scale,
-    PixelAt pixelAt)
-{
-    const int firstX = ceilDivide(excludedBands.left, scale);
-    const int lastX = (width - excludedBands.right) / scale;
-    const int firstCurrentY = ceilDivide(excludedBands.top, scale);
-    const int lastCurrentY = (height - advance - excludedBands.bottom) / scale;
-    const int previousTop = excludedBands.top > advance
-        ? ceilDivide(excludedBands.top - advance, scale)
-        : 0;
-    const int firstPreviousY = std::max(firstCurrentY, previousTop);
-    const int lastPreviousY = std::min(lastCurrentY, (height - excludedBands.bottom - advance) / scale);
-    if (firstX >= lastX || firstPreviousY >= lastPreviousY) {
-        return std::numeric_limits<double>::infinity();
-    }
-
-    long double difference = 0;
-    std::uint64_t count = 0;
-    const int scaledAdvance = advance / scale;
-    for (int currentY = firstPreviousY; currentY < lastPreviousY; ++currentY) {
-        for (int x = firstX; x < lastX; ++x) {
-            const int previousValue = pixelAt(0, x, currentY + scaledAdvance);
-            const int currentValue = pixelAt(1, x, currentY);
-            difference += static_cast<long double>(std::abs(previousValue - currentValue));
-            ++count;
-        }
-    }
-    return static_cast<double>(difference / (static_cast<long double>(count) * 255.0L));
-}
-
-[[nodiscard]] double fullResolutionError(
-    const ScrollFrame& previous,
-    const ScrollFrame& current,
-    int advance,
-    const PixelCrop& excludedBands)
-{
-    return normalizedError(
-        previous.width,
-        previous.height,
-        advance,
-        excludedBands,
-        1,
-        [&](int image, int x, int y) {
-            return luminanceAt(image == 0 ? previous : current, x, y);
-        });
-}
-
-[[nodiscard]] double coarseError(
     const LuminanceImage& previous,
     const LuminanceImage& current,
     int advance,
     const PixelCrop& excludedBands,
-    int fullWidth,
-    int fullHeight)
+    int rowStep,
+    int columnStep)
 {
-    return normalizedError(
-        fullWidth,
-        fullHeight,
-        advance,
-        excludedBands,
-        CoarseScale,
-        [&](int image, int x, int y) {
-            const auto& source = image == 0 ? previous : current;
-            const auto offset = static_cast<std::size_t>(y) * static_cast<std::size_t>(source.width)
-                + static_cast<std::size_t>(x);
-            return source.pixels[offset];
+    const int firstX = excludedBands.left;
+    const int lastX = previous.width - excludedBands.right;
+    const int firstY = excludedBands.top;
+    const int lastY = previous.height - excludedBands.bottom - advance;
+    if (firstX >= lastX || firstY >= lastY) {
+        return std::numeric_limits<double>::infinity();
+    }
+
+    double difference = 0;
+    std::uint64_t count = 0;
+    const auto unsignedRowStep = static_cast<std::size_t>(rowStep);
+    const auto unsignedColumnStep = static_cast<std::size_t>(columnStep);
+    for (auto currentY = static_cast<std::size_t>(firstY);
+         currentY < static_cast<std::size_t>(lastY);
+         currentY += unsignedRowStep) {
+        const auto previousRow = (currentY + static_cast<std::size_t>(advance))
+            * static_cast<std::size_t>(previous.width);
+        const auto currentRow = currentY * static_cast<std::size_t>(current.width);
+        for (auto column = static_cast<std::size_t>(firstX);
+             column < static_cast<std::size_t>(lastX);
+             column += unsignedColumnStep) {
+            const int previousValue = previous.pixels[previousRow + column];
+            const int currentValue = current.pixels[currentRow + column];
+            difference += static_cast<double>(std::abs(previousValue - currentValue));
+            ++count;
+        }
+    }
+    return difference / (static_cast<double>(count) * 255.0);
+}
+
+void sortByError(std::vector<ScoredAdvance>& scores)
+{
+    std::sort(scores.begin(), scores.end(), [](const auto& left, const auto& right) {
+        if (left.error == right.error) {
+            return left.advance < right.advance;
+        }
+        return left.error < right.error;
+    });
+}
+
+[[nodiscard]] std::vector<int> selectCoarsePeaks(std::vector<ScoredAdvance> scores)
+{
+    sortByError(scores);
+    std::vector<int> peaks;
+    peaks.reserve(CoarseCandidateCount);
+    for (const auto& score : scores) {
+        if (!std::isfinite(score.error)) {
+            break;
+        }
+        const bool nearSelectedPeak = std::any_of(peaks.cbegin(), peaks.cend(), [&](int selected) {
+            return std::abs(selected - score.advance) <= PeakSuppressionRadius;
         });
+        if (!nearSelectedPeak) {
+            peaks.push_back(score.advance);
+            if (peaks.size() == CoarseCandidateCount) {
+                break;
+            }
+        }
+    }
+    return peaks;
+}
+
+[[nodiscard]] std::vector<ScoredAdvance> scoreFullResolution(
+    const LuminanceImage& previous,
+    const LuminanceImage& current,
+    const PixelCrop& excludedBands,
+    const std::vector<int>& advances)
+{
+    std::vector<ScoredAdvance> scores;
+    scores.reserve(advances.size());
+    for (const int advance : advances) {
+        scores.push_back({advance, normalizedError(previous, current, advance, excludedBands, 1, 1)});
+    }
+    sortByError(scores);
+    return scores;
+}
+
+[[nodiscard]] std::vector<int> allAdvances(int maximumAdvance)
+{
+    std::vector<int> advances;
+    advances.reserve(static_cast<std::size_t>(maximumAdvance) + 1U);
+    for (int advance = 0; advance <= maximumAdvance; ++advance) {
+        advances.push_back(advance);
+    }
+    return advances;
 }
 
 } // namespace
@@ -192,56 +195,52 @@ OverlapResult VerticalOverlapMatcher::match(
         return result;
     }
 
-    const auto coarsePrevious = quarterScaleLuminance(previous);
-    const auto coarseCurrent = quarterScaleLuminance(current);
+    const auto previousLuminance = makeLuminance(previous);
+    const auto currentLuminance = makeLuminance(current);
+    const int scoringWidth = previous.width
+        - config.excludedBands.left
+        - config.excludedBands.right;
+    const int coarseColumnStep = std::max(
+        CoarseScale,
+        scoringWidth / MaximumCoarseColumns
+            + (scoringWidth % MaximumCoarseColumns == 0 ? 0 : 1));
     std::vector<ScoredAdvance> coarseScores;
-    coarseScores.reserve(static_cast<std::size_t>(maximumAdvance / CoarseScale + 1));
-    for (int advance = 0; advance <= maximumAdvance; advance += CoarseScale) {
-        coarseScores.push_back({advance, coarseError(
-            coarsePrevious,
-            coarseCurrent,
+    coarseScores.reserve(static_cast<std::size_t>(maximumAdvance) + 1U);
+    for (int advance = 0; advance <= maximumAdvance; ++advance) {
+        coarseScores.push_back({advance, normalizedError(
+            previousLuminance,
+            currentLuminance,
             advance,
             config.excludedBands,
-            previous.width,
-            height)});
+            CoarseScale,
+            coarseColumnStep)});
     }
-    std::sort(coarseScores.begin(), coarseScores.end(), [](const auto& left, const auto& right) {
-        return left.error < right.error;
-    });
+    const auto coarsePeaks = selectCoarsePeaks(coarseScores);
+    if (coarsePeaks.empty()) {
+        return result;
+    }
 
-    std::vector<int> fullResolutionAdvances;
-    const auto candidateCount = std::min(CoarseCandidateCount, coarseScores.size());
-    fullResolutionAdvances.reserve(candidateCount * (2U * CoarseScale - 1U));
-    for (std::size_t index = 0; index < candidateCount; ++index) {
-        for (int delta = -(CoarseScale - 1); delta < CoarseScale; ++delta) {
-            const int advance = coarseScores[index].advance + delta;
-            if (advance >= 0 && advance <= maximumAdvance) {
-                fullResolutionAdvances.push_back(advance);
-            }
-        }
-    }
-    if (maximumAdvance % CoarseScale != 0) {
-        fullResolutionAdvances.push_back(maximumAdvance);
-    }
-    std::sort(fullResolutionAdvances.begin(), fullResolutionAdvances.end());
-    fullResolutionAdvances.erase(
-        std::unique(fullResolutionAdvances.begin(), fullResolutionAdvances.end()),
-        fullResolutionAdvances.end());
-
-    std::vector<ScoredAdvance> fullScores;
-    fullScores.reserve(fullResolutionAdvances.size());
-    for (const int advance : fullResolutionAdvances) {
-        fullScores.push_back({advance, fullResolutionError(
-            previous,
-            current,
-            advance,
-            config.excludedBands)});
-    }
-    std::sort(fullScores.begin(), fullScores.end(), [](const auto& left, const auto& right) {
-        return left.error < right.error;
-    });
+    auto fullScores = scoreFullResolution(
+        previousLuminance,
+        currentLuminance,
+        config.excludedBands,
+        coarsePeaks);
     if (fullScores.empty() || !std::isfinite(fullScores.front().error)) {
         return result;
+    }
+
+    // A zero-error coarse sample cannot lead to a non-zero full-resolution winner
+    // unless sampling aliases hid the exact placement. Recover with a bounded full scan.
+    const auto coarseBest = std::min_element(coarseScores.cbegin(), coarseScores.cend(), [](const auto& left, const auto& right) {
+        return left.error < right.error;
+    });
+    if (coarseBest != coarseScores.cend() && coarseBest->error == 0.0
+        && fullScores.front().error != 0.0) {
+        fullScores = scoreFullResolution(
+            previousLuminance,
+            currentLuminance,
+            config.excludedBands,
+            allAdvances(maximumAdvance));
     }
 
     const auto& best = fullScores.front();
@@ -252,8 +251,11 @@ OverlapResult VerticalOverlapMatcher::match(
         return result;
     }
 
-    const double runnerUpError = fullScores.size() > 1U
-        ? fullScores[1].error
+    const auto runnerUp = std::find_if(fullScores.cbegin() + 1, fullScores.cend(), [&](const auto& candidate) {
+        return std::abs(candidate.advance - best.advance) > PeakSuppressionRadius;
+    });
+    const double runnerUpError = runnerUp != fullScores.cend()
+        ? runnerUp->error
         : std::numeric_limits<double>::infinity();
     const double winnerMargin = runnerUpError - best.error;
     const double errorConfidence = config.maximumNormalizedError > 0.0
