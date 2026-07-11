@@ -101,6 +101,12 @@
 		F8365189DAE642AC6E7A2BA5 /* AppSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E58F0FBF019037172C857FC /* AppSettingsTests.swift */; };
 		F8B6F4909546C93C6B665C25 /* shape-marker.svg in Resources */ = {isa = PBXBuildFile; fileRef = 152848C50D6579EFB098436E /* shape-marker.svg */; };
 		FDBF397BAA0A24460ECBCD14 /* pencil-tool.svg in Resources */ = {isa = PBXBuildFile; fileRef = FFD19A79C67CA725D5FD09B1 /* pencil-tool.svg */; };
+		AA5000000000000000000001 /* ScrollCaptureBridge.mm in Sources */ = {isa = PBXBuildFile; fileRef = AA5000000000000000000011 /* ScrollCaptureBridge.mm */; };
+		AA5000000000000000000002 /* FrameFingerprint.cpp in Sources */ = {isa = PBXBuildFile; fileRef = AA5000000000000000000012 /* FrameFingerprint.cpp */; };
+		AA5000000000000000000003 /* VerticalOverlapMatcher.cpp in Sources */ = {isa = PBXBuildFile; fileRef = AA5000000000000000000013 /* VerticalOverlapMatcher.cpp */; };
+		AA5000000000000000000004 /* ScrollStitchSession.cpp in Sources */ = {isa = PBXBuildFile; fileRef = AA5000000000000000000014 /* ScrollStitchSession.cpp */; };
+		AA5000000000000000000005 /* ScrollCaptureBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5000000000000000000015 /* ScrollCaptureBridgeTests.swift */; };
+		AA5000000000000000000006 /* ScrollCaptureTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5000000000000000000016 /* ScrollCaptureTestSupport.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -213,6 +219,13 @@
 		FB40FD0ECD6A4B14F7CA43BE /* ocr-recognition.svg */ = {isa = PBXFileReference; path = "ocr-recognition.svg"; sourceTree = "<group>"; };
 		FBEF0716BFD5842580A18284 /* masaike2.svg */ = {isa = PBXFileReference; path = masaike2.svg; sourceTree = "<group>"; };
 		FFD19A79C67CA725D5FD09B1 /* pencil-tool.svg */ = {isa = PBXFileReference; path = "pencil-tool.svg"; sourceTree = "<group>"; };
+		AA5000000000000000000010 /* ScrollCaptureBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ScrollCaptureBridge.h; sourceTree = "<group>"; };
+		AA5000000000000000000011 /* ScrollCaptureBridge.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = ScrollCaptureBridge.mm; sourceTree = "<group>"; };
+		AA5000000000000000000012 /* FrameFingerprint.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = ../../core/src/scroll/FrameFingerprint.cpp; sourceTree = SOURCE_ROOT; };
+		AA5000000000000000000013 /* VerticalOverlapMatcher.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = ../../core/src/scroll/VerticalOverlapMatcher.cpp; sourceTree = SOURCE_ROOT; };
+		AA5000000000000000000014 /* ScrollStitchSession.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = ../../core/src/scroll/ScrollStitchSession.cpp; sourceTree = SOURCE_ROOT; };
+		AA5000000000000000000015 /* ScrollCaptureBridgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollCaptureBridgeTests.swift; sourceTree = "<group>"; };
+		AA5000000000000000000016 /* ScrollCaptureTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollCaptureTestSupport.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -269,6 +282,8 @@
 		CB036B39FCDFD3D592520941 /* Bridge */ = {
 			isa = PBXGroup;
 			children = (
+				AA5000000000000000000010 /* ScrollCaptureBridge.h */,
+				AA5000000000000000000011 /* ScrollCaptureBridge.mm */,
 				476D29E7E5844B3709834710 /* SnapshotExportBridge.h */,
 				D4F7C165A6D2E913BC3F8E0D /* SnapshotExportBridge.mm */,
 				D2B4C4D0B64515EB108A0F92 /* xxsnap-Bridging-Header.h */,
@@ -279,6 +294,8 @@
 		E47B99274545910C8159BABC /* Tests */ = {
 			isa = PBXGroup;
 			children = (
+				AA5000000000000000000015 /* ScrollCaptureBridgeTests.swift */,
+				AA5000000000000000000016 /* ScrollCaptureTestSupport.swift */,
 				7E58F0FBF019037172C857FC /* AppSettingsTests.swift */,
 				9A119E98789DE049AE5BBF54 /* manual-capture-checklist.md */,
 				2187766CB52D346D96174E61 /* ScreenCaptureServiceTests.swift */,
@@ -572,6 +589,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AA5000000000000000000001 /* ScrollCaptureBridge.mm in Sources */,
+				AA5000000000000000000002 /* FrameFingerprint.cpp in Sources */,
+				AA5000000000000000000003 /* VerticalOverlapMatcher.cpp in Sources */,
+				AA5000000000000000000004 /* ScrollStitchSession.cpp in Sources */,
 				8A1D5C6713066839A5C21C4C /* AppDelegate.swift in Sources */,
 				2AE784E6242C209A3757AFA2 /* AppSettings.swift in Sources */,
 				28874BF6C20345BE1676B963 /* CaptureAnnotationRenderer.swift in Sources */,
@@ -594,6 +615,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AA5000000000000000000005 /* ScrollCaptureBridgeTests.swift in Sources */,
+				AA5000000000000000000006 /* ScrollCaptureTestSupport.swift in Sources */,
 				F8365189DAE642AC6E7A2BA5 /* AppSettingsTests.swift in Sources */,
 				D9E0A938B9832B91B010318D /* ScreenCaptureServiceTests.swift in Sources */,
 				2932C52816DBBB75B3E3D9C3 /* SelectionToolbarStateTests.swift in Sources */,
@@ -682,6 +705,8 @@
 		3CB69737E6FBB9F09E60BD6A /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
+				HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/../../core/include";
 				ASSETCATALOG_COMPILER_APPICON_NAME = "";
 				CODE_SIGNING_ALLOWED = YES;
 				CODE_SIGNING_REQUIRED = YES;
@@ -706,6 +731,7 @@
 		3D01DE37DB92DE93927FF3D0 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/../../core/include";
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGNING_ALLOWED = NO;
 				CODE_SIGNING_REQUIRED = NO;
@@ -726,6 +752,8 @@
 		5B0D5C0BD1B43DC77A950020 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
+				HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/../../core/include";
 				ASSETCATALOG_COMPILER_APPICON_NAME = "";
 				CODE_SIGNING_ALLOWED = YES;
 				CODE_SIGNING_REQUIRED = YES;
@@ -809,6 +837,7 @@
 		806BD9EE047D77D704B71E8B /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/../../core/include";
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGNING_ALLOWED = NO;
 				CODE_SIGNING_REQUIRED = NO;
