@@ -599,6 +599,21 @@ try {
     if (continuePending) {
         if (movementOverlap.kind != OverlapKind::Reliable
             || movementOverlap.verticalAdvance <= 0) {
+            auto reviewConfig = matcherConfig;
+            if (implementation_->fixedTopAgreement > 0) {
+                reviewConfig.excludedBands.top = std::max(
+                    reviewConfig.excludedBands.top, config.fixedTopCandidateHeight);
+            }
+            if (implementation_->fixedBottomAgreement > 0) {
+                reviewConfig.excludedBands.bottom = std::max(
+                    reviewConfig.excludedBands.bottom, config.fixedBottomCandidateHeight);
+            }
+            const auto reverse = matcher.match(frame, evidenceTail, reviewConfig);
+            if (reverse.kind == OverlapKind::Reliable && reverse.verticalAdvance > 0) {
+                result.kind = AppendKind::ReviewDiscarded;
+                result.confidence = reverse.confidence;
+                return result;
+            }
             implementation_->clearPending();
             return result;
         }

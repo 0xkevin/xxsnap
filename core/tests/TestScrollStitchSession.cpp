@@ -184,6 +184,8 @@ private slots:
     void topBreakDoesNotPreventBottomConfirmation();
     void bottomBreakDoesNotPreventTopConfirmation();
     void evidenceBreakFlushesPerMovementBeyondOldTailAdvanceBudget();
+    void nonAnchorReverseReviewPreservesPendingEvidence();
+    void nonAnchorReverseReviewInsideAcceptedContentDoesNotMutate();
     void discardedFramesDoNotAdvanceFixedBandConfirmation();
     void interruptedFixedEvidenceDoesNotMutateOrCarryAgreement();
     void pendingFixedFramesCountTowardResourceLimit();
@@ -584,6 +586,49 @@ void TestScrollStitchSession::evidenceBreakFlushesPerMovementBeyondOldTailAdvanc
     QCOMPARE(resumed.appendedHeight, 50);
     QCOMPARE(session.outputHeight(), 340);
     QCOMPARE(blueAt(session.finalize(), 20, 339), documentPixel(20, 339));
+}
+
+void TestScrollStitchSession::nonAnchorReverseReviewPreservesPendingEvidence()
+{
+    auto config = defaultConfig();
+    config.matcher.maximumNormalizedError = 0.20;
+    config.fixedTopCandidateHeight = 12;
+    ScrollStitchSession session(config);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(0, true, false)).kind,
+        AppendKind::AcceptedInitial);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(60, true, false)).kind,
+        AppendKind::PausedLowConfidence);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(120, true, false)).kind,
+        AppendKind::PausedLowConfidence);
+    const auto acceptedPixels = session.finalize().pixels;
+
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(90, true, false)).kind,
+        AppendKind::ReviewDiscarded);
+    QCOMPARE(session.outputHeight(), 140);
+    QCOMPARE(session.finalize().pixels, acceptedPixels);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(120, true, false)).kind,
+        AppendKind::DuplicateDiscarded);
+
+    const auto resumed = session.append(viewportWithIndependentFixedBands(180, true, false));
+    QCOMPARE(resumed.kind, AppendKind::AcceptedAppend);
+    QCOMPARE(resumed.appendedHeight, 180);
+    QCOMPARE(session.outputHeight(), 320);
+    QCOMPARE(blueAt(session.finalize(), 20, 319), documentPixel(20, 319));
+}
+
+void TestScrollStitchSession::nonAnchorReverseReviewInsideAcceptedContentDoesNotMutate()
+{
+    ScrollStitchSession session(defaultConfig());
+    for (const int offset : {0, 60, 120}) {
+        const auto result = session.append(documentViewport(offset));
+        QVERIFY(result.kind == AppendKind::AcceptedInitial || result.kind == AppendKind::AcceptedAppend);
+    }
+    const auto before = session.finalize();
+    QCOMPARE(session.append(documentViewport(90)).kind, AppendKind::ReviewDiscarded);
+    QCOMPARE(session.outputHeight(), 260);
+    QCOMPARE(session.finalize().pixels, before.pixels);
+    QCOMPARE(session.append(documentViewport(180)).kind, AppendKind::AcceptedAppend);
+    QCOMPARE(session.outputHeight(), 320);
 }
 
 void TestScrollStitchSession::discardedFramesDoNotAdvanceFixedBandConfirmation()
