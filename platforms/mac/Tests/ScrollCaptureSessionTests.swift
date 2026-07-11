@@ -184,6 +184,137 @@ final class ScrollCaptureSessionTests: XCTestCase {
         XCTAssertEqual(engine.concurrent, 0)
     }
 
+    func testRealSamplingLoopContinuesInertiallyAndStopsAfterStableTail() async throws {
+        let clock = ControlledClock()
+        let capturer = FakeCapturer()
+        let engine = FakeStitcher(results: [
+            .acceptedInitial,
+            .acceptedAppend,
+            .duplicateDiscarded,
+            .duplicateDiscarded,
+            .duplicateDiscarded,
+        ])
+        let session = makeSession(capturer: capturer, engine: engine, clock: clock)
+        try await session.start()
+
+        session.recordScrollActivity()
+        await waitUntil { clock.pendingCount == 1 }
+        clock.advance()
+        await waitUntil { engine.appendedImages.count == 2 && clock.pendingCount == 1 }
+
+        // Direct activity resets stability while the same inertial loop remains active.
+        session.recordScrollActivity()
+        XCTAssertEqual(clock.pendingCount, 1)
+        for expectedCount in 3...5 {
+            clock.advance()
+            await waitUntil {
+                engine.appendedImages.count == expectedCount
+                    && (expectedCount == 5 || clock.pendingCount == 1)
+            }
+        }
+
+        await waitUntil { !session.isSamplingArmed && clock.pendingCount == 0 }
+        XCTAssertEqual(capturer.captureCount, 4)
+        XCTAssertEqual(capturer.maximumConcurrent, 1)
+        XCTAssertEqual(engine.maximumConcurrent, 1)
+    }
+
+    func testRepeatedActivityDoesNotCreateSecondSamplingLoop() async throws {
+        let clock = ControlledClock()
+        let capturer = BlockingCapturer()
+        let engine = FakeStitcher(results: [.acceptedInitial, .acceptedAppend])
+        let session = makeSession(capturer: capturer, engine: engine, clock: clock)
+        try await session.start()
+
+        session.recordScrollActivity()
+        await waitUntil { clock.pendingCount == 1 }
+        session.recordScrollActivity()
+        XCTAssertEqual(clock.pendingCount, 1)
+        clock.advance()
+        await capturer.waitUntilCaptureStarts()
+        session.recordScrollActivity()
+        XCTAssertEqual(clock.pendingCount, 0)
+        capturer.resumeCapture()
+        await waitUntil { engine.appendedImages.count == 2 && clock.pendingCount == 1 }
+
+        XCTAssertEqual(capturer.maximumConcurrent, 1)
+        _ = session.cancel()
+    }
+
+    func testCancelWhileSamplerSleepsCancelsClockAndNeverCaptures() async throws {
+        let clock = ControlledClock()
+        let capturer = FakeCapturer()
+        let engine = FakeStitcher(results: [.acceptedInitial, .acceptedAppend])
+        let session = makeSession(capturer: capturer, engine: engine, clock: clock)
+        try await session.start()
+        session.recordScrollActivity()
+        await waitUntil { clock.pendingCount == 1 }
+
+        _ = session.cancel()
+
+        await waitUntil { clock.pendingCount == 0 }
+        XCTAssertEqual(capturer.captureCount, 0)
+        XCTAssertEqual(session.state, .cancelled)
+    }
+
+    func testLateCaptureReturnAfterCancelIsInertAndDoesNotPublish() async throws {
+        let capturer = BlockingCapturer()
+        let engine = FakeStitcher(results: [.acceptedInitial, .acceptedAppend])
+        let presentation = PresentationRecorder()
+        let session = makeSession(capturer: capturer, engine: engine, presentation: presentation)
+        try await session.start()
+        session.recordScrollActivity()
+        let tick = Task { await session.test_runSamplingTick() }
+        await capturer.waitUntilCaptureStarts()
+
+        _ = session.cancel()
+        let eventCountAtCancel = presentation.eventCount
+        capturer.resumeCapture()
+        await tick.value
+
+        XCTAssertEqual(session.state, .cancelled)
+        XCTAssertEqual(engine.appendedImages.count, 1)
+        XCTAssertEqual(presentation.eventCount, eventCountAtCancel)
+    }
+
+    func testLateCaptureErrorAfterFinishCannotOverwriteFinishedState() async throws {
+        let capturer = BlockingCapturer()
+        let engine = FakeStitcher(results: [.acceptedInitial, .acceptedAppend])
+        let presentation = PresentationRecorder()
+        let session = makeSession(capturer: capturer, engine: engine, presentation: presentation)
+        try await session.start()
+        session.recordScrollActivity()
+        let tick = Task { await session.test_runSamplingTick() }
+        await capturer.waitUntilCaptureStarts()
+
+        _ = try await session.finish()
+        let eventCountAtFinish = presentation.eventCount
+        capturer.failCapture()
+        await tick.value
+
+        XCTAssertEqual(session.state, .finished)
+        XCTAssertEqual(engine.appendedImages.count, 1)
+        XCTAssertEqual(presentation.eventCount, eventCountAtFinish)
+    }
+
+    func testCancelReleasesOwnedStitcherAndReturnsSeed() async throws {
+        var didDeinitialize = false
+        var engine: FakeStitcher? = FakeStitcher(
+            results: [.acceptedInitial],
+            onDeinit: { didDeinitialize = true }
+        )
+        let weakEngine = WeakBox(engine)
+        let session = makeSession(engine: try XCTUnwrap(engine))
+        try await session.start()
+        engine = nil
+
+        let seed = session.cancel()
+
+        XCTAssertNil(weakEngine.value)
+        XCTAssertTrue(didDeinitialize)
+        XCTAssertTrue(seed.frozenImage === session.seed.frozenImage)
+    }
+
     func testScreenCaptureServiceConformsToScrollRegionCapturing() {
         let service: any ScrollRegionCapturing = ScreenCaptureService()
         XCTAssertTrue(service is ScreenCaptureService)
@@ -222,6 +353,7 @@ final class ScrollCaptureSessionTests: XCTestCase {
     private func makeSession(
         capturer: (any ScrollRegionCapturing)? = nil,
         engine: FakeStitcher,
+        clock: (any ScrollCaptureClock)? = nil,
         monitor: (any ScrollActivityMonitoring)? = nil,
         presentation: PresentationRecorder? = nil
     ) -> ScrollCaptureSession {
@@ -236,7 +368,7 @@ final class ScrollCaptureSessionTests: XCTestCase {
             ),
             capturer: capturer ?? FakeCapturer(),
             stitcher: engine,
-            clock: FakeClock(),
+            clock: clock ?? FakeClock(),
             activityMonitor: monitor ?? FakeActivityMonitor(),
             presentation: { presentation.record($0) }
         )
@@ -244,6 +376,11 @@ final class ScrollCaptureSessionTests: XCTestCase {
 }
 
 private enum TestError: Error { case failed }
+
+private final class WeakBox<Value: AnyObject> {
+    weak var value: Value?
+    init(_ value: Value?) { self.value = value }
+}
 
 @MainActor
 private final class FakeCapturer: ScrollRegionCapturing {
@@ -268,7 +405,7 @@ private final class FakeCapturer: ScrollRegionCapturing {
 @MainActor
 private final class BlockingCapturer: ScrollRegionCapturing {
     private var started: CheckedContinuation<Void, Never>?
-    private var resume: CheckedContinuation<Void, Never>?
+    private var resume: CheckedContinuation<NSImage, Error>?
     private(set) var captureCount = 0
     private(set) var concurrent = 0
     private(set) var maximumConcurrent = 0
@@ -279,9 +416,8 @@ private final class BlockingCapturer: ScrollRegionCapturing {
         maximumConcurrent = max(maximumConcurrent, concurrent)
         started?.resume()
         started = nil
-        await withCheckedContinuation { resume = $0 }
-        concurrent -= 1
-        return TestImageFactory.solid(size: selectionRect.size, color: .green)
+        defer { concurrent -= 1 }
+        return try await withCheckedThrowingContinuation { resume = $0 }
     }
 
     func waitUntilCaptureStarts() async {
@@ -290,7 +426,12 @@ private final class BlockingCapturer: ScrollRegionCapturing {
     }
 
     func resumeCapture() {
-        resume?.resume()
+        resume?.resume(returning: TestImageFactory.solid(size: CGSize(width: 80, height: 60), color: .green))
+        resume = nil
+    }
+
+    func failCapture() {
+        resume?.resume(throwing: TestError.failed)
         resume = nil
     }
 }
@@ -299,13 +440,19 @@ private final class BlockingCapturer: ScrollRegionCapturing {
 private final class FakeStitcher: ScrollStitching {
     private var results: [ScrollCaptureAppendKind]
     let final: NSImage
+    private let onDeinit: (() -> Void)?
     private(set) var appendedImages: [NSImage] = []
     private(set) var concurrent = 0
     private(set) var maximumConcurrent = 0
 
-    init(results: [ScrollCaptureAppendKind], final: NSImage? = nil) {
+    init(
+        results: [ScrollCaptureAppendKind],
+        final: NSImage? = nil,
+        onDeinit: (() -> Void)? = nil
+    ) {
         self.results = results
         self.final = final ?? TestImageFactory.solid(size: CGSize(width: 80, height: 120), color: .purple)
+        self.onDeinit = onDeinit
     }
 
     func append(_ image: NSImage) throws -> ScrollCaptureAppendUpdate {
@@ -319,11 +466,49 @@ private final class FakeStitcher: ScrollStitching {
 
     func preview(maximumHeight: Int) throws -> NSImage { final }
     func finalImage() throws -> NSImage { final }
+
+    deinit { onDeinit?() }
 }
 
 @MainActor
 private final class FakeClock: ScrollCaptureClock {
     func sleep(for duration: Duration) async throws { throw CancellationError() }
+}
+
+@MainActor
+private final class ControlledClock: ScrollCaptureClock {
+    private struct Waiter {
+        let id: UUID
+        let continuation: CheckedContinuation<Void, Error>
+    }
+
+    private var waiters: [Waiter] = []
+    var pendingCount: Int { waiters.count }
+
+    func sleep(for duration: Duration) async throws {
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                if Task.isCancelled {
+                    continuation.resume(throwing: CancellationError())
+                } else {
+                    waiters.append(Waiter(id: id, continuation: continuation))
+                }
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in self?.cancel(id: id) }
+        }
+    }
+
+    func advance() {
+        guard !waiters.isEmpty else { return }
+        waiters.removeFirst().continuation.resume()
+    }
+
+    private func cancel(id: UUID) {
+        guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
+        waiters.remove(at: index).continuation.resume(throwing: CancellationError())
+    }
 }
 
 private final class FakeMonitorRegistrar: ScrollEventMonitorRegistering {
@@ -363,6 +548,7 @@ private final class PresentationRecorder {
     private(set) var states: [ScrollCaptureSessionState] = []
     private(set) var kinds: [ScrollCaptureAppendKind] = []
     private(set) var previews: [NSImage] = []
+    var eventCount: Int { states.count + kinds.count + previews.count }
     func record(_ event: ScrollCapturePresentationUpdate) {
         switch event {
         case let .state(state): states.append(state)
@@ -370,6 +556,16 @@ private final class PresentationRecorder {
         case let .preview(image): previews.append(image)
         }
     }
+}
+
+@MainActor
+private func waitUntil(
+    _ condition: () -> Bool,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) async {
+    for _ in 0..<100 where !condition() { await Task.yield() }
+    XCTAssertTrue(condition(), file: file, line: line)
 }
 
 private func XCTAssertThrowsErrorAsync(

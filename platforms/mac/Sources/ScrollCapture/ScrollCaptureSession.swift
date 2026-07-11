@@ -68,7 +68,7 @@ final class ScrollCaptureSession {
     private(set) var isSamplingArmed = false
 
     private let capturer: any ScrollRegionCapturing
-    private let stitcher: any ScrollStitching
+    private var stitcher: (any ScrollStitching)?
     private let clock: any ScrollCaptureClock
     private let activityMonitor: any ScrollActivityMonitoring
     private let presentation: @MainActor (ScrollCapturePresentationUpdate) -> Void
@@ -77,6 +77,7 @@ final class ScrollCaptureSession {
     private var stabilityCount = 0
     private var samplingTask: Task<Void, Never>?
     private var tickInProgress = false
+    private var generation = 0
 
     init(
         seed: ScrollCaptureSeed,
@@ -103,6 +104,7 @@ final class ScrollCaptureSession {
         guard state == .idle else { throw ScrollCaptureSessionError.invalidState(state) }
         setState(.preparing)
         do {
+            guard let stitcher else { throw ScrollCaptureSessionError.invalidState(state) }
             let update = try stitcher.append(seed.frozenImage)
             presentation(.append(update))
             guard update.kind == .acceptedInitial else {
@@ -135,14 +137,18 @@ final class ScrollCaptureSession {
         default:
             throw ScrollCaptureSessionError.invalidState(state)
         }
+        guard let stitcher else { throw ScrollCaptureSessionError.invalidState(state) }
+        generation += 1
         disarmSampling()
         activityMonitor.stop()
         setState(.finishing)
         do {
             let image = try stitcher.finalImage()
+            self.stitcher = nil
             setState(.finished)
             return image
         } catch {
+            self.stitcher = nil
             setState(.paused(.captureFailure))
             throw error
         }
@@ -151,8 +157,10 @@ final class ScrollCaptureSession {
     @discardableResult
     func cancel() -> ScrollCaptureSeed {
         guard state != .finished, state != .cancelled else { return seed }
+        generation += 1
         disarmSampling()
         activityMonitor.stop()
+        stitcher = nil
         setState(.cancelled)
         return seed
     }
@@ -177,6 +185,7 @@ final class ScrollCaptureSession {
     private func runSamplingTick() async {
         guard isSamplingArmed, !tickInProgress else { return }
         guard state == .capturing || state == .paused(.lowConfidence) else { return }
+        let tickGeneration = generation
         tickInProgress = true
         defer { tickInProgress = false }
 
@@ -184,17 +193,24 @@ final class ScrollCaptureSession {
             // ScreenCaptureService accepts AppKit global screen coordinates. snapshotRect is
             // image-local geometry and is therefore intentionally not used for live sampling.
             let image = try await capturer.captureImage(in: seed.screenRect)
-            guard isSamplingArmed, state != .cancelled else { return }
+            guard generation == tickGeneration, isSamplingArmed else { return }
+            guard state == .capturing || state == .paused(.lowConfidence) else { return }
+            guard let stitcher else { return }
             let update = try stitcher.append(image)
             presentation(.append(update))
-            try handle(update)
+            try handle(update, stitcher: stitcher)
         } catch {
+            guard generation == tickGeneration else { return }
+            guard state == .capturing || state == .paused(.lowConfidence) else { return }
             disarmSampling()
             setState(.paused(.captureFailure))
         }
     }
 
-    private func handle(_ update: ScrollCaptureAppendUpdate) throws {
+    private func handle(
+        _ update: ScrollCaptureAppendUpdate,
+        stitcher: any ScrollStitching
+    ) throws {
         switch update.kind {
         case .acceptedAppend:
             stabilityCount = 0
