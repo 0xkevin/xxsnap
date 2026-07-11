@@ -115,6 +115,22 @@ final class LongImageEditorTests: XCTestCase {
         XCTAssertEqual(slice.image.size, NSSize(width: 200, height: 100))
     }
 
+    func testVisibleSliceUsesRendererVisualBoundsForVisualOnlyIntersection() {
+        var style = CaptureAnnotationStyle(); style.strokeWidth = 160
+        let annotation = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 40, y: 300, width: 60, height: 50),
+            style: style,
+            rotationAngle: .pi / 4
+        )
+        let slice = LongImageEditorDocument.visibleSlice(
+            image: TestImageFactory.solid(size: NSSize(width: 200, height: 1_000), color: .white),
+            annotations: [annotation], eraserMasks: [],
+            imageRect: NSRect(x: 0, y: 430, width: 200, height: 150)
+        )
+        XCTAssertEqual(slice.annotations.map(\.id), [annotation.id])
+    }
+
     func testResizePreservesTopVisibleCenterAnchor() {
         let before = LongImageEditorGeometry(
             imageSize: NSSize(width: 1_000, height: 8_000),
@@ -273,6 +289,22 @@ final class LongImageEditorTests: XCTestCase {
         controller.stop()
     }
 
+    func testMovingWindowCommitsActiveTextSnapshotBeforeRefreshingOverlay() throws {
+        let text = CaptureAnnotation(kind: .text, rect: NSRect(x: 20, y: 40, width: 120, height: 50), style: CaptureAnnotationStyle(), text: "draft")
+        let controller = LongImageEditorWindowController(
+            canonicalImage: TestImageFactory.solid(size: NSSize(width: 200, height: 1_200), color: .white),
+            annotations: [text], visibleFrame: NSRect(x: 0, y: 0, width: 500, height: 450)
+        )
+        controller.show()
+        let overlay = try XCTUnwrap(controller.test_editingOverlay)
+        var edited = try XCTUnwrap(overlay.test_annotation(at: 0)); edited.text = "committed on move"
+        overlay.test_setAnnotations([edited])
+        controller.windowDidMove(Notification(name: NSWindow.didMoveNotification))
+        XCTAssertEqual(controller.test_fullAnnotations[0].text, "committed on move")
+        XCTAssertEqual(controller.test_editingOverlay?.test_annotation(at: 0)?.text, "committed on move")
+        controller.stop()
+    }
+
     func testControlStripContainsAccessibleFinishButtonAndCommitsCurrentEdits() throws {
         let controller = makeTallController()
         var completionCount = 0
@@ -347,19 +379,42 @@ final class LongImageEditorTests: XCTestCase {
     }
 
     func testVisibleRendererMatchesForNonAlignedOriginAndMultiplePixelBlockSizes() throws {
-        let image = TestImageFactory.verticalDocumentViewport(offset: 0, width: 180, height: 1_600, scale: 2)
-        let rect = NSRect(x: 0, y: 503, width: 180, height: 260)
+        let image = TestImageFactory.verticalDocumentViewport(offset: 0, width: 220, height: 1_600, scale: 2)
+        let rect = NSRect(x: 20, y: 503, width: 180, height: 260)
         var style = CaptureAnnotationStyle(); style.strokeWidth = 22
-        let first = CaptureAnnotation(kind: .mosaicRectangle, rect: NSRect(x: 15, y: 520, width: 80, height: 90), style: style, mosaicRedaction: CaptureMosaicRedaction(type: .pixelMosaic, value: 7))
-        let second = CaptureAnnotation(kind: .mosaicRectangle, rect: NSRect(x: 70, y: 640, width: 90, height: 95), style: style, mosaicRedaction: CaptureMosaicRedaction(type: .pixelMosaic, value: 13))
-        let annotations = [first, second]
+        let first = CaptureAnnotation(kind: .mosaicRectangle, rect: NSRect(x: 60, y: 520, width: 70, height: 90), style: style, mosaicRedaction: CaptureMosaicRedaction(type: .pixelMosaic, value: 7))
+        let second = CaptureAnnotation(kind: .mosaicRectangle, rect: NSRect(x: 100, y: 640, width: 80, height: 80), style: style, mosaicRedaction: CaptureMosaicRedaction(type: .pixelMosaic, value: 13))
+        let third = CaptureAnnotation(kind: .mosaicRectangle, rect: NSRect(x: 120, y: 725, width: 70, height: 34), style: style, mosaicRedaction: CaptureMosaicRedaction(type: .pixelMosaic, value: 17))
+        let annotations = [first, second, third]
         let full = CaptureAnnotationRenderer.renderCompleteLongImage(image: image, annotations: annotations, eraserMasks: [])
         let expected = try cropTopOrigin(full, rect: rect)
         let actual = CaptureAnnotationRenderer.renderVisibleLongImageSlice(image: image, annotations: annotations, eraserMasks: [], imageRect: rect)
+        XCTAssertEqual(pixelSize(actual), pixelSize(expected))
         XCTAssertEqual(try pixelBytes(actual), try pixelBytes(expected))
         let processing = CaptureAnnotationRenderer.visibleLongImageProcessingRect(imageSize: image.size, imageRect: rect, annotations: annotations)
         XCTAssertNotEqual(processing.minY.truncatingRemainder(dividingBy: 7), 0)
+        XCTAssertGreaterThan(processing.minX, 0)
+        XCTAssertLessThan(processing.height, rect.height + 300)
         XCTAssertLessThan(processing.height, image.size.height)
+    }
+
+    func testVisibleRenderPlanSelectsOnlyVisualIntersectionsFromLargeAnnotationCollection() {
+        let style = CaptureAnnotationStyle()
+        var annotations = (0..<10_000).map { index in
+            CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 10, y: CGFloat(index * 20), width: 20, height: 10), style: style)
+        }
+        var crossingStyle = style; crossingStyle.strokeWidth = 120
+        let crossing = CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 80, y: 4_850, width: 30, height: 30), style: crossingStyle, rotationAngle: .pi / 4)
+        annotations.append(crossing)
+        let plan = CaptureAnnotationRenderer.visibleLongImageRenderPlan(
+            imageSize: NSSize(width: 200, height: 220_000),
+            imageRect: NSRect(x: 0, y: 5_000, width: 200, height: 400),
+            annotations: annotations,
+            eraserMasks: []
+        )
+        XCTAssertLessThan(plan.annotationCount, 60)
+        XCTAssertTrue(plan.annotationIDs.contains(crossing.id))
+        XCTAssertLessThan(plan.processingRect.height, 1_000)
     }
 
     func testDynamicVisualBoundsPreserveRotatedHugeStrokeAndTextAcrossSliceBoundary() throws {
@@ -508,7 +563,25 @@ final class LongImageEditorTests: XCTestCase {
 
     private func pixelBytes(_ image: NSImage) throws -> Data {
         let cg = try XCTUnwrap(image.cgImage(forProposedRect: nil, context: nil, hints: nil))
-        return try XCTUnwrap(cg.dataProvider?.data) as Data
+        let bytesPerRow = cg.width * 4
+        var bytes = [UInt8](repeating: 0, count: bytesPerRow * cg.height)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let created = bytes.withUnsafeMutableBytes { storage -> Bool in
+            guard let base = storage.baseAddress,
+                  let context = CGContext(
+                    data: base,
+                    width: cg.width,
+                    height: cg.height,
+                    bitsPerComponent: 8,
+                    bytesPerRow: bytesPerRow,
+                    space: colorSpace,
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                  ) else { return false }
+            context.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+            return true
+        }
+        XCTAssertTrue(created)
+        return Data(bytes)
     }
 
     private func makeTallController() -> LongImageEditorWindowController {

@@ -1115,6 +1115,12 @@ struct CaptureSelectionResult {
 }
 
 enum CaptureAnnotationRenderer {
+    struct VisibleLongImageRenderPlan {
+        var processingRect: NSRect
+        var annotationIDs: Set<AnnotationID>
+        var maskIDs: Set<UUID>
+        var annotationCount: Int { annotationIDs.count }
+    }
     static let markerOpacity: CGFloat = 0.85
     static let textDisplayScale: CGFloat = 3
     private static let redactionContext = CIContext(options: nil)
@@ -1256,26 +1262,39 @@ enum CaptureAnnotationRenderer {
         let imageBounds = NSRect(origin: .zero, size: image.size)
         let requested = imageRect.standardized.intersection(imageBounds)
         guard !requested.isEmpty else { return NSImage(size: .zero) }
-        var processing = visibleLongImageProcessingRect(imageSize: image.size, imageRect: requested, annotations: annotations)
-        processing = pixelPhaseAlignedProcessingRect(
-            processing,
-            image: image,
-            blockSizes: annotations.compactMap {
-                guard $0.mosaicRedaction?.type == .pixelMosaic else { return nil }
-                return max(1, $0.mosaicRedaction?.value ?? 1)
-            }
+        let plan = visibleLongImageRenderPlan(
+            imageSize: image.size,
+            imageRect: requested,
+            annotations: annotations,
+            eraserMasks: eraserMasks
         )
+        let processing = plan.processingRect
         guard let source = cropLongImage(image, rect: processing) else { return image }
+        let selectedAnnotations = annotations.filter { plan.annotationIDs.contains($0.id) }
+        let selectedMasks = eraserMasks.filter { plan.maskIDs.contains($0.id) }
         let offset = NSPoint(x: -processing.minX, y: -processing.minY)
-        let localAnnotations = annotations.map {
+        let localAnnotations = selectedAnnotations.map {
             let topLocal = LongImageAnnotationTranslation.annotation($0, by: offset)
             return LongImageAnnotationTranslation.annotationFromTopOriginToRenderer(topLocal, imageHeight: processing.height)
         }
-        let localMasks = eraserMasks.map {
+        let localMasks = selectedMasks.map {
             let topLocal = LongImageAnnotationTranslation.mask($0, by: offset)
             return LongImageAnnotationTranslation.maskFromTopOriginToRenderer(topLocal, imageHeight: processing.height)
         }
-        let rendered = render(image: source, annotations: localAnnotations, eraserMasks: localMasks)
+        guard let fullCG = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return image }
+        let scaleX = CGFloat(fullCG.width) / max(image.size.width, 1)
+        let scaleY = CGFloat(fullCG.height) / max(image.size.height, 1)
+        let contentOrigin = CGPoint(
+            x: processing.minX * scaleX,
+            y: (image.size.height - processing.maxY) * scaleY
+        )
+        let rendered = renderRegion(
+            image: source,
+            annotations: localAnnotations,
+            eraserMasks: localMasks,
+            contentOriginPixels: contentOrigin,
+            fullCanvasPixelHeight: CGFloat(fullCG.height)
+        )
         let localRequest = requested.offsetBy(dx: -processing.minX, dy: -processing.minY)
         return cropLongImage(rendered, rect: localRequest) ?? rendered
     }
@@ -1301,7 +1320,21 @@ enum CaptureAnnotationRenderer {
         return processing.intersection(imageBounds).integral
     }
 
-    private static func longImageVisualBounds(for annotation: CaptureAnnotation) -> NSRect {
+    static func visibleLongImageRenderPlan(
+        imageSize: NSSize,
+        imageRect: NSRect,
+        annotations: [CaptureAnnotation],
+        eraserMasks: [EraserMask]
+    ) -> VisibleLongImageRenderPlan {
+        let processing = visibleLongImageProcessingRect(imageSize: imageSize, imageRect: imageRect, annotations: annotations)
+        let annotationIDs = Set(annotations.lazy.filter { longImageVisualBounds(for: $0).intersects(processing) }.map(\.id))
+        let maskIDs = Set(eraserMasks.lazy.filter {
+            $0.rect.intersects(processing) && !$0.affectedAnnotationIDs.isDisjoint(with: annotationIDs)
+        }.map(\.id))
+        return VisibleLongImageRenderPlan(processingRect: processing, annotationIDs: annotationIDs, maskIDs: maskIDs)
+    }
+
+    static func longImageVisualBounds(for annotation: CaptureAnnotation) -> NSRect {
         var bounds = annotation.rect.standardized
         if let arrow = annotation.arrowLine { bounds = bounds.union(arrow.boundingRect) }
         if let brush = annotation.brushPath { bounds = bounds.union(brush.boundingRect) }
@@ -1326,33 +1359,6 @@ enum CaptureAnnotationRenderer {
         return bounds.insetBy(dx: -padding, dy: -padding)
     }
 
-    private static func pixelPhaseAlignedProcessingRect(
-        _ rect: NSRect,
-        image: NSImage,
-        blockSizes: [Int]
-    ) -> NSRect {
-        guard !blockSizes.isEmpty,
-              let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return rect }
-        let grid = blockSizes.reduce(1) { leastCommonMultiple($0, $1) }
-        guard grid > 1 else { return rect }
-        let sx = CGFloat(cg.width) / max(image.size.width, 1)
-        let sy = CGFloat(cg.height) / max(image.size.height, 1)
-        let pixelMinX = floor(rect.minX * sx / CGFloat(grid)) * CGFloat(grid)
-        let pixelMinY = floor(rect.minY * sy / CGFloat(grid)) * CGFloat(grid)
-        let pixelMaxX = CGFloat(cg.width) - floor((CGFloat(cg.width) - rect.maxX * sx) / CGFloat(grid)) * CGFloat(grid)
-        let pixelMaxY = CGFloat(cg.height) - floor((CGFloat(cg.height) - rect.maxY * sy) / CGFloat(grid)) * CGFloat(grid)
-        return NSRect(
-            x: pixelMinX / sx,
-            y: pixelMinY / sy,
-            width: (pixelMaxX - pixelMinX) / sx,
-            height: (pixelMaxY - pixelMinY) / sy
-        ).intersection(NSRect(origin: .zero, size: image.size))
-    }
-
-    private static func leastCommonMultiple(_ lhs: Int, _ rhs: Int) -> Int {
-        func gcd(_ a: Int, _ b: Int) -> Int { b == 0 ? abs(a) : gcd(b, a % b) }
-        return abs(lhs / max(1, gcd(lhs, rhs)) * rhs)
-    }
 
     private static func cropLongImage(_ image: NSImage, rect: NSRect) -> NSImage? {
         guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
@@ -1371,7 +1377,9 @@ enum CaptureAnnotationRenderer {
     private static func renderImage(
         image: NSImage,
         annotations: [CaptureAnnotation],
-        eraserMasks: [EraserMask] = []
+        eraserMasks: [EraserMask] = [],
+        contentOriginPixels: CGPoint = .zero,
+        fullCanvasPixelHeight: CGFloat? = nil
     ) -> NSImage? {
         guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
             return nil
@@ -1388,7 +1396,7 @@ enum CaptureAnnotationRenderer {
         let scaleX = CGFloat(cgImage.width) / max(image.size.width, 1)
         let scaleY = CGFloat(cgImage.height) / max(image.size.height, 1)
         if eraserMasks.isEmpty {
-            drawAnnotations(annotations, in: context, sourceImage: cgImage, scaleX: scaleX, scaleY: scaleY)
+            drawAnnotations(annotations, in: context, sourceImage: cgImage, scaleX: scaleX, scaleY: scaleY, contentOriginPixels: contentOriginPixels, fullCanvasPixelHeight: fullCanvasPixelHeight ?? CGFloat(cgImage.height))
         } else {
             drawAnnotations(
                 annotations: annotations,
@@ -1397,7 +1405,9 @@ enum CaptureAnnotationRenderer {
                 sourceImage: cgImage,
                 eraserMasks: eraserMasks,
                 scaleX: scaleX,
-                scaleY: scaleY
+                scaleY: scaleY,
+                contentOriginPixels: contentOriginPixels,
+                fullCanvasPixelHeight: fullCanvasPixelHeight ?? CGFloat(cgImage.height)
             )
         }
 
@@ -1408,12 +1418,30 @@ enum CaptureAnnotationRenderer {
         return NSImage(cgImage: renderedImage, size: image.size)
     }
 
+    private static func renderRegion(
+        image: NSImage,
+        annotations: [CaptureAnnotation],
+        eraserMasks: [EraserMask],
+        contentOriginPixels: CGPoint,
+        fullCanvasPixelHeight: CGFloat
+    ) -> NSImage {
+        renderImage(
+            image: image,
+            annotations: annotations,
+            eraserMasks: eraserMasks,
+            contentOriginPixels: contentOriginPixels,
+            fullCanvasPixelHeight: fullCanvasPixelHeight
+        ) ?? image
+    }
+
     private static func drawAnnotations(
         _ annotations: [CaptureAnnotation],
         in context: CGContext,
         sourceImage: CGImage,
         scaleX: CGFloat,
-        scaleY: CGFloat
+        scaleY: CGFloat,
+        contentOriginPixels: CGPoint = .zero,
+        fullCanvasPixelHeight: CGFloat? = nil
     ) {
         for annotation in annotations {
             if isMosaicAnnotation(annotation) {
@@ -1421,7 +1449,9 @@ enum CaptureAnnotationRenderer {
                     annotation,
                     in: context,
                     scaleX: scaleX,
-                    scaleY: scaleY
+                    scaleY: scaleY,
+                    contentOriginPixels: contentOriginPixels,
+                    fullCanvasPixelHeight: fullCanvasPixelHeight ?? CGFloat(context.height)
                 )
             } else {
                 draw(annotation, in: context, sourceImage: sourceImage, scaleX: scaleX, scaleY: scaleY)
@@ -1436,12 +1466,14 @@ enum CaptureAnnotationRenderer {
         sourceImage: CGImage,
         eraserMasks: [EraserMask],
         scaleX: CGFloat,
-        scaleY: CGFloat
+        scaleY: CGFloat,
+        contentOriginPixels: CGPoint = .zero,
+        fullCanvasPixelHeight: CGFloat? = nil
     ) {
         for annotation in annotations {
             let masksForAnnotation = eraserMasks.filter { $0.affectedAnnotationIDs.contains(annotation.id) }
             guard !masksForAnnotation.isEmpty else {
-                drawAnnotations([annotation], in: context, sourceImage: sourceImage, scaleX: scaleX, scaleY: scaleY)
+                drawAnnotations([annotation], in: context, sourceImage: sourceImage, scaleX: scaleX, scaleY: scaleY, contentOriginPixels: contentOriginPixels, fullCanvasPixelHeight: fullCanvasPixelHeight)
                 continue
             }
             guard let annotationImage = makeMaskedAnnotationImage(
@@ -1453,7 +1485,9 @@ enum CaptureAnnotationRenderer {
                 annotation: annotation,
                 eraserMasks: masksForAnnotation,
                 scaleX: scaleX,
-                scaleY: scaleY
+                scaleY: scaleY,
+                contentOriginPixels: contentOriginPixels,
+                fullCanvasPixelHeight: fullCanvasPixelHeight ?? CGFloat(context.height)
             ) else {
                 continue
             }
@@ -1470,7 +1504,9 @@ enum CaptureAnnotationRenderer {
         annotation: CaptureAnnotation,
         eraserMasks: [EraserMask],
         scaleX: CGFloat,
-        scaleY: CGFloat
+        scaleY: CGFloat,
+        contentOriginPixels: CGPoint,
+        fullCanvasPixelHeight: CGFloat
     ) -> CGImage? {
         guard let context = makeRenderContext(width: width, height: height, colorSpace: colorSpace) else {
             return nil
@@ -1479,7 +1515,7 @@ enum CaptureAnnotationRenderer {
         if let currentImage {
             context.draw(currentImage, in: CGRect(x: 0, y: 0, width: width, height: height))
         }
-        drawAnnotations([annotation], in: context, sourceImage: sourceImage, scaleX: scaleX, scaleY: scaleY)
+        drawAnnotations([annotation], in: context, sourceImage: sourceImage, scaleX: scaleX, scaleY: scaleY, contentOriginPixels: contentOriginPixels, fullCanvasPixelHeight: fullCanvasPixelHeight)
 
         context.saveGState()
         context.setBlendMode(.clear)
@@ -1952,7 +1988,9 @@ enum CaptureAnnotationRenderer {
         _ annotation: CaptureAnnotation,
         in context: CGContext,
         scaleX: CGFloat,
-        scaleY: CGFloat
+        scaleY: CGFloat,
+        contentOriginPixels: CGPoint,
+        fullCanvasPixelHeight: CGFloat
     ) {
         let lineScale = (scaleX + scaleY) / 2
         if annotation.kind == .mosaicStroke {
@@ -1961,7 +1999,9 @@ enum CaptureAnnotationRenderer {
                 in: context,
                 scaleX: scaleX,
                 scaleY: scaleY,
-                lineScale: lineScale
+                lineScale: lineScale,
+                contentOriginPixels: contentOriginPixels,
+                fullCanvasPixelHeight: fullCanvasPixelHeight
             )
             return
         }
@@ -1970,7 +2010,9 @@ enum CaptureAnnotationRenderer {
                 annotation,
                 in: context,
                 scaleX: scaleX,
-                scaleY: scaleY
+                scaleY: scaleY,
+                contentOriginPixels: contentOriginPixels,
+                fullCanvasPixelHeight: fullCanvasPixelHeight
             )
         }
     }
@@ -1980,7 +2022,9 @@ enum CaptureAnnotationRenderer {
         in context: CGContext,
         scaleX: CGFloat,
         scaleY: CGFloat,
-        lineScale: CGFloat
+        lineScale: CGFloat,
+        contentOriginPixels: CGPoint,
+        fullCanvasPixelHeight: CGFloat
     ) {
         guard
             let mosaicStroke = annotation.mosaicStroke,
@@ -2005,7 +2049,9 @@ enum CaptureAnnotationRenderer {
             in: context,
             clipRect: mosaicStroke.boundingRect,
             scaleX: scaleX,
-            scaleY: scaleY
+            scaleY: scaleY,
+            contentOriginPixels: contentOriginPixels,
+            fullCanvasPixelHeight: fullCanvasPixelHeight
         )
     }
 
@@ -2013,7 +2059,9 @@ enum CaptureAnnotationRenderer {
         _ annotation: CaptureAnnotation,
         in context: CGContext,
         scaleX: CGFloat,
-        scaleY: CGFloat
+        scaleY: CGFloat,
+        contentOriginPixels: CGPoint,
+        fullCanvasPixelHeight: CGFloat
     ) {
         guard let redaction = annotation.mosaicRedaction else {
             return
@@ -2027,7 +2075,9 @@ enum CaptureAnnotationRenderer {
             in: context,
             clipRect: rect,
             scaleX: scaleX,
-            scaleY: scaleY
+            scaleY: scaleY,
+            contentOriginPixels: contentOriginPixels,
+            fullCanvasPixelHeight: fullCanvasPixelHeight
         )
     }
 
@@ -2073,7 +2123,9 @@ enum CaptureAnnotationRenderer {
         in context: CGContext,
         clipRect: NSRect,
         scaleX: CGFloat,
-        scaleY: CGFloat
+        scaleY: CGFloat,
+        contentOriginPixels: CGPoint,
+        fullCanvasPixelHeight: CGFloat
     ) {
         guard let displaySnapshot = snapshotContext(context) else {
             return
@@ -2087,7 +2139,9 @@ enum CaptureAnnotationRenderer {
                 redaction: redaction,
                 imageSize: imageSize,
                 scaleX: scaleX,
-                scaleY: scaleY
+                scaleY: scaleY,
+                contentOriginPixels: contentOriginPixels,
+                fullCanvasPixelHeight: fullCanvasPixelHeight
             ),
             let displayCrop = cropMosaicSnapshot(displaySnapshot, to: effectRect)
         else {
@@ -2128,7 +2182,9 @@ enum CaptureAnnotationRenderer {
         redaction: CaptureMosaicRedaction,
         imageSize: CGSize,
         scaleX: CGFloat,
-        scaleY: CGFloat
+        scaleY: CGFloat,
+        contentOriginPixels: CGPoint,
+        fullCanvasPixelHeight: CGFloat
     ) -> CGRect? {
         let imageBounds = CGRect(origin: .zero, size: imageSize)
         var effectRect = CGRect(
@@ -2159,7 +2215,8 @@ enum CaptureAnnotationRenderer {
             effectRect = alignedPixelMosaicEffectRect(
                 effectRect,
                 blockSize: value,
-                imageHeight: imageSize.height
+                contentOriginPixels: contentOriginPixels,
+                fullCanvasPixelHeight: fullCanvasPixelHeight
             )
         }
 
@@ -2170,20 +2227,21 @@ enum CaptureAnnotationRenderer {
     private static func alignedPixelMosaicEffectRect(
         _ rect: CGRect,
         blockSize: CGFloat,
-        imageHeight: CGFloat
+        contentOriginPixels: CGPoint,
+        fullCanvasPixelHeight: CGFloat
     ) -> CGRect {
         guard blockSize > 1 else {
             return rect
         }
 
-        let minX = floor(rect.minX / blockSize) * blockSize
-        let maxX = ceil(rect.maxX / blockSize) * blockSize
-        let top = imageHeight - rect.maxY
-        let bottom = imageHeight - rect.minY
+        let minX = floor((rect.minX + contentOriginPixels.x) / blockSize) * blockSize - contentOriginPixels.x
+        let maxX = ceil((rect.maxX + contentOriginPixels.x) / blockSize) * blockSize - contentOriginPixels.x
+        let top = fullCanvasPixelHeight - (rect.maxY + contentOriginPixels.y)
+        let bottom = fullCanvasPixelHeight - (rect.minY + contentOriginPixels.y)
         let alignedTop = floor(top / blockSize) * blockSize
         let alignedBottom = ceil(bottom / blockSize) * blockSize
-        let minY = imageHeight - alignedBottom
-        let maxY = imageHeight - alignedTop
+        let minY = fullCanvasPixelHeight - contentOriginPixels.y - alignedBottom
+        let maxY = fullCanvasPixelHeight - contentOriginPixels.y - alignedTop
         return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
     }
 

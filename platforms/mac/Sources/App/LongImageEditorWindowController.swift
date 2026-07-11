@@ -112,7 +112,7 @@ struct LongImageEditorDocument {
 
     static func visibleSlice(image: NSImage, annotations: [CaptureAnnotation], eraserMasks: [EraserMask], imageRect: NSRect) -> LongImageEditorSlice {
         let rect = imageRect.intersection(NSRect(origin: .zero, size: image.size))
-        let visible = annotations.filter { $0.rect.intersects(rect) }
+        let visible = annotations.filter { CaptureAnnotationRenderer.longImageVisualBounds(for: $0).intersects(rect) }
         let visibleIDs = Set(visible.map(\.id))
         let masks = eraserMasks.filter { $0.rect.intersects(rect) && !$0.affectedAnnotationIDs.isDisjoint(with: visibleIDs) }
         let offset = NSPoint(x: -rect.minX, y: -rect.minY)
@@ -214,8 +214,8 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     func windowDidResize(_ notification: Notification) {
         let anchor = geometry.topVisibleCenter; commitOverlay(); relayout(preserving: anchor); refreshOverlay()
     }
-    func windowDidMove(_ notification: Notification) { refreshOverlay() }
-    func windowDidChangeBackingProperties(_ notification: Notification) { refreshOverlay() }
+    func windowDidMove(_ notification: Notification) { commitOverlay(); refreshOverlay() }
+    func windowDidChangeBackingProperties(_ notification: Notification) { commitOverlay(); refreshOverlay() }
     func windowWillClose(_ notification: Notification) { commitOverlay(); stop() }
 
     private func configureViews() {
@@ -335,7 +335,9 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
             }
             documentState.eraserMasks.removeAll { $0.affectedAnnotationIDs.isEmpty }
         }
-        presentedAnnotationIDs = Set(documentState.annotations.filter { $0.rect.intersects(visibleImageRect) }.map(\.id))
+        presentedAnnotationIDs = Set(documentState.annotations.filter {
+            CaptureAnnotationRenderer.longImageVisualBounds(for: $0).intersects(visibleImageRect)
+        }.map(\.id))
         presentedMaskIDs = Set(documentState.eraserMasks.filter { presentedAnnotationIDs.isDisjoint(with: $0.affectedAnnotationIDs) == false && $0.rect.intersects(visibleImageRect) }.map(\.id))
     }
     private func lock(_ value: Bool) {
