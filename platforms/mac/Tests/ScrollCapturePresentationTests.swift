@@ -89,12 +89,20 @@ final class ScrollCapturePresentationTests: XCTestCase {
         XCTAssertFalse(controller.test_controlCanBecomeKey)
         XCTAssertFalse(controller.test_controlIsOpaque)
         XCTAssertEqual(controller.test_controlBackgroundColor, .clear)
-        XCTAssertEqual(controller.test_finishButtonFrame, finish.offsetBy(dx: -toolbar.minX, dy: -toolbar.minY))
-        XCTAssertEqual(controller.test_cancelButtonFrame, cancel.offsetBy(dx: -toolbar.minX, dy: -toolbar.minY))
+        XCTAssertTrue(controller.test_controlIgnoresMouseEvents)
+        XCTAssertEqual(controller.test_finishButtonFrame, finish)
+        XCTAssertEqual(controller.test_cancelButtonFrame, cancel)
         XCTAssertEqual(controller.test_controlHitTargetCount, 2)
         XCTAssertTrue(controller.test_controlHitTargetsAreTransparent)
+        XCTAssertEqual(controller.test_interactiveWindowFrames, [finish, cancel])
+        XCTAssertTrue(controller.test_toolbarPointIsInteractive(NSPoint(x: finish.midX, y: finish.midY)))
+        XCTAssertTrue(controller.test_toolbarPointIsInteractive(NSPoint(x: cancel.midX, y: cancel.midY)))
+        XCTAssertFalse(controller.test_toolbarPointIsInteractive(NSPoint(x: toolbar.minX + 20, y: toolbar.midY)))
         XCTAssertEqual(controller.test_finishButtonToolTip, L10n(language: .english).text(.finishScrollCapture))
         XCTAssertEqual(controller.test_cancelButtonToolTip, L10n(language: .english).text(.cancel))
+        XCTAssertEqual(controller.test_finishAccessibilityLabel, L10n(language: .english).text(.finishScrollCapture))
+        XCTAssertEqual(controller.test_cancelAccessibilityLabel, L10n(language: .english).text(.cancel))
+        XCTAssertEqual(controller.test_accessibilityRoles, [.button, .button])
         controller.start()
         XCTAssertTrue(controller.test_hasVisiblePanels)
         controller.test_triggerFinish()
@@ -164,6 +172,47 @@ final class ScrollCapturePresentationTests: XCTestCase {
         let controller = makeController(language: .zhHans)
         XCTAssertEqual(controller.test_finishButtonToolTip, "完成滚动截图")
         XCTAssertEqual(controller.test_cancelButtonToolTip, "取消")
+        XCTAssertEqual(controller.test_finishAccessibilityLabel, "完成滚动截图")
+        XCTAssertEqual(controller.test_cancelAccessibilityLabel, "取消")
+    }
+
+    func testPreviewPanelNeverObscuresControlInFullscreenAndConstrainedLayouts() {
+        let fullscreen = NSRect(x: 0, y: 0, width: 800, height: 600)
+        let toolbar = NSRect(x: 200, y: 12, width: 400, height: 28)
+        let controller = makeController(
+            toolbarFrame: toolbar,
+            selectionFrame: fullscreen,
+            visibleFrame: fullscreen
+        )
+        XCTAssertFalse(controller.test_previewFrame.intersects(toolbar))
+        XCTAssertTrue(fullscreen.contains(controller.test_previewFrame))
+        controller.updatePlacement(selectionFrame: fullscreen, visibleFrame: fullscreen)
+        XCTAssertFalse(controller.test_previewFrame.intersects(toolbar))
+
+        let constrained = NSRect(x: 0, y: 0, width: 320, height: 240)
+        let blockingToolbar = NSRect(x: 0, y: 100, width: 320, height: 40)
+        let constrainedController = makeController(
+            toolbarFrame: blockingToolbar,
+            selectionFrame: constrained,
+            visibleFrame: constrained
+        )
+        XCTAssertFalse(constrainedController.test_previewFrame.intersects(blockingToolbar))
+        XCTAssertTrue(constrained.contains(constrainedController.test_previewFrame))
+    }
+
+    func testWarningUsesTwoLineLocalizedLayoutAndFullTooltip() {
+        let controller = makeController(language: .english)
+        let warning = L10n(language: .english).text(.scrollCaptureLowConfidence)
+        controller.setWarning(warning)
+        XCTAssertGreaterThanOrEqual(controller.test_warningFrame.height, 36)
+        XCTAssertTrue(controller.test_warningWraps)
+        XCTAssertEqual(controller.test_warningToolTip, warning)
+
+        let chinese = makeController(language: .zhHans)
+        let chineseWarning = L10n(language: .zhHans).text(.scrollCaptureResourceLimit)
+        chinese.setWarning(chineseWarning)
+        XCTAssertGreaterThanOrEqual(chinese.test_warningFrame.height, 36)
+        XCTAssertEqual(chinese.test_warningToolTip, chineseWarning)
     }
 
     func testStopRemovesObserverAndReleasesPreviewImage() {
@@ -176,6 +225,7 @@ final class ScrollCapturePresentationTests: XCTestCase {
             weakImage = image
             controller?.updatePreview(image)
             controller?.test_userScroll(to: 120)
+            controller?.setWarning("cleanup warning")
             reviewOffset = controller?.test_reviewOffset
             controller?.stop()
         }
@@ -183,6 +233,7 @@ final class ScrollCapturePresentationTests: XCTestCase {
         controller?.test_postBoundsChangeNotification()
         XCTAssertEqual(controller?.test_reviewOffset, reviewOffset)
         XCTAssertFalse(controller?.test_hasBoundsObserver ?? true)
+        XCTAssertNil(controller?.test_warningToolTip)
         controller?.updatePreview(NSImage(size: NSSize(width: 200, height: 800)))
         controller?.setWarning("late")
         XCTAssertNil(controller?.test_previewImage)
@@ -191,13 +242,18 @@ final class ScrollCapturePresentationTests: XCTestCase {
         XCTAssertNil(weakController)
     }
 
-    private func makeController(language: AppLanguage = .english) -> ScrollCapturePresentationController {
+    private func makeController(
+        language: AppLanguage = .english,
+        toolbarFrame: NSRect = NSRect(x: 100, y: 100, width: 400, height: 28),
+        selectionFrame: NSRect = NSRect(x: 200, y: 200, width: 300, height: 240),
+        visibleFrame: NSRect = NSRect(x: 0, y: 0, width: 1000, height: 700)
+    ) -> ScrollCapturePresentationController {
         ScrollCapturePresentationController(
-            toolbarFrame: NSRect(x: 100, y: 100, width: 400, height: 28),
-            finishButtonFrame: NSRect(x: 300, y: 104, width: 20, height: 20),
-            cancelButtonFrame: NSRect(x: 356, y: 104, width: 20, height: 20),
-            selectionFrame: NSRect(x: 200, y: 200, width: 300, height: 240),
-            visibleFrame: NSRect(x: 0, y: 0, width: 1000, height: 700),
+            toolbarFrame: toolbarFrame,
+            finishButtonFrame: NSRect(x: toolbarFrame.midX, y: toolbarFrame.minY + 4, width: 20, height: min(20, toolbarFrame.height)),
+            cancelButtonFrame: NSRect(x: toolbarFrame.maxX - 28, y: toolbarFrame.minY + 4, width: 20, height: min(20, toolbarFrame.height)),
+            selectionFrame: selectionFrame,
+            visibleFrame: visibleFrame,
             language: language,
             onFinish: {},
             onCancel: {}

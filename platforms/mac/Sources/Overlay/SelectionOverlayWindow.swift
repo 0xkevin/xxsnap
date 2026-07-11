@@ -568,8 +568,10 @@ final class SelectionOverlayWindow: NSWindow {
     private var didCompleteSelection = false
     private var escapeKeyMonitor: Any?
     var onScrollCaptureRequested: ((ScrollCaptureSeed) -> Void)?
+    var onScrollCaptureFinishRequested: (() -> Void)?
     var onScrollCaptureCancelRequested: (() -> Void)?
     private(set) var scrollCaptureOverlayState: ScrollCaptureOverlayState = .inactive
+    private var scrollCaptureTerminalActionTriggered = false
 
     init(
         backgroundImage: NSImage?,
@@ -612,6 +614,7 @@ final class SelectionOverlayWindow: NSWindow {
         }
         overlayView.scrollCaptureDidRequest = { [weak self] seed in
             guard let self else { return }
+            self.scrollCaptureTerminalActionTriggered = false
             self.scrollCaptureOverlayState = .capturing
             self.ignoresMouseEvents = true
             overlayView.scrollCaptureOverlayState = .capturing
@@ -619,6 +622,9 @@ final class SelectionOverlayWindow: NSWindow {
         }
         overlayView.scrollCaptureCancelDidRequest = { [weak self] in
             self?.requestScrollCaptureCancel()
+        }
+        overlayView.scrollCaptureFinishDidRequest = { [weak self] in
+            self?.requestScrollCaptureFinish()
         }
 
         contentView = overlayView
@@ -697,6 +703,10 @@ final class SelectionOverlayWindow: NSWindow {
             requestScrollCaptureCancel()
             return nil
         }
+        if Self.isScrollCaptureFinishKey(event.keyCode), scrollCaptureOverlayState != .inactive {
+            requestScrollCaptureFinish()
+            return nil
+        }
         if let overlayView = contentView as? SelectionOverlayView,
            overlayView.handleKeyDown(event) {
             return nil
@@ -753,9 +763,20 @@ final class SelectionOverlayWindow: NSWindow {
     }
 
     private func requestScrollCaptureCancel() {
-        guard scrollCaptureOverlayState != .inactive else { return }
+        guard scrollCaptureOverlayState != .inactive, !scrollCaptureTerminalActionTriggered else { return }
+        scrollCaptureTerminalActionTriggered = true
         endScrollCapturePassiveMode()
         onScrollCaptureCancelRequested?()
+    }
+
+    private func requestScrollCaptureFinish() {
+        guard scrollCaptureOverlayState != .inactive, !scrollCaptureTerminalActionTriggered else { return }
+        scrollCaptureTerminalActionTriggered = true
+        onScrollCaptureFinishRequested?()
+    }
+
+    private static func isScrollCaptureFinishKey(_ keyCode: UInt16) -> Bool {
+        keyCode == 36 || keyCode == 76
     }
 
     private func performBaseEscape() {
@@ -769,6 +790,10 @@ final class SelectionOverlayWindow: NSWindow {
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53, scrollCaptureOverlayState != .inactive {
             requestScrollCaptureCancel()
+            return
+        }
+        if Self.isScrollCaptureFinishKey(event.keyCode), scrollCaptureOverlayState != .inactive {
+            requestScrollCaptureFinish()
             return
         }
         if let overlayView = contentView as? SelectionOverlayView,
@@ -1997,6 +2022,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     var selectionDidFinish: ((CaptureSelectionResult?) -> Void)?
     var scrollCaptureDidRequest: ((ScrollCaptureSeed) -> Void)?
     var scrollCaptureCancelDidRequest: (() -> Void)?
+    var scrollCaptureFinishDidRequest: (() -> Void)?
     var scrollCaptureOverlayState: ScrollCaptureOverlayState = .inactive {
         didSet { needsDisplay = true }
     }
@@ -3394,6 +3420,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         if scrollCaptureOverlayState != .inactive {
             if event.keyCode == 53 {
                 scrollCaptureCancelDidRequest?()
+            } else if event.keyCode == 36 || event.keyCode == 76 {
+                scrollCaptureFinishDidRequest?()
             }
             return true
         }

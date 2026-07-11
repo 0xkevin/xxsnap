@@ -96,6 +96,33 @@ final class SelectionToolbarStateTests: XCTestCase {
         }
     }
 
+    func testEnterFinishesCapturingAndPausedScrollCaptureExactlyOnce() {
+        for (paused, keyCode) in [(false, UInt16(36)), (true, UInt16(76))] {
+            var ordinaryCompletionCount = 0
+            var finishCount = 0
+            var cancelCount = 0
+            let window = SelectionOverlayWindow(backgroundImage: solidImage(size: NSSize(width: 500, height: 400), color: .white)) { _ in
+                ordinaryCompletionCount += 1
+            }
+            window.onScrollCaptureRequested = { _ in }
+            window.onScrollCaptureFinishRequested = { finishCount += 1 }
+            window.onScrollCaptureCancelRequested = { cancelCount += 1 }
+            window.test_setLockedSelectionRect(NSRect(x: 40, y: 40, width: 260, height: 200))
+            window.test_beginScrollCapture()
+            if paused { window.setScrollCapturePaused(message: "Paused") }
+
+            window.test_keyDown(keyCode: keyCode)
+            window.test_keyDown(keyCode: keyCode)
+            window.test_keyDown(keyCode: 53)
+
+            XCTAssertEqual(finishCount, 1)
+            XCTAssertEqual(cancelCount, 0)
+            XCTAssertEqual(ordinaryCompletionCount, 0)
+            XCTAssertNotEqual(window.scrollCaptureOverlayState, .inactive)
+            XCTAssertTrue(window.ignoresMouseEvents)
+        }
+    }
+
     func testEndingPassiveModeRestoresMouseAndOrdinaryFlow() throws {
         var requestCount = 0
         let window = SelectionOverlayWindow(backgroundImage: solidImage(size: NSSize(width: 500, height: 400), color: .white)) { _ in }
