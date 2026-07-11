@@ -159,6 +159,7 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     private let language: AppLanguage
     private var renderedRevision: NSImage?
     private var documentRevision: UInt64 = 0
+    private var lastCommittedOverlayRevision: UInt64?
     private var actionInProgress = false
     private var didNotifyClose = false
     private var boundsObserver: NSObjectProtocol?
@@ -387,6 +388,8 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     }
     private func commitOverlay() {
         guard let snapshot = overlay?.editorSnapshot, let presentedContext else { return }
+        guard lastCommittedOverlayRevision != snapshot.revision else { return }
+        lastCommittedOverlayRevision = snapshot.revision
         let previousAnnotations = documentState.annotations
         let previousMasks = documentState.eraserMasks
         let origin = presentedContext.sliceRect.origin

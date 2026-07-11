@@ -785,6 +785,11 @@ final class LongImageEditorTests: XCTestCase {
         XCTAssertEqual(controller.test_pinButton.accessibilityLabel(), "贴出完整长截图")
 
         let firstRevision = controller.test_documentRevision
+        controller.windowDidResize(Notification(name: NSWindow.didResizeNotification))
+        controller.test_copyButton.performClick(nil)
+        XCTAssertTrue(received[2] === received[3])
+        XCTAssertEqual(controller.test_documentRevision, firstRevision)
+
         var edited = try XCTUnwrap(controller.test_editingOverlay?.test_annotation(at: 0))
         edited.rect.origin.x += 10
         controller.test_editingOverlay?.test_setAnnotations([edited])
@@ -792,11 +797,11 @@ final class LongImageEditorTests: XCTestCase {
         controller.test_saveButton.performClick(nil)
         controller.test_pinButton.performClick(nil)
 
-        XCTAssertEqual(received.count, 6)
-        XCTAssertFalse(received[2] === received[3])
-        XCTAssertTrue(received[3] === received[4])
+        XCTAssertEqual(received.count, 7)
+        XCTAssertFalse(received[3] === received[4])
         XCTAssertTrue(received[4] === received[5])
-        XCTAssertNotEqual(try pixelBytes(received[2]), try pixelBytes(received[3]))
+        XCTAssertTrue(received[5] === received[6])
+        XCTAssertNotEqual(try pixelBytes(received[3]), try pixelBytes(received[4]))
         XCTAssertEqual(controller.test_documentRevision, firstRevision + 1)
         controller.stop()
     }

@@ -606,6 +606,7 @@ extension NSCursor {
 struct SelectionOverlayEditorSnapshot {
     var annotations: [CaptureAnnotation]
     var eraserMasks: [EraserMask]
+    var revision: UInt64
 }
 
 final class SelectionOverlayWindow: NSWindow {
@@ -2358,6 +2359,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private var annotations: [CaptureAnnotation] = [] {
         didSet { invalidateEraserMaskedComposite() }
     }
+    private var editorDocumentRevision: UInt64 = 0
     private enum AnnotationHistoryEntry {
         case add(annotation: CaptureAnnotation, index: Int)
         case delete(annotation: CaptureAnnotation, index: Int, masks: [EraserMask])
@@ -6720,7 +6722,11 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     var editorSnapshot: SelectionOverlayEditorSnapshot {
         commitCurrentTextEdit()
-        return SelectionOverlayEditorSnapshot(annotations: annotations, eraserMasks: eraserMasks)
+        return SelectionOverlayEditorSnapshot(
+            annotations: annotations,
+            eraserMasks: eraserMasks,
+            revision: editorDocumentRevision
+        )
     }
 
     func test_handleTextDropdownScroll(at point: NSPoint, deltaY: CGFloat) -> Bool {
@@ -8240,10 +8246,12 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
         undoAnnotationEntries.append(.add(annotation: annotations[index], index: index))
         redoAnnotationEntries.removeAll()
+        editorDocumentRevision &+= 1
     }
 
     private func clearRedoAnnotationHistory() {
         redoAnnotationEntries.removeAll()
+        editorDocumentRevision &+= 1
     }
 
     private func applyUndo(_ entry: AnnotationHistoryEntry) {
@@ -8349,6 +8357,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         selectedIndex: Int?,
         numberSequenceGroupIDs: Set<UUID?>? = nil
     ) {
+        editorDocumentRevision &+= 1
         editingTextAnnotationIndex = nil
         clearNumberEditing()
         clearPendingTextEdit()

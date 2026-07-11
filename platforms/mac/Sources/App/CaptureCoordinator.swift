@@ -87,6 +87,7 @@ final class CaptureCoordinator {
     private let longImageCopyHandler: (@MainActor (NSImage) -> Bool)?
     private let longImageSaveHandler: (@MainActor (NSImage) -> Bool)?
     private var longImageEditor: (any LongImageEditorPresenting)?
+    private var longImageLifecycleActive = false
     private var scrollCaptureSession: (any ScrollCaptureSessionRunning)?
     private var scrollCapturePresentation: (any ScrollCapturePresenting)?
     private var scrollCaptureTask: Task<Void, Never>?
@@ -181,11 +182,7 @@ final class CaptureCoordinator {
 
     func startCapture() {
         NSLog("xxsnap startCapture")
-        guard overlayWindow == nil,
-              captureTask == nil,
-              startTask == nil,
-              scrollCapturePhase == .idle
-        else {
+        guard canStartCapture else {
             NSLog("xxsnap startCapture ignored because capture is already active")
             return
         }
@@ -255,6 +252,14 @@ final class CaptureCoordinator {
             self.captureOverlayDidPresent?()
             overlayWindow.present()
         }
+    }
+
+    private var canStartCapture: Bool {
+        overlayWindow == nil
+            && captureTask == nil
+            && startTask == nil
+            && !longImageLifecycleActive
+            && scrollCapturePhase == .idle
     }
 
     private static var defaultScrollCaptureMaximumAcceptedBytes: UInt {
@@ -433,14 +438,15 @@ final class CaptureCoordinator {
                 }
                 self.frozenDesktopImage = nil
                 self.lastCapture = image
+                self.scrollCaptureFinishPending = false
+                self.scrollCapturePhase = .idle
                 if let longImageHandoff = self.longImageHandoff {
                     longImageHandoff(image, seed)
                     self.captureSessionDidEnd?()
                 } else {
+                    self.longImageLifecycleActive = true
                     self.presentLongImageEditor(image: image, seed: seed)
                 }
-                self.scrollCaptureFinishPending = false
-                self.scrollCapturePhase = .idle
             } catch {
                 guard let self, self.scrollCaptureGeneration == generation,
                       self.scrollCaptureSession === session else { return }
@@ -520,6 +526,7 @@ final class CaptureCoordinator {
                 guard let self, let current = self.longImageEditor,
                       ObjectIdentifier(current) == editorID else { return }
                 self.longImageEditor = nil
+                self.longImageLifecycleActive = false
                 self.captureSessionDidEnd?()
             }
             editor.show()
@@ -529,11 +536,19 @@ final class CaptureCoordinator {
     }
 
     private func presentLongImageFallback(_ image: NSImage) {
-        if longImageFallbackPresenter(image) == .save {
-            _ = longImageSaveHandler?(image) ?? saveLastCapture(image)
+        while true {
+            switch longImageFallbackPresenter(image) {
+            case .save:
+                let didSave = longImageSaveHandler?(image) ?? saveLastCapture(image)
+                if !didSave { continue }
+            case .cancel:
+                break
+            }
+            longImageEditor = nil
+            longImageLifecycleActive = false
+            captureSessionDidEnd?()
+            return
         }
-        longImageEditor = nil
-        captureSessionDidEnd?()
     }
 
     private static func presentLongImageFallback(_ image: NSImage) -> LongImageFallbackChoice {
@@ -801,6 +816,8 @@ final class CaptureCoordinator {
 
 #if DEBUG
 extension CaptureCoordinator {
+    var test_isScrollCapturePhaseIdle: Bool { scrollCapturePhase == .idle }
+    var test_canStartCapture: Bool { canStartCapture }
     var test_lastCapture: NSImage? {
         lastCapture
     }
