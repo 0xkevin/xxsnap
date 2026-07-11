@@ -128,11 +128,15 @@ bool frameFromImage(NSImage *image, ScrollFrame& frame, CGFloat& scale, NSError 
 
     const CGFloat horizontalScale = static_cast<CGFloat>(width) / image.size.width;
     const CGFloat verticalScale = static_cast<CGFloat>(height) / image.size.height;
-    scale = std::min(horizontalScale, verticalScale);
-    if (!std::isfinite(scale) || scale <= 0) {
+    const CGFloat unifiedScale = (horizontalScale + verticalScale) / 2;
+    const CGFloat horizontalPixelError = std::abs(unifiedScale * image.size.width - width);
+    const CGFloat verticalPixelError = std::abs(unifiedScale * image.size.height - height);
+    if (!std::isfinite(unifiedScale) || unifiedScale <= 0
+        || horizontalPixelError > 1 || verticalPixelError > 1) {
         setError(error, BridgeError::InvalidImage, @"The image scale is invalid.");
         return false;
     }
+    scale = unifiedScale;
     return true;
 }
 
@@ -215,6 +219,11 @@ BridgeImplementation *implementationOrError(void *pointer, NSError **error)
 @end
 
 @implementation ScrollCaptureAppendUpdate
+
+- (instancetype)init
+{
+    return nil;
+}
 
 - (instancetype)initWithResult:(const AppendResult&)result
 {

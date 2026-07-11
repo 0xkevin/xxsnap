@@ -4,6 +4,49 @@ import XCTest
 @testable import xxsnap
 
 final class ScrollCaptureBridgeTests: XCTestCase {
+    func testRuntimeInitializerCannotCreateDefaultAppendUpdate() throws {
+        let object = try XCTUnwrap(class_createInstance(ScrollCaptureAppendUpdate.self, 0))
+        let selector = NSSelectorFromString("init")
+        let method = try XCTUnwrap(class_getInstanceMethod(ScrollCaptureAppendUpdate.self, selector))
+        typealias Initializer = @convention(c) (UnsafeMutableRawPointer, Selector) -> UnsafeMutableRawPointer?
+        let initialize = unsafeBitCast(method_getImplementation(method), to: Initializer.self)
+        let retainedObject = Unmanaged.passRetained(object as AnyObject)
+
+        let result = initialize(retainedObject.toOpaque(), selector)
+        if let result {
+            Unmanaged<AnyObject>.fromOpaque(result).release()
+        }
+
+        XCTAssertNil(result)
+    }
+
+    func testRejectsClearlyNonUniformImageScale() throws {
+        let bridge = try XCTUnwrap(ScrollCaptureBridge(maximumAcceptedBytes: 1_000_000))
+        let image = TestImageFactory.solid(
+            pixelWidth: 100,
+            pixelHeight: 200,
+            pointSize: CGSize(width: 100, height: 100),
+            color: .black
+        )
+
+        assertBridgeError { try bridge.append(image) }
+    }
+
+    func testAcceptsOnePixelRepresentationRoundingWithUnifiedScale() throws {
+        let bridge = try XCTUnwrap(ScrollCaptureBridge(maximumAcceptedBytes: 1_000_000))
+        let image = TestImageFactory.solid(
+            pixelWidth: 100,
+            pixelHeight: 101,
+            pointSize: CGSize(width: 50, height: 50),
+            color: .black
+        )
+
+        XCTAssertEqual(try bridge.append(image).kind, .acceptedInitial)
+        let final = try XCTUnwrap(bridge.finalImage())
+        XCTAssertEqual(100 / final.size.width, 2.01, accuracy: 0.001)
+        XCTAssertEqual(101 / final.size.height, 2.01, accuracy: 0.001)
+    }
+
     func testRuntimeAllocatedUninitializedBridgeReturnsErrorInsteadOfCrashing() throws {
         let object = try XCTUnwrap(class_createInstance(ScrollCaptureBridge.self, 0))
         let bridge = try XCTUnwrap(object as? ScrollCaptureBridge)

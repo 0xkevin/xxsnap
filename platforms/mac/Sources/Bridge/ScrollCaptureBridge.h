@@ -12,6 +12,8 @@ typedef NS_ENUM(NSInteger, ScrollCaptureAppendKind) {
 };
 
 @interface ScrollCaptureAppendUpdate : NSObject
+- (instancetype)init NS_UNAVAILABLE;
++ (instancetype)new NS_UNAVAILABLE;
 @property(nonatomic, readonly) ScrollCaptureAppendKind kind;
 @property(nonatomic, readonly) NSInteger appendedHeight;
 @property(nonatomic, readonly) NSInteger outputHeight;
@@ -24,12 +26,12 @@ typedef NS_ENUM(NSInteger, ScrollCaptureAppendKind) {
 - (nullable instancetype)initWithMaximumAcceptedBytes:(NSUInteger)maximumAcceptedBytes
     NS_SWIFT_NAME(init(maximumAcceptedBytes:));
 - (nullable ScrollCaptureAppendUpdate *)appendImage:(NSImage *)image
-                                              error:(NSError **)error
+                                              error:(NSError * _Nullable * _Nullable)error
     NS_SWIFT_NAME(append(_:));
 - (nullable NSImage *)previewImageWithMaximumHeight:(NSInteger)maximumHeight
-                                              error:(NSError **)error
+                                              error:(NSError * _Nullable * _Nullable)error
     NS_SWIFT_NAME(preview(maximumHeight:));
-- (nullable NSImage *)finalImageAndReturnError:(NSError **)error
+- (nullable NSImage *)finalImageAndReturnError:(NSError * _Nullable * _Nullable)error
     NS_SWIFT_NAME(finalImage());
 @end
 

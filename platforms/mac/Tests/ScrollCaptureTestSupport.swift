@@ -29,6 +29,20 @@ enum TestImageFactory {
     static func solid(size: CGSize, color: NSColor, scale: CGFloat = 1) -> NSImage {
         let pixelWidth = Int(size.width * scale)
         let pixelHeight = Int(size.height * scale)
+        return solid(
+            pixelWidth: pixelWidth,
+            pixelHeight: pixelHeight,
+            pointSize: size,
+            color: color
+        )
+    }
+
+    static func solid(
+        pixelWidth: Int,
+        pixelHeight: Int,
+        pointSize: CGSize,
+        color: NSColor
+    ) -> NSImage {
         precondition(pixelWidth > 0 && pixelHeight > 0)
 
         let converted = color.usingColorSpace(.deviceRGB)!
@@ -40,7 +54,7 @@ enum TestImageFactory {
         return image(
             pixelWidth: pixelWidth,
             pixelHeight: pixelHeight,
-            pointSize: size,
+            pointSize: pointSize,
             bytes: bytes.enumerated().map { index, _ in
                 switch index % 4 {
                 case 0: blue
