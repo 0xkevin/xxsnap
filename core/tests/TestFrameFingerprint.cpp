@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 
 namespace {
 
@@ -30,6 +31,8 @@ private slots:
     void onePixelPerturbationHasNonZeroDistance();
     void differentFramesExceedDuplicateThreshold();
     void invalidAndMismatchedFingerprintsCannotBeCompared();
+    void frameValidationRejectsOverflowedBufferSize();
+    void constructorRejectsUnrepresentableRowSize();
 };
 
 void TestFrameFingerprint::identicalFramesHaveZeroDistance()
@@ -77,6 +80,26 @@ void TestFrameFingerprint::invalidAndMismatchedFingerprintsCannotBeCompared()
 
     QVERIFY(!FrameFingerprint::meanAbsoluteDistance(empty, oneByOne).has_value());
     QVERIFY(!FrameFingerprint::meanAbsoluteDistance(oneByOne, twoByOne).has_value());
+}
+
+void TestFrameFingerprint::frameValidationRejectsOverflowedBufferSize()
+{
+    ScrollFrame frame;
+    frame.width = 1;
+    frame.height = std::numeric_limits<int>::max();
+    frame.bytesPerRow = std::numeric_limits<int>::max();
+    frame.pixels.resize(1);
+
+    QVERIFY(!frame.isValid());
+}
+
+void TestFrameFingerprint::constructorRejectsUnrepresentableRowSize()
+{
+    const ScrollFrame frame(std::numeric_limits<int>::max(), 1);
+
+    QVERIFY(!frame.isValid());
+    QCOMPARE(frame.bytesPerRow, 0);
+    QVERIFY(frame.pixels.empty());
 }
 
 QTEST_MAIN(TestFrameFingerprint)
