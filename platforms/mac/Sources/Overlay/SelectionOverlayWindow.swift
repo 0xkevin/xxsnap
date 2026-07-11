@@ -931,6 +931,10 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_activateTextTool()
     }
 
+    func test_openTextFontDropdown() {
+        (contentView as? SelectionOverlayView)?.test_openTextFontDropdown()
+    }
+
     func test_toggleShapeTool(_ shape: CaptureAnnotationKind) {
         (contentView as? SelectionOverlayView)?.test_toggleShapeTool(shape)
     }
@@ -1015,6 +1019,9 @@ final class SelectionOverlayWindow: NSWindow {
 
     func test_scrollWheel(at point: NSPoint, deltaY: CGFloat) {
         guard let overlayView = contentView as? SelectionOverlayView else {
+            return
+        }
+        if overlayView.test_handleTextDropdownScroll(at: point, deltaY: deltaY) {
             return
         }
         if let handler = configuration.longImageScrollHandler {
@@ -3495,12 +3502,12 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     override func scrollWheel(with event: NSEvent) {
         cancelPinnedImageToolbarShiftShortcut()
-        if let longImageScrollHandler = configuration.longImageScrollHandler {
-            longImageScrollHandler(event.scrollingDeltaY)
-            return
-        }
         let point = convert(event.locationInWindow, from: nil)
         if handleTextDropdownScroll(at: point, deltaY: event.scrollingDeltaY) {
+            return
+        }
+        if let longImageScrollHandler = configuration.longImageScrollHandler {
+            longImageScrollHandler(event.scrollingDeltaY)
             return
         }
         guard handleScrollWheel(at: point, deltaY: event.scrollingDeltaY) else {
@@ -6672,6 +6679,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         return SelectionOverlayEditorSnapshot(annotations: annotations, eraserMasks: eraserMasks)
     }
 
+    func test_handleTextDropdownScroll(at point: NSPoint, deltaY: CGFloat) -> Bool {
+        handleTextDropdownScroll(at: point, deltaY: deltaY)
+    }
+
     func updateLongImageEditor(
         backgroundImage: NSImage?,
         selectionRect: NSRect,
@@ -6706,6 +6717,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     func test_activateTextTool() {
         activateTextTool()
+    }
+
+    func test_openTextFontDropdown() {
+        toggleTextDropdown(.font)
     }
 
     func test_activateNumberTool() {

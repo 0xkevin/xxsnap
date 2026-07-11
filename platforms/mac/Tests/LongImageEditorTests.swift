@@ -755,6 +755,94 @@ final class LongImageEditorTests: XCTestCase {
         controller.stop()
     }
 
+    func testRepeatedResizeCommitsUsingPresentedOverlayGeometryWithoutYDrift() throws {
+        let style = CaptureAnnotationStyle()
+        let rectangle = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 20, y: 80, width: 60, height: 40),
+            style: style
+        )
+        let text = CaptureAnnotation(
+            kind: .text,
+            rect: NSRect(x: 30, y: 150, width: 100, height: 45),
+            style: style,
+            text: "Resize"
+        )
+        let controller = LongImageEditorWindowController(
+            canonicalImage: TestImageFactory.solid(size: NSSize(width: 200, height: 1_200), color: .white, scale: 2),
+            annotations: [rectangle, text],
+            visibleFrame: NSRect(x: 0, y: 0, width: 700, height: 800),
+            initialWindowSize: NSSize(width: 400, height: 420)
+        )
+        controller.show()
+        let overlay = try XCTUnwrap(controller.test_editingOverlay)
+        let mask = EraserMask(rect: NSRect(x: 40, y: 80, width: 20, height: 15), affectedAnnotationIDs: [rectangle.id])
+        overlay.test_addEraserMask(mask)
+
+        func resizeBy100() throws {
+            let oldFrame = try XCTUnwrap(controller.window?.frame)
+            controller.window?.delegate = nil
+            controller.window?.setFrame(
+                NSRect(x: oldFrame.minX, y: oldFrame.minY, width: oldFrame.width, height: oldFrame.height + 100),
+                display: false
+            )
+            controller.window?.delegate = controller
+            controller.windowDidResize(Notification(name: NSWindow.didResizeNotification))
+        }
+        try resizeBy100()
+        let firstCommittedMaskY = try XCTUnwrap(controller.test_fullEraserMasks.first { $0.id == mask.id }).rect.minY
+        try resizeBy100()
+        try resizeBy100()
+
+        XCTAssertEqual(controller.test_fullAnnotations.first { $0.id == rectangle.id }?.rect, rectangle.rect)
+        XCTAssertEqual(controller.test_fullAnnotations.first { $0.id == text.id }?.rect, text.rect)
+        let committedMask = try XCTUnwrap(controller.test_fullEraserMasks.first { $0.id == mask.id })
+        XCTAssertEqual(committedMask.rect.minY, firstCommittedMaskY, accuracy: 0.001)
+        controller.stop()
+    }
+
+    func testLongImageOverlayIsChildAndDoesNotRemainOrphanedWhenMiniaturized() throws {
+        let controller = makeTallController()
+        controller.show()
+        let window = try XCTUnwrap(controller.window)
+        let overlay = try XCTUnwrap(controller.test_editingOverlay)
+        XCTAssertTrue(window.childWindows?.contains(overlay) == true)
+
+        window.miniaturize(nil)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertFalse(overlay.isVisible)
+        window.deminiaturize(nil)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertTrue(overlay.isVisible)
+        let expectedFrame = window.convertToScreen(controller.scrollView.convert(controller.scrollView.bounds, to: nil))
+        XCTAssertEqual(overlay.frame, expectedFrame)
+
+        controller.stop()
+        XCTAssertFalse(window.childWindows?.contains(overlay) == true)
+        XCTAssertFalse(overlay.isVisible)
+    }
+
+    func testTextDropdownConsumesWheelBeforeLongImageDocumentScroll() throws {
+        var documentScrollCount = 0
+        let overlay = SelectionOverlayWindow(
+            backgroundImage: nil,
+            configuration: .longImageEditor(
+                windowFrame: NSRect(x: 0, y: 0, width: 500, height: 400),
+                selectionRect: NSRect(x: 0, y: 0, width: 500, height: 400),
+                scrollHandler: { _ in documentScrollCount += 1 }
+            )
+        ) { _ in }
+        overlay.test_activateTextTool()
+        overlay.test_openTextFontDropdown()
+        let dropdown = try XCTUnwrap(overlay.test_textDropdownRect)
+        let dropdownOffset = overlay.test_textDropdownScrollOffset
+
+        overlay.test_scrollWheel(at: NSPoint(x: dropdown.midX, y: dropdown.midY), deltaY: -80)
+
+        XCTAssertEqual(documentScrollCount, 0)
+        XCTAssertGreaterThan(overlay.test_textDropdownScrollOffset, dropdownOffset)
+    }
+
     func testEditorInteractionCallbacksLockAndUnlockDocumentScrolling() throws {
         let controller = LongImageEditorWindowController(
             image: TestImageFactory.solid(size: NSSize(width: 200, height: 1_000), color: .white),

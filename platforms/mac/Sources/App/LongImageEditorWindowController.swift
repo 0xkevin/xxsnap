@@ -137,6 +137,11 @@ private final class LongImageFlippedView: NSView { override var isFlipped: Bool 
 
 @MainActor
 final class LongImageEditorWindowController: NSWindowController, NSWindowDelegate {
+    private struct PresentedContext {
+        var sliceRect: NSRect
+        var overlayBoundsHeight: CGFloat
+        var displayScale: CGFloat
+    }
     static let controlStripHeight: CGFloat = 52
     let scrollView = NSScrollView()
     let controlStripView = NSView()
@@ -150,6 +155,7 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     private var restoringLockedOrigin = false
     private var presentedAnnotationIDs: Set<AnnotationID> = []
     private var presentedMaskIDs: Set<UUID> = []
+    private var presentedContext: PresentedContext?
     private var didStop = false
     private var viewportRefreshCount = 0
     private(set) var geometry: LongImageEditorGeometry
@@ -204,8 +210,12 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         if let boundsObserver { NotificationCenter.default.removeObserver(boundsObserver) }
         boundsObserver = nil
         interactionLocked = false
-        overlay?.orderOut(nil)
+        if let overlay {
+            window?.removeChildWindow(overlay)
+            overlay.orderOut(nil)
+        }
         overlay = nil
+        presentedContext = nil
         imageView.image = nil
         documentState = LongImageEditorDocument(image: NSImage(size: .zero), annotations: [], eraserMasks: [])
         window?.orderOut(nil)
@@ -216,6 +226,8 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     }
     func windowDidMove(_ notification: Notification) { commitOverlay(); refreshOverlay() }
     func windowDidChangeBackingProperties(_ notification: Notification) { commitOverlay(); refreshOverlay() }
+    func windowDidMiniaturize(_ notification: Notification) { overlay?.orderOut(nil) }
+    func windowDidDeminiaturize(_ notification: Notification) { refreshOverlay(); overlay?.orderFront(nil) }
     func windowWillClose(_ notification: Notification) { commitOverlay(); stop() }
 
     private func configureViews() {
@@ -288,7 +300,14 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
             scrollHandler: { [weak self] deltaY in self?.handleOverlayScroll(deltaY: deltaY) }
         )
         let value = SelectionOverlayWindow(backgroundImage: displayImage(slice.image, size: frame.size), configuration: config) { [weak self] in self?.finish($0) }
-        overlay = value; value.present()
+        overlay = value
+        presentedContext = PresentedContext(
+            sliceRect: slice.imageRect,
+            overlayBoundsHeight: frame.height,
+            displayScale: geometry.fitWidthScale
+        )
+        value.present()
+        window?.addChildWindow(value, ordered: .above)
     }
     private func refreshOverlay() {
         guard !didStop else { return }
@@ -298,6 +317,11 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         presentedAnnotationIDs = Set(slice.annotations.map(\.id))
         presentedMaskIDs = Set(slice.eraserMasks.map(\.id))
         let frame = viewportScreenFrame()
+        presentedContext = PresentedContext(
+            sliceRect: slice.imageRect,
+            overlayBoundsHeight: frame.height,
+            displayScale: geometry.fitWidthScale
+        )
         overlay.updateLongImageEditor(
             windowFrame: frame, backgroundImage: displayImage(slice.image, size: frame.size),
             selectionRect: NSRect(origin: .zero, size: frame.size),
@@ -312,21 +336,35 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         )
     }
     private func commitOverlay() {
-        guard let snapshot = overlay?.editorSnapshot else { return }
-        let origin = visibleImageRect.origin
+        guard let snapshot = overlay?.editorSnapshot, let presentedContext else { return }
+        let origin = presentedContext.sliceRect.origin
         let localIDs = Set(snapshot.annotations.map(\.id))
         let deletedIDs = presentedAnnotationIDs.subtracting(localIDs)
         documentState.annotations.removeAll { deletedIDs.contains($0.id) }
         for local in snapshot.annotations {
-            let viewportTop = LongImageAnnotationTranslation.annotationFromTopOriginToRenderer(local, imageHeight: viewportScreenFrame().height)
-            let full = LongImageAnnotationTranslation.annotation(viewportTop, toImageSliceOrigin: origin, displayScale: geometry.fitWidthScale)
+            let viewportTop = LongImageAnnotationTranslation.annotationFromTopOriginToRenderer(
+                local,
+                imageHeight: presentedContext.overlayBoundsHeight
+            )
+            let full = LongImageAnnotationTranslation.annotation(
+                viewportTop,
+                toImageSliceOrigin: origin,
+                displayScale: presentedContext.displayScale
+            )
             if let index = documentState.annotations.firstIndex(where: { $0.id == full.id }) { documentState.annotations[index] = full } else { documentState.annotations.append(full) }
         }
         let localMaskIDs = Set(snapshot.eraserMasks.map(\.id))
         documentState.eraserMasks.removeAll { presentedMaskIDs.contains($0.id) && !localMaskIDs.contains($0.id) }
         for local in snapshot.eraserMasks {
-            let viewportTop = LongImageAnnotationTranslation.maskFromTopOriginToRenderer(local, imageHeight: viewportScreenFrame().height)
-            let full = LongImageAnnotationTranslation.mask(viewportTop, toImageSliceOrigin: origin, displayScale: geometry.fitWidthScale)
+            let viewportTop = LongImageAnnotationTranslation.maskFromTopOriginToRenderer(
+                local,
+                imageHeight: presentedContext.overlayBoundsHeight
+            )
+            let full = LongImageAnnotationTranslation.mask(
+                viewportTop,
+                toImageSliceOrigin: origin,
+                displayScale: presentedContext.displayScale
+            )
             if let index = documentState.eraserMasks.firstIndex(where: { $0.id == full.id }) { documentState.eraserMasks[index] = full } else { documentState.eraserMasks.append(full) }
         }
         if !deletedIDs.isEmpty {
@@ -336,9 +374,12 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
             documentState.eraserMasks.removeAll { $0.affectedAnnotationIDs.isEmpty }
         }
         presentedAnnotationIDs = Set(documentState.annotations.filter {
-            CaptureAnnotationRenderer.longImageVisualBounds(for: $0).intersects(visibleImageRect)
+            CaptureAnnotationRenderer.longImageVisualBounds(for: $0).intersects(presentedContext.sliceRect)
         }.map(\.id))
-        presentedMaskIDs = Set(documentState.eraserMasks.filter { presentedAnnotationIDs.isDisjoint(with: $0.affectedAnnotationIDs) == false && $0.rect.intersects(visibleImageRect) }.map(\.id))
+        presentedMaskIDs = Set(documentState.eraserMasks.filter {
+            !presentedAnnotationIDs.isDisjoint(with: $0.affectedAnnotationIDs)
+                && $0.rect.intersects(presentedContext.sliceRect)
+        }.map(\.id))
     }
     private func lock(_ value: Bool) {
         if value {
