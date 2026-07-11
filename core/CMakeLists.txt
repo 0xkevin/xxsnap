@@ -1,6 +1,7 @@
 add_library(snipory_core
     src/annotation/AnnotationRenderer.cpp
     src/scroll/FrameFingerprint.cpp
+    src/scroll/ScrollStitchSession.cpp
     src/scroll/VerticalOverlapMatcher.cpp
     src/usecases/SnapshotExportUseCase.cpp
 )
@@ -52,4 +53,5 @@ if(BUILD_TESTING)
     snipory_core_add_test(test_snapshot_export_use_case tests/TestSnapshotExportUseCase.cpp)
     snipory_core_add_test(test_frame_fingerprint tests/TestFrameFingerprint.cpp)
     snipory_core_add_test(test_vertical_overlap_matcher tests/TestVerticalOverlapMatcher.cpp)
+    snipory_core_add_test(test_scroll_stitch_session tests/TestScrollStitchSession.cpp)
 endif()
