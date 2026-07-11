@@ -1092,6 +1092,57 @@ final class LongImageEditorTests: XCTestCase {
         controller.stop()
     }
 
+    func testLiveSuffixMagnifierForcesRawBackgroundAndUnsuppressesPrefix() throws {
+        let image = TestImageFactory.verticalDocumentViewport(offset: 0, width: 200, height: 1_000, scale: 2)
+        let style = CaptureAnnotationStyle()
+        let prefix = CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 10, y: 20, width: 60, height: 50), style: style)
+        let selected = CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 40, y: 80, width: 80, height: 60), style: style)
+        let magnifier = CaptureAnnotation(
+            kind: .magnifier, rect: NSRect(x: 100, y: 100, width: 80, height: 80),
+            style: style, magnifierShape: .rectangle, magnifierZoom: 2
+        )
+        let controller = LongImageEditorWindowController(
+            canonicalImage: image, annotations: [prefix, selected, magnifier],
+            visibleFrame: NSRect(x: 0, y: 0, width: 600, height: 500),
+            initialWindowSize: NSSize(width: 400, height: 420)
+        )
+        controller.show()
+        let overlay = try XCTUnwrap(controller.test_editingOverlay)
+        let local = try XCTUnwrap(overlay.editorSnapshot?.annotations.first { $0.id == selected.id })
+        overlay.test_mouseDown(at: NSPoint(x: local.rect.minX, y: local.rect.midY))
+        XCTAssertTrue(overlay.test_suppressedAnnotationIDs.isEmpty)
+        let raw = try XCTUnwrap(CaptureAnnotationRenderer.sampleLongImage(image, rect: controller.visibleImageRect))
+        XCTAssertEqual(try pixelBytes(try XCTUnwrap(overlay.test_backgroundImage)), try pixelBytes(raw))
+        overlay.test_mouseUp(at: NSPoint(x: local.rect.minX, y: local.rect.midY))
+        controller.stop()
+    }
+
+    func testInvalidMosaicEffectInputsRemainFiniteAndDoNotShrinkProcessing() throws {
+        let image = TestImageFactory.verticalDocumentViewport(offset: 0, width: 180, height: 700, scale: 2)
+        var style = CaptureAnnotationStyle(); style.strokeWidth = .infinity
+        let annotation = CaptureAnnotation(
+            kind: .mosaicRectangle, rect: NSRect(x: 20, y: 250, width: 140, height: 180),
+            style: style, mosaicRedaction: CaptureMosaicRedaction(type: .gaussianBlur, value: -20)
+        )
+        let requested = NSRect(x: 0, y: 300, width: 180, height: 120)
+        let plan = CaptureAnnotationRenderer.visibleLongImageRenderPlan(
+            imageSize: image.size, imageRect: requested, annotations: [annotation], eraserMasks: []
+        )
+        XCTAssertTrue(plan.processingRect.minY.isFinite)
+        XCTAssertTrue(plan.processingRect.height.isFinite)
+        XCTAssertGreaterThanOrEqual(plan.processingRect.height, requested.height)
+        let output = CaptureAnnotationRenderer.renderVisibleLongImageSlice(
+            image: image, annotations: [annotation], eraserMasks: [], imageRect: requested
+        )
+        XCTAssertEqual(pixelSize(output), NSSize(width: 360, height: 240))
+    }
+
+    func testLongImageExportIgnoresOrphanMasksWhenThereAreNoAnnotations() {
+        let image = TestImageFactory.solid(size: NSSize(width: 160, height: 320), color: .red, scale: 2)
+        let orphan = EraserMask(rect: NSRect(x: 10, y: 10, width: 20, height: 20), affectedAnnotationIDs: [UUID()])
+        XCTAssertTrue(CaptureAnnotationRenderer.renderLongImage(image: image, annotations: [], eraserMasks: [orphan]) === image)
+    }
+
     func testEditorInteractionCallbacksLockAndUnlockDocumentScrolling() throws {
         let controller = LongImageEditorWindowController(
             image: TestImageFactory.solid(size: NSSize(width: 200, height: 1_000), color: .white),

@@ -1285,7 +1285,7 @@ enum CaptureAnnotationRenderer {
         annotations: [CaptureAnnotation],
         eraserMasks: [EraserMask]
     ) -> NSImage {
-        guard !annotations.isEmpty || !eraserMasks.isEmpty else { return image }
+        guard !annotations.isEmpty else { return image }
         guard let source = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return image }
         let colorSpace = source.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!
         guard let output = makeRenderContext(width: source.width, height: source.height, colorSpace: colorSpace) else {
@@ -1374,7 +1374,7 @@ enum CaptureAnnotationRenderer {
         )
         let processing = plan.processingRect
         guard let source = cropLongImage(image, rect: processing) else { return image }
-        let selectedAnnotations = annotations.filter { plan.annotationIDs.contains($0.id) }
+        let selectedAnnotations = annotations.filter { plan.annotationIDs.contains($0.id) }.map(normalizedEffectAnnotation)
         let selectedMasks = eraserMasks.filter { plan.maskIDs.contains($0.id) }
         let offset = NSPoint(x: -processing.minX, y: -processing.minY)
         let localAnnotations = selectedAnnotations.map {
@@ -1461,12 +1461,13 @@ enum CaptureAnnotationRenderer {
     ) -> NSRect {
         let affected = requiredRegion.intersection(visualBounds)
         guard !affected.isNull, !affected.isEmpty else { return .null }
-        let value = CGFloat(annotation.mosaicRedaction?.value ?? 1)
+        let value = CGFloat(max(1, annotation.mosaicRedaction?.value ?? 1))
+        let strokeWidth = normalizedEffectStrokeWidth(annotation.style.strokeWidth)
         let halo: CGFloat
         if annotation.mosaicRedaction?.type == .gaussianBlur {
-            halo = value * 3 + annotation.style.strokeWidth
+            halo = value * 3 + strokeWidth
         } else {
-            halo = value * 4 + annotation.style.strokeWidth
+            halo = value * 4 + strokeWidth
         }
         if visualBounds.height <= requiredRegion.height + halo * 2,
            visualBounds.width <= requiredRegion.width + halo * 2 {
@@ -1482,6 +1483,17 @@ enum CaptureAnnotationRenderer {
             sourceBounds: imageBounds,
             zoom: annotation.effectiveMagnifierZoom
         )?.integralSource
+    }
+
+    private static func normalizedEffectStrokeWidth(_ value: CGFloat) -> CGFloat {
+        value.isFinite ? min(512, max(0, value)) : 64
+    }
+
+    private static func normalizedEffectAnnotation(_ annotation: CaptureAnnotation) -> CaptureAnnotation {
+        guard annotation.kind == .mosaicStroke || annotation.kind == .mosaicRectangle else { return annotation }
+        var normalized = annotation
+        normalized.style.strokeWidth = normalizedEffectStrokeWidth(annotation.style.strokeWidth)
+        return normalized
     }
 
     static func visibleLongImageRenderPlan(
@@ -1524,9 +1536,14 @@ enum CaptureAnnotationRenderer {
             }
             bounds = corners.dropFirst().reduce(NSRect(origin: corners[0], size: .zero)) { $0.union(NSRect(origin: $1, size: .zero)) }
         }
-        var padding = max(4, annotation.style.strokeWidth * 2)
+        var padding = max(4, normalizedEffectStrokeWidth(annotation.style.strokeWidth) * 2)
         if annotation.kind == .text { padding = max(padding, annotation.style.textSize * textDisplayScale) }
-        if let redaction = annotation.mosaicRedaction { padding = max(padding, CGFloat(redaction.value) * 4 + annotation.style.strokeWidth) }
+        if let redaction = annotation.mosaicRedaction {
+            padding = max(
+                padding,
+                CGFloat(max(1, redaction.value)) * 4 + normalizedEffectStrokeWidth(annotation.style.strokeWidth)
+            )
+        }
         return bounds.insetBy(dx: -padding, dy: -padding)
     }
 

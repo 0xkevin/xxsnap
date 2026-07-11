@@ -409,9 +409,12 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
 
     private func prepareLivePresentation(targetID: AnnotationID?) {
         guard let overlay, let presentedContext else { return }
-        let prefixEnd = targetID.flatMap { id in
+        var prefixEnd = targetID.flatMap { id in
             documentState.annotations.firstIndex { $0.id == id }
         } ?? 0
+        if documentState.annotations.dropFirst(prefixEnd).contains(where: { $0.kind == .magnifier }) {
+            prefixEnd = 0
+        }
         let prefixAnnotations = Array(documentState.annotations.prefix(prefixEnd))
         let prefixIDs = Set(prefixAnnotations.map(\.id))
         let prefixMasks = documentState.eraserMasks.filter {
