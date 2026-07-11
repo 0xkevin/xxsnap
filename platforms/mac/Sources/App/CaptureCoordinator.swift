@@ -32,6 +32,14 @@ struct ScrollCapturePresentationContext {
     let onCancel: @MainActor () -> Void
 }
 
+private enum ScrollCaptureLifecyclePhase: Equatable {
+    case idle
+    case starting
+    case active
+    case finishing
+    case cancelling
+}
+
 @MainActor
 final class CaptureCoordinator {
     var captureOverlayDidPresent: (() -> Void)?
@@ -62,6 +70,7 @@ final class CaptureCoordinator {
     private var scrollCaptureTask: Task<Void, Never>?
     private var scrollCaptureSeed: ScrollCaptureSeed?
     private var scrollCaptureFinishPending = false
+    private var scrollCapturePhase: ScrollCaptureLifecyclePhase = .idle
     private var scrollCaptureGeneration: UInt64 = 0
     private var pendingLongImageSeed: ScrollCaptureSeed?
 
@@ -134,7 +143,11 @@ final class CaptureCoordinator {
 
     func startCapture() {
         NSLog("xxsnap startCapture")
-        guard overlayWindow == nil, captureTask == nil, startTask == nil else {
+        guard overlayWindow == nil,
+              captureTask == nil,
+              startTask == nil,
+              scrollCapturePhase == .idle
+        else {
             NSLog("xxsnap startCapture ignored because capture is already active")
             return
         }
@@ -244,12 +257,15 @@ final class CaptureCoordinator {
     }
 
     private func requestScrollCapture(seed: ScrollCaptureSeed) {
-        guard scrollCaptureSession == nil,
+        guard scrollCapturePhase == .idle,
+              scrollCaptureSession == nil,
               scrollCapturePresentation == nil,
               scrollCaptureTask == nil,
               let overlay = overlayWindow
         else { return }
 
+        scrollCaptureFinishPending = false
+        scrollCapturePhase = .starting
         overlay.setScrollCaptureCapturing()
         scrollCaptureGeneration &+= 1
         let generation = scrollCaptureGeneration
@@ -257,6 +273,8 @@ final class CaptureCoordinator {
         guard let geometry = overlay.scrollCaptureControlGeometry else {
             overlay.restoreAfterScrollCaptureCancellation()
             overlay.present()
+            scrollCaptureFinishPending = false
+            scrollCapturePhase = .idle
             return
         }
         let visibleFrame = Self.visibleFrame(containing: seed.screenRect)
@@ -280,11 +298,15 @@ final class CaptureCoordinator {
             do {
                 try await session?.start()
                 guard let self, self.scrollCaptureGeneration == generation,
-                      self.scrollCaptureSession === session else { return }
+                      self.scrollCaptureSession === session,
+                      self.scrollCapturePhase == .starting else { return }
                 self.scrollCaptureTask = nil
                 if self.scrollCaptureFinishPending {
                     self.scrollCaptureFinishPending = false
+                    self.scrollCapturePhase = .active
                     self.finishScrollCapture()
+                } else {
+                    self.scrollCapturePhase = .active
                 }
             } catch {
                 guard let self, self.scrollCaptureGeneration == generation,
@@ -335,14 +357,23 @@ final class CaptureCoordinator {
     }
 
     private func finishScrollCapture() {
-        guard let session = scrollCaptureSession,
-              let seed = scrollCaptureSeed,
-              scrollCapturePresentation != nil
-        else { return }
-        guard scrollCaptureTask == nil else {
+        switch scrollCapturePhase {
+        case .starting:
+            guard !scrollCaptureFinishPending else { return }
             scrollCaptureFinishPending = true
             return
+        case .active:
+            break
+        case .idle, .finishing, .cancelling:
+            return
         }
+        guard let session = scrollCaptureSession,
+              let seed = scrollCaptureSeed,
+              scrollCapturePresentation != nil,
+              scrollCaptureTask == nil
+        else { return }
+        scrollCapturePhase = .finishing
+        scrollCaptureFinishPending = false
         let generation = scrollCaptureGeneration
         scrollCaptureTask = Task { @MainActor [weak self, weak session] in
             do {
@@ -355,8 +386,7 @@ final class CaptureCoordinator {
                 self.scrollCaptureSeed = nil
                 self.scrollCaptureTask = nil
                 if let overlay = self.overlayWindow {
-                    overlay.orderOut(nil)
-                    self.retiredOverlayWindows.append(overlay)
+                    overlay.finishScrollCaptureAndDismiss()
                     self.overlayWindow = nil
                 }
                 self.frozenDesktopImage = nil
@@ -367,6 +397,8 @@ final class CaptureCoordinator {
                     self.lastCapture = image
                     self.pendingLongImageSeed = seed
                 }
+                self.scrollCaptureFinishPending = false
+                self.scrollCapturePhase = .idle
                 self.captureSessionDidEnd?()
             } catch {
                 guard let self, self.scrollCaptureGeneration == generation,
@@ -377,7 +409,14 @@ final class CaptureCoordinator {
     }
 
     private func cancelScrollCapture() {
+        switch scrollCapturePhase {
+        case .starting, .active:
+            break
+        case .idle, .finishing, .cancelling:
+            return
+        }
         guard let session = scrollCaptureSession else { return }
+        scrollCapturePhase = .cancelling
         scrollCaptureGeneration &+= 1
         scrollCaptureTask?.cancel()
         scrollCaptureTask = nil
@@ -389,6 +428,7 @@ final class CaptureCoordinator {
         scrollCaptureFinishPending = false
         overlayWindow?.restoreAfterScrollCaptureCancellation()
         overlayWindow?.present()
+        scrollCapturePhase = .idle
     }
 
     private func recoverScrollCaptureOverlay(generation: UInt64) {
@@ -403,6 +443,7 @@ final class CaptureCoordinator {
         scrollCaptureFinishPending = false
         overlayWindow?.restoreAfterScrollCaptureCancellation()
         overlayWindow?.present()
+        scrollCapturePhase = .idle
     }
 
     private func showPermissionRestartAlert() {
@@ -647,6 +688,10 @@ extension CaptureCoordinator {
 
     var test_pinnedWindowCount: Int {
         pinnedWindowControllers.count
+    }
+
+    var test_retiredOverlayCount: Int {
+        retiredOverlayWindows.count
     }
 
     var test_hasScrollCaptureSession: Bool {

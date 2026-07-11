@@ -777,6 +777,14 @@ final class SelectionOverlayWindow: NSWindow {
         nextEscapeCancelsRestoredSelection = true
     }
 
+    func finishScrollCaptureAndDismiss() {
+        endScrollCapturePassiveMode()
+        onScrollCaptureRequested = nil
+        onScrollCaptureFinishRequested = nil
+        onScrollCaptureCancelRequested = nil
+        orderOut(nil)
+    }
+
     private func requestScrollCaptureCancel() {
         guard scrollCaptureOverlayState != .inactive, !scrollCaptureTerminalActionTriggered else { return }
         scrollCaptureTerminalActionTriggered = true
