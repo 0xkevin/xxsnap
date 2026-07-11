@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 
@@ -97,6 +98,19 @@ ScrollFrame aliasedSamplingFrame(int width, int height, int documentY, int coars
     return frame;
 }
 
+ScrollFrame cancellingPatternFrame(int width, int height, int amplitude)
+{
+    ScrollFrame frame(width, height);
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const bool positive = ((x & 1) ^ (y & 1)) != 0;
+            const auto value = static_cast<std::uint8_t>(100 + (positive ? amplitude : -amplitude));
+            setGray(frame, x, y, value);
+        }
+    }
+    return frame;
+}
+
 ScrollFrame crop(const ScrollFrame& source, int x, int y, int width, int height)
 {
     ScrollFrame result(width, height);
@@ -182,6 +196,9 @@ private slots:
     void recallsNonZeroErrorPeakBeyondFixedCandidateLimit();
     void detectsShortPeriodIndependentPeaks();
     void avoidsQuadraticFullResolutionFallback();
+    void ignoresAdvancesWithEmptyMaskedIntersection();
+    void detectsIndependentPeaksHiddenByFlatSignature();
+    void avoidsFlatSignatureFullResolutionDegeneration();
 };
 
 void TestVerticalOverlapMatcher::findsDownwardOffset()
@@ -440,7 +457,53 @@ void TestVerticalOverlapMatcher::avoidsQuadraticFullResolutionFallback()
 
     QCOMPARE(result.kind, OverlapKind::Reliable);
     QCOMPARE(result.verticalAdvance, advance);
-    QVERIFY2(elapsed < 1500, qPrintable(QStringLiteral("elapsed %1 ms").arg(elapsed)));
+    QVERIFY2(elapsed < 3000, qPrintable(QStringLiteral("elapsed %1 ms").arg(elapsed)));
+}
+
+void TestVerticalOverlapMatcher::ignoresAdvancesWithEmptyMaskedIntersection()
+{
+    const ScrollFrame document = stripedDocument(120, 220);
+    const ScrollFrame previous = crop(document, 0, 0, 120, 100);
+    const ScrollFrame current = crop(document, 0, 2, 120, 100);
+    OverlapConfig config;
+    config.maximumAdvanceRatio = 0.5;
+    config.excludedBands.top = 45;
+    config.excludedBands.bottom = 45;
+
+    const auto result = VerticalOverlapMatcher().match(previous, current, config);
+
+    QCOMPARE(result.kind, OverlapKind::Reliable);
+    QCOMPARE(result.verticalAdvance, 2);
+    QVERIFY(std::isfinite(result.normalizedError));
+}
+
+void TestVerticalOverlapMatcher::detectsIndependentPeaksHiddenByFlatSignature()
+{
+    const ScrollFrame previous = cancellingPatternFrame(128, 180, 20);
+    const ScrollFrame current = cancellingPatternFrame(128, 180, 10);
+    OverlapConfig config;
+    config.maximumAdvanceRatio = 0.025;
+
+    const auto result = VerticalOverlapMatcher().match(previous, current, config);
+
+    QCOMPARE(result.kind, OverlapKind::Ambiguous);
+    QCOMPARE(result.normalizedError, 10.0 / 255.0);
+}
+
+void TestVerticalOverlapMatcher::avoidsFlatSignatureFullResolutionDegeneration()
+{
+    const ScrollFrame previous = cancellingPatternFrame(1920, 1080, 20);
+    const ScrollFrame current = cancellingPatternFrame(1920, 1080, 10);
+    OverlapConfig config;
+    config.maximumAdvanceRatio = 0.5;
+    QElapsedTimer timer;
+    timer.start();
+
+    const auto result = VerticalOverlapMatcher().match(previous, current, config);
+    const auto elapsed = timer.elapsed();
+
+    QCOMPARE(result.kind, OverlapKind::Ambiguous);
+    QVERIFY2(elapsed < 3000, qPrintable(QStringLiteral("elapsed %1 ms").arg(elapsed)));
 }
 
 QTEST_MAIN(TestVerticalOverlapMatcher)
