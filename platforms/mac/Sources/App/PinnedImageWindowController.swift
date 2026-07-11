@@ -98,14 +98,31 @@ final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPr
         self.screenRect = requestedRect.isEmpty ? NSRect(origin: .zero, size: image.size) : requestedRect
         self.imageAspectRatio = image.size.width / max(image.size.height, 1)
         let screenFrame = visibleFrame ?? NSRect(x: 0, y: 0, width: 800, height: 600)
-        let initialImageFrame = self.screenRect.isEmpty
-            ? NSRect(
-                x: screenFrame.midX - image.size.width / 2,
-                y: screenFrame.midY - image.size.height / 2,
-                width: image.size.width,
-                height: image.size.height
+        let requestedImageFrame = self.screenRect
+        let windowFrame = PinnedImageWindowGeometry.windowFrame(forImageFrame: requestedImageFrame)
+        let needsFitting = windowFrame.width > screenFrame.width || windowFrame.height > screenFrame.height
+        let fittedSize: NSSize
+        if needsFitting {
+            // Leave headroom for an immediate zoom while keeping the complete pin on-screen.
+            let initialVisibleFrame = NSRect(
+                origin: screenFrame.origin,
+                size: NSSize(width: screenFrame.width * 0.875, height: screenFrame.height * 0.875)
             )
-            : self.screenRect
+            fittedSize = PinnedImageWindowGeometry.fittedImageSize(
+                imageSize: image.size,
+                visibleFrame: initialVisibleFrame
+            )
+        } else {
+            fittedSize = requestedImageFrame.size
+        }
+        let initialImageFrame = needsFitting
+            ? NSRect(
+                x: screenFrame.midX - fittedSize.width / 2,
+                y: screenFrame.midY - fittedSize.height / 2,
+                width: fittedSize.width,
+                height: fittedSize.height
+            )
+            : requestedImageFrame
         self.initialImageFrame = initialImageFrame
         let initialFrame = PinnedImageWindowGeometry.windowFrame(forImageFrame: initialImageFrame)
         let window = PinnedImageWindow(

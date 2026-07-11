@@ -38,6 +38,7 @@ private final class FakeScrollCaptureSession: ScrollCaptureSessionRunning {
     var suspendsStart = false
     var startContinuation: CheckedContinuation<Void, Error>?
     var finishError: Error?
+    var finishErrors: [Error] = []
     var finishedImage = NSImage(size: NSSize(width: 20, height: 40))
     var suspendsFinish = false
     var finishContinuation: CheckedContinuation<NSImage, Error>?
@@ -57,6 +58,7 @@ private final class FakeScrollCaptureSession: ScrollCaptureSessionRunning {
 
     func finish() async throws -> NSImage {
         finishCount += 1
+        if !finishErrors.isEmpty { throw finishErrors.removeFirst() }
         if let finishError { throw finishError }
         if suspendsFinish {
             return try await withCheckedThrowingContinuation { finishContinuation = $0 }
@@ -78,6 +80,7 @@ private final class FakeScrollCapturePresentation: ScrollCapturePresenting {
     private(set) var warnings: [String] = []
     private(set) var clearWarningCount = 0
     private(set) var placements: [(NSRect, NSRect)] = []
+    private(set) var resetTerminalCount = 0
     var onFinish: (() -> Void)?
     var onCancel: (() -> Void)?
 
@@ -89,6 +92,15 @@ private final class FakeScrollCapturePresentation: ScrollCapturePresenting {
     func updatePlacement(selectionFrame: NSRect, visibleFrame: NSRect) {
         placements.append((selectionFrame, visibleFrame))
     }
+    func resetTerminalActionsForRetry() { resetTerminalCount += 1 }
+}
+
+@MainActor
+private final class FakeLongImageEditor: LongImageEditorPresenting {
+    var onClose: (() -> Void)?
+    private(set) var showCount = 0
+    func show() { showCount += 1 }
+    func simulateClose() { onClose?() }
 }
 
 final class SelectionToolbarStateTests: XCTestCase {
@@ -2605,6 +2617,26 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(closeCount, 0)
         XCTAssertFalse(controller.test_isToolbarVisible)
         XCTAssertEqual(controller.window?.isVisible, true)
+        controller.window?.close()
+    }
+
+    @MainActor
+    func testPinnedTallLongImageFitsVisibleFrameWithoutChangingSource() {
+        let source = solidImage(size: NSSize(width: 1_200, height: 12_000), color: .white)
+        let visible = NSRect(x: 0, y: 0, width: 1_440, height: 900)
+        let controller = PinnedImageWindowController(image: source, visibleFrame: visible)
+
+        let initial = controller.test_imageFrameInScreen
+        XCTAssertTrue(controller.image === source)
+        XCTAssertEqual(controller.image.size, NSSize(width: 1_200, height: 12_000))
+        XCTAssertLessThanOrEqual(initial.height, visible.height)
+        XCTAssertLessThanOrEqual(controller.window?.frame.height ?? .infinity, visible.height)
+        XCTAssertEqual(initial.width / initial.height, 0.1, accuracy: 0.003)
+
+        controller.scale(by: 1.2)
+        XCTAssertGreaterThan(controller.test_imageFrameInScreen.height, initial.height)
+        XCTAssertTrue(controller.image === source)
+        XCTAssertEqual(controller.image.size, NSSize(width: 1_200, height: 12_000))
         controller.window?.close()
     }
 
@@ -9629,6 +9661,39 @@ final class SelectionToolbarStateTests: XCTestCase {
     }
 
     @MainActor
+    func testCaptureCoordinatorResourceLimitCanFinishAcceptedImageWithoutAutoCancel() async throws {
+        let seed = scrollCaptureSeedForCoordinatorTests()
+        let session = FakeScrollCaptureSession(seed: seed)
+        session.finishedImage = NSImage(size: NSSize(width: 80, height: 500))
+        let presentation = FakeScrollCapturePresentation()
+        var update: (@MainActor (ScrollCapturePresentationUpdate) -> Void)?
+        var handedOff: NSImage?
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            scrollCaptureSessionFactory: { _, callback in update = callback; return session },
+            scrollCapturePresentationFactory: { context in
+                presentation.onFinish = context.onFinish
+                presentation.onCancel = context.onCancel
+                return presentation
+            },
+            longImageHandoff: { image, _ in handedOff = image }
+        )
+        coordinator.test_installOverlayWindow(SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in })
+        coordinator.test_requestScrollCapture(seed: seed)
+        await Task.yield()
+        update?(.preview(session.finishedImage))
+        update?(.state(.paused(.resourceLimit)))
+
+        presentation.onFinish?()
+        for _ in 0..<20 where handedOff == nil { await Task.yield() }
+
+        XCTAssertTrue(handedOff === session.finishedImage)
+        XCTAssertEqual(session.finishCount, 1)
+        XCTAssertEqual(session.cancelCount, 0)
+    }
+
+    @MainActor
     func testCaptureCoordinatorQueuesFinishRequestedWhileSessionIsStarting() async throws {
         let seed = scrollCaptureSeedForCoordinatorTests()
         let session = FakeScrollCaptureSession(seed: seed)
@@ -9814,10 +9879,14 @@ final class SelectionToolbarStateTests: XCTestCase {
     }
 
     @MainActor
-    func testCaptureCoordinatorDefaultFinishStoresAndTakesAtomicPendingLongImagePayload() async throws {
+    func testCaptureCoordinatorFinishShowsRetainedEditorAndEndsOnlyWhenEditorCloses() async throws {
         let seed = scrollCaptureSeedForCoordinatorTests()
         let session = FakeScrollCaptureSession(seed: seed)
         let presentation = FakeScrollCapturePresentation()
+        let editor = FakeLongImageEditor()
+        var capturedImage: NSImage?
+        var capturedSeed: ScrollCaptureSeed?
+        var endCount = 0
         let coordinator = CaptureCoordinator(
             permissionCoordinator: PermissionCoordinator(),
             screenCaptureService: ScreenCaptureService(),
@@ -9826,62 +9895,98 @@ final class SelectionToolbarStateTests: XCTestCase {
                 presentation.onFinish = context.onFinish
                 presentation.onCancel = context.onCancel
                 return presentation
+            },
+            longImageEditorFactory: { image, seed, _ in
+                capturedImage = image
+                capturedSeed = seed
+                return editor
             }
         )
+        coordinator.captureSessionDidEnd = { endCount += 1 }
         coordinator.test_installOverlayWindow(SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in })
         coordinator.test_requestScrollCapture(seed: seed)
         await Task.yield()
         presentation.onFinish?()
         for _ in 0..<100 where coordinator.test_hasScrollCaptureSession { await Task.yield() }
 
-        let payload = try XCTUnwrap(coordinator.test_takePendingLongImagePayload())
-        XCTAssertTrue(payload.image === session.finishedImage)
-        XCTAssertEqual(payload.seed.annotations.map(\.id), seed.annotations.map(\.id))
-        XCTAssertEqual(payload.seed.eraserMasks.count, seed.eraserMasks.count)
-        XCTAssertNil(coordinator.test_takePendingLongImagePayload())
+        XCTAssertTrue(capturedImage === session.finishedImage)
+        XCTAssertEqual(capturedSeed?.annotations.map(\.id), seed.annotations.map(\.id))
+        XCTAssertEqual(editor.showCount, 1)
+        XCTAssertTrue(coordinator.test_lastCapture === session.finishedImage)
+        XCTAssertEqual(endCount, 0)
+        XCTAssertTrue(coordinator.test_hasLongImageEditor)
+
+        editor.simulateClose()
+        XCTAssertEqual(endCount, 1)
+        XCTAssertFalse(coordinator.test_hasLongImageEditor)
     }
 
     @MainActor
-    func testCaptureCoordinatorNewScrollAndOrdinaryCaptureClearPendingLongImagePayload() async throws {
+    func testCaptureCoordinatorEditorFactoryFailureOffersExactImageFallbackSaveAndEnds() async throws {
         let seed = scrollCaptureSeedForCoordinatorTests()
-        let firstSession = FakeScrollCaptureSession(seed: seed)
-        let secondSession = FakeScrollCaptureSession(seed: seed)
-        let firstPresentation = FakeScrollCapturePresentation()
-        let secondPresentation = FakeScrollCapturePresentation()
-        var sessionIndex = 0
-        var presentationIndex = 0
+        let session = FakeScrollCaptureSession(seed: seed)
+        let presentation = FakeScrollCapturePresentation()
+        var fallbackImage: NSImage?
+        var savedImages: [NSImage] = []
+        var endCount = 0
         let coordinator = CaptureCoordinator(
             permissionCoordinator: PermissionCoordinator(),
             screenCaptureService: ScreenCaptureService(),
-            scrollCaptureSessionFactory: { _, _ in
-                defer { sessionIndex += 1 }
-                return sessionIndex == 0 ? firstSession : secondSession
-            },
+            scrollCaptureSessionFactory: { _, _ in session },
             scrollCapturePresentationFactory: { context in
-                let value = presentationIndex == 0 ? firstPresentation : secondPresentation
-                presentationIndex += 1
-                value.onFinish = context.onFinish
-                value.onCancel = context.onCancel
-                return value
-            }
+                presentation.onFinish = context.onFinish
+                presentation.onCancel = context.onCancel
+                return presentation
+            },
+            longImageEditorFactory: { _, _, _ in throw FakeScrollCaptureSession.Failure.finish },
+            longImageFallbackPresenter: { image in fallbackImage = image; return .save },
+            longImageSaveHandler: { savedImages.append($0); return true }
         )
+        coordinator.captureSessionDidEnd = { endCount += 1 }
         coordinator.test_installOverlayWindow(SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in })
         coordinator.test_requestScrollCapture(seed: seed)
         await Task.yield()
-        firstPresentation.onFinish?()
+        presentation.onFinish?()
         for _ in 0..<100 where coordinator.test_hasScrollCaptureSession { await Task.yield() }
-        XCTAssertTrue(coordinator.test_hasPendingLongImagePayload)
 
+        XCTAssertTrue(fallbackImage === session.finishedImage)
+        XCTAssertEqual(savedImages.count, 1)
+        XCTAssertTrue(savedImages[0] === session.finishedImage)
+        XCTAssertTrue(coordinator.test_lastCapture === session.finishedImage)
+        XCTAssertEqual(endCount, 1)
+        XCTAssertFalse(coordinator.test_hasLongImageEditor)
+    }
+
+    @MainActor
+    func testCaptureCoordinatorEditorFactoryFailureFallbackCancelDoesNotSave() async throws {
+        let seed = scrollCaptureSeedForCoordinatorTests()
+        let session = FakeScrollCaptureSession(seed: seed)
+        let presentation = FakeScrollCapturePresentation()
+        var saveCount = 0
+        var endCount = 0
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            scrollCaptureSessionFactory: { _, _ in session },
+            scrollCapturePresentationFactory: { context in
+                presentation.onFinish = context.onFinish
+                presentation.onCancel = context.onCancel
+                return presentation
+            },
+            longImageEditorFactory: { _, _, _ in nil },
+            longImageFallbackPresenter: { _ in .cancel },
+            longImageSaveHandler: { _ in saveCount += 1; return true }
+        )
+        coordinator.captureSessionDidEnd = { endCount += 1 }
         coordinator.test_installOverlayWindow(SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in })
         coordinator.test_requestScrollCapture(seed: seed)
-        XCTAssertFalse(coordinator.test_hasPendingLongImagePayload)
         await Task.yield()
-        secondPresentation.onFinish?()
-        for _ in 0..<100 where coordinator.test_hasScrollCaptureSession { await Task.yield() }
-        XCTAssertTrue(coordinator.test_hasPendingLongImagePayload)
+        presentation.onFinish?()
+        for _ in 0..<20 where coordinator.test_hasScrollCaptureSession { await Task.yield() }
 
-        coordinator.test_handleSelection(nil, frozenDesktopImage: nil)
-        XCTAssertFalse(coordinator.test_hasPendingLongImagePayload)
+        XCTAssertEqual(saveCount, 0)
+        XCTAssertEqual(endCount, 1)
+        XCTAssertTrue(coordinator.test_lastCapture === session.finishedImage)
     }
 
     @MainActor
@@ -9956,8 +10061,8 @@ final class SelectionToolbarStateTests: XCTestCase {
     }
 
     @MainActor
-    func testCaptureCoordinatorStartAndFinishErrorsStopPresentationAndRecoverOverlay() async throws {
-        for failure in [FakeScrollCaptureSession.Failure.start, .finish] {
+    func testCaptureCoordinatorStartErrorStopsPresentationAndRecoversOverlay() async throws {
+        for failure in [FakeScrollCaptureSession.Failure.start] {
             let seed = scrollCaptureSeedForCoordinatorTests()
             let overlay = SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in }
             let session = FakeScrollCaptureSession(seed: seed)
@@ -9989,6 +10094,46 @@ final class SelectionToolbarStateTests: XCTestCase {
             XCTAssertEqual(overlay.scrollCaptureOverlayState, .inactive)
             XCTAssertFalse(overlay.ignoresMouseEvents)
         }
+    }
+
+    @MainActor
+    func testCaptureCoordinatorCompositionFailureKeepsPreviewAndRetriesSameSession() async throws {
+        let seed = scrollCaptureSeedForCoordinatorTests()
+        let overlay = SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in }
+        let session = FakeScrollCaptureSession(seed: seed)
+        session.finishErrors = [FakeScrollCaptureSession.Failure.finish]
+        let presentation = FakeScrollCapturePresentation()
+        var handoffCount = 0
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            scrollCaptureSessionFactory: { _, _ in session },
+            scrollCapturePresentationFactory: { context in
+                presentation.onFinish = context.onFinish
+                presentation.onCancel = context.onCancel
+                return presentation
+            },
+            longImageHandoff: { image, _ in
+                XCTAssertTrue(image === session.finishedImage)
+                handoffCount += 1
+            }
+        )
+        coordinator.test_installOverlayWindow(overlay)
+        coordinator.test_requestScrollCapture(seed: seed)
+        await Task.yield()
+
+        overlay.test_keyDown(keyCode: 36)
+        for _ in 0..<20 where session.finishCount < 1 { await Task.yield() }
+        XCTAssertTrue(coordinator.test_hasScrollCaptureSession)
+        XCTAssertTrue(coordinator.test_overlayWindow === overlay)
+        XCTAssertEqual(presentation.stopCount, 0)
+        XCTAssertEqual(presentation.resetTerminalCount, 1)
+
+        overlay.test_keyDown(keyCode: 36)
+        for _ in 0..<20 where handoffCount == 0 { await Task.yield() }
+        XCTAssertEqual(session.finishCount, 2)
+        XCTAssertEqual(handoffCount, 1)
+        XCTAssertEqual(presentation.stopCount, 1)
     }
 
     @MainActor

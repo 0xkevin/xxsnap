@@ -742,6 +742,59 @@ final class LongImageEditorTests: XCTestCase {
         XCTAssertEqual(completedAnnotations.count, 1)
     }
 
+    func testCopySaveAndPinUseSameCompleteRenderedRevisionAndFailureKeepsEditorOpen() throws {
+        let image = TestImageFactory.solid(size: NSSize(width: 120, height: 900), color: .white)
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = .red
+        style.strokeWidth = 8
+        let annotation = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 15, y: 700, width: 80, height: 100),
+            style: style
+        )
+        var received: [NSImage] = []
+        let controller = LongImageEditorWindowController(
+            canonicalImage: image,
+            annotations: [annotation],
+            visibleFrame: NSRect(x: 0, y: 0, width: 500, height: 450),
+            actions: LongImageEditorActions(
+                copy: { received.append($0); return true },
+                save: { received.append($0); return false },
+                pin: { received.append($0); return true }
+            )
+        )
+        controller.show()
+
+        controller.test_copyButton.performClick(nil)
+        controller.test_saveButton.performClick(nil)
+        controller.test_pinButton.performClick(nil)
+
+        XCTAssertEqual(received.count, 3)
+        XCTAssertTrue(received[0] === received[1])
+        XCTAssertTrue(received[1] === received[2])
+        XCTAssertEqual(pixelSize(received[0]), NSSize(width: 120, height: 900))
+        XCTAssertNotEqual(try pixelBytes(received[0]), try pixelBytes(image))
+        XCTAssertEqual(controller.window?.isVisible, true)
+        XCTAssertEqual(controller.test_copyButton.accessibilityLabel(), "复制完整长截图")
+        XCTAssertEqual(controller.test_saveButton.accessibilityLabel(), "保存完整长截图")
+        XCTAssertEqual(controller.test_pinButton.accessibilityLabel(), "贴出完整长截图")
+        controller.stop()
+    }
+
+    func testLongEditorActionsUseEnglishLocalizedLabelsAndTooltips() {
+        let controller = LongImageEditorWindowController(
+            image: TestImageFactory.solid(size: NSSize(width: 120, height: 500), color: .white),
+            visibleFrame: NSRect(x: 0, y: 0, width: 500, height: 450),
+            language: .english
+        )
+        XCTAssertEqual(controller.test_copyButton.title, "Copy")
+        XCTAssertEqual(controller.test_copyButton.toolTip, "Copy complete long screenshot")
+        XCTAssertEqual(controller.test_saveButton.title, "Save")
+        XCTAssertEqual(controller.test_pinButton.title, "Pin")
+        XCTAssertEqual(controller.test_finishButton.title, "Finish")
+        controller.stop()
+    }
+
     func testSeedInitializerConvertsBottomOriginSeedCoordinatesToTopCanonical() throws {
         let frozen = TestImageFactory.solid(size: NSSize(width: 200, height: 300), color: .white)
         let style = CaptureAnnotationStyle()

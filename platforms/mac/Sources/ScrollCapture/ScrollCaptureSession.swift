@@ -163,7 +163,6 @@ final class ScrollCaptureSession {
             return image
         } catch {
             guard generation == operationGeneration, state == .finishing else { throw error }
-            self.stitcher = nil
             _ = setState(.paused(.captureFailure), operationGeneration: operationGeneration)
             throw error
         }

@@ -137,6 +137,22 @@ final class ScrollCaptureSessionTests: XCTestCase {
         XCTAssertEqual(presentation.states.suffix(2), [.finishing, .finished])
     }
 
+    func testFinishFailureKeepsStitcherAndCanRetrySameSession() async throws {
+        let final = TestImageFactory.solid(size: CGSize(width: 10, height: 30), color: .blue)
+        let engine = FakeStitcher(results: [.acceptedInitial], final: final, finalErrors: [TestError.failed])
+        let presentation = PresentationRecorder()
+        let session = makeSession(engine: engine, presentation: presentation)
+        try await session.start()
+
+        await XCTAssertThrowsErrorAsync { _ = try await session.finish() }
+        XCTAssertEqual(session.state, .paused(.captureFailure))
+
+        let result = try await session.finish()
+        XCTAssertTrue(result === final)
+        XCTAssertEqual(engine.finalImageCallCount, 2)
+        XCTAssertEqual(session.state, .finished)
+    }
+
     func testCancelReturnsImmutableSeedAndPreventsLaterTick() async throws {
         let engine = FakeStitcher(results: [.acceptedInitial, .acceptedAppend])
         let monitor = FakeActivityMonitor()
@@ -545,14 +561,17 @@ private final class FakeStitcher: ScrollStitching {
     private(set) var maximumConcurrent = 0
     private(set) var previewCallCount = 0
     private(set) var finalImageCallCount = 0
+    private var finalErrors: [Error]
 
     init(
         results: [ScrollCaptureAppendKind],
         final: NSImage? = nil,
+        finalErrors: [Error] = [],
         onDeinit: (() -> Void)? = nil
     ) {
         self.results = results
         self.final = final ?? TestImageFactory.solid(size: CGSize(width: 80, height: 120), color: .purple)
+        self.finalErrors = finalErrors
         self.onDeinit = onDeinit
     }
 
@@ -572,6 +591,7 @@ private final class FakeStitcher: ScrollStitching {
 
     func finalImage() throws -> NSImage {
         finalImageCallCount += 1
+        if !finalErrors.isEmpty { throw finalErrors.removeFirst() }
         return final
     }
 

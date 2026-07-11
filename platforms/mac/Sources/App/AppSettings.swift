@@ -135,6 +135,11 @@ struct L10n {
         case scrollCaptureLowConfidence
         case scrollCaptureResourceLimit
         case scrollCaptureFailure
+        case longImageCopy
+        case longImageSave
+        case longImagePin
+        case longImageFinish
+        case longImageClose
         case colorSamplerCopyHex
         case colorSamplerCopyRgb
     }
@@ -155,6 +160,11 @@ struct L10n {
             return "已达到资源限制，滚动截图已暂停"
         case (.zhHans, .scrollCaptureFailure):
             return "截图失败，请重试"
+        case (.zhHans, .longImageCopy): return "复制"
+        case (.zhHans, .longImageSave): return "保存"
+        case (.zhHans, .longImagePin): return "贴图"
+        case (.zhHans, .longImageFinish): return "完成编辑"
+        case (.zhHans, .longImageClose): return "关闭"
         case (.zhHans, .colorSamplerCopyHex):
             return "按 C 复制HEX颜色值"
         case (.zhHans, .colorSamplerCopyRgb):
@@ -171,6 +181,11 @@ struct L10n {
             return "Resource limit reached. Scroll capture is paused."
         case (.english, .scrollCaptureFailure):
             return "Capture failed. Please try again."
+        case (.english, .longImageCopy): return "Copy"
+        case (.english, .longImageSave): return "Save"
+        case (.english, .longImagePin): return "Pin"
+        case (.english, .longImageFinish): return "Finish"
+        case (.english, .longImageClose): return "Close"
         case (.english, .colorSamplerCopyHex):
             return "Press C to copy HEX"
         case (.english, .colorSamplerCopyRgb):

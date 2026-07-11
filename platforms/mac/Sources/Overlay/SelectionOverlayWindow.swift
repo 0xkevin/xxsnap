@@ -863,6 +863,11 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.scrollCaptureOverlayState = .capturing
     }
 
+    func resetScrollCaptureTerminalActionsForRetry() {
+        guard scrollCaptureOverlayState != .inactive else { return }
+        scrollCaptureTerminalActionTriggered = false
+    }
+
     func endScrollCapturePassiveMode() {
         guard scrollCaptureOverlayState != .inactive else { return }
         scrollCaptureOverlayState = .inactive

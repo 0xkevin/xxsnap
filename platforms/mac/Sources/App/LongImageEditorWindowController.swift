@@ -130,6 +130,14 @@ struct LongImageEditorDocument {
 
 private final class LongImageFlippedView: NSView { override var isFlipped: Bool { true } }
 
+struct LongImageEditorActions {
+    var copy: @MainActor (NSImage) -> Bool
+    var save: @MainActor (NSImage) -> Bool
+    var pin: @MainActor (NSImage) -> Bool
+
+    static let none = Self(copy: { _ in false }, save: { _ in false }, pin: { _ in false })
+}
+
 @MainActor
 final class LongImageEditorWindowController: NSWindowController, NSWindowDelegate {
     private struct PresentedContext {
@@ -141,8 +149,17 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     let scrollView = NSScrollView()
     let controlStripView = NSView()
     private let finishButton = NSButton(title: "完成编辑", target: nil, action: nil)
+    private let copyButton = NSButton(title: "复制", target: nil, action: nil)
+    private let saveButton = NSButton(title: "保存", target: nil, action: nil)
+    private let pinButton = NSButton(title: "贴图", target: nil, action: nil)
+    private let closeButton = NSButton(title: "关闭", target: nil, action: nil)
     private let imageView = NSImageView(), documentView = LongImageFlippedView()
     private var documentState: LongImageEditorDocument
+    private let actions: LongImageEditorActions
+    private let language: AppLanguage
+    private var renderedRevision: NSImage?
+    private var actionInProgress = false
+    private var didNotifyClose = false
     private var boundsObserver: NSObjectProtocol?
     private var overlay: SelectionOverlayWindow?
     private var interactionLocked = false
@@ -155,6 +172,7 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     private var viewportRefreshCount = 0
     private(set) var geometry: LongImageEditorGeometry
     var onFinishEditing: ((NSImage, [CaptureAnnotation], [EraserMask]) -> Void)?
+    var onClose: (() -> Void)?
 
     var imagePixelSize: NSSize {
         guard let cg = documentState.image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return .zero }
@@ -163,9 +181,11 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     var fitWidthScale: CGFloat { geometry.fitWidthScale }
     var visibleImageRect: NSRect { geometry.visibleImageRect }
 
-    init(canonicalImage image: NSImage, annotations: [CaptureAnnotation] = [], eraserMasks: [EraserMask] = [], visibleFrame: NSRect? = NSScreen.main?.visibleFrame, initialWindowSize: NSSize? = nil) {
+    init(canonicalImage image: NSImage, annotations: [CaptureAnnotation] = [], eraserMasks: [EraserMask] = [], visibleFrame: NSRect? = NSScreen.main?.visibleFrame, initialWindowSize: NSSize? = nil, actions: LongImageEditorActions = .none, language: AppLanguage = .zhHans) {
         let visible = visibleFrame ?? NSRect(x: 0, y: 0, width: 1_200, height: 900)
         documentState = LongImageEditorDocument(image: image, annotations: annotations, eraserMasks: eraserMasks)
+        self.actions = actions
+        self.language = language
         let requested = initialWindowSize ?? NSSize(width: min(1_000, visible.width), height: min(840, visible.height))
         let size = NSSize(width: min(requested.width, visible.width), height: min(requested.height, visible.height))
         let frame = NSRect(x: visible.midX - size.width / 2, y: visible.midY - size.height / 2, width: size.width, height: size.height)
@@ -180,17 +200,19 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         observeScroll()
         relayout(preserving: geometry.topVisibleCenter)
     }
-    convenience init(image: NSImage, annotations: [CaptureAnnotation] = [], eraserMasks: [EraserMask] = [], visibleFrame: NSRect? = NSScreen.main?.visibleFrame, initialWindowSize: NSSize? = nil) {
-        self.init(canonicalImage: image, annotations: annotations, eraserMasks: eraserMasks, visibleFrame: visibleFrame, initialWindowSize: initialWindowSize)
+    convenience init(image: NSImage, annotations: [CaptureAnnotation] = [], eraserMasks: [EraserMask] = [], visibleFrame: NSRect? = NSScreen.main?.visibleFrame, initialWindowSize: NSSize? = nil, actions: LongImageEditorActions = .none, language: AppLanguage = .zhHans) {
+        self.init(canonicalImage: image, annotations: annotations, eraserMasks: eraserMasks, visibleFrame: visibleFrame, initialWindowSize: initialWindowSize, actions: actions, language: language)
     }
-    convenience init(image: NSImage, seed: ScrollCaptureSeed, visibleFrame: NSRect? = NSScreen.main?.visibleFrame, initialWindowSize: NSSize? = nil) {
+    convenience init(image: NSImage, seed: ScrollCaptureSeed, visibleFrame: NSRect? = NSScreen.main?.visibleFrame, initialWindowSize: NSSize? = nil, actions: LongImageEditorActions = .none, language: AppLanguage = .zhHans) {
         let height = seed.frozenImage.size.height
         self.init(
             canonicalImage: image,
             annotations: seed.annotations.map { LongImageAnnotationTranslation.annotationFromTopOriginToRenderer($0, imageHeight: height) },
             eraserMasks: seed.eraserMasks.map { LongImageAnnotationTranslation.maskFromTopOriginToRenderer($0, imageHeight: height) },
             visibleFrame: visibleFrame,
-            initialWindowSize: initialWindowSize
+            initialWindowSize: initialWindowSize,
+            actions: actions,
+            language: language
         )
     }
     @available(*, unavailable) required init?(coder: NSCoder) { nil }
@@ -215,6 +237,7 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         documentState = LongImageEditorDocument(image: NSImage(size: .zero), annotations: [], eraserMasks: [])
         window?.orderOut(nil)
         onFinishEditing = nil
+        notifyClosed()
     }
     func windowDidResize(_ notification: Notification) {
         let anchor = geometry.topVisibleCenter; commitOverlay(); relayout(preserving: anchor); refreshOverlay()
@@ -227,12 +250,24 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
 
     private func configureViews() {
         guard let content = window?.contentView else { return }
+        let l10n = L10n(language: language)
+        copyButton.title = l10n.text(.longImageCopy)
+        saveButton.title = l10n.text(.longImageSave)
+        pinButton.title = l10n.text(.longImagePin)
+        finishButton.title = l10n.text(.longImageFinish)
+        closeButton.title = l10n.text(.longImageClose)
         controlStripView.translatesAutoresizingMaskIntoConstraints = false
         finishButton.translatesAutoresizingMaskIntoConstraints = false
         finishButton.target = self
         finishButton.action = #selector(finishButtonPressed(_:))
-        finishButton.setAccessibilityLabel("完成编辑")
-        controlStripView.addSubview(finishButton)
+        let finishLabel = language == .english ? "Finish editing long screenshot" : "完成编辑"
+        finishButton.setAccessibilityLabel(finishLabel)
+        finishButton.toolTip = finishLabel
+        configureActionButton(copyButton, label: language == .english ? "Copy complete long screenshot" : "复制完整长截图", action: #selector(copyButtonPressed(_:)))
+        configureActionButton(saveButton, label: language == .english ? "Save complete long screenshot" : "保存完整长截图", action: #selector(saveButtonPressed(_:)))
+        configureActionButton(pinButton, label: language == .english ? "Pin complete long screenshot" : "贴出完整长截图", action: #selector(pinButtonPressed(_:)))
+        configureActionButton(closeButton, label: language == .english ? "Close long screenshot editor" : "关闭长截图编辑器", action: #selector(closeButtonPressed(_:)))
+        [copyButton, saveButton, pinButton, closeButton, finishButton].forEach(controlStripView.addSubview)
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.scrollerStyle = .overlay
         scrollView.hasVerticalScroller = true; scrollView.hasHorizontalScroller = false
@@ -247,6 +282,10 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
             scrollView.topAnchor.constraint(equalTo: controlStripView.bottomAnchor), scrollView.bottomAnchor.constraint(equalTo: content.bottomAnchor),
             finishButton.trailingAnchor.constraint(equalTo: controlStripView.trailingAnchor, constant: -12),
             finishButton.centerYAnchor.constraint(equalTo: controlStripView.centerYAnchor),
+            closeButton.trailingAnchor.constraint(equalTo: finishButton.leadingAnchor, constant: -8), closeButton.centerYAnchor.constraint(equalTo: controlStripView.centerYAnchor),
+            pinButton.leadingAnchor.constraint(equalTo: controlStripView.leadingAnchor, constant: 12), pinButton.centerYAnchor.constraint(equalTo: controlStripView.centerYAnchor),
+            saveButton.leadingAnchor.constraint(equalTo: pinButton.trailingAnchor, constant: 8), saveButton.centerYAnchor.constraint(equalTo: controlStripView.centerYAnchor),
+            copyButton.leadingAnchor.constraint(equalTo: saveButton.trailingAnchor, constant: 8), copyButton.centerYAnchor.constraint(equalTo: controlStripView.centerYAnchor),
         ])
         content.layoutSubtreeIfNeeded()
     }
@@ -347,6 +386,7 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     }
     private func commitOverlay() {
         guard let snapshot = overlay?.editorSnapshot, let presentedContext else { return }
+        let previousRevision = documentRevisionSignature
         let origin = presentedContext.sliceRect.origin
         let localIDs = Set(snapshot.annotations.map(\.id))
         let deletedIDs = presentedAnnotationIDs.subtracting(localIDs)
@@ -390,6 +430,46 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
             !presentedAnnotationIDs.isDisjoint(with: $0.affectedAnnotationIDs)
                 && $0.rect.intersects(presentedContext.sliceRect)
         }.map(\.id))
+        if previousRevision != documentRevisionSignature { renderedRevision = nil }
+    }
+
+    private var documentRevisionSignature: String {
+        String(reflecting: documentState.annotations) + String(reflecting: documentState.eraserMasks)
+    }
+
+    private func completeRenderedImage() -> NSImage {
+        if let renderedRevision { return renderedRevision }
+        let rendered = CaptureAnnotationRenderer.renderLongImage(
+            image: documentState.image,
+            annotations: documentState.annotations,
+            eraserMasks: documentState.eraserMasks
+        )
+        renderedRevision = rendered
+        return rendered
+    }
+
+    private func performAction(_ action: @MainActor (NSImage) -> Bool) {
+        guard !actionInProgress, !didStop else { return }
+        actionInProgress = true
+        defer { actionInProgress = false }
+        commitOverlay()
+        _ = action(completeRenderedImage())
+    }
+
+    private func configureActionButton(_ button: NSButton, label: String, action: Selector) {
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.target = self
+        button.action = action
+        button.toolTip = label
+        button.setAccessibilityLabel(label)
+    }
+
+    private func notifyClosed() {
+        guard !didNotifyClose else { return }
+        didNotifyClose = true
+        let callback = onClose
+        onClose = nil
+        callback?()
     }
     private func lock(_ value: Bool) {
         if value {
@@ -465,12 +545,19 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         close()
         stop()
     }
+    @objc private func copyButtonPressed(_ sender: Any?) { performAction(actions.copy) }
+    @objc private func saveButtonPressed(_ sender: Any?) { performAction(actions.save) }
+    @objc private func pinButtonPressed(_ sender: Any?) { performAction(actions.pin) }
+    @objc private func closeButtonPressed(_ sender: Any?) { close(); stop() }
 #if DEBUG
     var test_editingOverlay: SelectionOverlayWindow? { overlay }
     var test_isDocumentScrollingEnabled: Bool { !interactionLocked }
     var test_hasBoundsObserver: Bool { boundsObserver != nil }
     var test_viewportRefreshCount: Int { viewportRefreshCount }
     var test_finishButton: NSButton { finishButton }
+    var test_copyButton: NSButton { copyButton }
+    var test_saveButton: NSButton { saveButton }
+    var test_pinButton: NSButton { pinButton }
     var test_fullAnnotations: [CaptureAnnotation] { documentState.annotations }
     var test_fullEraserMasks: [EraserMask] { documentState.eraserMasks }
     func test_commitOverlay() { commitOverlay() }

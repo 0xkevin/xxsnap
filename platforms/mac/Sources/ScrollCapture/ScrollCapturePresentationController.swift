@@ -222,6 +222,15 @@ final class ScrollCapturePresentationController: NSObject {
         ), display: false)
     }
 
+    func resetTerminalActionsForRetry() {
+        guard !stopped else { return }
+        terminalActionTriggered = false
+        [finishPanel, cancelPanel].forEach { panel in
+            (panel.contentView as? NSControl)?.isEnabled = true
+            panel.ignoresMouseEvents = false
+        }
+    }
+
     @objc private func finishPressed() { triggerTerminalAction(onFinish) }
     @objc private func cancelPressed() { triggerTerminalAction(onCancel) }
 

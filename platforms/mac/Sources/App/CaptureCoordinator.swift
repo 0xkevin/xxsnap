@@ -19,9 +19,23 @@ protocol ScrollCapturePresenting: AnyObject {
     func setWarning(_ text: String)
     func clearWarning()
     func updatePlacement(selectionFrame: NSRect, visibleFrame: NSRect)
+    func resetTerminalActionsForRetry()
 }
 
 extension ScrollCapturePresentationController: ScrollCapturePresenting {}
+
+@MainActor
+protocol LongImageEditorPresenting: AnyObject {
+    var onClose: (() -> Void)? { get set }
+    func show()
+}
+
+extension LongImageEditorWindowController: LongImageEditorPresenting {}
+
+enum LongImageFallbackChoice {
+    case save
+    case cancel
+}
 
 struct ScrollCapturePresentationContext {
     let geometry: ScrollCaptureControlGeometry
@@ -39,11 +53,6 @@ private enum ScrollCaptureLifecyclePhase: Equatable {
     case active
     case finishing
     case cancelling
-}
-
-private struct PendingLongImagePayload {
-    let image: NSImage
-    let seed: ScrollCaptureSeed
 }
 
 @MainActor
@@ -71,6 +80,13 @@ final class CaptureCoordinator {
         ScrollCapturePresentationContext
     ) -> any ScrollCapturePresenting
     private let longImageHandoff: (@MainActor (NSImage, ScrollCaptureSeed) -> Void)?
+    private let longImageEditorFactory: @MainActor (
+        NSImage, ScrollCaptureSeed, LongImageEditorActions
+    ) throws -> (any LongImageEditorPresenting)?
+    private let longImageFallbackPresenter: @MainActor (NSImage) -> LongImageFallbackChoice
+    private let longImageCopyHandler: (@MainActor (NSImage) -> Bool)?
+    private let longImageSaveHandler: (@MainActor (NSImage) -> Bool)?
+    private var longImageEditor: (any LongImageEditorPresenting)?
     private var scrollCaptureSession: (any ScrollCaptureSessionRunning)?
     private var scrollCapturePresentation: (any ScrollCapturePresenting)?
     private var scrollCaptureTask: Task<Void, Never>?
@@ -78,7 +94,6 @@ final class CaptureCoordinator {
     private var scrollCaptureFinishPending = false
     private var scrollCapturePhase: ScrollCaptureLifecyclePhase = .idle
     private var scrollCaptureGeneration: UInt64 = 0
-    private var pendingLongImagePayload: PendingLongImagePayload?
 
     init(
         permissionCoordinator: PermissionCoordinator,
@@ -94,7 +109,13 @@ final class CaptureCoordinator {
         scrollCapturePresentationFactory: @escaping @MainActor (
             ScrollCapturePresentationContext
         ) -> any ScrollCapturePresenting = CaptureCoordinator.makeScrollCapturePresentation,
-        longImageHandoff: (@MainActor (NSImage, ScrollCaptureSeed) -> Void)? = nil
+        longImageHandoff: (@MainActor (NSImage, ScrollCaptureSeed) -> Void)? = nil,
+        longImageEditorFactory: (@MainActor (
+            NSImage, ScrollCaptureSeed, LongImageEditorActions
+        ) throws -> (any LongImageEditorPresenting)?)? = nil,
+        longImageFallbackPresenter: (@MainActor (NSImage) -> LongImageFallbackChoice)? = nil,
+        longImageCopyHandler: (@MainActor (NSImage) -> Bool)? = nil,
+        longImageSaveHandler: (@MainActor (NSImage) -> Bool)? = nil
     ) {
         self.permissionCoordinator = permissionCoordinator
         self.screenCaptureService = screenCaptureService
@@ -116,6 +137,17 @@ final class CaptureCoordinator {
         }
         self.scrollCapturePresentationFactory = scrollCapturePresentationFactory
         self.longImageHandoff = longImageHandoff
+        self.longImageEditorFactory = longImageEditorFactory ?? { image, seed, actions in
+            LongImageEditorWindowController(
+                image: image,
+                seed: seed,
+                actions: actions,
+                language: settingsStore.load().language
+            )
+        }
+        self.longImageFallbackPresenter = longImageFallbackPresenter ?? Self.presentLongImageFallback
+        self.longImageCopyHandler = longImageCopyHandler
+        self.longImageSaveHandler = longImageSaveHandler
     }
 
     convenience init() {
@@ -157,7 +189,6 @@ final class CaptureCoordinator {
             NSLog("xxsnap startCapture ignored because capture is already active")
             return
         }
-        pendingLongImagePayload = nil
 
         if !permissionCoordinator.hasScreenCapturePermission() {
             NSLog("xxsnap missing screen capture permission")
@@ -272,7 +303,6 @@ final class CaptureCoordinator {
         else { return }
 
         scrollCaptureFinishPending = false
-        pendingLongImagePayload = nil
         scrollCapturePhase = .starting
         overlay.setScrollCaptureCapturing()
         scrollCaptureGeneration &+= 1
@@ -402,19 +432,23 @@ final class CaptureCoordinator {
                     self.overlayWindow = nil
                 }
                 self.frozenDesktopImage = nil
+                self.lastCapture = image
                 if let longImageHandoff = self.longImageHandoff {
                     longImageHandoff(image, seed)
+                    self.captureSessionDidEnd?()
                 } else {
-                    // Task 8 replaces this boundary with the native long-image editor.
-                    self.pendingLongImagePayload = PendingLongImagePayload(image: image, seed: seed)
+                    self.presentLongImageEditor(image: image, seed: seed)
                 }
                 self.scrollCaptureFinishPending = false
                 self.scrollCapturePhase = .idle
-                self.captureSessionDidEnd?()
             } catch {
                 guard let self, self.scrollCaptureGeneration == generation,
                       self.scrollCaptureSession === session else { return }
-                self.recoverScrollCaptureOverlay(generation: generation)
+                self.scrollCaptureTask = nil
+                self.scrollCaptureFinishPending = false
+                self.scrollCapturePhase = .active
+                self.scrollCapturePresentation?.resetTerminalActionsForRetry()
+                self.overlayWindow?.resetScrollCaptureTerminalActionsForRetry()
             }
         }
     }
@@ -455,6 +489,80 @@ final class CaptureCoordinator {
         overlayWindow?.restoreAfterScrollCaptureCancellation()
         overlayWindow?.present()
         scrollCapturePhase = .idle
+    }
+
+    private func presentLongImageEditor(image: NSImage, seed: ScrollCaptureSeed) {
+        let actions = LongImageEditorActions(
+            copy: { [weak self] rendered in
+                guard let self else { return false }
+                if let handler = self.longImageCopyHandler { return handler(rendered) }
+                self.copyToPasteboard(rendered)
+                return true
+            },
+            save: { [weak self] rendered in
+                guard let self else { return false }
+                return self.longImageSaveHandler?(rendered) ?? self.saveLastCapture(rendered)
+            },
+            pin: { [weak self] rendered in
+                guard let self else { return false }
+                self.presentPinnedImage(rendered, screenRect: NSRect(origin: seed.screenRect.origin, size: rendered.size))
+                return true
+            }
+        )
+        do {
+            guard let editor = try longImageEditorFactory(image, seed, actions) else {
+                presentLongImageFallback(image)
+                return
+            }
+            longImageEditor = editor
+            let editorID = ObjectIdentifier(editor)
+            editor.onClose = { [weak self] in
+                guard let self, let current = self.longImageEditor,
+                      ObjectIdentifier(current) == editorID else { return }
+                self.longImageEditor = nil
+                self.captureSessionDidEnd?()
+            }
+            editor.show()
+        } catch {
+            presentLongImageFallback(image)
+        }
+    }
+
+    private func presentLongImageFallback(_ image: NSImage) {
+        if longImageFallbackPresenter(image) == .save {
+            _ = longImageSaveHandler?(image) ?? saveLastCapture(image)
+        }
+        longImageEditor = nil
+        captureSessionDidEnd?()
+    }
+
+    private static func presentLongImageFallback(_ image: NSImage) -> LongImageFallbackChoice {
+        let alert = NSAlert()
+        alert.messageText = "无法打开长截图编辑器"
+        alert.informativeText = "完整长截图已保留。是否立即保存为 PNG？"
+        alert.addButton(withTitle: "保存")
+        alert.addButton(withTitle: "取消")
+        return alert.runModal() == .alertFirstButtonReturn ? .save : .cancel
+    }
+
+    private func presentPinnedImage(_ image: NSImage, screenRect: NSRect) {
+        let controller = pinnedWindowFactory(image, screenRect)
+        pinnedWindowControllers.append(controller)
+        let controllerID = ObjectIdentifier(controller)
+        controller.onHide = { [weak self] in
+            guard let self,
+                  let hidden = self.pinnedWindowControllers.first(where: { ObjectIdentifier($0) == controllerID })
+            else { return }
+            self.mostRecentlyHiddenPinnedWindow = hidden
+        }
+        controller.onClose = { [weak self] in
+            guard let self else { return }
+            self.pinnedWindowControllers.removeAll { ObjectIdentifier($0) == controllerID }
+            if let recent = self.mostRecentlyHiddenPinnedWindow, ObjectIdentifier(recent) == controllerID {
+                self.mostRecentlyHiddenPinnedWindow = nil
+            }
+        }
+        controller.show()
     }
 
     private func showPermissionRestartAlert() {
@@ -527,7 +635,6 @@ final class CaptureCoordinator {
     }
 
     private func handleSelection(_ result: CaptureSelectionResult?) {
-        pendingLongImagePayload = nil
         if let overlayWindow {
             retiredOverlayWindows.append(overlayWindow)
         }
@@ -698,15 +805,7 @@ extension CaptureCoordinator {
         lastCapture
     }
 
-    var test_hasPendingLongImagePayload: Bool {
-        pendingLongImagePayload != nil
-    }
-
-    func test_takePendingLongImagePayload() -> (image: NSImage, seed: ScrollCaptureSeed)? {
-        guard let payload = pendingLongImagePayload else { return nil }
-        pendingLongImagePayload = nil
-        return (payload.image, payload.seed)
-    }
+    var test_hasLongImageEditor: Bool { longImageEditor != nil }
 
     var test_pinnedWindowCount: Int {
         pinnedWindowControllers.count

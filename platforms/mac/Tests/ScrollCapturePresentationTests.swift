@@ -119,6 +119,30 @@ final class ScrollCapturePresentationTests: XCTestCase {
         XCTAssertFalse(controller.test_hasVisiblePanels)
     }
 
+    func testTerminalActionsCanBeRearmedAfterRecoverableFailure() {
+        var finishes = 0
+        var cancels = 0
+        let controller = ScrollCapturePresentationController(
+            toolbarFrame: NSRect(x: 100, y: 100, width: 400, height: 28),
+            finishButtonFrame: NSRect(x: 300, y: 104, width: 20, height: 20),
+            cancelButtonFrame: NSRect(x: 350, y: 104, width: 20, height: 20),
+            selectionFrame: NSRect(x: 100, y: 150, width: 400, height: 300),
+            visibleFrame: NSRect(x: 0, y: 0, width: 1_000, height: 700),
+            language: .english,
+            onFinish: { finishes += 1 },
+            onCancel: { cancels += 1 }
+        )
+        controller.start()
+        controller.test_triggerFinish()
+        controller.resetTerminalActionsForRetry()
+        controller.test_triggerFinish()
+        controller.resetTerminalActionsForRetry()
+        controller.test_triggerCancel()
+
+        XCTAssertEqual(finishes, 2)
+        XCTAssertEqual(cancels, 1)
+    }
+
     func testPreviewTailFollowAndReviewPositionAreIndependentFromWarning() {
         let controller = makeController()
         controller.updatePreview(NSImage(size: NSSize(width: 240, height: 900)))
