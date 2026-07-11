@@ -1151,6 +1151,28 @@ enum CaptureAnnotationRenderer {
         var maskIDs: Set<UUID>
         var annotationCount: Int { annotationIDs.count }
     }
+#if DEBUG
+    struct LongImageTileMetrics {
+        var tileCount = 0
+        var maxTemporaryProcessingPixelHeight = 0
+        var maxTemporaryProcessingPixels = 0
+    }
+    private(set) static var test_lastLongImageTileMetrics = LongImageTileMetrics()
+
+    static func test_renderLegacyCompleteLongImage(
+        image: NSImage,
+        annotations: [CaptureAnnotation],
+        eraserMasks: [EraserMask]
+    ) -> NSImage {
+        let rendererAnnotations = annotations.map {
+            LongImageAnnotationTranslation.annotationFromTopOriginToRenderer($0, imageHeight: image.size.height)
+        }
+        let rendererMasks = eraserMasks.map {
+            LongImageAnnotationTranslation.maskFromTopOriginToRenderer($0, imageHeight: image.size.height)
+        }
+        return render(image: image, annotations: rendererAnnotations, eraserMasks: rendererMasks)
+    }
+#endif
     static let markerOpacity: CGFloat = 0.85
     static let textDisplayScale: CGFloat = 3
     private static let redactionContext = CIContext(options: nil)
@@ -1263,13 +1285,65 @@ enum CaptureAnnotationRenderer {
         annotations: [CaptureAnnotation],
         eraserMasks: [EraserMask]
     ) -> NSImage {
-        let rendererAnnotations = annotations.map {
-            LongImageAnnotationTranslation.annotationFromTopOriginToRenderer($0, imageHeight: image.size.height)
+        guard let source = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return image }
+        let colorSpace = source.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!
+        guard let output = makeRenderContext(width: source.width, height: source.height, colorSpace: colorSpace) else {
+            return image
         }
-        let rendererMasks = eraserMasks.map {
-            LongImageAnnotationTranslation.maskFromTopOriginToRenderer($0, imageHeight: image.size.height)
+        let scaleY = CGFloat(source.height) / max(image.size.height, 1)
+        let tilePixelHeight = 512
+#if DEBUG
+        test_lastLongImageTileMetrics = LongImageTileMetrics()
+#endif
+        output.interpolationQuality = .none
+        output.setBlendMode(.copy)
+        for topPixel in stride(from: 0, to: source.height, by: tilePixelHeight) {
+            autoreleasepool {
+                let pixelHeight = min(tilePixelHeight, source.height - topPixel)
+                let tileRect = NSRect(
+                    x: 0,
+                    y: CGFloat(topPixel) / scaleY,
+                    width: image.size.width,
+                    height: CGFloat(pixelHeight) / scaleY
+                )
+#if DEBUG
+                let plan = visibleLongImageRenderPlan(
+                    imageSize: image.size,
+                    imageRect: tileRect,
+                    annotations: annotations,
+                    eraserMasks: eraserMasks
+                )
+                let processingPixelHeight = Int(ceil(plan.processingRect.height * scaleY))
+                test_lastLongImageTileMetrics.tileCount += 1
+                test_lastLongImageTileMetrics.maxTemporaryProcessingPixelHeight = max(
+                    test_lastLongImageTileMetrics.maxTemporaryProcessingPixelHeight,
+                    processingPixelHeight
+                )
+                test_lastLongImageTileMetrics.maxTemporaryProcessingPixels = max(
+                    test_lastLongImageTileMetrics.maxTemporaryProcessingPixels,
+                    source.width * processingPixelHeight
+                )
+#endif
+                let tile = renderVisibleLongImageSlice(
+                    image: image,
+                    annotations: annotations,
+                    eraserMasks: eraserMasks,
+                    imageRect: tileRect
+                )
+                guard let tileCG = tile.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
+                output.draw(
+                    tileCG,
+                    in: CGRect(
+                        x: 0,
+                        y: source.height - topPixel - pixelHeight,
+                        width: source.width,
+                        height: pixelHeight
+                    )
+                )
+            }
         }
-        return render(image: image, annotations: rendererAnnotations, eraserMasks: rendererMasks)
+        guard let rendered = output.makeImage() else { return image }
+        return NSImage(cgImage: rendered, size: image.size)
     }
 
     static func renderCompleteLongImage(

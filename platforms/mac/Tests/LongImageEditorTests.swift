@@ -469,6 +469,73 @@ final class LongImageEditorTests: XCTestCase {
         XCTAssertEqual(cgImage.height, 1_200)
     }
 
+    func testTiledFullExportBoundsTemporaryProcessingForTallDocument() throws {
+        let image = TestImageFactory.verticalDocumentViewport(offset: 0, width: 400, height: 8_000)
+        var style = CaptureAnnotationStyle(); style.strokeColor = .red; style.strokeWidth = 12
+        let rectangle = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 40, y: 2_900, width: 220, height: 160),
+            style: style
+        )
+        let mosaic = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(x: 70, y: 3_050, width: 250, height: 180),
+            style: style,
+            mosaicRedaction: CaptureMosaicRedaction(type: .gaussianBlur, value: 16)
+        )
+        let mask = EraserMask(
+            rect: NSRect(x: 100, y: 2_950, width: 60, height: 60),
+            affectedAnnotationIDs: [rectangle.id]
+        )
+        let output = CaptureAnnotationRenderer.renderLongImage(
+            image: image,
+            annotations: [rectangle, mosaic],
+            eraserMasks: [mask]
+        )
+        let cg = try XCTUnwrap(output.cgImage(forProposedRect: nil, context: nil, hints: nil))
+        XCTAssertEqual(cg.width, 400)
+        XCTAssertEqual(cg.height, 8_000)
+        let metrics = CaptureAnnotationRenderer.test_lastLongImageTileMetrics
+        XCTAssertGreaterThan(metrics.tileCount, 10)
+        XCTAssertLessThan(metrics.maxTemporaryProcessingPixelHeight, 2_048)
+        XCTAssertLessThan(metrics.maxTemporaryProcessingPixels, 400 * 2_048)
+    }
+
+    func testTiledFullExportMatchesLegacyRendererAcrossTileSeams() throws {
+        let image = TestImageFactory.verticalDocumentViewport(offset: 0, width: 180, height: 1_300, scale: 2)
+        var style = CaptureAnnotationStyle(); style.strokeColor = .red; style.strokeWidth = 10
+        let rectangle = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 25, y: 235, width: 120, height: 90),
+            style: style
+        )
+        let mosaic = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(x: 35, y: 480, width: 110, height: 100),
+            style: style,
+            mosaicRedaction: CaptureMosaicRedaction(type: .pixelMosaic, value: 9)
+        )
+        let magnifier = CaptureAnnotation(
+            kind: .magnifier,
+            rect: NSRect(x: 50, y: 745, width: 90, height: 90),
+            style: style,
+            magnifierShape: .rectangle,
+            magnifierZoom: 2
+        )
+        let mask = EraserMask(
+            rect: NSRect(x: 60, y: 260, width: 35, height: 30),
+            affectedAnnotationIDs: [rectangle.id]
+        )
+        let annotations = [rectangle, mosaic, magnifier]
+        let tiled = CaptureAnnotationRenderer.renderLongImage(
+            image: image, annotations: annotations, eraserMasks: [mask]
+        )
+        let legacy = CaptureAnnotationRenderer.test_renderLegacyCompleteLongImage(
+            image: image, annotations: annotations, eraserMasks: [mask]
+        )
+        XCTAssertEqual(try pixelBytes(tiled), try pixelBytes(legacy))
+    }
+
     func testVisibleRendererMatchesCompleteLongImageCropForAnnotationMatrixAtRetinaScale() throws {
         let image = TestImageFactory.verticalDocumentViewport(offset: 0, width: 160, height: 1_200, scale: 2)
         let sliceRect = NSRect(x: 0, y: 160, width: 160, height: 240)
