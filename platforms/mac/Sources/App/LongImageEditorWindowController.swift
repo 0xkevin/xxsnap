@@ -285,6 +285,12 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         presentedAnnotationIDs = Set(slice.annotations.map(\.id))
         presentedMaskIDs = Set(slice.eraserMasks.map(\.id))
         let frame = viewportScreenFrame()
+        let preview = CaptureAnnotationRenderer.renderVisibleLongImageSlice(
+            image: documentState.image,
+            annotations: documentState.annotations,
+            eraserMasks: documentState.eraserMasks,
+            imageRect: slice.imageRect
+        )
         let config = SelectionOverlayConfiguration.longImageEditor(
             windowFrame: frame, selectionRect: NSRect(origin: .zero, size: frame.size),
             initialAnnotations: slice.annotations.map {
@@ -295,11 +301,12 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
                 let viewportTop = LongImageAnnotationTranslation.mask($0, fromImageSliceOrigin: .zero, displayScale: geometry.fitWidthScale)
                 return LongImageAnnotationTranslation.maskFromTopOriginToRenderer(viewportTop, imageHeight: frame.height)
             },
+            suppressedAnnotationIDs: presentedAnnotationIDs,
             interactionBegan: { [weak self] in self?.lock(true) },
             interactionEnded: { [weak self] in self?.lock(false) },
             scrollHandler: { [weak self] deltaY in self?.handleOverlayScroll(deltaY: deltaY) }
         )
-        let value = SelectionOverlayWindow(backgroundImage: displayImage(slice.image, size: frame.size), configuration: config) { [weak self] in self?.finish($0) }
+        let value = SelectionOverlayWindow(backgroundImage: displayImage(preview, size: frame.size), configuration: config) { [weak self] in self?.finish($0) }
         overlay = value
         presentedContext = PresentedContext(
             sliceRect: slice.imageRect,
@@ -317,13 +324,19 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         presentedAnnotationIDs = Set(slice.annotations.map(\.id))
         presentedMaskIDs = Set(slice.eraserMasks.map(\.id))
         let frame = viewportScreenFrame()
+        let preview = CaptureAnnotationRenderer.renderVisibleLongImageSlice(
+            image: documentState.image,
+            annotations: documentState.annotations,
+            eraserMasks: documentState.eraserMasks,
+            imageRect: slice.imageRect
+        )
         presentedContext = PresentedContext(
             sliceRect: slice.imageRect,
             overlayBoundsHeight: frame.height,
             displayScale: geometry.fitWidthScale
         )
         overlay.updateLongImageEditor(
-            windowFrame: frame, backgroundImage: displayImage(slice.image, size: frame.size),
+            windowFrame: frame, backgroundImage: displayImage(preview, size: frame.size),
             selectionRect: NSRect(origin: .zero, size: frame.size),
             annotations: slice.annotations.map {
                 let viewportTop = LongImageAnnotationTranslation.annotation($0, fromImageSliceOrigin: .zero, displayScale: geometry.fitWidthScale)
@@ -332,7 +345,8 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
             eraserMasks: slice.eraserMasks.map {
                 let viewportTop = LongImageAnnotationTranslation.mask($0, fromImageSliceOrigin: .zero, displayScale: geometry.fitWidthScale)
                 return LongImageAnnotationTranslation.maskFromTopOriginToRenderer(viewportTop, imageHeight: frame.height)
-            }
+            },
+            suppressedAnnotationIDs: presentedAnnotationIDs
         )
     }
     private func commitOverlay() {
@@ -439,5 +453,6 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     var test_fullAnnotations: [CaptureAnnotation] { documentState.annotations }
     var test_fullEraserMasks: [EraserMask] { documentState.eraserMasks }
     func test_commitOverlay() { commitOverlay() }
+    func test_refreshOverlay() { refreshOverlay() }
 #endif
 }

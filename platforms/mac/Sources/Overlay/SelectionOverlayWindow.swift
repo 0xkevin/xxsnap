@@ -72,6 +72,7 @@ struct SelectionOverlayConfiguration {
     var completesBeforeOrderingOut: Bool
     var initialAnnotations: [CaptureAnnotation]
     var initialEraserMasks: [EraserMask]
+    var suppressedAnnotationIDs: Set<AnnotationID>
     var annotationInteractionBegan: (() -> Void)?
     var annotationInteractionEnded: (() -> Void)?
     var longImageScrollHandler: ((CGFloat) -> Void)?
@@ -100,6 +101,7 @@ struct SelectionOverlayConfiguration {
         completesBeforeOrderingOut: false,
         initialAnnotations: [],
         initialEraserMasks: [],
+        suppressedAnnotationIDs: [],
         annotationInteractionBegan: nil,
         annotationInteractionEnded: nil,
         longImageScrollHandler: nil,
@@ -140,6 +142,7 @@ struct SelectionOverlayConfiguration {
             completesBeforeOrderingOut: true,
             initialAnnotations: [],
             initialEraserMasks: [],
+            suppressedAnnotationIDs: [],
             annotationInteractionBegan: nil,
             annotationInteractionEnded: nil,
             longImageScrollHandler: nil,
@@ -158,6 +161,7 @@ struct SelectionOverlayConfiguration {
         selectionRect: NSRect,
         initialAnnotations: [CaptureAnnotation] = [],
         initialEraserMasks: [EraserMask] = [],
+        suppressedAnnotationIDs: Set<AnnotationID> = [],
         interactionBegan: (() -> Void)? = nil,
         interactionEnded: (() -> Void)? = nil,
         scrollHandler: ((CGFloat) -> Void)? = nil
@@ -179,6 +183,7 @@ struct SelectionOverlayConfiguration {
             completesBeforeOrderingOut: true,
             initialAnnotations: initialAnnotations,
             initialEraserMasks: initialEraserMasks,
+            suppressedAnnotationIDs: suppressedAnnotationIDs,
             annotationInteractionBegan: interactionBegan,
             annotationInteractionEnded: interactionEnded,
             longImageScrollHandler: scrollHandler,
@@ -740,7 +745,8 @@ final class SelectionOverlayWindow: NSWindow {
         backgroundImage: NSImage?,
         selectionRect: NSRect,
         annotations: [CaptureAnnotation],
-        eraserMasks: [EraserMask]
+        eraserMasks: [EraserMask],
+        suppressedAnnotationIDs: Set<AnnotationID> = []
     ) {
         setFrame(windowFrame, display: false)
         guard let overlayView = contentView as? SelectionOverlayView else { return }
@@ -749,7 +755,8 @@ final class SelectionOverlayWindow: NSWindow {
             backgroundImage: backgroundImage,
             selectionRect: selectionRect,
             annotations: annotations,
-            eraserMasks: eraserMasks
+            eraserMasks: eraserMasks,
+            suppressedAnnotationIDs: suppressedAnnotationIDs
         )
         makeFirstResponder(overlayView)
     }
@@ -1297,6 +1304,14 @@ final class SelectionOverlayWindow: NSWindow {
 
     var test_textDropdownScrollOffset: Int {
         (contentView as? SelectionOverlayView)?.test_textDropdownScrollOffset ?? 0
+    }
+
+    var test_backgroundImage: NSImage? {
+        (contentView as? SelectionOverlayView)?.test_backgroundImage
+    }
+
+    var test_suppressedAnnotationIDs: Set<AnnotationID> {
+        (contentView as? SelectionOverlayView)?.test_suppressedAnnotationIDs ?? []
     }
 
     func test_optionsTextBoldPoint() -> NSPoint? {
@@ -2139,6 +2154,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         didSet { invalidateEraserMaskedComposite() }
     }
     private var backgroundBitmap: NSBitmapImageRep?
+    private var suppressedAnnotationIDs: Set<AnnotationID>
     private var backgroundLuminanceCache: [String: CGFloat] = [:]
     private let settings: AppSettings
     private let featureGate: FeatureGate
@@ -2167,6 +2183,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         self.settings = settings
         self.featureGate = featureGate
         self.configuration = configuration
+        self.suppressedAnnotationIDs = configuration.suppressedAnnotationIDs
         self.refreshHandler = refreshHandler
         if let cgImage = backgroundImage?.cgImage(forProposedRect: nil, context: nil, hints: nil) {
             self.backgroundBitmap = NSBitmapImageRep(cgImage: cgImage)
@@ -6687,7 +6704,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         backgroundImage: NSImage?,
         selectionRect: NSRect,
         annotations: [CaptureAnnotation],
-        eraserMasks: [EraserMask]
+        eraserMasks: [EraserMask],
+        suppressedAnnotationIDs: Set<AnnotationID>
     ) {
         commitCurrentTextEdit()
         self.backgroundImage = backgroundImage
@@ -6699,6 +6717,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         backgroundLuminanceCache.removeAll()
         self.annotations = annotations
         self.eraserMasks = eraserMasks
+        self.suppressedAnnotationIDs = suppressedAnnotationIDs
         selectedAnnotationIndex = nil
         setLockedSelectionRect(selectionRect.standardized)
         resetMosaicPreviewCaches()
@@ -7222,6 +7241,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
         return textDropdownScrollOffset(for: activeTextDropdown)
     }
+
+    var test_backgroundImage: NSImage? { backgroundImage }
+    var test_suppressedAnnotationIDs: Set<AnnotationID> { suppressedAnnotationIDs }
 
     func test_optionsTextBoldPoint() -> NSPoint? {
         guard let optionsToolbarRect else {
@@ -10025,7 +10047,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private var hasEraserMasksForDrawing: Bool {
-        !eraserMasks.isEmpty
+        eraserMasks.contains { !$0.affectedAnnotationIDs.subtracting(suppressedAnnotationIDs).isEmpty }
     }
 
     private func commitEraserRectangle() {
@@ -11282,7 +11304,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 } else {
                     let liveValueIndex = selectedMosaicValuePreviewIndex()
                     let mosaicAnnotations = annotations.enumerated().compactMap { index, annotation in
-                        isMosaicAnnotation(annotation) && index != liveValueIndex ? annotation : nil
+                        isMosaicAnnotation(annotation)
+                            && !suppressedAnnotationIDs.contains(annotation.id)
+                            && index != liveValueIndex ? annotation : nil
                     }
                     if let composite = mosaicPreviewComposite(for: mosaicAnnotations) {
                         drawMosaicComposite(composite, clippedTo: mosaicAnnotations)
@@ -11553,7 +11577,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         let alreadyRenderedWithMosaicOrdering = shouldRenderAnnotationsWithMosaicOrdering
         let selectedIndex = selectedAnnotationIndex
         for (index, annotation) in annotations.enumerated() {
-            if isMosaicAnnotation(annotation) || index == selectedIndex {
+            if suppressedAnnotationIDs.contains(annotation.id)
+                || isMosaicAnnotation(annotation)
+                || index == selectedIndex {
                 continue
             }
             if !alreadyRenderedWithMosaicOrdering {
@@ -11572,7 +11598,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return
         }
 
-        if !alreadyRenderedWithMosaicOrdering {
+        if !alreadyRenderedWithMosaicOrdering && !suppressedAnnotationIDs.contains(selectedAnnotation.id) {
             drawAnnotation(selectedAnnotation, inOverlay: true)
         }
         if shouldDrawSelectedAnnotationOutline(selectedAnnotation) {
@@ -11822,7 +11848,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return false
         }
 
-        let orderedAnnotations = draftAnnotation.map { annotations + [$0] } ?? annotations
+        let drawableAnnotations = annotations.filter { !suppressedAnnotationIDs.contains($0.id) }
+        let orderedAnnotations = draftAnnotation.map { drawableAnnotations + [$0] } ?? drawableAnnotations
         return needsSequentialMosaicComposite(for: orderedAnnotations)
     }
 
@@ -11865,6 +11892,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
 
         for (index, annotation) in annotations.enumerated() {
+            if suppressedAnnotationIDs.contains(annotation.id) {
+                continue
+            }
             if isMosaicAnnotation(annotation) {
                 if rotatingIndex == index,
                    drawRotatingMosaicRectanglePreview(at: index, drawBaseAnnotations: false) {

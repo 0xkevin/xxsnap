@@ -843,6 +843,48 @@ final class LongImageEditorTests: XCTestCase {
         XCTAssertGreaterThan(overlay.test_textDropdownScrollOffset, dropdownOffset)
     }
 
+    func testControllerBakesDependencyAwareCompositeAndSuppressesCommittedRedraw() throws {
+        let image = TestImageFactory.verticalDocumentViewport(offset: 0, width: 200, height: 1_200, scale: 2)
+        var style = CaptureAnnotationStyle(); style.strokeWidth = 8
+        let redaction = CaptureMosaicRedaction(type: .gaussianBlur, value: 14)
+        let earlier = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(x: 20, y: 35, width: 150, height: 70),
+            style: style,
+            mosaicRedaction: redaction
+        )
+        let direct = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(x: 25, y: 115, width: 145, height: 65),
+            style: style,
+            mosaicRedaction: redaction
+        )
+        let controller = LongImageEditorWindowController(
+            canonicalImage: image,
+            annotations: [earlier, direct],
+            visibleFrame: NSRect(x: 0, y: 0, width: 600, height: 500),
+            initialWindowSize: NSSize(width: 400, height: 420)
+        )
+        controller.show()
+        let overlay = try XCTUnwrap(controller.test_editingOverlay)
+        let background = try XCTUnwrap(overlay.test_backgroundImage)
+        let expected = CaptureAnnotationRenderer.renderVisibleLongImageSlice(
+            image: image,
+            annotations: [earlier, direct],
+            eraserMasks: [],
+            imageRect: controller.visibleImageRect
+        )
+        XCTAssertEqual(try pixelBytes(background), try pixelBytes(expected))
+        XCTAssertEqual(overlay.test_suppressedAnnotationIDs, Set(overlay.editorSnapshot?.annotations.map(\.id) ?? []))
+
+        overlay.test_setAnnotations([])
+        controller.test_commitOverlay()
+        controller.test_refreshOverlay()
+        XCTAssertTrue(controller.test_fullAnnotations.isEmpty)
+        XCTAssertTrue(try XCTUnwrap(controller.test_editingOverlay?.test_suppressedAnnotationIDs).isEmpty)
+        controller.stop()
+    }
+
     func testEditorInteractionCallbacksLockAndUnlockDocumentScrolling() throws {
         let controller = LongImageEditorWindowController(
             image: TestImageFactory.solid(size: NSSize(width: 200, height: 1_000), color: .white),
