@@ -567,6 +567,8 @@ final class SelectionOverlayWindow: NSWindow {
     private let configuration: SelectionOverlayConfiguration
     private var didCompleteSelection = false
     private var escapeKeyMonitor: Any?
+    var onScrollCaptureRequested: ((ScrollCaptureSeed) -> Void)?
+    private(set) var scrollCaptureOverlayState: ScrollCaptureOverlayState = .inactive
 
     init(
         backgroundImage: NSImage?,
@@ -606,6 +608,13 @@ final class SelectionOverlayWindow: NSWindow {
         )
         overlayView.selectionDidFinish = { [weak self] result in
             self?.completeSelection(with: result)
+        }
+        overlayView.scrollCaptureDidRequest = { [weak self] seed in
+            guard let self else { return }
+            self.scrollCaptureOverlayState = .capturing
+            self.ignoresMouseEvents = true
+            overlayView.scrollCaptureOverlayState = .capturing
+            self.onScrollCaptureRequested?(seed)
         }
 
         contentView = overlayView
@@ -699,7 +708,30 @@ final class SelectionOverlayWindow: NSWindow {
     }
 
     override func cancelOperation(_ sender: Any?) {
+        if scrollCaptureOverlayState != .inactive {
+            endScrollCapturePassiveMode()
+            return
+        }
         completeSelection(with: nil)
+    }
+
+    var scrollCaptureToolbarScreenFrame: NSRect? {
+        guard let overlayView = contentView as? SelectionOverlayView,
+              let frame = overlayView.scrollCaptureToolbarFrame else { return nil }
+        return convertToScreen(frame)
+    }
+
+    func setScrollCapturePaused(message: String) {
+        guard scrollCaptureOverlayState != .inactive else { return }
+        scrollCaptureOverlayState = .paused(message: message)
+        (contentView as? SelectionOverlayView)?.scrollCaptureOverlayState = scrollCaptureOverlayState
+    }
+
+    func endScrollCapturePassiveMode() {
+        guard scrollCaptureOverlayState != .inactive else { return }
+        scrollCaptureOverlayState = .inactive
+        ignoresMouseEvents = false
+        (contentView as? SelectionOverlayView)?.endScrollCapturePassiveMode()
     }
 
     private func performBaseEscape() {
@@ -725,6 +757,17 @@ final class SelectionOverlayWindow: NSWindow {
     }
 
 #if DEBUG
+    func test_beginScrollCapture() {
+        (contentView as? SelectionOverlayView)?.beginScrollCapture()
+    }
+
+    func test_toolbarButtonIsEnabled(_ button: TestToolbarButton) -> Bool {
+        (contentView as? SelectionOverlayView)?.test_toolbarButtonIsEnabled(button) ?? false
+    }
+
+    func test_tooltipText(for button: TestToolbarButton) -> String? {
+        (contentView as? SelectionOverlayView)?.test_tooltipText(for: button)
+    }
     func test_setLockedSelectionRect(_ rect: NSRect) {
         (contentView as? SelectionOverlayView)?.test_setLockedSelectionRect(rect)
     }
@@ -1924,6 +1967,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     var selectionDidFinish: ((CaptureSelectionResult?) -> Void)?
+    var scrollCaptureDidRequest: ((ScrollCaptureSeed) -> Void)?
+    var scrollCaptureOverlayState: ScrollCaptureOverlayState = .inactive {
+        didSet { needsDisplay = true }
+    }
     private var backgroundImage: NSImage? {
         didSet { invalidateEraserMaskedComposite() }
     }
@@ -2608,6 +2655,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     override func mouseDown(with event: NSEvent) {
+        guard scrollCaptureOverlayState == .inactive else { return }
         cancelPinnedImageToolbarShiftShortcut()
         let point = convert(event.locationInWindow, from: nil)
         NSLog("xxsnap overlay mouseDown mode=%@ point=(%.0f, %.0f)", "\(interactionMode)", point.x, point.y)
@@ -2652,6 +2700,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        guard scrollCaptureOverlayState == .inactive else { return }
         let point = convert(event.locationInWindow, from: nil)
 
         if isPinnedImageDragInProgress {
@@ -3313,6 +3362,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     func handleKeyDown(_ event: NSEvent) -> Bool {
+        if scrollCaptureOverlayState != .inactive {
+            return true
+        }
         cancelPinnedImageToolbarShiftShortcut()
         if shouldPassKeyDownToTextEditor(event) {
             NSLog(
@@ -4110,6 +4162,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         if let toolbar = mainToolbarRect(for: selectionRect) {
             for (button, rect) in toolbarButtonRects(in: toolbar) where rect.contains(point) {
                 let identifier = tooltipIdentifier(for: button)
+                if button == .scroll, scrollCaptureOverlayState != .inactive {
+                    return (identifier, L10n(language: settings.language).text(.finishScrollCapture), rect)
+                }
                 guard let title = SelectionToolbarState.tooltipTitle(for: identifier) else {
                     return nil
                 }
@@ -5951,7 +6006,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         case .pin:
             finish(action: .pin)
         case .scroll:
-            showPlaceholder(for: button)
+            beginScrollCapture()
         case .finishEditing:
             finish(action: .finishEditing)
         }
@@ -6768,6 +6823,17 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             toolbarButton = .finishEditing
         }
         return buttonMatchesCurrentTool(toolbarButton)
+    }
+
+    func test_toolbarButtonIsEnabled(_ button: TestToolbarButton) -> Bool {
+        guard let point = test_mainToolbarButtonPoint(for: button),
+              let toolbarButton = toolbarButton(at: point) else { return false }
+        return isToolbarButtonEnabled(toolbarButton)
+    }
+
+    func test_tooltipText(for button: TestToolbarButton) -> String? {
+        guard let point = test_mainToolbarButtonPoint(for: button) else { return nil }
+        return tooltipTarget(at: point)?.text
     }
 
     var test_isPinnedImageDragInProgress: Bool {
@@ -13163,6 +13229,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private func isToolbarButtonEnabled(_ button: ToolbarButton) -> Bool {
+        if scrollCaptureOverlayState != .inactive {
+            return button == .scroll || button == .cancel
+        }
         switch button {
         case .undo:
             return !undoAnnotationEntries.isEmpty || !annotations.isEmpty
@@ -15232,6 +15301,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private func buttonMatchesCurrentTool(_ button: ToolbarButton) -> Bool {
+        if button == .scroll, scrollCaptureOverlayState != .inactive {
+            return true
+        }
         switch button {
         case .rectangle:
             return isShapeToolActive && (currentShapeKind == .rectangle || currentShapeKind == .ellipse)
@@ -15270,6 +15342,43 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             offset: mainToolbarOffset,
             inside: mainToolbarLayoutBounds(for: selectionRect)
         )
+    }
+
+    var scrollCaptureToolbarFrame: NSRect? {
+        guard let selectionRect else { return nil }
+        return mainToolbarRect(for: selectionRect)
+    }
+
+    func beginScrollCapture() {
+        guard scrollCaptureOverlayState == .inactive,
+              let lockedSelectionRect,
+              let window,
+              let backgroundImage else { return }
+        commitCurrentTextEdit()
+        commitNumberEditingIfNeeded()
+        let snapshotRect = lockedSelectionRect.standardized
+        guard let crop = pixelAlignedCrop(image: backgroundImage, to: snapshotRect)?.image else { return }
+        closeTextDropdown()
+        closeMagnifierZoomDropdown()
+        showsStrokeStyleMenu = false
+        showsCornerRadiusPanel = false
+        showsStartArrowTypeMenu = false
+        showsEndArrowTypeMenu = false
+        activeNumberDropdown = false
+        scrollCaptureOverlayState = .capturing
+        scrollCaptureDidRequest?(ScrollCaptureSeed(
+            screenRect: window.convertToScreen(snapshotRect).standardized,
+            snapshotRect: snapshotRect,
+            frozenImage: crop,
+            annotations: annotations,
+            eraserMasks: eraserMasks
+        ))
+    }
+
+    func endScrollCapturePassiveMode() {
+        scrollCaptureOverlayState = .inactive
+        invalidateCursorRectsAndRefresh()
+        needsDisplay = true
     }
 
     private func baseMainToolbarRect(for selectionRect: NSRect) -> NSRect? {

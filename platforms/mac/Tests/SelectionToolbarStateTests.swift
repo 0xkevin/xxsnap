@@ -30,6 +30,81 @@ private final class FakePinnedWindow: PinnedImageWindowPresenting {
 }
 
 final class SelectionToolbarStateTests: XCTestCase {
+    func testBeginScrollCaptureFreezesSeedAndEntersPassiveModeWithoutOrdinaryCompletion() throws {
+        let image = solidImage(size: NSSize(width: 640, height: 420), color: .white)
+        var ordinaryCompletionCount = 0
+        var request: ScrollCaptureSeed?
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in ordinaryCompletionCount += 1 }
+        window.onScrollCaptureRequested = { request = $0 }
+        let selection = NSRect(x: 80, y: 60, width: 300, height: 220)
+        let annotation = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 10, y: 10, width: 40, height: 30),
+            style: CaptureAnnotationStyle()
+        )
+        window.test_setLockedSelectionRect(selection)
+        window.test_setAnnotations([annotation])
+        let toolbarBefore = try XCTUnwrap(window.test_mainToolbarRect())
+
+        window.test_beginScrollCapture()
+
+        let seed = try XCTUnwrap(request)
+        XCTAssertEqual(seed.snapshotRect, selection)
+        XCTAssertEqual(seed.screenRect, window.convertToScreen(selection).standardized)
+        XCTAssertEqual(seed.annotations.count, 1)
+        XCTAssertEqual(seed.frozenImage.size, selection.size)
+        XCTAssertEqual(ordinaryCompletionCount, 0)
+        XCTAssertEqual(window.scrollCaptureOverlayState, .capturing)
+        XCTAssertTrue(window.ignoresMouseEvents)
+        XCTAssertEqual(window.test_mainToolbarRect(), toolbarBefore)
+        XCTAssertTrue(window.test_toolbarButtonIsSelected(.scroll))
+        XCTAssertFalse(window.test_toolbarButtonIsEnabled(.rectangle))
+        XCTAssertTrue(window.test_toolbarButtonIsEnabled(.scroll))
+        XCTAssertTrue(window.test_toolbarButtonIsEnabled(.cancel))
+        XCTAssertEqual(window.test_tooltipText(for: .scroll), L10n(language: .zhHans).text(.finishScrollCapture))
+    }
+
+    func testEndingPassiveModeRestoresMouseAndOrdinaryFlow() throws {
+        var requestCount = 0
+        let window = SelectionOverlayWindow(backgroundImage: solidImage(size: NSSize(width: 500, height: 400), color: .white)) { _ in }
+        window.onScrollCaptureRequested = { _ in requestCount += 1 }
+        window.test_setLockedSelectionRect(NSRect(x: 40, y: 40, width: 260, height: 200))
+        window.test_activateShapeTool(.rectangle)
+        window.test_beginScrollCapture()
+        window.endScrollCapturePassiveMode()
+        XCTAssertEqual(window.scrollCaptureOverlayState, .inactive)
+        XCTAssertFalse(window.ignoresMouseEvents)
+        XCTAssertTrue(window.test_toolbarButtonIsSelected(.rectangle))
+        window.test_beginScrollCapture()
+        XCTAssertEqual(requestCount, 2)
+    }
+
+    func testPassiveScrollCaptureConsumesOverlayCommandsAndPreservesGeometry() throws {
+        var ordinaryCompletionCount = 0
+        let window = SelectionOverlayWindow(backgroundImage: solidImage(size: NSSize(width: 700, height: 500), color: .white)) { _ in
+            ordinaryCompletionCount += 1
+        }
+        window.onScrollCaptureRequested = { _ in }
+        let selection = NSRect(x: 80, y: 80, width: 360, height: 260)
+        window.test_setLockedSelectionRect(selection)
+        let toolbar = try XCTUnwrap(window.test_mainToolbarRect())
+        let screenToolbar = try XCTUnwrap(window.scrollCaptureToolbarScreenFrame)
+        XCTAssertEqual(screenToolbar, window.convertToScreen(toolbar))
+        window.test_beginScrollCapture()
+
+        XCTAssertTrue(window.test_handleKeyDown(keyCode: 8, charactersIgnoringModifiers: "c", modifierFlags: [.command]))
+        window.test_mouseDown(at: NSPoint(x: selection.midX, y: selection.midY))
+        window.test_mouseDragged(to: NSPoint(x: selection.midX + 50, y: selection.midY + 50))
+        window.test_mouseUp(at: NSPoint(x: selection.midX + 50, y: selection.midY + 50))
+        XCTAssertEqual(ordinaryCompletionCount, 0)
+        XCTAssertEqual(window.test_annotationCount, 0)
+        XCTAssertEqual(window.test_lockedSelectionRect, selection)
+        XCTAssertEqual(window.test_mainToolbarRect(), toolbar)
+
+        window.setScrollCapturePaused(message: "Paused")
+        XCTAssertEqual(window.scrollCaptureOverlayState, .paused(message: "Paused"))
+        XCTAssertTrue(window.ignoresMouseEvents)
+    }
     func testEyedropperSamplesVisibleAnnotationAndCopiesOnlyColor() throws {
         let background = solidImage(size: NSSize(width: 240, height: 160), color: NSColor(srgbRed: 0.95, green: 0.8, blue: 0.1, alpha: 1))
         let expectedOverlayColor = NSColor(srgbRed: 0, green: 0, blue: 1, alpha: 1)

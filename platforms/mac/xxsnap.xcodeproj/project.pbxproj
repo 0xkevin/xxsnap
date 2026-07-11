@@ -110,6 +110,8 @@
 		AA5100000000000000000001 /* ScrollCaptureSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5100000000000000000011 /* ScrollCaptureSession.swift */; };
 		AA5100000000000000000002 /* ScrollActivityMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5100000000000000000012 /* ScrollActivityMonitor.swift */; };
 		AA5100000000000000000003 /* ScrollCaptureSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5100000000000000000013 /* ScrollCaptureSessionTests.swift */; };
+		AA5200000000000000000001 /* ScrollCapturePresentationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5200000000000000000011 /* ScrollCapturePresentationController.swift */; };
+		AA5200000000000000000002 /* ScrollCapturePresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5200000000000000000012 /* ScrollCapturePresentationTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -232,6 +234,8 @@
 		AA5100000000000000000011 /* ScrollCaptureSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollCaptureSession.swift; sourceTree = "<group>"; };
 		AA5100000000000000000012 /* ScrollActivityMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollActivityMonitor.swift; sourceTree = "<group>"; };
 		AA5100000000000000000013 /* ScrollCaptureSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollCaptureSessionTests.swift; sourceTree = "<group>"; };
+		AA5200000000000000000011 /* ScrollCapturePresentationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollCapturePresentationController.swift; sourceTree = "<group>"; };
+		AA5200000000000000000012 /* ScrollCapturePresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollCapturePresentationTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -261,6 +265,7 @@
 		AA5100000000000000000020 /* ScrollCapture */ = {
 			isa = PBXGroup;
 			children = (
+				AA5200000000000000000011 /* ScrollCapturePresentationController.swift */,
 				AA5100000000000000000012 /* ScrollActivityMonitor.swift */,
 				AA5100000000000000000011 /* ScrollCaptureSession.swift */,
 			);
@@ -309,6 +314,7 @@
 		E47B99274545910C8159BABC /* Tests */ = {
 			isa = PBXGroup;
 			children = (
+				AA5200000000000000000012 /* ScrollCapturePresentationTests.swift */,
 				AA5100000000000000000013 /* ScrollCaptureSessionTests.swift */,
 				AA5000000000000000000015 /* ScrollCaptureBridgeTests.swift */,
 				AA5000000000000000000016 /* ScrollCaptureTestSupport.swift */,
@@ -606,6 +612,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AA5200000000000000000001 /* ScrollCapturePresentationController.swift in Sources */,
 				AA5100000000000000000002 /* ScrollActivityMonitor.swift in Sources */,
 				AA5100000000000000000001 /* ScrollCaptureSession.swift in Sources */,
 				AA5000000000000000000001 /* ScrollCaptureBridge.mm in Sources */,
@@ -634,6 +641,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AA5200000000000000000002 /* ScrollCapturePresentationTests.swift in Sources */,
 				AA5100000000000000000003 /* ScrollCaptureSessionTests.swift in Sources */,
 				AA5000000000000000000005 /* ScrollCaptureBridgeTests.swift in Sources */,
 				AA5000000000000000000006 /* ScrollCaptureTestSupport.swift in Sources */,

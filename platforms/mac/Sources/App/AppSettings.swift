@@ -130,6 +130,11 @@ struct FeatureGate {
 struct L10n {
     enum Key {
         case toolbarScrollCapture
+        case finishScrollCapture
+        case cancel
+        case scrollCaptureLowConfidence
+        case scrollCaptureResourceLimit
+        case scrollCaptureFailure
         case colorSamplerCopyHex
         case colorSamplerCopyRgb
     }
@@ -140,12 +145,32 @@ struct L10n {
         switch (language, key) {
         case (.zhHans, .toolbarScrollCapture):
             return "滚动截图"
+        case (.zhHans, .finishScrollCapture):
+            return "完成滚动截图"
+        case (.zhHans, .cancel):
+            return "取消"
+        case (.zhHans, .scrollCaptureLowConfidence):
+            return "匹配置信度较低，滚动截图已暂停"
+        case (.zhHans, .scrollCaptureResourceLimit):
+            return "已达到资源限制，滚动截图已暂停"
+        case (.zhHans, .scrollCaptureFailure):
+            return "截图失败，请重试"
         case (.zhHans, .colorSamplerCopyHex):
             return "按 C 复制HEX颜色值"
         case (.zhHans, .colorSamplerCopyRgb):
             return "按 C 复制RGB颜色值"
         case (.english, .toolbarScrollCapture):
             return "Scroll Capture"
+        case (.english, .finishScrollCapture):
+            return "Finish Scroll Capture"
+        case (.english, .cancel):
+            return "Cancel"
+        case (.english, .scrollCaptureLowConfidence):
+            return "Low matching confidence. Scroll capture is paused."
+        case (.english, .scrollCaptureResourceLimit):
+            return "Resource limit reached. Scroll capture is paused."
+        case (.english, .scrollCaptureFailure):
+            return "Capture failed. Please try again."
         case (.english, .colorSamplerCopyHex):
             return "Press C to copy HEX"
         case (.english, .colorSamplerCopyRgb):
