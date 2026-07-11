@@ -20,6 +20,7 @@ namespace {
 
 constexpr FingerprintSize AnchorFingerprintSize{16, 12};
 constexpr std::size_t RecentAnchorCount = 8;
+constexpr std::size_t RecentReverseReviewLimit = 16;
 
 [[nodiscard]] bool validUnit(double value)
 {
@@ -51,6 +52,7 @@ constexpr std::size_t RecentAnchorCount = 8;
         && config.fixedTopCandidateHeight >= 0
         && config.fixedBottomCandidateHeight >= 0
         && config.fixedBandConfirmationMovements >= 3
+        && config.fixedBandConfirmationMovements <= 32
         && validUnit(config.fixedBandStationaryThreshold)
         && config.scrollbarMaximumWidth >= 0
         && config.scrollbarConfirmationMovements >= 1
@@ -357,17 +359,118 @@ public:
         auto matcherConfig = effectiveMatcherConfig();
         if (evidence.top) {
             matcherConfig.excludedBands.top = std::max(
-                matcherConfig.excludedBands.top, evidence.topHeight);
+                matcherConfig.excludedBands.top,
+                std::max(evidence.topHeight, fixedTopRunHeight));
         }
         if (evidence.bottom) {
             matcherConfig.excludedBands.bottom = std::max(
-                matcherConfig.excludedBands.bottom, evidence.bottomHeight);
+                matcherConfig.excludedBands.bottom,
+                std::max(evidence.bottomHeight, fixedBottomRunHeight));
         }
-        evidence.overlap = VerticalOverlapMatcher().match(previous, current, matcherConfig);
+        VerticalOverlapMatcher matcher;
+        evidence.overlap = matcher.match(previous, current, matcherConfig);
         if (evidence.overlap.kind != OverlapKind::Reliable
             || evidence.overlap.verticalAdvance <= 0) {
             evidence.top = false;
             evidence.bottom = false;
+            return evidence;
+        }
+
+        auto bandIsInformativeAndStationary = [&](bool top, int height) {
+            const int edgeInset = std::min(config.scrollbarMaximumWidth, current.width / 8);
+            const int firstColumn = edgeInset;
+            const int columnCount = current.width - edgeInset * 2;
+            if (height <= 0 || columnCount < 2) {
+                return false;
+            }
+            int minimumValue = 255;
+            int maximumValue = 0;
+            std::size_t horizontalEdges = 0U;
+            std::size_t horizontalPairs = 0U;
+            double sameError = 0.0;
+            double alignedError = 0.0;
+            std::size_t alignedSamples = 0U;
+            for (int row = 0; row < height; ++row) {
+                const int y = top ? row : current.height - height + row;
+                int previousValue = -1;
+                for (int x = firstColumn; x < firstColumn + columnCount; ++x) {
+                    const auto currentValue = static_cast<int>(current.pixels[
+                        static_cast<std::size_t>(y) * static_cast<std::size_t>(current.bytesPerRow)
+                        + static_cast<std::size_t>(x) * 4U]);
+                    const auto previousSame = static_cast<int>(previous.pixels[
+                        static_cast<std::size_t>(y) * static_cast<std::size_t>(previous.bytesPerRow)
+                        + static_cast<std::size_t>(x) * 4U]);
+                    minimumValue = std::min(minimumValue, currentValue);
+                    maximumValue = std::max(maximumValue, currentValue);
+                    if (previousValue >= 0) {
+                        ++horizontalPairs;
+                        horizontalEdges += std::abs(currentValue - previousValue) >= 1 ? 1U : 0U;
+                    }
+                    previousValue = currentValue;
+                    sameError += std::abs(currentValue - previousSame) / 255.0;
+
+                    const int alignedPreviousY = top
+                        ? y + evidence.overlap.verticalAdvance
+                        : y;
+                    const int alignedCurrentY = top
+                        ? y
+                        : y - evidence.overlap.verticalAdvance;
+                    if (alignedPreviousY >= 0 && alignedPreviousY < previous.height
+                        && alignedCurrentY >= 0 && alignedCurrentY < current.height) {
+                        const auto previousAligned = static_cast<int>(previous.pixels[
+                            static_cast<std::size_t>(alignedPreviousY)
+                                * static_cast<std::size_t>(previous.bytesPerRow)
+                            + static_cast<std::size_t>(x) * 4U]);
+                        const auto currentAligned = static_cast<int>(current.pixels[
+                            static_cast<std::size_t>(alignedCurrentY)
+                                * static_cast<std::size_t>(current.bytesPerRow)
+                            + static_cast<std::size_t>(x) * 4U]);
+                        alignedError += std::abs(previousAligned - currentAligned) / 255.0;
+                        ++alignedSamples;
+                    }
+                }
+            }
+            const std::size_t sameSamples = static_cast<std::size_t>(height)
+                * static_cast<std::size_t>(columnCount);
+            const double edgeRatio = horizontalPairs > 0U
+                ? static_cast<double>(horizontalEdges) / static_cast<double>(horizontalPairs)
+                : 0.0;
+            if (maximumValue - minimumValue < 8 || edgeRatio < 0.05
+                || alignedSamples < static_cast<std::size_t>(columnCount)) {
+                return false;
+            }
+            const double meanSameError = sameError / static_cast<double>(sameSamples);
+            const double meanAlignedError = alignedError / static_cast<double>(alignedSamples);
+            return meanAlignedError - meanSameError >= 0.01;
+        };
+
+        const bool informativeTop = evidence.top
+            && bandIsInformativeAndStationary(true, evidence.topHeight);
+        const bool informativeBottom = evidence.bottom
+            && bandIsInformativeAndStationary(false, evidence.bottomHeight);
+        if (informativeTop != evidence.top || informativeBottom != evidence.bottom) {
+            evidence.top = informativeTop;
+            evidence.bottom = informativeBottom;
+            if (!evidence.top && !evidence.bottom) {
+                return evidence;
+            }
+            matcherConfig = effectiveMatcherConfig();
+            if (evidence.top) {
+                matcherConfig.excludedBands.top = std::max(
+                    matcherConfig.excludedBands.top,
+                    std::max(evidence.topHeight, fixedTopRunHeight));
+            }
+            if (evidence.bottom) {
+                matcherConfig.excludedBands.bottom = std::max(
+                    matcherConfig.excludedBands.bottom,
+                    std::max(evidence.bottomHeight, fixedBottomRunHeight));
+            }
+            evidence.overlap = matcher.match(previous, current, matcherConfig);
+            if (evidence.overlap.kind != OverlapKind::Reliable
+                || evidence.overlap.verticalAdvance <= 0) {
+                evidence.top = false;
+                evidence.bottom = false;
+            }
         }
         return evidence;
     }
@@ -660,8 +763,11 @@ try {
                 reviewConfig.excludedBands.bottom = std::max(
                     reviewConfig.excludedBands.bottom, implementation_->fixedBottomRunHeight);
             }
+            std::size_t reviewedCandidates = 0U;
             for (auto movement = implementation_->pending.crbegin();
-                 movement != implementation_->pending.crend(); ++movement) {
+                 movement != implementation_->pending.crend()
+                 && reviewedCandidates < RecentReverseReviewLimit;
+                 ++movement, ++reviewedCandidates) {
                 const auto reverse = matcher.match(frame, *movement->frame, reviewConfig);
                 if (reverse.kind == OverlapKind::Reliable && reverse.verticalAdvance > 0) {
                     result.kind = AppendKind::ReviewDiscarded;
@@ -693,19 +799,28 @@ try {
             *contribution,
         };
         const int requiredEvidence = std::max(3, config.fixedBandConfirmationMovements);
+        const auto heightIsConsistent = [](int previousHeight, int currentHeight) {
+            const int tolerance = std::max(2, static_cast<int>(
+                std::ceil(static_cast<double>(std::max(1, previousHeight)) * 0.15)));
+            return std::abs(previousHeight - currentHeight) <= tolerance;
+        };
+        const bool restartTopRun = evidence.top && implementation_->fixedTopAgreement > 0
+            && !heightIsConsistent(implementation_->fixedTopRunHeight, evidence.topHeight);
+        const bool restartBottomRun = evidence.bottom && implementation_->fixedBottomAgreement > 0
+            && !heightIsConsistent(implementation_->fixedBottomRunHeight, evidence.bottomHeight);
         const int nextTopAgreement = evidence.top
-            ? implementation_->fixedTopAgreement + 1
+            ? (restartTopRun ? 1 : implementation_->fixedTopAgreement + 1)
             : 0;
         const int nextBottomAgreement = evidence.bottom
-            ? implementation_->fixedBottomAgreement + 1
+            ? (restartBottomRun ? 1 : implementation_->fixedBottomAgreement + 1)
             : 0;
         const int nextTopRunHeight = evidence.top
-            ? (implementation_->fixedTopAgreement > 0
+            ? (implementation_->fixedTopAgreement > 0 && !restartTopRun
                     ? std::min(implementation_->fixedTopRunHeight, evidence.topHeight)
                     : evidence.topHeight)
             : 0;
         const int nextBottomRunHeight = evidence.bottom
-            ? (implementation_->fixedBottomAgreement > 0
+            ? (implementation_->fixedBottomAgreement > 0 && !restartBottomRun
                     ? std::min(implementation_->fixedBottomRunHeight, evidence.bottomHeight)
                     : evidence.bottomHeight)
             : 0;
@@ -717,19 +832,20 @@ try {
         using BandDecision = Implementation::BandDecision;
         std::vector<std::pair<BandDecision, BandDecision>> decisions;
         decisions.reserve(implementation_->pending.size() + 1U);
-        auto resolveExisting = [](BandDecision decision, bool confirm, bool evidenceNow) {
+        auto resolveExisting = [](BandDecision decision, bool confirm, bool evidenceNow, bool restart) {
             if (decision != BandDecision::Unresolved) {
                 return decision;
             }
             if (confirm) {
                 return BandDecision::Fixed;
             }
-            return evidenceNow ? BandDecision::Unresolved : BandDecision::Ordinary;
+            return evidenceNow && !restart ? BandDecision::Unresolved : BandDecision::Ordinary;
         };
         for (const auto& movement : implementation_->pending) {
             decisions.emplace_back(
-                resolveExisting(movement.topDecision, confirmTop, evidence.top),
-                resolveExisting(movement.bottomDecision, confirmBottom, evidence.bottom));
+                resolveExisting(movement.topDecision, confirmTop, evidence.top, restartTopRun),
+                resolveExisting(
+                    movement.bottomDecision, confirmBottom, evidence.bottom, restartBottomRun));
         }
         newMovement.topDecision = implementation_->fixedTopConfirmed || confirmTop
             ? BandDecision::Fixed
