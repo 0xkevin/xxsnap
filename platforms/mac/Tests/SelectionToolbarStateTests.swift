@@ -10052,6 +10052,72 @@ final class SelectionToolbarStateTests: XCTestCase {
     }
 
     @MainActor
+    func testDefaultLongEditorStaysOnCaptureDisplay() async throws {
+        var seed = scrollCaptureSeedForCoordinatorTests()
+        seed = ScrollCaptureSeed(
+            screenRect: NSRect(x: 1_200, y: 120, width: 80, height: 60),
+            snapshotRect: seed.snapshotRect,
+            frozenImage: seed.frozenImage,
+            annotations: seed.annotations,
+            eraserMasks: seed.eraserMasks
+        )
+        let secondary = NSRect(x: 1_000, y: 0, width: 900, height: 700)
+        let session = FakeScrollCaptureSession(seed: seed)
+        let presentation = FakeScrollCapturePresentation()
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            scrollCaptureSessionFactory: { _, _ in session },
+            scrollCapturePresentationFactory: { context in
+                presentation.onFinish = context.onFinish
+                presentation.onCancel = context.onCancel
+                return presentation
+            },
+            screenVisibleFrameResolver: { rect in
+                XCTAssertTrue(rect.contains(NSPoint(x: seed.screenRect.midX, y: seed.screenRect.midY)))
+                return secondary
+            }
+        )
+        coordinator.test_installOverlayWindow(SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in })
+        coordinator.test_requestScrollCapture(seed: seed)
+        await Task.yield()
+        presentation.onFinish?()
+        for _ in 0..<100 where coordinator.test_hasScrollCaptureSession { await Task.yield() }
+
+        let frame = try XCTUnwrap(coordinator.test_longImageEditorWindowFrame)
+        XCTAssertTrue(secondary.contains(NSPoint(x: frame.midX, y: frame.midY)))
+        XCTAssertEqual(frame.midX, secondary.midX, accuracy: 0.001)
+        XCTAssertEqual(frame.midY, secondary.midY, accuracy: 0.001)
+    }
+
+    @MainActor
+    func testPinnedLongImageResolvesAndCentersOnRequestedDisplayWithoutMutatingSource() throws {
+        let main = NSRect(x: 0, y: 0, width: 900, height: 700)
+        let secondary = NSRect(x: 1_000, y: 0, width: 800, height: 600)
+        let image = solidImage(size: NSSize(width: 500, height: 2_000), color: .white)
+        let requested = NSRect(x: 1_100, y: 100, width: 500, height: 2_000)
+        let controller = PinnedImageWindowController(
+            image: image,
+            screenRect: requested,
+            screenResolver: { rect in rect.origin.x >= 1_000 ? secondary : main }
+        )
+
+        XCTAssertTrue(controller.image === image)
+        XCTAssertEqual(controller.screenRect, requested)
+        let frame = try XCTUnwrap(controller.window?.frame)
+        XCTAssertTrue(secondary.contains(frame))
+        XCTAssertEqual(frame.midX, secondary.midX, accuracy: 0.001)
+        XCTAssertEqual(frame.midY, secondary.midY, accuracy: 0.001)
+
+        let mainController = PinnedImageWindowController(
+            image: image,
+            screenRect: NSRect(x: 100, y: 100, width: 500, height: 2_000),
+            screenResolver: { rect in rect.origin.x >= 1_000 ? secondary : main }
+        )
+        XCTAssertTrue(main.contains(try XCTUnwrap(mainController.window?.frame)))
+    }
+
+    @MainActor
     func testCaptureCoordinatorEditorFactoryFailureOffersExactImageFallbackSaveAndEnds() async throws {
         let seed = scrollCaptureSeedForCoordinatorTests()
         let session = FakeScrollCaptureSession(seed: seed)

@@ -140,6 +140,7 @@ struct LongImageEditorActions {
 
 @MainActor
 final class LongImageEditorWindowController: NSWindowController, NSWindowDelegate {
+    typealias CompleteRenderer = (NSImage, [CaptureAnnotation], [EraserMask]) throws -> NSImage
     private struct PresentedContext {
         var sliceRect: NSRect
         var overlayBoundsHeight: CGFloat
@@ -156,11 +157,13 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     private let imageView = NSImageView(), documentView = LongImageFlippedView()
     private var documentState: LongImageEditorDocument
     private let actions: LongImageEditorActions
+    private let completeRenderer: CompleteRenderer
     private let language: AppLanguage
     private var renderedRevision: NSImage?
     private var documentRevision: UInt64 = 0
     private var lastCommittedOverlayRevision: UInt64?
     private var actionInProgress = false
+    private(set) var lastRenderError: Error?
     private var didNotifyClose = false
     private var boundsObserver: NSObjectProtocol?
     private var overlay: SelectionOverlayWindow?
@@ -173,6 +176,7 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     private var didStop = false
     private var viewportRefreshCount = 0
     private(set) var geometry: LongImageEditorGeometry
+    private let initialWindowFrame: NSRect
     var onFinishEditing: ((NSImage, [CaptureAnnotation], [EraserMask]) -> Void)?
     var onClose: (() -> Void)?
 
@@ -183,10 +187,11 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     var fitWidthScale: CGFloat { geometry.fitWidthScale }
     var visibleImageRect: NSRect { geometry.visibleImageRect }
 
-    init(canonicalImage image: NSImage, annotations: [CaptureAnnotation] = [], eraserMasks: [EraserMask] = [], visibleFrame: NSRect? = NSScreen.main?.visibleFrame, initialWindowSize: NSSize? = nil, actions: LongImageEditorActions = .none, language: AppLanguage = .zhHans) {
+    init(canonicalImage image: NSImage, annotations: [CaptureAnnotation] = [], eraserMasks: [EraserMask] = [], visibleFrame: NSRect? = NSScreen.main?.visibleFrame, initialWindowSize: NSSize? = nil, actions: LongImageEditorActions = .none, renderer: @escaping CompleteRenderer = { try CaptureAnnotationRenderer.renderLongImageStrict(image: $0, annotations: $1, eraserMasks: $2) }, language: AppLanguage = .zhHans) {
         let visible = visibleFrame ?? NSRect(x: 0, y: 0, width: 1_200, height: 900)
         documentState = LongImageEditorDocument(image: image, annotations: annotations, eraserMasks: eraserMasks)
         self.actions = actions
+        completeRenderer = renderer
         self.language = language
         let requested = initialWindowSize ?? NSSize(width: min(1_000, visible.width), height: min(840, visible.height))
         let size = NSSize(width: min(requested.width, visible.width), height: min(requested.height, visible.height))
@@ -195,6 +200,7 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         // `visibleFrame` bounds the complete titled window, not just its content.
         window.setFrame(frame, display: false)
         window.title = "长截图编辑"
+        initialWindowFrame = frame
         geometry = LongImageEditorGeometry(imageSize: image.size, viewportSize: NSSize(width: size.width, height: size.height - Self.controlStripHeight), scrollOffset: 0)
         super.init(window: window)
         window.delegate = self
@@ -441,13 +447,10 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         }
     }
 
-    private func completeRenderedImage() -> NSImage {
+    private func completeRenderedImage() throws -> NSImage {
         if let renderedRevision { return renderedRevision }
-        let rendered = CaptureAnnotationRenderer.renderLongImage(
-            image: documentState.image,
-            annotations: documentState.annotations,
-            eraserMasks: documentState.eraserMasks
-        )
+        let rendered = try completeRenderer(
+            documentState.image, documentState.annotations, documentState.eraserMasks)
         renderedRevision = rendered
         return rendered
     }
@@ -457,7 +460,14 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         actionInProgress = true
         defer { actionInProgress = false }
         commitOverlay()
-        _ = action(completeRenderedImage())
+        do {
+            let rendered = try completeRenderedImage()
+            lastRenderError = nil
+            _ = action(rendered)
+        } catch {
+            lastRenderError = error
+            NSLog("xxsnap long image render failed: \(error.localizedDescription)")
+        }
     }
 
     private func configureActionButton(_ button: NSButton, label: String, action: Selector) {
@@ -563,6 +573,9 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     var test_saveButton: NSButton { saveButton }
     var test_pinButton: NSButton { pinButton }
     var test_documentRevision: UInt64 { documentRevision }
+    var test_cachedRenderedRevision: NSImage? { renderedRevision }
+    var test_lastRenderError: Error? { lastRenderError }
+    var test_initialWindowFrame: NSRect { initialWindowFrame }
     var test_fullAnnotations: [CaptureAnnotation] { documentState.annotations }
     var test_fullEraserMasks: [EraserMask] { documentState.eraserMasks }
     func test_commitOverlay() { commitOverlay() }

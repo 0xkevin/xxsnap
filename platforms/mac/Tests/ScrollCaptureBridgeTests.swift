@@ -159,6 +159,31 @@ final class ScrollCaptureBridgeTests: XCTestCase {
         XCTAssertEqual(final.representations.first?.pixelsHigh, 48)
     }
 
+    func testDefaultFixedBandBudgetUsesPointsForTwoXImages() throws {
+        try assertFixedFooterIsRetainedOnce(scale: 2)
+    }
+
+    func testDefaultFixedBandBudgetKeepsOneXBehavior() throws {
+        try assertFixedFooterIsRetainedOnce(scale: 1)
+    }
+
+    private func assertFixedFooterIsRetainedOnce(scale: CGFloat) throws {
+        let bridge = try XCTUnwrap(ScrollCaptureBridge(maximumAcceptedBytes: 32 * 1024 * 1024))
+        let offsets = [0, 15, 30, 45, 60]
+        var kinds: [ScrollCaptureAppendKind] = []
+        for offset in offsets {
+            kinds.append(try bridge.append(TestImageFactory.verticalDocumentViewportWithFixedFooter(
+                offset: offset,
+                scale: scale
+            )).kind)
+        }
+
+        let final = try XCTUnwrap(bridge.finalImage())
+        XCTAssertEqual(final.representations.first?.pixelsHigh, Int((280 + 60) * scale))
+        XCTAssertEqual(final.size.height, 340, accuracy: 0.001)
+        XCTAssertEqual(kinds.last?.rawValue, ScrollCaptureAppendKind.acceptedAppend.rawValue)
+    }
+
     private func renderedPixels(_ image: NSImage, at points: [(Int, Int)]) -> [[UInt8]] {
         let width = Int(image.size.width)
         let height = Int(image.size.height)

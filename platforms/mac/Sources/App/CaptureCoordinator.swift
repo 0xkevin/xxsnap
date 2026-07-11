@@ -110,6 +110,7 @@ final class CaptureCoordinator {
         scrollCapturePresentationFactory: @escaping @MainActor (
             ScrollCapturePresentationContext
         ) -> any ScrollCapturePresenting = CaptureCoordinator.makeScrollCapturePresentation,
+        screenVisibleFrameResolver: (@MainActor (NSRect) -> NSRect)? = nil,
         longImageHandoff: (@MainActor (NSImage, ScrollCaptureSeed) -> Void)? = nil,
         longImageEditorFactory: (@MainActor (
             NSImage, ScrollCaptureSeed, LongImageEditorActions
@@ -137,11 +138,13 @@ final class CaptureCoordinator {
             )
         }
         self.scrollCapturePresentationFactory = scrollCapturePresentationFactory
+        let resolveVisibleFrame = screenVisibleFrameResolver ?? Self.visibleFrame(containing:)
         self.longImageHandoff = longImageHandoff
         self.longImageEditorFactory = longImageEditorFactory ?? { image, seed, actions in
             LongImageEditorWindowController(
                 image: image,
                 seed: seed,
+                visibleFrame: resolveVisibleFrame(seed.screenRect),
                 actions: actions,
                 language: settingsStore.load().language
             )
@@ -827,6 +830,9 @@ extension CaptureCoordinator {
     }
 
     var test_hasLongImageEditor: Bool { longImageEditor != nil }
+    var test_longImageEditorWindowFrame: NSRect? {
+        (longImageEditor as? LongImageEditorWindowController)?.test_initialWindowFrame
+    }
 
     var test_pinnedWindowCount: Int {
         pinnedWindowControllers.count

@@ -806,6 +806,68 @@ final class LongImageEditorTests: XCTestCase {
         controller.stop()
     }
 
+    func testStrictLongImageRendererReportsContextTileAndFinalFailures() throws {
+        let image = TestImageFactory.solid(size: NSSize(width: 120, height: 900), color: .white)
+        let annotation = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 10, y: 20, width: 60, height: 50),
+            style: CaptureAnnotationStyle()
+        )
+
+        for stage in [LongImageRenderStage.source, .context, .middleTile, .finalImage] {
+            XCTAssertThrowsError(try CaptureAnnotationRenderer.test_renderLongImageStrict(
+                image: image,
+                annotations: [annotation],
+                eraserMasks: [],
+                failingAt: stage
+            )) { error in
+                XCTAssertEqual(error as? LongImageRenderError, .creationFailed(stage))
+            }
+        }
+    }
+
+    func testRenderFailureSkipsEveryActionAndEachActionCanRetry() {
+        let source = TestImageFactory.solid(size: NSSize(width: 120, height: 900), color: .white)
+        let rendered = TestImageFactory.solid(size: source.size, color: .red)
+        var renderCount = 0
+        var actionCounts = [0, 0, 0]
+        for actionIndex in 0..<3 {
+            var shouldFail = true
+            let controller = LongImageEditorWindowController(
+                canonicalImage: source,
+                visibleFrame: NSRect(x: 0, y: 0, width: 500, height: 450),
+                actions: LongImageEditorActions(
+                    copy: { _ in actionCounts[0] += 1; return true },
+                    save: { _ in actionCounts[1] += 1; return true },
+                    pin: { _ in actionCounts[2] += 1; return true }
+                ),
+                renderer: { _, _, _ in
+                    renderCount += 1
+                    if shouldFail { throw LongImageRenderError.creationFailed(.context) }
+                    return rendered
+                }
+            )
+            controller.show()
+            let button = [controller.test_copyButton, controller.test_saveButton, controller.test_pinButton][actionIndex]
+            let countsBeforeFailure = actionCounts
+            button.performClick(nil)
+            XCTAssertEqual(actionCounts, countsBeforeFailure)
+            XCTAssertNil(controller.test_cachedRenderedRevision)
+            XCTAssertNotNil(controller.test_lastRenderError)
+            XCTAssertEqual(controller.window?.isVisible, true)
+
+            shouldFail = false
+            button.performClick(nil)
+            XCTAssertEqual(actionCounts[actionIndex], 1)
+            XCTAssertTrue(controller.test_cachedRenderedRevision === rendered)
+            XCTAssertNil(controller.test_lastRenderError)
+            controller.stop()
+        }
+
+        XCTAssertEqual(actionCounts, [1, 1, 1])
+        XCTAssertEqual(renderCount, 6)
+    }
+
     func testLongEditorActionsUseEnglishLocalizedLabelsAndTooltips() {
         let controller = LongImageEditorWindowController(
             image: TestImageFactory.solid(size: NSSize(width: 120, height: 500), color: .white),

@@ -2,6 +2,7 @@
 
 #include "snipory/core/scroll/ScrollStitchSession.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -38,18 +39,36 @@ void setError(NSError **error, BridgeError code, NSString *message)
 
 struct BridgeImplementation final {
     explicit BridgeImplementation(std::size_t maximumAcceptedBytes)
-        : session([maximumAcceptedBytes] {
-            ScrollStitchConfig config;
-            config.maximumAcceptedBytes = maximumAcceptedBytes;
-            return config;
-        }())
+        : maximumAcceptedBytes(maximumAcceptedBytes)
     {
     }
 
-    ScrollStitchSession session;
+    std::size_t maximumAcceptedBytes;
+    std::unique_ptr<ScrollStitchSession> session;
     CGFloat sourceScale = 1.0;
     bool acceptedImage = false;
 };
+
+std::unique_ptr<ScrollStitchSession> makeSession(
+    std::size_t maximumAcceptedBytes, CGFloat sourceScale, int frameHeight)
+{
+    ScrollStitchConfig config;
+    config.maximumAcceptedBytes = maximumAcceptedBytes;
+    constexpr int defaultFixedBandPointBudget = 96;
+    const auto scaledBudget = defaultFixedBandPointBudget * sourceScale;
+    if (!std::isfinite(scaledBudget)
+        || scaledBudget > std::numeric_limits<int>::max()) {
+        return nullptr;
+    }
+    const auto pixelBudget = std::min<long>(
+        std::lround(scaledBudget), frameHeight / 4);
+    if (pixelBudget < 0) {
+        return nullptr;
+    }
+    config.fixedTopCandidateHeight = static_cast<int>(pixelBudget);
+    config.fixedBottomCandidateHeight = static_cast<int>(pixelBudget);
+    return std::make_unique<ScrollStitchSession>(config);
+}
 
 CGImageRef bestCGImage(NSImage *image)
 {
@@ -303,7 +322,15 @@ BridgeImplementation *implementationOrError(void *pointer, NSError **error)
         return nil;
     }
     try {
-        const AppendResult result = implementation->session.append(frame);
+        if (implementation->session == nullptr) {
+            implementation->session = makeSession(
+                implementation->maximumAcceptedBytes, sourceScale, frame.height);
+            if (implementation->session == nullptr) {
+                setError(error, BridgeError::InvalidImage, @"The image scale is invalid.");
+                return nil;
+            }
+        }
+        const AppendResult result = implementation->session->append(frame);
         if (result.kind == AppendKind::AcceptedInitial) {
             implementation->sourceScale = sourceScale;
             implementation->acceptedImage = true;
@@ -332,7 +359,7 @@ BridgeImplementation *implementationOrError(void *pointer, NSError **error)
     }
     try {
         return imageFromFrame(
-            implementation->session.preview(static_cast<int>(maximumHeight)),
+            implementation->session->preview(static_cast<int>(maximumHeight)),
             implementation->sourceScale, error);
     } catch (...) {
         setError(error, BridgeError::InternalFailure, @"The scroll stitch engine failed to create a preview.");
@@ -352,7 +379,7 @@ BridgeImplementation *implementationOrError(void *pointer, NSError **error)
     }
     try {
         return imageFromFrame(
-            implementation->session.finalize(), implementation->sourceScale, error);
+            implementation->session->finalize(), implementation->sourceScale, error);
     } catch (...) {
         setError(error, BridgeError::InternalFailure, @"The scroll stitch engine failed to create the final image.");
         return nil;

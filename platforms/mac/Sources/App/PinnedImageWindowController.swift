@@ -92,12 +92,20 @@ final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPr
     private var imageActionHandlerForTesting: ((CaptureCompletionAction) -> Void)?
 #endif
 
-    init(image: NSImage, screenRect: NSRect? = nil, visibleFrame: NSRect? = NSScreen.main?.visibleFrame) {
+    init(
+        image: NSImage,
+        screenRect: NSRect? = nil,
+        visibleFrame: NSRect? = nil,
+        screenResolver: (NSRect) -> NSRect? = PinnedImageWindowController.visibleFrame(containing:)
+    ) {
         self.pinnedImage = image
         let requestedRect = screenRect?.standardized ?? NSRect(origin: .zero, size: image.size)
         self.screenRect = requestedRect.isEmpty ? NSRect(origin: .zero, size: image.size) : requestedRect
         self.imageAspectRatio = image.size.width / max(image.size.height, 1)
-        let screenFrame = visibleFrame ?? NSRect(x: 0, y: 0, width: 800, height: 600)
+        let screenFrame = visibleFrame
+            ?? screenResolver(self.screenRect)
+            ?? NSScreen.main?.visibleFrame
+            ?? NSRect(x: 0, y: 0, width: 800, height: 600)
         let requestedImageFrame = self.screenRect
         let windowFrame = PinnedImageWindowGeometry.windowFrame(forImageFrame: requestedImageFrame)
         let needsFitting = windowFrame.width > screenFrame.width || windowFrame.height > screenFrame.height
@@ -145,6 +153,15 @@ final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPr
         window.delegate = self
         view.controller = self
         Self.activeControllers.add(self)
+    }
+
+    private static func visibleFrame(containing rect: NSRect) -> NSRect? {
+        if let screen = NSScreen.screens.first(where: { NSMouseInRect(rect.origin, $0.frame, false) }) {
+            return screen.visibleFrame
+        }
+        let point = NSPoint(x: rect.midX, y: rect.midY)
+        return NSScreen.screens.first(where: { NSMouseInRect(point, $0.frame, false) })?.visibleFrame
+            ?? NSScreen.screens.first(where: { $0.frame.intersects(rect) })?.visibleFrame
     }
 
     @available(*, unavailable)
