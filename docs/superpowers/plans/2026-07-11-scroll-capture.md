@@ -415,7 +415,7 @@ Add the bridge, the three core `.cpp` files, and the test to the correct build p
 Run:
 
 ```bash
-xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived -only-testing:xxsnapMacTests/ScrollCaptureBridgeTests test
+xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived -only-testing:xxsnapTests/ScrollCaptureBridgeTests test
 ```
 
 Expected: the test fails because the Objective-C API is not implemented.
@@ -458,7 +458,7 @@ Convert through `CGContext` into premultiplied BGRA bytes, preserve pixel dimens
 - [ ] **Step 4: Run bridge and project build**
 
 ```bash
-xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived -only-testing:xxsnapMacTests/ScrollCaptureBridgeTests test
+xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived -only-testing:xxsnapTests/ScrollCaptureBridgeTests test
 xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived build
 ```
 
@@ -602,7 +602,7 @@ Low confidence and resource limit enter distinct pause reasons. A reliable appen
 - [ ] **Step 6: Run focused tests**
 
 ```bash
-xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived -only-testing:xxsnapMacTests/ScrollCaptureSessionTests -only-testing:xxsnapMacTests/ScreenCaptureServiceTests test
+xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived -only-testing:xxsnapTests/ScrollCaptureSessionTests -only-testing:xxsnapTests/ScreenCaptureServiceTests test
 ```
 
 Expected: session and capture-service tests pass.
@@ -687,7 +687,7 @@ Use a borderless nonactivating panel with an `NSScrollView`. Replace its downsam
 - [ ] **Step 6: Run presentation and overlay tests**
 
 ```bash
-xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived -only-testing:xxsnapMacTests/ScrollCapturePresentationTests -only-testing:xxsnapMacTests/SelectionToolbarStateTests test
+xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived -only-testing:xxsnapTests/ScrollCapturePresentationTests -only-testing:xxsnapTests/SelectionToolbarStateTests test
 ```
 
 Expected: layout, control-state, and restore tests pass.
@@ -773,7 +773,7 @@ The separate controls panel and overlay key handling must both route `Enter` to 
 - [ ] **Step 5: Run coordinator and overlay tests**
 
 ```bash
-xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived -only-testing:xxsnapMacTests/SelectionToolbarStateTests test
+xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived -only-testing:xxsnapTests/SelectionToolbarStateTests test
 ```
 
 Expected: existing selection and new scroll lifecycle tests pass.
@@ -839,7 +839,7 @@ Add a renderer entry point that accepts the full image, full-image annotations, 
 - [ ] **Step 6: Run editor and renderer tests**
 
 ```bash
-xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived -only-testing:xxsnapMacTests/LongImageEditorTests -only-testing:xxsnapMacTests/SelectionToolbarStateTests test
+xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived -only-testing:xxsnapTests/LongImageEditorTests -only-testing:xxsnapTests/SelectionToolbarStateTests test
 ```
 
 Expected: editor geometry and existing annotation tests pass.
@@ -895,7 +895,7 @@ If final composition succeeds but editor creation fails, retain the image as `la
 - [ ] **Step 5: Run focused output tests**
 
 ```bash
-xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived -only-testing:xxsnapMacTests/LongImageEditorTests -only-testing:xxsnapMacTests/SelectionToolbarStateTests test
+xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived -only-testing:xxsnapTests/LongImageEditorTests -only-testing:xxsnapTests/SelectionToolbarStateTests test
 ```
 
 Expected: output parity, pin fitting, and fallback tests pass.
@@ -955,7 +955,7 @@ xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 APP_PATH="$REPO_ROOT/build/xcode-derived/Build/Products/Debug/XxSnap.app"
 APP_EXEC="$APP_PATH/Contents/MacOS/XxSnap"
-pkill -f "XxSnap.app/Contents/MacOS/XxSnap" || true
+pkill -f "$APP_EXEC" || true
 open -n "$APP_PATH"
 pgrep -af "$APP_EXEC"
 ```

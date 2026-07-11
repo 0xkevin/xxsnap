@@ -13,7 +13,7 @@ Use this checklist after building the exact Debug app from `build/xcode-derived`
 ## Scroll-capture test setup
 
 - [ ] Use a Trial or Pro license so the Scroll Capture button is visible; record the active plan.
-- [ ] Record whether xxsnap has macOS Accessibility or Input Monitoring permission. Finish Scroll Capture/Cancel buttons are the permission-independent path; target-app-frontmost keyboard checks require one of those permissions.
+- [ ] Record whether xxsnap has macOS Accessibility permission. Finish Scroll Capture/Cancel buttons are the permission-independent path; target-app-frontmost keyboard checks require that permission.
 - [ ] Prepare four deterministic targets: a long Safari page without a fixed header, the same or equivalent page with a fixed header, a long Chrome page without a fixed header, and the same or equivalent page with a fixed header.
 - [ ] Prepare an ordinary long document in Preview and, where available, a long plain-text document in a text editor. Include numbered rows or other unique seam markers.
 - [ ] For each target, begin at the top, lock a region wholly inside the scrollable content, add a visible first-screen annotation, and start Scroll Capture.
@@ -42,9 +42,9 @@ For every executed row, save a representative PNG outside the repository and ins
 - [ ] After upward review, scroll downward through already accepted content and then beyond the previous tail; confirm repeats/review frames are discarded and new content resumes appending once the tail advances.
 - [ ] Scroll the live preview upward; confirm it stops following the tail while capture continues. Scroll the preview back to the bottom and confirm tail following resumes.
 - [ ] Use a repeated/low-detail region that produces low match confidence; confirm collection pauses with a warning and retains the accepted preview. Then scroll to a uniquely matchable downward frame and confirm collection can resume without restarting.
-- [ ] With Safari frontmost and xxsnap granted Accessibility or Input Monitoring permission, verify `Return` and keypad `Enter` on separate active/paused runs each trigger Finish Scroll Capture exactly once; verify `Esc` cancels and restores the locked selection/first-screen annotations.
+- [ ] With Safari frontmost and xxsnap granted Accessibility permission, verify `Return` and keypad `Enter` on separate active/paused runs each trigger Finish Scroll Capture exactly once; verify `Esc` cancels and restores the locked selection/first-screen annotations.
 - [ ] Repeat the target-frontmost keyboard check with Chrome. Confirm a local/global duplicate delivery cannot finish or cancel twice.
-- [ ] Without Accessibility/Input Monitoring permission, do not mark target-frontmost shortcuts passed. Verify the on-screen Finish Scroll Capture and Cancel buttons still complete/cancel reliably; also verify shortcuts continue to work when the xxsnap overlay itself owns the key event.
+- [ ] Without Accessibility permission, do not mark target-frontmost shortcuts passed. Verify the on-screen Finish Scroll Capture and Cancel buttons still complete/cancel reliably; also verify shortcuts continue to work when the xxsnap overlay itself owns the key event.
 - [ ] After a scroll cancel, verify ordinary screenshot escape behavior is unchanged: the first local `Esc` exits an active annotation tool and the second local `Esc` closes the ordinary capture.
 
 ## Fixed bands and scrollbar confidence
@@ -94,5 +94,5 @@ For every executed row, save a representative PNG outside the repository and ins
 
 - Computer Use runtime initialization succeeded once with `sky-ready`, but subsequent `sky.list_apps()` and `sky.get_app_state({app:'Google Chrome'})` calls repeatedly failed with the exact error `Sky Computer Use native pipe startup failed`.
 - Because the native control pipe could not start reliably, Safari、Chrome、Preview and XxSnap UI could not be operated or inspected with trustworthy evidence. The environment also could not distinguish physical mouse input from physical trackpad input. This is an automation-environment blocker, not a product failure.
-- Browser/document seam inspection, fixed-header and scrollbar behavior, target-app-frontmost Return/keypad Enter/Esc with and without Accessibility/Input Monitoring permission, mouse/trackpad inertia, long-image copy/save/pin, multi-display, and Retina/non-Retina checks remain `待人工`.
+- Browser/document seam inspection, fixed-header and scrollbar behavior, target-app-frontmost Return/keypad Enter/Esc with and without Accessibility permission, mouse/trackpad inertia, long-image copy/save/pin, multi-display, and Retina/non-Retina checks remain `待人工`.
 - Terminal verification found exactly one product process: PID `41041`, executable `/Users/kevin/Projects/open-source/Snipory/xxsnap/.worktrees/scroll-capture-impl/build/xcode-derived/Build/Products/Debug/XxSnap.app/Contents/MacOS/XxSnap`. Process-query helper noise is excluded from this record.
