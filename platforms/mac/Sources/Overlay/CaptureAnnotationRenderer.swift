@@ -1338,32 +1338,30 @@ enum CaptureAnnotationRenderer {
         imageRect: NSRect,
         annotations: [CaptureAnnotation]
     ) -> NSRect {
+        dependencyAnalysis(imageSize: imageSize, imageRect: imageRect, annotations: annotations).processingRect
+    }
+
+    private static func dependencyAnalysis(
+        imageSize: NSSize,
+        imageRect: NSRect,
+        annotations: [CaptureAnnotation]
+    ) -> (processingRect: NSRect, annotationIDs: Set<AnnotationID>) {
         let imageBounds = NSRect(origin: .zero, size: imageSize)
         let requested = imageRect.standardized.intersection(imageBounds)
+        let dependencies = annotations.map { longImageVisualBounds(for: $0).intersection(imageBounds) }
+        let directIndexes = Set(dependencies.indices.filter { dependencies[$0].intersects(requested) })
         var processing = requested
-        for annotation in annotations {
-            let visual = longImageVisualBounds(for: annotation).intersection(imageBounds)
-            if visual.intersects(requested) {
-                processing = processing.union(visual).intersection(imageBounds)
+        var includedIDs = Set<AnnotationID>()
+        for index in dependencies.indices.reversed() {
+            let dependency = dependencies[index]
+            guard directIndexes.contains(index) || dependency.intersects(processing) else { continue }
+            let annotation = annotations[index]
+            includedIDs.insert(annotation.id)
+            if isSourceDependentLongImageAnnotation(annotation) {
+                processing = processing.union(dependency).intersection(imageBounds)
             }
         }
-        var included = Set<AnnotationID>()
-        var didGrow = true
-        while didGrow {
-            didGrow = false
-            for annotation in annotations where !included.contains(annotation.id) && isSourceDependentLongImageAnnotation(annotation) {
-                let dependency = longImageVisualBounds(for: annotation).intersection(imageBounds)
-                if dependency.intersects(processing) {
-                    included.insert(annotation.id)
-                    let expanded = processing.union(dependency).intersection(imageBounds)
-                    if expanded != processing {
-                        processing = expanded
-                        didGrow = true
-                    }
-                }
-            }
-        }
-        return processing.intersection(imageBounds).integral
+        return (processing.intersection(imageBounds).integral, includedIDs)
     }
 
     private static func isSourceDependentLongImageAnnotation(_ annotation: CaptureAnnotation) -> Bool {
@@ -1376,8 +1374,9 @@ enum CaptureAnnotationRenderer {
         annotations: [CaptureAnnotation],
         eraserMasks: [EraserMask]
     ) -> VisibleLongImageRenderPlan {
-        let processing = visibleLongImageProcessingRect(imageSize: imageSize, imageRect: imageRect, annotations: annotations)
-        let annotationIDs = Set(annotations.lazy.filter { longImageVisualBounds(for: $0).intersects(processing) }.map(\.id))
+        let analysis = dependencyAnalysis(imageSize: imageSize, imageRect: imageRect, annotations: annotations)
+        let processing = analysis.processingRect
+        let annotationIDs = analysis.annotationIDs
         let maskIDs = Set(eraserMasks.lazy.filter {
             $0.rect.intersects(processing) && !$0.affectedAnnotationIDs.isDisjoint(with: annotationIDs)
         }.map(\.id))

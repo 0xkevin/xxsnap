@@ -196,6 +196,60 @@ final class LongImageEditorTests: XCTestCase {
         XCTAssertEqual(try pixelBytes(actual), try pixelBytes(expected))
     }
 
+    func testDependencyAnalysisDoesNotLetLaterMosaicChainAffectEarlierDirectMosaic() {
+        let requested = NSRect(x: 0, y: 20, width: 180, height: 100)
+        var style = CaptureAnnotationStyle(); style.strokeWidth = 10
+        let redaction = CaptureMosaicRedaction(type: .gaussianBlur, value: 16)
+        let direct = CaptureAnnotation(kind: .mosaicRectangle, rect: NSRect(x: 20, y: 35, width: 120, height: 50), style: style, mosaicRedaction: redaction)
+        let laterChain = (0..<100).map { index in
+            CaptureAnnotation(
+                kind: .mosaicRectangle,
+                rect: NSRect(x: 20, y: CGFloat(220 + index * 45), width: 120, height: 60),
+                style: style,
+                mosaicRedaction: redaction
+            )
+        }
+        let plan = CaptureAnnotationRenderer.visibleLongImageRenderPlan(
+            imageSize: NSSize(width: 180, height: 6_000), imageRect: requested,
+            annotations: [direct] + laterChain, eraserMasks: []
+        )
+        XCTAssertEqual(plan.annotationIDs, [direct.id])
+        XCTAssertLessThan(plan.processingRect.maxY, 220)
+    }
+
+    func testLateDirectMosaicPullsOnlyEarlierDependencyChainAndMatchesFullRender() throws {
+        let image = TestImageFactory.verticalDocumentViewport(offset: 0, width: 180, height: 1_200, scale: 2)
+        let requested = NSRect(x: 0, y: 610, width: 180, height: 100)
+        var mosaicStyle = CaptureAnnotationStyle(); mosaicStyle.strokeWidth = 10
+        var ordinaryStyle = CaptureAnnotationStyle(); ordinaryStyle.strokeColor = .red; ordinaryStyle.strokeWidth = 80
+        let redaction = CaptureMosaicRedaction(type: .gaussianBlur, value: 18)
+        let earliest = CaptureAnnotation(kind: .mosaicRectangle, rect: NSRect(x: 20, y: 350, width: 120, height: 70), style: mosaicStyle, mosaicRedaction: redaction)
+        let ordinary = CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 35, y: 445, width: 90, height: 45), style: ordinaryStyle)
+        let middle = CaptureAnnotation(kind: .mosaicRectangle, rect: NSRect(x: 25, y: 500, width: 120, height: 70), style: mosaicStyle, mosaicRedaction: redaction)
+        let direct = CaptureAnnotation(kind: .mosaicRectangle, rect: NSRect(x: 30, y: 615, width: 115, height: 65), style: mosaicStyle, mosaicRedaction: redaction)
+        let annotations = [earliest, ordinary, middle, direct]
+        let plan = CaptureAnnotationRenderer.visibleLongImageRenderPlan(
+            imageSize: image.size, imageRect: requested, annotations: annotations, eraserMasks: []
+        )
+        XCTAssertEqual(plan.annotationIDs, Set(annotations.map(\.id)))
+        let full = CaptureAnnotationRenderer.renderCompleteLongImage(image: image, annotations: annotations, eraserMasks: [])
+        let expected = try cropTopOrigin(full, rect: requested)
+        let actual = CaptureAnnotationRenderer.renderVisibleLongImageSlice(image: image, annotations: annotations, eraserMasks: [], imageRect: requested)
+        XCTAssertEqual(try pixelBytes(actual), try pixelBytes(expected))
+    }
+
+    func testLaterAnnotationDirectlyIntersectingRequestedIsAlwaysIncluded() {
+        let requested = NSRect(x: 0, y: 400, width: 180, height: 120)
+        let style = CaptureAnnotationStyle()
+        let early = CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 20, y: 410, width: 50, height: 40), style: style)
+        let later = CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 100, y: 450, width: 50, height: 40), style: style)
+        let plan = CaptureAnnotationRenderer.visibleLongImageRenderPlan(
+            imageSize: NSSize(width: 180, height: 1_000), imageRect: requested,
+            annotations: [early, later], eraserMasks: []
+        )
+        XCTAssertEqual(plan.annotationIDs, [early.id, later.id])
+    }
+
     func testResizePreservesTopVisibleCenterAnchor() {
         let before = LongImageEditorGeometry(
             imageSize: NSSize(width: 1_000, height: 8_000),
@@ -491,9 +545,14 @@ final class LongImageEditorTests: XCTestCase {
         let text = CaptureAnnotation(kind: .text, rect: NSRect(x: 20, y: 930, width: 200, height: 90), style: textStyle, rotationAngle: -.pi / 8, text: "Boundary")
         let annotations = [rotated, text]
         let processing = CaptureAnnotationRenderer.visibleLongImageProcessingRect(imageSize: image.size, imageRect: rect, annotations: annotations)
-        XCTAssertLessThan(processing.minY, rect.minY - 100)
-        XCTAssertGreaterThan(processing.maxY, rect.maxY + 40)
-        XCTAssertLessThan(processing.height, image.size.height)
+        XCTAssertEqual(processing, rect.integral)
+        let plan = CaptureAnnotationRenderer.visibleLongImageRenderPlan(
+            imageSize: image.size,
+            imageRect: rect,
+            annotations: annotations,
+            eraserMasks: []
+        )
+        XCTAssertEqual(plan.annotationIDs, Set(annotations.map(\.id)))
         let full = CaptureAnnotationRenderer.renderCompleteLongImage(image: image, annotations: annotations, eraserMasks: [])
         let expected = try cropTopOrigin(full, rect: rect)
         let actual = CaptureAnnotationRenderer.renderVisibleLongImageSlice(image: image, annotations: annotations, eraserMasks: [], imageRect: rect)
