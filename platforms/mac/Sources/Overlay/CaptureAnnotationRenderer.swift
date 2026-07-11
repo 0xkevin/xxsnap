@@ -1230,6 +1230,72 @@ enum CaptureAnnotationRenderer {
         render(image: image, annotations: annotations, eraserMasks: eraserMasks)
     }
 
+    static func renderCompleteLongImage(
+        image: NSImage,
+        annotations: [CaptureAnnotation],
+        eraserMasks: [EraserMask]
+    ) -> NSImage {
+        let rendererAnnotations = annotations.map {
+            LongImageAnnotationTranslation.annotationFromTopOriginToRenderer($0, imageHeight: image.size.height)
+        }
+        let rendererMasks = eraserMasks.map {
+            LongImageAnnotationTranslation.maskFromTopOriginToRenderer($0, imageHeight: image.size.height)
+        }
+        return renderLongImage(image: image, annotations: rendererAnnotations, eraserMasks: rendererMasks)
+    }
+
+    /// Renders only a bounded processing region around the viewport. The
+    /// margin keeps source-dependent mosaic and magnifier sampling local while
+    /// avoiding allocation of a second complete long image during scrolling.
+    static func renderVisibleLongImageSlice(
+        image: NSImage,
+        annotations: [CaptureAnnotation],
+        eraserMasks: [EraserMask],
+        imageRect: NSRect
+    ) -> NSImage {
+        let imageBounds = NSRect(origin: .zero, size: image.size)
+        let requested = imageRect.standardized.intersection(imageBounds)
+        guard !requested.isEmpty else { return NSImage(size: .zero) }
+        let processing = visibleLongImageProcessingRect(imageSize: image.size, imageRect: requested)
+        guard let source = cropLongImage(image, rect: processing) else { return image }
+        let visibleAnnotations = annotations.filter { $0.rect.intersects(processing) }
+        let visibleIDs = Set(visibleAnnotations.map(\.id))
+        let visibleMasks = eraserMasks.filter { !$0.affectedAnnotationIDs.isDisjoint(with: visibleIDs) && $0.rect.intersects(processing) }
+        let offset = NSPoint(x: -processing.minX, y: -processing.minY)
+        let localAnnotations = visibleAnnotations.map {
+            let topLocal = LongImageAnnotationTranslation.annotation($0, by: offset)
+            return LongImageAnnotationTranslation.annotationFromTopOriginToRenderer(topLocal, imageHeight: processing.height)
+        }
+        let localMasks = visibleMasks.map {
+            let topLocal = LongImageAnnotationTranslation.mask($0, by: offset)
+            return LongImageAnnotationTranslation.maskFromTopOriginToRenderer(topLocal, imageHeight: processing.height)
+        }
+        let rendered = render(image: source, annotations: localAnnotations, eraserMasks: localMasks)
+        let localRequest = requested.offsetBy(dx: -processing.minX, dy: -processing.minY)
+        return cropLongImage(rendered, rect: localRequest) ?? rendered
+    }
+
+    static func visibleLongImageProcessingRect(imageSize: NSSize, imageRect: NSRect) -> NSRect {
+        let processingMargin: CGFloat = 256
+        return imageRect.standardized
+            .insetBy(dx: -processingMargin, dy: -processingMargin)
+            .intersection(NSRect(origin: .zero, size: imageSize))
+    }
+
+    private static func cropLongImage(_ image: NSImage, rect: NSRect) -> NSImage? {
+        guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+        let scaleX = CGFloat(cg.width) / max(image.size.width, 1)
+        let scaleY = CGFloat(cg.height) / max(image.size.height, 1)
+        let pixels = CGRect(
+            x: rect.minX * scaleX,
+            y: rect.minY * scaleY,
+            width: rect.width * scaleX,
+            height: rect.height * scaleY
+        ).integral.intersection(CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+        guard let cropped = cg.cropping(to: pixels) else { return nil }
+        return NSImage(cgImage: cropped, size: rect.size)
+    }
+
     private static func renderImage(
         image: NSImage,
         annotations: [CaptureAnnotation],

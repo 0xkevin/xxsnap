@@ -59,6 +59,23 @@ enum LongImageAnnotationTranslation {
     static func mask(_ source: EraserMask, toImageSliceOrigin origin: NSPoint, displayScale: CGFloat) -> EraserMask {
         mask(scaled(source, by: 1 / max(displayScale, 0.0001)), by: origin)
     }
+    static func annotationFromTopOriginToRenderer(_ source: CaptureAnnotation, imageHeight: CGFloat) -> CaptureAnnotation {
+        var result = source
+        result.rect.origin.y = imageHeight - result.rect.maxY
+        if var line = result.arrowLine {
+            line.start.y = imageHeight - line.start.y; line.end.y = imageHeight - line.end.y
+            line.control.y = imageHeight - line.control.y; result.arrowLine = line
+        }
+        if var path = result.brushPath { path.points = path.points.map { NSPoint(x: $0.x, y: imageHeight - $0.y) }; result.brushPath = path }
+        if var line = result.markerLine {
+            line.start.y = imageHeight - line.start.y; line.end.y = imageHeight - line.end.y; result.markerLine = line
+        }
+        if var stroke = result.mosaicStroke { stroke.points = stroke.points.map { NSPoint(x: $0.x, y: imageHeight - $0.y) }; result.mosaicStroke = stroke }
+        return result
+    }
+    static func maskFromTopOriginToRenderer(_ source: EraserMask, imageHeight: CGFloat) -> EraserMask {
+        var result = source; result.rect.origin.y = imageHeight - result.rect.maxY; return result
+    }
     private static func scaled(_ source: CaptureAnnotation, by scale: CGFloat) -> CaptureAnnotation {
         var result = source
         result.rect = NSRect(x: result.rect.minX * scale, y: result.rect.minY * scale, width: result.rect.width * scale, height: result.rect.height * scale)
@@ -128,6 +145,8 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     private var boundsObserver: NSObjectProtocol?
     private var overlay: SelectionOverlayWindow?
     private var interactionLocked = false
+    private var didStop = false
+    private var viewportRefreshCount = 0
     private(set) var geometry: LongImageEditorGeometry
     var onFinishEditing: ((NSImage, [CaptureAnnotation], [EraserMask]) -> Void)?
 
@@ -158,14 +177,26 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     @available(*, unavailable) required init?(coder: NSCoder) { nil }
     deinit {
         if let boundsObserver { NotificationCenter.default.removeObserver(boundsObserver) }
-        overlay?.orderOut(nil)
     }
 
     func show() { showWindow(nil); window?.makeKeyAndOrderFront(nil); showOverlay() }
+    func stop() {
+        guard !didStop else { return }
+        didStop = true
+        if let boundsObserver { NotificationCenter.default.removeObserver(boundsObserver) }
+        boundsObserver = nil
+        interactionLocked = false
+        overlay?.orderOut(nil)
+        overlay = nil
+        imageView.image = nil
+        documentState = LongImageEditorDocument(image: NSImage(size: .zero), annotations: [], eraserMasks: [])
+        window?.orderOut(nil)
+        onFinishEditing = nil
+    }
     func windowDidResize(_ notification: Notification) {
         let anchor = geometry.topVisibleCenter; commitOverlay(); relayout(preserving: anchor); refreshOverlay()
     }
-    func windowWillClose(_ notification: Notification) { commitOverlay(); overlay?.orderOut(nil); overlay = nil }
+    func windowWillClose(_ notification: Notification) { commitOverlay(); stop() }
 
     private func configureViews() {
         guard let content = window?.contentView else { return }
@@ -209,22 +240,36 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         let frame = viewportScreenFrame()
         let config = SelectionOverlayConfiguration.longImageEditor(
             windowFrame: frame, selectionRect: NSRect(origin: .zero, size: frame.size),
-            initialAnnotations: slice.annotations.map { LongImageAnnotationTranslation.annotation($0, fromImageSliceOrigin: .zero, displayScale: geometry.fitWidthScale) },
-            initialEraserMasks: slice.eraserMasks.map { LongImageAnnotationTranslation.mask($0, fromImageSliceOrigin: .zero, displayScale: geometry.fitWidthScale) },
+            initialAnnotations: slice.annotations.map {
+                let viewportTop = LongImageAnnotationTranslation.annotation($0, fromImageSliceOrigin: .zero, displayScale: geometry.fitWidthScale)
+                return LongImageAnnotationTranslation.annotationFromTopOriginToRenderer(viewportTop, imageHeight: frame.height)
+            },
+            initialEraserMasks: slice.eraserMasks.map {
+                let viewportTop = LongImageAnnotationTranslation.mask($0, fromImageSliceOrigin: .zero, displayScale: geometry.fitWidthScale)
+                return LongImageAnnotationTranslation.maskFromTopOriginToRenderer(viewportTop, imageHeight: frame.height)
+            },
             interactionBegan: { [weak self] in self?.lock(true) }, interactionEnded: { [weak self] in self?.lock(false) }
         )
         let value = SelectionOverlayWindow(backgroundImage: displayImage(slice.image, size: frame.size), configuration: config) { [weak self] in self?.finish($0) }
         overlay = value; value.present()
     }
     private func refreshOverlay() {
+        guard !didStop else { return }
+        viewportRefreshCount += 1
         guard let overlay else { return }
         let slice = LongImageEditorDocument.visibleSlice(image: documentState.image, annotations: documentState.annotations, eraserMasks: documentState.eraserMasks, imageRect: visibleImageRect)
         let frame = viewportScreenFrame()
         overlay.updateLongImageEditor(
             windowFrame: frame, backgroundImage: displayImage(slice.image, size: frame.size),
             selectionRect: NSRect(origin: .zero, size: frame.size),
-            annotations: slice.annotations.map { LongImageAnnotationTranslation.annotation($0, fromImageSliceOrigin: .zero, displayScale: geometry.fitWidthScale) },
-            eraserMasks: slice.eraserMasks.map { LongImageAnnotationTranslation.mask($0, fromImageSliceOrigin: .zero, displayScale: geometry.fitWidthScale) }
+            annotations: slice.annotations.map {
+                let viewportTop = LongImageAnnotationTranslation.annotation($0, fromImageSliceOrigin: .zero, displayScale: geometry.fitWidthScale)
+                return LongImageAnnotationTranslation.annotationFromTopOriginToRenderer(viewportTop, imageHeight: frame.height)
+            },
+            eraserMasks: slice.eraserMasks.map {
+                let viewportTop = LongImageAnnotationTranslation.mask($0, fromImageSliceOrigin: .zero, displayScale: geometry.fitWidthScale)
+                return LongImageAnnotationTranslation.maskFromTopOriginToRenderer(viewportTop, imageHeight: frame.height)
+            }
         )
     }
     private func commitOverlay() {
@@ -232,12 +277,14 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         let origin = visibleImageRect.origin, oldVisible = Set(documentState.annotations.filter { $0.rect.intersects(visibleImageRect) }.map(\.id))
         let localIDs = Set(snapshot.annotations.map(\.id)); documentState.annotations.removeAll { oldVisible.contains($0.id) && !localIDs.contains($0.id) }
         for local in snapshot.annotations {
-            let full = LongImageAnnotationTranslation.annotation(local, toImageSliceOrigin: origin, displayScale: geometry.fitWidthScale)
+            let viewportTop = LongImageAnnotationTranslation.annotationFromTopOriginToRenderer(local, imageHeight: viewportScreenFrame().height)
+            let full = LongImageAnnotationTranslation.annotation(viewportTop, toImageSliceOrigin: origin, displayScale: geometry.fitWidthScale)
             if let index = documentState.annotations.firstIndex(where: { $0.id == full.id }) { documentState.annotations[index] = full } else { documentState.annotations.append(full) }
         }
         let localMaskIDs = Set(snapshot.eraserMasks.map(\.id)); documentState.eraserMasks.removeAll { $0.rect.intersects(visibleImageRect) && !localMaskIDs.contains($0.id) }
         for local in snapshot.eraserMasks {
-            let full = LongImageAnnotationTranslation.mask(local, toImageSliceOrigin: origin, displayScale: geometry.fitWidthScale)
+            let viewportTop = LongImageAnnotationTranslation.maskFromTopOriginToRenderer(local, imageHeight: viewportScreenFrame().height)
+            let full = LongImageAnnotationTranslation.mask(viewportTop, toImageSliceOrigin: origin, displayScale: geometry.fitWidthScale)
             if let index = documentState.eraserMasks.firstIndex(where: { $0.id == full.id }) { documentState.eraserMasks[index] = full } else { documentState.eraserMasks.append(full) }
         }
     }
@@ -247,10 +294,18 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     }
     private func finish(_ result: CaptureSelectionResult?) {
         guard result?.action == .finishEditing else { return }; commitOverlay()
-        onFinishEditing?(documentState.image, documentState.annotations, documentState.eraserMasks); close()
+        onFinishEditing?(documentState.image, documentState.annotations, documentState.eraserMasks)
+        close()
+        stop()
     }
     private func displayImage(_ image: NSImage, size: NSSize) -> NSImage {
         guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return image }
         return NSImage(cgImage: cg, size: size)
     }
+#if DEBUG
+    var test_editingOverlay: SelectionOverlayWindow? { overlay }
+    var test_isDocumentScrollingEnabled: Bool { !interactionLocked }
+    var test_hasBoundsObserver: Bool { boundsObserver != nil }
+    var test_viewportRefreshCount: Int { viewportRefreshCount }
+#endif
 }
