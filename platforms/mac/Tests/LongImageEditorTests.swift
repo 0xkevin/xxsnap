@@ -159,6 +159,20 @@ final class LongImageEditorTests: XCTestCase {
         XCTAssertEqual(slice.annotations.first?.rect.origin, NSPoint(x: 30.5, y: 20))
     }
 
+    func testRendererFractionalVisibleCropMatchesIndependentSamplingOracle() throws {
+        let image = TestImageFactory.verticalDocumentViewport(offset: 0, width: 240, height: 1_200, scale: 2)
+        let requested = NSRect(x: 0, y: 100.25, width: 240, height: 100.5)
+        let actual = CaptureAnnotationRenderer.renderVisibleLongImageSlice(
+            image: image,
+            annotations: [],
+            eraserMasks: [],
+            imageRect: requested
+        )
+        let expected = try fractionallySampleTopOrigin(image, rect: requested)
+        XCTAssertEqual(pixelSize(actual), NSSize(width: 480, height: 201))
+        XCTAssertEqual(try pixelBytes(actual), try pixelBytes(expected))
+    }
+
     func testThinBarArrowVisualExtentEntersSliceOutsideLineRect() {
         var style = CaptureAnnotationStyle(); style.strokeWidth = 1
         let line = CaptureArrowLine(
@@ -1096,6 +1110,26 @@ final class LongImageEditorTests: XCTestCase {
         let sy = CGFloat(cg.height) / image.size.height
         let pixels = CGRect(x: rect.minX * sx, y: rect.minY * sy, width: rect.width * sx, height: rect.height * sy).integral
         return NSImage(cgImage: try XCTUnwrap(cg.cropping(to: pixels)), size: rect.size)
+    }
+
+    private func fractionallySampleTopOrigin(_ image: NSImage, rect: NSRect) throws -> NSImage {
+        let source = try XCTUnwrap(image.cgImage(forProposedRect: nil, context: nil, hints: nil))
+        let sx = CGFloat(source.width) / image.size.width, sy = CGFloat(source.height) / image.size.height
+        let requested = CGRect(x: rect.minX * sx, y: rect.minY * sy, width: rect.width * sx, height: rect.height * sy)
+        let enclosing = requested.integral.intersection(CGRect(x: 0, y: 0, width: source.width, height: source.height))
+        let crop = try XCTUnwrap(source.cropping(to: enclosing))
+        let width = Int(requested.width.rounded()), height = Int(requested.height.rounded())
+        let context = try XCTUnwrap(CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: source.colorSpace ?? CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.interpolationQuality = .none
+        context.draw(crop, in: CGRect(
+            x: enclosing.minX - requested.minX, y: enclosing.minY - requested.minY,
+            width: enclosing.width, height: enclosing.height
+        ))
+        return NSImage(cgImage: try XCTUnwrap(context.makeImage()), size: rect.size)
     }
 
     private func pixelSize(_ image: NSImage) -> NSSize {

@@ -1532,17 +1532,46 @@ enum CaptureAnnotationRenderer {
 
 
     private static func cropLongImage(_ image: NSImage, rect: NSRect) -> NSImage? {
+        sampleLongImage(image, rect: rect)
+    }
+
+    static func sampleLongImage(_ image: NSImage, rect: NSRect) -> NSImage? {
         guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
         let scaleX = CGFloat(cg.width) / max(image.size.width, 1)
         let scaleY = CGFloat(cg.height) / max(image.size.height, 1)
-        let pixels = CGRect(
+        let requestedPixels = CGRect(
             x: rect.minX * scaleX,
             y: rect.minY * scaleY,
             width: rect.width * scaleX,
             height: rect.height * scaleY
-        ).integral.intersection(CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
-        guard let cropped = cg.cropping(to: pixels) else { return nil }
-        return NSImage(cgImage: cropped, size: rect.size)
+        )
+        let bounds = CGRect(x: 0, y: 0, width: cg.width, height: cg.height)
+        let enclosingPixels = requestedPixels.integral.intersection(bounds)
+        guard let cropped = cg.cropping(to: enclosingPixels) else { return nil }
+        let width = max(1, Int(requestedPixels.width.rounded()))
+        let height = max(1, Int(requestedPixels.height.rounded()))
+        let colorSpace = cg.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        context.interpolationQuality = .none
+        context.draw(
+            cropped,
+            in: CGRect(
+                x: enclosingPixels.minX - requestedPixels.minX,
+                y: enclosingPixels.minY - requestedPixels.minY,
+                width: enclosingPixels.width,
+                height: enclosingPixels.height
+            )
+        )
+        guard let sampled = context.makeImage() else { return nil }
+        return NSImage(cgImage: sampled, size: rect.size)
     }
 
     private static func renderImage(
