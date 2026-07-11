@@ -172,6 +172,13 @@ public:
         int confirmedWidth = 0;
     };
 
+    enum class BandDecision
+    {
+        Ordinary,
+        Unresolved,
+        Fixed,
+    };
+
     struct PendingMovement final
     {
         std::shared_ptr<const ScrollFrame> frame;
@@ -179,6 +186,8 @@ public:
         int advance = 0;
         double confidence = 0.0;
         std::size_t persistentBytes = 0U;
+        BandDecision topDecision = BandDecision::Ordinary;
+        BandDecision bottomDecision = BandDecision::Ordinary;
     };
 
     struct FixedBandEvidence final
@@ -549,26 +558,40 @@ try {
         ? *implementation_->tail
         : *implementation_->pending.back().frame;
     const auto matcherConfig = implementation_->effectiveMatcherConfig();
-    const auto reverse = matcher.match(frame, evidenceTail, matcherConfig);
-    if (reverse.kind == OverlapKind::Reliable && reverse.verticalAdvance > 0) {
-        result.kind = AppendKind::ReviewDiscarded;
-        result.confidence = reverse.confidence;
-        return result;
-    }
     auto overlap = matcher.match(evidenceTail, frame, matcherConfig);
     result.confidence = overlap.confidence;
     const auto evidence = implementation_->fixedBandEvidence(evidenceTail, frame);
+    if (!evidence.top && !evidence.bottom) {
+        const auto reverse = matcher.match(frame, evidenceTail, matcherConfig);
+        if (reverse.kind == OverlapKind::Reliable && reverse.verticalAdvance > 0) {
+            result.kind = AppendKind::ReviewDiscarded;
+            result.confidence = reverse.confidence;
+            return result;
+        }
+    }
 
     bool discardPendingOnCommit = false;
-    if (!evidence.top && !evidence.bottom && !implementation_->pending.empty()
-        && overlap.kind == OverlapKind::Reliable
-        && overlap.verticalAdvance > 0) {
+    const bool topEvidenceBroke = !implementation_->fixedTopConfirmed
+        && implementation_->fixedTopAgreement > 0 && !evidence.top;
+    const bool bottomEvidenceBroke = !implementation_->fixedBottomConfirmed
+        && implementation_->fixedBottomAgreement > 0 && !evidence.bottom;
+    if (!implementation_->pending.empty() && (topEvidenceBroke || bottomEvidenceBroke)) {
         overlap = matcher.match(*implementation_->tail, frame, matcherConfig);
         result.confidence = overlap.confidence;
         discardPendingOnCommit = true;
     }
 
-    if (evidence.top || evidence.bottom) {
+    const bool continuePending = !discardPendingOnCommit
+        && (!implementation_->pending.empty() || evidence.top || evidence.bottom);
+    if (continuePending) {
+        const auto movementOverlap = evidence.top || evidence.bottom
+            ? evidence.overlap
+            : overlap;
+        if (movementOverlap.kind != OverlapKind::Reliable
+            || movementOverlap.verticalAdvance <= 0) {
+            implementation_->clearPending();
+            return result;
+        }
         const auto contribution = checkedSum(*fullFrameBytes, fingerprintBytes);
         const auto projected = contribution.has_value()
             ? checkedSum(implementation_->persistentBytes, *contribution)
@@ -586,8 +609,8 @@ try {
         Implementation::PendingMovement newMovement{
             *storedPendingFrame,
             std::move(fingerprint),
-            evidence.overlap.verticalAdvance,
-            evidence.overlap.confidence,
+            movementOverlap.verticalAdvance,
+            movementOverlap.confidence,
             *contribution,
         };
         const int requiredEvidence = std::max(3, config.fixedBandConfirmationMovements);
@@ -601,14 +624,44 @@ try {
             && nextTopAgreement >= requiredEvidence;
         const bool confirmBottom = !implementation_->fixedBottomConfirmed
             && nextBottomAgreement >= requiredEvidence;
-        const bool topStillUnresolved = !implementation_->fixedTopConfirmed
-            && nextTopAgreement > 0 && !confirmTop;
-        const bool bottomStillUnresolved = !implementation_->fixedBottomConfirmed
-            && nextBottomAgreement > 0 && !confirmBottom;
-        const bool flush = (confirmTop || confirmBottom)
-            && !topStillUnresolved && !bottomStillUnresolved;
-        if (!flush) {
+
+        using BandDecision = Implementation::BandDecision;
+        std::vector<std::pair<BandDecision, BandDecision>> decisions;
+        decisions.reserve(implementation_->pending.size() + 1U);
+        auto resolveExisting = [](BandDecision decision, bool confirm, bool evidenceNow) {
+            if (decision != BandDecision::Unresolved) {
+                return decision;
+            }
+            if (confirm) {
+                return BandDecision::Fixed;
+            }
+            return evidenceNow ? BandDecision::Unresolved : BandDecision::Ordinary;
+        };
+        for (const auto& movement : implementation_->pending) {
+            decisions.emplace_back(
+                resolveExisting(movement.topDecision, confirmTop, evidence.top),
+                resolveExisting(movement.bottomDecision, confirmBottom, evidence.bottom));
+        }
+        newMovement.topDecision = implementation_->fixedTopConfirmed || confirmTop
+            ? BandDecision::Fixed
+            : (evidence.top ? BandDecision::Unresolved : BandDecision::Ordinary);
+        newMovement.bottomDecision = implementation_->fixedBottomConfirmed || confirmBottom
+            ? BandDecision::Fixed
+            : (evidence.bottom ? BandDecision::Unresolved : BandDecision::Ordinary);
+        decisions.emplace_back(newMovement.topDecision, newMovement.bottomDecision);
+
+        std::size_t safePrefix = 0U;
+        while (safePrefix < decisions.size()
+            && decisions[safePrefix].first != BandDecision::Unresolved
+            && decisions[safePrefix].second != BandDecision::Unresolved) {
+            ++safePrefix;
+        }
+        if (safePrefix == 0U) {
             implementation_->pending.reserve(implementation_->pending.size() + 1U);
+            for (std::size_t i = 0; i < implementation_->pending.size(); ++i) {
+                implementation_->pending[i].topDecision = decisions[i].first;
+                implementation_->pending[i].bottomDecision = decisions[i].second;
+            }
             implementation_->pending.push_back(std::move(newMovement));
             implementation_->persistentBytes = *projected;
             implementation_->fixedTopAgreement = nextTopAgreement;
@@ -617,15 +670,17 @@ try {
         }
 
         std::vector<Implementation::Segment> preparedSegments;
-        preparedSegments.reserve(implementation_->pending.size() + 1U);
+        preparedSegments.reserve(safePrefix);
         int flushedHeight = 0;
         auto preparedScrollbar = implementation_->scrollbar;
         const ScrollFrame* previous = implementation_->tail.get();
-        auto prepareMovement = [&](const Implementation::PendingMovement& movement) {
+        auto prepareMovement = [&](
+                                   const Implementation::PendingMovement& movement,
+                                   BandDecision bottomDecision) {
             if (movement.advance > std::numeric_limits<int>::max() - flushedHeight) {
                 return false;
             }
-            const bool excludeBottom = implementation_->fixedBottomConfirmed || confirmBottom;
+            const bool excludeBottom = bottomDecision == BandDecision::Fixed;
             const int firstRow = movement.frame->height - movement.advance
                 - (excludeBottom ? config.fixedBottomCandidateHeight : 0);
             auto pixels = copyRows(*movement.frame, firstRow, movement.advance);
@@ -640,21 +695,22 @@ try {
             flushedHeight += movement.advance;
             return true;
         };
-        for (const auto& movement : implementation_->pending) {
-            if (!prepareMovement(movement)) {
+        for (std::size_t i = 0; i < safePrefix; ++i) {
+            const auto& movement = i < implementation_->pending.size()
+                ? implementation_->pending[i]
+                : newMovement;
+            if (!prepareMovement(movement, decisions[i].second)) {
                 result.kind = AppendKind::ResourceLimit;
                 return result;
             }
         }
-        if (!prepareMovement(newMovement)
-            || flushedHeight > std::numeric_limits<int>::max() - implementation_->height) {
+        if (flushedHeight > std::numeric_limits<int>::max() - implementation_->height) {
             result.kind = AppendKind::ResourceLimit;
             return result;
         }
 
         std::size_t flushedPersistent = *projected;
-        const std::size_t pendingCount = implementation_->pending.size() + 1U;
-        const auto pendingFrameBytes = checkedProduct(*fullFrameBytes, pendingCount);
+        const auto pendingFrameBytes = checkedProduct(*fullFrameBytes, safePrefix);
         const auto segmentBytes = imageBytes(frame.width, flushedHeight);
         if (!pendingFrameBytes.has_value() || !segmentBytes.has_value()
             || flushedPersistent < *pendingFrameBytes) {
@@ -685,28 +741,40 @@ try {
         implementation_->segments.reserve(
             implementation_->segments.size() + preparedSegments.size());
         implementation_->anchors.reserve(
-            implementation_->anchors.size() + implementation_->pending.size() + 1U);
+            implementation_->anchors.size() + safePrefix);
+        implementation_->pending.reserve(implementation_->pending.size() + 1U);
+        for (std::size_t i = 0; i < implementation_->pending.size(); ++i) {
+            implementation_->pending[i].topDecision = decisions[i].first;
+            implementation_->pending[i].bottomDecision = decisions[i].second;
+        }
+        implementation_->pending.push_back(std::move(newMovement));
         for (auto& segment : preparedSegments) {
             implementation_->segments.push_back(std::move(segment));
         }
-        for (auto& movement : implementation_->pending) {
-            implementation_->anchors.push_back(std::move(movement.fingerprint));
+        const auto newTail = implementation_->pending[safePrefix - 1U].frame;
+        for (std::size_t i = 0; i < safePrefix; ++i) {
+            implementation_->anchors.push_back(std::move(implementation_->pending[i].fingerprint));
         }
-        implementation_->anchors.push_back(std::move(newMovement.fingerprint));
-        implementation_->tail = newMovement.frame;
+        implementation_->pending.erase(
+            implementation_->pending.begin(),
+            implementation_->pending.begin() + static_cast<std::ptrdiff_t>(safePrefix));
+        implementation_->tail = newTail;
         implementation_->tailHasSeparateStorage = true;
-        implementation_->pending.clear();
         implementation_->persistentBytes = flushedPersistent;
         implementation_->fixedTopConfirmed = implementation_->fixedTopConfirmed || confirmTop;
         implementation_->fixedBottomConfirmed = implementation_->fixedBottomConfirmed || confirmBottom;
-        implementation_->fixedTopAgreement = 0;
-        implementation_->fixedBottomAgreement = 0;
+        implementation_->fixedTopAgreement = implementation_->fixedTopConfirmed
+            ? 0
+            : nextTopAgreement;
+        implementation_->fixedBottomAgreement = implementation_->fixedBottomConfirmed
+            ? 0
+            : nextBottomAgreement;
         implementation_->scrollbar = std::move(preparedScrollbar);
         implementation_->height += flushedHeight;
         result.kind = AppendKind::AcceptedAppend;
         result.appendedHeight = flushedHeight;
         result.outputHeight = implementation_->height;
-        result.confidence = evidence.overlap.confidence;
+        result.confidence = movementOverlap.confidence;
         return result;
     }
 
@@ -716,13 +784,19 @@ try {
     }
 
     const int appendedHeight = overlap.verticalAdvance;
-    const int bottomCandidate = config.fixedBottomCandidateHeight;
+    const int excludedTop = implementation_->fixedTopConfirmed
+        ? config.fixedTopCandidateHeight
+        : 0;
+    const int excludedBottom = implementation_->fixedBottomConfirmed
+        ? config.fixedBottomCandidateHeight
+        : 0;
+    const int firstNewRow = frame.height - excludedBottom - appendedHeight;
     if (appendedHeight > std::numeric_limits<int>::max() - implementation_->height
-        || appendedHeight > frame.height - bottomCandidate - config.fixedTopCandidateHeight) {
+        || firstNewRow < excludedTop) {
         result.kind = AppendKind::ResourceLimit;
         return result;
     }
-    const int rawRows = appendedHeight + bottomCandidate;
+    const int rawRows = appendedHeight;
     const auto rawBytes = imageBytes(frame.width, rawRows);
     if (!rawBytes.has_value()) {
         result.kind = AppendKind::ResourceLimit;
@@ -759,7 +833,7 @@ try {
         return result;
     }
 
-    auto rawSegment = copyRows(frame, frame.height - rawRows, rawRows);
+    auto rawSegment = copyRows(frame, firstNewRow, rawRows);
     const auto storedTail = copyFrame(frame);
     if (!rawSegment.isValid() || !storedTail.has_value()) {
         result.kind = AppendKind::ResourceLimit;
@@ -779,7 +853,7 @@ try {
         implementation_->scrollbar, *implementation_->tail, frame);
     implementation_->segments.push_back({
         *storedSegment,
-        implementation_->fixedBottomConfirmed ? 0 : bottomCandidate,
+        0,
         appendedHeight,
     });
     implementation_->anchors.push_back(std::move(fingerprint));
