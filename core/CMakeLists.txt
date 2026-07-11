@@ -1,5 +1,6 @@
 add_library(snipory_core
     src/annotation/AnnotationRenderer.cpp
+    src/scroll/FrameFingerprint.cpp
     src/usecases/SnapshotExportUseCase.cpp
 )
 target_compile_features(snipory_core PUBLIC cxx_std_20)
@@ -48,4 +49,5 @@ if(BUILD_TESTING)
     snipory_core_add_test(test_annotation_renderer tests/TestAnnotationRenderer.cpp)
     snipory_core_add_test(test_selection_geometry tests/TestSelectionGeometry.cpp)
     snipory_core_add_test(test_snapshot_export_use_case tests/TestSnapshotExportUseCase.cpp)
+    snipory_core_add_test(test_frame_fingerprint tests/TestFrameFingerprint.cpp)
 endif()
