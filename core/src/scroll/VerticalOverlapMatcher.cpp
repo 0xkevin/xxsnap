@@ -516,13 +516,12 @@ OverlapResult VerticalOverlapMatcher::match(
     result.verticalAdvance = best.advance;
     result.overlapHeight = height - best.advance;
     result.normalizedError = best.error;
-    if (best.error > config.maximumNormalizedError) {
-        return result;
-    }
-
     if (evaluationBudget.exhausted) {
         result.kind = OverlapKind::Ambiguous;
         result.confidence = 0.0;
+        return result;
+    }
+    if (best.error > config.maximumNormalizedError) {
         return result;
     }
 

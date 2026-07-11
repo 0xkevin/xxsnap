@@ -221,6 +221,7 @@ private slots:
     void returnsConservativeResultWhenEvaluationBudgetIsExhausted();
     void sufficientBudgetResolvesSmallCommonNullspaceInput();
     void validatesFullResolutionCandidateBudget();
+    void budgetExhaustionTakesPriorityOverProvisionalError();
 };
 
 void TestVerticalOverlapMatcher::findsDownwardOffset()
@@ -251,8 +252,10 @@ void TestVerticalOverlapMatcher::rejectsUnrelatedFramesAsInsufficient()
     const ScrollFrame previous = stripedDocument(120, 180);
     ScrollFrame current(120, 180);
     fillRows(current, 0, current.height, 255);
+    OverlapConfig config;
+    config.maximumFullResolutionCandidates = 200;
 
-    const auto result = VerticalOverlapMatcher().match(previous, current, {});
+    const auto result = VerticalOverlapMatcher().match(previous, current, config);
 
     QCOMPARE(result.kind, OverlapKind::Insufficient);
     QVERIFY(result.normalizedError > 0.08);
@@ -567,6 +570,21 @@ void TestVerticalOverlapMatcher::validatesFullResolutionCandidateBudget()
     QCOMPARE(VerticalOverlapMatcher().match(frame, frame, config).kind, OverlapKind::Insufficient);
     config.maximumFullResolutionCandidates = 1'000'000;
     QVERIFY(VerticalOverlapMatcher().match(frame, frame, config).kind != OverlapKind::Insufficient);
+}
+
+void TestVerticalOverlapMatcher::budgetExhaustionTakesPriorityOverProvisionalError()
+{
+    const ScrollFrame previous = commonNullspaceFrame(100, 0);
+    const ScrollFrame current = commonNullspaceFrame(100, 20);
+    OverlapConfig config;
+    config.maximumAdvanceRatio = 0.5;
+    config.maximumNormalizedError = 0.0001;
+    config.maximumFullResolutionCandidates = 1;
+
+    const auto result = VerticalOverlapMatcher().match(previous, current, config);
+
+    QCOMPARE(result.kind, OverlapKind::Ambiguous);
+    QCOMPARE(result.confidence, 0.0);
 }
 
 QTEST_MAIN(TestVerticalOverlapMatcher)
