@@ -59,6 +59,7 @@ enum ScrollCapturePresentationUpdate {
 enum ScrollCaptureSessionError: Error, Equatable {
     case invalidState(ScrollCaptureSessionState)
     case initialFrameRejected(ScrollCaptureAppendKind)
+    case operationCancelled
 }
 
 @MainActor
@@ -76,6 +77,8 @@ final class ScrollCaptureSession {
     private let stabilityThreshold: Int
     private var stabilityCount = 0
     private var samplingTask: Task<Void, Never>?
+    private var currentSamplingLoopID: UInt64?
+    private var nextSamplingLoopID: UInt64 = 0
     private var tickInProgress = false
     private var generation = 0
 
@@ -102,19 +105,25 @@ final class ScrollCaptureSession {
 
     func start() async throws {
         guard state == .idle else { throw ScrollCaptureSessionError.invalidState(state) }
-        setState(.preparing)
+        let operationGeneration = generation
+        guard setState(.preparing, operationGeneration: operationGeneration) else { return }
         do {
             guard let stitcher else { throw ScrollCaptureSessionError.invalidState(state) }
             let update = try stitcher.append(seed.frozenImage)
-            presentation(.append(update))
+            guard emit(
+                .append(update),
+                operationGeneration: operationGeneration,
+                expectedState: .preparing
+            ) else { return }
             guard update.kind == .acceptedInitial else {
                 throw ScrollCaptureSessionError.initialFrameRejected(update.kind)
             }
-            setState(.capturing)
+            guard setState(.capturing, operationGeneration: operationGeneration) else { return }
             activityMonitor.start { [weak self] in self?.recordScrollActivity() }
         } catch {
+            guard generation == operationGeneration, state == .preparing else { return }
             disarmSampling()
-            setState(.paused(.captureFailure))
+            _ = setState(.paused(.captureFailure), operationGeneration: operationGeneration)
             throw error
         }
     }
@@ -139,17 +148,23 @@ final class ScrollCaptureSession {
         }
         guard let stitcher else { throw ScrollCaptureSessionError.invalidState(state) }
         generation += 1
+        let operationGeneration = generation
         disarmSampling()
         activityMonitor.stop()
-        setState(.finishing)
+        guard setState(.finishing, operationGeneration: operationGeneration) else {
+            throw ScrollCaptureSessionError.operationCancelled
+        }
         do {
             let image = try stitcher.finalImage()
             self.stitcher = nil
-            setState(.finished)
+            guard setState(.finished, operationGeneration: operationGeneration) else {
+                throw ScrollCaptureSessionError.operationCancelled
+            }
             return image
         } catch {
+            guard generation == operationGeneration, state == .finishing else { throw error }
             self.stitcher = nil
-            setState(.paused(.captureFailure))
+            _ = setState(.paused(.captureFailure), operationGeneration: operationGeneration)
             throw error
         }
     }
@@ -158,15 +173,19 @@ final class ScrollCaptureSession {
     func cancel() -> ScrollCaptureSeed {
         guard state != .finished, state != .cancelled else { return seed }
         generation += 1
+        let operationGeneration = generation
         disarmSampling()
         activityMonitor.stop()
         stitcher = nil
-        setState(.cancelled)
+        _ = setState(.cancelled, operationGeneration: operationGeneration)
         return seed
     }
 
     private func ensureSamplingLoop() {
-        guard samplingTask == nil else { return }
+        guard currentSamplingLoopID == nil else { return }
+        nextSamplingLoopID &+= 1
+        let loopID = nextSamplingLoopID
+        currentSamplingLoopID = loopID
         samplingTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let clock = self?.clock, let interval = self?.samplingInterval else { break }
@@ -178,8 +197,14 @@ final class ScrollCaptureSession {
                 guard !Task.isCancelled, self?.isSamplingArmed == true else { break }
                 await self?.runSamplingTick()
             }
-            self?.samplingTask = nil
+            self?.samplingLoopDidFinish(loopID)
         }
+    }
+
+    private func samplingLoopDidFinish(_ loopID: UInt64) {
+        guard currentSamplingLoopID == loopID else { return }
+        samplingTask = nil
+        currentSamplingLoopID = nil
     }
 
     private func runSamplingTick() async {
@@ -197,34 +222,47 @@ final class ScrollCaptureSession {
             guard state == .capturing || state == .paused(.lowConfidence) else { return }
             guard let stitcher else { return }
             let update = try stitcher.append(image)
-            presentation(.append(update))
-            try handle(update, stitcher: stitcher)
+            let appendState = state
+            guard emit(
+                .append(update),
+                operationGeneration: tickGeneration,
+                expectedState: appendState
+            ) else { return }
+            try handle(update, stitcher: stitcher, operationGeneration: tickGeneration)
         } catch {
             guard generation == tickGeneration else { return }
             guard state == .capturing || state == .paused(.lowConfidence) else { return }
             disarmSampling()
-            setState(.paused(.captureFailure))
+            _ = setState(.paused(.captureFailure), operationGeneration: tickGeneration)
         }
     }
 
     private func handle(
         _ update: ScrollCaptureAppendUpdate,
-        stitcher: any ScrollStitching
+        stitcher: any ScrollStitching,
+        operationGeneration: Int
     ) throws {
         switch update.kind {
         case .acceptedAppend:
             stabilityCount = 0
-            if state == .paused(.lowConfidence) { setState(.capturing) }
-            presentation(.preview(try stitcher.preview(maximumHeight: 1_200)))
+            if state == .paused(.lowConfidence) {
+                guard setState(.capturing, operationGeneration: operationGeneration) else { return }
+            }
+            let preview = try stitcher.preview(maximumHeight: 1_200)
+            _ = emit(
+                .preview(preview),
+                operationGeneration: operationGeneration,
+                expectedState: .capturing
+            )
         case .duplicateDiscarded, .reviewDiscarded:
             stabilityCount += 1
             if stabilityCount >= stabilityThreshold { disarmSampling() }
         case .pausedLowConfidence:
             disarmSampling()
-            setState(.paused(.lowConfidence))
+            _ = setState(.paused(.lowConfidence), operationGeneration: operationGeneration)
         case .resourceLimit:
             disarmSampling()
-            setState(.paused(.resourceLimit))
+            _ = setState(.paused(.resourceLimit), operationGeneration: operationGeneration)
         case .acceptedInitial:
             throw ScrollCaptureSessionError.initialFrameRejected(update.kind)
         @unknown default:
@@ -234,13 +272,31 @@ final class ScrollCaptureSession {
 
     private func disarmSampling() {
         isSamplingArmed = false
+        currentSamplingLoopID = nil
         samplingTask?.cancel()
         samplingTask = nil
     }
 
-    private func setState(_ newState: ScrollCaptureSessionState) {
+    @discardableResult
+    private func setState(
+        _ newState: ScrollCaptureSessionState,
+        operationGeneration: Int
+    ) -> Bool {
         state = newState
-        presentation(.state(newState))
+        return emit(
+            .state(newState),
+            operationGeneration: operationGeneration,
+            expectedState: newState
+        )
+    }
+
+    private func emit(
+        _ update: ScrollCapturePresentationUpdate,
+        operationGeneration: Int,
+        expectedState: ScrollCaptureSessionState
+    ) -> Bool {
+        presentation(update)
+        return generation == operationGeneration && state == expectedState
     }
 
 #if DEBUG

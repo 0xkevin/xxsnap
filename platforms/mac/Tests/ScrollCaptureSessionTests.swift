@@ -315,6 +315,101 @@ final class ScrollCaptureSessionTests: XCTestCase {
         XCTAssertTrue(seed.frozenImage === session.seed.frozenImage)
     }
 
+    func testRearmedLowConfidenceLoopCannotBeClearedByRetiringLoop() async throws {
+        let clock = ControlledClock()
+        let capturer = FakeCapturer()
+        let engine = FakeStitcher(results: [.acceptedInitial, .pausedLowConfidence, .acceptedAppend])
+        weak var weakSession: ScrollCaptureSession?
+        let session = makeSession(
+            capturer: capturer,
+            engine: engine,
+            clock: clock,
+            presentationHandler: { update in
+                if update.isState(.paused(.lowConfidence)) {
+                    weakSession?.recordScrollActivity()
+                }
+            }
+        )
+        weakSession = session
+        try await session.start()
+        session.recordScrollActivity()
+        await waitUntil { clock.pendingCount == 1 }
+
+        clock.advance()
+        await waitUntil { session.state == .paused(.lowConfidence) && clock.pendingCount == 1 }
+        for _ in 0..<10 { await Task.yield() }
+        session.recordScrollActivity()
+        for _ in 0..<10 { await Task.yield() }
+        XCTAssertEqual(clock.pendingCount, 1)
+
+        clock.advance()
+        await waitUntil { engine.appendedImages.count == 3 }
+        for _ in 0..<10 { await Task.yield() }
+        XCTAssertEqual(clock.pendingCount, 1)
+        XCTAssertEqual(capturer.captureCount, 2)
+        XCTAssertEqual(capturer.maximumConcurrent, 1)
+        _ = session.cancel()
+    }
+
+    func testStartAppendPresentationCanCancelWithoutStartingMonitorOrRevivingState() async throws {
+        let engine = FakeStitcher(results: [.acceptedInitial])
+        let monitor = FakeActivityMonitor()
+        weak var weakSession: ScrollCaptureSession?
+        let session = makeSession(
+            engine: engine,
+            monitor: monitor,
+            presentationHandler: { update in
+                if update.isAppend(.acceptedInitial) { _ = weakSession?.cancel() }
+            }
+        )
+        weakSession = session
+
+        try await session.start()
+
+        XCTAssertEqual(session.state, .cancelled)
+        XCTAssertEqual(monitor.startCount, 0)
+    }
+
+    func testTickAppendPresentationCanCancelWithoutPreviewOrHandlingResult() async throws {
+        let engine = FakeStitcher(results: [.acceptedInitial, .acceptedAppend])
+        let recorder = PresentationRecorder()
+        weak var weakSession: ScrollCaptureSession?
+        let session = makeSession(
+            engine: engine,
+            presentation: recorder,
+            presentationHandler: { update in
+                if update.isAppend(.acceptedAppend) { _ = weakSession?.cancel() }
+            }
+        )
+        weakSession = session
+        try await session.start()
+        session.recordScrollActivity()
+
+        await session.test_runSamplingTick()
+
+        XCTAssertEqual(session.state, .cancelled)
+        XCTAssertEqual(recorder.previews.count, 0)
+        XCTAssertEqual(engine.previewCallCount, 0)
+    }
+
+    func testFinishingPresentationCanCancelWithoutCallingFinalOrRevivingState() async throws {
+        let engine = FakeStitcher(results: [.acceptedInitial])
+        weak var weakSession: ScrollCaptureSession?
+        let session = makeSession(
+            engine: engine,
+            presentationHandler: { update in
+                if update.isState(.finishing) { _ = weakSession?.cancel() }
+            }
+        )
+        weakSession = session
+        try await session.start()
+
+        await XCTAssertThrowsErrorAsync { _ = try await session.finish() }
+
+        XCTAssertEqual(session.state, .cancelled)
+        XCTAssertEqual(engine.finalImageCallCount, 0)
+    }
+
     func testScreenCaptureServiceConformsToScrollRegionCapturing() {
         let service: any ScrollRegionCapturing = ScreenCaptureService()
         XCTAssertTrue(service is ScreenCaptureService)
@@ -355,7 +450,8 @@ final class ScrollCaptureSessionTests: XCTestCase {
         engine: FakeStitcher,
         clock: (any ScrollCaptureClock)? = nil,
         monitor: (any ScrollActivityMonitoring)? = nil,
-        presentation: PresentationRecorder? = nil
+        presentation: PresentationRecorder? = nil,
+        presentationHandler: (@MainActor (ScrollCapturePresentationUpdate) -> Void)? = nil
     ) -> ScrollCaptureSession {
         let presentation = presentation ?? PresentationRecorder()
         return ScrollCaptureSession(
@@ -370,7 +466,10 @@ final class ScrollCaptureSessionTests: XCTestCase {
             stitcher: engine,
             clock: clock ?? FakeClock(),
             activityMonitor: monitor ?? FakeActivityMonitor(),
-            presentation: { presentation.record($0) }
+            presentation: {
+                presentation.record($0)
+                presentationHandler?($0)
+            }
         )
     }
 }
@@ -444,6 +543,8 @@ private final class FakeStitcher: ScrollStitching {
     private(set) var appendedImages: [NSImage] = []
     private(set) var concurrent = 0
     private(set) var maximumConcurrent = 0
+    private(set) var previewCallCount = 0
+    private(set) var finalImageCallCount = 0
 
     init(
         results: [ScrollCaptureAppendKind],
@@ -464,8 +565,15 @@ private final class FakeStitcher: ScrollStitching {
         return .testValue(kind: results.removeFirst())
     }
 
-    func preview(maximumHeight: Int) throws -> NSImage { final }
-    func finalImage() throws -> NSImage { final }
+    func preview(maximumHeight: Int) throws -> NSImage {
+        previewCallCount += 1
+        return final
+    }
+
+    func finalImage() throws -> NSImage {
+        finalImageCallCount += 1
+        return final
+    }
 
     deinit { onDeinit?() }
 }
@@ -555,6 +663,18 @@ private final class PresentationRecorder {
         case let .append(update): kinds.append(update.kind)
         case let .preview(image): previews.append(image)
         }
+    }
+}
+
+private extension ScrollCapturePresentationUpdate {
+    func isState(_ expected: ScrollCaptureSessionState) -> Bool {
+        if case let .state(state) = self { return state == expected }
+        return false
+    }
+
+    func isAppend(_ expected: ScrollCaptureAppendKind) -> Bool {
+        if case let .append(update) = self { return update.kind == expected }
+        return false
     }
 }
 

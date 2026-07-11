@@ -57,7 +57,7 @@ final class ScrollActivityMonitor: ScrollActivityMonitoring {
         }
     }
 
-    deinit {
+    isolated deinit {
         if let localMonitor { registrar.remove(localMonitor) }
         if let globalMonitor { registrar.remove(globalMonitor) }
     }
