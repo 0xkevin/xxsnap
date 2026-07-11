@@ -74,6 +74,7 @@ struct SelectionOverlayConfiguration {
     var initialEraserMasks: [EraserMask]
     var annotationInteractionBegan: (() -> Void)?
     var annotationInteractionEnded: (() -> Void)?
+    var longImageScrollHandler: ((CGFloat) -> Void)?
     var pinnedImageScaleHandler: ((CGFloat, NSPoint) -> Void)?
     var pinnedImageDragBegan: ((NSPoint) -> Void)?
     var pinnedImageDragChanged: ((NSPoint) -> Void)?
@@ -101,6 +102,7 @@ struct SelectionOverlayConfiguration {
         initialEraserMasks: [],
         annotationInteractionBegan: nil,
         annotationInteractionEnded: nil,
+        longImageScrollHandler: nil,
         pinnedImageScaleHandler: nil,
         pinnedImageDragBegan: nil,
         pinnedImageDragChanged: nil,
@@ -140,6 +142,7 @@ struct SelectionOverlayConfiguration {
             initialEraserMasks: [],
             annotationInteractionBegan: nil,
             annotationInteractionEnded: nil,
+            longImageScrollHandler: nil,
             pinnedImageScaleHandler: pinnedImageScaleHandler,
             pinnedImageDragBegan: pinnedImageDragBegan,
             pinnedImageDragChanged: pinnedImageDragChanged,
@@ -156,7 +159,8 @@ struct SelectionOverlayConfiguration {
         initialAnnotations: [CaptureAnnotation] = [],
         initialEraserMasks: [EraserMask] = [],
         interactionBegan: (() -> Void)? = nil,
-        interactionEnded: (() -> Void)? = nil
+        interactionEnded: (() -> Void)? = nil,
+        scrollHandler: ((CGFloat) -> Void)? = nil
     ) -> SelectionOverlayConfiguration {
         SelectionOverlayConfiguration(
             windowFrame: windowFrame,
@@ -177,6 +181,7 @@ struct SelectionOverlayConfiguration {
             initialEraserMasks: initialEraserMasks,
             annotationInteractionBegan: interactionBegan,
             annotationInteractionEnded: interactionEnded,
+            longImageScrollHandler: scrollHandler,
             pinnedImageScaleHandler: nil,
             pinnedImageDragBegan: nil,
             pinnedImageDragChanged: nil,
@@ -1010,6 +1015,10 @@ final class SelectionOverlayWindow: NSWindow {
 
     func test_scrollWheel(at point: NSPoint, deltaY: CGFloat) {
         guard let overlayView = contentView as? SelectionOverlayView else {
+            return
+        }
+        if let handler = configuration.longImageScrollHandler {
+            handler(deltaY)
             return
         }
         _ = overlayView.test_handleScrollWheel(at: point, deltaY: deltaY)
@@ -3486,6 +3495,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     override func scrollWheel(with event: NSEvent) {
         cancelPinnedImageToolbarShiftShortcut()
+        if let longImageScrollHandler = configuration.longImageScrollHandler {
+            longImageScrollHandler(event.scrollingDeltaY)
+            return
+        }
         let point = convert(event.locationInWindow, from: nil)
         if handleTextDropdownScroll(at: point, deltaY: event.scrollingDeltaY) {
             return

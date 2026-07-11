@@ -1227,7 +1227,13 @@ enum CaptureAnnotationRenderer {
         annotations: [CaptureAnnotation],
         eraserMasks: [EraserMask]
     ) -> NSImage {
-        render(image: image, annotations: annotations, eraserMasks: eraserMasks)
+        let rendererAnnotations = annotations.map {
+            LongImageAnnotationTranslation.annotationFromTopOriginToRenderer($0, imageHeight: image.size.height)
+        }
+        let rendererMasks = eraserMasks.map {
+            LongImageAnnotationTranslation.maskFromTopOriginToRenderer($0, imageHeight: image.size.height)
+        }
+        return render(image: image, annotations: rendererAnnotations, eraserMasks: rendererMasks)
     }
 
     static func renderCompleteLongImage(
@@ -1235,13 +1241,7 @@ enum CaptureAnnotationRenderer {
         annotations: [CaptureAnnotation],
         eraserMasks: [EraserMask]
     ) -> NSImage {
-        let rendererAnnotations = annotations.map {
-            LongImageAnnotationTranslation.annotationFromTopOriginToRenderer($0, imageHeight: image.size.height)
-        }
-        let rendererMasks = eraserMasks.map {
-            LongImageAnnotationTranslation.maskFromTopOriginToRenderer($0, imageHeight: image.size.height)
-        }
-        return renderLongImage(image: image, annotations: rendererAnnotations, eraserMasks: rendererMasks)
+        renderLongImage(image: image, annotations: annotations, eraserMasks: eraserMasks)
     }
 
     /// Renders only a bounded processing region around the viewport. The
@@ -1256,17 +1256,22 @@ enum CaptureAnnotationRenderer {
         let imageBounds = NSRect(origin: .zero, size: image.size)
         let requested = imageRect.standardized.intersection(imageBounds)
         guard !requested.isEmpty else { return NSImage(size: .zero) }
-        let processing = visibleLongImageProcessingRect(imageSize: image.size, imageRect: requested)
+        var processing = visibleLongImageProcessingRect(imageSize: image.size, imageRect: requested, annotations: annotations)
+        processing = pixelPhaseAlignedProcessingRect(
+            processing,
+            image: image,
+            blockSizes: annotations.compactMap {
+                guard $0.mosaicRedaction?.type == .pixelMosaic else { return nil }
+                return max(1, $0.mosaicRedaction?.value ?? 1)
+            }
+        )
         guard let source = cropLongImage(image, rect: processing) else { return image }
-        let visibleAnnotations = annotations.filter { $0.rect.intersects(processing) }
-        let visibleIDs = Set(visibleAnnotations.map(\.id))
-        let visibleMasks = eraserMasks.filter { !$0.affectedAnnotationIDs.isDisjoint(with: visibleIDs) && $0.rect.intersects(processing) }
         let offset = NSPoint(x: -processing.minX, y: -processing.minY)
-        let localAnnotations = visibleAnnotations.map {
+        let localAnnotations = annotations.map {
             let topLocal = LongImageAnnotationTranslation.annotation($0, by: offset)
             return LongImageAnnotationTranslation.annotationFromTopOriginToRenderer(topLocal, imageHeight: processing.height)
         }
-        let localMasks = visibleMasks.map {
+        let localMasks = eraserMasks.map {
             let topLocal = LongImageAnnotationTranslation.mask($0, by: offset)
             return LongImageAnnotationTranslation.maskFromTopOriginToRenderer(topLocal, imageHeight: processing.height)
         }
@@ -1276,10 +1281,77 @@ enum CaptureAnnotationRenderer {
     }
 
     static func visibleLongImageProcessingRect(imageSize: NSSize, imageRect: NSRect) -> NSRect {
-        let processingMargin: CGFloat = 256
-        return imageRect.standardized
-            .insetBy(dx: -processingMargin, dy: -processingMargin)
-            .intersection(NSRect(origin: .zero, size: imageSize))
+        visibleLongImageProcessingRect(imageSize: imageSize, imageRect: imageRect, annotations: [])
+    }
+
+    static func visibleLongImageProcessingRect(
+        imageSize: NSSize,
+        imageRect: NSRect,
+        annotations: [CaptureAnnotation]
+    ) -> NSRect {
+        let imageBounds = NSRect(origin: .zero, size: imageSize)
+        let requested = imageRect.standardized.intersection(imageBounds)
+        var processing = requested
+        for annotation in annotations {
+            let visual = longImageVisualBounds(for: annotation)
+            if visual.intersects(requested) {
+                processing = processing.union(visual)
+            }
+        }
+        return processing.intersection(imageBounds).integral
+    }
+
+    private static func longImageVisualBounds(for annotation: CaptureAnnotation) -> NSRect {
+        var bounds = annotation.rect.standardized
+        if let arrow = annotation.arrowLine { bounds = bounds.union(arrow.boundingRect) }
+        if let brush = annotation.brushPath { bounds = bounds.union(brush.boundingRect) }
+        if let marker = annotation.markerLine { bounds = bounds.union(marker.boundingRect) }
+        if let mosaic = annotation.mosaicStroke { bounds = bounds.union(mosaic.boundingRect) }
+        if annotation.rotationAngle != 0 {
+            let center = NSPoint(x: bounds.midX, y: bounds.midY)
+            let cosine = cos(annotation.rotationAngle), sine = sin(annotation.rotationAngle)
+            let corners = [
+                NSPoint(x: bounds.minX, y: bounds.minY), NSPoint(x: bounds.maxX, y: bounds.minY),
+                NSPoint(x: bounds.maxX, y: bounds.maxY), NSPoint(x: bounds.minX, y: bounds.maxY),
+            ].map { point -> NSPoint in
+                let dx = point.x - center.x, dy = point.y - center.y
+                return NSPoint(x: center.x + dx * cosine - dy * sine, y: center.y + dx * sine + dy * cosine)
+            }
+            bounds = corners.dropFirst().reduce(NSRect(origin: corners[0], size: .zero)) { $0.union(NSRect(origin: $1, size: .zero)) }
+        }
+        var padding = max(4, annotation.style.strokeWidth * 2)
+        if annotation.kind == .text { padding = max(padding, annotation.style.textSize * textDisplayScale) }
+        if annotation.kind == .magnifier { padding = max(padding, max(bounds.width, bounds.height) * annotation.effectiveMagnifierZoom) }
+        if let redaction = annotation.mosaicRedaction { padding = max(padding, CGFloat(redaction.value) * 4 + annotation.style.strokeWidth) }
+        return bounds.insetBy(dx: -padding, dy: -padding)
+    }
+
+    private static func pixelPhaseAlignedProcessingRect(
+        _ rect: NSRect,
+        image: NSImage,
+        blockSizes: [Int]
+    ) -> NSRect {
+        guard !blockSizes.isEmpty,
+              let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return rect }
+        let grid = blockSizes.reduce(1) { leastCommonMultiple($0, $1) }
+        guard grid > 1 else { return rect }
+        let sx = CGFloat(cg.width) / max(image.size.width, 1)
+        let sy = CGFloat(cg.height) / max(image.size.height, 1)
+        let pixelMinX = floor(rect.minX * sx / CGFloat(grid)) * CGFloat(grid)
+        let pixelMinY = floor(rect.minY * sy / CGFloat(grid)) * CGFloat(grid)
+        let pixelMaxX = CGFloat(cg.width) - floor((CGFloat(cg.width) - rect.maxX * sx) / CGFloat(grid)) * CGFloat(grid)
+        let pixelMaxY = CGFloat(cg.height) - floor((CGFloat(cg.height) - rect.maxY * sy) / CGFloat(grid)) * CGFloat(grid)
+        return NSRect(
+            x: pixelMinX / sx,
+            y: pixelMinY / sy,
+            width: (pixelMaxX - pixelMinX) / sx,
+            height: (pixelMaxY - pixelMinY) / sy
+        ).intersection(NSRect(origin: .zero, size: image.size))
+    }
+
+    private static func leastCommonMultiple(_ lhs: Int, _ rhs: Int) -> Int {
+        func gcd(_ a: Int, _ b: Int) -> Int { b == 0 ? abs(a) : gcd(b, a % b) }
+        return abs(lhs / max(1, gcd(lhs, rhs)) * rhs)
     }
 
     private static func cropLongImage(_ image: NSImage, rect: NSRect) -> NSImage? {

@@ -140,11 +140,16 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     static let controlStripHeight: CGFloat = 52
     let scrollView = NSScrollView()
     let controlStripView = NSView()
+    private let finishButton = NSButton(title: "完成编辑", target: nil, action: nil)
     private let imageView = NSImageView(), documentView = LongImageFlippedView()
     private var documentState: LongImageEditorDocument
     private var boundsObserver: NSObjectProtocol?
     private var overlay: SelectionOverlayWindow?
     private var interactionLocked = false
+    private var lockedClipOrigin: NSPoint?
+    private var restoringLockedOrigin = false
+    private var presentedAnnotationIDs: Set<AnnotationID> = []
+    private var presentedMaskIDs: Set<UUID> = []
     private var didStop = false
     private var viewportRefreshCount = 0
     private(set) var geometry: LongImageEditorGeometry
@@ -157,7 +162,7 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     var fitWidthScale: CGFloat { geometry.fitWidthScale }
     var visibleImageRect: NSRect { geometry.visibleImageRect }
 
-    init(image: NSImage, annotations: [CaptureAnnotation] = [], eraserMasks: [EraserMask] = [], visibleFrame: NSRect? = NSScreen.main?.visibleFrame, initialWindowSize: NSSize? = nil) {
+    init(canonicalImage image: NSImage, annotations: [CaptureAnnotation] = [], eraserMasks: [EraserMask] = [], visibleFrame: NSRect? = NSScreen.main?.visibleFrame, initialWindowSize: NSSize? = nil) {
         let visible = visibleFrame ?? NSRect(x: 0, y: 0, width: 1_200, height: 900)
         documentState = LongImageEditorDocument(image: image, annotations: annotations, eraserMasks: eraserMasks)
         let requested = initialWindowSize ?? NSSize(width: min(1_000, visible.width), height: min(840, visible.height))
@@ -173,6 +178,19 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         configureViews()
         observeScroll()
         relayout(preserving: geometry.topVisibleCenter)
+    }
+    convenience init(image: NSImage, annotations: [CaptureAnnotation] = [], eraserMasks: [EraserMask] = [], visibleFrame: NSRect? = NSScreen.main?.visibleFrame, initialWindowSize: NSSize? = nil) {
+        self.init(canonicalImage: image, annotations: annotations, eraserMasks: eraserMasks, visibleFrame: visibleFrame, initialWindowSize: initialWindowSize)
+    }
+    convenience init(image: NSImage, seed: ScrollCaptureSeed, visibleFrame: NSRect? = NSScreen.main?.visibleFrame, initialWindowSize: NSSize? = nil) {
+        let height = seed.frozenImage.size.height
+        self.init(
+            canonicalImage: image,
+            annotations: seed.annotations.map { LongImageAnnotationTranslation.annotationFromTopOriginToRenderer($0, imageHeight: height) },
+            eraserMasks: seed.eraserMasks.map { LongImageAnnotationTranslation.maskFromTopOriginToRenderer($0, imageHeight: height) },
+            visibleFrame: visibleFrame,
+            initialWindowSize: initialWindowSize
+        )
     }
     @available(*, unavailable) required init?(coder: NSCoder) { nil }
     deinit {
@@ -196,11 +214,18 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     func windowDidResize(_ notification: Notification) {
         let anchor = geometry.topVisibleCenter; commitOverlay(); relayout(preserving: anchor); refreshOverlay()
     }
+    func windowDidMove(_ notification: Notification) { refreshOverlay() }
+    func windowDidChangeBackingProperties(_ notification: Notification) { refreshOverlay() }
     func windowWillClose(_ notification: Notification) { commitOverlay(); stop() }
 
     private func configureViews() {
         guard let content = window?.contentView else { return }
         controlStripView.translatesAutoresizingMaskIntoConstraints = false
+        finishButton.translatesAutoresizingMaskIntoConstraints = false
+        finishButton.target = self
+        finishButton.action = #selector(finishButtonPressed(_:))
+        finishButton.setAccessibilityLabel("完成编辑")
+        controlStripView.addSubview(finishButton)
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.scrollerStyle = .overlay
         scrollView.hasVerticalScroller = true; scrollView.hasHorizontalScroller = false
@@ -213,6 +238,8 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
             controlStripView.topAnchor.constraint(equalTo: content.topAnchor), controlStripView.heightAnchor.constraint(equalToConstant: Self.controlStripHeight),
             scrollView.leadingAnchor.constraint(equalTo: content.leadingAnchor), scrollView.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             scrollView.topAnchor.constraint(equalTo: controlStripView.bottomAnchor), scrollView.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            finishButton.trailingAnchor.constraint(equalTo: controlStripView.trailingAnchor, constant: -12),
+            finishButton.centerYAnchor.constraint(equalTo: controlStripView.centerYAnchor),
         ])
         content.layoutSubtreeIfNeeded()
     }
@@ -229,7 +256,13 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         scrollView.contentView.scroll(to: NSPoint(x: 0, y: geometry.scrollOffset * geometry.fitWidthScale))
         scrollView.reflectScrolledClipView(scrollView.contentView); updateOffset()
     }
-    private func scrolled() { guard !interactionLocked else { return }; commitOverlay(); updateOffset(); refreshOverlay() }
+    private func scrolled() {
+        if interactionLocked {
+            restoreLockedClipOrigin()
+            return
+        }
+        commitOverlay(); updateOffset(); refreshOverlay()
+    }
     private func updateOffset() { geometry.scrollOffset = scrollView.contentView.bounds.minY / max(geometry.fitWidthScale, 0.0001) }
     private func viewportScreenFrame() -> NSRect {
         guard let window else { return .zero }; return window.convertToScreen(scrollView.convert(scrollView.bounds, to: nil))
@@ -237,6 +270,8 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     private func showOverlay() {
         guard overlay == nil else { refreshOverlay(); return }
         let slice = LongImageEditorDocument.visibleSlice(image: documentState.image, annotations: documentState.annotations, eraserMasks: documentState.eraserMasks, imageRect: visibleImageRect)
+        presentedAnnotationIDs = Set(slice.annotations.map(\.id))
+        presentedMaskIDs = Set(slice.eraserMasks.map(\.id))
         let frame = viewportScreenFrame()
         let config = SelectionOverlayConfiguration.longImageEditor(
             windowFrame: frame, selectionRect: NSRect(origin: .zero, size: frame.size),
@@ -248,7 +283,9 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
                 let viewportTop = LongImageAnnotationTranslation.mask($0, fromImageSliceOrigin: .zero, displayScale: geometry.fitWidthScale)
                 return LongImageAnnotationTranslation.maskFromTopOriginToRenderer(viewportTop, imageHeight: frame.height)
             },
-            interactionBegan: { [weak self] in self?.lock(true) }, interactionEnded: { [weak self] in self?.lock(false) }
+            interactionBegan: { [weak self] in self?.lock(true) },
+            interactionEnded: { [weak self] in self?.lock(false) },
+            scrollHandler: { [weak self] deltaY in self?.handleOverlayScroll(deltaY: deltaY) }
         )
         let value = SelectionOverlayWindow(backgroundImage: displayImage(slice.image, size: frame.size), configuration: config) { [weak self] in self?.finish($0) }
         overlay = value; value.present()
@@ -258,6 +295,8 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         viewportRefreshCount += 1
         guard let overlay else { return }
         let slice = LongImageEditorDocument.visibleSlice(image: documentState.image, annotations: documentState.annotations, eraserMasks: documentState.eraserMasks, imageRect: visibleImageRect)
+        presentedAnnotationIDs = Set(slice.annotations.map(\.id))
+        presentedMaskIDs = Set(slice.eraserMasks.map(\.id))
         let frame = viewportScreenFrame()
         overlay.updateLongImageEditor(
             windowFrame: frame, backgroundImage: displayImage(slice.image, size: frame.size),
@@ -274,23 +313,45 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     }
     private func commitOverlay() {
         guard let snapshot = overlay?.editorSnapshot else { return }
-        let origin = visibleImageRect.origin, oldVisible = Set(documentState.annotations.filter { $0.rect.intersects(visibleImageRect) }.map(\.id))
-        let localIDs = Set(snapshot.annotations.map(\.id)); documentState.annotations.removeAll { oldVisible.contains($0.id) && !localIDs.contains($0.id) }
+        let origin = visibleImageRect.origin
+        let localIDs = Set(snapshot.annotations.map(\.id))
+        let deletedIDs = presentedAnnotationIDs.subtracting(localIDs)
+        documentState.annotations.removeAll { deletedIDs.contains($0.id) }
         for local in snapshot.annotations {
             let viewportTop = LongImageAnnotationTranslation.annotationFromTopOriginToRenderer(local, imageHeight: viewportScreenFrame().height)
             let full = LongImageAnnotationTranslation.annotation(viewportTop, toImageSliceOrigin: origin, displayScale: geometry.fitWidthScale)
             if let index = documentState.annotations.firstIndex(where: { $0.id == full.id }) { documentState.annotations[index] = full } else { documentState.annotations.append(full) }
         }
-        let localMaskIDs = Set(snapshot.eraserMasks.map(\.id)); documentState.eraserMasks.removeAll { $0.rect.intersects(visibleImageRect) && !localMaskIDs.contains($0.id) }
+        let localMaskIDs = Set(snapshot.eraserMasks.map(\.id))
+        documentState.eraserMasks.removeAll { presentedMaskIDs.contains($0.id) && !localMaskIDs.contains($0.id) }
         for local in snapshot.eraserMasks {
             let viewportTop = LongImageAnnotationTranslation.maskFromTopOriginToRenderer(local, imageHeight: viewportScreenFrame().height)
             let full = LongImageAnnotationTranslation.mask(viewportTop, toImageSliceOrigin: origin, displayScale: geometry.fitWidthScale)
             if let index = documentState.eraserMasks.firstIndex(where: { $0.id == full.id }) { documentState.eraserMasks[index] = full } else { documentState.eraserMasks.append(full) }
         }
+        if !deletedIDs.isEmpty {
+            for index in documentState.eraserMasks.indices {
+                documentState.eraserMasks[index].affectedAnnotationIDs.subtract(deletedIDs)
+            }
+            documentState.eraserMasks.removeAll { $0.affectedAnnotationIDs.isEmpty }
+        }
+        presentedAnnotationIDs = Set(documentState.annotations.filter { $0.rect.intersects(visibleImageRect) }.map(\.id))
+        presentedMaskIDs = Set(documentState.eraserMasks.filter { presentedAnnotationIDs.isDisjoint(with: $0.affectedAnnotationIDs) == false && $0.rect.intersects(visibleImageRect) }.map(\.id))
     }
     private func lock(_ value: Bool) {
-        interactionLocked = value; scrollView.verticalScroller?.isEnabled = !value
-        if !value { commitOverlay(); refreshOverlay() }
+        if value {
+            guard !interactionLocked else { return }
+            interactionLocked = true
+            lockedClipOrigin = scrollView.contentView.bounds.origin
+            scrollView.verticalScroller?.isEnabled = false
+        } else {
+            guard interactionLocked else { return }
+            restoreLockedClipOrigin()
+            interactionLocked = false
+            lockedClipOrigin = nil
+            scrollView.verticalScroller?.isEnabled = true
+            commitOverlay(); refreshOverlay()
+        }
     }
     private func finish(_ result: CaptureSelectionResult?) {
         guard result?.action == .finishEditing else { return }; commitOverlay()
@@ -302,10 +363,38 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return image }
         return NSImage(cgImage: cg, size: size)
     }
+    private func restoreLockedClipOrigin() {
+        guard !restoringLockedOrigin, let lockedClipOrigin,
+              scrollView.contentView.bounds.origin != lockedClipOrigin else { return }
+        restoringLockedOrigin = true
+        scrollView.contentView.scroll(to: lockedClipOrigin)
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+        restoringLockedOrigin = false
+    }
+    private func handleOverlayScroll(deltaY: CGFloat) {
+        guard !interactionLocked else { return }
+        commitOverlay()
+        let maxY = max(0, documentView.frame.height - scrollView.contentSize.height)
+        let nextY = min(max(0, scrollView.contentView.bounds.minY - deltaY), maxY)
+        scrollView.contentView.scroll(to: NSPoint(x: 0, y: nextY))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+        updateOffset()
+        refreshOverlay()
+    }
+    @objc private func finishButtonPressed(_ sender: Any?) {
+        commitOverlay()
+        onFinishEditing?(documentState.image, documentState.annotations, documentState.eraserMasks)
+        close()
+        stop()
+    }
 #if DEBUG
     var test_editingOverlay: SelectionOverlayWindow? { overlay }
     var test_isDocumentScrollingEnabled: Bool { !interactionLocked }
     var test_hasBoundsObserver: Bool { boundsObserver != nil }
     var test_viewportRefreshCount: Int { viewportRefreshCount }
+    var test_finishButton: NSButton { finishButton }
+    var test_fullAnnotations: [CaptureAnnotation] { documentState.annotations }
+    var test_fullEraserMasks: [EraserMask] { documentState.eraserMasks }
+    func test_commitOverlay() { commitOverlay() }
 #endif
 }
