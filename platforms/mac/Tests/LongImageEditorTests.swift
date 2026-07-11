@@ -814,7 +814,25 @@ final class LongImageEditorTests: XCTestCase {
             style: CaptureAnnotationStyle()
         )
 
-        for stage in [LongImageRenderStage.source, .context, .middleTile, .finalImage] {
+        let stages: [LongImageRenderStage] = [
+            .sourceImage,
+            .outputContext,
+            .sourceCropCGImage,
+            .sourceCrop,
+            .sourceSampleContext,
+            .sourceSampleImage,
+            .fullImage,
+            .annotationRegionSource,
+            .annotationRegionContext,
+            .annotationRegionImage,
+            .finalCropCGImage,
+            .finalCrop,
+            .finalSampleContext,
+            .finalSampleImage,
+            .tileImage,
+            .finalImage,
+        ]
+        for stage in stages {
             XCTAssertThrowsError(try CaptureAnnotationRenderer.test_renderLongImageStrict(
                 image: image,
                 annotations: [annotation],
@@ -824,6 +842,59 @@ final class LongImageEditorTests: XCTestCase {
                 XCTAssertEqual(error as? LongImageRenderError, .creationFailed(stage))
             }
         }
+    }
+
+    func testInternalStrictTileFailureKeepsEditorRetryableWithoutExecutingAction() {
+        let source = TestImageFactory.solid(size: NSSize(width: 120, height: 900), color: .white)
+        let annotation = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 10, y: 20, width: 60, height: 50),
+            style: CaptureAnnotationStyle()
+        )
+        var injectedFailure: LongImageRenderStage? = .annotationRegionContext
+        var actionCount = 0
+        let controller = LongImageEditorWindowController(
+            canonicalImage: source,
+            annotations: [annotation],
+            visibleFrame: NSRect(x: 0, y: 0, width: 500, height: 450),
+            actions: LongImageEditorActions(
+                copy: { _ in actionCount += 1; return true },
+                save: { _ in XCTFail("unexpected save"); return false },
+                pin: { _ in XCTFail("unexpected pin"); return false }
+            ),
+            renderer: { image, annotations, masks in
+                if let injectedFailure {
+                    return try CaptureAnnotationRenderer.test_renderLongImageStrict(
+                        image: image,
+                        annotations: annotations,
+                        eraserMasks: masks,
+                        failingAt: injectedFailure
+                    )
+                }
+                return try CaptureAnnotationRenderer.renderLongImageStrict(
+                    image: image,
+                    annotations: annotations,
+                    eraserMasks: masks
+                )
+            }
+        )
+        controller.show()
+
+        controller.test_copyButton.performClick(nil)
+        XCTAssertEqual(actionCount, 0)
+        XCTAssertNil(controller.test_cachedRenderedRevision)
+        XCTAssertEqual(
+            controller.test_lastRenderError as? LongImageRenderError,
+            .creationFailed(.annotationRegionContext)
+        )
+        XCTAssertEqual(controller.window?.isVisible, true)
+
+        injectedFailure = nil
+        controller.test_copyButton.performClick(nil)
+        XCTAssertEqual(actionCount, 1)
+        XCTAssertNotNil(controller.test_cachedRenderedRevision)
+        XCTAssertNil(controller.test_lastRenderError)
+        controller.stop()
     }
 
     func testRenderFailureSkipsEveryActionAndEachActionCanRetry() {
@@ -843,7 +914,7 @@ final class LongImageEditorTests: XCTestCase {
                 ),
                 renderer: { _, _, _ in
                     renderCount += 1
-                    if shouldFail { throw LongImageRenderError.creationFailed(.context) }
+                    if shouldFail { throw LongImageRenderError.creationFailed(.outputContext) }
                     return rendered
                 }
             )

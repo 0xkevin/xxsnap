@@ -1121,9 +1121,21 @@ struct CaptureSelectionResult {
 }
 
 enum LongImageRenderStage: Equatable {
-    case source
-    case context
-    case middleTile
+    case sourceImage
+    case outputContext
+    case sourceCropCGImage
+    case sourceCrop
+    case sourceSampleContext
+    case sourceSampleImage
+    case fullImage
+    case annotationRegionSource
+    case annotationRegionContext
+    case annotationRegionImage
+    case finalCropCGImage
+    case finalCrop
+    case finalSampleContext
+    case finalSampleImage
+    case tileImage
     case finalImage
 }
 
@@ -1339,15 +1351,15 @@ enum CaptureAnnotationRenderer {
         injectedFailure: LongImageRenderStage?
     ) throws -> NSImage {
         guard !annotations.isEmpty else { return image }
-        guard injectedFailure != .source,
+        guard injectedFailure != .sourceImage,
               let source = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
-        else { throw LongImageRenderError.creationFailed(.source) }
+        else { throw LongImageRenderError.creationFailed(.sourceImage) }
         guard let colorSpace = source.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB) else {
-            throw LongImageRenderError.creationFailed(.context)
+            throw LongImageRenderError.creationFailed(.outputContext)
         }
-        guard injectedFailure != .context,
+        guard injectedFailure != .outputContext,
               let output = makeRenderContext(width: source.width, height: source.height, colorSpace: colorSpace)
-        else { throw LongImageRenderError.creationFailed(.context) }
+        else { throw LongImageRenderError.creationFailed(.outputContext) }
         let scaleY = CGFloat(source.height) / max(image.size.height, 1)
         let tilePixelHeight = 512
 #if DEBUG
@@ -1384,16 +1396,26 @@ enum CaptureAnnotationRenderer {
                     source.width * processingPixelHeight
                 )
 #endif
-                let tile = renderVisibleLongImageSlice(
-                    image: image,
-                    annotations: annotations,
-                    eraserMasks: eraserMasks,
-                    imageRect: tileRect
-                )
-                guard !(injectedFailure == .middleTile && tileIndex == 1),
+                let tile: NSImage
+                do {
+                    tile = try renderVisibleLongImageSliceStrict(
+                        image: image,
+                        annotations: annotations,
+                        eraserMasks: eraserMasks,
+                        imageRect: tileRect,
+                        injectedFailure: injectedFailure
+                    )
+                } catch let error as LongImageRenderError {
+                    tileError = error
+                    return
+                } catch {
+                    tileError = .creationFailed(.tileImage)
+                    return
+                }
+                guard !(injectedFailure == .tileImage && tileIndex == 1),
                       let tileCG = tile.cgImage(forProposedRect: nil, context: nil, hints: nil)
                 else {
-                    tileError = .creationFailed(.middleTile)
+                    tileError = .creationFailed(.tileImage)
                     return
                 }
                 output.draw(
@@ -1431,6 +1453,41 @@ enum CaptureAnnotationRenderer {
         eraserMasks: [EraserMask],
         imageRect: NSRect
     ) -> NSImage {
+        (try? renderVisibleLongImageSlice(
+            image: image,
+            annotations: annotations,
+            eraserMasks: eraserMasks,
+            imageRect: imageRect,
+            propagatesFailures: false,
+            injectedFailure: nil
+        )) ?? image
+    }
+
+    private static func renderVisibleLongImageSliceStrict(
+        image: NSImage,
+        annotations: [CaptureAnnotation],
+        eraserMasks: [EraserMask],
+        imageRect: NSRect,
+        injectedFailure: LongImageRenderStage?
+    ) throws -> NSImage {
+        try renderVisibleLongImageSlice(
+            image: image,
+            annotations: annotations,
+            eraserMasks: eraserMasks,
+            imageRect: imageRect,
+            propagatesFailures: true,
+            injectedFailure: injectedFailure
+        )
+    }
+
+    private static func renderVisibleLongImageSlice(
+        image: NSImage,
+        annotations: [CaptureAnnotation],
+        eraserMasks: [EraserMask],
+        imageRect: NSRect,
+        propagatesFailures: Bool,
+        injectedFailure: LongImageRenderStage?
+    ) throws -> NSImage {
         let imageBounds = NSRect(origin: .zero, size: image.size)
         let requested = imageRect.standardized.intersection(imageBounds)
         guard !requested.isEmpty else { return NSImage(size: .zero) }
@@ -1441,7 +1498,18 @@ enum CaptureAnnotationRenderer {
             eraserMasks: eraserMasks
         )
         let processing = plan.processingRect
-        guard let source = cropLongImage(image, rect: processing) else { return image }
+        let source: NSImage
+        do {
+            source = try sampleLongImageStrict(
+                image,
+                rect: processing,
+                stages: .sourceCrop,
+                injectedFailure: injectedFailure
+            )
+        } catch {
+            if propagatesFailures { throw error }
+            return image
+        }
         let selectedAnnotations = annotations.filter { plan.annotationIDs.contains($0.id) }.map(normalizedEffectAnnotation)
         let selectedMasks = eraserMasks.filter { plan.maskIDs.contains($0.id) }
         let offset = NSPoint(x: -processing.minX, y: -processing.minY)
@@ -1453,23 +1521,49 @@ enum CaptureAnnotationRenderer {
             let topLocal = LongImageAnnotationTranslation.mask($0, by: offset)
             return LongImageAnnotationTranslation.maskFromTopOriginToRenderer(topLocal, imageHeight: processing.height)
         }
-        guard let fullCG = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return image }
+        let fullCG: CGImage
+        do {
+            guard injectedFailure != .fullImage,
+                  let value = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+            else { throw LongImageRenderError.creationFailed(.fullImage) }
+            fullCG = value
+        } catch {
+            if propagatesFailures { throw error }
+            return image
+        }
         let scaleX = CGFloat(fullCG.width) / max(image.size.width, 1)
         let scaleY = CGFloat(fullCG.height) / max(image.size.height, 1)
         let contentOrigin = CGPoint(
             x: processing.minX * scaleX,
             y: (image.size.height - processing.maxY) * scaleY
         )
-        let rendered = renderRegion(
-            image: source,
-            annotations: localAnnotations,
-            eraserMasks: localMasks,
-            contentOriginPixels: contentOrigin,
-            fullCanvasPixelWidth: CGFloat(fullCG.width),
-            fullCanvasPixelHeight: CGFloat(fullCG.height)
-        )
+        let rendered: NSImage
+        do {
+            rendered = try renderRegionStrict(
+                image: source,
+                annotations: localAnnotations,
+                eraserMasks: localMasks,
+                contentOriginPixels: contentOrigin,
+                fullCanvasPixelWidth: CGFloat(fullCG.width),
+                fullCanvasPixelHeight: CGFloat(fullCG.height),
+                injectedFailure: injectedFailure
+            )
+        } catch {
+            if propagatesFailures { throw error }
+            rendered = source
+        }
         let localRequest = requested.offsetBy(dx: -processing.minX, dy: -processing.minY)
-        return cropLongImage(rendered, rect: localRequest) ?? rendered
+        do {
+            return try sampleLongImageStrict(
+                rendered,
+                rect: localRequest,
+                stages: .finalCrop,
+                injectedFailure: injectedFailure
+            )
+        } catch {
+            if propagatesFailures { throw error }
+            return rendered
+        }
     }
 
     static func visibleLongImageProcessingRect(imageSize: NSSize, imageRect: NSRect) -> NSRect {
@@ -1616,12 +1710,44 @@ enum CaptureAnnotationRenderer {
     }
 
 
-    private static func cropLongImage(_ image: NSImage, rect: NSRect) -> NSImage? {
-        sampleLongImage(image, rect: rect)
+    static func sampleLongImage(_ image: NSImage, rect: NSRect) -> NSImage? {
+        try? sampleLongImageStrict(
+            image,
+            rect: rect,
+            stages: .sourceCrop,
+            injectedFailure: nil
+        )
     }
 
-    static func sampleLongImage(_ image: NSImage, rect: NSRect) -> NSImage? {
-        guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+    private struct LongImageSampleStages {
+        var cgImage: LongImageRenderStage
+        var crop: LongImageRenderStage
+        var context: LongImageRenderStage
+        var image: LongImageRenderStage
+
+        static let sourceCrop = Self(
+            cgImage: .sourceCropCGImage,
+            crop: .sourceCrop,
+            context: .sourceSampleContext,
+            image: .sourceSampleImage
+        )
+        static let finalCrop = Self(
+            cgImage: .finalCropCGImage,
+            crop: .finalCrop,
+            context: .finalSampleContext,
+            image: .finalSampleImage
+        )
+    }
+
+    private static func sampleLongImageStrict(
+        _ image: NSImage,
+        rect: NSRect,
+        stages: LongImageSampleStages,
+        injectedFailure: LongImageRenderStage?
+    ) throws -> NSImage {
+        guard injectedFailure != stages.cgImage,
+              let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        else { throw LongImageRenderError.creationFailed(stages.cgImage) }
         let scaleX = CGFloat(cg.width) / max(image.size.width, 1)
         let scaleY = CGFloat(cg.height) / max(image.size.height, 1)
         let requestedPixels = CGRect(
@@ -1632,11 +1758,16 @@ enum CaptureAnnotationRenderer {
         )
         let bounds = CGRect(x: 0, y: 0, width: cg.width, height: cg.height)
         let enclosingPixels = requestedPixels.integral.intersection(bounds)
-        guard let cropped = cg.cropping(to: enclosingPixels) else { return nil }
+        guard injectedFailure != stages.crop,
+              let cropped = cg.cropping(to: enclosingPixels)
+        else { throw LongImageRenderError.creationFailed(stages.crop) }
         let width = max(1, Int(requestedPixels.width.rounded()))
         let height = max(1, Int(requestedPixels.height.rounded()))
-        let colorSpace = cg.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!
-        guard let context = CGContext(
+        guard let colorSpace = cg.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB) else {
+            throw LongImageRenderError.creationFailed(stages.context)
+        }
+        guard injectedFailure != stages.context,
+              let context = CGContext(
             data: nil,
             width: width,
             height: height,
@@ -1644,7 +1775,7 @@ enum CaptureAnnotationRenderer {
             bytesPerRow: 0,
             space: colorSpace,
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return nil }
+        ) else { throw LongImageRenderError.creationFailed(stages.context) }
         context.interpolationQuality = .none
         context.draw(
             cropped,
@@ -1655,7 +1786,9 @@ enum CaptureAnnotationRenderer {
                 height: enclosingPixels.height
             )
         )
-        guard let sampled = context.makeImage() else { return nil }
+        guard injectedFailure != stages.image, let sampled = context.makeImage() else {
+            throw LongImageRenderError.creationFailed(stages.image)
+        }
         return NSImage(cgImage: sampled, size: rect.size)
     }
 
@@ -1667,14 +1800,36 @@ enum CaptureAnnotationRenderer {
         fullCanvasPixelWidth: CGFloat? = nil,
         fullCanvasPixelHeight: CGFloat? = nil
     ) -> NSImage? {
-        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
-            return nil
-        }
+        try? renderImageStrict(
+            image: image,
+            annotations: annotations,
+            eraserMasks: eraserMasks,
+            contentOriginPixels: contentOriginPixels,
+            fullCanvasPixelWidth: fullCanvasPixelWidth,
+            fullCanvasPixelHeight: fullCanvasPixelHeight,
+            injectedFailure: nil
+        )
+    }
 
-        let colorSpace = cgImage.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!
-        guard let context = makeRenderContext(width: cgImage.width, height: cgImage.height, colorSpace: colorSpace) else {
-            return nil
+    private static func renderImageStrict(
+        image: NSImage,
+        annotations: [CaptureAnnotation],
+        eraserMasks: [EraserMask] = [],
+        contentOriginPixels: CGPoint = .zero,
+        fullCanvasPixelWidth: CGFloat? = nil,
+        fullCanvasPixelHeight: CGFloat? = nil,
+        injectedFailure: LongImageRenderStage?
+    ) throws -> NSImage {
+        guard injectedFailure != .annotationRegionSource,
+              let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        else { throw LongImageRenderError.creationFailed(.annotationRegionSource) }
+
+        guard let colorSpace = cgImage.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB) else {
+            throw LongImageRenderError.creationFailed(.annotationRegionContext)
         }
+        guard injectedFailure != .annotationRegionContext,
+              let context = makeRenderContext(width: cgImage.width, height: cgImage.height, colorSpace: colorSpace)
+        else { throw LongImageRenderError.creationFailed(.annotationRegionContext) }
 
         context.interpolationQuality = .none
         context.draw(cgImage, in: CGRect(x: 0, y: 0, width: cgImage.width, height: cgImage.height))
@@ -1707,29 +1862,31 @@ enum CaptureAnnotationRenderer {
             )
         }
 
-        guard let renderedImage = context.makeImage() else {
-            return nil
-        }
+        guard injectedFailure != .annotationRegionImage,
+              let renderedImage = context.makeImage()
+        else { throw LongImageRenderError.creationFailed(.annotationRegionImage) }
 
         return NSImage(cgImage: renderedImage, size: image.size)
     }
 
-    private static func renderRegion(
+    private static func renderRegionStrict(
         image: NSImage,
         annotations: [CaptureAnnotation],
         eraserMasks: [EraserMask],
         contentOriginPixels: CGPoint,
         fullCanvasPixelWidth: CGFloat,
-        fullCanvasPixelHeight: CGFloat
-    ) -> NSImage {
-        renderImage(
+        fullCanvasPixelHeight: CGFloat,
+        injectedFailure: LongImageRenderStage?
+    ) throws -> NSImage {
+        try renderImageStrict(
             image: image,
             annotations: annotations,
             eraserMasks: eraserMasks,
             contentOriginPixels: contentOriginPixels,
             fullCanvasPixelWidth: fullCanvasPixelWidth,
-            fullCanvasPixelHeight: fullCanvasPixelHeight
-        ) ?? image
+            fullCanvasPixelHeight: fullCanvasPixelHeight,
+            injectedFailure: injectedFailure
+        )
     }
 
     private static func drawAnnotations(
