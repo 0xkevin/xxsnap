@@ -9,6 +9,7 @@
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <new>
 #include <optional>
 #include <unordered_map>
 #include <utility>
@@ -150,8 +151,7 @@ public:
     struct Segment final
     {
         std::shared_ptr<const ScrollFrame> pixels;
-        int ordinaryFirstRow = 0;
-        int fixedBottomFirstRow = 0;
+        int firstRow = 0;
         int outputRows = 0;
     };
 
@@ -163,25 +163,38 @@ public:
         double trackPersistence = 0.0;
     };
 
+    struct ScrollbarState final
+    {
+        std::optional<ScrollbarObservation> last;
+        int observedMovements = 0;
+        int movingMovements = 0;
+        double minimumPersistence = 1.0;
+        int confirmedWidth = 0;
+    };
+
+    struct PendingMovement final
+    {
+        std::shared_ptr<const ScrollFrame> frame;
+        Fingerprint fingerprint;
+        int advance = 0;
+        double confidence = 0.0;
+        std::size_t persistentBytes = 0U;
+    };
+
     ScrollStitchConfig config;
     bool configIsValid = false;
     std::vector<Segment> segments;
     std::vector<Fingerprint> anchors;
+    std::vector<PendingMovement> pending;
     std::shared_ptr<const ScrollFrame> tail;
     bool tailHasSeparateStorage = false;
     std::size_t persistentBytes = 0;
     int height = 0;
     int width = 0;
     int viewportHeight = 0;
-    int fixedTopAgreements = 0;
-    int fixedBottomAgreements = 0;
     bool fixedTopConfirmed = false;
     bool fixedBottomConfirmed = false;
-    std::optional<ScrollbarObservation> lastScrollbar;
-    int scrollbarObservedMovements = 0;
-    int scrollbarMovingMovements = 0;
-    double scrollbarMinimumPersistence = 1.0;
-    int scrollbarWidth = 0;
+    ScrollbarState scrollbar;
 
     [[nodiscard]] bool duplicateFingerprint(const Fingerprint& left, const Fingerprint& right) const
     {
@@ -201,6 +214,16 @@ public:
         }
         for (std::size_t i = recentStart; i > 0U; --i) {
             if (duplicateFingerprint(anchors[i - 1U], fingerprint)) {
+                return i - 1U;
+            }
+        }
+        return std::nullopt;
+    }
+
+    [[nodiscard]] std::optional<std::size_t> matchingPending(const Fingerprint& fingerprint) const
+    {
+        for (std::size_t i = pending.size(); i > 0U; --i) {
+            if (duplicateFingerprint(pending[i - 1U].fingerprint, fingerprint)) {
                 return i - 1U;
             }
         }
@@ -253,26 +276,36 @@ public:
                 < config.fixedBandStationaryThreshold;
     }
 
-    void observeFixedBands(const ScrollFrame& previous, const ScrollFrame& current)
+    [[nodiscard]] bool candidateBandsAreStationary(
+        const ScrollFrame& previous,
+        const ScrollFrame& current) const
     {
         const bool centerMoved = centralDocumentMoved(previous, current);
-        if (!fixedTopConfirmed && config.fixedTopCandidateHeight > 0) {
-            const bool stationary = stationaryRatio(
+        const bool topStationary = config.fixedTopCandidateHeight == 0
+            || stationaryRatio(
                 previous, current, 0, config.fixedTopCandidateHeight)
                 >= config.fixedBandStationaryThreshold;
-            fixedTopAgreements = stationary && centerMoved ? fixedTopAgreements + 1 : 0;
-            fixedTopConfirmed = fixedTopAgreements >= config.fixedBandConfirmationMovements;
-        }
-        if (!fixedBottomConfirmed && config.fixedBottomCandidateHeight > 0) {
-            const bool stationary = stationaryRatio(
+        const bool bottomStationary = config.fixedBottomCandidateHeight == 0
+            || stationaryRatio(
                 previous,
                 current,
                 current.height - config.fixedBottomCandidateHeight,
                 config.fixedBottomCandidateHeight)
                 >= config.fixedBandStationaryThreshold;
-            fixedBottomAgreements = stationary && centerMoved ? fixedBottomAgreements + 1 : 0;
-            fixedBottomConfirmed = fixedBottomAgreements >= config.fixedBandConfirmationMovements;
-        }
+        return centerMoved && topStationary && bottomStationary
+            && (config.fixedTopCandidateHeight > 0 || config.fixedBottomCandidateHeight > 0);
+    }
+
+    [[nodiscard]] OverlapConfig candidateMatcherConfig() const
+    {
+        auto result = config.matcher;
+        result.excludedBands.top = std::max(
+            result.excludedBands.top, config.fixedTopCandidateHeight);
+        result.excludedBands.bottom = std::max(
+            result.excludedBands.bottom, config.fixedBottomCandidateHeight);
+        result.excludedBands.right = std::max(
+            result.excludedBands.right, config.scrollbarMaximumWidth);
+        return result;
     }
 
     [[nodiscard]] std::optional<ScrollbarObservation> detectScrollbar(
@@ -338,43 +371,55 @@ public:
         return result;
     }
 
-    void observeScrollbar(const ScrollFrame& previous, const ScrollFrame& current)
+    [[nodiscard]] ScrollbarState nextScrollbarState(
+        ScrollbarState state,
+        const ScrollFrame& previous,
+        const ScrollFrame& current) const
     {
-        if (config.scrollbarMaximumWidth <= 0 || scrollbarWidth > 0) {
-            return;
+        if (config.scrollbarMaximumWidth <= 0 || state.confirmedWidth > 0) {
+            return state;
         }
-        if (!lastScrollbar.has_value()) {
-            lastScrollbar = detectScrollbar(previous);
+        if (!state.last.has_value()) {
+            state.last = detectScrollbar(previous);
         }
         const auto observation = detectScrollbar(current);
-        if (!lastScrollbar.has_value() || !observation.has_value()
-            || lastScrollbar->width != observation->width) {
-            lastScrollbar = observation;
-            scrollbarObservedMovements = 0;
-            scrollbarMovingMovements = 0;
-            scrollbarMinimumPersistence = 1.0;
-            return;
+        if (!state.last.has_value() || !observation.has_value()
+            || state.last->width != observation->width) {
+            state.last = observation;
+            state.observedMovements = 0;
+            state.movingMovements = 0;
+            state.minimumPersistence = 1.0;
+            return state;
         }
 
-        ++scrollbarObservedMovements;
+        ++state.observedMovements;
         const double normalizedMotion = static_cast<double>(
-            std::abs(observation->thumbTop - lastScrollbar->thumbTop))
+            std::abs(observation->thumbTop - state.last->thumbTop))
             / static_cast<double>(current.height);
         if (normalizedMotion >= config.scrollbarMotionThreshold) {
-            ++scrollbarMovingMovements;
+            ++state.movingMovements;
         }
-        scrollbarMinimumPersistence = std::min(
-            scrollbarMinimumPersistence,
-            std::min(lastScrollbar->trackPersistence, observation->trackPersistence));
-        lastScrollbar = observation;
+        state.minimumPersistence = std::min(
+            state.minimumPersistence,
+            std::min(state.last->trackPersistence, observation->trackPersistence));
+        state.last = observation;
 
-        const double movingRatio = static_cast<double>(scrollbarMovingMovements)
-            / static_cast<double>(scrollbarObservedMovements);
-        const double confidence = movingRatio * scrollbarMinimumPersistence;
-        if (scrollbarObservedMovements >= config.scrollbarConfirmationMovements
+        const double movingRatio = static_cast<double>(state.movingMovements)
+            / static_cast<double>(state.observedMovements);
+        const double confidence = movingRatio * state.minimumPersistence;
+        if (state.observedMovements >= config.scrollbarConfirmationMovements
             && confidence >= config.scrollbarConfidenceThreshold) {
-            scrollbarWidth = observation->width;
+            state.confirmedWidth = observation->width;
         }
+        return state;
+    }
+
+    void clearPending() noexcept
+    {
+        for (const auto& movement : pending) {
+            persistentBytes -= movement.persistentBytes;
+        }
+        pending.clear();
     }
 };
 
@@ -388,7 +433,7 @@ ScrollStitchSession::ScrollStitchSession(ScrollStitchSession&&) noexcept = defau
 ScrollStitchSession& ScrollStitchSession::operator=(ScrollStitchSession&&) noexcept = default;
 
 AppendResult ScrollStitchSession::append(const ScrollFrame& frame)
-{
+try {
     AppendResult result;
     result.outputHeight = implementation_->height;
     const auto& config = implementation_->config;
@@ -400,16 +445,21 @@ AppendResult ScrollStitchSession::append(const ScrollFrame& frame)
         return result;
     }
 
-    auto fingerprint = FrameFingerprint::make(frame, AnchorFingerprintSize);
-    if (fingerprint.luminance.empty()) {
-        return result;
-    }
-    const std::size_t fingerprintBytes = fingerprint.luminance.capacity();
     const auto fullFrameBytes = imageBytes(frame.width, frame.height);
     if (!fullFrameBytes.has_value()) {
         result.kind = AppendKind::ResourceLimit;
         return result;
     }
+    if (implementation_->anchors.empty()
+        && *fullFrameBytes >= config.maximumAcceptedBytes) {
+        result.kind = AppendKind::ResourceLimit;
+        return result;
+    }
+    auto fingerprint = FrameFingerprint::make(frame, AnchorFingerprintSize);
+    if (fingerprint.luminance.empty()) {
+        return result;
+    }
+    const std::size_t fingerprintBytes = fingerprint.luminance.capacity();
 
     if (implementation_->anchors.empty()) {
         const auto projected = checkedSum(*fullFrameBytes, fingerprintBytes);
@@ -425,11 +475,12 @@ AppendResult ScrollStitchSession::append(const ScrollFrame& frame)
         try {
             implementation_->segments.reserve(1U);
             implementation_->anchors.reserve(1U);
-            implementation_->segments.push_back({*storedFrame, 0, 0, frame.height});
+            implementation_->segments.push_back({*storedFrame, 0, frame.height});
             implementation_->anchors.push_back(std::move(fingerprint));
         } catch (...) {
             implementation_->segments.clear();
             implementation_->anchors.clear();
+            result.kind = AppendKind::ResourceLimit;
             return result;
         }
         implementation_->tail = *storedFrame;
@@ -449,25 +500,171 @@ AppendResult ScrollStitchSession::append(const ScrollFrame& frame)
         return result;
     }
     if (const auto match = implementation_->matchingAnchor(fingerprint); match.has_value()) {
-        result.kind = *match + 1U == implementation_->anchors.size()
+        result.kind = implementation_->pending.empty()
+                && *match + 1U == implementation_->anchors.size()
+            ? AppendKind::DuplicateDiscarded
+            : AppendKind::ReviewDiscarded;
+        result.confidence = 1.0;
+        return result;
+    }
+    if (const auto match = implementation_->matchingPending(fingerprint); match.has_value()) {
+        result.kind = *match + 1U == implementation_->pending.size()
             ? AppendKind::DuplicateDiscarded
             : AppendKind::ReviewDiscarded;
         result.confidence = 1.0;
         return result;
     }
 
-    const auto matcherConfig = implementation_->effectiveMatcherConfig();
     VerticalOverlapMatcher matcher;
-    const auto& tail = *implementation_->tail;
-    const auto reverse = matcher.match(frame, tail, matcherConfig);
+    const auto& evidenceTail = implementation_->pending.empty()
+        ? *implementation_->tail
+        : *implementation_->pending.back().frame;
+    const auto matcherConfig = implementation_->effectiveMatcherConfig();
+    const auto reverse = matcher.match(frame, evidenceTail, matcherConfig);
     if (reverse.kind == OverlapKind::Reliable && reverse.verticalAdvance > 0) {
         result.kind = AppendKind::ReviewDiscarded;
         result.confidence = reverse.confidence;
         return result;
     }
-    const auto overlap = matcher.match(tail, frame, matcherConfig);
+    auto overlap = matcher.match(evidenceTail, frame, matcherConfig);
     result.confidence = overlap.confidence;
+
+    bool discardPendingOnCommit = false;
+    if (!implementation_->pending.empty() && overlap.kind == OverlapKind::Reliable
+        && overlap.verticalAdvance > 0) {
+        overlap = matcher.match(*implementation_->tail, frame, matcherConfig);
+        result.confidence = overlap.confidence;
+        discardPendingOnCommit = true;
+    }
+
     if (overlap.kind != OverlapKind::Reliable || overlap.verticalAdvance <= 0) {
+        const auto candidate = matcher.match(
+            evidenceTail, frame, implementation_->candidateMatcherConfig());
+        const bool fixedEvidence = candidate.kind == OverlapKind::Reliable
+            && candidate.verticalAdvance > 0
+            && implementation_->candidateBandsAreStationary(evidenceTail, frame);
+        if (!fixedEvidence) {
+            implementation_->clearPending();
+            return result;
+        }
+
+        const auto contribution = checkedSum(*fullFrameBytes, fingerprintBytes);
+        const auto projected = contribution.has_value()
+            ? checkedSum(implementation_->persistentBytes, *contribution)
+            : std::nullopt;
+        if (!projected.has_value() || *projected >= config.maximumAcceptedBytes) {
+            result.kind = AppendKind::ResourceLimit;
+            return result;
+        }
+        const auto storedPendingFrame = copyFrame(frame);
+        if (!storedPendingFrame.has_value()) {
+            result.kind = AppendKind::ResourceLimit;
+            return result;
+        }
+
+        Implementation::PendingMovement newMovement{
+            *storedPendingFrame,
+            std::move(fingerprint),
+            candidate.verticalAdvance,
+            candidate.confidence,
+            *contribution,
+        };
+        const int requiredEvidence = std::max(3, config.fixedBandConfirmationMovements);
+        if (implementation_->pending.size() + 1U < static_cast<std::size_t>(requiredEvidence)) {
+            implementation_->pending.reserve(implementation_->pending.size() + 1U);
+            implementation_->pending.push_back(std::move(newMovement));
+            implementation_->persistentBytes = *projected;
+            return result;
+        }
+
+        std::vector<Implementation::Segment> preparedSegments;
+        preparedSegments.reserve(implementation_->pending.size() + 1U);
+        int flushedHeight = 0;
+        auto preparedScrollbar = implementation_->scrollbar;
+        const ScrollFrame* previous = implementation_->tail.get();
+        auto prepareMovement = [&](const Implementation::PendingMovement& movement) {
+            if (movement.advance > std::numeric_limits<int>::max() - flushedHeight) {
+                return false;
+            }
+            const int firstRow = movement.frame->height
+                - config.fixedBottomCandidateHeight - movement.advance;
+            auto pixels = copyRows(*movement.frame, firstRow, movement.advance);
+            if (!pixels.isValid()) {
+                return false;
+            }
+            auto stored = std::make_shared<const ScrollFrame>(std::move(pixels));
+            preparedSegments.push_back({stored, 0, movement.advance});
+            preparedScrollbar = implementation_->nextScrollbarState(
+                std::move(preparedScrollbar), *previous, *movement.frame);
+            previous = movement.frame.get();
+            flushedHeight += movement.advance;
+            return true;
+        };
+        for (const auto& movement : implementation_->pending) {
+            if (!prepareMovement(movement)) {
+                result.kind = AppendKind::ResourceLimit;
+                return result;
+            }
+        }
+        if (!prepareMovement(newMovement)
+            || flushedHeight > std::numeric_limits<int>::max() - implementation_->height) {
+            result.kind = AppendKind::ResourceLimit;
+            return result;
+        }
+
+        std::size_t flushedPersistent = *projected;
+        const std::size_t pendingCount = implementation_->pending.size() + 1U;
+        const auto pendingFrameBytes = checkedProduct(*fullFrameBytes, pendingCount);
+        const auto segmentBytes = imageBytes(frame.width, flushedHeight);
+        if (!pendingFrameBytes.has_value() || !segmentBytes.has_value()
+            || flushedPersistent < *pendingFrameBytes) {
+            result.kind = AppendKind::ResourceLimit;
+            return result;
+        }
+        flushedPersistent -= *pendingFrameBytes;
+        if (implementation_->tailHasSeparateStorage) {
+            if (flushedPersistent < *fullFrameBytes) {
+                result.kind = AppendKind::ResourceLimit;
+                return result;
+            }
+            flushedPersistent -= *fullFrameBytes;
+        }
+        for (const auto bytes : {*segmentBytes, *fullFrameBytes}) {
+            const auto sum = checkedSum(flushedPersistent, bytes);
+            if (!sum.has_value()) {
+                result.kind = AppendKind::ResourceLimit;
+                return result;
+            }
+            flushedPersistent = *sum;
+        }
+        if (flushedPersistent >= config.maximumAcceptedBytes) {
+            result.kind = AppendKind::ResourceLimit;
+            return result;
+        }
+
+        implementation_->segments.reserve(
+            implementation_->segments.size() + preparedSegments.size());
+        implementation_->anchors.reserve(
+            implementation_->anchors.size() + implementation_->pending.size() + 1U);
+        for (auto& segment : preparedSegments) {
+            implementation_->segments.push_back(std::move(segment));
+        }
+        for (auto& movement : implementation_->pending) {
+            implementation_->anchors.push_back(std::move(movement.fingerprint));
+        }
+        implementation_->anchors.push_back(std::move(newMovement.fingerprint));
+        implementation_->tail = newMovement.frame;
+        implementation_->tailHasSeparateStorage = true;
+        implementation_->pending.clear();
+        implementation_->persistentBytes = flushedPersistent;
+        implementation_->fixedTopConfirmed = config.fixedTopCandidateHeight > 0;
+        implementation_->fixedBottomConfirmed = config.fixedBottomCandidateHeight > 0;
+        implementation_->scrollbar = std::move(preparedScrollbar);
+        implementation_->height += flushedHeight;
+        result.kind = AppendKind::AcceptedAppend;
+        result.appendedHeight = flushedHeight;
+        result.outputHeight = implementation_->height;
+        result.confidence = candidate.confidence;
         return result;
     }
 
@@ -486,6 +683,15 @@ AppendResult ScrollStitchSession::append(const ScrollFrame& frame)
     }
 
     std::size_t projected = implementation_->persistentBytes;
+    if (discardPendingOnCommit) {
+        for (const auto& movement : implementation_->pending) {
+            if (projected < movement.persistentBytes) {
+                result.kind = AppendKind::ResourceLimit;
+                return result;
+            }
+            projected -= movement.persistentBytes;
+        }
+    }
     if (implementation_->tailHasSeparateStorage) {
         if (projected < *fullFrameBytes) {
             result.kind = AppendKind::ResourceLimit;
@@ -522,23 +728,31 @@ AppendResult ScrollStitchSession::append(const ScrollFrame& frame)
         return result;
     }
 
-    implementation_->observeFixedBands(tail, frame);
-    implementation_->observeScrollbar(tail, frame);
+    const auto preparedScrollbar = implementation_->nextScrollbarState(
+        implementation_->scrollbar, *implementation_->tail, frame);
     implementation_->segments.push_back({
         *storedSegment,
-        bottomCandidate,
-        0,
+        implementation_->fixedBottomConfirmed ? 0 : bottomCandidate,
         appendedHeight,
     });
     implementation_->anchors.push_back(std::move(fingerprint));
     implementation_->tail = *storedTail;
     implementation_->tailHasSeparateStorage = true;
+    if (discardPendingOnCommit) {
+        implementation_->pending.clear();
+    }
     implementation_->persistentBytes = projected;
+    implementation_->scrollbar = preparedScrollbar;
     implementation_->height += appendedHeight;
     result.kind = AppendKind::AcceptedAppend;
     result.appendedHeight = appendedHeight;
     result.outputHeight = implementation_->height;
     return result;
+} catch (const std::bad_alloc&) {
+    AppendResult failure;
+    failure.kind = AppendKind::ResourceLimit;
+    failure.outputHeight = implementation_->height;
+    return failure;
 }
 
 int ScrollStitchSession::outputHeight() const noexcept
@@ -551,7 +765,7 @@ ScrollFrame ScrollStitchSession::finalize() const
     if (implementation_->segments.empty()) {
         return {};
     }
-    const int outputWidth = implementation_->width - implementation_->scrollbarWidth;
+    const int outputWidth = implementation_->width - implementation_->scrollbar.confirmedWidth;
     if (!imageBytes(outputWidth, implementation_->height).has_value()) {
         return {};
     }
@@ -562,9 +776,7 @@ ScrollFrame ScrollStitchSession::finalize() const
     const auto rowBytes = static_cast<std::size_t>(outputWidth) * 4U;
     int outputRow = 0;
     for (const auto& segment : implementation_->segments) {
-        const int firstRow = implementation_->fixedBottomConfirmed
-            ? segment.fixedBottomFirstRow
-            : segment.ordinaryFirstRow;
+        const int firstRow = segment.firstRow;
         if (!segment.pixels || firstRow < 0 || segment.outputRows <= 0
             || firstRow > segment.pixels->height - segment.outputRows) {
             return {};
