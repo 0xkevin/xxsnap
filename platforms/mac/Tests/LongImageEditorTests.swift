@@ -138,7 +138,13 @@ final class LongImageEditorTests: XCTestCase {
             rect: NSRect(x: 30.5, y: 120.25, width: 50, height: 30),
             style: CaptureAnnotationStyle()
         )
-        let requested = NSRect(x: 0, y: 100.25, width: 240, height: 100.5)
+        let geometry = LongImageEditorGeometry(
+            imageSize: image.size,
+            viewportSize: NSSize(width: 216, height: 90.45),
+            scrollOffset: 100.25
+        )
+        XCTAssertEqual(geometry.fitWidthScale, 0.9, accuracy: 0.001)
+        let requested = geometry.visibleImageRect
         let slice = LongImageEditorDocument.visibleSlice(
             image: image,
             annotations: [annotation],
@@ -853,7 +859,7 @@ final class LongImageEditorTests: XCTestCase {
         )
         let text = CaptureAnnotation(
             kind: .text,
-            rect: NSRect(x: 30, y: 150, width: 100, height: 45),
+            rect: NSRect(x: 90, y: 20, width: 100, height: 45),
             style: style,
             text: "Resize"
         )
@@ -867,6 +873,11 @@ final class LongImageEditorTests: XCTestCase {
         let overlay = try XCTUnwrap(controller.test_editingOverlay)
         let mask = EraserMask(rect: NSRect(x: 40, y: 80, width: 20, height: 15), affectedAnnotationIDs: [rectangle.id])
         overlay.test_addEraserMask(mask)
+        overlay.makeKey()
+        overlay.test_activateTextTool()
+        let localText = try XCTUnwrap(overlay.editorSnapshot?.annotations.first { $0.id == text.id })
+        overlay.test_doubleClick(at: NSPoint(x: localText.rect.midX, y: localText.rect.midY))
+        overlay.firstResponder?.insertText("Active")
 
         func resizeBy100() throws {
             let oldFrame = try XCTUnwrap(controller.window?.frame)
@@ -880,6 +891,7 @@ final class LongImageEditorTests: XCTestCase {
         }
         try resizeBy100()
         let firstCommittedMaskY = try XCTUnwrap(controller.test_fullEraserMasks.first { $0.id == mask.id }).rect.minY
+        let firstActiveTextRect = try XCTUnwrap(controller.test_fullAnnotations.first { $0.id == text.id }).rect
         try resizeBy100()
         try resizeBy100()
 
@@ -887,6 +899,7 @@ final class LongImageEditorTests: XCTestCase {
         XCTAssertEqual(controller.test_fullAnnotations.first { $0.id == text.id }?.rect, text.rect)
         let committedMask = try XCTUnwrap(controller.test_fullEraserMasks.first { $0.id == mask.id })
         XCTAssertEqual(committedMask.rect.minY, firstCommittedMaskY, accuracy: 0.001)
+        XCTAssertEqual(controller.test_fullAnnotations.first { $0.id == text.id }?.rect, firstActiveTextRect)
         controller.stop()
     }
 
@@ -897,11 +910,9 @@ final class LongImageEditorTests: XCTestCase {
         let overlay = try XCTUnwrap(controller.test_editingOverlay)
         XCTAssertTrue(window.childWindows?.contains(overlay) == true)
 
-        window.miniaturize(nil)
-        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        controller.windowDidMiniaturize(Notification(name: NSWindow.didMiniaturizeNotification))
         XCTAssertFalse(overlay.isVisible)
-        window.deminiaturize(nil)
-        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        controller.windowDidDeminiaturize(Notification(name: NSWindow.didDeminiaturizeNotification))
         XCTAssertTrue(overlay.isVisible)
         let expectedFrame = window.convertToScreen(controller.scrollView.convert(controller.scrollView.bounds, to: nil))
         XCTAssertEqual(overlay.frame, expectedFrame)
