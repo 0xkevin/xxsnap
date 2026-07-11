@@ -1055,7 +1055,7 @@ enum CaptureStrokePattern: Int, CaseIterable {
     }
 }
 
-struct CaptureAnnotationStyle {
+struct CaptureAnnotationStyle: Equatable {
     var strokeColor: NSColor = NSColor(calibratedRed: 245 / 255, green: 34 / 255, blue: 45 / 255, alpha: 1)
     var strokeWidth: CGFloat = 3
     var strokePattern: CaptureStrokePattern = .solid
@@ -1078,7 +1078,7 @@ struct EraserMask: Equatable {
     var affectedAnnotationIDs: Set<AnnotationID>
 }
 
-struct CaptureAnnotation {
+struct CaptureAnnotation: Equatable {
     var id: AnnotationID = UUID()
     var kind: CaptureAnnotationKind
     var rect: NSRect

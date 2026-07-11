@@ -118,6 +118,12 @@ final class ScrollCaptureSession {
             guard update.kind == .acceptedInitial else {
                 throw ScrollCaptureSessionError.initialFrameRejected(update.kind)
             }
+            let preview = try stitcher.preview(maximumHeight: 1_200)
+            guard emit(
+                .preview(preview),
+                operationGeneration: operationGeneration,
+                expectedState: .preparing
+            ) else { return }
             guard setState(.capturing, operationGeneration: operationGeneration) else { return }
             activityMonitor.start { [weak self] in self?.recordScrollActivity() }
         } catch {

@@ -752,10 +752,15 @@ final class LongImageEditorTests: XCTestCase {
             rect: NSRect(x: 15, y: 700, width: 80, height: 100),
             style: style
         )
+        let editableAnnotation = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 10, y: 20, width: 60, height: 50),
+            style: style
+        )
         var received: [NSImage] = []
         let controller = LongImageEditorWindowController(
             canonicalImage: image,
-            annotations: [annotation],
+            annotations: [editableAnnotation, annotation],
             visibleFrame: NSRect(x: 0, y: 0, width: 500, height: 450),
             actions: LongImageEditorActions(
                 copy: { received.append($0); return true },
@@ -778,6 +783,21 @@ final class LongImageEditorTests: XCTestCase {
         XCTAssertEqual(controller.test_copyButton.accessibilityLabel(), "复制完整长截图")
         XCTAssertEqual(controller.test_saveButton.accessibilityLabel(), "保存完整长截图")
         XCTAssertEqual(controller.test_pinButton.accessibilityLabel(), "贴出完整长截图")
+
+        let firstRevision = controller.test_documentRevision
+        var edited = try XCTUnwrap(controller.test_editingOverlay?.test_annotation(at: 0))
+        edited.rect.origin.x += 10
+        controller.test_editingOverlay?.test_setAnnotations([edited])
+        controller.test_copyButton.performClick(nil)
+        controller.test_saveButton.performClick(nil)
+        controller.test_pinButton.performClick(nil)
+
+        XCTAssertEqual(received.count, 6)
+        XCTAssertFalse(received[2] === received[3])
+        XCTAssertTrue(received[3] === received[4])
+        XCTAssertTrue(received[4] === received[5])
+        XCTAssertNotEqual(try pixelBytes(received[2]), try pixelBytes(received[3]))
+        XCTAssertEqual(controller.test_documentRevision, firstRevision + 1)
         controller.stop()
     }
 

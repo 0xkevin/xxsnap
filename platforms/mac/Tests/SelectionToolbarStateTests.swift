@@ -103,6 +103,36 @@ private final class FakeLongImageEditor: LongImageEditorPresenting {
     func simulateClose() { onClose?() }
 }
 
+@MainActor
+private final class ResourceLimitCoordinatorStitcher: ScrollStitching {
+    let acceptedImage: NSImage
+    private var appendCount = 0
+    init(acceptedImage: NSImage) { self.acceptedImage = acceptedImage }
+    func append(_ image: NSImage) throws -> ScrollCaptureAppendUpdate {
+        appendCount += 1
+        return .testValue(kind: appendCount == 1 ? .acceptedInitial : .resourceLimit)
+    }
+    func preview(maximumHeight: Int) throws -> NSImage { acceptedImage }
+    func finalImage() throws -> NSImage { acceptedImage }
+}
+
+@MainActor
+private struct ResourceLimitCoordinatorCapturer: ScrollRegionCapturing {
+    let image: NSImage
+    func captureImage(in selectionRect: NSRect) async throws -> NSImage { image }
+}
+
+@MainActor
+private struct ResourceLimitCoordinatorClock: ScrollCaptureClock {
+    func sleep(for duration: Duration) async throws { throw CancellationError() }
+}
+
+@MainActor
+private final class ResourceLimitCoordinatorMonitor: ScrollActivityMonitoring {
+    func start(_ callback: @escaping @MainActor () -> Void) {}
+    func stop() {}
+}
+
 final class SelectionToolbarStateTests: XCTestCase {
     func testBeginScrollCaptureFreezesSeedAndEntersPassiveModeWithoutOrdinaryCompletion() throws {
         let image = solidImage(size: NSSize(width: 640, height: 420), color: .white)
@@ -9663,15 +9693,26 @@ final class SelectionToolbarStateTests: XCTestCase {
     @MainActor
     func testCaptureCoordinatorResourceLimitCanFinishAcceptedImageWithoutAutoCancel() async throws {
         let seed = scrollCaptureSeedForCoordinatorTests()
-        let session = FakeScrollCaptureSession(seed: seed)
-        session.finishedImage = NSImage(size: NSSize(width: 80, height: 500))
+        let acceptedImage = solidImage(size: NSSize(width: 80, height: 500), color: .purple)
+        let stitcher = ResourceLimitCoordinatorStitcher(acceptedImage: acceptedImage)
         let presentation = FakeScrollCapturePresentation()
-        var update: (@MainActor (ScrollCapturePresentationUpdate) -> Void)?
+        var session: ScrollCaptureSession?
         var handedOff: NSImage?
         let coordinator = CaptureCoordinator(
             permissionCoordinator: PermissionCoordinator(),
             screenCaptureService: ScreenCaptureService(),
-            scrollCaptureSessionFactory: { _, callback in update = callback; return session },
+            scrollCaptureSessionFactory: { capturedSeed, callback in
+                let value = ScrollCaptureSession(
+                    seed: capturedSeed,
+                    capturer: ResourceLimitCoordinatorCapturer(image: acceptedImage),
+                    stitcher: stitcher,
+                    clock: ResourceLimitCoordinatorClock(),
+                    activityMonitor: ResourceLimitCoordinatorMonitor(),
+                    presentation: callback
+                )
+                session = value
+                return value
+            },
             scrollCapturePresentationFactory: { context in
                 presentation.onFinish = context.onFinish
                 presentation.onCancel = context.onCancel
@@ -9681,16 +9722,19 @@ final class SelectionToolbarStateTests: XCTestCase {
         )
         coordinator.test_installOverlayWindow(SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in })
         coordinator.test_requestScrollCapture(seed: seed)
-        await Task.yield()
-        update?(.preview(session.finishedImage))
-        update?(.state(.paused(.resourceLimit)))
+        for _ in 0..<20 where session?.state != .capturing { await Task.yield() }
+        XCTAssertTrue(presentation.previews.last === acceptedImage)
+
+        session?.recordScrollActivity()
+        await session?.test_runSamplingTick()
+        XCTAssertEqual(session?.state, .paused(.resourceLimit))
+        XCTAssertTrue(presentation.previews.last === acceptedImage)
 
         presentation.onFinish?()
         for _ in 0..<20 where handedOff == nil { await Task.yield() }
 
-        XCTAssertTrue(handedOff === session.finishedImage)
-        XCTAssertEqual(session.finishCount, 1)
-        XCTAssertEqual(session.cancelCount, 0)
+        XCTAssertTrue(handedOff === acceptedImage)
+        XCTAssertEqual(presentation.stopCount, 1)
     }
 
     @MainActor
@@ -9886,21 +9930,33 @@ final class SelectionToolbarStateTests: XCTestCase {
         let editor = FakeLongImageEditor()
         var capturedImage: NSImage?
         var capturedSeed: ScrollCaptureSeed?
+        var capturedActions: LongImageEditorActions?
+        var copiedImages: [NSImage] = []
+        var savedImages: [NSImage] = []
+        var pinnedWindow: FakePinnedWindow?
         var endCount = 0
         let coordinator = CaptureCoordinator(
             permissionCoordinator: PermissionCoordinator(),
             screenCaptureService: ScreenCaptureService(),
+            pinnedWindowFactory: { image, screenRect in
+                let window = FakePinnedWindow(image: image, screenRect: screenRect)
+                pinnedWindow = window
+                return window
+            },
             scrollCaptureSessionFactory: { _, _ in session },
             scrollCapturePresentationFactory: { context in
                 presentation.onFinish = context.onFinish
                 presentation.onCancel = context.onCancel
                 return presentation
             },
-            longImageEditorFactory: { image, seed, _ in
+            longImageEditorFactory: { image, seed, actions in
                 capturedImage = image
                 capturedSeed = seed
+                capturedActions = actions
                 return editor
-            }
+            },
+            longImageCopyHandler: { copiedImages.append($0); return true },
+            longImageSaveHandler: { savedImages.append($0); return true }
         )
         coordinator.captureSessionDidEnd = { endCount += 1 }
         coordinator.test_installOverlayWindow(SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in })
@@ -9915,6 +9971,19 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertTrue(coordinator.test_lastCapture === session.finishedImage)
         XCTAssertEqual(endCount, 0)
         XCTAssertTrue(coordinator.test_hasLongImageEditor)
+
+        let rendered = CaptureAnnotationRenderer.renderLongImage(
+            image: solidImage(size: NSSize(width: 80, height: 500), color: .white),
+            annotations: seed.annotations,
+            eraserMasks: seed.eraserMasks
+        )
+        XCTAssertEqual(capturedActions?.copy(rendered), true)
+        XCTAssertEqual(capturedActions?.save(rendered), true)
+        XCTAssertEqual(capturedActions?.pin(rendered), true)
+        XCTAssertTrue(copiedImages.first === rendered)
+        XCTAssertTrue(savedImages.first === rendered)
+        XCTAssertTrue(pinnedWindow?.image === rendered)
+        XCTAssertEqual(pinnedWindow?.showCount, 1)
 
         editor.simulateClose()
         XCTAssertEqual(endCount, 1)

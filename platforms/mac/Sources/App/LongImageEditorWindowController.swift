@@ -158,6 +158,7 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     private let actions: LongImageEditorActions
     private let language: AppLanguage
     private var renderedRevision: NSImage?
+    private var documentRevision: UInt64 = 0
     private var actionInProgress = false
     private var didNotifyClose = false
     private var boundsObserver: NSObjectProtocol?
@@ -386,7 +387,8 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     }
     private func commitOverlay() {
         guard let snapshot = overlay?.editorSnapshot, let presentedContext else { return }
-        let previousRevision = documentRevisionSignature
+        let previousAnnotations = documentState.annotations
+        let previousMasks = documentState.eraserMasks
         let origin = presentedContext.sliceRect.origin
         let localIDs = Set(snapshot.annotations.map(\.id))
         let deletedIDs = presentedAnnotationIDs.subtracting(localIDs)
@@ -430,11 +432,10 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
             !presentedAnnotationIDs.isDisjoint(with: $0.affectedAnnotationIDs)
                 && $0.rect.intersects(presentedContext.sliceRect)
         }.map(\.id))
-        if previousRevision != documentRevisionSignature { renderedRevision = nil }
-    }
-
-    private var documentRevisionSignature: String {
-        String(reflecting: documentState.annotations) + String(reflecting: documentState.eraserMasks)
+        if previousAnnotations != documentState.annotations || previousMasks != documentState.eraserMasks {
+            documentRevision &+= 1
+            renderedRevision = nil
+        }
     }
 
     private func completeRenderedImage() -> NSImage {
@@ -558,6 +559,7 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     var test_copyButton: NSButton { copyButton }
     var test_saveButton: NSButton { saveButton }
     var test_pinButton: NSButton { pinButton }
+    var test_documentRevision: UInt64 { documentRevision }
     var test_fullAnnotations: [CaptureAnnotation] { documentState.annotations }
     var test_fullEraserMasks: [EraserMask] { documentState.eraserMasks }
     func test_commitOverlay() { commitOverlay() }

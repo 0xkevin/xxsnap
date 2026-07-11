@@ -71,7 +71,7 @@ final class ScrollCaptureSessionTests: XCTestCase {
         await session.test_runSamplingTick()
 
         XCTAssertFalse(session.isSamplingArmed)
-        XCTAssertEqual(presentation.previews.count, 0)
+        XCTAssertEqual(presentation.previews.count, 1)
         XCTAssertEqual(presentation.kinds, [.acceptedInitial, .reviewDiscarded, .reviewDiscarded, .reviewDiscarded])
     }
 
@@ -98,6 +98,25 @@ final class ScrollCaptureSessionTests: XCTestCase {
         limitSession.recordScrollActivity()
         await limitSession.test_runSamplingTick()
         XCTAssertEqual(limitEngine.appendedImages.count, 2)
+    }
+
+    func testInitialAcceptedPreviewRemainsVisibleWhenFirstLiveAppendHitsResourceLimit() async throws {
+        let accepted = TestImageFactory.solid(size: CGSize(width: 80, height: 60), color: .red)
+        let engine = FakeStitcher(results: [.acceptedInitial, .resourceLimit], final: accepted)
+        let presentation = PresentationRecorder()
+        let session = makeSession(engine: engine, presentation: presentation)
+
+        try await session.start()
+        XCTAssertEqual(presentation.previews.count, 1)
+        XCTAssertTrue(try XCTUnwrap(presentation.previews.first) === accepted)
+
+        session.recordScrollActivity()
+        await session.test_runSamplingTick()
+
+        XCTAssertEqual(session.state, .paused(.resourceLimit))
+        XCTAssertEqual(presentation.previews.count, 1)
+        XCTAssertTrue(try XCTUnwrap(presentation.previews.first) === accepted)
+        XCTAssertEqual(engine.previewCallCount, 1)
     }
 
     func testReentrantTicksNeverOverlapCaptureOrAppend() async throws {
@@ -404,8 +423,8 @@ final class ScrollCaptureSessionTests: XCTestCase {
         await session.test_runSamplingTick()
 
         XCTAssertEqual(session.state, .cancelled)
-        XCTAssertEqual(recorder.previews.count, 0)
-        XCTAssertEqual(engine.previewCallCount, 0)
+        XCTAssertEqual(recorder.previews.count, 1)
+        XCTAssertEqual(engine.previewCallCount, 1)
     }
 
     func testFinishingPresentationCanCancelWithoutCallingFinalOrRevivingState() async throws {
