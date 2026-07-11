@@ -20,6 +20,22 @@ ScrollFrame solidFrame(int width, int height, std::uint8_t value)
     return frame;
 }
 
+void setBgra(
+    ScrollFrame& frame,
+    int x,
+    int y,
+    std::uint8_t blue,
+    std::uint8_t green,
+    std::uint8_t red,
+    std::uint8_t alpha = 255)
+{
+    const auto offset = static_cast<std::size_t>(y * frame.bytesPerRow + x * 4);
+    frame.pixels[offset] = blue;
+    frame.pixels[offset + 1] = green;
+    frame.pixels[offset + 2] = red;
+    frame.pixels[offset + 3] = alpha;
+}
+
 } // namespace
 
 class TestFrameFingerprint final : public QObject
@@ -33,6 +49,10 @@ private slots:
     void invalidAndMismatchedFingerprintsCannotBeCompared();
     void frameValidationRejectsOverflowedBufferSize();
     void constructorRejectsUnrepresentableRowSize();
+    void tallFingerprintDoesNotOverflowSourceBounds();
+    void wideFingerprintDoesNotOverflowSourceBounds();
+    void luminanceAndSpatialBinsHaveExactValues();
+    void distanceUsesFullByteRange();
 };
 
 void TestFrameFingerprint::identicalFramesHaveZeroDistance()
@@ -100,6 +120,59 @@ void TestFrameFingerprint::constructorRejectsUnrepresentableRowSize()
     QVERIFY(!frame.isValid());
     QCOMPARE(frame.bytesPerRow, 0);
     QVERIFY(frame.pixels.empty());
+}
+
+void TestFrameFingerprint::tallFingerprintDoesNotOverflowSourceBounds()
+{
+    const auto fingerprint = FrameFingerprint::make(
+        solidFrame(1, 50'000, 40),
+        FingerprintSize{1, 50'000});
+
+    QCOMPARE(fingerprint.luminance.size(), std::size_t{50'000});
+    QVERIFY(std::all_of(fingerprint.luminance.cbegin(), fingerprint.luminance.cend(), [](auto value) {
+        return value == 40;
+    }));
+}
+
+void TestFrameFingerprint::wideFingerprintDoesNotOverflowSourceBounds()
+{
+    const auto fingerprint = FrameFingerprint::make(
+        solidFrame(50'000, 1, 40),
+        FingerprintSize{50'000, 1});
+
+    QCOMPARE(fingerprint.luminance.size(), std::size_t{50'000});
+    QVERIFY(std::all_of(fingerprint.luminance.cbegin(), fingerprint.luminance.cend(), [](auto value) {
+        return value == 40;
+    }));
+}
+
+void TestFrameFingerprint::luminanceAndSpatialBinsHaveExactValues()
+{
+    ScrollFrame frame(4, 2);
+    setBgra(frame, 0, 0, 255, 0, 0);
+    setBgra(frame, 1, 0, 0, 255, 0);
+    setBgra(frame, 2, 0, 0, 0, 255);
+    setBgra(frame, 3, 0, 255, 255, 255);
+    setBgra(frame, 0, 1, 0, 0, 0);
+    setBgra(frame, 1, 1, 0, 0, 255);
+    setBgra(frame, 2, 1, 0, 255, 0);
+    setBgra(frame, 3, 1, 255, 0, 0);
+
+    const auto oneBin = FrameFingerprint::make(frame, FingerprintSize{1, 1});
+    const auto twoBins = FrameFingerprint::make(frame, FingerprintSize{2, 1});
+
+    QCOMPARE(oneBin.luminance, std::vector<std::uint8_t>({96}));
+    QCOMPARE(twoBins.luminance, std::vector<std::uint8_t>({64, 128}));
+}
+
+void TestFrameFingerprint::distanceUsesFullByteRange()
+{
+    const Fingerprint zero{FingerprintSize{1, 1}, {0}};
+    const Fingerprint one{FingerprintSize{1, 1}, {1}};
+    const Fingerprint maximum{FingerprintSize{1, 1}, {255}};
+
+    QCOMPARE(*FrameFingerprint::meanAbsoluteDistance(zero, one), 1.0 / 255.0);
+    QCOMPARE(*FrameFingerprint::meanAbsoluteDistance(zero, maximum), 1.0);
 }
 
 QTEST_MAIN(TestFrameFingerprint)

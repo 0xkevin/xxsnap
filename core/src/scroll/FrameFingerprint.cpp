@@ -35,6 +35,24 @@ bool isValid(const Fingerprint& fingerprint)
     return count.has_value() && fingerprint.luminance.size() == *count;
 }
 
+struct SampleRange final
+{
+    int begin;
+    int end;
+};
+
+SampleRange sampleRange(int targetIndex, int sourceExtent, int targetExtent)
+{
+    const auto index = static_cast<std::uint64_t>(targetIndex);
+    const auto source = static_cast<std::uint64_t>(sourceExtent);
+    const auto target = static_cast<std::uint64_t>(targetExtent);
+    const auto begin = std::min(index * source / target, source - 1U);
+    const auto endNumerator = (index + 1U) * source;
+    const auto roundedEnd = endNumerator / target + (endNumerator % target != 0U ? 1U : 0U);
+    const auto end = std::min(source, std::max(begin + 1U, roundedEnd));
+    return {static_cast<int>(begin), static_cast<int>(end)};
+}
+
 } // namespace
 
 Fingerprint FrameFingerprint::make(const ScrollFrame& frame, FingerprintSize size)
@@ -47,23 +65,17 @@ Fingerprint FrameFingerprint::make(const ScrollFrame& frame, FingerprintSize siz
 
     result.luminance.resize(*count);
     for (int targetY = 0; targetY < size.height; ++targetY) {
-        const int sourceTop = targetY * frame.height / size.height;
-        const int sourceBottom = std::max(
-            sourceTop + 1,
-            static_cast<int>(std::ceil(static_cast<double>(targetY + 1) * frame.height / size.height)));
+        const auto verticalRange = sampleRange(targetY, frame.height, size.height);
 
         for (int targetX = 0; targetX < size.width; ++targetX) {
-            const int sourceLeft = targetX * frame.width / size.width;
-            const int sourceRight = std::max(
-                sourceLeft + 1,
-                static_cast<int>(std::ceil(static_cast<double>(targetX + 1) * frame.width / size.width)));
+            const auto horizontalRange = sampleRange(targetX, frame.width, size.width);
 
             std::uint64_t sum = 0;
             std::uint64_t samples = 0;
-            for (int sourceY = sourceTop; sourceY < sourceBottom; ++sourceY) {
+            for (int sourceY = verticalRange.begin; sourceY < verticalRange.end; ++sourceY) {
                 const auto rowOffset = static_cast<std::size_t>(sourceY)
                     * static_cast<std::size_t>(frame.bytesPerRow);
-                for (int sourceX = sourceLeft; sourceX < sourceRight; ++sourceX) {
+                for (int sourceX = horizontalRange.begin; sourceX < horizontalRange.end; ++sourceX) {
                     const auto pixelOffset = rowOffset + static_cast<std::size_t>(sourceX) * 4U;
                     sum += luminance(frame.pixels.data() + pixelOffset);
                     ++samples;
