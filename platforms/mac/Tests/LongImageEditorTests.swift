@@ -131,6 +131,28 @@ final class LongImageEditorTests: XCTestCase {
         XCTAssertEqual(slice.annotations.map(\.id), [annotation.id])
     }
 
+    func testFractionalVisibleSliceKeepsPixelScaleAndAnnotationRegistration() throws {
+        let image = TestImageFactory.verticalDocumentViewport(offset: 0, width: 240, height: 1_200, scale: 2)
+        let annotation = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 30.5, y: 120.25, width: 50, height: 30),
+            style: CaptureAnnotationStyle()
+        )
+        let requested = NSRect(x: 0, y: 100.25, width: 240, height: 100.5)
+        let slice = LongImageEditorDocument.visibleSlice(
+            image: image,
+            annotations: [annotation],
+            eraserMasks: [],
+            imageRect: requested
+        )
+        let cg = try XCTUnwrap(slice.image.cgImage(forProposedRect: nil, context: nil, hints: nil))
+        XCTAssertEqual(cg.width, 480)
+        XCTAssertEqual(cg.height, 201)
+        XCTAssertEqual(slice.image.size, requested.size)
+        XCTAssertEqual(slice.imageRect, requested)
+        XCTAssertEqual(slice.annotations.first?.rect.origin, NSPoint(x: 30.5, y: 20))
+    }
+
     func testThinBarArrowVisualExtentEntersSliceOutsideLineRect() {
         var style = CaptureAnnotationStyle(); style.strokeWidth = 1
         let line = CaptureArrowLine(
