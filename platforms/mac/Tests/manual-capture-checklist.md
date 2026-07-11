@@ -89,3 +89,10 @@ For every executed row, save a representative PNG outside the repository and ins
 
 - Automated core/XCTest results belong in the task handoff or CI log, not as substitutes for unchecked manual rows above.
 - Real Safari/Chrome scrolling, mouse/trackpad inertia, visual seam inspection, multi-display and Retina/non-Retina rows must remain `待人工` until executed on the named hardware/app combination.
+
+### 2026-07-12 UI smoke attempt
+
+- Computer Use runtime initialization succeeded once with `sky-ready`, but subsequent `sky.list_apps()` and `sky.get_app_state({app:'Google Chrome'})` calls repeatedly failed with the exact error `Sky Computer Use native pipe startup failed`.
+- Because the native control pipe could not start reliably, Safari、Chrome、Preview and XxSnap UI could not be operated or inspected with trustworthy evidence. The environment also could not distinguish physical mouse input from physical trackpad input. This is an automation-environment blocker, not a product failure.
+- Browser/document seam inspection, fixed-header and scrollbar behavior, target-app-frontmost Return/keypad Enter/Esc with and without Accessibility/Input Monitoring permission, mouse/trackpad inertia, long-image copy/save/pin, multi-display, and Retina/non-Retina checks remain `待人工`.
+- Terminal verification found exactly one product process: PID `41041`, executable `/Users/kevin/Projects/open-source/Snipory/xxsnap/.worktrees/scroll-capture-impl/build/xcode-derived/Build/Products/Debug/XxSnap.app/Contents/MacOS/XxSnap`. Process-query helper noise is excluded from this record.
