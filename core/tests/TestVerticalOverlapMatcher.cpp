@@ -1,5 +1,6 @@
 #include "snipory/core/scroll/VerticalOverlapMatcher.h"
 
+#include <QElapsedTimer>
 #include <QTest>
 
 #include <algorithm>
@@ -79,6 +80,23 @@ ScrollFrame aliasedHighFrequencyDocument(int width, int height)
     return frame;
 }
 
+ScrollFrame aliasedSamplingFrame(int width, int height, int documentY, int coarseColumnStep)
+{
+    ScrollFrame frame(width, height);
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            auto bits = static_cast<std::uint32_t>(y + documentY) * 0x9e3779b9U
+                ^ static_cast<std::uint32_t>(x) * 0x85ebca6bU;
+            bits ^= bits >> 16U;
+            const auto value = (y + documentY) % 4 == 0 && x % coarseColumnStep == 0
+                ? std::uint8_t{0}
+                : static_cast<std::uint8_t>(bits & 0xffU);
+            setGray(frame, x, y, value);
+        }
+    }
+    return frame;
+}
+
 ScrollFrame crop(const ScrollFrame& source, int x, int y, int width, int height)
 {
     ScrollFrame result(width, height);
@@ -128,6 +146,18 @@ void addBrightness(ScrollFrame& frame, std::uint8_t amount)
     }
 }
 
+void corruptQuarterGrid(ScrollFrame& frame)
+{
+    for (int y = 0; y < frame.height; y += 4) {
+        for (int x = 0; x < frame.width; x += 4) {
+            const auto offset = static_cast<std::size_t>(y)
+                    * static_cast<std::size_t>(frame.bytesPerRow)
+                + static_cast<std::size_t>(x) * 4U;
+            setGray(frame, x, y, static_cast<std::uint8_t>(255U - frame.pixels[offset]));
+        }
+    }
+}
+
 } // namespace
 
 class TestVerticalOverlapMatcher final : public QObject
@@ -149,6 +179,9 @@ private slots:
     void respectsMinimumWinnerMargin();
     void rejectsInvalidInputsAndConfig();
     void matchesOnePixelWideScoringRegion();
+    void recallsNonZeroErrorPeakBeyondFixedCandidateLimit();
+    void detectsShortPeriodIndependentPeaks();
+    void avoidsQuadraticFullResolutionFallback();
 };
 
 void TestVerticalOverlapMatcher::findsDownwardOffset()
@@ -311,15 +344,13 @@ void TestVerticalOverlapMatcher::respectsMaximumNormalizedError()
 
 void TestVerticalOverlapMatcher::respectsMinimumWinnerMargin()
 {
-    const ScrollFrame document = verticalGradient(120, 480);
-    const ScrollFrame previous = crop(document, 0, 0, 120, 180);
-    const ScrollFrame current = crop(document, 0, 72, 120, 180);
+    const ScrollFrame repeated = repeatedRows(120, 180, 12);
     OverlapConfig config;
-    config.minimumWinnerMargin = 0.02;
+    config.minimumWinnerMargin = 0.0;
 
-    const auto result = VerticalOverlapMatcher().match(previous, current, config);
+    const auto result = VerticalOverlapMatcher().match(repeated, repeated, config);
 
-    QCOMPARE(result.kind, OverlapKind::Ambiguous);
+    QCOMPARE(result.kind, OverlapKind::Reliable);
 }
 
 void TestVerticalOverlapMatcher::rejectsInvalidInputsAndConfig()
@@ -361,6 +392,55 @@ void TestVerticalOverlapMatcher::matchesOnePixelWideScoringRegion()
 
     QCOMPARE(result.kind, OverlapKind::Reliable);
     QCOMPARE(result.verticalAdvance, 50);
+}
+
+void TestVerticalOverlapMatcher::recallsNonZeroErrorPeakBeyondFixedCandidateLimit()
+{
+    const ScrollFrame document = stripedDocument(120, 480);
+    const ScrollFrame previous = crop(document, 0, 0, 120, 180);
+    ScrollFrame current = crop(document, 0, 72, 120, 180);
+    corruptQuarterGrid(current);
+
+    const auto result = VerticalOverlapMatcher().match(previous, current, {});
+
+    QCOMPARE(result.kind, OverlapKind::Reliable);
+    QCOMPARE(result.verticalAdvance, 72);
+    QVERIFY(result.normalizedError > 0.02);
+    QVERIFY(result.normalizedError < 0.08);
+}
+
+void TestVerticalOverlapMatcher::detectsShortPeriodIndependentPeaks()
+{
+    OverlapConfig config;
+    config.maximumAdvanceRatio = 0.02;
+    for (const int period : {2, 3}) {
+        const ScrollFrame repeated = repeatedRows(120, 180, period);
+
+        const auto result = VerticalOverlapMatcher().match(repeated, repeated, config);
+
+        QCOMPARE(result.kind, OverlapKind::Ambiguous);
+    }
+}
+
+void TestVerticalOverlapMatcher::avoidsQuadraticFullResolutionFallback()
+{
+    constexpr int width = 1920;
+    constexpr int height = 1080;
+    constexpr int advance = 432;
+    constexpr int coarseColumnStep = 30;
+    const ScrollFrame previous = aliasedSamplingFrame(width, height, 0, coarseColumnStep);
+    const ScrollFrame current = aliasedSamplingFrame(width, height, advance, coarseColumnStep);
+    OverlapConfig config;
+    config.maximumAdvanceRatio = 0.5;
+    QElapsedTimer timer;
+    timer.start();
+
+    const auto result = VerticalOverlapMatcher().match(previous, current, config);
+    const auto elapsed = timer.elapsed();
+
+    QCOMPARE(result.kind, OverlapKind::Reliable);
+    QCOMPARE(result.verticalAdvance, advance);
+    QVERIFY2(elapsed < 1500, qPrintable(QStringLiteral("elapsed %1 ms").arg(elapsed)));
 }
 
 QTEST_MAIN(TestVerticalOverlapMatcher)
