@@ -1,8 +1,20 @@
 import AppKit
+import ObjectiveC.runtime
 import XCTest
 @testable import xxsnap
 
 final class ScrollCaptureBridgeTests: XCTestCase {
+    func testRuntimeAllocatedUninitializedBridgeReturnsErrorInsteadOfCrashing() throws {
+        let object = try XCTUnwrap(class_createInstance(ScrollCaptureBridge.self, 0))
+        let bridge = try XCTUnwrap(object as? ScrollCaptureBridge)
+
+        assertBridgeError {
+            try bridge.append(TestImageFactory.solid(size: CGSize(width: 8, height: 8), color: .black))
+        }
+        assertBridgeError { try bridge.preview(maximumHeight: 8) }
+        assertBridgeError { try bridge.finalImage() }
+    }
+
     func testFinalImagePreservesVisualCornerOrientation() throws {
         let source = TestImageFactory.fourCornerMarkers()
         let bridge = try XCTUnwrap(ScrollCaptureBridge(maximumAcceptedBytes: 1_000_000))

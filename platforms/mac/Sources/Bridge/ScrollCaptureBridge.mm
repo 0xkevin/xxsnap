@@ -196,6 +196,18 @@ ScrollCaptureAppendKind bridgeKind(AppendKind kind)
     }
 }
 
+BridgeImplementation *implementationOrError(void *pointer, NSError **error)
+{
+    auto *implementation = static_cast<BridgeImplementation *>(pointer);
+    if (implementation == nullptr) {
+        setError(
+            error,
+            BridgeError::InvalidConfiguration,
+            @"The scroll capture bridge was not initialized with a byte limit.");
+    }
+    return implementation;
+}
+
 } // namespace
 
 @interface ScrollCaptureAppendUpdate ()
@@ -220,6 +232,11 @@ ScrollCaptureAppendKind bridgeKind(AppendKind kind)
 
 @implementation ScrollCaptureBridge {
     void *_implementation;
+}
+
+- (instancetype)init
+{
+    return nil;
 }
 
 - (nullable instancetype)initWithMaximumAcceptedBytes:(NSUInteger)maximumAcceptedBytes
@@ -247,7 +264,10 @@ ScrollCaptureAppendKind bridgeKind(AppendKind kind)
 - (nullable ScrollCaptureAppendUpdate *)appendImage:(NSImage *)image
                                               error:(NSError **)error
 {
-    auto *implementation = static_cast<BridgeImplementation *>(_implementation);
+    auto *implementation = implementationOrError(_implementation, error);
+    if (implementation == nullptr) {
+        return nil;
+    }
     ScrollFrame frame;
     CGFloat sourceScale = 1;
     if (!frameFromImage(image, frame, sourceScale, error)) {
@@ -269,11 +289,14 @@ ScrollCaptureAppendKind bridgeKind(AppendKind kind)
 - (nullable NSImage *)previewImageWithMaximumHeight:(NSInteger)maximumHeight
                                               error:(NSError **)error
 {
+    auto *implementation = implementationOrError(_implementation, error);
+    if (implementation == nullptr) {
+        return nil;
+    }
     if (maximumHeight <= 0 || maximumHeight > std::numeric_limits<int>::max()) {
         setError(error, BridgeError::InvalidPreviewHeight, @"Preview height must be a positive 32-bit pixel count.");
         return nil;
     }
-    auto *implementation = static_cast<BridgeImplementation *>(_implementation);
     if (!implementation->acceptedImage) {
         setError(error, BridgeError::NoOutput, @"Append an image before requesting a preview.");
         return nil;
@@ -290,7 +313,10 @@ ScrollCaptureAppendKind bridgeKind(AppendKind kind)
 
 - (nullable NSImage *)finalImageAndReturnError:(NSError **)error
 {
-    auto *implementation = static_cast<BridgeImplementation *>(_implementation);
+    auto *implementation = implementationOrError(_implementation, error);
+    if (implementation == nullptr) {
+        return nil;
+    }
     if (!implementation->acceptedImage) {
         setError(error, BridgeError::NoOutput, @"Append an image before requesting the final image.");
         return nil;

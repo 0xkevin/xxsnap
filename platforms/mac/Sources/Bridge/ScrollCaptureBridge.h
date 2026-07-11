@@ -19,6 +19,8 @@ typedef NS_ENUM(NSInteger, ScrollCaptureAppendKind) {
 @end
 
 @interface ScrollCaptureBridge : NSObject
+- (instancetype)init NS_UNAVAILABLE;
++ (instancetype)new NS_UNAVAILABLE;
 - (nullable instancetype)initWithMaximumAcceptedBytes:(NSUInteger)maximumAcceptedBytes
     NS_SWIFT_NAME(init(maximumAcceptedBytes:));
 - (nullable ScrollCaptureAppendUpdate *)appendImage:(NSImage *)image
