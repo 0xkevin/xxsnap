@@ -1285,6 +1285,7 @@ enum CaptureAnnotationRenderer {
         annotations: [CaptureAnnotation],
         eraserMasks: [EraserMask]
     ) -> NSImage {
+        guard !annotations.isEmpty || !eraserMasks.isEmpty else { return image }
         guard let source = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return image }
         let colorSpace = source.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!
         guard let output = makeRenderContext(width: source.width, height: source.height, colorSpace: colorSpace) else {
@@ -1433,8 +1434,14 @@ enum CaptureAnnotationRenderer {
             let annotation = annotations[index]
             includedIDs.insert(annotation.id)
             if isCompositeSourceDependentLongImageAnnotation(annotation) {
-                requiredPriorCompositeRegion = requiredPriorCompositeRegion.union(visual).intersection(imageBounds)
-                processingRegion = processingRegion.union(visual).intersection(imageBounds)
+                let dependency = mosaicSourceDependencyBounds(
+                    for: annotation,
+                    requiredRegion: requiredPriorCompositeRegion,
+                    visualBounds: visual,
+                    imageBounds: imageBounds
+                )
+                requiredPriorCompositeRegion = requiredPriorCompositeRegion.union(dependency).intersection(imageBounds)
+                processingRegion = processingRegion.union(dependency).intersection(imageBounds)
             } else if let source = magnifierSourceBounds(for: annotation, imageBounds: imageBounds) {
                 processingRegion = processingRegion.union(source).intersection(imageBounds)
             }
@@ -1444,6 +1451,28 @@ enum CaptureAnnotationRenderer {
 
     private static func isCompositeSourceDependentLongImageAnnotation(_ annotation: CaptureAnnotation) -> Bool {
         annotation.kind == .mosaicStroke || annotation.kind == .mosaicRectangle
+    }
+
+    private static func mosaicSourceDependencyBounds(
+        for annotation: CaptureAnnotation,
+        requiredRegion: NSRect,
+        visualBounds: NSRect,
+        imageBounds: NSRect
+    ) -> NSRect {
+        let affected = requiredRegion.intersection(visualBounds)
+        guard !affected.isNull, !affected.isEmpty else { return .null }
+        let value = CGFloat(annotation.mosaicRedaction?.value ?? 1)
+        let halo: CGFloat
+        if annotation.mosaicRedaction?.type == .gaussianBlur {
+            halo = value * 3 + annotation.style.strokeWidth
+        } else {
+            halo = value * 4 + annotation.style.strokeWidth
+        }
+        if visualBounds.height <= requiredRegion.height + halo * 2,
+           visualBounds.width <= requiredRegion.width + halo * 2 {
+            return visualBounds
+        }
+        return affected.insetBy(dx: -halo, dy: -halo).intersection(imageBounds)
     }
 
     private static func magnifierSourceBounds(for annotation: CaptureAnnotation, imageBounds: NSRect) -> NSRect? {

@@ -507,6 +507,54 @@ final class LongImageEditorTests: XCTestCase {
         XCTAssertLessThan(metrics.maxTemporaryProcessingPixels, 400 * 2_048)
     }
 
+    func testHugeMosaicAnnotationsKeepEachTileProcessingBounded() throws {
+        let image = TestImageFactory.verticalDocumentViewport(offset: 0, width: 400, height: 8_000)
+        var style = CaptureAnnotationStyle(); style.strokeWidth = 18
+        let redaction = CaptureMosaicRedaction(type: .gaussianBlur, value: 20)
+        let hugeRectangle = CaptureAnnotation(
+            kind: .mosaicRectangle,
+            rect: NSRect(x: 30, y: 0, width: 330, height: 8_000),
+            style: style,
+            mosaicRedaction: redaction
+        )
+        let hugeStroke = CaptureAnnotation(
+            kind: .mosaicStroke,
+            rect: NSRect(x: 180, y: 0, width: 30, height: 8_000),
+            style: style,
+            mosaicStroke: CaptureMosaicStroke(points: [NSPoint(x: 195, y: 0), NSPoint(x: 195, y: 8_000)]),
+            mosaicRedaction: redaction
+        )
+        let request = NSRect(x: 0, y: 3_000, width: 400, height: 512)
+        let plan = CaptureAnnotationRenderer.visibleLongImageRenderPlan(
+            imageSize: image.size,
+            imageRect: request,
+            annotations: [hugeRectangle, hugeStroke],
+            eraserMasks: []
+        )
+        XCTAssertLessThanOrEqual(plan.processingRect.height, request.height + 512)
+
+        _ = CaptureAnnotationRenderer.renderLongImage(
+            image: image,
+            annotations: [hugeRectangle, hugeStroke],
+            eraserMasks: []
+        )
+        XCTAssertLessThanOrEqual(
+            CaptureAnnotationRenderer.test_lastLongImageTileMetrics.maxTemporaryProcessingPixelHeight,
+            512 + 512
+        )
+    }
+
+    func testLongImageExportWithoutEditsReturnsOriginalImageIdentity() {
+        let image = TestImageFactory.solid(
+            pixelWidth: 320,
+            pixelHeight: 640,
+            pointSize: NSSize(width: 160, height: 320),
+            color: NSColor(deviceRed: 0.2, green: 0.4, blue: 0.8, alpha: 0.45)
+        )
+        let output = CaptureAnnotationRenderer.renderLongImage(image: image, annotations: [], eraserMasks: [])
+        XCTAssertTrue(output === image)
+    }
+
     func testTiledFullExportMatchesLegacyRendererAcrossTileSeams() throws {
         let image = TestImageFactory.verticalDocumentViewport(offset: 0, width: 180, height: 1_300, scale: 2)
         var style = CaptureAnnotationStyle(); style.strokeColor = .red; style.strokeWidth = 10
