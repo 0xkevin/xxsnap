@@ -181,6 +181,9 @@ private slots:
     void lateBottomConfirmationCropsOnlyItsEvidenceRun();
     void topOnlyConfirmationAllowsLargeAdvanceWithScrollingBottom();
     void bottomOnlyConfirmationAllowsLargeAdvanceWithScrollingTop();
+    void topBreakDoesNotPreventBottomConfirmation();
+    void bottomBreakDoesNotPreventTopConfirmation();
+    void evidenceBreakFlushesPerMovementBeyondOldTailAdvanceBudget();
     void discardedFramesDoNotAdvanceFixedBandConfirmation();
     void interruptedFixedEvidenceDoesNotMutateOrCarryAgreement();
     void pendingFixedFramesCountTowardResourceLimit();
@@ -509,6 +512,78 @@ void TestScrollStitchSession::bottomOnlyConfirmationAllowsLargeAdvanceWithScroll
     const auto result = session.append(viewportWithIndependentFixedBands(245, false, true));
     QCOMPARE(result.kind, AppendKind::AcceptedAppend);
     QCOMPARE(result.appendedHeight, 125);
+}
+
+void TestScrollStitchSession::topBreakDoesNotPreventBottomConfirmation()
+{
+    auto config = defaultConfig();
+    config.matcher.maximumNormalizedError = 0.20;
+    config.fixedTopCandidateHeight = 12;
+    config.fixedBottomCandidateHeight = 8;
+    ScrollStitchSession session(config);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(0, true, true)).kind,
+        AppendKind::AcceptedInitial);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(40, true, true)).kind,
+        AppendKind::PausedLowConfidence);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(80, true, true)).kind,
+        AppendKind::PausedLowConfidence);
+    const auto confirmation = session.append(viewportWithIndependentFixedBands(120, false, true));
+    QCOMPARE(confirmation.kind, AppendKind::AcceptedAppend);
+    QCOMPARE(confirmation.appendedHeight, 120);
+    QCOMPARE(session.outputHeight(), 260);
+    QCOMPARE(blueAt(session.finalize(), 20, 140), documentPixel(20, 132));
+    QCOMPARE(blueAt(session.finalize(), 20, 259), documentPixel(20, 251));
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(160, false, true)).kind,
+        AppendKind::AcceptedAppend);
+}
+
+void TestScrollStitchSession::bottomBreakDoesNotPreventTopConfirmation()
+{
+    auto config = defaultConfig();
+    config.matcher.maximumNormalizedError = 0.20;
+    config.fixedTopCandidateHeight = 12;
+    config.fixedBottomCandidateHeight = 8;
+    ScrollStitchSession session(config);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(0, true, true)).kind,
+        AppendKind::AcceptedInitial);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(40, true, true)).kind,
+        AppendKind::PausedLowConfidence);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(80, true, true)).kind,
+        AppendKind::PausedLowConfidence);
+    const auto confirmation = session.append(viewportWithIndependentFixedBands(120, true, false));
+    QCOMPARE(confirmation.kind, AppendKind::AcceptedAppend);
+    QCOMPARE(confirmation.appendedHeight, 120);
+    QCOMPARE(session.outputHeight(), 260);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(160, true, false)).kind,
+        AppendKind::AcceptedAppend);
+}
+
+void TestScrollStitchSession::evidenceBreakFlushesPerMovementBeyondOldTailAdvanceBudget()
+{
+    auto config = defaultConfig();
+    config.matcher.maximumAdvanceRatio = 0.50;
+    config.matcher.maximumNormalizedError = 0.20;
+    config.fixedTopCandidateHeight = 12;
+    ScrollStitchSession session(config);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(0, true, false)).kind,
+        AppendKind::AcceptedInitial);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(50, true, false)).kind,
+        AppendKind::PausedLowConfidence);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(100, true, false)).kind,
+        AppendKind::PausedLowConfidence);
+
+    const auto flush = session.append(viewportWithIndependentFixedBands(150, false, false));
+    QCOMPARE(flush.kind, AppendKind::AcceptedAppend);
+    QCOMPARE(flush.appendedHeight, 150);
+    QCOMPARE(session.outputHeight(), 290);
+    QCOMPARE(blueAt(session.finalize(), 20, 140), documentPixel(20, 140));
+    QCOMPARE(blueAt(session.finalize(), 20, 289), documentPixel(20, 289));
+
+    const auto resumed = session.append(viewportWithIndependentFixedBands(200, false, false));
+    QCOMPARE(resumed.kind, AppendKind::AcceptedAppend);
+    QCOMPARE(resumed.appendedHeight, 50);
+    QCOMPARE(session.outputHeight(), 340);
+    QCOMPARE(blueAt(session.finalize(), 20, 339), documentPixel(20, 339));
 }
 
 void TestScrollStitchSession::discardedFramesDoNotAdvanceFixedBandConfirmation()

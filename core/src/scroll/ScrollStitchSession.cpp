@@ -561,7 +561,7 @@ try {
     auto overlap = matcher.match(evidenceTail, frame, matcherConfig);
     result.confidence = overlap.confidence;
     const auto evidence = implementation_->fixedBandEvidence(evidenceTail, frame);
-    if (!evidence.top && !evidence.bottom) {
+    if (!evidence.top && !evidence.bottom && implementation_->pending.empty()) {
         const auto reverse = matcher.match(frame, evidenceTail, matcherConfig);
         if (reverse.kind == OverlapKind::Reliable && reverse.verticalAdvance > 0) {
             result.kind = AppendKind::ReviewDiscarded;
@@ -570,23 +570,33 @@ try {
         }
     }
 
-    bool discardPendingOnCommit = false;
     const bool topEvidenceBroke = !implementation_->fixedTopConfirmed
         && implementation_->fixedTopAgreement > 0 && !evidence.top;
     const bool bottomEvidenceBroke = !implementation_->fixedBottomConfirmed
         && implementation_->fixedBottomAgreement > 0 && !evidence.bottom;
+    auto movementOverlap = evidence.top || evidence.bottom
+        ? evidence.overlap
+        : overlap;
     if (!implementation_->pending.empty() && (topEvidenceBroke || bottomEvidenceBroke)) {
-        overlap = matcher.match(*implementation_->tail, frame, matcherConfig);
-        result.confidence = overlap.confidence;
-        discardPendingOnCommit = true;
+        auto transitionConfig = matcherConfig;
+        if (evidence.top || topEvidenceBroke) {
+            transitionConfig.excludedBands.top = std::max(
+                transitionConfig.excludedBands.top, config.fixedTopCandidateHeight);
+        }
+        if (evidence.bottom || bottomEvidenceBroke) {
+            transitionConfig.excludedBands.bottom = std::max(
+                transitionConfig.excludedBands.bottom, config.fixedBottomCandidateHeight);
+        }
+        const auto transition = matcher.match(evidenceTail, frame, transitionConfig);
+        if (transition.kind == OverlapKind::Reliable && transition.verticalAdvance > 0) {
+            movementOverlap = transition;
+            result.confidence = transition.confidence;
+        }
     }
 
-    const bool continuePending = !discardPendingOnCommit
-        && (!implementation_->pending.empty() || evidence.top || evidence.bottom);
+    const bool continuePending = !implementation_->pending.empty()
+        || evidence.top || evidence.bottom;
     if (continuePending) {
-        const auto movementOverlap = evidence.top || evidence.bottom
-            ? evidence.overlap
-            : overlap;
         if (movementOverlap.kind != OverlapKind::Reliable
             || movementOverlap.verticalAdvance <= 0) {
             implementation_->clearPending();
@@ -804,15 +814,6 @@ try {
     }
 
     std::size_t projected = implementation_->persistentBytes;
-    if (discardPendingOnCommit) {
-        for (const auto& movement : implementation_->pending) {
-            if (projected < movement.persistentBytes) {
-                result.kind = AppendKind::ResourceLimit;
-                return result;
-            }
-            projected -= movement.persistentBytes;
-        }
-    }
     if (implementation_->tailHasSeparateStorage) {
         if (projected < *fullFrameBytes) {
             result.kind = AppendKind::ResourceLimit;
@@ -859,11 +860,6 @@ try {
     implementation_->anchors.push_back(std::move(fingerprint));
     implementation_->tail = *storedTail;
     implementation_->tailHasSeparateStorage = true;
-    if (discardPendingOnCommit) {
-        implementation_->pending.clear();
-        implementation_->fixedTopAgreement = 0;
-        implementation_->fixedBottomAgreement = 0;
-    }
     implementation_->persistentBytes = projected;
     implementation_->scrollbar = preparedScrollbar;
     implementation_->height += appendedHeight;
