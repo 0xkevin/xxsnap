@@ -70,6 +70,10 @@ struct SelectionOverlayConfiguration {
     var outsideSelectionDimAlpha: CGFloat
     var usesWindowBoundsForLayout: Bool
     var completesBeforeOrderingOut: Bool
+    var initialAnnotations: [CaptureAnnotation]
+    var initialEraserMasks: [EraserMask]
+    var annotationInteractionBegan: (() -> Void)?
+    var annotationInteractionEnded: (() -> Void)?
     var pinnedImageScaleHandler: ((CGFloat, NSPoint) -> Void)?
     var pinnedImageDragBegan: ((NSPoint) -> Void)?
     var pinnedImageDragChanged: ((NSPoint) -> Void)?
@@ -93,6 +97,10 @@ struct SelectionOverlayConfiguration {
         outsideSelectionDimAlpha: 0.34,
         usesWindowBoundsForLayout: false,
         completesBeforeOrderingOut: false,
+        initialAnnotations: [],
+        initialEraserMasks: [],
+        annotationInteractionBegan: nil,
+        annotationInteractionEnded: nil,
         pinnedImageScaleHandler: nil,
         pinnedImageDragBegan: nil,
         pinnedImageDragChanged: nil,
@@ -128,6 +136,10 @@ struct SelectionOverlayConfiguration {
             outsideSelectionDimAlpha: 0,
             usesWindowBoundsForLayout: true,
             completesBeforeOrderingOut: true,
+            initialAnnotations: [],
+            initialEraserMasks: [],
+            annotationInteractionBegan: nil,
+            annotationInteractionEnded: nil,
             pinnedImageScaleHandler: pinnedImageScaleHandler,
             pinnedImageDragBegan: pinnedImageDragBegan,
             pinnedImageDragChanged: pinnedImageDragChanged,
@@ -135,6 +147,43 @@ struct SelectionOverlayConfiguration {
             pinnedImageContextMenuHandler: pinnedImageContextMenuHandler,
             pinnedImageWindowCommandHandler: pinnedImageWindowCommandHandler,
             pinnedImageToolbarToggleHandler: pinnedImageToolbarToggleHandler
+        )
+    }
+
+    static func longImageEditor(
+        windowFrame: NSRect,
+        selectionRect: NSRect,
+        initialAnnotations: [CaptureAnnotation] = [],
+        initialEraserMasks: [EraserMask] = [],
+        interactionBegan: (() -> Void)? = nil,
+        interactionEnded: (() -> Void)? = nil
+    ) -> SelectionOverlayConfiguration {
+        SelectionOverlayConfiguration(
+            windowFrame: windowFrame,
+            windowLevel: .floating,
+            initialLockedSelectionRect: selectionRect,
+            hiddenMainToolbarButtons: [.scroll, .cancel, .pin],
+            showsFinishEditingButton: true,
+            allowsSelectionGeometryEditing: false,
+            showsSelectionBorder: false,
+            showsMosaicRectangleSelectionOutline: false,
+            showsSelectionMeasurementControl: false,
+            allowsPassiveColorSampler: false,
+            usesArrowCursorWhenIdle: true,
+            outsideSelectionDimAlpha: 0,
+            usesWindowBoundsForLayout: true,
+            completesBeforeOrderingOut: true,
+            initialAnnotations: initialAnnotations,
+            initialEraserMasks: initialEraserMasks,
+            annotationInteractionBegan: interactionBegan,
+            annotationInteractionEnded: interactionEnded,
+            pinnedImageScaleHandler: nil,
+            pinnedImageDragBegan: nil,
+            pinnedImageDragChanged: nil,
+            pinnedImageDragEnded: nil,
+            pinnedImageContextMenuHandler: nil,
+            pinnedImageWindowCommandHandler: nil,
+            pinnedImageToolbarToggleHandler: nil
         )
     }
 
@@ -539,6 +588,11 @@ extension NSCursor {
     }
 }
 
+struct SelectionOverlayEditorSnapshot {
+    var annotations: [CaptureAnnotation]
+    var eraserMasks: [EraserMask]
+}
+
 final class SelectionOverlayWindow: NSWindow {
     static let defaultPaletteColors: [NSColor] = [
         paletteColor(0xFF001A),
@@ -669,6 +723,29 @@ final class SelectionOverlayWindow: NSWindow {
         }
         overlayView.frame = NSRect(origin: .zero, size: windowFrame.size)
         overlayView.updatePinnedImageEditor(backgroundImage: backgroundImage, selectionRect: selectionRect)
+        makeFirstResponder(overlayView)
+    }
+
+    var editorSnapshot: SelectionOverlayEditorSnapshot? {
+        (contentView as? SelectionOverlayView)?.editorSnapshot
+    }
+
+    func updateLongImageEditor(
+        windowFrame: NSRect,
+        backgroundImage: NSImage?,
+        selectionRect: NSRect,
+        annotations: [CaptureAnnotation],
+        eraserMasks: [EraserMask]
+    ) {
+        setFrame(windowFrame, display: false)
+        guard let overlayView = contentView as? SelectionOverlayView else { return }
+        overlayView.frame = NSRect(origin: .zero, size: windowFrame.size)
+        overlayView.updateLongImageEditor(
+            backgroundImage: backgroundImage,
+            selectionRect: selectionRect,
+            annotations: annotations,
+            eraserMasks: eraserMasks
+        )
         makeFirstResponder(overlayView)
     }
 
@@ -2081,6 +2158,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             self.backgroundBitmap = nil
         }
         super.init(frame: frameRect)
+        annotations = configuration.initialAnnotations
+        eraserMasks = configuration.initialEraserMasks
         if let initialLockedSelectionRect = configuration.initialLockedSelectionRect {
             setLockedSelectionRect(initialLockedSelectionRect)
         }
@@ -2727,6 +2806,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     override func mouseDown(with event: NSEvent) {
         guard scrollCaptureOverlayState == .inactive else { return }
+        configuration.annotationInteractionBegan?()
         cancelPinnedImageToolbarShiftShortcut()
         let point = convert(event.locationInWindow, from: nil)
         NSLog("xxsnap overlay mouseDown mode=%@ point=(%.0f, %.0f)", "\(interactionMode)", point.x, point.y)
@@ -3233,6 +3313,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     override func mouseUp(with event: NSEvent) {
+        defer { configuration.annotationInteractionEnded?() }
         let point = convert(event.locationInWindow, from: nil)
         NSLog("xxsnap overlay mouseUp mode=%@ point=(%.0f, %.0f)", "\(interactionMode)", point.x, point.y)
 
@@ -6569,6 +6650,34 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
         selectionStartPoint = nextSelectionRect.origin
         selectionCurrentPoint = NSPoint(x: nextSelectionRect.maxX, y: nextSelectionRect.maxY)
+        clearColorSampler()
+        needsDisplay = true
+    }
+
+    var editorSnapshot: SelectionOverlayEditorSnapshot {
+        commitCurrentTextEdit()
+        return SelectionOverlayEditorSnapshot(annotations: annotations, eraserMasks: eraserMasks)
+    }
+
+    func updateLongImageEditor(
+        backgroundImage: NSImage?,
+        selectionRect: NSRect,
+        annotations: [CaptureAnnotation],
+        eraserMasks: [EraserMask]
+    ) {
+        commitCurrentTextEdit()
+        self.backgroundImage = backgroundImage
+        if let cgImage = backgroundImage?.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+            backgroundBitmap = NSBitmapImageRep(cgImage: cgImage)
+        } else {
+            backgroundBitmap = nil
+        }
+        backgroundLuminanceCache.removeAll()
+        self.annotations = annotations
+        self.eraserMasks = eraserMasks
+        selectedAnnotationIndex = nil
+        setLockedSelectionRect(selectionRect.standardized)
+        resetMosaicPreviewCaches()
         clearColorSampler()
         needsDisplay = true
     }

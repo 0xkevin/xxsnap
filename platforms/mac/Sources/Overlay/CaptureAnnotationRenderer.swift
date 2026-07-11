@@ -1219,6 +1219,17 @@ enum CaptureAnnotationRenderer {
         return renderImage(image: image, annotations: annotations, eraserMasks: eraserMasks) ?? image
     }
 
+    /// Stable export entry point for canonical full-document coordinates. It
+    /// deliberately delegates to the single-image renderer so mosaic,
+    /// magnifier, text, z-order and eraser behavior cannot diverge.
+    static func renderLongImage(
+        image: NSImage,
+        annotations: [CaptureAnnotation],
+        eraserMasks: [EraserMask]
+    ) -> NSImage {
+        render(image: image, annotations: annotations, eraserMasks: eraserMasks)
+    }
+
     private static func renderImage(
         image: NSImage,
         annotations: [CaptureAnnotation],

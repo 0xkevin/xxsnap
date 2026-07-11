@@ -26,6 +26,8 @@
 		31B529E62D217D2F5B13FB85 /* copy-to-clipboard.png in Resources */ = {isa = PBXBuildFile; fileRef = 746D4C73B253F54E1E56C5C6 /* copy-to-clipboard.png */; };
 		3255124AE9CD7B90D40C887F /* PermissionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F196A38351C3089668432BA /* PermissionCoordinator.swift */; };
 		373154DBAEF7397C9B344879 /* xxsnapMacTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95FB5FC844E7D04225DF9701 /* xxsnapMacTests.swift */; };
+		AA5300000000000000000001 /* LongImageEditorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5300000000000000000011 /* LongImageEditorTests.swift */; };
+		AA5300000000000000000002 /* LongImageEditorWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5300000000000000000012 /* LongImageEditorWindowController.swift */; };
 		393CEA2CDF1666A7490229B1 /* refresh (1).svg in Resources */ = {isa = PBXBuildFile; fileRef = 1DB60D2449C038C54679162D /* refresh (1).svg */; };
 		A1B2C3D4E5F60718293A4B5D /* italic.svg in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B6D /* italic.svg */; };
 		3B68E276F3F9D035C6BAC9CC /* highlighter-tool.png in Resources */ = {isa = PBXBuildFile; fileRef = 6569DD68B9D82807BFE9B8B4 /* highlighter-tool.png */; };
@@ -181,6 +183,7 @@
 		90511938797AF565EB5E63DF /* palette-tool.svg */ = {isa = PBXFileReference; path = "palette-tool.svg"; sourceTree = "<group>"; };
 		9381E644823646F0488892C2 /* settings-more.svg */ = {isa = PBXFileReference; path = "settings-more.svg"; sourceTree = "<group>"; };
 		95FB5FC844E7D04225DF9701 /* xxsnapMacTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = xxsnapMacTests.swift; sourceTree = "<group>"; };
+		AA5300000000000000000011 /* LongImageEditorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LongImageEditorTests.swift; sourceTree = "<group>"; };
 		9A119E98789DE049AE5BBF54 /* manual-capture-checklist.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "manual-capture-checklist.md"; sourceTree = "<group>"; };
 		9A98FE556582ECA9DC75EEAB /* cancel-capture.svg */ = {isa = PBXFileReference; path = "cancel-capture.svg"; sourceTree = "<group>"; };
 		9C2C9A82C9F64C7D76730267 /* SelectionOverlayWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectionOverlayWindow.swift; sourceTree = "<group>"; };
@@ -236,6 +239,7 @@
 		AA5100000000000000000013 /* ScrollCaptureSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollCaptureSessionTests.swift; sourceTree = "<group>"; };
 		AA5200000000000000000011 /* ScrollCapturePresentationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollCapturePresentationController.swift; sourceTree = "<group>"; };
 		AA5200000000000000000012 /* ScrollCapturePresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollCapturePresentationTests.swift; sourceTree = "<group>"; };
+		AA5300000000000000000012 /* LongImageEditorWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LongImageEditorWindowController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -243,6 +247,7 @@
 			isa = PBXGroup;
 			children = (
 				F7D7DA546BB3234545506458 /* AppDelegate.swift */,
+				AA5300000000000000000012 /* LongImageEditorWindowController.swift */,
 				24BFA4790A577CD9B35EBC9C /* AppSettings.swift */,
 				24BDEB3AE00354C36614F3C1 /* CaptureControlWindowController.swift */,
 				A177154367D4DF7657018B06 /* CaptureCoordinator.swift */,
@@ -314,6 +319,7 @@
 		E47B99274545910C8159BABC /* Tests */ = {
 			isa = PBXGroup;
 			children = (
+				AA5300000000000000000011 /* LongImageEditorTests.swift */,
 				AA5200000000000000000012 /* ScrollCapturePresentationTests.swift */,
 				AA5100000000000000000013 /* ScrollCaptureSessionTests.swift */,
 				AA5000000000000000000015 /* ScrollCaptureBridgeTests.swift */,
@@ -612,6 +618,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AA5300000000000000000002 /* LongImageEditorWindowController.swift in Sources */,
 				AA5200000000000000000001 /* ScrollCapturePresentationController.swift in Sources */,
 				AA5100000000000000000002 /* ScrollActivityMonitor.swift in Sources */,
 				AA5100000000000000000001 /* ScrollCaptureSession.swift in Sources */,
@@ -641,6 +648,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AA5300000000000000000001 /* LongImageEditorTests.swift in Sources */,
 				AA5200000000000000000002 /* ScrollCapturePresentationTests.swift in Sources */,
 				AA5100000000000000000003 /* ScrollCaptureSessionTests.swift in Sources */,
 				AA5000000000000000000005 /* ScrollCaptureBridgeTests.swift in Sources */,
