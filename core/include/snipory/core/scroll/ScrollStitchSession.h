@@ -34,6 +34,9 @@ struct ScrollStitchConfig final
     // per-entry container bookkeeping is excluded from this byte budget.
     std::size_t maximumAcceptedBytes = 256U * 1024U * 1024U;
 
+    bool enableFixedBandDetection = true;
+    // Zero selects a conservative automatic search budget. Positive values cap
+    // the searched prefix/suffix rather than asserting an exact band height.
     int fixedTopCandidateHeight = 0;
     int fixedBottomCandidateHeight = 0;
     int fixedBandConfirmationMovements = 3;
@@ -41,7 +44,7 @@ struct ScrollStitchConfig final
 
     int scrollbarMaximumWidth = 8;
     int scrollbarConfirmationMovements = 3;
-    double scrollbarPersistenceThreshold = 0.94;
+    double scrollbarPersistenceThreshold = 0.75;
     double scrollbarMotionThreshold = 0.02;
     double scrollbarConfidenceThreshold = 0.80;
 };

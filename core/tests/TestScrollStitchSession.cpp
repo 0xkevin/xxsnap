@@ -102,6 +102,34 @@ ScrollFrame viewportWithThumbPosition(int documentY, int thumbTop)
     return frame;
 }
 
+ScrollFrame viewportWithScrollbarSides(int documentY, bool left, bool right)
+{
+    auto frame = documentViewport(documentY);
+    const int thumbTop = 12 + documentY / 3;
+    for (int y = 0; y < frame.height; ++y) {
+        for (int x = 0; x < frame.width; ++x) {
+            if ((left && x < 4) || (right && x >= frame.width - 4)) {
+                setPixel(frame, x, y, y >= thumbTop && y < thumbTop + 22 ? 45 : 220);
+            }
+        }
+    }
+    return frame;
+}
+
+ScrollFrame tallViewportWithFixedHeader(int documentY)
+{
+    ScrollFrame frame(120, 240);
+    for (int y = 0; y < frame.height; ++y) {
+        for (int x = 0; x < frame.width; ++x) {
+            const auto value = y < 60
+                ? static_cast<std::uint8_t>(31 + x % 17)
+                : documentPixel(x, documentY + y);
+            setPixel(frame, x, y, value);
+        }
+    }
+    return frame;
+}
+
 ScrollFrame viewportWithIndependentFixedBands(int documentY, bool fixedTop, bool fixedBottom)
 {
     auto frame = documentViewport(documentY);
@@ -186,17 +214,26 @@ private slots:
     void evidenceBreakFlushesPerMovementBeyondOldTailAdvanceBudget();
     void nonAnchorReverseReviewPreservesPendingEvidence();
     void nonAnchorReverseReviewInsideAcceptedContentDoesNotMutate();
+    void deepPendingReverseReviewSearchesRecentFrames();
+    void unknownLowConfidenceFramePreservesPendingProgress();
     void discardedFramesDoNotAdvanceFixedBandConfirmation();
-    void interruptedFixedEvidenceDoesNotMutateOrCarryAgreement();
+    void unknownFramePreservesFixedEvidence();
     void pendingFixedFramesCountTowardResourceLimit();
     void confirmedScrollbarIsCroppedButAmbiguousEdgeIsPreserved();
     void changingFixedPositionEdgeBlockIsNotCropped();
     void lowConfidenceThumbMotionDoesNotCrop();
     void sparseAnimatedEdgeIsNotMistakenForScrollbarThumb();
+    void defaultScrollbarThresholdCropsRightMovingThumb();
+    void leftMovingThumbCropsLeftAndPreservesSourcePixels();
+    void simultaneousEdgeCandidatesArePreservedAsAmbiguous();
     void resourceLimitLeavesFinalImageSaveable();
     void currentTailPixelsCountTowardResourceLimit();
     void lightweightAnchorHistoryDoesNotConsumeViewportPerAcceptance();
     void previewDownsamplesWithoutMutatingFinalImage();
+    void smallPreviewSamplesLongNearLimitCompositionDirectly();
+    void automaticFixedBandDetectionWorksWithProductionDefaults();
+    void automaticFixedBandDetectionFindsHeaderLargerThan32Pixels();
+    void automaticFixedBandDetectionDoesNotDelayScrollingEdges();
     void rejectsInvalidAndDimensionMismatchedFrames();
     void invalidConfigurationNeverAcceptsContent();
 };
@@ -631,6 +668,52 @@ void TestScrollStitchSession::nonAnchorReverseReviewInsideAcceptedContentDoesNot
     QCOMPARE(session.outputHeight(), 320);
 }
 
+void TestScrollStitchSession::deepPendingReverseReviewSearchesRecentFrames()
+{
+    auto config = defaultConfig();
+    config.matcher.maximumAdvanceRatio = 0.50;
+    config.matcher.maximumNormalizedError = 0.20;
+    config.fixedTopCandidateHeight = 12;
+    ScrollStitchSession session(config);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(0, true, false)).kind,
+        AppendKind::AcceptedInitial);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(50, true, false)).kind,
+        AppendKind::PausedLowConfidence);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(100, true, false)).kind,
+        AppendKind::PausedLowConfidence);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(10, true, false)).kind,
+        AppendKind::ReviewDiscarded);
+    QCOMPARE(session.outputHeight(), 140);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(100, true, false)).kind,
+        AppendKind::DuplicateDiscarded);
+    const auto resumed = session.append(viewportWithIndependentFixedBands(150, true, false));
+    QCOMPARE(resumed.kind, AppendKind::AcceptedAppend);
+    QCOMPARE(resumed.appendedHeight, 150);
+    QCOMPARE(session.outputHeight(), 290);
+}
+
+void TestScrollStitchSession::unknownLowConfidenceFramePreservesPendingProgress()
+{
+    auto config = defaultConfig();
+    config.fixedTopCandidateHeight = 12;
+    ScrollStitchSession session(config);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(0, true, false)).kind,
+        AppendKind::AcceptedInitial);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(50, true, false)).kind,
+        AppendKind::PausedLowConfidence);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(100, true, false)).kind,
+        AppendKind::PausedLowConfidence);
+    ScrollFrame unknown(120, 140);
+    std::fill(unknown.pixels.begin(), unknown.pixels.end(), 127);
+    QCOMPARE(session.append(unknown).kind, AppendKind::PausedLowConfidence);
+    QCOMPARE(session.outputHeight(), 140);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(100, true, false)).kind,
+        AppendKind::DuplicateDiscarded);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(150, true, false)).kind,
+        AppendKind::AcceptedAppend);
+    QCOMPARE(session.outputHeight(), 290);
+}
+
 void TestScrollStitchSession::discardedFramesDoNotAdvanceFixedBandConfirmation()
 {
     auto config = defaultConfig();
@@ -653,7 +736,7 @@ void TestScrollStitchSession::discardedFramesDoNotAdvanceFixedBandConfirmation()
     QCOMPARE(blueAt(session.finalize(), 20, 259), documentPixel(20, 251));
 }
 
-void TestScrollStitchSession::interruptedFixedEvidenceDoesNotMutateOrCarryAgreement()
+void TestScrollStitchSession::unknownFramePreservesFixedEvidence()
 {
     auto config = defaultConfig();
     config.fixedTopCandidateHeight = 12;
@@ -667,11 +750,11 @@ void TestScrollStitchSession::interruptedFixedEvidenceDoesNotMutateOrCarryAgreem
     QCOMPARE(session.append(unrelated).kind, AppendKind::PausedLowConfidence);
     QCOMPARE(session.outputHeight(), 140);
     QCOMPARE(session.append(documentViewport(80, true)).kind, AppendKind::PausedLowConfidence);
-    QCOMPARE(session.append(documentViewport(120, true)).kind, AppendKind::PausedLowConfidence);
-    QCOMPARE(session.outputHeight(), 140);
-    const auto result = session.append(documentViewport(160, true));
-    QCOMPARE(result.kind, AppendKind::AcceptedAppend);
-    QCOMPARE(result.appendedHeight, 160);
+    const auto confirmation = session.append(documentViewport(120, true));
+    QCOMPARE(confirmation.kind, AppendKind::AcceptedAppend);
+    QCOMPARE(confirmation.appendedHeight, 120);
+    QCOMPARE(session.outputHeight(), 260);
+    QCOMPARE(session.append(documentViewport(160, true)).kind, AppendKind::AcceptedAppend);
 }
 
 void TestScrollStitchSession::pendingFixedFramesCountTowardResourceLimit()
@@ -722,6 +805,44 @@ void TestScrollStitchSession::sparseAnimatedEdgeIsNotMistakenForScrollbarThumb()
         QVERIFY(result.kind == AppendKind::AcceptedInitial || result.kind == AppendKind::AcceptedAppend);
     }
 
+    QCOMPARE(session.finalize().width, 120);
+}
+
+void TestScrollStitchSession::defaultScrollbarThresholdCropsRightMovingThumb()
+{
+    auto config = defaultConfig();
+    config.scrollbarMaximumWidth = 6;
+    ScrollStitchSession session(config);
+    for (const int offset : {0, 30, 60, 90, 120}) {
+        const auto result = session.append(viewportWithScrollbarSides(offset, false, true));
+        QVERIFY(result.kind == AppendKind::AcceptedInitial || result.kind == AppendKind::AcceptedAppend);
+    }
+    QCOMPARE(session.finalize().width, 116);
+}
+
+void TestScrollStitchSession::leftMovingThumbCropsLeftAndPreservesSourcePixels()
+{
+    auto config = defaultConfig();
+    config.scrollbarMaximumWidth = 6;
+    ScrollStitchSession session(config);
+    for (const int offset : {0, 30, 60, 90, 120}) {
+        const auto result = session.append(viewportWithScrollbarSides(offset, true, false));
+        QVERIFY(result.kind == AppendKind::AcceptedInitial || result.kind == AppendKind::AcceptedAppend);
+    }
+    const auto final = session.finalize();
+    QCOMPARE(final.width, 116);
+    QCOMPARE(blueAt(final, 0, 100), documentPixel(4, 100));
+}
+
+void TestScrollStitchSession::simultaneousEdgeCandidatesArePreservedAsAmbiguous()
+{
+    auto config = defaultConfig();
+    config.scrollbarMaximumWidth = 6;
+    ScrollStitchSession session(config);
+    for (const int offset : {0, 30, 60, 90, 120}) {
+        const auto result = session.append(viewportWithScrollbarSides(offset, true, true));
+        QVERIFY(result.kind == AppendKind::AcceptedInitial || result.kind == AppendKind::AcceptedAppend);
+    }
     QCOMPARE(session.finalize().width, 120);
 }
 
@@ -810,6 +931,60 @@ void TestScrollStitchSession::previewDownsamplesWithoutMutatingFinalImage()
     QCOMPARE(preview.height, 100);
     QCOMPARE(preview.width, 46);
     QCOMPARE(session.finalize().height, 260);
+}
+
+void TestScrollStitchSession::smallPreviewSamplesLongNearLimitCompositionDirectly()
+{
+    auto config = defaultConfig();
+    config.maximumAcceptedBytes = 120U * 900U * 4U;
+    ScrollStitchSession session(config);
+    QCOMPARE(session.append(documentViewport(0)).kind, AppendKind::AcceptedInitial);
+    for (int offset = 20; offset <= 600; offset += 20) {
+        QCOMPARE(session.append(documentViewport(offset)).kind, AppendKind::AcceptedAppend);
+    }
+    const auto preview = session.preview(74);
+    QCOMPARE(preview.height, 74);
+    QCOMPARE(preview.width, 12);
+    QCOMPARE(blueAt(preview, 0, 0), documentPixel(0, 0));
+    const int sourceY = 73 * 740 / 74;
+    QCOMPARE(blueAt(preview, 11, 73), documentPixel(110, sourceY));
+    QCOMPARE(session.outputHeight(), 740);
+}
+
+void TestScrollStitchSession::automaticFixedBandDetectionWorksWithProductionDefaults()
+{
+    ScrollStitchSession session(defaultConfig());
+    QCOMPARE(session.append(documentViewport(0, true)).kind, AppendKind::AcceptedInitial);
+    QCOMPARE(session.append(documentViewport(40, true)).kind, AppendKind::PausedLowConfidence);
+    QCOMPARE(session.append(documentViewport(80, true)).kind, AppendKind::PausedLowConfidence);
+    const auto result = session.append(documentViewport(120, true));
+    QCOMPARE(result.kind, AppendKind::AcceptedAppend);
+    QCOMPARE(result.appendedHeight, 120);
+    QCOMPARE(session.outputHeight(), 260);
+    QCOMPARE(blueAt(session.finalize(), 20, 140), documentPixel(20, 132));
+}
+
+void TestScrollStitchSession::automaticFixedBandDetectionFindsHeaderLargerThan32Pixels()
+{
+    ScrollStitchSession session(defaultConfig());
+    QCOMPARE(session.append(tallViewportWithFixedHeader(0)).kind, AppendKind::AcceptedInitial);
+    QCOMPARE(session.append(tallViewportWithFixedHeader(60)).kind, AppendKind::PausedLowConfidence);
+    QCOMPARE(session.append(tallViewportWithFixedHeader(120)).kind, AppendKind::PausedLowConfidence);
+    const auto result = session.append(tallViewportWithFixedHeader(180));
+    QCOMPARE(result.kind, AppendKind::AcceptedAppend);
+    QCOMPARE(result.appendedHeight, 180);
+    QCOMPARE(session.outputHeight(), 420);
+    QCOMPARE(blueAt(session.finalize(), 20, 2), static_cast<std::uint8_t>(31 + 20 % 17));
+    QCOMPARE(blueAt(session.finalize(), 20, 419), documentPixel(20, 419));
+}
+
+void TestScrollStitchSession::automaticFixedBandDetectionDoesNotDelayScrollingEdges()
+{
+    ScrollStitchSession session(defaultConfig());
+    QCOMPARE(session.append(documentViewport(0)).kind, AppendKind::AcceptedInitial);
+    QCOMPARE(session.append(documentViewport(40)).kind, AppendKind::AcceptedAppend);
+    QCOMPARE(session.append(documentViewport(80)).kind, AppendKind::AcceptedAppend);
+    QCOMPARE(session.outputHeight(), 220);
 }
 
 void TestScrollStitchSession::rejectsInvalidAndDimensionMismatchedFrames()

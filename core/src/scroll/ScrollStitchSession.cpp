@@ -157,6 +157,7 @@ public:
 
     struct ScrollbarObservation final
     {
+        int side = 0;
         int width = 0;
         int thumbTop = 0;
         int thumbBottom = 0;
@@ -169,6 +170,7 @@ public:
         int observedMovements = 0;
         int movingMovements = 0;
         double minimumPersistence = 1.0;
+        int confirmedSide = 0;
         int confirmedWidth = 0;
     };
 
@@ -195,6 +197,8 @@ public:
         OverlapResult overlap;
         bool top = false;
         bool bottom = false;
+        int topHeight = 0;
+        int bottomHeight = 0;
     };
 
     ScrollStitchConfig config;
@@ -210,8 +214,12 @@ public:
     int viewportHeight = 0;
     bool fixedTopConfirmed = false;
     bool fixedBottomConfirmed = false;
+    int fixedTopHeight = 0;
+    int fixedBottomHeight = 0;
     int fixedTopAgreement = 0;
     int fixedBottomAgreement = 0;
+    int fixedTopRunHeight = 0;
+    int fixedBottomRunHeight = 0;
     ScrollbarState scrollbar;
 
     [[nodiscard]] bool duplicateFingerprint(const Fingerprint& left, const Fingerprint& right) const
@@ -253,14 +261,16 @@ public:
         auto result = config.matcher;
         if (fixedTopConfirmed) {
             result.excludedBands.top = std::max(
-                result.excludedBands.top, config.fixedTopCandidateHeight);
+                result.excludedBands.top, fixedTopHeight);
         }
         if (fixedBottomConfirmed) {
             result.excludedBands.bottom = std::max(
-                result.excludedBands.bottom, config.fixedBottomCandidateHeight);
+                result.excludedBands.bottom, fixedBottomHeight);
         }
         result.excludedBands.right = std::max(
             result.excludedBands.right, config.scrollbarMaximumWidth);
+        result.excludedBands.left = std::max(
+            result.excludedBands.left, config.scrollbarMaximumWidth);
         return result;
     }
 
@@ -294,20 +304,40 @@ public:
                 < config.fixedBandStationaryThreshold;
     }
 
-    [[nodiscard]] bool candidateBandIsStationary(
+    [[nodiscard]] int stationaryBandHeight(
         const ScrollFrame& previous,
         const ScrollFrame& current,
         bool top) const
     {
-        const int rows = top
+        if (!config.enableFixedBandDetection || (top ? fixedTopConfirmed : fixedBottomConfirmed)) {
+            return 0;
+        }
+        const int configuredBudget = top
             ? config.fixedTopCandidateHeight
             : config.fixedBottomCandidateHeight;
-        if (rows <= 0 || (top ? fixedTopConfirmed : fixedBottomConfirmed)) {
-            return false;
+        const int budget = configuredBudget > 0
+            ? configuredBudget
+            : std::min(96, current.height / 4);
+        const int edgeInset = std::min(config.scrollbarMaximumWidth, current.width / 8);
+        const int firstColumn = edgeInset;
+        const int columnCount = current.width - edgeInset * 2;
+        if (budget <= 0 || columnCount <= 0) {
+            return 0;
         }
-        const int firstRow = top ? 0 : current.height - rows;
-        return stationaryRatio(previous, current, firstRow, rows)
-            >= config.fixedBandStationaryThreshold;
+        int stationaryRows = 0;
+        for (int offset = 0; offset < budget; ++offset) {
+            const int y = top ? offset : current.height - 1 - offset;
+            int equal = 0;
+            for (int x = firstColumn; x < firstColumn + columnCount; ++x) {
+                equal += pixelEqual(previous, current, x, y) ? 1 : 0;
+            }
+            const double ratio = static_cast<double>(equal) / static_cast<double>(columnCount);
+            if (ratio < config.fixedBandStationaryThreshold) {
+                break;
+            }
+            ++stationaryRows;
+        }
+        return stationaryRows;
     }
 
     [[nodiscard]] FixedBandEvidence fixedBandEvidence(
@@ -315,8 +345,10 @@ public:
         const ScrollFrame& current) const
     {
         FixedBandEvidence evidence;
-        evidence.top = candidateBandIsStationary(previous, current, true);
-        evidence.bottom = candidateBandIsStationary(previous, current, false);
+        evidence.topHeight = stationaryBandHeight(previous, current, true);
+        evidence.bottomHeight = stationaryBandHeight(previous, current, false);
+        evidence.top = evidence.topHeight > 0;
+        evidence.bottom = evidence.bottomHeight > 0;
         if ((!evidence.top && !evidence.bottom) || !centralDocumentMoved(previous, current)) {
             evidence.top = false;
             evidence.bottom = false;
@@ -325,11 +357,11 @@ public:
         auto matcherConfig = effectiveMatcherConfig();
         if (evidence.top) {
             matcherConfig.excludedBands.top = std::max(
-                matcherConfig.excludedBands.top, config.fixedTopCandidateHeight);
+                matcherConfig.excludedBands.top, evidence.topHeight);
         }
         if (evidence.bottom) {
             matcherConfig.excludedBands.bottom = std::max(
-                matcherConfig.excludedBands.bottom, config.fixedBottomCandidateHeight);
+                matcherConfig.excludedBands.bottom, evidence.bottomHeight);
         }
         evidence.overlap = VerticalOverlapMatcher().match(previous, current, matcherConfig);
         if (evidence.overlap.kind != OverlapKind::Reliable
@@ -340,8 +372,9 @@ public:
         return evidence;
     }
 
-    [[nodiscard]] std::optional<ScrollbarObservation> detectScrollbar(
-        const ScrollFrame& frame) const
+    [[nodiscard]] std::optional<ScrollbarObservation> detectScrollbarSide(
+        const ScrollFrame& frame,
+        int side) const
     {
         const int budget = std::min(config.scrollbarMaximumWidth, frame.width / 8);
         if (budget <= 0) {
@@ -349,8 +382,10 @@ public:
         }
 
         ScrollbarObservation result;
+        result.side = side;
         double minimumPersistence = 1.0;
-        for (int x = frame.width - 1; x >= frame.width - budget; --x) {
+        for (int offset = 0; offset < budget; ++offset) {
+            const int x = side < 0 ? offset : frame.width - 1 - offset;
             std::unordered_map<std::uint32_t, int> counts;
             counts.reserve(static_cast<std::size_t>(frame.height));
             for (int y = 0; y < frame.height; ++y) {
@@ -403,6 +438,17 @@ public:
         return result;
     }
 
+    [[nodiscard]] std::optional<ScrollbarObservation> detectScrollbar(
+        const ScrollFrame& frame) const
+    {
+        const auto left = detectScrollbarSide(frame, -1);
+        const auto right = detectScrollbarSide(frame, 1);
+        if (left.has_value() && right.has_value()) {
+            return std::nullopt;
+        }
+        return left.has_value() ? left : right;
+    }
+
     [[nodiscard]] ScrollbarState nextScrollbarState(
         ScrollbarState state,
         const ScrollFrame& previous,
@@ -416,6 +462,7 @@ public:
         }
         const auto observation = detectScrollbar(current);
         if (!state.last.has_value() || !observation.has_value()
+            || state.last->side != observation->side
             || state.last->width != observation->width) {
             state.last = observation;
             state.observedMovements = 0;
@@ -441,6 +488,7 @@ public:
         const double confidence = movingRatio * state.minimumPersistence;
         if (state.observedMovements >= config.scrollbarConfirmationMovements
             && confidence >= config.scrollbarConfidenceThreshold) {
+            state.confirmedSide = observation->side;
             state.confirmedWidth = observation->width;
         }
         return state;
@@ -454,9 +502,11 @@ public:
         pending.clear();
         if (!fixedTopConfirmed) {
             fixedTopAgreement = 0;
+            fixedTopRunHeight = 0;
         }
         if (!fixedBottomConfirmed) {
             fixedBottomAgreement = 0;
+            fixedBottomRunHeight = 0;
         }
     }
 };
@@ -581,11 +631,13 @@ try {
         auto transitionConfig = matcherConfig;
         if (evidence.top || topEvidenceBroke) {
             transitionConfig.excludedBands.top = std::max(
-                transitionConfig.excludedBands.top, config.fixedTopCandidateHeight);
+                transitionConfig.excludedBands.top,
+                std::max(evidence.topHeight, implementation_->fixedTopRunHeight));
         }
         if (evidence.bottom || bottomEvidenceBroke) {
             transitionConfig.excludedBands.bottom = std::max(
-                transitionConfig.excludedBands.bottom, config.fixedBottomCandidateHeight);
+                transitionConfig.excludedBands.bottom,
+                std::max(evidence.bottomHeight, implementation_->fixedBottomRunHeight));
         }
         const auto transition = matcher.match(evidenceTail, frame, transitionConfig);
         if (transition.kind == OverlapKind::Reliable && transition.verticalAdvance > 0) {
@@ -602,19 +654,21 @@ try {
             auto reviewConfig = matcherConfig;
             if (implementation_->fixedTopAgreement > 0) {
                 reviewConfig.excludedBands.top = std::max(
-                    reviewConfig.excludedBands.top, config.fixedTopCandidateHeight);
+                    reviewConfig.excludedBands.top, implementation_->fixedTopRunHeight);
             }
             if (implementation_->fixedBottomAgreement > 0) {
                 reviewConfig.excludedBands.bottom = std::max(
-                    reviewConfig.excludedBands.bottom, config.fixedBottomCandidateHeight);
+                    reviewConfig.excludedBands.bottom, implementation_->fixedBottomRunHeight);
             }
-            const auto reverse = matcher.match(frame, evidenceTail, reviewConfig);
-            if (reverse.kind == OverlapKind::Reliable && reverse.verticalAdvance > 0) {
-                result.kind = AppendKind::ReviewDiscarded;
-                result.confidence = reverse.confidence;
-                return result;
+            for (auto movement = implementation_->pending.crbegin();
+                 movement != implementation_->pending.crend(); ++movement) {
+                const auto reverse = matcher.match(frame, *movement->frame, reviewConfig);
+                if (reverse.kind == OverlapKind::Reliable && reverse.verticalAdvance > 0) {
+                    result.kind = AppendKind::ReviewDiscarded;
+                    result.confidence = reverse.confidence;
+                    return result;
+                }
             }
-            implementation_->clearPending();
             return result;
         }
         const auto contribution = checkedSum(*fullFrameBytes, fingerprintBytes);
@@ -644,6 +698,16 @@ try {
             : 0;
         const int nextBottomAgreement = evidence.bottom
             ? implementation_->fixedBottomAgreement + 1
+            : 0;
+        const int nextTopRunHeight = evidence.top
+            ? (implementation_->fixedTopAgreement > 0
+                    ? std::min(implementation_->fixedTopRunHeight, evidence.topHeight)
+                    : evidence.topHeight)
+            : 0;
+        const int nextBottomRunHeight = evidence.bottom
+            ? (implementation_->fixedBottomAgreement > 0
+                    ? std::min(implementation_->fixedBottomRunHeight, evidence.bottomHeight)
+                    : evidence.bottomHeight)
             : 0;
         const bool confirmTop = !implementation_->fixedTopConfirmed
             && nextTopAgreement >= requiredEvidence;
@@ -691,6 +755,8 @@ try {
             implementation_->persistentBytes = *projected;
             implementation_->fixedTopAgreement = nextTopAgreement;
             implementation_->fixedBottomAgreement = nextBottomAgreement;
+            implementation_->fixedTopRunHeight = nextTopRunHeight;
+            implementation_->fixedBottomRunHeight = nextBottomRunHeight;
             return result;
         }
 
@@ -706,8 +772,11 @@ try {
                 return false;
             }
             const bool excludeBottom = bottomDecision == BandDecision::Fixed;
+            const int bottomHeight = implementation_->fixedBottomConfirmed
+                ? implementation_->fixedBottomHeight
+                : nextBottomRunHeight;
             const int firstRow = movement.frame->height - movement.advance
-                - (excludeBottom ? config.fixedBottomCandidateHeight : 0);
+                - (excludeBottom ? bottomHeight : 0);
             auto pixels = copyRows(*movement.frame, firstRow, movement.advance);
             if (!pixels.isValid()) {
                 return false;
@@ -786,6 +855,12 @@ try {
         implementation_->tail = newTail;
         implementation_->tailHasSeparateStorage = true;
         implementation_->persistentBytes = flushedPersistent;
+        if (confirmTop) {
+            implementation_->fixedTopHeight = nextTopRunHeight;
+        }
+        if (confirmBottom) {
+            implementation_->fixedBottomHeight = nextBottomRunHeight;
+        }
         implementation_->fixedTopConfirmed = implementation_->fixedTopConfirmed || confirmTop;
         implementation_->fixedBottomConfirmed = implementation_->fixedBottomConfirmed || confirmBottom;
         implementation_->fixedTopAgreement = implementation_->fixedTopConfirmed
@@ -794,6 +869,12 @@ try {
         implementation_->fixedBottomAgreement = implementation_->fixedBottomConfirmed
             ? 0
             : nextBottomAgreement;
+        implementation_->fixedTopRunHeight = implementation_->fixedTopConfirmed
+            ? 0
+            : nextTopRunHeight;
+        implementation_->fixedBottomRunHeight = implementation_->fixedBottomConfirmed
+            ? 0
+            : nextBottomRunHeight;
         implementation_->scrollbar = std::move(preparedScrollbar);
         implementation_->height += flushedHeight;
         result.kind = AppendKind::AcceptedAppend;
@@ -810,10 +891,10 @@ try {
 
     const int appendedHeight = overlap.verticalAdvance;
     const int excludedTop = implementation_->fixedTopConfirmed
-        ? config.fixedTopCandidateHeight
+        ? implementation_->fixedTopHeight
         : 0;
     const int excludedBottom = implementation_->fixedBottomConfirmed
-        ? config.fixedBottomCandidateHeight
+        ? implementation_->fixedBottomHeight
         : 0;
     const int firstNewRow = frame.height - excludedBottom - appendedHeight;
     if (appendedHeight > std::numeric_limits<int>::max() - implementation_->height
@@ -899,6 +980,9 @@ ScrollFrame ScrollStitchSession::finalize() const
     if (implementation_->segments.empty()) {
         return {};
     }
+    const int leftCrop = implementation_->scrollbar.confirmedSide < 0
+        ? implementation_->scrollbar.confirmedWidth
+        : 0;
     const int outputWidth = implementation_->width - implementation_->scrollbar.confirmedWidth;
     if (!imageBytes(outputWidth, implementation_->height).has_value()) {
         return {};
@@ -917,7 +1001,8 @@ ScrollFrame ScrollStitchSession::finalize() const
         }
         for (int row = 0; row < segment.outputRows; ++row, ++outputRow) {
             const auto sourceOffset = static_cast<std::size_t>(firstRow + row)
-                * static_cast<std::size_t>(segment.pixels->bytesPerRow);
+                    * static_cast<std::size_t>(segment.pixels->bytesPerRow)
+                + static_cast<std::size_t>(leftCrop) * 4U;
             const auto destinationOffset = static_cast<std::size_t>(outputRow)
                 * static_cast<std::size_t>(output.bytesPerRow);
             std::memcpy(
@@ -931,35 +1016,54 @@ ScrollFrame ScrollStitchSession::finalize() const
 
 ScrollFrame ScrollStitchSession::preview(int maximumHeight) const
 {
-    const auto full = finalize();
-    if (!full.isValid() || maximumHeight <= 0) {
+    if (implementation_->segments.empty() || maximumHeight <= 0) {
         return {};
     }
-    if (full.height <= maximumHeight) {
-        return full;
-    }
-    const int previewWidth = std::max(1, static_cast<int>(
-        std::lround(static_cast<double>(full.width) * maximumHeight / full.height)));
-    if (!imageBytes(previewWidth, maximumHeight).has_value()) {
+    const int leftCrop = implementation_->scrollbar.confirmedSide < 0
+        ? implementation_->scrollbar.confirmedWidth
+        : 0;
+    const int composedWidth = implementation_->width - implementation_->scrollbar.confirmedWidth;
+    const int previewHeight = std::min(maximumHeight, implementation_->height);
+    const int previewWidth = previewHeight == implementation_->height
+        ? composedWidth
+        : std::max(1, static_cast<int>(std::lround(
+              static_cast<double>(composedWidth) * previewHeight / implementation_->height)));
+    if (!imageBytes(previewWidth, previewHeight).has_value()) {
         return {};
     }
-    ScrollFrame output(previewWidth, maximumHeight);
+    ScrollFrame output(previewWidth, previewHeight);
     if (!output.isValid()) {
         return {};
     }
+
+    std::size_t segmentIndex = 0U;
+    int segmentStart = 0;
     for (int y = 0; y < output.height; ++y) {
         const int sourceY = static_cast<int>(
-            static_cast<std::int64_t>(y) * full.height / output.height);
+            static_cast<std::int64_t>(y) * implementation_->height / output.height);
+        while (segmentIndex < implementation_->segments.size()
+            && sourceY >= segmentStart + implementation_->segments[segmentIndex].outputRows) {
+            segmentStart += implementation_->segments[segmentIndex].outputRows;
+            ++segmentIndex;
+        }
+        if (segmentIndex >= implementation_->segments.size()) {
+            return {};
+        }
+        const auto& segment = implementation_->segments[segmentIndex];
+        const int segmentRow = segment.firstRow + sourceY - segmentStart;
         for (int x = 0; x < output.width; ++x) {
-            const int sourceX = static_cast<int>(
-                static_cast<std::int64_t>(x) * full.width / output.width);
-            const auto sourceOffset = static_cast<std::size_t>(sourceY)
-                    * static_cast<std::size_t>(full.bytesPerRow)
+            const int sourceX = leftCrop + static_cast<int>(
+                static_cast<std::int64_t>(x) * composedWidth / output.width);
+            const auto sourceOffset = static_cast<std::size_t>(segmentRow)
+                    * static_cast<std::size_t>(segment.pixels->bytesPerRow)
                 + static_cast<std::size_t>(sourceX) * 4U;
             const auto destinationOffset = static_cast<std::size_t>(y)
                     * static_cast<std::size_t>(output.bytesPerRow)
                 + static_cast<std::size_t>(x) * 4U;
-            std::memcpy(output.pixels.data() + destinationOffset, full.pixels.data() + sourceOffset, 4U);
+            std::memcpy(
+                output.pixels.data() + destinationOffset,
+                segment.pixels->pixels.data() + sourceOffset,
+                4U);
         }
     }
     return output;
