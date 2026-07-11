@@ -379,6 +379,10 @@ final class CaptureCoordinator {
         else { return }
         let l10n = L10n(language: settingsStore.load().language)
         switch update {
+        case .terminalCommand(.finish):
+            finishScrollCapture()
+        case .terminalCommand(.cancel):
+            cancelScrollCapture()
         case .preview(let image):
             presentation.updatePreview(image)
         case .append:

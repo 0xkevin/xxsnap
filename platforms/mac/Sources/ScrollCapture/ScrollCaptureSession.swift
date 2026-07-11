@@ -54,6 +54,12 @@ enum ScrollCapturePresentationUpdate {
     case state(ScrollCaptureSessionState)
     case append(ScrollCaptureAppendUpdate)
     case preview(NSImage)
+    case terminalCommand(ScrollCaptureTerminalCommand)
+}
+
+enum ScrollCaptureTerminalCommand: Equatable {
+    case finish
+    case cancel
 }
 
 enum ScrollCaptureSessionError: Error, Equatable {
@@ -125,7 +131,10 @@ final class ScrollCaptureSession {
                 expectedState: .preparing
             ) else { return }
             guard setState(.capturing, operationGeneration: operationGeneration) else { return }
-            activityMonitor.start { [weak self] in self?.recordScrollActivity() }
+            activityMonitor.start(
+                onScrollActivity: { [weak self] in self?.recordScrollActivity() },
+                onTerminalCommand: { [weak self] command in self?.receiveTerminalCommand(command) }
+            )
         } catch {
             guard generation == operationGeneration, state == .preparing else { return }
             disarmSampling()
@@ -140,6 +149,15 @@ final class ScrollCaptureSession {
             stabilityCount = 0
             isSamplingArmed = true
             ensureSamplingLoop()
+        default:
+            break
+        }
+    }
+
+    private func receiveTerminalCommand(_ command: ScrollCaptureTerminalCommand) {
+        switch state {
+        case .capturing, .paused:
+            presentation(.terminalCommand(command))
         default:
             break
         }

@@ -9652,6 +9652,41 @@ final class SelectionToolbarStateTests: XCTestCase {
     }
 
     @MainActor
+    func testCaptureCoordinatorRoutesExternalTerminalCommandToActiveScrollLifecycle() async throws {
+        let seed = scrollCaptureSeedForCoordinatorTests()
+        let overlay = SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in }
+        let session = FakeScrollCaptureSession(seed: seed)
+        let presentation = FakeScrollCapturePresentation()
+        var update: (@MainActor (ScrollCapturePresentationUpdate) -> Void)?
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            scrollCaptureSessionFactory: { _, callback in
+                update = callback
+                return session
+            },
+            scrollCapturePresentationFactory: { context in
+                presentation.onFinish = context.onFinish
+                presentation.onCancel = context.onCancel
+                return presentation
+            },
+            longImageHandoff: { _, _ in XCTFail("cancel must not hand off") }
+        )
+        coordinator.test_installOverlayWindow(overlay)
+        coordinator.test_requestScrollCapture(seed: seed)
+        await Task.yield()
+
+        update?(.terminalCommand(.cancel))
+        update?(.terminalCommand(.cancel))
+        overlay.onScrollCaptureFinishRequested?()
+
+        XCTAssertEqual(session.cancelCount, 1)
+        XCTAssertEqual(session.finishCount, 0)
+        XCTAssertEqual(presentation.stopCount, 1)
+        XCTAssertEqual(overlay.scrollCaptureOverlayState, .inactive)
+    }
+
+    @MainActor
     func testCaptureCoordinatorFinishStopsAndHandsRawImageWithFrozenSeedExactlyOnce() async throws {
         let seed = scrollCaptureSeedForCoordinatorTests()
         let overlay = SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in

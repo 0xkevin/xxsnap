@@ -450,7 +450,7 @@ final class ScrollCaptureSessionTests: XCTestCase {
         XCTAssertTrue(service is ScreenCaptureService)
     }
 
-    func testActivityMonitorRegistrationIsIdempotentReturnsLocalEventAndStopsBothMonitors() async throws {
+    func testActivityMonitorRegistrationIsIdempotentReturnsLocalEventAndStopsAllMonitors() async throws {
         let registrar = FakeMonitorRegistrar()
         let monitor = ScrollActivityMonitor(registrar: registrar)
         var activityCount = 0
@@ -474,10 +474,79 @@ final class ScrollCaptureSessionTests: XCTestCase {
         XCTAssertEqual(activityCount, 2)
         XCTAssertEqual(registrar.addLocalCount, 1)
         XCTAssertEqual(registrar.addGlobalCount, 1)
+        XCTAssertEqual(registrar.addGlobalKeyCount, 1)
 
         monitor.stop()
         monitor.stop()
+        XCTAssertEqual(registrar.removed.count, 3)
+    }
+
+    func testActivityMonitorForwardsTerminalKeysFromOtherApplicationsAndStopsKeyMonitor() async throws {
+        let registrar = FakeMonitorRegistrar()
+        let monitor = ScrollActivityMonitor(registrar: registrar)
+        var commands: [ScrollCaptureTerminalCommand] = []
+        monitor.start(
+            onScrollActivity: {},
+            onTerminalCommand: { commands.append($0) }
+        )
+
+        registrar.globalKeyHandler?(try makeKeyEvent(keyCode: 36))
+        registrar.globalKeyHandler?(try makeKeyEvent(keyCode: 76))
+        registrar.globalKeyHandler?(try makeKeyEvent(keyCode: 53))
+        registrar.globalKeyHandler?(try makeKeyEvent(keyCode: 0))
+        await Task.yield()
+
+        XCTAssertEqual(commands, [.finish, .finish, .cancel])
+        XCTAssertEqual(registrar.addGlobalKeyCount, 1)
+
+        monitor.stop()
+        XCTAssertEqual(registrar.removed.count, 3)
+    }
+
+    func testActivityMonitorStillStopsScrollMonitorsWhenGlobalKeyRegistrationIsUnavailable() async {
+        let registrar = FakeMonitorRegistrar()
+        registrar.providesGlobalKeyToken = false
+        let monitor = ScrollActivityMonitor(registrar: registrar)
+
+        monitor.start(onScrollActivity: {}, onTerminalCommand: { _ in })
+        monitor.stop()
+
+        XCTAssertEqual(registrar.addGlobalKeyCount, 1)
         XCTAssertEqual(registrar.removed.count, 2)
+        await Task.yield()
+    }
+
+    func testSessionPublishesTerminalCommandsOnlyWhileCaptureCanTerminate() async throws {
+        let monitor = FakeActivityMonitor()
+        let presentation = PresentationRecorder()
+        let session = makeSession(
+            engine: FakeStitcher(results: [.acceptedInitial]),
+            monitor: monitor,
+            presentation: presentation
+        )
+        try await session.start()
+
+        monitor.send(.finish)
+        XCTAssertEqual(presentation.commands, [.finish])
+
+        _ = session.cancel()
+        monitor.send(.cancel)
+        XCTAssertEqual(presentation.commands, [.finish])
+    }
+
+    private func makeKeyEvent(keyCode: UInt16) throws -> NSEvent {
+        try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "",
+            charactersIgnoringModifiers: "",
+            isARepeat: false,
+            keyCode: keyCode
+        ))
     }
 
     private func makeSession(
@@ -663,9 +732,12 @@ private final class FakeMonitorRegistrar: ScrollEventMonitorRegistering {
     let globalToken = NSObject()
     private(set) var addLocalCount = 0
     private(set) var addGlobalCount = 0
+    private(set) var addGlobalKeyCount = 0
     private(set) var removed: [AnyObject] = []
     var localHandler: ((NSEvent) -> NSEvent?)?
     var globalHandler: ((NSEvent) -> Void)?
+    var globalKeyHandler: ((NSEvent) -> Void)?
+    var providesGlobalKeyToken = true
 
     func addLocal(_ handler: @escaping (NSEvent) -> NSEvent?) -> Any {
         addLocalCount += 1
@@ -679,6 +751,12 @@ private final class FakeMonitorRegistrar: ScrollEventMonitorRegistering {
         return globalToken
     }
 
+    func addGlobalKeyDown(_ handler: @escaping (NSEvent) -> Void) -> Any? {
+        addGlobalKeyCount += 1
+        globalKeyHandler = handler
+        return providesGlobalKeyToken ? NSObject() : nil
+    }
+
     func remove(_ monitor: Any) { removed.append(monitor as AnyObject) }
 }
 
@@ -686,8 +764,17 @@ private final class FakeMonitorRegistrar: ScrollEventMonitorRegistering {
 private final class FakeActivityMonitor: ScrollActivityMonitoring {
     private(set) var startCount = 0
     private(set) var stopCount = 0
+    private var terminalCommand: (@MainActor (ScrollCaptureTerminalCommand) -> Void)?
     func start(_ callback: @escaping @MainActor () -> Void) { startCount += 1 }
+    func start(
+        onScrollActivity: @escaping @MainActor () -> Void,
+        onTerminalCommand: @escaping @MainActor (ScrollCaptureTerminalCommand) -> Void
+    ) {
+        startCount += 1
+        terminalCommand = onTerminalCommand
+    }
     func stop() { stopCount += 1 }
+    func send(_ command: ScrollCaptureTerminalCommand) { terminalCommand?(command) }
 }
 
 @MainActor
@@ -695,9 +782,11 @@ private final class PresentationRecorder {
     private(set) var states: [ScrollCaptureSessionState] = []
     private(set) var kinds: [ScrollCaptureAppendKind] = []
     private(set) var previews: [NSImage] = []
-    var eventCount: Int { states.count + kinds.count + previews.count }
+    private(set) var commands: [ScrollCaptureTerminalCommand] = []
+    var eventCount: Int { states.count + kinds.count + previews.count + commands.count }
     func record(_ event: ScrollCapturePresentationUpdate) {
         switch event {
+        case let .terminalCommand(command): commands.append(command)
         case let .state(state): states.append(state)
         case let .append(update): kinds.append(update.kind)
         case let .preview(image): previews.append(image)
