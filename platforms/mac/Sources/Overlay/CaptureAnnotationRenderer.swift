@@ -281,14 +281,20 @@ enum CaptureArrowVectorGeometry {
         end: CGPoint,
         strokeWidth: CGFloat
     ) -> (path: CGPath, evenOddFill: Bool)? {
+        let localStart = CGPoint.zero
+        let localControl = CGPoint(x: control.x - start.x, y: control.y - start.y)
+        let localEnd = CGPoint(x: end.x - start.x, y: end.y - start.y)
+        var translation = CGAffineTransform(translationX: start.x, y: start.y)
         switch type {
         case .solidArrow:
-            guard let path = stretchedArrowFilled2Path(start: start, control: control, end: end, strokeWidth: strokeWidth) else {
+            guard let localPath = stretchedArrowFilled2Path(start: localStart, control: localControl, end: localEnd, strokeWidth: strokeWidth),
+                  let path = localPath.copy(using: &translation) else {
                 return nil
             }
             return (path, false)
         case .hollowArrow:
-            guard let path = stretchedHollowArrowFilled2Path(start: start, control: control, end: end, strokeWidth: strokeWidth) else {
+            guard let localPath = stretchedHollowArrowFilled2Path(start: localStart, control: localControl, end: localEnd, strokeWidth: strokeWidth),
+                  let path = localPath.copy(using: &translation) else {
                 return nil
             }
             return (path, false)
@@ -1115,6 +1121,30 @@ struct CaptureSelectionResult {
 }
 
 enum CaptureAnnotationRenderer {
+    private enum ArrowHeadMetrics {
+        static func barHalfWidth(_ strokeWidth: CGFloat) -> CGFloat { max(5, strokeWidth * 2.1) }
+        static func dotRadius(_ strokeWidth: CGFloat) -> CGFloat { max(3.5, strokeWidth * 1.45) }
+        static func diamondLength(_ strokeWidth: CGFloat) -> CGFloat { max(10, strokeWidth * 3.3) }
+        static func diamondHalfWidth(_ strokeWidth: CGFloat) -> CGFloat { max(4, strokeWidth * 1.5) }
+
+        static func conservativeRadius(for type: CaptureArrowType, strokeWidth: CGFloat) -> CGFloat {
+            let lineHalf = max(0.75, strokeWidth / 2)
+            switch type {
+            case .none:
+                return lineHalf
+            case .bar:
+                return barHalfWidth(strokeWidth) + lineHalf
+            case .dot:
+                return dotRadius(strokeWidth)
+            case .diamond:
+                return hypot(diamondLength(strokeWidth), diamondHalfWidth(strokeWidth)) + lineHalf
+            case .normal:
+                return 12 * max(0.8, strokeWidth / 2) + lineHalf
+            case .solidArrow, .hollowArrow:
+                return 24 * max(0.8, strokeWidth / 2) + strokeWidth * 2
+            }
+        }
+    }
     struct VisibleLongImageRenderPlan {
         var processingRect: NSRect
         var annotationIDs: Set<AnnotationID>
@@ -1312,12 +1342,32 @@ enum CaptureAnnotationRenderer {
         let requested = imageRect.standardized.intersection(imageBounds)
         var processing = requested
         for annotation in annotations {
-            let visual = longImageVisualBounds(for: annotation)
+            let visual = longImageVisualBounds(for: annotation).intersection(imageBounds)
             if visual.intersects(requested) {
-                processing = processing.union(visual)
+                processing = processing.union(visual).intersection(imageBounds)
+            }
+        }
+        var included = Set<AnnotationID>()
+        var didGrow = true
+        while didGrow {
+            didGrow = false
+            for annotation in annotations where !included.contains(annotation.id) && isSourceDependentLongImageAnnotation(annotation) {
+                let dependency = longImageVisualBounds(for: annotation).intersection(imageBounds)
+                if dependency.intersects(processing) {
+                    included.insert(annotation.id)
+                    let expanded = processing.union(dependency).intersection(imageBounds)
+                    if expanded != processing {
+                        processing = expanded
+                        didGrow = true
+                    }
+                }
             }
         }
         return processing.intersection(imageBounds).integral
+    }
+
+    private static func isSourceDependentLongImageAnnotation(_ annotation: CaptureAnnotation) -> Bool {
+        annotation.kind == .mosaicStroke || annotation.kind == .mosaicRectangle || annotation.kind == .magnifier
     }
 
     static func visibleLongImageRenderPlan(
@@ -1340,6 +1390,13 @@ enum CaptureAnnotationRenderer {
         if let brush = annotation.brushPath { bounds = bounds.union(brush.boundingRect) }
         if let marker = annotation.markerLine { bounds = bounds.union(marker.boundingRect) }
         if let mosaic = annotation.mosaicStroke { bounds = bounds.union(mosaic.boundingRect) }
+        if annotation.kind == .arrowLine, let arrow = annotation.arrowLine {
+            let startRadius = ArrowHeadMetrics.conservativeRadius(for: arrow.startArrowType, strokeWidth: annotation.style.strokeWidth)
+            let endRadius = ArrowHeadMetrics.conservativeRadius(for: arrow.endArrowType, strokeWidth: annotation.style.strokeWidth)
+            bounds = bounds
+                .union(NSRect(x: arrow.start.x - startRadius, y: arrow.start.y - startRadius, width: startRadius * 2, height: startRadius * 2))
+                .union(NSRect(x: arrow.end.x - endRadius, y: arrow.end.y - endRadius, width: endRadius * 2, height: endRadius * 2))
+        }
         if annotation.rotationAngle != 0 {
             let center = NSPoint(x: bounds.midX, y: bounds.midY)
             let cosine = cos(annotation.rotationAngle), sine = sin(annotation.rotationAngle)
@@ -2623,7 +2680,7 @@ enum CaptureAnnotationRenderer {
             context.saveGState()
             context.setLineWidth(max(1.5, strokeWidth))
             context.setLineCap(.butt)
-            let capHalfWidth = max(5, strokeWidth * 2.1)
+            let capHalfWidth = ArrowHeadMetrics.barHalfWidth(strokeWidth)
             let capStart = CGPoint(x: tip.x + perp.dx * capHalfWidth, y: tip.y + perp.dy * capHalfWidth)
             let capEnd = CGPoint(x: tip.x - perp.dx * capHalfWidth, y: tip.y - perp.dy * capHalfWidth)
             let path = CGMutablePath()
@@ -2633,11 +2690,11 @@ enum CaptureAnnotationRenderer {
             context.strokePath()
             context.restoreGState()
         case .dot:
-            let radius = max(3.5, strokeWidth * 1.45)
+            let radius = ArrowHeadMetrics.dotRadius(strokeWidth)
             context.fillEllipse(in: CGRect(x: tip.x - radius, y: tip.y - radius, width: radius * 2, height: radius * 2))
         case .diamond:
-            let diamondLength = max(10, strokeWidth * 3.3)
-            let diamondHalfWidth = max(4, strokeWidth * 1.5)
+            let diamondLength = ArrowHeadMetrics.diamondLength(strokeWidth)
+            let diamondHalfWidth = ArrowHeadMetrics.diamondHalfWidth(strokeWidth)
             let center = CGPoint(x: tip.x - direction.dx * diamondLength * 0.5, y: tip.y - direction.dy * diamondLength * 0.5)
             let back = CGPoint(x: tip.x - direction.dx * diamondLength, y: tip.y - direction.dy * diamondLength)
             let path = CGMutablePath()

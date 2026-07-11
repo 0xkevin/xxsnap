@@ -131,6 +131,71 @@ final class LongImageEditorTests: XCTestCase {
         XCTAssertEqual(slice.annotations.map(\.id), [annotation.id])
     }
 
+    func testThinBarArrowVisualExtentEntersSliceOutsideLineRect() {
+        var style = CaptureAnnotationStyle(); style.strokeWidth = 1
+        let line = CaptureArrowLine(
+            start: NSPoint(x: 30, y: 100), end: NSPoint(x: 150, y: 100), control: NSPoint(x: 90, y: 100),
+            startArrowType: .bar, endArrowType: .none
+        )
+        let annotation = CaptureAnnotation(kind: .arrowLine, rect: line.boundingRect, style: style, arrowLine: line)
+        let visual = CaptureAnnotationRenderer.longImageVisualBounds(for: annotation)
+        XCTAssertLessThanOrEqual(visual.minY, 94.5)
+        let slice = LongImageEditorDocument.visibleSlice(
+            image: TestImageFactory.solid(size: NSSize(width: 200, height: 500), color: .white),
+            annotations: [annotation], eraserMasks: [], imageRect: NSRect(x: 0, y: 94, width: 200, height: 2)
+        )
+        XCTAssertEqual(slice.annotations.map(\.id), [annotation.id])
+    }
+
+    func testArrowEndpointKindsMatchFullRenderAtSliceBoundary() throws {
+        let image = TestImageFactory.verticalDocumentViewport(offset: 0, width: 220, height: 900, scale: 2)
+        let sliceRect = NSRect(x: 0, y: 295, width: 220, height: 180)
+        var style = CaptureAnnotationStyle(); style.strokeColor = .red; style.strokeWidth = 2
+        let types: [CaptureArrowType] = [.bar, .dot, .diamond, .normal, .solidArrow, .hollowArrow]
+        for (index, type) in types.enumerated() {
+            let y = CGFloat(300 + index * 25)
+            let line = CaptureArrowLine(
+                start: NSPoint(x: 8, y: y), end: NSPoint(x: 205, y: y), control: NSPoint(x: 105, y: y),
+                startArrowType: type, endArrowType: type
+            )
+            let annotation = CaptureAnnotation(kind: .arrowLine, rect: line.boundingRect, style: style, arrowLine: line)
+            let full = CaptureAnnotationRenderer.renderCompleteLongImage(image: image, annotations: [annotation], eraserMasks: [])
+            let expected = try cropTopOrigin(full, rect: sliceRect)
+            let actual = CaptureAnnotationRenderer.renderVisibleLongImageSlice(image: image, annotations: [annotation], eraserMasks: [], imageRect: sliceRect)
+            let actualBytes = try pixelBytes(actual), expectedBytes = try pixelBytes(expected)
+            if type == .solidArrow || type == .hollowArrow {
+                XCTAssertLessThanOrEqual(maxChannelDifference(actualBytes, expectedBytes), 1, "\(type)")
+            } else {
+                XCTAssertEqual(actualBytes, expectedBytes, "\(type)")
+            }
+        }
+    }
+
+    func testProcessingRectExpandsTransitivelyAcrossMosaicDependencyChain() throws {
+        let image = TestImageFactory.verticalDocumentViewport(offset: 0, width: 180, height: 1_400, scale: 2)
+        let requested = NSRect(x: 0, y: 600, width: 180, height: 120)
+        var style = CaptureAnnotationStyle(); style.strokeWidth = 12
+        let redaction = CaptureMosaicRedaction(type: .gaussianBlur, value: 20)
+        let earliest = CaptureAnnotation(kind: .mosaicRectangle, rect: NSRect(x: 20, y: 350, width: 130, height: 80), style: style, mosaicRedaction: redaction)
+        let middle = CaptureAnnotation(kind: .mosaicRectangle, rect: NSRect(x: 25, y: 465, width: 125, height: 80), style: style, mosaicRedaction: redaction)
+        let latest = CaptureAnnotation(kind: .mosaicRectangle, rect: NSRect(x: 30, y: 580, width: 120, height: 80), style: style, mosaicRedaction: redaction)
+        let unrelated = CaptureAnnotation(kind: .mosaicRectangle, rect: NSRect(x: 20, y: 20, width: 130, height: 50), style: style, mosaicRedaction: redaction)
+        let annotations = [unrelated, earliest, middle, latest]
+        let plan = CaptureAnnotationRenderer.visibleLongImageRenderPlan(
+            imageSize: image.size, imageRect: requested, annotations: annotations, eraserMasks: []
+        )
+        XCTAssertTrue(plan.annotationIDs.contains(earliest.id))
+        XCTAssertTrue(plan.annotationIDs.contains(middle.id))
+        XCTAssertTrue(plan.annotationIDs.contains(latest.id))
+        XCTAssertFalse(plan.annotationIDs.contains(unrelated.id))
+        XCTAssertLessThan(plan.processingRect.minY, 300)
+        XCTAssertGreaterThan(plan.processingRect.minY, 100)
+        let full = CaptureAnnotationRenderer.renderCompleteLongImage(image: image, annotations: annotations, eraserMasks: [])
+        let expected = try cropTopOrigin(full, rect: requested)
+        let actual = CaptureAnnotationRenderer.renderVisibleLongImageSlice(image: image, annotations: annotations, eraserMasks: [], imageRect: requested)
+        XCTAssertEqual(try pixelBytes(actual), try pixelBytes(expected))
+    }
+
     func testResizePreservesTopVisibleCenterAnchor() {
         let before = LongImageEditorGeometry(
             imageSize: NSSize(width: 1_000, height: 8_000),
@@ -582,6 +647,11 @@ final class LongImageEditorTests: XCTestCase {
         }
         XCTAssertTrue(created)
         return Data(bytes)
+    }
+
+    private func maxChannelDifference(_ lhs: Data, _ rhs: Data) -> Int {
+        guard lhs.count == rhs.count else { return .max }
+        return zip(lhs, rhs).reduce(0) { max($0, abs(Int($1.0) - Int($1.1))) }
     }
 
     private func makeTallController() -> LongImageEditorWindowController {
