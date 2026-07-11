@@ -329,6 +329,67 @@ final class LongImageEditorTests: XCTestCase {
         XCTAssertEqual(boundaryPlan.processingRect, boundaryRequested)
     }
 
+    func testVisibleMagnifierUsesFullCanvasGeometryForHorizontalPartialRetinaSlice() throws {
+        let image = TestImageFactory.verticalDocumentViewport(offset: 0, width: 600, height: 1_200, scale: 2)
+        let requested = NSRect(x: 390, y: 480, width: 60, height: 240)
+        let magnifier = CaptureAnnotation(
+            kind: .magnifier,
+            rect: NSRect(x: 250, y: 520, width: 160, height: 160),
+            style: CaptureAnnotationStyle(),
+            magnifierShape: .rectangle,
+            magnifierZoom: 2
+        )
+        let plan = CaptureAnnotationRenderer.visibleLongImageRenderPlan(
+            imageSize: image.size,
+            imageRect: requested,
+            annotations: [magnifier],
+            eraserMasks: []
+        )
+        XCTAssertEqual(plan.processingRect.minX, 284, accuracy: 0.001)
+        XCTAssertLessThan(plan.processingRect.width, 200)
+        XCTAssertGreaterThan(plan.processingRect.minX, 0)
+
+        let full = CaptureAnnotationRenderer.renderCompleteLongImage(image: image, annotations: [magnifier], eraserMasks: [])
+        let expected = try cropTopOrigin(full, rect: requested)
+        let actual = CaptureAnnotationRenderer.renderVisibleLongImageSlice(
+            image: image,
+            annotations: [magnifier],
+            eraserMasks: [],
+            imageRect: requested
+        )
+        XCTAssertEqual(try pixelBytes(actual), try pixelBytes(expected))
+    }
+
+    func testVisibleMagnifierPreservesOffsetFallbackAtTrueFullImageEdge() throws {
+        let image = TestImageFactory.verticalDocumentViewport(offset: 0, width: 600, height: 1_200, scale: 2)
+        let requested = NSRect(x: 80, y: 480, width: 80, height: 240)
+        let magnifier = CaptureAnnotation(
+            kind: .magnifier,
+            rect: NSRect(x: -40, y: 520, width: 160, height: 160),
+            style: CaptureAnnotationStyle(),
+            magnifierShape: .rectangle,
+            magnifierZoom: 2
+        )
+        let plan = CaptureAnnotationRenderer.visibleLongImageRenderPlan(
+            imageSize: image.size,
+            imageRect: requested,
+            annotations: [magnifier],
+            eraserMasks: []
+        )
+        XCTAssertEqual(plan.processingRect.minX, 0, accuracy: 0.001)
+        XCTAssertLessThan(plan.processingRect.width, 200)
+
+        let full = CaptureAnnotationRenderer.renderCompleteLongImage(image: image, annotations: [magnifier], eraserMasks: [])
+        let expected = try cropTopOrigin(full, rect: requested)
+        let actual = CaptureAnnotationRenderer.renderVisibleLongImageSlice(
+            image: image,
+            annotations: [magnifier],
+            eraserMasks: [],
+            imageRect: requested
+        )
+        XCTAssertEqual(try pixelBytes(actual), try pixelBytes(expected))
+    }
+
     func testResizePreservesTopVisibleCenterAnchor() {
         let before = LongImageEditorGeometry(
             imageSize: NSSize(width: 1_000, height: 8_000),

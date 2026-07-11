@@ -1322,6 +1322,7 @@ enum CaptureAnnotationRenderer {
             annotations: localAnnotations,
             eraserMasks: localMasks,
             contentOriginPixels: contentOrigin,
+            fullCanvasPixelWidth: CGFloat(fullCG.width),
             fullCanvasPixelHeight: CGFloat(fullCG.height)
         )
         let localRequest = requested.offsetBy(dx: -processing.minX, dy: -processing.minY)
@@ -1446,6 +1447,7 @@ enum CaptureAnnotationRenderer {
         annotations: [CaptureAnnotation],
         eraserMasks: [EraserMask] = [],
         contentOriginPixels: CGPoint = .zero,
+        fullCanvasPixelWidth: CGFloat? = nil,
         fullCanvasPixelHeight: CGFloat? = nil
     ) -> NSImage? {
         guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
@@ -1463,7 +1465,16 @@ enum CaptureAnnotationRenderer {
         let scaleX = CGFloat(cgImage.width) / max(image.size.width, 1)
         let scaleY = CGFloat(cgImage.height) / max(image.size.height, 1)
         if eraserMasks.isEmpty {
-            drawAnnotations(annotations, in: context, sourceImage: cgImage, scaleX: scaleX, scaleY: scaleY, contentOriginPixels: contentOriginPixels, fullCanvasPixelHeight: fullCanvasPixelHeight ?? CGFloat(cgImage.height))
+            drawAnnotations(
+                annotations,
+                in: context,
+                sourceImage: cgImage,
+                scaleX: scaleX,
+                scaleY: scaleY,
+                contentOriginPixels: contentOriginPixels,
+                fullCanvasPixelWidth: fullCanvasPixelWidth ?? CGFloat(cgImage.width),
+                fullCanvasPixelHeight: fullCanvasPixelHeight ?? CGFloat(cgImage.height)
+            )
         } else {
             drawAnnotations(
                 annotations: annotations,
@@ -1474,6 +1485,7 @@ enum CaptureAnnotationRenderer {
                 scaleX: scaleX,
                 scaleY: scaleY,
                 contentOriginPixels: contentOriginPixels,
+                fullCanvasPixelWidth: fullCanvasPixelWidth ?? CGFloat(cgImage.width),
                 fullCanvasPixelHeight: fullCanvasPixelHeight ?? CGFloat(cgImage.height)
             )
         }
@@ -1490,6 +1502,7 @@ enum CaptureAnnotationRenderer {
         annotations: [CaptureAnnotation],
         eraserMasks: [EraserMask],
         contentOriginPixels: CGPoint,
+        fullCanvasPixelWidth: CGFloat,
         fullCanvasPixelHeight: CGFloat
     ) -> NSImage {
         renderImage(
@@ -1497,6 +1510,7 @@ enum CaptureAnnotationRenderer {
             annotations: annotations,
             eraserMasks: eraserMasks,
             contentOriginPixels: contentOriginPixels,
+            fullCanvasPixelWidth: fullCanvasPixelWidth,
             fullCanvasPixelHeight: fullCanvasPixelHeight
         ) ?? image
     }
@@ -1508,6 +1522,7 @@ enum CaptureAnnotationRenderer {
         scaleX: CGFloat,
         scaleY: CGFloat,
         contentOriginPixels: CGPoint = .zero,
+        fullCanvasPixelWidth: CGFloat? = nil,
         fullCanvasPixelHeight: CGFloat? = nil
     ) {
         for annotation in annotations {
@@ -1521,7 +1536,16 @@ enum CaptureAnnotationRenderer {
                     fullCanvasPixelHeight: fullCanvasPixelHeight ?? CGFloat(context.height)
                 )
             } else {
-                draw(annotation, in: context, sourceImage: sourceImage, scaleX: scaleX, scaleY: scaleY)
+                draw(
+                    annotation,
+                    in: context,
+                    sourceImage: sourceImage,
+                    scaleX: scaleX,
+                    scaleY: scaleY,
+                    contentOriginPixels: contentOriginPixels,
+                    fullCanvasPixelWidth: fullCanvasPixelWidth ?? CGFloat(context.width),
+                    fullCanvasPixelHeight: fullCanvasPixelHeight ?? CGFloat(context.height)
+                )
             }
         }
     }
@@ -1535,12 +1559,22 @@ enum CaptureAnnotationRenderer {
         scaleX: CGFloat,
         scaleY: CGFloat,
         contentOriginPixels: CGPoint = .zero,
+        fullCanvasPixelWidth: CGFloat? = nil,
         fullCanvasPixelHeight: CGFloat? = nil
     ) {
         for annotation in annotations {
             let masksForAnnotation = eraserMasks.filter { $0.affectedAnnotationIDs.contains(annotation.id) }
             guard !masksForAnnotation.isEmpty else {
-                drawAnnotations([annotation], in: context, sourceImage: sourceImage, scaleX: scaleX, scaleY: scaleY, contentOriginPixels: contentOriginPixels, fullCanvasPixelHeight: fullCanvasPixelHeight)
+                drawAnnotations(
+                    [annotation],
+                    in: context,
+                    sourceImage: sourceImage,
+                    scaleX: scaleX,
+                    scaleY: scaleY,
+                    contentOriginPixels: contentOriginPixels,
+                    fullCanvasPixelWidth: fullCanvasPixelWidth,
+                    fullCanvasPixelHeight: fullCanvasPixelHeight
+                )
                 continue
             }
             guard let annotationImage = makeMaskedAnnotationImage(
@@ -1554,6 +1588,7 @@ enum CaptureAnnotationRenderer {
                 scaleX: scaleX,
                 scaleY: scaleY,
                 contentOriginPixels: contentOriginPixels,
+                fullCanvasPixelWidth: fullCanvasPixelWidth ?? CGFloat(context.width),
                 fullCanvasPixelHeight: fullCanvasPixelHeight ?? CGFloat(context.height)
             ) else {
                 continue
@@ -1573,6 +1608,7 @@ enum CaptureAnnotationRenderer {
         scaleX: CGFloat,
         scaleY: CGFloat,
         contentOriginPixels: CGPoint,
+        fullCanvasPixelWidth: CGFloat,
         fullCanvasPixelHeight: CGFloat
     ) -> CGImage? {
         guard let context = makeRenderContext(width: width, height: height, colorSpace: colorSpace) else {
@@ -1582,7 +1618,16 @@ enum CaptureAnnotationRenderer {
         if let currentImage {
             context.draw(currentImage, in: CGRect(x: 0, y: 0, width: width, height: height))
         }
-        drawAnnotations([annotation], in: context, sourceImage: sourceImage, scaleX: scaleX, scaleY: scaleY, contentOriginPixels: contentOriginPixels, fullCanvasPixelHeight: fullCanvasPixelHeight)
+        drawAnnotations(
+            [annotation],
+            in: context,
+            sourceImage: sourceImage,
+            scaleX: scaleX,
+            scaleY: scaleY,
+            contentOriginPixels: contentOriginPixels,
+            fullCanvasPixelWidth: fullCanvasPixelWidth,
+            fullCanvasPixelHeight: fullCanvasPixelHeight
+        )
 
         context.saveGState()
         context.setBlendMode(.clear)
@@ -1625,7 +1670,10 @@ enum CaptureAnnotationRenderer {
         in context: CGContext,
         sourceImage: CGImage,
         scaleX: CGFloat,
-        scaleY: CGFloat
+        scaleY: CGFloat,
+        contentOriginPixels: CGPoint,
+        fullCanvasPixelWidth: CGFloat,
+        fullCanvasPixelHeight: CGFloat
     ) {
         let lineScale = (scaleX + scaleY) / 2
         if isMosaicAnnotation(annotation) {
@@ -1638,7 +1686,10 @@ enum CaptureAnnotationRenderer {
                 sourceImage: sourceImage,
                 scaleX: scaleX,
                 scaleY: scaleY,
-                lineScale: lineScale
+                lineScale: lineScale,
+                contentOriginPixels: contentOriginPixels,
+                fullCanvasPixelWidth: fullCanvasPixelWidth,
+                fullCanvasPixelHeight: fullCanvasPixelHeight
             )
             return
         }
@@ -1891,7 +1942,10 @@ enum CaptureAnnotationRenderer {
         sourceImage: CGImage,
         scaleX: CGFloat,
         scaleY: CGFloat,
-        lineScale: CGFloat
+        lineScale: CGFloat,
+        contentOriginPixels: CGPoint,
+        fullCanvasPixelWidth: CGFloat,
+        fullCanvasPixelHeight: CGFloat
     ) {
         let rect = annotation.rect.standardized
         guard rect.width > 0, rect.height > 0 else {
@@ -1906,10 +1960,19 @@ enum CaptureAnnotationRenderer {
             width: rect.width * scaleX,
             height: rect.height * scaleY
         )
-        let imageBounds = CGRect(x: 0, y: 0, width: sourceImage.width, height: sourceImage.height)
+        let globalDestination = destination.offsetBy(
+            dx: contentOriginPixels.x,
+            dy: contentOriginPixels.y
+        )
+        let fullCanvasBounds = CGRect(
+            x: 0,
+            y: 0,
+            width: fullCanvasPixelWidth,
+            height: fullCanvasPixelHeight
+        )
         let geometry = magnifierDrawGeometry(
-            destination: destination,
-            sourceBounds: imageBounds,
+            destination: globalDestination,
+            sourceBounds: fullCanvasBounds,
             zoom: zoom,
             contentXOffset: magnifierContentXOffset * scaleX,
             contentYOffset: magnifierContentYOffset * scaleY
@@ -1919,15 +1982,25 @@ enum CaptureAnnotationRenderer {
         addMagnifierClip(shape: shape, rect: destination, to: context)
         context.clip()
         if let geometry {
+            let localSource = geometry.integralSource.offsetBy(
+                dx: -contentOriginPixels.x,
+                dy: -contentOriginPixels.y
+            )
             let cropRect = CGRect(
-                x: geometry.integralSource.minX,
-                y: CGFloat(sourceImage.height) - geometry.integralSource.maxY,
-                width: geometry.integralSource.width,
-                height: geometry.integralSource.height
+                x: localSource.minX,
+                y: CGFloat(sourceImage.height) - localSource.maxY,
+                width: localSource.width,
+                height: localSource.height
             )
             if let crop = sourceImage.cropping(to: cropRect) {
                 context.interpolationQuality = .none
-                context.draw(crop, in: geometry.drawRect)
+                context.draw(
+                    crop,
+                    in: geometry.drawRect.offsetBy(
+                        dx: -contentOriginPixels.x,
+                        dy: -contentOriginPixels.y
+                    )
+                )
             }
         }
         context.restoreGState()
