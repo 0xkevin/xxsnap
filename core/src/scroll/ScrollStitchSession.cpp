@@ -181,6 +181,13 @@ public:
         std::size_t persistentBytes = 0U;
     };
 
+    struct FixedBandEvidence final
+    {
+        OverlapResult overlap;
+        bool top = false;
+        bool bottom = false;
+    };
+
     ScrollStitchConfig config;
     bool configIsValid = false;
     std::vector<Segment> segments;
@@ -194,6 +201,8 @@ public:
     int viewportHeight = 0;
     bool fixedTopConfirmed = false;
     bool fixedBottomConfirmed = false;
+    int fixedTopAgreement = 0;
+    int fixedBottomAgreement = 0;
     ScrollbarState scrollbar;
 
     [[nodiscard]] bool duplicateFingerprint(const Fingerprint& left, const Fingerprint& right) const
@@ -276,36 +285,50 @@ public:
                 < config.fixedBandStationaryThreshold;
     }
 
-    [[nodiscard]] bool candidateBandsAreStationary(
+    [[nodiscard]] bool candidateBandIsStationary(
+        const ScrollFrame& previous,
+        const ScrollFrame& current,
+        bool top) const
+    {
+        const int rows = top
+            ? config.fixedTopCandidateHeight
+            : config.fixedBottomCandidateHeight;
+        if (rows <= 0 || (top ? fixedTopConfirmed : fixedBottomConfirmed)) {
+            return false;
+        }
+        const int firstRow = top ? 0 : current.height - rows;
+        return stationaryRatio(previous, current, firstRow, rows)
+            >= config.fixedBandStationaryThreshold;
+    }
+
+    [[nodiscard]] FixedBandEvidence fixedBandEvidence(
         const ScrollFrame& previous,
         const ScrollFrame& current) const
     {
-        const bool centerMoved = centralDocumentMoved(previous, current);
-        const bool topStationary = config.fixedTopCandidateHeight == 0
-            || stationaryRatio(
-                previous, current, 0, config.fixedTopCandidateHeight)
-                >= config.fixedBandStationaryThreshold;
-        const bool bottomStationary = config.fixedBottomCandidateHeight == 0
-            || stationaryRatio(
-                previous,
-                current,
-                current.height - config.fixedBottomCandidateHeight,
-                config.fixedBottomCandidateHeight)
-                >= config.fixedBandStationaryThreshold;
-        return centerMoved && topStationary && bottomStationary
-            && (config.fixedTopCandidateHeight > 0 || config.fixedBottomCandidateHeight > 0);
-    }
-
-    [[nodiscard]] OverlapConfig candidateMatcherConfig() const
-    {
-        auto result = config.matcher;
-        result.excludedBands.top = std::max(
-            result.excludedBands.top, config.fixedTopCandidateHeight);
-        result.excludedBands.bottom = std::max(
-            result.excludedBands.bottom, config.fixedBottomCandidateHeight);
-        result.excludedBands.right = std::max(
-            result.excludedBands.right, config.scrollbarMaximumWidth);
-        return result;
+        FixedBandEvidence evidence;
+        evidence.top = candidateBandIsStationary(previous, current, true);
+        evidence.bottom = candidateBandIsStationary(previous, current, false);
+        if ((!evidence.top && !evidence.bottom) || !centralDocumentMoved(previous, current)) {
+            evidence.top = false;
+            evidence.bottom = false;
+            return evidence;
+        }
+        auto matcherConfig = effectiveMatcherConfig();
+        if (evidence.top) {
+            matcherConfig.excludedBands.top = std::max(
+                matcherConfig.excludedBands.top, config.fixedTopCandidateHeight);
+        }
+        if (evidence.bottom) {
+            matcherConfig.excludedBands.bottom = std::max(
+                matcherConfig.excludedBands.bottom, config.fixedBottomCandidateHeight);
+        }
+        evidence.overlap = VerticalOverlapMatcher().match(previous, current, matcherConfig);
+        if (evidence.overlap.kind != OverlapKind::Reliable
+            || evidence.overlap.verticalAdvance <= 0) {
+            evidence.top = false;
+            evidence.bottom = false;
+        }
+        return evidence;
     }
 
     [[nodiscard]] std::optional<ScrollbarObservation> detectScrollbar(
@@ -420,6 +443,12 @@ public:
             persistentBytes -= movement.persistentBytes;
         }
         pending.clear();
+        if (!fixedTopConfirmed) {
+            fixedTopAgreement = 0;
+        }
+        if (!fixedBottomConfirmed) {
+            fixedBottomAgreement = 0;
+        }
     }
 };
 
@@ -528,26 +557,18 @@ try {
     }
     auto overlap = matcher.match(evidenceTail, frame, matcherConfig);
     result.confidence = overlap.confidence;
+    const auto evidence = implementation_->fixedBandEvidence(evidenceTail, frame);
 
     bool discardPendingOnCommit = false;
-    if (!implementation_->pending.empty() && overlap.kind == OverlapKind::Reliable
+    if (!evidence.top && !evidence.bottom && !implementation_->pending.empty()
+        && overlap.kind == OverlapKind::Reliable
         && overlap.verticalAdvance > 0) {
         overlap = matcher.match(*implementation_->tail, frame, matcherConfig);
         result.confidence = overlap.confidence;
         discardPendingOnCommit = true;
     }
 
-    if (overlap.kind != OverlapKind::Reliable || overlap.verticalAdvance <= 0) {
-        const auto candidate = matcher.match(
-            evidenceTail, frame, implementation_->candidateMatcherConfig());
-        const bool fixedEvidence = candidate.kind == OverlapKind::Reliable
-            && candidate.verticalAdvance > 0
-            && implementation_->candidateBandsAreStationary(evidenceTail, frame);
-        if (!fixedEvidence) {
-            implementation_->clearPending();
-            return result;
-        }
-
+    if (evidence.top || evidence.bottom) {
         const auto contribution = checkedSum(*fullFrameBytes, fingerprintBytes);
         const auto projected = contribution.has_value()
             ? checkedSum(implementation_->persistentBytes, *contribution)
@@ -565,15 +586,33 @@ try {
         Implementation::PendingMovement newMovement{
             *storedPendingFrame,
             std::move(fingerprint),
-            candidate.verticalAdvance,
-            candidate.confidence,
+            evidence.overlap.verticalAdvance,
+            evidence.overlap.confidence,
             *contribution,
         };
         const int requiredEvidence = std::max(3, config.fixedBandConfirmationMovements);
-        if (implementation_->pending.size() + 1U < static_cast<std::size_t>(requiredEvidence)) {
+        const int nextTopAgreement = evidence.top
+            ? implementation_->fixedTopAgreement + 1
+            : 0;
+        const int nextBottomAgreement = evidence.bottom
+            ? implementation_->fixedBottomAgreement + 1
+            : 0;
+        const bool confirmTop = !implementation_->fixedTopConfirmed
+            && nextTopAgreement >= requiredEvidence;
+        const bool confirmBottom = !implementation_->fixedBottomConfirmed
+            && nextBottomAgreement >= requiredEvidence;
+        const bool topStillUnresolved = !implementation_->fixedTopConfirmed
+            && nextTopAgreement > 0 && !confirmTop;
+        const bool bottomStillUnresolved = !implementation_->fixedBottomConfirmed
+            && nextBottomAgreement > 0 && !confirmBottom;
+        const bool flush = (confirmTop || confirmBottom)
+            && !topStillUnresolved && !bottomStillUnresolved;
+        if (!flush) {
             implementation_->pending.reserve(implementation_->pending.size() + 1U);
             implementation_->pending.push_back(std::move(newMovement));
             implementation_->persistentBytes = *projected;
+            implementation_->fixedTopAgreement = nextTopAgreement;
+            implementation_->fixedBottomAgreement = nextBottomAgreement;
             return result;
         }
 
@@ -586,8 +625,9 @@ try {
             if (movement.advance > std::numeric_limits<int>::max() - flushedHeight) {
                 return false;
             }
-            const int firstRow = movement.frame->height
-                - config.fixedBottomCandidateHeight - movement.advance;
+            const bool excludeBottom = implementation_->fixedBottomConfirmed || confirmBottom;
+            const int firstRow = movement.frame->height - movement.advance
+                - (excludeBottom ? config.fixedBottomCandidateHeight : 0);
             auto pixels = copyRows(*movement.frame, firstRow, movement.advance);
             if (!pixels.isValid()) {
                 return false;
@@ -657,14 +697,21 @@ try {
         implementation_->tailHasSeparateStorage = true;
         implementation_->pending.clear();
         implementation_->persistentBytes = flushedPersistent;
-        implementation_->fixedTopConfirmed = config.fixedTopCandidateHeight > 0;
-        implementation_->fixedBottomConfirmed = config.fixedBottomCandidateHeight > 0;
+        implementation_->fixedTopConfirmed = implementation_->fixedTopConfirmed || confirmTop;
+        implementation_->fixedBottomConfirmed = implementation_->fixedBottomConfirmed || confirmBottom;
+        implementation_->fixedTopAgreement = 0;
+        implementation_->fixedBottomAgreement = 0;
         implementation_->scrollbar = std::move(preparedScrollbar);
         implementation_->height += flushedHeight;
         result.kind = AppendKind::AcceptedAppend;
         result.appendedHeight = flushedHeight;
         result.outputHeight = implementation_->height;
-        result.confidence = candidate.confidence;
+        result.confidence = evidence.overlap.confidence;
+        return result;
+    }
+
+    if (overlap.kind != OverlapKind::Reliable || overlap.verticalAdvance <= 0) {
+        implementation_->clearPending();
         return result;
     }
 
@@ -740,6 +787,8 @@ try {
     implementation_->tailHasSeparateStorage = true;
     if (discardPendingOnCommit) {
         implementation_->pending.clear();
+        implementation_->fixedTopAgreement = 0;
+        implementation_->fixedBottomAgreement = 0;
     }
     implementation_->persistentBytes = projected;
     implementation_->scrollbar = preparedScrollbar;

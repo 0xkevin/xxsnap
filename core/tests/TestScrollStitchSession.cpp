@@ -102,6 +102,21 @@ ScrollFrame viewportWithThumbPosition(int documentY, int thumbTop)
     return frame;
 }
 
+ScrollFrame viewportWithIndependentFixedBands(int documentY, bool fixedTop, bool fixedBottom)
+{
+    auto frame = documentViewport(documentY);
+    for (int y = 0; y < frame.height; ++y) {
+        for (int x = 0; x < frame.width; ++x) {
+            if (fixedTop && y < 12) {
+                setPixel(frame, x, y, static_cast<std::uint8_t>(31 + x % 17));
+            } else if (fixedBottom && y >= frame.height - 8) {
+                setPixel(frame, x, y, static_cast<std::uint8_t>(61 + x % 11));
+            }
+        }
+    }
+    return frame;
+}
+
 std::vector<ScrollFrame> makeDocumentViewports(std::initializer_list<int> offsets)
 {
     std::vector<ScrollFrame> frames;
@@ -142,6 +157,9 @@ private slots:
     void fixedHeaderAndFooterAreRetainedOnce();
     void scrollingCandidateBandIsNeverConfirmedOrDropped();
     void fixedBandConfirmationRequiresThreeAcceptedMovements();
+    void reliableOrdinaryMatchStillDefersStationaryFixedBands();
+    void fixedTopConfirmsWhenBottomCandidateScrolls();
+    void fixedBottomConfirmsWhenTopCandidateScrolls();
     void discardedFramesDoNotAdvanceFixedBandConfirmation();
     void interruptedFixedEvidenceDoesNotMutateOrCarryAgreement();
     void pendingFixedFramesCountTowardResourceLimit();
@@ -288,6 +306,71 @@ void TestScrollStitchSession::fixedBandConfirmationRequiresThreeAcceptedMovement
     QCOMPARE(blueAt(session.finalize(), 20, 139), static_cast<std::uint8_t>(61 + 20 % 11));
     QCOMPARE(blueAt(session.finalize(), 20, 140), documentPixel(20, 132));
     QCOMPARE(blueAt(session.finalize(), 20, 259), documentPixel(20, 251));
+}
+
+void TestScrollStitchSession::reliableOrdinaryMatchStillDefersStationaryFixedBands()
+{
+    auto config = defaultConfig();
+    config.matcher.maximumNormalizedError = 0.20;
+    config.fixedTopCandidateHeight = 12;
+    config.fixedBottomCandidateHeight = 8;
+    ScrollStitchSession session(config);
+    QCOMPARE(session.append(documentViewport(0, true)).kind, AppendKind::AcceptedInitial);
+    QCOMPARE(session.append(documentViewport(40, true)).kind, AppendKind::PausedLowConfidence);
+    QCOMPARE(session.append(documentViewport(80, true)).kind, AppendKind::PausedLowConfidence);
+    QCOMPARE(session.outputHeight(), 140);
+    const auto result = session.append(documentViewport(120, true));
+    QCOMPARE(result.kind, AppendKind::AcceptedAppend);
+    QCOMPARE(result.appendedHeight, 120);
+    QCOMPARE(session.outputHeight(), 260);
+    QCOMPARE(blueAt(session.finalize(), 20, 140), documentPixel(20, 132));
+    QCOMPARE(blueAt(session.finalize(), 20, 259), documentPixel(20, 251));
+}
+
+void TestScrollStitchSession::fixedTopConfirmsWhenBottomCandidateScrolls()
+{
+    auto config = defaultConfig();
+    config.fixedTopCandidateHeight = 12;
+    config.fixedBottomCandidateHeight = 8;
+    ScrollStitchSession session(config);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(0, true, false)).kind,
+        AppendKind::AcceptedInitial);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(40, true, false)).kind,
+        AppendKind::PausedLowConfidence);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(80, true, false)).kind,
+        AppendKind::PausedLowConfidence);
+    const auto result = session.append(viewportWithIndependentFixedBands(120, true, false));
+    QCOMPARE(result.kind, AppendKind::AcceptedAppend);
+    QCOMPARE(result.appendedHeight, 120);
+    const auto final = session.finalize();
+    QCOMPARE(final.height, 260);
+    QCOMPARE(blueAt(final, 20, 2), static_cast<std::uint8_t>(31 + 20 % 17));
+    QCOMPARE(blueAt(final, 20, 139), documentPixel(20, 139));
+    QCOMPARE(blueAt(final, 20, 140), documentPixel(20, 140));
+    QCOMPARE(blueAt(final, 20, 259), documentPixel(20, 259));
+}
+
+void TestScrollStitchSession::fixedBottomConfirmsWhenTopCandidateScrolls()
+{
+    auto config = defaultConfig();
+    config.fixedTopCandidateHeight = 12;
+    config.fixedBottomCandidateHeight = 8;
+    ScrollStitchSession session(config);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(0, false, true)).kind,
+        AppendKind::AcceptedInitial);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(40, false, true)).kind,
+        AppendKind::PausedLowConfidence);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(80, false, true)).kind,
+        AppendKind::PausedLowConfidence);
+    const auto result = session.append(viewportWithIndependentFixedBands(120, false, true));
+    QCOMPARE(result.kind, AppendKind::AcceptedAppend);
+    QCOMPARE(result.appendedHeight, 120);
+    const auto final = session.finalize();
+    QCOMPARE(final.height, 260);
+    QCOMPARE(blueAt(final, 20, 131), documentPixel(20, 131));
+    QCOMPARE(blueAt(final, 20, 139), static_cast<std::uint8_t>(61 + 20 % 11));
+    QCOMPARE(blueAt(final, 20, 140), documentPixel(20, 132));
+    QCOMPARE(blueAt(final, 20, 259), documentPixel(20, 251));
 }
 
 void TestScrollStitchSession::discardedFramesDoNotAdvanceFixedBandConfirmation()
