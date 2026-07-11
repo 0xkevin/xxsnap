@@ -20,7 +20,6 @@ namespace {
 
 constexpr FingerprintSize AnchorFingerprintSize{16, 12};
 constexpr std::size_t RecentAnchorCount = 8;
-constexpr std::size_t RecentReverseReviewLimit = 16;
 
 [[nodiscard]] bool validUnit(double value)
 {
@@ -99,6 +98,15 @@ constexpr std::size_t RecentReverseReviewLimit = 16;
     return static_cast<std::uint32_t>(frame.pixels[offset])
         | (static_cast<std::uint32_t>(frame.pixels[offset + 1U]) << 8U)
         | (static_cast<std::uint32_t>(frame.pixels[offset + 2U]) << 16U);
+}
+
+[[nodiscard]] int luminanceAt(const ScrollFrame& frame, int x, int y)
+{
+    const auto offset = static_cast<std::size_t>(y) * static_cast<std::size_t>(frame.bytesPerRow)
+        + static_cast<std::size_t>(x) * 4U;
+    const auto* bgra = frame.pixels.data() + offset;
+    const auto weighted = 29U * bgra[0] + 150U * bgra[1] + 77U * bgra[2] + 128U;
+    return static_cast<int>(weighted >> 8U);
 }
 
 [[nodiscard]] bool pixelEqual(const ScrollFrame& left, const ScrollFrame& right, int x, int y)
@@ -394,12 +402,8 @@ public:
                 const int y = top ? row : current.height - height + row;
                 int previousValue = -1;
                 for (int x = firstColumn; x < firstColumn + columnCount; ++x) {
-                    const auto currentValue = static_cast<int>(current.pixels[
-                        static_cast<std::size_t>(y) * static_cast<std::size_t>(current.bytesPerRow)
-                        + static_cast<std::size_t>(x) * 4U]);
-                    const auto previousSame = static_cast<int>(previous.pixels[
-                        static_cast<std::size_t>(y) * static_cast<std::size_t>(previous.bytesPerRow)
-                        + static_cast<std::size_t>(x) * 4U]);
+                    const int currentValue = luminanceAt(current, x, y);
+                    const int previousSame = luminanceAt(previous, x, y);
                     minimumValue = std::min(minimumValue, currentValue);
                     maximumValue = std::max(maximumValue, currentValue);
                     if (previousValue >= 0) {
@@ -417,14 +421,8 @@ public:
                         : y - evidence.overlap.verticalAdvance;
                     if (alignedPreviousY >= 0 && alignedPreviousY < previous.height
                         && alignedCurrentY >= 0 && alignedCurrentY < current.height) {
-                        const auto previousAligned = static_cast<int>(previous.pixels[
-                            static_cast<std::size_t>(alignedPreviousY)
-                                * static_cast<std::size_t>(previous.bytesPerRow)
-                            + static_cast<std::size_t>(x) * 4U]);
-                        const auto currentAligned = static_cast<int>(current.pixels[
-                            static_cast<std::size_t>(alignedCurrentY)
-                                * static_cast<std::size_t>(current.bytesPerRow)
-                            + static_cast<std::size_t>(x) * 4U]);
+                        const int previousAligned = luminanceAt(previous, x, alignedPreviousY);
+                        const int currentAligned = luminanceAt(current, x, alignedCurrentY);
                         alignedError += std::abs(previousAligned - currentAligned) / 255.0;
                         ++alignedSamples;
                     }
@@ -763,11 +761,8 @@ try {
                 reviewConfig.excludedBands.bottom = std::max(
                     reviewConfig.excludedBands.bottom, implementation_->fixedBottomRunHeight);
             }
-            std::size_t reviewedCandidates = 0U;
             for (auto movement = implementation_->pending.crbegin();
-                 movement != implementation_->pending.crend()
-                 && reviewedCandidates < RecentReverseReviewLimit;
-                 ++movement, ++reviewedCandidates) {
+                 movement != implementation_->pending.crend(); ++movement) {
                 const auto reverse = matcher.match(frame, *movement->frame, reviewConfig);
                 if (reverse.kind == OverlapKind::Reliable && reverse.verticalAdvance > 0) {
                     result.kind = AppendKind::ReviewDiscarded;

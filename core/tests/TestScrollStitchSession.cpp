@@ -10,9 +10,11 @@
 namespace {
 
 using snipory::core::scroll::AppendKind;
+using snipory::core::scroll::OverlapKind;
 using snipory::core::scroll::ScrollFrame;
 using snipory::core::scroll::ScrollStitchConfig;
 using snipory::core::scroll::ScrollStitchSession;
+using snipory::core::scroll::VerticalOverlapMatcher;
 
 void setPixel(ScrollFrame& frame, int x, int y, std::uint8_t value)
 {
@@ -21,6 +23,22 @@ void setPixel(ScrollFrame& frame, int x, int y, std::uint8_t value)
     frame.pixels[offset] = value;
     frame.pixels[offset + 1U] = static_cast<std::uint8_t>(value ^ 0x35U);
     frame.pixels[offset + 2U] = static_cast<std::uint8_t>(value ^ 0xa7U);
+    frame.pixels[offset + 3U] = 255;
+}
+
+void setBgra(
+    ScrollFrame& frame,
+    int x,
+    int y,
+    std::uint8_t blue,
+    std::uint8_t green,
+    std::uint8_t red)
+{
+    const auto offset = static_cast<std::size_t>(y) * static_cast<std::size_t>(frame.bytesPerRow)
+        + static_cast<std::size_t>(x) * 4U;
+    frame.pixels[offset] = blue;
+    frame.pixels[offset + 1U] = green;
+    frame.pixels[offset + 2U] = red;
     frame.pixels[offset + 3U] = 255;
 }
 
@@ -174,6 +192,35 @@ ScrollFrame tallViewportWithHeaderVariant(int documentY, int variant)
     return frame;
 }
 
+ScrollFrame viewportWithConstantBlueTexturedFixedBands(int documentY)
+{
+    auto frame = documentViewport(documentY);
+    for (int y = 0; y < frame.height; ++y) {
+        for (int x = 0; x < frame.width; ++x) {
+            if (y < 12 || y >= frame.height - 8) {
+                setBgra(frame, x, y, 80,
+                    static_cast<std::uint8_t>((x & 1) == 0 ? 25 : 220),
+                    static_cast<std::uint8_t>(40 + x % 23));
+            }
+        }
+    }
+    return frame;
+}
+
+ScrollFrame viewportWithConstantBlueScrollingChroma(int documentY)
+{
+    ScrollFrame frame(120, 140);
+    for (int y = 0; y < frame.height; ++y) {
+        for (int x = 0; x < frame.width; ++x) {
+            const int documentRow = documentY + y;
+            setBgra(frame, x, y, 80,
+                static_cast<std::uint8_t>((documentRow * 17 + x * 5) & 0xff),
+                static_cast<std::uint8_t>((documentRow * 29 + x * 11) & 0xff));
+        }
+    }
+    return frame;
+}
+
 ScrollFrame viewportWithIndependentFixedBands(int documentY, bool fixedTop, bool fixedBottom)
 {
     auto frame = documentViewport(documentY);
@@ -281,6 +328,9 @@ private slots:
     void automaticFixedBandDetectionRejectsWhiteDocumentGap();
     void automaticFixedBandDetectionRejectsLowInformationGradient();
     void inconsistentBandHeightsRestartEvidenceRun();
+    void constantBlueTexturedFixedBandsStillConfirm();
+    void constantBlueScrollingChromaDoesNotBecomeFixed();
+    void maximumPendingRunSearchesAllFramesForReverseReview();
     void rejectsInvalidAndDimensionMismatchedFrames();
     void invalidConfigurationNeverAcceptsContent();
 };
@@ -1094,6 +1144,66 @@ void TestScrollStitchSession::inconsistentBandHeightsRestartEvidenceRun()
     QCOMPARE(confirmation.kind, AppendKind::AcceptedAppend);
     QCOMPARE(confirmation.appendedHeight, 180);
     QCOMPARE(session.outputHeight(), 600);
+}
+
+void TestScrollStitchSession::constantBlueTexturedFixedBandsStillConfirm()
+{
+    ScrollStitchSession session(defaultConfig());
+    QCOMPARE(session.append(viewportWithConstantBlueTexturedFixedBands(0)).kind,
+        AppendKind::AcceptedInitial);
+    QCOMPARE(session.append(viewportWithConstantBlueTexturedFixedBands(40)).kind,
+        AppendKind::PausedLowConfidence);
+    QCOMPARE(session.append(viewportWithConstantBlueTexturedFixedBands(80)).kind,
+        AppendKind::PausedLowConfidence);
+    const auto result = session.append(viewportWithConstantBlueTexturedFixedBands(120));
+    QCOMPARE(result.kind, AppendKind::AcceptedAppend);
+    QCOMPARE(result.appendedHeight, 120);
+    QCOMPARE(session.outputHeight(), 260);
+}
+
+void TestScrollStitchSession::constantBlueScrollingChromaDoesNotBecomeFixed()
+{
+    ScrollStitchSession session(defaultConfig());
+    QCOMPARE(session.append(viewportWithConstantBlueScrollingChroma(0)).kind,
+        AppendKind::AcceptedInitial);
+    QCOMPARE(session.append(viewportWithConstantBlueScrollingChroma(40)).kind,
+        AppendKind::AcceptedAppend);
+    QCOMPARE(session.append(viewportWithConstantBlueScrollingChroma(80)).kind,
+        AppendKind::AcceptedAppend);
+    QCOMPARE(session.append(viewportWithConstantBlueScrollingChroma(120)).kind,
+        AppendKind::AcceptedAppend);
+    QCOMPARE(session.outputHeight(), 260);
+}
+
+void TestScrollStitchSession::maximumPendingRunSearchesAllFramesForReverseReview()
+{
+    auto config = defaultConfig();
+    config.matcher.maximumAdvanceRatio = 0.15;
+    config.fixedTopCandidateHeight = 12;
+    config.fixedBandConfirmationMovements = 32;
+    ScrollStitchSession session(config);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(0, true, false)).kind,
+        AppendKind::AcceptedInitial);
+    for (int offset = 10; offset <= 200; offset += 10) {
+        QCOMPARE(session.append(viewportWithIndependentFixedBands(offset, true, false)).kind,
+            AppendKind::PausedLowConfidence);
+    }
+    auto reviewMatcherConfig = config.matcher;
+    reviewMatcherConfig.excludedBands.top = 12;
+    reviewMatcherConfig.excludedBands.left = 8;
+    reviewMatcherConfig.excludedBands.right = 8;
+    const auto directReverse = VerticalOverlapMatcher().match(
+        viewportWithIndependentFixedBands(5, true, false),
+        viewportWithIndependentFixedBands(20, true, false),
+        reviewMatcherConfig);
+    QCOMPARE(directReverse.kind, OverlapKind::Reliable);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(5, true, false)).kind,
+        AppendKind::ReviewDiscarded);
+    QCOMPARE(session.outputHeight(), 140);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(200, true, false)).kind,
+        AppendKind::DuplicateDiscarded);
+    QCOMPARE(session.append(viewportWithIndependentFixedBands(210, true, false)).kind,
+        AppendKind::PausedLowConfidence);
 }
 
 void TestScrollStitchSession::rejectsInvalidAndDimensionMismatchedFrames()
