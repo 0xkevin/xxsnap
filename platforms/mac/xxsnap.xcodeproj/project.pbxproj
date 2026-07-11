@@ -107,6 +107,9 @@
 		AA5000000000000000000004 /* ScrollStitchSession.cpp in Sources */ = {isa = PBXBuildFile; fileRef = AA5000000000000000000014 /* ScrollStitchSession.cpp */; };
 		AA5000000000000000000005 /* ScrollCaptureBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5000000000000000000015 /* ScrollCaptureBridgeTests.swift */; };
 		AA5000000000000000000006 /* ScrollCaptureTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5000000000000000000016 /* ScrollCaptureTestSupport.swift */; };
+		AA5100000000000000000001 /* ScrollCaptureSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5100000000000000000011 /* ScrollCaptureSession.swift */; };
+		AA5100000000000000000002 /* ScrollActivityMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5100000000000000000012 /* ScrollActivityMonitor.swift */; };
+		AA5100000000000000000003 /* ScrollCaptureSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5100000000000000000013 /* ScrollCaptureSessionTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -226,6 +229,9 @@
 		AA5000000000000000000014 /* ScrollStitchSession.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = ../../core/src/scroll/ScrollStitchSession.cpp; sourceTree = SOURCE_ROOT; };
 		AA5000000000000000000015 /* ScrollCaptureBridgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollCaptureBridgeTests.swift; sourceTree = "<group>"; };
 		AA5000000000000000000016 /* ScrollCaptureTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollCaptureTestSupport.swift; sourceTree = "<group>"; };
+		AA5100000000000000000011 /* ScrollCaptureSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollCaptureSession.swift; sourceTree = "<group>"; };
+		AA5100000000000000000012 /* ScrollActivityMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollActivityMonitor.swift; sourceTree = "<group>"; };
+		AA5100000000000000000013 /* ScrollCaptureSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollCaptureSessionTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -250,6 +256,15 @@
 				8A2205AED8C5F363A0B466E2 /* ScreenCaptureService.swift */,
 			);
 			path = Capture;
+			sourceTree = "<group>";
+		};
+		AA5100000000000000000020 /* ScrollCapture */ = {
+			isa = PBXGroup;
+			children = (
+				AA5100000000000000000012 /* ScrollActivityMonitor.swift */,
+				AA5100000000000000000011 /* ScrollCaptureSession.swift */,
+			);
+			path = ScrollCapture;
 			sourceTree = "<group>";
 		};
 		65F4A13A03C198B2FAA07548 /* Products */ = {
@@ -294,6 +309,7 @@
 		E47B99274545910C8159BABC /* Tests */ = {
 			isa = PBXGroup;
 			children = (
+				AA5100000000000000000013 /* ScrollCaptureSessionTests.swift */,
 				AA5000000000000000000015 /* ScrollCaptureBridgeTests.swift */,
 				AA5000000000000000000016 /* ScrollCaptureTestSupport.swift */,
 				7E58F0FBF019037172C857FC /* AppSettingsTests.swift */,
@@ -312,6 +328,7 @@
 				08569F3CA22B1505B2B6A859 /* App */,
 				CB036B39FCDFD3D592520941 /* Bridge */,
 				449F8A7986C90F759D3D40EE /* Capture */,
+				AA5100000000000000000020 /* ScrollCapture */,
 				F37C448F1A3EA306B87B3856 /* Overlay */,
 				B352A921EAE1E9FC40E01640 /* Toolbar */,
 			);
@@ -589,6 +606,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AA5100000000000000000002 /* ScrollActivityMonitor.swift in Sources */,
+				AA5100000000000000000001 /* ScrollCaptureSession.swift in Sources */,
 				AA5000000000000000000001 /* ScrollCaptureBridge.mm in Sources */,
 				AA5000000000000000000002 /* FrameFingerprint.cpp in Sources */,
 				AA5000000000000000000003 /* VerticalOverlapMatcher.cpp in Sources */,
@@ -615,6 +634,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AA5100000000000000000003 /* ScrollCaptureSessionTests.swift in Sources */,
 				AA5000000000000000000005 /* ScrollCaptureBridgeTests.swift in Sources */,
 				AA5000000000000000000006 /* ScrollCaptureTestSupport.swift in Sources */,
 				F8365189DAE642AC6E7A2BA5 /* AppSettingsTests.swift in Sources */,

@@ -18,6 +18,10 @@ typedef NS_ENUM(NSInteger, ScrollCaptureAppendKind) {
 @property(nonatomic, readonly) NSInteger appendedHeight;
 @property(nonatomic, readonly) NSInteger outputHeight;
 @property(nonatomic, readonly) double confidence;
+#if DEBUG
++ (instancetype)testValueWithKind:(ScrollCaptureAppendKind)kind
+    NS_SWIFT_NAME(testValue(kind:));
+#endif
 @end
 
 @interface ScrollCaptureBridge : NSObject

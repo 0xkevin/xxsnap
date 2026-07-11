@@ -216,6 +216,7 @@ BridgeImplementation *implementationOrError(void *pointer, NSError **error)
 
 @interface ScrollCaptureAppendUpdate ()
 - (instancetype)initWithResult:(const AppendResult&)result;
+- (instancetype)initWithKind:(ScrollCaptureAppendKind)kind;
 @end
 
 @implementation ScrollCaptureAppendUpdate
@@ -236,6 +237,25 @@ BridgeImplementation *implementationOrError(void *pointer, NSError **error)
     }
     return self;
 }
+
+- (instancetype)initWithKind:(ScrollCaptureAppendKind)kind
+{
+    self = [super init];
+    if (self != nil) {
+        _kind = kind;
+        _appendedHeight = 0;
+        _outputHeight = 0;
+        _confidence = 1;
+    }
+    return self;
+}
+
+#if DEBUG
++ (instancetype)testValueWithKind:(ScrollCaptureAppendKind)kind
+{
+    return [[self alloc] initWithKind:kind];
+}
+#endif
 
 @end
 

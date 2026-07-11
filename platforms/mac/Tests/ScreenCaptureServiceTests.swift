@@ -7,6 +7,12 @@ import XCTest
 
 final class ScreenCaptureServiceTests: XCTestCase {
     @MainActor
+    func testConformsToScrollRegionCapturingWithoutAdapter() {
+        let service: any ScrollRegionCapturing = ScreenCaptureService()
+        XCTAssertTrue(service is ScreenCaptureService)
+    }
+
+    @MainActor
     func testScreenshotConfigurationUsesNativeBgraOutput() {
         let configuration = ScreenCaptureService.makeScreenshotConfiguration(width: 320, height: 200)
 

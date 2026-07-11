@@ -3,7 +3,7 @@ import CoreVideo
 import ScreenCaptureKit
 
 @MainActor
-final class ScreenCaptureService {
+final class ScreenCaptureService: ScrollRegionCapturing {
     static func makeScreenshotConfiguration(width: Int, height: Int) -> SCStreamConfiguration {
         let configuration = SCStreamConfiguration()
         configuration.width = max(1, width)
