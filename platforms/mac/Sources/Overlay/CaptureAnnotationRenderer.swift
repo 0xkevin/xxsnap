@@ -1280,9 +1280,8 @@ enum CaptureAnnotationRenderer {
         renderLongImage(image: image, annotations: annotations, eraserMasks: eraserMasks)
     }
 
-    /// Renders only a bounded processing region around the viewport. The
-    /// margin keeps source-dependent mosaic and magnifier sampling local while
-    /// avoiding allocation of a second complete long image during scrolling.
+    /// Renders only the bounded region needed for composite-dependent effects
+    /// and raw magnifier samples, avoiding a second complete long image while scrolling.
     static func renderVisibleLongImageSlice(
         image: NSImage,
         annotations: [CaptureAnnotation],
@@ -1348,24 +1347,37 @@ enum CaptureAnnotationRenderer {
     ) -> (processingRect: NSRect, annotationIDs: Set<AnnotationID>) {
         let imageBounds = NSRect(origin: .zero, size: imageSize)
         let requested = imageRect.standardized.intersection(imageBounds)
-        let dependencies = annotations.map { longImageVisualBounds(for: $0).intersection(imageBounds) }
-        let directIndexes = Set(dependencies.indices.filter { dependencies[$0].intersects(requested) })
-        var processing = requested
+        let visualBounds = annotations.map { longImageVisualBounds(for: $0).intersection(imageBounds) }
+        let directIndexes = Set(visualBounds.indices.filter { visualBounds[$0].intersects(requested) })
+        var processingRegion = requested
+        var requiredPriorCompositeRegion = requested
         var includedIDs = Set<AnnotationID>()
-        for index in dependencies.indices.reversed() {
-            let dependency = dependencies[index]
-            guard directIndexes.contains(index) || dependency.intersects(processing) else { continue }
+        for index in visualBounds.indices.reversed() {
+            let visual = visualBounds[index]
+            guard directIndexes.contains(index) || visual.intersects(requiredPriorCompositeRegion) else { continue }
             let annotation = annotations[index]
             includedIDs.insert(annotation.id)
-            if isSourceDependentLongImageAnnotation(annotation) {
-                processing = processing.union(dependency).intersection(imageBounds)
+            if isCompositeSourceDependentLongImageAnnotation(annotation) {
+                requiredPriorCompositeRegion = requiredPriorCompositeRegion.union(visual).intersection(imageBounds)
+                processingRegion = processingRegion.union(visual).intersection(imageBounds)
+            } else if let source = magnifierSourceBounds(for: annotation, imageBounds: imageBounds) {
+                processingRegion = processingRegion.union(source).intersection(imageBounds)
             }
         }
-        return (processing.intersection(imageBounds).integral, includedIDs)
+        return (processingRegion.intersection(imageBounds).integral, includedIDs)
     }
 
-    private static func isSourceDependentLongImageAnnotation(_ annotation: CaptureAnnotation) -> Bool {
-        annotation.kind == .mosaicStroke || annotation.kind == .mosaicRectangle || annotation.kind == .magnifier
+    private static func isCompositeSourceDependentLongImageAnnotation(_ annotation: CaptureAnnotation) -> Bool {
+        annotation.kind == .mosaicStroke || annotation.kind == .mosaicRectangle
+    }
+
+    private static func magnifierSourceBounds(for annotation: CaptureAnnotation, imageBounds: NSRect) -> NSRect? {
+        guard annotation.kind == .magnifier else { return nil }
+        return magnifierDrawGeometry(
+            destination: annotation.rect.standardized,
+            sourceBounds: imageBounds,
+            zoom: annotation.effectiveMagnifierZoom
+        )?.integralSource
     }
 
     static func visibleLongImageRenderPlan(
@@ -1410,7 +1422,6 @@ enum CaptureAnnotationRenderer {
         }
         var padding = max(4, annotation.style.strokeWidth * 2)
         if annotation.kind == .text { padding = max(padding, annotation.style.textSize * textDisplayScale) }
-        if annotation.kind == .magnifier { padding = max(padding, max(bounds.width, bounds.height) * annotation.effectiveMagnifierZoom) }
         if let redaction = annotation.mosaicRedaction { padding = max(padding, CGFloat(redaction.value) * 4 + annotation.style.strokeWidth) }
         return bounds.insetBy(dx: -padding, dy: -padding)
     }

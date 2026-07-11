@@ -250,6 +250,85 @@ final class LongImageEditorTests: XCTestCase {
         XCTAssertEqual(plan.annotationIDs, [early.id, later.id])
     }
 
+    func testDirectMagnifierUsesRawSourceWithoutPullingEarlierMosaicLayers() throws {
+        let image = TestImageFactory.verticalDocumentViewport(offset: 0, width: 240, height: 6_000, scale: 2)
+        let requested = NSRect(x: 0, y: 5_045, width: 240, height: 80)
+        var mosaicStyle = CaptureAnnotationStyle(); mosaicStyle.strokeWidth = 1
+        let sourceOnlyMosaics = (0..<100).map { _ in
+            CaptureAnnotation(
+                kind: .mosaicRectangle,
+                rect: NSRect(x: 70, y: 5_025, width: 80, height: 15),
+                style: mosaicStyle,
+                mosaicRedaction: CaptureMosaicRedaction(type: .pixelMosaic, value: 1)
+            )
+        }
+        let magnifier = CaptureAnnotation(
+            kind: .magnifier,
+            rect: NSRect(x: 40, y: 5_000, width: 160, height: 80),
+            style: CaptureAnnotationStyle(),
+            magnifierShape: .rectangle,
+            magnifierZoom: 2
+        )
+        let annotations = sourceOnlyMosaics + [magnifier]
+        let plan = CaptureAnnotationRenderer.visibleLongImageRenderPlan(
+            imageSize: image.size,
+            imageRect: requested,
+            annotations: annotations,
+            eraserMasks: []
+        )
+        XCTAssertEqual(plan.annotationIDs, [magnifier.id])
+        XCTAssertLessThan(plan.processingRect.height, 150)
+        XCTAssertLessThanOrEqual(plan.processingRect.minY, 5_020)
+
+        let full = CaptureAnnotationRenderer.renderCompleteLongImage(image: image, annotations: annotations, eraserMasks: [])
+        let expected = try cropTopOrigin(full, rect: requested)
+        let actual = CaptureAnnotationRenderer.renderVisibleLongImageSlice(
+            image: image,
+            annotations: annotations,
+            eraserMasks: [],
+            imageRect: requested
+        )
+        XCTAssertEqual(try pixelBytes(actual), try pixelBytes(expected))
+    }
+
+    func testMagnifierProcessingUsesActualZoomedSourceExtentAndClampsToImageBounds() {
+        let imageSize = NSSize(width: 800, height: 1_000)
+        let requested = NSRect(x: 450, y: 550, width: 70, height: 60)
+        let lens = NSRect(x: 300, y: 400, width: 200, height: 200)
+        let zoom2 = CaptureAnnotation(
+            kind: .magnifier, rect: lens, style: CaptureAnnotationStyle(), magnifierZoom: 2
+        )
+        let zoom4 = CaptureAnnotation(
+            kind: .magnifier, rect: lens, style: CaptureAnnotationStyle(), magnifierZoom: 4
+        )
+        let zoom2Plan = CaptureAnnotationRenderer.visibleLongImageRenderPlan(
+            imageSize: imageSize, imageRect: requested, annotations: [zoom2], eraserMasks: []
+        )
+        let zoom4Plan = CaptureAnnotationRenderer.visibleLongImageRenderPlan(
+            imageSize: imageSize, imageRect: requested, annotations: [zoom4], eraserMasks: []
+        )
+        XCTAssertEqual(zoom2Plan.processingRect.minY, 450, accuracy: 0.001)
+        XCTAssertEqual(zoom4Plan.processingRect.minY, 475, accuracy: 0.001)
+        XCTAssertEqual(zoom2Plan.processingRect.minX, 344, accuracy: 0.001)
+        XCTAssertEqual(zoom4Plan.processingRect.minX, 372, accuracy: 0.001)
+        XCTAssertGreaterThan(zoom4Plan.processingRect.minY, zoom2Plan.processingRect.minY)
+
+        let boundaryLens = CaptureAnnotation(
+            kind: .magnifier,
+            rect: NSRect(x: 300, y: -100, width: 200, height: 200),
+            style: CaptureAnnotationStyle(),
+            magnifierZoom: 2
+        )
+        let boundaryRequested = NSRect(x: 0, y: 0, width: 800, height: 50)
+        let boundaryPlan = CaptureAnnotationRenderer.visibleLongImageRenderPlan(
+            imageSize: imageSize,
+            imageRect: boundaryRequested,
+            annotations: [boundaryLens],
+            eraserMasks: []
+        )
+        XCTAssertEqual(boundaryPlan.processingRect, boundaryRequested)
+    }
+
     func testResizePreservesTopVisibleCenterAnchor() {
         let before = LongImageEditorGeometry(
             imageSize: NSSize(width: 1_000, height: 8_000),
