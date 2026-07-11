@@ -572,7 +572,6 @@ final class SelectionOverlayWindow: NSWindow {
     var onScrollCaptureCancelRequested: (() -> Void)?
     private(set) var scrollCaptureOverlayState: ScrollCaptureOverlayState = .inactive
     private var scrollCaptureTerminalActionTriggered = false
-    private var nextEscapeCancelsRestoredSelection = false
 
     init(
         backgroundImage: NSImage?,
@@ -705,11 +704,6 @@ final class SelectionOverlayWindow: NSWindow {
             requestScrollCaptureFinish()
             return nil
         }
-        if event.keyCode == 53, nextEscapeCancelsRestoredSelection {
-            nextEscapeCancelsRestoredSelection = false
-            cancelOperation(nil)
-            return nil
-        }
         if let overlayView = contentView as? SelectionOverlayView,
            overlayView.handleKeyDown(event) {
             return nil
@@ -774,7 +768,6 @@ final class SelectionOverlayWindow: NSWindow {
 
     func restoreAfterScrollCaptureCancellation() {
         endScrollCapturePassiveMode()
-        nextEscapeCancelsRestoredSelection = true
     }
 
     func finishScrollCaptureAndDismiss() {
@@ -817,11 +810,6 @@ final class SelectionOverlayWindow: NSWindow {
         }
         if Self.isScrollCaptureFinishKey(event.keyCode), scrollCaptureOverlayState != .inactive {
             requestScrollCaptureFinish()
-            return
-        }
-        if event.keyCode == 53, nextEscapeCancelsRestoredSelection {
-            nextEscapeCancelsRestoredSelection = false
-            cancelOperation(nil)
             return
         }
         if let overlayView = contentView as? SelectionOverlayView,

@@ -41,6 +41,11 @@ private enum ScrollCaptureLifecyclePhase: Equatable {
     case cancelling
 }
 
+private struct PendingLongImagePayload {
+    let image: NSImage
+    let seed: ScrollCaptureSeed
+}
+
 @MainActor
 final class CaptureCoordinator {
     var captureOverlayDidPresent: (() -> Void)?
@@ -73,7 +78,7 @@ final class CaptureCoordinator {
     private var scrollCaptureFinishPending = false
     private var scrollCapturePhase: ScrollCaptureLifecyclePhase = .idle
     private var scrollCaptureGeneration: UInt64 = 0
-    private var pendingLongImageSeed: ScrollCaptureSeed?
+    private var pendingLongImagePayload: PendingLongImagePayload?
 
     init(
         permissionCoordinator: PermissionCoordinator,
@@ -152,6 +157,7 @@ final class CaptureCoordinator {
             NSLog("xxsnap startCapture ignored because capture is already active")
             return
         }
+        pendingLongImagePayload = nil
 
         if !permissionCoordinator.hasScreenCapturePermission() {
             NSLog("xxsnap missing screen capture permission")
@@ -266,6 +272,7 @@ final class CaptureCoordinator {
         else { return }
 
         scrollCaptureFinishPending = false
+        pendingLongImagePayload = nil
         scrollCapturePhase = .starting
         overlay.setScrollCaptureCapturing()
         scrollCaptureGeneration &+= 1
@@ -399,8 +406,7 @@ final class CaptureCoordinator {
                     longImageHandoff(image, seed)
                 } else {
                     // Task 8 replaces this boundary with the native long-image editor.
-                    self.lastCapture = image
-                    self.pendingLongImageSeed = seed
+                    self.pendingLongImagePayload = PendingLongImagePayload(image: image, seed: seed)
                 }
                 self.scrollCaptureFinishPending = false
                 self.scrollCapturePhase = .idle
@@ -521,6 +527,7 @@ final class CaptureCoordinator {
     }
 
     private func handleSelection(_ result: CaptureSelectionResult?) {
+        pendingLongImagePayload = nil
         if let overlayWindow {
             retiredOverlayWindows.append(overlayWindow)
         }
@@ -689,6 +696,16 @@ final class CaptureCoordinator {
 extension CaptureCoordinator {
     var test_lastCapture: NSImage? {
         lastCapture
+    }
+
+    var test_hasPendingLongImagePayload: Bool {
+        pendingLongImagePayload != nil
+    }
+
+    func test_takePendingLongImagePayload() -> (image: NSImage, seed: ScrollCaptureSeed)? {
+        guard let payload = pendingLongImagePayload else { return nil }
+        pendingLongImagePayload = nil
+        return (payload.image, payload.seed)
     }
 
     var test_pinnedWindowCount: Int {
