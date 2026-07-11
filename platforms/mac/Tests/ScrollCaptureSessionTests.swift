@@ -172,6 +172,53 @@ final class ScrollCaptureSessionTests: XCTestCase {
         XCTAssertEqual(session.state, .finished)
     }
 
+    func testFinishFailureRestartsTerminalMonitorAndReturnCanRetrySameSession() async throws {
+        let final = TestImageFactory.solid(size: CGSize(width: 10, height: 30), color: .blue)
+        let engine = FakeStitcher(results: [.acceptedInitial], final: final, finalErrors: [TestError.failed])
+        let monitor = FakeActivityMonitor()
+        let presentation = PresentationRecorder()
+        let session = makeSession(engine: engine, monitor: monitor, presentation: presentation)
+        try await session.start()
+
+        await XCTAssertThrowsErrorAsync { _ = try await session.finish() }
+
+        XCTAssertEqual(session.state, .paused(.captureFailure))
+        XCTAssertFalse(session.isSamplingArmed)
+        XCTAssertEqual(monitor.stopCount, 1)
+        XCTAssertEqual(monitor.startCount, 2)
+
+        monitor.send(.finish)
+        XCTAssertEqual(presentation.commands, [.finish])
+        let result = try await session.finish()
+
+        XCTAssertTrue(result === final)
+        XCTAssertEqual(engine.finalImageCallCount, 2)
+        XCTAssertEqual(monitor.stopCount, 2)
+        XCTAssertEqual(session.state, .finished)
+    }
+
+    func testFinishFailureRestartsTerminalMonitorAndEscapeCanCancelWithoutSamplingLeak() async throws {
+        let engine = FakeStitcher(results: [.acceptedInitial], finalErrors: [TestError.failed])
+        let monitor = FakeActivityMonitor()
+        let presentation = PresentationRecorder()
+        let session = makeSession(engine: engine, monitor: monitor, presentation: presentation)
+        try await session.start()
+
+        await XCTAssertThrowsErrorAsync { _ = try await session.finish() }
+        monitor.send(.cancel)
+        XCTAssertEqual(presentation.commands, [.cancel])
+
+        _ = session.cancel()
+        session.recordScrollActivity()
+        await session.test_runSamplingTick()
+
+        XCTAssertEqual(session.state, .cancelled)
+        XCTAssertFalse(session.isSamplingArmed)
+        XCTAssertEqual(engine.appendedImages.count, 1)
+        XCTAssertEqual(monitor.startCount, 2)
+        XCTAssertEqual(monitor.stopCount, 2)
+    }
+
     func testCancelReturnsImmutableSeedAndPreventsLaterTick() async throws {
         let engine = FakeStitcher(results: [.acceptedInitial, .acceptedAppend])
         let monitor = FakeActivityMonitor()
@@ -513,6 +560,23 @@ final class ScrollCaptureSessionTests: XCTestCase {
 
         XCTAssertEqual(registrar.addGlobalKeyCount, 1)
         XCTAssertEqual(registrar.removed.count, 2)
+        await Task.yield()
+    }
+
+    func testActivityMonitorUsesAccessibilityTrustForWarningButStillAttemptsGlobalKeyRegistration() async {
+        let registrar = FakeMonitorRegistrar()
+        var messages: [String] = []
+        let monitor = ScrollActivityMonitor(
+            registrar: registrar,
+            isAccessibilityTrusted: { false },
+            log: { messages.append($0) }
+        )
+
+        monitor.start(onScrollActivity: {}, onTerminalCommand: { _ in })
+
+        XCTAssertEqual(registrar.addGlobalKeyCount, 1)
+        XCTAssertEqual(messages, ["xxsnap global scroll-capture keys require Accessibility permission; toolbar controls remain available"])
+        monitor.stop()
         await Task.yield()
     }
 

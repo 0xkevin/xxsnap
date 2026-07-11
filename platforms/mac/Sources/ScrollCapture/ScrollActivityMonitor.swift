@@ -46,12 +46,20 @@ extension ScrollActivityMonitoring {
 @MainActor
 final class ScrollActivityMonitor: ScrollActivityMonitoring {
     private let registrar: any ScrollEventMonitorRegistering
+    private let isAccessibilityTrusted: () -> Bool
+    private let log: (String) -> Void
     private var localMonitor: Any?
     private var globalMonitor: Any?
     private var globalKeyMonitor: Any?
 
-    init(registrar: any ScrollEventMonitorRegistering = AppKitScrollEventMonitorRegistrar()) {
+    init(
+        registrar: any ScrollEventMonitorRegistering = AppKitScrollEventMonitorRegistrar(),
+        isAccessibilityTrusted: @escaping () -> Bool = { AXIsProcessTrusted() },
+        log: @escaping (String) -> Void = { NSLog("%@", $0) }
+    ) {
         self.registrar = registrar
+        self.isAccessibilityTrusted = isAccessibilityTrusted
+        self.log = log
     }
 
     func start(_ callback: @escaping @MainActor () -> Void) {
@@ -76,8 +84,8 @@ final class ScrollActivityMonitor: ScrollActivityMonitoring {
                   let command = Self.terminalCommand(for: event.keyCode) else { return }
             Task { @MainActor in onTerminalCommand(command) }
         }
-        if !AXIsProcessTrusted(), !CGPreflightListenEventAccess() {
-            NSLog("xxsnap global scroll-capture keys require Accessibility or Input Monitoring permission; toolbar controls remain available")
+        if !isAccessibilityTrusted() {
+            log("xxsnap global scroll-capture keys require Accessibility permission; toolbar controls remain available")
         }
     }
 

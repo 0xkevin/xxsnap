@@ -131,10 +131,7 @@ final class ScrollCaptureSession {
                 expectedState: .preparing
             ) else { return }
             guard setState(.capturing, operationGeneration: operationGeneration) else { return }
-            activityMonitor.start(
-                onScrollActivity: { [weak self] in self?.recordScrollActivity() },
-                onTerminalCommand: { [weak self] command in self?.receiveTerminalCommand(command) }
-            )
+            startActivityMonitor()
         } catch {
             guard generation == operationGeneration, state == .preparing else { return }
             disarmSampling()
@@ -163,6 +160,13 @@ final class ScrollCaptureSession {
         }
     }
 
+    private func startActivityMonitor() {
+        activityMonitor.start(
+            onScrollActivity: { [weak self] in self?.recordScrollActivity() },
+            onTerminalCommand: { [weak self] command in self?.receiveTerminalCommand(command) }
+        )
+    }
+
     func finish() async throws -> NSImage {
         switch state {
         case .capturing, .paused:
@@ -187,7 +191,9 @@ final class ScrollCaptureSession {
             return image
         } catch {
             guard generation == operationGeneration, state == .finishing else { throw error }
-            _ = setState(.paused(.captureFailure), operationGeneration: operationGeneration)
+            if setState(.paused(.captureFailure), operationGeneration: operationGeneration) {
+                startActivityMonitor()
+            }
             throw error
         }
     }
