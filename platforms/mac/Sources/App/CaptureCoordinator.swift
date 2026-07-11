@@ -35,6 +35,7 @@ struct ScrollCapturePresentationContext {
 private enum ScrollCaptureLifecyclePhase: Equatable {
     case idle
     case starting
+    case finishPending
     case active
     case finishing
     case cancelling
@@ -298,15 +299,17 @@ final class CaptureCoordinator {
             do {
                 try await session?.start()
                 guard let self, self.scrollCaptureGeneration == generation,
-                      self.scrollCaptureSession === session,
-                      self.scrollCapturePhase == .starting else { return }
-                self.scrollCaptureTask = nil
-                if self.scrollCaptureFinishPending {
+                      self.scrollCaptureSession === session else { return }
+                switch self.scrollCapturePhase {
+                case .starting:
+                    self.scrollCaptureTask = nil
                     self.scrollCaptureFinishPending = false
                     self.scrollCapturePhase = .active
+                case .finishPending:
+                    self.scrollCaptureTask = nil
                     self.finishScrollCapture()
-                } else {
-                    self.scrollCapturePhase = .active
+                case .idle, .active, .finishing, .cancelling:
+                    return
                 }
             } catch {
                 guard let self, self.scrollCaptureGeneration == generation,
@@ -359,11 +362,13 @@ final class CaptureCoordinator {
     private func finishScrollCapture() {
         switch scrollCapturePhase {
         case .starting:
-            guard !scrollCaptureFinishPending else { return }
             scrollCaptureFinishPending = true
+            scrollCapturePhase = .finishPending
             return
         case .active:
             break
+        case .finishPending:
+            guard scrollCaptureFinishPending, scrollCaptureTask == nil else { return }
         case .idle, .finishing, .cancelling:
             return
         }
@@ -412,7 +417,7 @@ final class CaptureCoordinator {
         switch scrollCapturePhase {
         case .starting, .active:
             break
-        case .idle, .finishing, .cancelling:
+        case .idle, .finishPending, .finishing, .cancelling:
             return
         }
         guard let session = scrollCaptureSession else { return }

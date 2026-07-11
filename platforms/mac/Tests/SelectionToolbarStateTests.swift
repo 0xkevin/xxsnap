@@ -9646,18 +9646,58 @@ final class SelectionToolbarStateTests: XCTestCase {
             },
             longImageHandoff: { _, _ in handoffCount += 1 }
         )
-        coordinator.test_installOverlayWindow(SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in })
+        let overlay = SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in }
+        coordinator.test_installOverlayWindow(overlay)
         coordinator.test_requestScrollCapture(seed: seed)
         for _ in 0..<10 where session.startContinuation == nil { await Task.yield() }
 
         presentation.onFinish?()
+        overlay.onScrollCaptureFinishRequested?()
+        presentation.onCancel?()
+        overlay.onScrollCaptureCancelRequested?()
         XCTAssertEqual(session.finishCount, 0)
+        XCTAssertEqual(session.cancelCount, 0)
         session.startContinuation?.resume()
         for _ in 0..<10 where handoffCount == 0 { await Task.yield() }
 
         XCTAssertEqual(session.finishCount, 1)
         XCTAssertEqual(handoffCount, 1)
         XCTAssertEqual(presentation.stopCount, 1)
+    }
+
+    @MainActor
+    func testCaptureCoordinatorStartFailureAfterPendingFinishRecoversOverlay() async throws {
+        let seed = scrollCaptureSeedForCoordinatorTests()
+        let session = FakeScrollCaptureSession(seed: seed)
+        session.suspendsStart = true
+        let presentation = FakeScrollCapturePresentation()
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            scrollCaptureSessionFactory: { _, _ in session },
+            scrollCapturePresentationFactory: { context in
+                presentation.onFinish = context.onFinish
+                presentation.onCancel = context.onCancel
+                return presentation
+            },
+            longImageHandoff: { _, _ in XCTFail("failed start must not hand off") }
+        )
+        let overlay = SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in }
+        coordinator.test_installOverlayWindow(overlay)
+        coordinator.test_requestScrollCapture(seed: seed)
+        for _ in 0..<100 where session.startContinuation == nil { await Task.yield() }
+        XCTAssertNotNil(session.startContinuation)
+        presentation.onFinish?()
+
+        session.startContinuation?.resume(throwing: FakeScrollCaptureSession.Failure.start)
+        for _ in 0..<100 where coordinator.test_hasScrollCaptureSession { await Task.yield() }
+
+        XCTAssertFalse(coordinator.test_hasScrollCaptureSession)
+        XCTAssertEqual(session.finishCount, 0)
+        XCTAssertEqual(session.cancelCount, 1)
+        XCTAssertEqual(presentation.stopCount, 1)
+        XCTAssertTrue(coordinator.test_overlayWindow === overlay)
+        XCTAssertEqual(overlay.scrollCaptureOverlayState, .inactive)
     }
 
     @MainActor
