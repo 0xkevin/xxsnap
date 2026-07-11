@@ -72,8 +72,12 @@ final class ScrollCapturePresentationTests: XCTestCase {
         var finishes = 0
         var cancels = 0
         let toolbar = NSRect(x: 100, y: 200, width: 480, height: 28)
+        let finish = NSRect(x: 388, y: 204, width: 20, height: 20)
+        let cancel = NSRect(x: 444, y: 204, width: 20, height: 20)
         let controller = ScrollCapturePresentationController(
             toolbarFrame: toolbar,
+            finishButtonFrame: finish,
+            cancelButtonFrame: cancel,
             selectionFrame: NSRect(x: 200, y: 240, width: 400, height: 300),
             visibleFrame: NSRect(x: 0, y: 0, width: 1200, height: 800),
             language: .english,
@@ -83,14 +87,25 @@ final class ScrollCapturePresentationTests: XCTestCase {
         XCTAssertTrue(controller.test_controlStyleMask.contains(.nonactivatingPanel))
         XCTAssertEqual(controller.test_controlFrame, toolbar)
         XCTAssertFalse(controller.test_controlCanBecomeKey)
+        XCTAssertFalse(controller.test_controlIsOpaque)
+        XCTAssertEqual(controller.test_controlBackgroundColor, .clear)
+        XCTAssertEqual(controller.test_finishButtonFrame, finish.offsetBy(dx: -toolbar.minX, dy: -toolbar.minY))
+        XCTAssertEqual(controller.test_cancelButtonFrame, cancel.offsetBy(dx: -toolbar.minX, dy: -toolbar.minY))
+        XCTAssertEqual(controller.test_controlHitTargetCount, 2)
+        XCTAssertTrue(controller.test_controlHitTargetsAreTransparent)
         controller.start()
         XCTAssertTrue(controller.test_hasVisiblePanels)
         controller.test_triggerFinish()
+        controller.test_triggerFinish()
         controller.test_triggerCancel()
         XCTAssertEqual(finishes, 1)
-        XCTAssertEqual(cancels, 1)
+        XCTAssertEqual(cancels, 0)
         controller.stop()
         controller.stop()
+        XCTAssertFalse(controller.test_hasVisiblePanels)
+        XCTAssertNil(controller.test_previewImage)
+        XCTAssertNil(controller.test_warningText)
+        controller.start()
         XCTAssertFalse(controller.test_hasVisiblePanels)
     }
 
@@ -98,22 +113,54 @@ final class ScrollCapturePresentationTests: XCTestCase {
         let controller = makeController()
         controller.updatePreview(NSImage(size: NSSize(width: 240, height: 900)))
         XCTAssertTrue(controller.test_isFollowingTail)
-        controller.test_userReviewedAwayFromBottom(position: 0.35)
+        XCTAssertEqual(controller.test_visibleRect.minY, 0, accuracy: 0.5)
+        controller.test_userScroll(to: 160)
+        XCTAssertGreaterThan(controller.test_visibleRect.minY, 100)
+        let reviewOffset = controller.test_visibleRect.minY
         controller.updatePreview(NSImage(size: NSSize(width: 240, height: 1200)))
         XCTAssertFalse(controller.test_isFollowingTail)
-        XCTAssertEqual(controller.test_reviewPosition, 0.35, accuracy: 0.01)
+        XCTAssertEqual(controller.test_visibleRect.minY, reviewOffset, accuracy: 0.5)
         controller.setWarning("Low confidence")
         XCTAssertEqual(controller.test_warningText, "Low confidence")
         controller.clearWarning()
         XCTAssertNil(controller.test_warningText)
         XCTAssertNotNil(controller.test_previewImage)
-        controller.test_userReturnedToBottom()
+        controller.test_userScroll(to: 0)
         XCTAssertTrue(controller.test_isFollowingTail)
+        controller.updatePreview(NSImage(size: NSSize(width: 240, height: 1400)))
+        XCTAssertEqual(controller.test_visibleRect.minY, 0, accuracy: 0.5)
+    }
+
+    func testStopRemovesObserverAndReleasesPreviewImage() {
+        var controller: ScrollCapturePresentationController? = makeController()
+        weak var weakImage: NSImage?
+        weak let weakController = controller
+        var reviewOffset: CGFloat?
+        autoreleasepool {
+            let image = NSImage(size: NSSize(width: 400, height: 1600))
+            weakImage = image
+            controller?.updatePreview(image)
+            controller?.test_userScroll(to: 120)
+            reviewOffset = controller?.test_reviewOffset
+            controller?.stop()
+        }
+        XCTAssertNil(weakImage)
+        controller?.test_postBoundsChangeNotification()
+        XCTAssertEqual(controller?.test_reviewOffset, reviewOffset)
+        XCTAssertFalse(controller?.test_hasBoundsObserver ?? true)
+        controller?.updatePreview(NSImage(size: NSSize(width: 200, height: 800)))
+        controller?.setWarning("late")
+        XCTAssertNil(controller?.test_previewImage)
+        XCTAssertNil(controller?.test_warningText)
+        controller = nil
+        XCTAssertNil(weakController)
     }
 
     private func makeController() -> ScrollCapturePresentationController {
         ScrollCapturePresentationController(
             toolbarFrame: NSRect(x: 100, y: 100, width: 400, height: 28),
+            finishButtonFrame: NSRect(x: 300, y: 104, width: 20, height: 20),
+            cancelButtonFrame: NSRect(x: 356, y: 104, width: 20, height: 20),
             selectionFrame: NSRect(x: 200, y: 200, width: 300, height: 240),
             visibleFrame: NSRect(x: 0, y: 0, width: 1000, height: 700),
             language: .english,

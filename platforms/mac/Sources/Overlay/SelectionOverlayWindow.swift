@@ -568,6 +568,7 @@ final class SelectionOverlayWindow: NSWindow {
     private var didCompleteSelection = false
     private var escapeKeyMonitor: Any?
     var onScrollCaptureRequested: ((ScrollCaptureSeed) -> Void)?
+    var onScrollCaptureCancelRequested: (() -> Void)?
     private(set) var scrollCaptureOverlayState: ScrollCaptureOverlayState = .inactive
 
     init(
@@ -615,6 +616,9 @@ final class SelectionOverlayWindow: NSWindow {
             self.ignoresMouseEvents = true
             overlayView.scrollCaptureOverlayState = .capturing
             self.onScrollCaptureRequested?(seed)
+        }
+        overlayView.scrollCaptureCancelDidRequest = { [weak self] in
+            self?.requestScrollCaptureCancel()
         }
 
         contentView = overlayView
@@ -689,6 +693,10 @@ final class SelectionOverlayWindow: NSWindow {
         guard !didCompleteSelection, isOwned else {
             return event
         }
+        if event.keyCode == 53, scrollCaptureOverlayState != .inactive {
+            requestScrollCaptureCancel()
+            return nil
+        }
         if let overlayView = contentView as? SelectionOverlayView,
            overlayView.handleKeyDown(event) {
             return nil
@@ -709,7 +717,7 @@ final class SelectionOverlayWindow: NSWindow {
 
     override func cancelOperation(_ sender: Any?) {
         if scrollCaptureOverlayState != .inactive {
-            endScrollCapturePassiveMode()
+            requestScrollCaptureCancel()
             return
         }
         completeSelection(with: nil)
@@ -719,6 +727,16 @@ final class SelectionOverlayWindow: NSWindow {
         guard let overlayView = contentView as? SelectionOverlayView,
               let frame = overlayView.scrollCaptureToolbarFrame else { return nil }
         return convertToScreen(frame)
+    }
+
+    var scrollCaptureControlGeometry: ScrollCaptureControlGeometry? {
+        guard let overlayView = contentView as? SelectionOverlayView,
+              let geometry = overlayView.scrollCaptureControlGeometry else { return nil }
+        return ScrollCaptureControlGeometry(
+            toolbarFrame: convertToScreen(geometry.toolbarFrame),
+            finishButtonFrame: convertToScreen(geometry.finishButtonFrame),
+            cancelButtonFrame: convertToScreen(geometry.cancelButtonFrame)
+        )
     }
 
     func setScrollCapturePaused(message: String) {
@@ -734,6 +752,12 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.endScrollCapturePassiveMode()
     }
 
+    private func requestScrollCaptureCancel() {
+        guard scrollCaptureOverlayState != .inactive else { return }
+        endScrollCapturePassiveMode()
+        onScrollCaptureCancelRequested?()
+    }
+
     private func performBaseEscape() {
         if let overlayView = contentView as? SelectionOverlayView,
            overlayView.finishPinnedImageEditingForEscape() {
@@ -743,6 +767,10 @@ final class SelectionOverlayWindow: NSWindow {
     }
 
     override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53, scrollCaptureOverlayState != .inactive {
+            requestScrollCaptureCancel()
+            return
+        }
         if let overlayView = contentView as? SelectionOverlayView,
            overlayView.handleKeyDown(event) {
             return
@@ -1968,6 +1996,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     var selectionDidFinish: ((CaptureSelectionResult?) -> Void)?
     var scrollCaptureDidRequest: ((ScrollCaptureSeed) -> Void)?
+    var scrollCaptureCancelDidRequest: (() -> Void)?
     var scrollCaptureOverlayState: ScrollCaptureOverlayState = .inactive {
         didSet { needsDisplay = true }
     }
@@ -3363,6 +3392,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     func handleKeyDown(_ event: NSEvent) -> Bool {
         if scrollCaptureOverlayState != .inactive {
+            if event.keyCode == 53 {
+                scrollCaptureCancelDidRequest?()
+            }
             return true
         }
         cancelPinnedImageToolbarShiftShortcut()
@@ -15347,6 +15379,19 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     var scrollCaptureToolbarFrame: NSRect? {
         guard let selectionRect else { return nil }
         return mainToolbarRect(for: selectionRect)
+    }
+
+    var scrollCaptureControlGeometry: ScrollCaptureControlGeometry? {
+        guard let selectionRect,
+              let toolbarFrame = mainToolbarRect(for: selectionRect) else { return nil }
+        let frames = Dictionary(uniqueKeysWithValues: toolbarButtonRects(in: toolbarFrame))
+        guard let finishButtonFrame = frames[.scroll],
+              let cancelButtonFrame = frames[.cancel] else { return nil }
+        return ScrollCaptureControlGeometry(
+            toolbarFrame: toolbarFrame,
+            finishButtonFrame: finishButtonFrame,
+            cancelButtonFrame: cancelButtonFrame
+        )
     }
 
     func beginScrollCapture() {

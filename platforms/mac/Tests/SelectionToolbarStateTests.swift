@@ -45,6 +45,8 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_setLockedSelectionRect(selection)
         window.test_setAnnotations([annotation])
         let toolbarBefore = try XCTUnwrap(window.test_mainToolbarRect())
+        let scrollBefore = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .scroll))
+        let cancelBefore = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .cancel))
 
         window.test_beginScrollCapture()
 
@@ -57,11 +59,41 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.scrollCaptureOverlayState, .capturing)
         XCTAssertTrue(window.ignoresMouseEvents)
         XCTAssertEqual(window.test_mainToolbarRect(), toolbarBefore)
+        let geometry = try XCTUnwrap(window.scrollCaptureControlGeometry)
+        XCTAssertEqual(geometry.toolbarFrame, window.convertToScreen(toolbarBefore))
+        XCTAssertEqual(geometry.finishButtonFrame, window.convertToScreen(scrollBefore))
+        XCTAssertEqual(geometry.cancelButtonFrame, window.convertToScreen(cancelBefore))
         XCTAssertTrue(window.test_toolbarButtonIsSelected(.scroll))
         XCTAssertFalse(window.test_toolbarButtonIsEnabled(.rectangle))
         XCTAssertTrue(window.test_toolbarButtonIsEnabled(.scroll))
         XCTAssertTrue(window.test_toolbarButtonIsEnabled(.cancel))
         XCTAssertEqual(window.test_tooltipText(for: .scroll), L10n(language: .zhHans).text(.finishScrollCapture))
+    }
+
+    func testEscapeCancelsCapturingAndPausedScrollCaptureExactlyOnce() {
+        for paused in [false, true] {
+            var ordinaryCompletionCount = 0
+            var cancelCount = 0
+            let window = SelectionOverlayWindow(backgroundImage: solidImage(size: NSSize(width: 500, height: 400), color: .white)) { _ in
+                ordinaryCompletionCount += 1
+            }
+            window.onScrollCaptureRequested = { _ in }
+            window.onScrollCaptureCancelRequested = { cancelCount += 1 }
+            window.test_setLockedSelectionRect(NSRect(x: 40, y: 40, width: 260, height: 200))
+            window.test_activateShapeTool(.rectangle)
+            window.test_beginScrollCapture()
+            if paused { window.setScrollCapturePaused(message: "Paused") }
+
+            window.test_keyDown(keyCode: 53)
+            XCTAssertEqual(cancelCount, 1)
+            XCTAssertEqual(ordinaryCompletionCount, 0)
+            XCTAssertEqual(window.scrollCaptureOverlayState, .inactive)
+            XCTAssertFalse(window.ignoresMouseEvents)
+            XCTAssertTrue(window.test_toolbarButtonIsSelected(.rectangle))
+            window.test_keyDown(keyCode: 53)
+            XCTAssertEqual(cancelCount, 1)
+            XCTAssertEqual(ordinaryCompletionCount, 0)
+        }
     }
 
     func testEndingPassiveModeRestoresMouseAndOrdinaryFlow() throws {

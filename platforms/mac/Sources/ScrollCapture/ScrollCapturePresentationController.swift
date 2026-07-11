@@ -6,6 +6,12 @@ enum ScrollCaptureOverlayState: Equatable {
     case paused(message: String)
 }
 
+struct ScrollCaptureControlGeometry: Equatable {
+    let toolbarFrame: NSRect
+    let finishButtonFrame: NSRect
+    let cancelButtonFrame: NSRect
+}
+
 @MainActor
 final class ScrollCapturePresentationController: NSObject {
     private let controlPanel: NSPanel
@@ -15,13 +21,18 @@ final class ScrollCapturePresentationController: NSObject {
     private let warningLabel = NSTextField(labelWithString: "")
     private let onFinish: () -> Void
     private let onCancel: () -> Void
+    private var boundsObserver: NSObjectProtocol?
     private var isProgrammaticScroll = false
     private(set) var isFollowingTail = true
-    private var reviewPosition: CGFloat = 1
+    private var reviewOffset: CGFloat = 0
+    private var terminalActionTriggered = false
+    private var hasStarted = false
     private var stopped = false
 
     init(
         toolbarFrame: NSRect,
+        finishButtonFrame: NSRect,
+        cancelButtonFrame: NSRect,
         selectionFrame: NSRect,
         visibleFrame: NSRect,
         language: AppLanguage,
@@ -49,29 +60,42 @@ final class ScrollCapturePresentationController: NSObject {
             defer: false
         )
         super.init()
-        configureControlPanel(language: language)
+        configureControlPanel(
+            finishButtonFrame: finishButtonFrame.offsetBy(dx: -toolbarFrame.minX, dy: -toolbarFrame.minY),
+            cancelButtonFrame: cancelButtonFrame.offsetBy(dx: -toolbarFrame.minX, dy: -toolbarFrame.minY)
+        )
         configurePreviewPanel()
+        installBoundsObserver()
     }
 
-    private func configureControlPanel(language: AppLanguage) {
+    deinit {
+        MainActor.assumeIsolated {
+            cleanup()
+        }
+    }
+
+    private func configureControlPanel(finishButtonFrame: NSRect, cancelButtonFrame: NSRect) {
         controlPanel.level = .screenSaver
         controlPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         controlPanel.isOpaque = false
         controlPanel.backgroundColor = .clear
         controlPanel.hasShadow = false
         let content = NSView(frame: NSRect(origin: .zero, size: controlPanel.frame.size))
-        content.wantsLayer = true
-        content.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.94).cgColor
-        content.layer?.cornerRadius = 6
-        let finish = NSButton(title: L10n(language: language).text(.finishScrollCapture), target: self, action: #selector(finishPressed))
-        finish.bezelStyle = .rounded
-        finish.frame = NSRect(x: max(4, content.bounds.maxX - 156), y: 3, width: 112, height: 22)
-        let cancel = NSButton(title: L10n(language: language).text(.cancel), target: self, action: #selector(cancelPressed))
-        cancel.bezelStyle = .rounded
-        cancel.frame = NSRect(x: max(4, content.bounds.maxX - 40), y: 3, width: 36, height: 22)
+        let finish = transparentHitTarget(frame: finishButtonFrame, action: #selector(finishPressed))
+        let cancel = transparentHitTarget(frame: cancelButtonFrame, action: #selector(cancelPressed))
         content.addSubview(finish)
         content.addSubview(cancel)
         controlPanel.contentView = content
+    }
+
+    private func transparentHitTarget(frame: NSRect, action: Selector) -> NSButton {
+        let button = NSButton(frame: frame)
+        button.title = ""
+        button.isBordered = false
+        button.isTransparent = true
+        button.target = self
+        button.action = action
+        return button
     }
 
     private func configurePreviewPanel() {
@@ -90,19 +114,14 @@ final class ScrollCapturePresentationController: NSObject {
         scrollView.drawsBackground = false
         scrollView.documentView = imageView
         scrollView.contentView.postsBoundsChangedNotifications = true
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(scrollBoundsChanged),
-            name: NSView.boundsDidChangeNotification,
-            object: scrollView.contentView
-        )
         content.addSubview(scrollView)
         content.addSubview(warningLabel)
         previewPanel.contentView = content
     }
 
     func start() {
-        stopped = false
+        guard !hasStarted, !stopped else { return }
+        hasStarted = true
         controlPanel.orderFrontRegardless()
         previewPanel.orderFrontRegardless()
     }
@@ -110,29 +129,54 @@ final class ScrollCapturePresentationController: NSObject {
     func stop() {
         guard !stopped else { return }
         stopped = true
+        cleanup()
+    }
+
+    private func cleanup() {
+        if let boundsObserver {
+            NotificationCenter.default.removeObserver(boundsObserver)
+            self.boundsObserver = nil
+        }
         controlPanel.orderOut(nil)
         previewPanel.orderOut(nil)
+        imageView.image = nil
+        warningLabel.stringValue = ""
+        warningLabel.isHidden = true
+        scrollView.documentView = nil
+    }
+
+    private func installBoundsObserver() {
+        boundsObserver = NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification,
+            object: scrollView.contentView,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.scrollBoundsChanged() }
+        }
     }
 
     func updatePreview(_ image: NSImage) {
+        guard !stopped else { return }
         imageView.image = image
         imageView.imageScaling = .scaleProportionallyDown
         let width = max(1, scrollView.contentSize.width)
         let height = max(scrollView.contentSize.height, image.size.height * width / max(image.size.width, 1))
         imageView.frame = NSRect(x: 0, y: 0, width: width, height: height)
-        let newMax = max(0, height - scrollView.contentSize.height)
         isProgrammaticScroll = true
         if isFollowingTail {
-            scrollView.contentView.scroll(to: NSPoint(x: 0, y: newMax))
-            reviewPosition = 1
+            scrollView.contentView.scroll(to: .zero)
+            reviewOffset = 0
         } else {
-            scrollView.contentView.scroll(to: NSPoint(x: 0, y: newMax * reviewPosition))
+            let maximumOffset = max(0, height - scrollView.contentSize.height)
+            reviewOffset = min(reviewOffset, maximumOffset)
+            scrollView.contentView.scroll(to: NSPoint(x: 0, y: reviewOffset))
         }
         scrollView.reflectScrolledClipView(scrollView.contentView)
         isProgrammaticScroll = false
     }
 
     func setWarning(_ text: String) {
+        guard !stopped else { return }
         warningLabel.stringValue = text
         warningLabel.isHidden = false
     }
@@ -150,15 +194,21 @@ final class ScrollCapturePresentationController: NSObject {
         ), display: false)
     }
 
-    @objc private func finishPressed() { onFinish() }
-    @objc private func cancelPressed() { onCancel() }
+    @objc private func finishPressed() { triggerTerminalAction(onFinish) }
+    @objc private func cancelPressed() { triggerTerminalAction(onCancel) }
+
+    private func triggerTerminalAction(_ action: () -> Void) {
+        guard !terminalActionTriggered else { return }
+        terminalActionTriggered = true
+        controlPanel.contentView?.subviews.compactMap { $0 as? NSControl }.forEach { $0.isEnabled = false }
+        controlPanel.ignoresMouseEvents = true
+        action()
+    }
 
     @objc private func scrollBoundsChanged() {
         guard !isProgrammaticScroll else { return }
-        let maxY = max(0, imageView.frame.height - scrollView.contentSize.height)
-        let y = min(maxY, max(0, scrollView.contentView.bounds.minY))
-        isFollowingTail = maxY - y <= 2
-        reviewPosition = maxY > 0 ? y / maxY : 1
+        reviewOffset = max(0, scrollView.documentVisibleRect.minY)
+        isFollowingTail = reviewOffset <= 2
     }
 
     static func previewFrame(
@@ -192,17 +242,30 @@ final class ScrollCapturePresentationController: NSObject {
     var test_controlStyleMask: NSWindow.StyleMask { controlPanel.styleMask }
     var test_controlFrame: NSRect { controlPanel.frame }
     var test_controlCanBecomeKey: Bool { controlPanel.canBecomeKey }
+    var test_controlIsOpaque: Bool { controlPanel.isOpaque }
+    var test_controlBackgroundColor: NSColor { controlPanel.backgroundColor }
+    var test_finishButtonFrame: NSRect { (controlPanel.contentView?.subviews.first as? NSButton)?.frame ?? .zero }
+    var test_cancelButtonFrame: NSRect { (controlPanel.contentView?.subviews.last as? NSButton)?.frame ?? .zero }
+    var test_controlHitTargetCount: Int { controlPanel.contentView?.subviews.compactMap { $0 as? NSButton }.count ?? 0 }
+    var test_controlHitTargetsAreTransparent: Bool {
+        controlPanel.contentView?.subviews.compactMap { $0 as? NSButton }.allSatisfy { $0.isTransparent && !$0.isBordered } ?? false
+    }
     var test_hasVisiblePanels: Bool { controlPanel.isVisible || previewPanel.isVisible }
     var test_isFollowingTail: Bool { isFollowingTail }
-    var test_reviewPosition: CGFloat { reviewPosition }
+    var test_visibleRect: NSRect { scrollView.documentVisibleRect }
+    var test_reviewOffset: CGFloat { reviewOffset }
+    var test_hasBoundsObserver: Bool { boundsObserver != nil }
     var test_warningText: String? { warningLabel.isHidden ? nil : warningLabel.stringValue }
     var test_previewImage: NSImage? { imageView.image }
-    func test_triggerFinish() { finishPressed() }
-    func test_triggerCancel() { cancelPressed() }
-    func test_userReviewedAwayFromBottom(position: CGFloat) {
-        isFollowingTail = false
-        reviewPosition = min(1, max(0, position))
+    func test_triggerFinish() { (controlPanel.contentView?.subviews.first as? NSButton)?.performClick(nil) }
+    func test_triggerCancel() { (controlPanel.contentView?.subviews.last as? NSButton)?.performClick(nil) }
+    func test_userScroll(to offset: CGFloat) {
+        scrollView.contentView.scroll(to: NSPoint(x: 0, y: offset))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+        scrollBoundsChanged()
     }
-    func test_userReturnedToBottom() { isFollowingTail = true; reviewPosition = 1 }
+    func test_postBoundsChangeNotification() {
+        NotificationCenter.default.post(name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
+    }
 #endif
 }
