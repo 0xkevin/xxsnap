@@ -6,13 +6,15 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <vector>
 
 namespace snipory::core::scroll {
 namespace {
 
-constexpr std::array<int, 3> SignatureBinLimits{64, 127, 255};
+constexpr std::array<int, 2> SignatureBinLimits{64, 127};
 constexpr std::size_t RefinementCandidateThreshold = 16;
+constexpr int MaximumFullResolutionCandidateLimit = 1'000'000;
 
 struct LuminanceImage final
 {
@@ -32,8 +34,33 @@ struct RowSignatures final
     int height = 0;
     int binCount = 0;
     std::vector<int> binWidths;
-    std::vector<double> means;
-    std::vector<double> alternatingMeans;
+    std::vector<std::uint64_t> sums;
+    std::vector<std::int64_t> alternatingSums;
+};
+
+struct WideAccumulator final
+{
+    std::uint64_t high = 0;
+    std::uint64_t low = 0;
+
+    void add(std::uint64_t value)
+    {
+        const auto previous = low;
+        low += value;
+        high += low < previous ? 1U : 0U;
+    }
+
+    [[nodiscard]] long double value() const
+    {
+        constexpr long double TwoTo64 = 18'446'744'073'709'551'616.0L;
+        return static_cast<long double>(high) * TwoTo64 + static_cast<long double>(low);
+    }
+};
+
+struct EvaluationBudget final
+{
+    int remaining = 0;
+    bool exhausted = false;
 };
 
 [[nodiscard]] bool validConfig(const OverlapConfig& config)
@@ -48,6 +75,8 @@ struct RowSignatures final
         && config.maximumAdvanceRatio <= 1.0
         && config.maximumNormalizedError >= 0.0
         && config.minimumWinnerMargin >= 0.0
+        && config.maximumFullResolutionCandidates > 0
+        && config.maximumFullResolutionCandidates <= MaximumFullResolutionCandidateLimit
         && config.excludedBands.left >= 0
         && config.excludedBands.right >= 0
         && config.excludedBands.top >= 0
@@ -93,9 +122,9 @@ struct RowSignatures final
     const int scoringWidth = image.width - excludedBands.left - excludedBands.right;
     result.binCount = std::min(binLimit, scoringWidth);
     result.binWidths.resize(static_cast<std::size_t>(result.binCount));
-    result.means.resize(
+    result.sums.resize(
         static_cast<std::size_t>(image.height) * static_cast<std::size_t>(result.binCount));
-    result.alternatingMeans.resize(result.means.size());
+    result.alternatingSums.resize(result.sums.size());
 
     for (int bin = 0; bin < result.binCount; ++bin) {
         const auto first = static_cast<std::size_t>(excludedBands.left)
@@ -118,10 +147,8 @@ struct RowSignatures final
             const auto destination = static_cast<std::size_t>(y)
                     * static_cast<std::size_t>(result.binCount)
                 + static_cast<std::size_t>(bin);
-            result.means[destination] = static_cast<double>(sum)
-                / static_cast<double>(last - first);
-            result.alternatingMeans[destination] = static_cast<double>(alternatingSum)
-                / static_cast<double>(last - first);
+            result.sums[destination] = sum;
+            result.alternatingSums[destination] = alternatingSum;
         }
     }
     return result;
@@ -138,7 +165,7 @@ struct RowSignatures final
     if (firstY >= lastY) {
         return std::numeric_limits<double>::infinity();
     }
-    double difference = 0;
+    WideAccumulator difference;
     std::uint64_t count = 0;
     for (int currentY = firstY; currentY < lastY; ++currentY) {
         const auto previousRow = static_cast<std::size_t>(currentY + advance)
@@ -148,17 +175,26 @@ struct RowSignatures final
         for (int bin = 0; bin < previous.binCount; ++bin) {
             const auto index = static_cast<std::size_t>(bin);
             const auto width = static_cast<std::uint64_t>(previous.binWidths[index]);
-            const double meanDifference = std::abs(
-                previous.means[previousRow + index] - current.means[currentRow + index]);
-            const double alternatingDifference = std::abs(
-                previous.alternatingMeans[previousRow + index]
-                - current.alternatingMeans[currentRow + index]);
+            const auto previousSum = previous.sums[previousRow + index];
+            const auto currentSum = current.sums[currentRow + index];
+            const auto meanDifference = previousSum >= currentSum
+                ? previousSum - currentSum
+                : currentSum - previousSum;
+            const auto alternatingDelta = previous.alternatingSums[previousRow + index]
+                - current.alternatingSums[currentRow + index];
+            const auto alternatingDifference = static_cast<std::uint64_t>(
+                alternatingDelta >= 0 ? alternatingDelta : -alternatingDelta);
             // Both projections are lower bounds for this bin's absolute pixel error.
-            difference += std::max(meanDifference, alternatingDifference) * static_cast<double>(width);
+            difference.add(std::max(meanDifference, alternatingDifference));
             count += width;
         }
     }
-    return difference / (static_cast<double>(count) * 255.0);
+    if (difference.high == 0 && difference.low == 0) {
+        return 0.0;
+    }
+    const auto normalized = static_cast<double>(
+        difference.value() / (static_cast<long double>(count) * 255.0L));
+    return std::nextafter(normalized, -std::numeric_limits<double>::infinity());
 }
 
 [[nodiscard]] double fullResolutionError(
@@ -227,19 +263,26 @@ void sortByError(std::vector<ScoredAdvance>& scores)
     return lowerBound < cutoff;
 }
 
-[[nodiscard]] double cachedFullResolutionError(
+[[nodiscard]] std::optional<double> cachedFullResolutionError(
     int advance,
     const LuminanceImage& previous,
     const LuminanceImage& current,
     const PixelCrop& excludedBands,
     std::vector<double>& fullErrors,
-    std::vector<bool>& evaluated)
+    std::vector<bool>& evaluated,
+    EvaluationBudget& budget)
 {
     const auto index = static_cast<std::size_t>(advance);
-    if (!evaluated[index]) {
-        fullErrors[index] = fullResolutionError(previous, current, advance, excludedBands);
-        evaluated[index] = true;
+    if (evaluated[index]) {
+        return fullErrors[index];
     }
+    if (budget.remaining == 0) {
+        budget.exhausted = true;
+        return std::nullopt;
+    }
+    --budget.remaining;
+    fullErrors[index] = fullResolutionError(previous, current, advance, excludedBands);
+    evaluated[index] = true;
     return fullErrors[index];
 }
 
@@ -252,7 +295,8 @@ void sortByError(std::vector<ScoredAdvance>& scores)
     const LuminanceImage& current,
     const PixelCrop& excludedBands,
     std::vector<double>& fullErrors,
-    std::vector<bool>& evaluated)
+    std::vector<bool>& evaluated,
+    EvaluationBudget& budget)
 {
     if (left.advance == right.advance) {
         return false;
@@ -276,14 +320,18 @@ void sortByError(std::vector<ScoredAdvance>& scores)
         if (lowerBounds[static_cast<std::size_t>(advance)].error > barrierThreshold) {
             return true;
         }
-        if (cachedFullResolutionError(
+        const auto fullError = cachedFullResolutionError(
                 advance,
                 previous,
                 current,
                 excludedBands,
                 fullErrors,
-                evaluated)
-            > barrierThreshold) {
+                evaluated,
+                budget);
+        if (!fullError.has_value()) {
+            return false;
+        }
+        if (*fullError > barrierThreshold) {
             return true;
         }
     }
@@ -325,6 +373,7 @@ OverlapResult VerticalOverlapMatcher::match(
 
     std::vector<double> fullErrors(static_cast<std::size_t>(maximumAdvance) + 1U, 1.0);
     std::vector<bool> fullEvaluated(static_cast<std::size_t>(maximumAdvance) + 1U, false);
+    EvaluationBudget evaluationBudget{config.maximumFullResolutionCandidates, false};
     double bestFullError = std::numeric_limits<double>::infinity();
     for (std::size_t level = 0; level < SignatureBinLimits.size(); ++level) {
         // Finer partitions monotonically tighten the lower bound without dropping
@@ -362,15 +411,18 @@ OverlapResult VerticalOverlapMatcher::match(
                 && !fullEvaluated[static_cast<std::size_t>(candidate.advance)];
         });
         if (firstUnevaluated != orderedAtLevel.cend()) {
-            bestFullError = std::min(
-                bestFullError,
-                cachedFullResolutionError(
-                    firstUnevaluated->advance,
-                    previousLuminance,
-                    currentLuminance,
-                    config.excludedBands,
-                    fullErrors,
-                    fullEvaluated));
+            const auto fullError = cachedFullResolutionError(
+                firstUnevaluated->advance,
+                previousLuminance,
+                currentLuminance,
+                config.excludedBands,
+                fullErrors,
+                fullEvaluated,
+                evaluationBudget);
+            if (!fullError.has_value()) {
+                break;
+            }
+            bestFullError = std::min(bestFullError, *fullError);
         }
         const auto nextUnevaluated = std::find_if(orderedAtLevel.cbegin(), orderedAtLevel.cend(), [&](const auto& candidate) {
             return canCompete(candidate.error, bestFullError, config.minimumWinnerMargin)
@@ -393,15 +445,18 @@ OverlapResult VerticalOverlapMatcher::match(
         if (!canCompete(candidate.error, bestFullError, config.minimumWinnerMargin)) {
             break;
         }
-        bestFullError = std::min(
-            bestFullError,
-            cachedFullResolutionError(
-                candidate.advance,
-                previousLuminance,
-                currentLuminance,
-                config.excludedBands,
-                fullErrors,
-                fullEvaluated));
+        const auto fullError = cachedFullResolutionError(
+            candidate.advance,
+            previousLuminance,
+            currentLuminance,
+            config.excludedBands,
+            fullErrors,
+            fullEvaluated,
+            evaluationBudget);
+        if (!fullError.has_value()) {
+            break;
+        }
+        bestFullError = std::min(bestFullError, *fullError);
 
         std::vector<ScoredAdvance> evaluatedSoFar;
         for (int advance = 0; advance <= maximumAdvance; ++advance) {
@@ -434,7 +489,8 @@ OverlapResult VerticalOverlapMatcher::match(
                                 currentLuminance,
                                 config.excludedBands,
                                 fullErrors,
-                                fullEvaluated);
+                                fullEvaluated,
+                                evaluationBudget);
                     });
                 if (provisionalRunner != evaluatedSoFar.cend()) {
                     certifiedAmbiguity = true;
@@ -464,6 +520,12 @@ OverlapResult VerticalOverlapMatcher::match(
         return result;
     }
 
+    if (evaluationBudget.exhausted) {
+        result.kind = OverlapKind::Ambiguous;
+        result.confidence = 0.0;
+        return result;
+    }
+
     const auto runnerUp = std::find_if(evaluated.cbegin() + 1, evaluated.cend(), [&](const auto& candidate) {
         return independentBasins(
             best,
@@ -474,12 +536,18 @@ OverlapResult VerticalOverlapMatcher::match(
             currentLuminance,
             config.excludedBands,
             fullErrors,
-            fullEvaluated);
+            fullEvaluated,
+            evaluationBudget);
     });
     const double runnerUpError = runnerUp != evaluated.cend()
         ? runnerUp->error
         : std::numeric_limits<double>::infinity();
     const double winnerMargin = runnerUpError - best.error;
+    if (evaluationBudget.exhausted) {
+        result.kind = OverlapKind::Ambiguous;
+        result.confidence = 0.0;
+        return result;
+    }
     const double errorConfidence = config.maximumNormalizedError > 0.0
         ? std::clamp(1.0 - best.error / config.maximumNormalizedError, 0.0, 1.0)
         : (best.error == 0.0 ? 1.0 : 0.0);

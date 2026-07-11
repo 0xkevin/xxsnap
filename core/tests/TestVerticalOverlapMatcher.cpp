@@ -111,6 +111,25 @@ ScrollFrame cancellingPatternFrame(int width, int height, int amplitude)
     return frame;
 }
 
+ScrollFrame commonNullspaceFrame(int height, int documentY)
+{
+    ScrollFrame frame(512, height);
+    for (int y = 0; y < height; ++y) {
+        const auto coefficient = static_cast<int>(
+            (static_cast<std::uint32_t>(y + documentY) * 37U) % 81U) - 40;
+        for (int x = 0; x < frame.width; ++x) {
+            int value = 128;
+            if (x == 509) {
+                value += coefficient;
+            } else if (x == 511) {
+                value -= coefficient;
+            }
+            setGray(frame, x, y, static_cast<std::uint8_t>(value));
+        }
+    }
+    return frame;
+}
+
 ScrollFrame crop(const ScrollFrame& source, int x, int y, int width, int height)
 {
     ScrollFrame result(width, height);
@@ -199,6 +218,9 @@ private slots:
     void ignoresAdvancesWithEmptyMaskedIntersection();
     void detectsIndependentPeaksHiddenByFlatSignature();
     void avoidsFlatSignatureFullResolutionDegeneration();
+    void returnsConservativeResultWhenEvaluationBudgetIsExhausted();
+    void sufficientBudgetResolvesSmallCommonNullspaceInput();
+    void validatesFullResolutionCandidateBudget();
 };
 
 void TestVerticalOverlapMatcher::findsDownwardOffset()
@@ -504,6 +526,47 @@ void TestVerticalOverlapMatcher::avoidsFlatSignatureFullResolutionDegeneration()
 
     QCOMPARE(result.kind, OverlapKind::Ambiguous);
     QVERIFY2(elapsed < 3000, qPrintable(QStringLiteral("elapsed %1 ms").arg(elapsed)));
+}
+
+void TestVerticalOverlapMatcher::returnsConservativeResultWhenEvaluationBudgetIsExhausted()
+{
+    constexpr int advance = 432;
+    const ScrollFrame previous = commonNullspaceFrame(1080, 0);
+    const ScrollFrame current = commonNullspaceFrame(1080, advance);
+    OverlapConfig config;
+
+    const auto result = VerticalOverlapMatcher().match(previous, current, config);
+
+    QCOMPARE(result.kind, OverlapKind::Ambiguous);
+    QCOMPARE(result.confidence, 0.0);
+}
+
+void TestVerticalOverlapMatcher::sufficientBudgetResolvesSmallCommonNullspaceInput()
+{
+    const ScrollFrame previous = commonNullspaceFrame(20, 0);
+    const ScrollFrame current = commonNullspaceFrame(20, 4);
+    OverlapConfig config;
+    config.maximumAdvanceRatio = 0.4;
+    config.maximumFullResolutionCandidates = 32;
+
+    const auto result = VerticalOverlapMatcher().match(previous, current, config);
+
+    QCOMPARE(result.kind, OverlapKind::Reliable);
+    QCOMPARE(result.verticalAdvance, 4);
+    QVERIFY(result.normalizedError < config.maximumNormalizedError);
+}
+
+void TestVerticalOverlapMatcher::validatesFullResolutionCandidateBudget()
+{
+    const ScrollFrame frame = stripedDocument(12, 20);
+    OverlapConfig config;
+    QCOMPARE(config.maximumFullResolutionCandidates, 16);
+    config.maximumFullResolutionCandidates = 0;
+    QCOMPARE(VerticalOverlapMatcher().match(frame, frame, config).kind, OverlapKind::Insufficient);
+    config.maximumFullResolutionCandidates = 1'000'001;
+    QCOMPARE(VerticalOverlapMatcher().match(frame, frame, config).kind, OverlapKind::Insufficient);
+    config.maximumFullResolutionCandidates = 1'000'000;
+    QVERIFY(VerticalOverlapMatcher().match(frame, frame, config).kind != OverlapKind::Insufficient);
 }
 
 QTEST_MAIN(TestVerticalOverlapMatcher)
