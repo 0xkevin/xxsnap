@@ -1047,6 +1047,51 @@ final class LongImageEditorTests: XCTestCase {
         controller.stop()
     }
 
+    func testBakedPreviewUnsuppressesSelectedAnnotationDuringLiveDragAndRebakesOnMouseUp() throws {
+        let image = TestImageFactory.verticalDocumentViewport(offset: 0, width: 200, height: 1_000, scale: 2)
+        var style = CaptureAnnotationStyle(); style.strokeColor = .red; style.strokeWidth = 8
+        let selected = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 30, y: 40, width: 80, height: 60),
+            style: style
+        )
+        let later = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 100, y: 110, width: 70, height: 50),
+            style: style
+        )
+        let controller = LongImageEditorWindowController(
+            canonicalImage: image,
+            annotations: [selected, later],
+            visibleFrame: NSRect(x: 0, y: 0, width: 600, height: 500),
+            initialWindowSize: NSSize(width: 400, height: 420)
+        )
+        controller.show()
+        let overlay = try XCTUnwrap(controller.test_editingOverlay)
+        let local = try XCTUnwrap(overlay.editorSnapshot?.annotations.first { $0.id == selected.id })
+        let down = NSPoint(x: local.rect.minX, y: local.rect.midY)
+        overlay.test_mouseDown(at: down)
+
+        XCTAssertFalse(overlay.test_suppressedAnnotationIDs.contains(selected.id))
+        XCTAssertTrue(overlay.test_suppressedAnnotationIDs.isEmpty)
+        let raw = try XCTUnwrap(CaptureAnnotationRenderer.sampleLongImage(image, rect: controller.visibleImageRect))
+        XCTAssertEqual(try pixelBytes(try XCTUnwrap(overlay.test_backgroundImage)), try pixelBytes(raw))
+
+        overlay.test_mouseDragged(to: NSPoint(x: down.x + 24, y: down.y + 18))
+        XCTAssertNotEqual(overlay.editorSnapshot?.annotations.first { $0.id == selected.id }?.rect, local.rect)
+        overlay.test_mouseUp(at: NSPoint(x: down.x + 24, y: down.y + 18))
+
+        XCTAssertEqual(overlay.test_suppressedAnnotationIDs, Set(overlay.editorSnapshot?.annotations.map(\.id) ?? []))
+        let expected = CaptureAnnotationRenderer.renderVisibleLongImageSlice(
+            image: image,
+            annotations: controller.test_fullAnnotations,
+            eraserMasks: controller.test_fullEraserMasks,
+            imageRect: controller.visibleImageRect
+        )
+        XCTAssertEqual(try pixelBytes(try XCTUnwrap(overlay.test_backgroundImage)), try pixelBytes(expected))
+        controller.stop()
+    }
+
     func testEditorInteractionCallbacksLockAndUnlockDocumentScrolling() throws {
         let controller = LongImageEditorWindowController(
             image: TestImageFactory.solid(size: NSSize(width: 200, height: 1_000), color: .white),

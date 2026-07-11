@@ -74,6 +74,7 @@ struct SelectionOverlayConfiguration {
     var initialEraserMasks: [EraserMask]
     var suppressedAnnotationIDs: Set<AnnotationID>
     var annotationInteractionBegan: (() -> Void)?
+    var annotationInteractionTargetBegan: ((AnnotationID?) -> Void)?
     var annotationInteractionEnded: (() -> Void)?
     var longImageScrollHandler: ((CGFloat) -> Void)?
     var pinnedImageScaleHandler: ((CGFloat, NSPoint) -> Void)?
@@ -103,6 +104,7 @@ struct SelectionOverlayConfiguration {
         initialEraserMasks: [],
         suppressedAnnotationIDs: [],
         annotationInteractionBegan: nil,
+        annotationInteractionTargetBegan: nil,
         annotationInteractionEnded: nil,
         longImageScrollHandler: nil,
         pinnedImageScaleHandler: nil,
@@ -144,6 +146,7 @@ struct SelectionOverlayConfiguration {
             initialEraserMasks: [],
             suppressedAnnotationIDs: [],
             annotationInteractionBegan: nil,
+            annotationInteractionTargetBegan: nil,
             annotationInteractionEnded: nil,
             longImageScrollHandler: nil,
             pinnedImageScaleHandler: pinnedImageScaleHandler,
@@ -163,6 +166,7 @@ struct SelectionOverlayConfiguration {
         initialEraserMasks: [EraserMask] = [],
         suppressedAnnotationIDs: Set<AnnotationID> = [],
         interactionBegan: (() -> Void)? = nil,
+        interactionTargetBegan: ((AnnotationID?) -> Void)? = nil,
         interactionEnded: (() -> Void)? = nil,
         scrollHandler: ((CGFloat) -> Void)? = nil
     ) -> SelectionOverlayConfiguration {
@@ -185,6 +189,7 @@ struct SelectionOverlayConfiguration {
             initialEraserMasks: initialEraserMasks,
             suppressedAnnotationIDs: suppressedAnnotationIDs,
             annotationInteractionBegan: interactionBegan,
+            annotationInteractionTargetBegan: interactionTargetBegan,
             annotationInteractionEnded: interactionEnded,
             longImageScrollHandler: scrollHandler,
             pinnedImageScaleHandler: nil,
@@ -759,6 +764,16 @@ final class SelectionOverlayWindow: NSWindow {
             suppressedAnnotationIDs: suppressedAnnotationIDs
         )
         makeFirstResponder(overlayView)
+    }
+
+    func updateLongImageEditorPresentation(
+        backgroundImage: NSImage?,
+        suppressedAnnotationIDs: Set<AnnotationID>
+    ) {
+        (contentView as? SelectionOverlayView)?.updateLongImageEditorPresentation(
+            backgroundImage: backgroundImage,
+            suppressedAnnotationIDs: suppressedAnnotationIDs
+        )
     }
 
     private func installEscapeKeyMonitor() {
@@ -2839,9 +2854,16 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     override func mouseDown(with event: NSEvent) {
         guard scrollCaptureOverlayState == .inactive else { return }
-        configuration.annotationInteractionBegan?()
         cancelPinnedImageToolbarShiftShortcut()
         let point = convert(event.locationInWindow, from: nil)
+        let startsNewContent = isShapeToolActive
+            || isTextToolActive
+            || isNumberToolActive
+            || isMagnifierToolActive
+            || isEraserToolActive
+        let targetID = startsNewContent ? nil : annotationIndexForBorder(at: point).map { annotations[$0].id }
+        configuration.annotationInteractionTargetBegan?(targetID)
+        configuration.annotationInteractionBegan?()
         NSLog("xxsnap overlay mouseDown mode=%@ point=(%.0f, %.0f)", "\(interactionMode)", point.x, point.y)
 
         cancelSelectionWheelAnimation()
@@ -6722,6 +6744,22 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         setLockedSelectionRect(selectionRect.standardized)
         resetMosaicPreviewCaches()
         clearColorSampler()
+        needsDisplay = true
+    }
+
+    func updateLongImageEditorPresentation(
+        backgroundImage: NSImage?,
+        suppressedAnnotationIDs: Set<AnnotationID>
+    ) {
+        self.backgroundImage = backgroundImage
+        if let cgImage = backgroundImage?.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+            backgroundBitmap = NSBitmapImageRep(cgImage: cgImage)
+        } else {
+            backgroundBitmap = nil
+        }
+        backgroundLuminanceCache.removeAll()
+        self.suppressedAnnotationIDs = suppressedAnnotationIDs
+        resetMosaicPreviewCaches()
         needsDisplay = true
     }
 

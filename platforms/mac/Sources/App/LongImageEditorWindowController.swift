@@ -298,6 +298,7 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
             },
             suppressedAnnotationIDs: presentedAnnotationIDs,
             interactionBegan: { [weak self] in self?.lock(true) },
+            interactionTargetBegan: { [weak self] id in self?.prepareLivePresentation(targetID: id) },
             interactionEnded: { [weak self] in self?.lock(false) },
             scrollHandler: { [weak self] deltaY in self?.handleOverlayScroll(deltaY: deltaY) }
         )
@@ -404,6 +405,28 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
             scrollView.verticalScroller?.isEnabled = true
             commitOverlay(); refreshOverlay()
         }
+    }
+
+    private func prepareLivePresentation(targetID: AnnotationID?) {
+        guard let overlay, let presentedContext else { return }
+        let prefixEnd = targetID.flatMap { id in
+            documentState.annotations.firstIndex { $0.id == id }
+        } ?? 0
+        let prefixAnnotations = Array(documentState.annotations.prefix(prefixEnd))
+        let prefixIDs = Set(prefixAnnotations.map(\.id))
+        let prefixMasks = documentState.eraserMasks.filter {
+            !$0.affectedAnnotationIDs.isDisjoint(with: prefixIDs)
+        }
+        let preview = CaptureAnnotationRenderer.renderVisibleLongImageSlice(
+            image: documentState.image,
+            annotations: prefixAnnotations,
+            eraserMasks: prefixMasks,
+            imageRect: presentedContext.sliceRect
+        )
+        overlay.updateLongImageEditorPresentation(
+            backgroundImage: displayImage(preview, size: overlay.frame.size),
+            suppressedAnnotationIDs: presentedAnnotationIDs.intersection(prefixIDs)
+        )
     }
     private func finish(_ result: CaptureSelectionResult?) {
         guard result?.action == .finishEditing else { return }; commitOverlay()
