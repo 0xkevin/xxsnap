@@ -886,7 +886,7 @@ Use injected closures for pasteboard, save panel, and pin factory so the editor 
 
 - [ ] **Step 3: Add resource-limit completion behavior**
 
-When the session reports resource limit, keep the accepted preview visible and present Finish Current Capture and Cancel. Finishing must use `finalImage()` from the preserved engine state.
+When the session reports resource limit, keep the accepted preview visible and present Finish Scroll Capture and Cancel. Finishing must use `finalImage()` from the preserved engine state.
 
 - [ ] **Step 4: Add post-capture save fallback**
 
@@ -952,12 +952,15 @@ Expected: all new scroll tests pass. Record the six known historical failures se
 
 ```bash
 xcodebuild -project platforms/mac/xxsnap.xcodeproj -scheme xxsnap -configuration Debug -derivedDataPath build/xcode-derived build
-pkill -f "/Users/kevin/Projects/open-source/Snipory/xxsnap/build/xcode-derived/Build/Products/Debug/XxSnap.app/Contents/MacOS/XxSnap" || true
-open -n /Users/kevin/Projects/open-source/Snipory/xxsnap/build/xcode-derived/Build/Products/Debug/XxSnap.app
-pgrep -af "XxSnap.app/Contents/MacOS/XxSnap"
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+APP_PATH="$REPO_ROOT/build/xcode-derived/Build/Products/Debug/XxSnap.app"
+APP_EXEC="$APP_PATH/Contents/MacOS/XxSnap"
+pkill -f "XxSnap.app/Contents/MacOS/XxSnap" || true
+open -n "$APP_PATH"
+pgrep -af "$APP_EXEC"
 ```
 
-Expected: one fresh debug process runs from `build/xcode-derived`.
+Expected: one fresh debug process runs from the current repository or worktree's `build/xcode-derived`; no XxSnap process from another checkout remains.
 
 - [ ] **Step 5: Execute the manual acceptance matrix**
 

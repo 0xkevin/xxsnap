@@ -493,7 +493,7 @@ mac 当前已使用的标注类型：
 - 滚动事件触发自适应采样。共享 C++ 核心执行纵向重叠匹配、精确重复帧丢弃、向上回看帧丢弃、向下恢复和分段拼接；匹配坚持纵向模型，不承诺横向滚动、缩放变化、旋转或透视变化。
 - 固定头部/底部通过连续移动后的稳定区域识别来避免重复；右侧滚动条仅在持续性、运动和置信度均满足阈值时裁剪，歧义边缘保留，避免误裁正文。
 - 实时预览显示已接受内容并默认跟随尾部。用户向上滚动预览时保持回看位置，回到底部后恢复尾随；预览会避开选区和工具条，空间不足时在安全区域内回退。
-- `Return` 或 `Enter` 与工具条完成按钮结束采集；`Esc` 与工具条取消按钮取消滚动会话并恢复原锁定选区和首屏标注。
+- 工具条“完成滚动截图”和“取消”是始终可用、无需额外输入监控权限的主路径。xxsnap 自己接收按键时，`Return`/`Enter` 完成、`Esc` 取消；焦点留在 Safari、Chrome 等目标应用时，xxsnap 通过 macOS 全局按键监控提供相同快捷键，但该增强依赖用户已授予“辅助功能”或“输入监控”权限。没有这些权限时不得承诺目标应用前台快捷键可用。
 - 低匹配置信度、帧采集失败或资源上限会暂停继续采样并显示警告，已接受预览和完成/取消路径保留。再次滚到可可靠匹配的新位置可以从低置信状态恢复；最终合成失败时可重试完成或取消。
 - 持久图像缓冲使用资源上限：按机器物理内存的八分之一配置，并限制在 `128 MiB...512 MiB`。达到上限后仍可用已接受分段完成当前长图。
 - 完成后进入独立长图编辑器。编辑器按宽度适配、纵向滚动，只把可见切片交给标注浮层，并把标注和橡皮擦遮罩换算回完整图片坐标；首屏已有标注继续保留。
@@ -575,7 +575,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project pla
 截至 2026-07-12，本分支最近一次完整验证结果：
 
 - 共享 core 的 CTest 执行 `8` 个测试，`8` passed，`0` failed。
-- macOS XCTest 执行 `799` 个测试，`794` passed，`5` failed；滚动截图直接相关的 `LongImageEditorTests`、`ScrollCaptureBridgeTests`、`ScrollCapturePresentationTests` 和 `ScrollCaptureSessionTests` 共 `104` 个测试，`104` passed。
+- macOS XCTest 执行 `803` 个测试，`798` passed，`5` failed；滚动截图直接相关的 `LongImageEditorTests`、`ScrollCaptureBridgeTests`、`ScrollCapturePresentationTests` 和 `ScrollCaptureSessionTests` 共 `107` 个测试，`107` passed；Coordinator 的目标应用全局终止键路由测试也通过。
 - `5` 个失败是滚动截图实施前已有的序号重置/控制项和状态栏图标基线：`SelectionToolbarStateTests` 中 `4` 个，`xxsnapMacTests` 中 `1` 个。本次没有放宽断言或顺带修改这些基线。
 - 自动化结果只证明确定性核心和平台状态机等代码路径；真实 Safari/Chrome/Preview/文本编辑器、鼠标/触控板惯性、多屏和显示缩放组合仍以手工清单为准，当前不记为已通过。
 

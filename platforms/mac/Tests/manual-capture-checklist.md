@@ -13,6 +13,7 @@ Use this checklist after building the exact Debug app from `build/xcode-derived`
 ## Scroll-capture test setup
 
 - [ ] Use a Trial or Pro license so the Scroll Capture button is visible; record the active plan.
+- [ ] Record whether xxsnap has macOS Accessibility or Input Monitoring permission. Finish Scroll Capture/Cancel buttons are the permission-independent path; target-app-frontmost keyboard checks require one of those permissions.
 - [ ] Prepare four deterministic targets: a long Safari page without a fixed header, the same or equivalent page with a fixed header, a long Chrome page without a fixed header, and the same or equivalent page with a fixed header.
 - [ ] Prepare an ordinary long document in Preview and, where available, a long plain-text document in a text editor. Include numbered rows or other unique seam markers.
 - [ ] For each target, begin at the top, lock a region wholly inside the scrollable content, add a visible first-screen annotation, and start Scroll Capture.
@@ -26,8 +27,9 @@ Use this checklist after building the exact Debug app from `build/xcode-derived`
 | B2 | Safari long page | Yes | Trackpad with inertia | Header is not repeated; body seams stay ordered; inertial tail frames are not duplicated. | 待人工 |
 | B3 | Chrome long page | No | Trackpad with inertia | Seams stay ordered; exact repeats are discarded; preview follows the tail. | 待人工 |
 | B4 | Chrome long page | Yes | Mouse wheel | Header is not repeated; body content is complete; scrollbar handling follows the confidence rules below. | 待人工 |
-| D1 | Preview long document | N/A | Mouse wheel | Page/text order is preserved, with no missing or repeated strip at page boundaries. | 待人工 |
-| D2 | Long plain-text editor document | N/A | Trackpad with inertia | Lines remain ordered and unique; cursor/selection changes do not create false seams. | 待人工（目标应用可用时） |
+| D1 | The same Preview long document | N/A | Mouse wheel | Page/text order is preserved, with no missing or repeated strip at page boundaries. | 待人工（未执行物理鼠标） |
+| D2 | The same Preview long document | N/A | Trackpad with inertia | The mouse result is reproducible with trackpad inertia; the final page is neither duplicated nor truncated. | 待人工（未执行物理触控板） |
+| D3 | Long plain-text editor document | N/A | Mouse or trackpad | Lines remain ordered and unique; cursor/selection changes do not create false seams. | 待人工（目标应用/设备可用时） |
 
 For every executed row, save a representative PNG outside the repository and inspect the entire image at 100% zoom, especially the first seam, last seam, fixed bands and right edge.
 
@@ -40,7 +42,10 @@ For every executed row, save a representative PNG outside the repository and ins
 - [ ] After upward review, scroll downward through already accepted content and then beyond the previous tail; confirm repeats/review frames are discarded and new content resumes appending once the tail advances.
 - [ ] Scroll the live preview upward; confirm it stops following the tail while capture continues. Scroll the preview back to the bottom and confirm tail following resumes.
 - [ ] Use a repeated/low-detail region that produces low match confidence; confirm collection pauses with a warning and retains the accepted preview. Then scroll to a uniquely matchable downward frame and confirm collection can resume without restarting.
-- [ ] During active and paused states, click Finish Scroll Capture and also verify `Return`/`Enter` on a separate run; confirm exactly one completion occurs. Verify Cancel and `Esc` on separate runs restore the original locked selection and first-screen annotations.
+- [ ] With Safari frontmost and xxsnap granted Accessibility or Input Monitoring permission, verify `Return` and keypad `Enter` on separate active/paused runs each trigger Finish Scroll Capture exactly once; verify `Esc` cancels and restores the locked selection/first-screen annotations.
+- [ ] Repeat the target-frontmost keyboard check with Chrome. Confirm a local/global duplicate delivery cannot finish or cancel twice.
+- [ ] Without Accessibility/Input Monitoring permission, do not mark target-frontmost shortcuts passed. Verify the on-screen Finish Scroll Capture and Cancel buttons still complete/cancel reliably; also verify shortcuts continue to work when the xxsnap overlay itself owns the key event.
+- [ ] After a scroll cancel, verify ordinary screenshot escape behavior is unchanged: the first local `Esc` exits an active annotation tool and the second local `Esc` closes the ordinary capture.
 
 ## Fixed bands and scrollbar confidence
 
@@ -73,7 +78,7 @@ For every executed row, save a representative PNG outside the repository and ins
 
 ## Failure and resource recovery
 
-- [ ] Force or use a test build with a small accepted-byte budget; confirm the resource guard pauses collection, preserves the accepted preview, and leaves Finish Current Capture/Cancel available.
+- [ ] Force or use a test build with a small accepted-byte budget; confirm the resource guard pauses collection, preserves the accepted preview, and leaves Finish Scroll Capture/Cancel available.
 - [ ] Finish after the resource guard pauses; confirm the retained accepted segments compose and enter the editor.
 - [ ] Simulate a transient frame-capture failure; confirm a warning is shown, accepted content remains available, and Finish may be retried or Cancel restores the original selection.
 - [ ] Simulate final composition failure; confirm the session/accepted engine state remains alive for another Finish attempt or Cancel.
