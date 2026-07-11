@@ -93,6 +93,8 @@ final class ScrollCapturePresentationTests: XCTestCase {
         XCTAssertEqual(controller.test_cancelButtonFrame, cancel.offsetBy(dx: -toolbar.minX, dy: -toolbar.minY))
         XCTAssertEqual(controller.test_controlHitTargetCount, 2)
         XCTAssertTrue(controller.test_controlHitTargetsAreTransparent)
+        XCTAssertEqual(controller.test_finishButtonToolTip, L10n(language: .english).text(.finishScrollCapture))
+        XCTAssertEqual(controller.test_cancelButtonToolTip, L10n(language: .english).text(.cancel))
         controller.start()
         XCTAssertTrue(controller.test_hasVisiblePanels)
         controller.test_triggerFinish()
@@ -117,9 +119,14 @@ final class ScrollCapturePresentationTests: XCTestCase {
         controller.test_userScroll(to: 160)
         XCTAssertGreaterThan(controller.test_visibleRect.minY, 100)
         let reviewOffset = controller.test_visibleRect.minY
+        let oldDocumentHeight = controller.test_documentHeight
         controller.updatePreview(NSImage(size: NSSize(width: 240, height: 1200)))
         XCTAssertFalse(controller.test_isFollowingTail)
-        XCTAssertEqual(controller.test_visibleRect.minY, reviewOffset, accuracy: 0.5)
+        XCTAssertEqual(
+            controller.test_visibleRect.minY,
+            reviewOffset + controller.test_documentHeight - oldDocumentHeight,
+            accuracy: 0.5
+        )
         controller.setWarning("Low confidence")
         XCTAssertEqual(controller.test_warningText, "Low confidence")
         controller.clearWarning()
@@ -129,6 +136,34 @@ final class ScrollCapturePresentationTests: XCTestCase {
         XCTAssertTrue(controller.test_isFollowingTail)
         controller.updatePreview(NSImage(size: NSSize(width: 240, height: 1400)))
         XCTAssertEqual(controller.test_visibleRect.minY, 0, accuracy: 0.5)
+    }
+
+    func testReviewAnchorTracksGrowingTailAndClampsWhileTailFollowStaysAtZero() {
+        let controller = makeController()
+        let width = controller.test_contentWidth
+        controller.updatePreview(NSImage(size: NSSize(width: width, height: 600)))
+        XCTAssertEqual(controller.test_documentHeight, 600, accuracy: 0.5)
+        controller.test_userScroll(to: 120)
+        controller.updatePreview(NSImage(size: NSSize(width: width, height: 720)))
+        XCTAssertEqual(controller.test_documentHeight, 720, accuracy: 0.5)
+        XCTAssertEqual(controller.test_visibleRect.minY, 240, accuracy: 0.5)
+
+        controller.test_userScroll(to: 400)
+        controller.updatePreview(NSImage(size: NSSize(width: width, height: 500)))
+        XCTAssertLessThanOrEqual(
+            controller.test_visibleRect.maxY,
+            controller.test_documentHeight + 0.5
+        )
+
+        controller.test_userScroll(to: 0)
+        controller.updatePreview(NSImage(size: NSSize(width: width, height: 800)))
+        XCTAssertEqual(controller.test_visibleRect.minY, 0, accuracy: 0.5)
+    }
+
+    func testTransparentControlTooltipsAreLocalizedInChinese() {
+        let controller = makeController(language: .zhHans)
+        XCTAssertEqual(controller.test_finishButtonToolTip, "完成滚动截图")
+        XCTAssertEqual(controller.test_cancelButtonToolTip, "取消")
     }
 
     func testStopRemovesObserverAndReleasesPreviewImage() {
@@ -156,14 +191,14 @@ final class ScrollCapturePresentationTests: XCTestCase {
         XCTAssertNil(weakController)
     }
 
-    private func makeController() -> ScrollCapturePresentationController {
+    private func makeController(language: AppLanguage = .english) -> ScrollCapturePresentationController {
         ScrollCapturePresentationController(
             toolbarFrame: NSRect(x: 100, y: 100, width: 400, height: 28),
             finishButtonFrame: NSRect(x: 300, y: 104, width: 20, height: 20),
             cancelButtonFrame: NSRect(x: 356, y: 104, width: 20, height: 20),
             selectionFrame: NSRect(x: 200, y: 200, width: 300, height: 240),
             visibleFrame: NSRect(x: 0, y: 0, width: 1000, height: 700),
-            language: .english,
+            language: language,
             onFinish: {},
             onCancel: {}
         )

@@ -62,7 +62,8 @@ final class ScrollCapturePresentationController: NSObject {
         super.init()
         configureControlPanel(
             finishButtonFrame: finishButtonFrame.offsetBy(dx: -toolbarFrame.minX, dy: -toolbarFrame.minY),
-            cancelButtonFrame: cancelButtonFrame.offsetBy(dx: -toolbarFrame.minX, dy: -toolbarFrame.minY)
+            cancelButtonFrame: cancelButtonFrame.offsetBy(dx: -toolbarFrame.minX, dy: -toolbarFrame.minY),
+            language: language
         )
         configurePreviewPanel()
         installBoundsObserver()
@@ -74,25 +75,39 @@ final class ScrollCapturePresentationController: NSObject {
         }
     }
 
-    private func configureControlPanel(finishButtonFrame: NSRect, cancelButtonFrame: NSRect) {
+    private func configureControlPanel(
+        finishButtonFrame: NSRect,
+        cancelButtonFrame: NSRect,
+        language: AppLanguage
+    ) {
         controlPanel.level = .screenSaver
         controlPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         controlPanel.isOpaque = false
         controlPanel.backgroundColor = .clear
         controlPanel.hasShadow = false
         let content = NSView(frame: NSRect(origin: .zero, size: controlPanel.frame.size))
-        let finish = transparentHitTarget(frame: finishButtonFrame, action: #selector(finishPressed))
-        let cancel = transparentHitTarget(frame: cancelButtonFrame, action: #selector(cancelPressed))
+        let l10n = L10n(language: language)
+        let finish = transparentHitTarget(
+            frame: finishButtonFrame,
+            action: #selector(finishPressed),
+            toolTip: l10n.text(.finishScrollCapture)
+        )
+        let cancel = transparentHitTarget(
+            frame: cancelButtonFrame,
+            action: #selector(cancelPressed),
+            toolTip: l10n.text(.cancel)
+        )
         content.addSubview(finish)
         content.addSubview(cancel)
         controlPanel.contentView = content
     }
 
-    private func transparentHitTarget(frame: NSRect, action: Selector) -> NSButton {
+    private func transparentHitTarget(frame: NSRect, action: Selector, toolTip: String) -> NSButton {
         let button = NSButton(frame: frame)
         button.title = ""
         button.isBordered = false
         button.isTransparent = true
+        button.toolTip = toolTip
         button.target = self
         button.action = action
         return button
@@ -157,6 +172,7 @@ final class ScrollCapturePresentationController: NSObject {
 
     func updatePreview(_ image: NSImage) {
         guard !stopped else { return }
+        let previousDocumentHeight = imageView.frame.height
         imageView.image = image
         imageView.imageScaling = .scaleProportionallyDown
         let width = max(1, scrollView.contentSize.width)
@@ -168,7 +184,8 @@ final class ScrollCapturePresentationController: NSObject {
             reviewOffset = 0
         } else {
             let maximumOffset = max(0, height - scrollView.contentSize.height)
-            reviewOffset = min(reviewOffset, maximumOffset)
+            let growth = max(0, height - previousDocumentHeight)
+            reviewOffset = min(reviewOffset + growth, maximumOffset)
             scrollView.contentView.scroll(to: NSPoint(x: 0, y: reviewOffset))
         }
         scrollView.reflectScrolledClipView(scrollView.contentView)
@@ -246,6 +263,8 @@ final class ScrollCapturePresentationController: NSObject {
     var test_controlBackgroundColor: NSColor { controlPanel.backgroundColor }
     var test_finishButtonFrame: NSRect { (controlPanel.contentView?.subviews.first as? NSButton)?.frame ?? .zero }
     var test_cancelButtonFrame: NSRect { (controlPanel.contentView?.subviews.last as? NSButton)?.frame ?? .zero }
+    var test_finishButtonToolTip: String? { (controlPanel.contentView?.subviews.first as? NSButton)?.toolTip }
+    var test_cancelButtonToolTip: String? { (controlPanel.contentView?.subviews.last as? NSButton)?.toolTip }
     var test_controlHitTargetCount: Int { controlPanel.contentView?.subviews.compactMap { $0 as? NSButton }.count ?? 0 }
     var test_controlHitTargetsAreTransparent: Bool {
         controlPanel.contentView?.subviews.compactMap { $0 as? NSButton }.allSatisfy { $0.isTransparent && !$0.isBordered } ?? false
@@ -253,6 +272,8 @@ final class ScrollCapturePresentationController: NSObject {
     var test_hasVisiblePanels: Bool { controlPanel.isVisible || previewPanel.isVisible }
     var test_isFollowingTail: Bool { isFollowingTail }
     var test_visibleRect: NSRect { scrollView.documentVisibleRect }
+    var test_contentWidth: CGFloat { scrollView.contentSize.width }
+    var test_documentHeight: CGFloat { imageView.frame.height }
     var test_reviewOffset: CGFloat { reviewOffset }
     var test_hasBoundsObserver: Bool { boundsObserver != nil }
     var test_warningText: String? { warningLabel.isHidden ? nil : warningLabel.stringValue }
