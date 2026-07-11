@@ -3,6 +3,36 @@ import CoreGraphics
 import UniformTypeIdentifiers
 
 @MainActor
+protocol ScrollCaptureSessionRunning: AnyObject {
+    func start() async throws
+    func finish() async throws -> NSImage
+    @discardableResult func cancel() -> ScrollCaptureSeed
+}
+
+extension ScrollCaptureSession: ScrollCaptureSessionRunning {}
+
+@MainActor
+protocol ScrollCapturePresenting: AnyObject {
+    func start()
+    func stop()
+    func updatePreview(_ image: NSImage)
+    func setWarning(_ text: String)
+    func clearWarning()
+    func updatePlacement(selectionFrame: NSRect, visibleFrame: NSRect)
+}
+
+extension ScrollCapturePresentationController: ScrollCapturePresenting {}
+
+struct ScrollCapturePresentationContext {
+    let geometry: ScrollCaptureControlGeometry
+    let selectionFrame: NSRect
+    let visibleFrame: NSRect
+    let language: AppLanguage
+    let onFinish: @MainActor () -> Void
+    let onCancel: @MainActor () -> Void
+}
+
+@MainActor
 final class CaptureCoordinator {
     var captureOverlayDidPresent: (() -> Void)?
     var captureSessionDidEnd: (() -> Void)?
@@ -19,6 +49,21 @@ final class CaptureCoordinator {
     private var mostRecentlyHiddenPinnedWindow: PinnedImageWindowPresenting?
     private var frozenDesktopImage: NSImage?
     private let pinnedWindowFactory: @MainActor (NSImage, NSRect) -> PinnedImageWindowPresenting
+    private let scrollCaptureSessionFactory: @MainActor (
+        ScrollCaptureSeed,
+        @escaping @MainActor (ScrollCapturePresentationUpdate) -> Void
+    ) -> any ScrollCaptureSessionRunning
+    private let scrollCapturePresentationFactory: @MainActor (
+        ScrollCapturePresentationContext
+    ) -> any ScrollCapturePresenting
+    private let longImageHandoff: (@MainActor (NSImage, ScrollCaptureSeed) -> Void)?
+    private var scrollCaptureSession: (any ScrollCaptureSessionRunning)?
+    private var scrollCapturePresentation: (any ScrollCapturePresenting)?
+    private var scrollCaptureTask: Task<Void, Never>?
+    private var scrollCaptureSeed: ScrollCaptureSeed?
+    private var scrollCaptureFinishPending = false
+    private var scrollCaptureGeneration: UInt64 = 0
+    private var pendingLongImageSeed: ScrollCaptureSeed?
 
     init(
         permissionCoordinator: PermissionCoordinator,
@@ -26,12 +71,36 @@ final class CaptureCoordinator {
         settingsStore: SettingsStore = SettingsStore(),
         pinnedWindowFactory: @escaping @MainActor (NSImage, NSRect) -> PinnedImageWindowPresenting = {
             PinnedImageWindowController(image: $0, screenRect: $1)
-        }
+        },
+        scrollCaptureSessionFactory: (@MainActor (
+            ScrollCaptureSeed,
+            @escaping @MainActor (ScrollCapturePresentationUpdate) -> Void
+        ) -> any ScrollCaptureSessionRunning)? = nil,
+        scrollCapturePresentationFactory: @escaping @MainActor (
+            ScrollCapturePresentationContext
+        ) -> any ScrollCapturePresenting = CaptureCoordinator.makeScrollCapturePresentation,
+        longImageHandoff: (@MainActor (NSImage, ScrollCaptureSeed) -> Void)? = nil
     ) {
         self.permissionCoordinator = permissionCoordinator
         self.screenCaptureService = screenCaptureService
         self.settingsStore = settingsStore
         self.pinnedWindowFactory = pinnedWindowFactory
+        self.scrollCaptureSessionFactory = scrollCaptureSessionFactory ?? { seed, update in
+            let maximumAcceptedBytes = Self.defaultScrollCaptureMaximumAcceptedBytes
+            guard let bridge = ScrollCaptureBridge(maximumAcceptedBytes: maximumAcceptedBytes) else {
+                preconditionFailure("Unable to create scroll capture bridge")
+            }
+            return ScrollCaptureSession(
+                seed: seed,
+                capturer: screenCaptureService,
+                stitcher: bridge,
+                clock: ContinuousScrollCaptureClock(),
+                activityMonitor: ScrollActivityMonitor(),
+                presentation: update
+            )
+        }
+        self.scrollCapturePresentationFactory = scrollCapturePresentationFactory
+        self.longImageHandoff = longImageHandoff
     }
 
     convenience init() {
@@ -39,6 +108,16 @@ final class CaptureCoordinator {
             permissionCoordinator: PermissionCoordinator(),
             screenCaptureService: ScreenCaptureService()
         )
+    }
+
+    deinit {
+        scrollCaptureTask?.cancel()
+        let presentation = scrollCapturePresentation
+        let session = scrollCaptureSession
+        Task { @MainActor in
+            presentation?.stop()
+            _ = session?.cancel()
+        }
     }
 
     @discardableResult
@@ -121,9 +200,209 @@ final class CaptureCoordinator {
             }
 
             self.overlayWindow = overlayWindow
+            self.installScrollCaptureCallbacks(on: overlayWindow)
             self.captureOverlayDidPresent?()
             overlayWindow.present()
         }
+    }
+
+    private static var defaultScrollCaptureMaximumAcceptedBytes: UInt {
+        // Cap the stitcher's retained image storage while scaling down on memory-constrained Macs.
+        let physical = ProcessInfo.processInfo.physicalMemory
+        let desired = min(UInt64(512 * 1_024 * 1_024), max(UInt64(128 * 1_024 * 1_024), physical / 8))
+        return UInt(min(desired, UInt64(UInt.max)))
+    }
+
+    private static func makeScrollCapturePresentation(
+        _ context: ScrollCapturePresentationContext
+    ) -> any ScrollCapturePresenting {
+        ScrollCapturePresentationController(
+            toolbarFrame: context.geometry.toolbarFrame,
+            finishButtonFrame: context.geometry.finishButtonFrame,
+            cancelButtonFrame: context.geometry.cancelButtonFrame,
+            selectionFrame: context.selectionFrame,
+            visibleFrame: context.visibleFrame,
+            language: context.language,
+            onFinish: context.onFinish,
+            onCancel: context.onCancel
+        )
+    }
+
+    private func installScrollCaptureCallbacks(on overlay: SelectionOverlayWindow) {
+        overlay.onScrollCaptureRequested = { [weak self, weak overlay] seed in
+            guard let self, self.overlayWindow === overlay else { return }
+            self.requestScrollCapture(seed: seed)
+        }
+        overlay.onScrollCaptureFinishRequested = { [weak self, weak overlay] in
+            guard let self, self.overlayWindow === overlay else { return }
+            self.finishScrollCapture()
+        }
+        overlay.onScrollCaptureCancelRequested = { [weak self, weak overlay] in
+            guard let self, self.overlayWindow === overlay else { return }
+            self.cancelScrollCapture()
+        }
+    }
+
+    private func requestScrollCapture(seed: ScrollCaptureSeed) {
+        guard scrollCaptureSession == nil,
+              scrollCapturePresentation == nil,
+              scrollCaptureTask == nil,
+              let overlay = overlayWindow
+        else { return }
+
+        overlay.setScrollCaptureCapturing()
+        scrollCaptureGeneration &+= 1
+        let generation = scrollCaptureGeneration
+        let language = settingsStore.load().language
+        guard let geometry = overlay.scrollCaptureControlGeometry else {
+            overlay.restoreAfterScrollCaptureCancellation()
+            overlay.present()
+            return
+        }
+        let visibleFrame = Self.visibleFrame(containing: seed.screenRect)
+        let presentation = scrollCapturePresentationFactory(ScrollCapturePresentationContext(
+            geometry: geometry,
+            selectionFrame: seed.screenRect,
+            visibleFrame: visibleFrame,
+            language: language,
+            onFinish: { [weak self] in self?.finishScrollCapture() },
+            onCancel: { [weak self] in self?.cancelScrollCapture() }
+        ))
+        let session = scrollCaptureSessionFactory(seed) { [weak self] update in
+            self?.receiveScrollCaptureUpdate(update, generation: generation)
+        }
+        scrollCaptureSeed = seed
+        scrollCaptureSession = session
+        scrollCapturePresentation = presentation
+        presentation.updatePlacement(selectionFrame: seed.screenRect, visibleFrame: visibleFrame)
+        presentation.start()
+        scrollCaptureTask = Task { @MainActor [weak self, weak session] in
+            do {
+                try await session?.start()
+                guard let self, self.scrollCaptureGeneration == generation,
+                      self.scrollCaptureSession === session else { return }
+                self.scrollCaptureTask = nil
+                if self.scrollCaptureFinishPending {
+                    self.scrollCaptureFinishPending = false
+                    self.finishScrollCapture()
+                }
+            } catch {
+                guard let self, self.scrollCaptureGeneration == generation,
+                      self.scrollCaptureSession === session else { return }
+                self.recoverScrollCaptureOverlay(generation: generation)
+            }
+        }
+    }
+
+    private static func visibleFrame(containing rect: NSRect) -> NSRect {
+        let point = NSPoint(x: rect.midX, y: rect.midY)
+        return NSScreen.screens.first(where: { NSMouseInRect(point, $0.frame, false) })?.visibleFrame
+            ?? NSScreen.screens.first(where: { $0.frame.intersects(rect) })?.visibleFrame
+            ?? NSScreen.main?.visibleFrame
+            ?? rect
+    }
+
+    private func receiveScrollCaptureUpdate(
+        _ update: ScrollCapturePresentationUpdate,
+        generation: UInt64
+    ) {
+        guard generation == scrollCaptureGeneration,
+              let overlay = overlayWindow,
+              let presentation = scrollCapturePresentation
+        else { return }
+        let l10n = L10n(language: settingsStore.load().language)
+        switch update {
+        case .preview(let image):
+            presentation.updatePreview(image)
+        case .append:
+            break
+        case .state(.capturing):
+            overlay.setScrollCaptureCapturing()
+            presentation.clearWarning()
+        case .state(.paused(let reason)):
+            let key: L10n.Key
+            switch reason {
+            case .lowConfidence: key = .scrollCaptureLowConfidence
+            case .resourceLimit: key = .scrollCaptureResourceLimit
+            case .captureFailure: key = .scrollCaptureFailure
+            }
+            let message = l10n.text(key)
+            overlay.setScrollCapturePaused(message: message)
+            presentation.setWarning(message)
+        case .state:
+            break
+        }
+    }
+
+    private func finishScrollCapture() {
+        guard let session = scrollCaptureSession,
+              let seed = scrollCaptureSeed,
+              scrollCapturePresentation != nil
+        else { return }
+        guard scrollCaptureTask == nil else {
+            scrollCaptureFinishPending = true
+            return
+        }
+        let generation = scrollCaptureGeneration
+        scrollCaptureTask = Task { @MainActor [weak self, weak session] in
+            do {
+                guard let image = try await session?.finish() else { return }
+                guard let self, self.scrollCaptureGeneration == generation,
+                      self.scrollCaptureSession === session else { return }
+                self.scrollCapturePresentation?.stop()
+                self.scrollCapturePresentation = nil
+                self.scrollCaptureSession = nil
+                self.scrollCaptureSeed = nil
+                self.scrollCaptureTask = nil
+                if let overlay = self.overlayWindow {
+                    overlay.orderOut(nil)
+                    self.retiredOverlayWindows.append(overlay)
+                    self.overlayWindow = nil
+                }
+                self.frozenDesktopImage = nil
+                if let longImageHandoff = self.longImageHandoff {
+                    longImageHandoff(image, seed)
+                } else {
+                    // Task 8 replaces this boundary with the native long-image editor.
+                    self.lastCapture = image
+                    self.pendingLongImageSeed = seed
+                }
+                self.captureSessionDidEnd?()
+            } catch {
+                guard let self, self.scrollCaptureGeneration == generation,
+                      self.scrollCaptureSession === session else { return }
+                self.recoverScrollCaptureOverlay(generation: generation)
+            }
+        }
+    }
+
+    private func cancelScrollCapture() {
+        guard let session = scrollCaptureSession else { return }
+        scrollCaptureGeneration &+= 1
+        scrollCaptureTask?.cancel()
+        scrollCaptureTask = nil
+        _ = session.cancel()
+        scrollCapturePresentation?.stop()
+        scrollCapturePresentation = nil
+        scrollCaptureSession = nil
+        scrollCaptureSeed = nil
+        scrollCaptureFinishPending = false
+        overlayWindow?.restoreAfterScrollCaptureCancellation()
+        overlayWindow?.present()
+    }
+
+    private func recoverScrollCaptureOverlay(generation: UInt64) {
+        guard scrollCaptureGeneration == generation else { return }
+        scrollCaptureGeneration &+= 1
+        scrollCaptureTask = nil
+        scrollCapturePresentation?.stop()
+        scrollCapturePresentation = nil
+        _ = scrollCaptureSession?.cancel()
+        scrollCaptureSession = nil
+        scrollCaptureSeed = nil
+        scrollCaptureFinishPending = false
+        overlayWindow?.restoreAfterScrollCaptureCancellation()
+        overlayWindow?.present()
     }
 
     private func showPermissionRestartAlert() {
@@ -368,6 +647,28 @@ extension CaptureCoordinator {
 
     var test_pinnedWindowCount: Int {
         pinnedWindowControllers.count
+    }
+
+    var test_hasScrollCaptureSession: Bool {
+        scrollCaptureSession != nil
+    }
+
+    var test_overlayWindow: SelectionOverlayWindow? {
+        overlayWindow
+    }
+
+    func test_installOverlayWindow(_ overlay: SelectionOverlayWindow) {
+        overlayWindow = overlay
+        installScrollCaptureCallbacks(on: overlay)
+    }
+
+    func test_requestScrollCapture(seed: ScrollCaptureSeed) {
+        overlayWindow?.test_setLockedSelectionRect(seed.snapshotRect)
+        requestScrollCapture(seed: seed)
+    }
+
+    func test_cancelScrollCapture() {
+        cancelScrollCapture()
     }
 
     func test_handleSelection(_ result: CaptureSelectionResult?, frozenDesktopImage: NSImage?) {

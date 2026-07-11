@@ -572,6 +572,7 @@ final class SelectionOverlayWindow: NSWindow {
     var onScrollCaptureCancelRequested: (() -> Void)?
     private(set) var scrollCaptureOverlayState: ScrollCaptureOverlayState = .inactive
     private var scrollCaptureTerminalActionTriggered = false
+    private var nextEscapeCancelsRestoredSelection = false
 
     init(
         backgroundImage: NSImage?,
@@ -614,10 +615,7 @@ final class SelectionOverlayWindow: NSWindow {
         }
         overlayView.scrollCaptureDidRequest = { [weak self] seed in
             guard let self else { return }
-            self.scrollCaptureTerminalActionTriggered = false
-            self.scrollCaptureOverlayState = .capturing
-            self.ignoresMouseEvents = true
-            overlayView.scrollCaptureOverlayState = .capturing
+            self.setScrollCaptureCapturing()
             self.onScrollCaptureRequested?(seed)
         }
         overlayView.scrollCaptureCancelDidRequest = { [weak self] in
@@ -707,6 +705,11 @@ final class SelectionOverlayWindow: NSWindow {
             requestScrollCaptureFinish()
             return nil
         }
+        if event.keyCode == 53, nextEscapeCancelsRestoredSelection {
+            nextEscapeCancelsRestoredSelection = false
+            cancelOperation(nil)
+            return nil
+        }
         if let overlayView = contentView as? SelectionOverlayView,
            overlayView.handleKeyDown(event) {
             return nil
@@ -755,11 +758,23 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.scrollCaptureOverlayState = scrollCaptureOverlayState
     }
 
+    func setScrollCaptureCapturing() {
+        scrollCaptureTerminalActionTriggered = false
+        scrollCaptureOverlayState = .capturing
+        ignoresMouseEvents = true
+        (contentView as? SelectionOverlayView)?.scrollCaptureOverlayState = .capturing
+    }
+
     func endScrollCapturePassiveMode() {
         guard scrollCaptureOverlayState != .inactive else { return }
         scrollCaptureOverlayState = .inactive
         ignoresMouseEvents = false
         (contentView as? SelectionOverlayView)?.endScrollCapturePassiveMode()
+    }
+
+    func restoreAfterScrollCaptureCancellation() {
+        endScrollCapturePassiveMode()
+        nextEscapeCancelsRestoredSelection = true
     }
 
     private func requestScrollCaptureCancel() {
@@ -794,6 +809,11 @@ final class SelectionOverlayWindow: NSWindow {
         }
         if Self.isScrollCaptureFinishKey(event.keyCode), scrollCaptureOverlayState != .inactive {
             requestScrollCaptureFinish()
+            return
+        }
+        if event.keyCode == 53, nextEscapeCancelsRestoredSelection {
+            nextEscapeCancelsRestoredSelection = false
+            cancelOperation(nil)
             return
         }
         if let overlayView = contentView as? SelectionOverlayView,

@@ -29,6 +29,68 @@ private final class FakePinnedWindow: PinnedImageWindowPresenting {
     }
 }
 
+@MainActor
+private final class FakeScrollCaptureSession: ScrollCaptureSessionRunning {
+    enum Failure: Error, Equatable { case start, finish }
+
+    let seed: ScrollCaptureSeed
+    var startError: Error?
+    var suspendsStart = false
+    var startContinuation: CheckedContinuation<Void, Error>?
+    var finishError: Error?
+    var finishedImage = NSImage(size: NSSize(width: 20, height: 40))
+    var suspendsFinish = false
+    var finishContinuation: CheckedContinuation<NSImage, Error>?
+    private(set) var startCount = 0
+    private(set) var finishCount = 0
+    private(set) var cancelCount = 0
+
+    init(seed: ScrollCaptureSeed) { self.seed = seed }
+
+    func start() async throws {
+        startCount += 1
+        if let startError { throw startError }
+        if suspendsStart {
+            try await withCheckedThrowingContinuation { startContinuation = $0 }
+        }
+    }
+
+    func finish() async throws -> NSImage {
+        finishCount += 1
+        if let finishError { throw finishError }
+        if suspendsFinish {
+            return try await withCheckedThrowingContinuation { finishContinuation = $0 }
+        }
+        return finishedImage
+    }
+
+    func cancel() -> ScrollCaptureSeed {
+        cancelCount += 1
+        return seed
+    }
+}
+
+@MainActor
+private final class FakeScrollCapturePresentation: ScrollCapturePresenting {
+    private(set) var startCount = 0
+    private(set) var stopCount = 0
+    private(set) var previews: [NSImage] = []
+    private(set) var warnings: [String] = []
+    private(set) var clearWarningCount = 0
+    private(set) var placements: [(NSRect, NSRect)] = []
+    var onFinish: (() -> Void)?
+    var onCancel: (() -> Void)?
+
+    func start() { startCount += 1 }
+    func stop() { stopCount += 1 }
+    func updatePreview(_ image: NSImage) { previews.append(image) }
+    func setWarning(_ text: String) { warnings.append(text) }
+    func clearWarning() { clearWarningCount += 1 }
+    func updatePlacement(selectionFrame: NSRect, visibleFrame: NSRect) {
+        placements.append((selectionFrame, visibleFrame))
+    }
+}
+
 final class SelectionToolbarStateTests: XCTestCase {
     func testBeginScrollCaptureFreezesSeedAndEntersPassiveModeWithoutOrdinaryCompletion() throws {
         let image = solidImage(size: NSSize(width: 640, height: 420), color: .white)
@@ -9476,6 +9538,279 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(coordinator.test_pinnedWindowCount, 0)
     }
 
+    @MainActor
+    func testCaptureCoordinatorStartsOneScrollSessionAndRoutesPresentationUpdates() async throws {
+        let seed = scrollCaptureSeedForCoordinatorTests()
+        let overlay = SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in
+            XCTFail("scroll capture must not use ordinary completion")
+        }
+        var update: (@MainActor (ScrollCapturePresentationUpdate) -> Void)?
+        var session: FakeScrollCaptureSession?
+        let presentation = FakeScrollCapturePresentation()
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            scrollCaptureSessionFactory: { capturedSeed, callback in
+                XCTAssertEqual(capturedSeed.screenRect, seed.screenRect)
+                update = callback
+                let value = FakeScrollCaptureSession(seed: capturedSeed)
+                session = value
+                return value
+            },
+            scrollCapturePresentationFactory: { context in
+                presentation.onFinish = context.onFinish
+                presentation.onCancel = context.onCancel
+                return presentation
+            },
+            longImageHandoff: { _, _ in XCTFail("unexpected handoff") }
+        )
+        coordinator.test_installOverlayWindow(overlay)
+
+        coordinator.test_requestScrollCapture(seed: seed)
+        await Task.yield()
+
+        XCTAssertEqual(session?.startCount, 1)
+        XCTAssertEqual(presentation.startCount, 1)
+        XCTAssertEqual(presentation.placements.count, 1)
+        XCTAssertTrue(coordinator.test_hasScrollCaptureSession)
+        let preview = NSImage(size: NSSize(width: 30, height: 80))
+        update?(.preview(preview))
+        XCTAssertTrue(presentation.previews.last === preview)
+        update?(.state(.paused(.lowConfidence)))
+        XCTAssertEqual(overlay.scrollCaptureOverlayState, .paused(message: L10n(language: .zhHans).text(.scrollCaptureLowConfidence)))
+        XCTAssertEqual(presentation.warnings.last, L10n(language: .zhHans).text(.scrollCaptureLowConfidence))
+        update?(.state(.capturing))
+        XCTAssertEqual(overlay.scrollCaptureOverlayState, .capturing)
+        XCTAssertEqual(presentation.clearWarningCount, 1)
+        update?(.state(.paused(.resourceLimit)))
+        XCTAssertTrue(coordinator.test_hasScrollCaptureSession)
+        XCTAssertEqual(session?.cancelCount, 0)
+        XCTAssertFalse(presentation.warnings.isEmpty)
+    }
+
+    @MainActor
+    func testCaptureCoordinatorFinishStopsAndHandsRawImageWithFrozenSeedExactlyOnce() async throws {
+        let seed = scrollCaptureSeedForCoordinatorTests()
+        let overlay = SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in
+            XCTFail("scroll capture must not use ordinary completion")
+        }
+        let session = FakeScrollCaptureSession(seed: seed)
+        session.finishedImage = NSImage(size: NSSize(width: 31, height: 240))
+        let presentation = FakeScrollCapturePresentation()
+        var handoffs: [(NSImage, ScrollCaptureSeed)] = []
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            scrollCaptureSessionFactory: { _, _ in session },
+            scrollCapturePresentationFactory: { context in
+                presentation.onFinish = context.onFinish
+                presentation.onCancel = context.onCancel
+                return presentation
+            },
+            longImageHandoff: { handoffs.append(($0, $1)) }
+        )
+        coordinator.test_installOverlayWindow(overlay)
+        coordinator.test_requestScrollCapture(seed: seed)
+        await Task.yield()
+
+        presentation.onFinish?()
+        presentation.onFinish?()
+        await Task.yield()
+        await Task.yield()
+
+        XCTAssertEqual(session.finishCount, 1)
+        XCTAssertEqual(presentation.stopCount, 1)
+        XCTAssertEqual(handoffs.count, 1)
+        XCTAssertTrue(handoffs[0].0 === session.finishedImage)
+        XCTAssertEqual(handoffs[0].1.annotations.map(\.id), seed.annotations.map(\.id))
+        XCTAssertEqual(handoffs[0].1.eraserMasks.count, seed.eraserMasks.count)
+        XCTAssertFalse(coordinator.test_hasScrollCaptureSession)
+        XCTAssertNil(coordinator.test_overlayWindow)
+    }
+
+    @MainActor
+    func testCaptureCoordinatorQueuesFinishRequestedWhileSessionIsStarting() async throws {
+        let seed = scrollCaptureSeedForCoordinatorTests()
+        let session = FakeScrollCaptureSession(seed: seed)
+        session.suspendsStart = true
+        let presentation = FakeScrollCapturePresentation()
+        var handoffCount = 0
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            scrollCaptureSessionFactory: { _, _ in session },
+            scrollCapturePresentationFactory: { context in
+                presentation.onFinish = context.onFinish
+                presentation.onCancel = context.onCancel
+                return presentation
+            },
+            longImageHandoff: { _, _ in handoffCount += 1 }
+        )
+        coordinator.test_installOverlayWindow(SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in })
+        coordinator.test_requestScrollCapture(seed: seed)
+        for _ in 0..<10 where session.startContinuation == nil { await Task.yield() }
+
+        presentation.onFinish?()
+        XCTAssertEqual(session.finishCount, 0)
+        session.startContinuation?.resume()
+        for _ in 0..<10 where handoffCount == 0 { await Task.yield() }
+
+        XCTAssertEqual(session.finishCount, 1)
+        XCTAssertEqual(handoffCount, 1)
+        XCTAssertEqual(presentation.stopCount, 1)
+    }
+
+    @MainActor
+    func testCaptureCoordinatorCancelRestoresSameOverlayThenSecondEscapeCancelsOrdinaryCapture() async throws {
+        let seed = scrollCaptureSeedForCoordinatorTests()
+        var ordinaryCompletionCount = 0
+        let overlay = SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in ordinaryCompletionCount += 1 }
+        overlay.test_setLockedSelectionRect(seed.snapshotRect)
+        overlay.test_activateShapeTool(.rectangle)
+        let session = FakeScrollCaptureSession(seed: seed)
+        let presentation = FakeScrollCapturePresentation()
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            scrollCaptureSessionFactory: { _, _ in session },
+            scrollCapturePresentationFactory: { context in
+                presentation.onFinish = context.onFinish
+                presentation.onCancel = context.onCancel
+                return presentation
+            },
+            longImageHandoff: { _, _ in }
+        )
+        coordinator.test_installOverlayWindow(overlay)
+        coordinator.test_requestScrollCapture(seed: seed)
+        await Task.yield()
+
+        presentation.onCancel?()
+
+        XCTAssertEqual(session.cancelCount, 1)
+        XCTAssertEqual(presentation.stopCount, 1)
+        XCTAssertTrue(coordinator.test_overlayWindow === overlay)
+        XCTAssertEqual(overlay.scrollCaptureOverlayState, .inactive)
+        XCTAssertFalse(overlay.ignoresMouseEvents)
+        XCTAssertTrue(overlay.test_toolbarButtonIsSelected(.rectangle))
+        XCTAssertEqual(ordinaryCompletionCount, 0)
+        overlay.test_keyDown(keyCode: 53)
+        await Task.yield()
+        XCTAssertEqual(ordinaryCompletionCount, 1)
+    }
+
+    @MainActor
+    func testCaptureCoordinatorStartAndFinishErrorsStopPresentationAndRecoverOverlay() async throws {
+        for failure in [FakeScrollCaptureSession.Failure.start, .finish] {
+            let seed = scrollCaptureSeedForCoordinatorTests()
+            let overlay = SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in }
+            let session = FakeScrollCaptureSession(seed: seed)
+            if failure == .start { session.startError = failure } else { session.finishError = failure }
+            let presentation = FakeScrollCapturePresentation()
+            let coordinator = CaptureCoordinator(
+                permissionCoordinator: PermissionCoordinator(),
+                screenCaptureService: ScreenCaptureService(),
+                scrollCaptureSessionFactory: { _, _ in session },
+                scrollCapturePresentationFactory: { context in
+                    presentation.onFinish = context.onFinish
+                    presentation.onCancel = context.onCancel
+                    return presentation
+                },
+                longImageHandoff: { _, _ in XCTFail("error must not hand off") }
+            )
+            coordinator.test_installOverlayWindow(overlay)
+            coordinator.test_requestScrollCapture(seed: seed)
+            await Task.yield()
+            if failure == .finish {
+                presentation.onFinish?()
+                await Task.yield()
+                await Task.yield()
+            }
+
+            XCTAssertEqual(presentation.stopCount, 1)
+            XCTAssertFalse(coordinator.test_hasScrollCaptureSession)
+            XCTAssertTrue(coordinator.test_overlayWindow === overlay)
+            XCTAssertEqual(overlay.scrollCaptureOverlayState, .inactive)
+            XCTAssertFalse(overlay.ignoresMouseEvents)
+        }
+    }
+
+    @MainActor
+    func testCaptureCoordinatorStaleFinishCannotClearNewScrollLifecycle() async throws {
+        let seed = scrollCaptureSeedForCoordinatorTests()
+        let oldSession = FakeScrollCaptureSession(seed: seed)
+        oldSession.suspendsFinish = true
+        let newSession = FakeScrollCaptureSession(seed: seed)
+        let oldPresentation = FakeScrollCapturePresentation()
+        let newPresentation = FakeScrollCapturePresentation()
+        var sessionIndex = 0
+        var presentationIndex = 0
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            scrollCaptureSessionFactory: { _, _ in
+                defer { sessionIndex += 1 }
+                return sessionIndex == 0 ? oldSession : newSession
+            },
+            scrollCapturePresentationFactory: { context in
+                let value = presentationIndex == 0 ? oldPresentation : newPresentation
+                presentationIndex += 1
+                value.onFinish = context.onFinish
+                value.onCancel = context.onCancel
+                return value
+            },
+            longImageHandoff: { _, _ in XCTFail("stale finish must not hand off") }
+        )
+        let firstOverlay = SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in }
+        coordinator.test_installOverlayWindow(firstOverlay)
+        coordinator.test_requestScrollCapture(seed: seed)
+        await Task.yield()
+        oldPresentation.onFinish?()
+        await Task.yield()
+        coordinator.test_cancelScrollCapture()
+
+        let secondOverlay = SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in }
+        coordinator.test_installOverlayWindow(secondOverlay)
+        coordinator.test_requestScrollCapture(seed: seed)
+        await Task.yield()
+        oldSession.finishContinuation?.resume(returning: oldSession.finishedImage)
+        await Task.yield()
+
+        XCTAssertTrue(coordinator.test_hasScrollCaptureSession)
+        XCTAssertEqual(newSession.startCount, 1)
+        XCTAssertEqual(newPresentation.stopCount, 0)
+    }
+
+    @MainActor
+    func testCaptureCoordinatorDeinitStopsAndCancelsOwnedScrollLifecycle() async throws {
+        let seed = scrollCaptureSeedForCoordinatorTests()
+        let session = FakeScrollCaptureSession(seed: seed)
+        let presentation = FakeScrollCapturePresentation()
+        weak var weakCoordinator: CaptureCoordinator?
+        do {
+            var coordinator: CaptureCoordinator? = CaptureCoordinator(
+                permissionCoordinator: PermissionCoordinator(),
+                screenCaptureService: ScreenCaptureService(),
+                scrollCaptureSessionFactory: { _, _ in session },
+                scrollCapturePresentationFactory: { context in
+                    presentation.onFinish = context.onFinish
+                    presentation.onCancel = context.onCancel
+                    return presentation
+                },
+                longImageHandoff: { _, _ in }
+            )
+            weakCoordinator = coordinator
+            coordinator?.test_installOverlayWindow(SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in })
+            coordinator?.test_requestScrollCapture(seed: seed)
+            await Task.yield()
+            coordinator = nil
+        }
+        await Task.yield()
+
+        XCTAssertNil(weakCoordinator)
+        XCTAssertEqual(session.cancelCount, 1)
+        XCTAssertEqual(presentation.stopCount, 1)
+    }
+
     func testMagnifierRendererSamplesOriginalImageInsteadOfAnnotations() throws {
         let base = solidImage(size: NSSize(width: 80, height: 80), color: .white)
         var coveringAnnotation = CaptureAnnotation(
@@ -14382,6 +14717,21 @@ final class SelectionToolbarStateTests: XCTestCase {
         }
         image.unlockFocus()
         return image
+    }
+
+    private func scrollCaptureSeedForCoordinatorTests() -> ScrollCaptureSeed {
+        let annotation = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 4, y: 5, width: 12, height: 14),
+            style: CaptureAnnotationStyle()
+        )
+        return ScrollCaptureSeed(
+            screenRect: NSRect(x: 100, y: 120, width: 80, height: 60),
+            snapshotRect: NSRect(x: 10, y: 20, width: 80, height: 60),
+            frozenImage: solidImage(size: NSSize(width: 80, height: 60), color: .white),
+            annotations: [annotation],
+            eraserMasks: [EraserMask(rect: NSRect(x: 6, y: 7, width: 4, height: 5), affectedAnnotationIDs: [annotation.id])]
+        )
     }
 
     private func solidImage(size: NSSize, color: NSColor) -> NSImage {
