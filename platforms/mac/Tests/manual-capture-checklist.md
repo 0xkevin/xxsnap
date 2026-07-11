@@ -62,7 +62,7 @@ For every executed row, save a representative PNG outside the repository and ins
 | P2 | Region with room outside | Preview is placed outside the selected region and stays inside the visible screen. | 待人工 |
 | P3 | Region with no outside room | Preview falls back inside a safe area and does not overlap the Finish/Cancel hit regions. | 待人工 |
 | P4 | Selection against each screen edge/corner | Toolbar and preview remain on-screen and actionable. | 待人工 |
-| P5 | Multi-display, selection on non-primary display | Capture, toolbar and preview stay on the selected display; output uses the selected coordinates. | 待人工（需多屏） |
+| P5 | Multi-display, selection on non-primary display | Capture, toolbar, preview, long-image editor and subsequent pin stay on the capture display; output uses the selected coordinates. | 待人工（需多屏） |
 | P6 | Retina display | Point-to-pixel conversion is sharp and seams/annotations align at native scale. | 待人工 |
 | P7 | Non-Retina display or scaled external display | Capture dimensions, seams, preview and annotations align without 2x/1x drift. | 待人工（需对应显示器） |
 
