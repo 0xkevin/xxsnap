@@ -72,7 +72,7 @@ Run:
 
 ```bash
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer cmake --build build --target test_scroll_stitch_session
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer ./build/core/tests/test_scroll_stitch_session fixedBandConfirmationIsAwaitingEvidence unrelatedFrameIsDiscardedAsLowConfidence
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer ./build/core/test_scroll_stitch_session fixedBandConfirmationIsAwaitingEvidence unrelatedFrameIsDiscardedAsLowConfidence
 ```
 
 Expected: compilation fails because `AwaitingEvidence` and `LowConfidenceDiscarded` do not exist.
@@ -118,7 +118,7 @@ Run:
 
 ```bash
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer cmake --build build --target test_scroll_stitch_session
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer ./build/core/tests/test_scroll_stitch_session
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer ./build/core/test_scroll_stitch_session
 ```
 
 Expected: all scroll-stitch tests pass, and every old `PausedLowConfidence` assertion has been intentionally assigned to one of the two new meanings.
@@ -239,7 +239,7 @@ Set `direction` only immediately before the first successful output mutation. Ne
 Run:
 
 ```bash
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer ./build/core/tests/test_scroll_stitch_session firstReliableDownwardMovementLocksAppendDirection firstReliableUpwardMovementLocksPrependDirection exactDuplicateDoesNotMutateOutput reverseReviewDoesNotMutateAcceptedContent previewDownsamplesWithoutMutatingFinalImage
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer ./build/core/test_scroll_stitch_session firstReliableDownwardMovementLocksAppendDirection firstReliableUpwardMovementLocksPrependDirection exactDuplicateDoesNotMutateOutput reverseReviewDoesNotMutateAcceptedContent previewDownsamplesWithoutMutatingFinalImage
 ```
 
 Expected: all pass with natural top-to-bottom pixels.
