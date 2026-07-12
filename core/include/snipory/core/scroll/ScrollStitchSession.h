@@ -14,13 +14,14 @@ enum class AppendKind
     AcceptedAppend,
     DuplicateDiscarded,
     ReviewDiscarded,
-    PausedLowConfidence,
+    AwaitingEvidence,
+    LowConfidenceDiscarded,
     ResourceLimit,
 };
 
 struct AppendResult final
 {
-    AppendKind kind = AppendKind::PausedLowConfidence;
+    AppendKind kind = AppendKind::LowConfidenceDiscarded;
     int appendedHeight = 0;
     int outputHeight = 0;
     double confidence = 0;

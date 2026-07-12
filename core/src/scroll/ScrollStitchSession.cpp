@@ -868,6 +868,8 @@ try {
             implementation_->fixedBottomAgreement = nextBottomAgreement;
             implementation_->fixedTopRunHeight = nextTopRunHeight;
             implementation_->fixedBottomRunHeight = nextBottomRunHeight;
+            result.kind = AppendKind::AwaitingEvidence;
+            result.outputHeight = implementation_->height;
             return result;
         }
 
