@@ -198,6 +198,21 @@ public:
         Up,
     };
 
+    enum class DirectionalDecision
+    {
+        Movement,
+        Opposite,
+        Ambiguous,
+    };
+
+    struct DirectionalMatch final
+    {
+        DirectionalDecision decision = DirectionalDecision::Ambiguous;
+        Direction candidate = Direction::Undetermined;
+        OverlapResult overlap;
+        double confidence = 0.0;
+    };
+
     struct PendingMovement final
     {
         std::shared_ptr<const ScrollFrame> frame;
@@ -205,6 +220,7 @@ public:
         int advance = 0;
         double confidence = 0.0;
         std::size_t persistentBytes = 0U;
+        Direction candidate = Direction::Undetermined;
         BandDecision topDecision = BandDecision::Ordinary;
         BandDecision bottomDecision = BandDecision::Ordinary;
     };
@@ -212,6 +228,7 @@ public:
     struct FixedBandEvidence final
     {
         OverlapResult overlap;
+        Direction candidate = Direction::Undetermined;
         bool top = false;
         bool bottom = false;
         int topHeight = 0;
@@ -239,6 +256,52 @@ public:
     int fixedTopRunHeight = 0;
     int fixedBottomRunHeight = 0;
     ScrollbarState scrollbar;
+
+    [[nodiscard]] static bool reliableMovement(const OverlapResult& value)
+    {
+        return value.kind == OverlapKind::Reliable && value.verticalAdvance > 0;
+    }
+
+    [[nodiscard]] static OverlapResult matchInDirection(
+        const ScrollFrame& previous,
+        const ScrollFrame& current,
+        const OverlapConfig& matcherConfig,
+        Direction direction)
+    {
+        VerticalOverlapMatcher matcher;
+        return direction == Direction::Up
+            ? matcher.match(current, previous, matcherConfig)
+            : matcher.match(previous, current, matcherConfig);
+    }
+
+    [[nodiscard]] DirectionalMatch directionalMatch(
+        const ScrollFrame& previous,
+        const ScrollFrame& current,
+        const OverlapConfig& matcherConfig,
+        Direction expected) const
+    {
+        const auto down = matchInDirection(
+            previous, current, matcherConfig, Direction::Down);
+        const auto up = matchInDirection(
+            previous, current, matcherConfig, Direction::Up);
+        const bool downReliable = reliableMovement(down);
+        const bool upReliable = reliableMovement(up);
+        DirectionalMatch result;
+        result.confidence = std::max(down.confidence, up.confidence);
+        if (downReliable == upReliable) {
+            return result;
+        }
+        const Direction candidate = downReliable ? Direction::Down : Direction::Up;
+        result.candidate = candidate;
+        result.overlap = downReliable ? down : up;
+        result.confidence = result.overlap.confidence;
+        if (expected == Direction::Undetermined || expected == candidate) {
+            result.decision = DirectionalDecision::Movement;
+        } else {
+            result.decision = DirectionalDecision::Opposite;
+        }
+        return result;
+    }
 
     [[nodiscard]] bool duplicateFingerprint(const Fingerprint& left, const Fingerprint& right) const
     {
@@ -360,7 +423,8 @@ public:
 
     [[nodiscard]] FixedBandEvidence fixedBandEvidence(
         const ScrollFrame& previous,
-        const ScrollFrame& current) const
+        const ScrollFrame& current,
+        Direction establishedDirection) const
     {
         FixedBandEvidence evidence;
         evidence.topHeight = stationaryBandHeight(previous, current, true);
@@ -383,14 +447,26 @@ public:
                 matcherConfig.excludedBands.bottom,
                 std::max(evidence.bottomHeight, fixedBottomRunHeight));
         }
-        VerticalOverlapMatcher matcher;
-        evidence.overlap = matcher.match(previous, current, matcherConfig);
-        if (evidence.overlap.kind != OverlapKind::Reliable
-            || evidence.overlap.verticalAdvance <= 0) {
+        DirectionalMatch directional;
+        if (establishedDirection == Direction::Undetermined) {
+            directional = directionalMatch(
+                previous, current, matcherConfig, Direction::Undetermined);
+        } else {
+            directional.candidate = establishedDirection;
+            directional.overlap = matchInDirection(
+                previous, current, matcherConfig, establishedDirection);
+            directional.confidence = directional.overlap.confidence;
+            if (reliableMovement(directional.overlap)) {
+                directional.decision = DirectionalDecision::Movement;
+            }
+        }
+        if (directional.decision != DirectionalDecision::Movement) {
             evidence.top = false;
             evidence.bottom = false;
             return evidence;
         }
+        evidence.overlap = directional.overlap;
+        evidence.candidate = directional.candidate;
 
         auto bandIsInformativeAndStationary = [&](bool top, int height) {
             const int edgeInset = std::min(config.scrollbarMaximumWidth, current.width / 8);
@@ -421,12 +497,13 @@ public:
                     previousValue = currentValue;
                     sameError += std::abs(currentValue - previousSame) / 255.0;
 
+                    const bool upward = evidence.candidate == Direction::Up;
                     const int alignedPreviousY = top
-                        ? y + evidence.overlap.verticalAdvance
-                        : y;
+                        ? y + (upward ? 0 : evidence.overlap.verticalAdvance)
+                        : y - (upward ? evidence.overlap.verticalAdvance : 0);
                     const int alignedCurrentY = top
-                        ? y
-                        : y - evidence.overlap.verticalAdvance;
+                        ? y + (upward ? evidence.overlap.verticalAdvance : 0)
+                        : y - (upward ? 0 : evidence.overlap.verticalAdvance);
                     if (alignedPreviousY >= 0 && alignedPreviousY < previous.height
                         && alignedCurrentY >= 0 && alignedCurrentY < current.height) {
                         const int previousAligned = luminanceAt(previous, x, alignedPreviousY);
@@ -471,11 +548,13 @@ public:
                     matcherConfig.excludedBands.bottom,
                     std::max(evidence.bottomHeight, fixedBottomRunHeight));
             }
-            evidence.overlap = matcher.match(previous, current, matcherConfig);
-            if (evidence.overlap.kind != OverlapKind::Reliable
-                || evidence.overlap.verticalAdvance <= 0) {
+            const auto refined = matchInDirection(
+                previous, current, matcherConfig, evidence.candidate);
+            if (!reliableMovement(refined)) {
                 evidence.top = false;
                 evidence.bottom = false;
+            } else {
+                evidence.overlap = refined;
             }
         }
         return evidence;
@@ -712,73 +791,91 @@ try {
         return result;
     }
 
-    VerticalOverlapMatcher matcher;
     const auto& evidenceTail = implementation_->pending.empty()
         ? *implementation_->tail
         : *implementation_->pending.back().frame;
     const auto matcherConfig = implementation_->effectiveMatcherConfig();
-    auto overlap = matcher.match(evidenceTail, frame, matcherConfig);
-    result.confidence = overlap.confidence;
-    bool prepend = false;
+    using Direction = Implementation::Direction;
+    using DirectionalDecision = Implementation::DirectionalDecision;
+    const Direction expectedDirection = implementation_->direction != Direction::Undetermined
+        ? implementation_->direction
+        : (!implementation_->pending.empty()
+                ? implementation_->pending.back().candidate
+                : Direction::Undetermined);
+    auto directional = implementation_->directionalMatch(
+        evidenceTail, frame, matcherConfig, expectedDirection);
+    if (implementation_->pending.empty()
+        && implementation_->direction != Direction::Undetermined
+        && directional.decision != DirectionalDecision::Movement) {
+        const auto& oppositeFrontier = implementation_->direction == Direction::Down
+            ? *implementation_->segments.front().pixels
+            : *implementation_->segments.back().pixels;
+        const auto frontierMatch = implementation_->directionalMatch(
+            oppositeFrontier, frame, matcherConfig, implementation_->direction);
+        if (frontierMatch.decision == DirectionalDecision::Opposite) {
+            directional = frontierMatch;
+        }
+    }
+    auto overlap = directional.overlap;
+    result.confidence = directional.confidence;
+    bool prepend = directional.candidate == Direction::Up;
     std::optional<Implementation::Direction> directionToLock;
     if (!config.enableFixedBandDetection && implementation_->pending.empty()) {
-        using Direction = Implementation::Direction;
-        const auto reliableMovement = [](const OverlapResult& candidate) {
-            return candidate.kind == OverlapKind::Reliable && candidate.verticalAdvance > 0;
-        };
-        const auto reverse = matcher.match(frame, evidenceTail, matcherConfig);
-        const bool forwardReliable = reliableMovement(overlap);
-        const bool reverseReliable = reliableMovement(reverse);
-
-        if (implementation_->direction == Direction::Undetermined) {
-            if (forwardReliable == reverseReliable) {
-                result.kind = AppendKind::LowConfidenceDiscarded;
-                result.confidence = std::max(overlap.confidence, reverse.confidence);
-                return result;
-            }
-            if (reverseReliable) {
-                overlap = reverse;
-                prepend = true;
-                directionToLock = Direction::Up;
-            } else {
-                directionToLock = Direction::Down;
-            }
-        } else if (implementation_->direction == Direction::Down) {
-            const auto& topFrontier = *implementation_->segments.front().pixels;
-            const auto opposite = matcher.match(frame, topFrontier, matcherConfig);
-            if (reliableMovement(opposite)) {
-                result.kind = AppendKind::ReviewDiscarded;
-                result.confidence = opposite.confidence;
-                return result;
-            }
-            if (!forwardReliable) {
-                return result;
-            }
-        } else {
-            const auto& bottomFrontier = *implementation_->segments.back().pixels;
-            const auto opposite = matcher.match(bottomFrontier, frame, matcherConfig);
-            if (reliableMovement(opposite)) {
-                result.kind = AppendKind::ReviewDiscarded;
-                result.confidence = opposite.confidence;
-                return result;
-            }
-            if (!reverseReliable) {
-                return result;
-            }
-            overlap = reverse;
-            prepend = true;
-        }
-        result.confidence = overlap.confidence;
-    }
-    const auto evidence = implementation_->fixedBandEvidence(evidenceTail, frame);
-    if (config.enableFixedBandDetection && !evidence.top && !evidence.bottom
-        && implementation_->pending.empty()) {
-        const auto reverse = matcher.match(frame, evidenceTail, matcherConfig);
-        if (reverse.kind == OverlapKind::Reliable && reverse.verticalAdvance > 0) {
-            result.kind = AppendKind::ReviewDiscarded;
-            result.confidence = reverse.confidence;
+        if (directional.decision != DirectionalDecision::Movement) {
+            result.kind = directional.decision == DirectionalDecision::Opposite
+                ? AppendKind::ReviewDiscarded
+                : AppendKind::LowConfidenceDiscarded;
             return result;
         }
+        directionToLock = implementation_->direction == Direction::Undetermined
+            ? std::optional<Direction>(directional.candidate)
+            : std::nullopt;
+        result.confidence = overlap.confidence;
+    }
+    const Direction establishedDirection = expectedDirection != Direction::Undetermined
+        ? expectedDirection
+        : (directional.decision == DirectionalDecision::Movement
+                ? directional.candidate
+                : Direction::Undetermined);
+    const auto evidence = implementation_->fixedBandEvidence(
+        evidenceTail, frame, establishedDirection);
+    if (evidence.top || evidence.bottom) {
+        directional.decision = DirectionalDecision::Movement;
+        directional.candidate = evidence.candidate;
+        directional.overlap = evidence.overlap;
+        directional.confidence = evidence.overlap.confidence;
+        overlap = evidence.overlap;
+        prepend = evidence.candidate == Direction::Up;
+        result.confidence = evidence.overlap.confidence;
+    }
+    if (config.enableFixedBandDetection && !implementation_->pending.empty()
+        && directional.decision != DirectionalDecision::Movement) {
+        auto reviewConfig = matcherConfig;
+        if (implementation_->fixedTopAgreement > 0) {
+            reviewConfig.excludedBands.top = std::max(
+                reviewConfig.excludedBands.top, implementation_->fixedTopRunHeight);
+        }
+        if (implementation_->fixedBottomAgreement > 0) {
+            reviewConfig.excludedBands.bottom = std::max(
+                reviewConfig.excludedBands.bottom, implementation_->fixedBottomRunHeight);
+        }
+        for (auto movement = implementation_->pending.crbegin();
+             movement != implementation_->pending.crend(); ++movement) {
+            const auto review = implementation_->directionalMatch(
+                *movement->frame, frame, reviewConfig, movement->candidate);
+            if (review.decision == DirectionalDecision::Opposite) {
+                result.kind = AppendKind::ReviewDiscarded;
+                result.confidence = review.confidence;
+                return result;
+            }
+        }
+    }
+    if (config.enableFixedBandDetection
+        && directional.decision != DirectionalDecision::Movement) {
+        result.kind = directional.decision == DirectionalDecision::Opposite
+            ? AppendKind::ReviewDiscarded
+            : AppendKind::LowConfidenceDiscarded;
+        return result;
     }
 
     const bool topEvidenceBroke = !implementation_->fixedTopConfirmed
@@ -800,9 +897,10 @@ try {
                 transitionConfig.excludedBands.bottom,
                 std::max(evidence.bottomHeight, implementation_->fixedBottomRunHeight));
         }
-        const auto transition = matcher.match(evidenceTail, frame, transitionConfig);
-        if (transition.kind == OverlapKind::Reliable && transition.verticalAdvance > 0) {
-            movementOverlap = transition;
+        const auto transition = implementation_->directionalMatch(
+            evidenceTail, frame, transitionConfig, expectedDirection);
+        if (transition.decision == DirectionalDecision::Movement) {
+            movementOverlap = transition.overlap;
             result.confidence = transition.confidence;
         }
     }
@@ -823,10 +921,11 @@ try {
             }
             for (auto movement = implementation_->pending.crbegin();
                  movement != implementation_->pending.crend(); ++movement) {
-                const auto reverse = matcher.match(frame, *movement->frame, reviewConfig);
-                if (reverse.kind == OverlapKind::Reliable && reverse.verticalAdvance > 0) {
+                const auto review = implementation_->directionalMatch(
+                    *movement->frame, frame, reviewConfig, movement->candidate);
+                if (review.decision == DirectionalDecision::Opposite) {
                     result.kind = AppendKind::ReviewDiscarded;
-                    result.confidence = reverse.confidence;
+                    result.confidence = review.confidence;
                     return result;
                 }
             }
@@ -852,6 +951,7 @@ try {
             movementOverlap.verticalAdvance,
             movementOverlap.confidence,
             *contribution,
+            directional.candidate,
         };
         const int requiredEvidence = std::max(3, config.fixedBandConfirmationMovements);
         const auto heightIsConsistent = [](int previousHeight, int currentHeight) {
@@ -941,16 +1041,23 @@ try {
         const ScrollFrame* previous = implementation_->tail.get();
         auto prepareMovement = [&](
                                    const Implementation::PendingMovement& movement,
+                                   BandDecision topDecision,
                                    BandDecision bottomDecision) {
             if (movement.advance > std::numeric_limits<int>::max() - flushedHeight) {
                 return false;
             }
+            const bool excludeTop = topDecision == BandDecision::Fixed;
             const bool excludeBottom = bottomDecision == BandDecision::Fixed;
+            const int topHeight = implementation_->fixedTopConfirmed
+                ? implementation_->fixedTopHeight
+                : nextTopRunHeight;
             const int bottomHeight = implementation_->fixedBottomConfirmed
                 ? implementation_->fixedBottomHeight
                 : nextBottomRunHeight;
-            const int firstRow = movement.frame->height - movement.advance
-                - (excludeBottom ? bottomHeight : 0);
+            const int firstRow = movement.candidate == Direction::Up
+                ? (excludeTop ? topHeight : 0)
+                : movement.frame->height - movement.advance
+                    - (excludeBottom ? bottomHeight : 0);
             auto pixels = copyRows(*movement.frame, firstRow, movement.advance);
             if (!pixels.isValid()) {
                 return false;
@@ -967,7 +1074,7 @@ try {
             const auto& movement = i < implementation_->pending.size()
                 ? implementation_->pending[i]
                 : newMovement;
-            if (!prepareMovement(movement, decisions[i].second)) {
+            if (!prepareMovement(movement, decisions[i].first, decisions[i].second)) {
                 result.kind = AppendKind::ResourceLimit;
                 return result;
             }
@@ -1016,8 +1123,16 @@ try {
             implementation_->pending[i].bottomDecision = decisions[i].second;
         }
         implementation_->pending.push_back(std::move(newMovement));
+        const Direction flushedDirection = implementation_->pending.empty()
+            ? directional.candidate
+            : implementation_->pending.front().candidate;
         for (auto& segment : preparedSegments) {
-            implementation_->segments.push_back(std::move(segment));
+            if (flushedDirection == Direction::Up) {
+                implementation_->segments.insert(
+                    implementation_->segments.begin(), std::move(segment));
+            } else {
+                implementation_->segments.push_back(std::move(segment));
+            }
         }
         const auto newTail = implementation_->pending[safePrefix - 1U].frame;
         for (std::size_t i = 0; i < safePrefix; ++i) {
@@ -1051,6 +1166,9 @@ try {
             : nextBottomRunHeight;
         implementation_->scrollbar = std::move(preparedScrollbar);
         implementation_->height += flushedHeight;
+        if (implementation_->direction == Direction::Undetermined) {
+            implementation_->direction = flushedDirection;
+        }
         result.kind = AppendKind::AcceptedAppend;
         result.appendedHeight = flushedHeight;
         result.outputHeight = implementation_->height;
@@ -1061,6 +1179,9 @@ try {
     if (overlap.kind != OverlapKind::Reliable || overlap.verticalAdvance <= 0) {
         implementation_->clearPending();
         return result;
+    }
+    if (implementation_->direction == Direction::Undetermined) {
+        directionToLock = directional.candidate;
     }
 
     const int appendedHeight = overlap.verticalAdvance;
