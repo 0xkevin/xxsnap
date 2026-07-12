@@ -84,7 +84,8 @@ For every executed row, save a representative PNG outside the repository and ins
 
 - [ ] Force or use a test build with a small accepted-byte budget; confirm the resource guard pauses collection, preserves the accepted preview, and leaves Finish Scroll Capture/Cancel available.
 - [ ] Finish after the resource guard pauses; confirm the retained accepted segments compose and enter the editor.
-- [ ] Simulate a transient frame-capture failure; confirm this blocking failure pauses collection, shows a warning, keeps accepted content available, and ignores later scroll activity instead of rearming sampling. Confirm the only reliable paths are Finish with the accepted result or Cancel.
+- [ ] Simulate an initial seed-capture or session-start failure; confirm the Coordinator cancels the scroll session, closes the scroll preview, restores the original locked selection, and does not offer Finish because no seed/result was accepted. `待人工`
+- [ ] After the seed is accepted, with or without appended segments, simulate a live frame-capture failure; confirm this blocking failure pauses collection, shows a warning, keeps accepted content available, and ignores later scroll activity instead of rearming sampling. Confirm the only reliable paths are Finish with the current accepted result or Cancel. `待人工`
 - [ ] Simulate final composition failure; confirm the session/accepted engine state remains alive for another Finish attempt or Cancel.
 - [ ] Simulate long-image editor creation returning `nil` and throwing; confirm the completed image is retained and a Save/Cancel fallback appears.
 - [ ] In the fallback, cancel the save panel once and confirm the fallback offers Save/Cancel again; then save successfully and verify the PNG. Canceling the fallback must end cleanly without claiming a save.

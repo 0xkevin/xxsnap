@@ -13,7 +13,7 @@ This section records the 2026-07-12 incremental decision and supersedes the orig
 - A session extends only one side of the seed. Reverse movement after the lock is review/dedup only and never changes direction; capturing the other side requires a new session. Horizontal capture remains deferred.
 - Low confidence produces a non-blocking warning and never automatically pauses the session. Sustained low-confidence or stable frames may let the sampling timer go idle; the next wheel or trackpad activity immediately rearms it.
 - Awaiting fixed-band evidence is normal continued sampling, clears any prior low-confidence warning, and does not show a new warning.
-- Only capture failure and resource guards create a blocking pause. Final-composition retry/cancel behavior is unchanged.
+- An initial seed/start failure cancels the scroll session, closes its preview, and restores the original locked selection; no Finish path exists before the seed is accepted. During collection, only a live capture failure after seed acceptance and resource guards create a blocking pause. A final-composition failure returns to a paused Retry Finish/Cancel path.
 
 ## Current State
 
@@ -108,13 +108,15 @@ stateDiagram-v2
   [*] --> SelectionLocked
   SelectionLocked --> Preparing: Scroll Capture
   Preparing --> Capturing: Initial frame accepted
+  Preparing --> SelectionLocked: Seed or start failure; cancel session
   Capturing --> Capturing: Repeat or review frame
   Capturing --> Capturing: Direction locked or segment accepted
   Capturing --> Capturing: Low-confidence warning or sampling idle/rearm
-  Capturing --> Paused: Capture failure or resource guard
+  Capturing --> Paused: Live capture failure or resource guard
   Capturing --> Completing: Finish or Enter
   Paused --> Completing: Finish or Enter
   Completing --> LongImageEditor: Final image available
+  Completing --> Paused: Final composition failure; retry Finish or Cancel
   Capturing --> SelectionLocked: Esc or Cancel
   Paused --> SelectionLocked: Esc or Cancel
 ```
@@ -246,7 +248,8 @@ Pin creates a pin for the complete long image, initially scaled to the visible s
 
 ## Error and Resource Handling
 
-- Initial or live frame-capture failure creates a blocking pause with an actionable error while preserving accepted content; scroll activity cannot resume or rearm sampling, so the reliable paths are Finish with the accepted result or Cancel.
+- Initial seed capture or session start failure cancels the scroll session, closes the scroll preview, and restores the original locked selection. Because no accepted seed/result exists, Finish is unavailable.
+- A live frame-capture failure after seed acceptance creates a blocking pause with an actionable error while preserving accepted content; scroll activity cannot resume or rearm sampling, so the reliable paths are Finish with the current accepted result or Cancel.
 - Low overlap, ambiguous placement, or excessive scroll displacement shows a non-blocking warning without mutating accepted content; sustained low-confidence frames may idle the sampling timer until input immediately rearms it.
 - Awaiting fixed-band evidence remains normal active sampling, clears any prior low-confidence warning, and does not show a new warning.
 - Approaching a safe memory or image-dimension limit pauses and offers completion with the current result.
@@ -297,7 +300,8 @@ Synthetic fixtures should be complemented by checked-in image sequences for brow
 - Fixed screen-position regions appear once.
 - High-confidence scrollbars are removed without cropping document content.
 - Unreliable matching warns without accepting a bad seam or automatically pausing; sustained low-confidence/stable frames may idle sampling and the next input immediately rearms it.
-- Capture-failure and resource-limit pauses ignore scroll activity and preserve Finish/Cancel; a final-composition failure preserves another Finish attempt or Cancel.
+- Initial seed/start failure closes the scroll preview and restores the original locked selection without offering Finish.
+- Live capture-failure and resource-limit pauses ignore scroll activity and preserve Finish/Cancel; a final-composition failure preserves another Finish attempt or Cancel.
 - The toolbar and latest-edge preview remain responsive throughout capture.
 - Existing annotations survive into the first screen of the long-image editor.
 - Editor, clipboard, saved PNG, and pin agree on full-image content and annotations.
