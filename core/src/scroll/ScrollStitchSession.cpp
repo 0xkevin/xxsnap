@@ -791,19 +791,57 @@ try {
         return result;
     }
 
-    const auto& evidenceTail = implementation_->pending.empty()
-        ? *implementation_->tail
-        : *implementation_->pending.back().frame;
+    const ScrollFrame* evidenceTail = implementation_->pending.empty()
+        ? implementation_->tail.get()
+        : implementation_->pending.back().frame.get();
     const auto matcherConfig = implementation_->effectiveMatcherConfig();
     using Direction = Implementation::Direction;
     using DirectionalDecision = Implementation::DirectionalDecision;
-    const Direction expectedDirection = implementation_->direction != Direction::Undetermined
+    Direction expectedDirection = implementation_->direction != Direction::Undetermined
         ? implementation_->direction
         : (!implementation_->pending.empty()
                 ? implementation_->pending.back().candidate
                 : Direction::Undetermined);
     auto directional = implementation_->directionalMatch(
-        evidenceTail, frame, matcherConfig, expectedDirection);
+        *evidenceTail, frame, matcherConfig, expectedDirection);
+    if (implementation_->direction == Direction::Undetermined
+        && !implementation_->pending.empty()) {
+        auto pendingDirectionConfig = matcherConfig;
+        if (implementation_->fixedTopAgreement > 0) {
+            pendingDirectionConfig.excludedBands.top = std::max(
+                pendingDirectionConfig.excludedBands.top,
+                implementation_->fixedTopRunHeight);
+        }
+        if (implementation_->fixedBottomAgreement > 0) {
+            pendingDirectionConfig.excludedBands.bottom = std::max(
+                pendingDirectionConfig.excludedBands.bottom,
+                implementation_->fixedBottomRunHeight);
+        }
+        const auto pendingDirectional = implementation_->directionalMatch(
+            *evidenceTail, frame, pendingDirectionConfig, expectedDirection);
+        if (pendingDirectional.decision == DirectionalDecision::Opposite) {
+            const Direction restartedCandidate = pendingDirectional.candidate;
+            implementation_->clearPending();
+            evidenceTail = implementation_->tail.get();
+            expectedDirection = Direction::Undetermined;
+            directional = implementation_->directionalMatch(
+                *evidenceTail, frame, matcherConfig, expectedDirection);
+            if (directional.decision != DirectionalDecision::Movement
+                || directional.candidate != restartedCandidate) {
+                const auto restartedEvidence = implementation_->fixedBandEvidence(
+                    *evidenceTail, frame, restartedCandidate);
+                if (!restartedEvidence.top && !restartedEvidence.bottom) {
+                    result.kind = AppendKind::ReviewDiscarded;
+                    result.confidence = pendingDirectional.confidence;
+                    return result;
+                }
+                directional.decision = DirectionalDecision::Movement;
+                directional.candidate = restartedCandidate;
+                directional.overlap = restartedEvidence.overlap;
+                directional.confidence = restartedEvidence.overlap.confidence;
+            }
+        }
+    }
     if (implementation_->pending.empty()
         && implementation_->direction != Direction::Undetermined
         && directional.decision != DirectionalDecision::Movement) {
@@ -838,7 +876,7 @@ try {
                 ? directional.candidate
                 : Direction::Undetermined);
     const auto evidence = implementation_->fixedBandEvidence(
-        evidenceTail, frame, establishedDirection);
+        *evidenceTail, frame, establishedDirection);
     if (evidence.top || evidence.bottom) {
         directional.decision = DirectionalDecision::Movement;
         directional.candidate = evidence.candidate;
@@ -864,6 +902,9 @@ try {
             const auto review = implementation_->directionalMatch(
                 *movement->frame, frame, reviewConfig, movement->candidate);
             if (review.decision == DirectionalDecision::Opposite) {
+                if (implementation_->direction == Direction::Undetermined) {
+                    implementation_->clearPending();
+                }
                 result.kind = AppendKind::ReviewDiscarded;
                 result.confidence = review.confidence;
                 return result;
@@ -890,7 +931,7 @@ try {
                 std::max(evidence.bottomHeight, implementation_->fixedBottomRunHeight));
         }
         const auto transition = implementation_->directionalMatch(
-            evidenceTail, frame, transitionConfig, expectedDirection);
+            *evidenceTail, frame, transitionConfig, expectedDirection);
         if (transition.decision == DirectionalDecision::Movement) {
             directional = transition;
             overlap = transition.overlap;
@@ -926,6 +967,9 @@ try {
                 const auto review = implementation_->directionalMatch(
                     *movement->frame, frame, reviewConfig, movement->candidate);
                 if (review.decision == DirectionalDecision::Opposite) {
+                    if (implementation_->direction == Direction::Undetermined) {
+                        implementation_->clearPending();
+                    }
                     result.kind = AppendKind::ReviewDiscarded;
                     result.confidence = review.confidence;
                     return result;
