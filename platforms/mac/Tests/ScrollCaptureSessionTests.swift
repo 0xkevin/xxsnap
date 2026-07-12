@@ -75,41 +75,81 @@ final class ScrollCaptureSessionTests: XCTestCase {
         XCTAssertEqual(presentation.kinds, [.acceptedInitial, .reviewDiscarded, .reviewDiscarded, .reviewDiscarded])
     }
 
-    func testPauseKindsDisarmAndOnlyLowConfidenceCanRecoverAfterActivity() async throws {
-        let lowEngine = FakeStitcher(results: [.acceptedInitial, .lowConfidenceDiscarded, .acceptedAppend])
-        let lowSession = makeSession(engine: lowEngine)
-        try await lowSession.start()
-        lowSession.recordScrollActivity()
-        await lowSession.test_runSamplingTick()
-        XCTAssertEqual(lowSession.state, .paused(.lowConfidence))
-        XCTAssertFalse(lowSession.isSamplingArmed)
-
-        lowSession.recordScrollActivity()
-        await lowSession.test_runSamplingTick()
-        XCTAssertEqual(lowSession.state, .capturing)
-        XCTAssertTrue(lowSession.isSamplingArmed)
-
+    func testResourceLimitPausesAndScrollActivityCannotRearmSampling() async throws {
         let limitEngine = FakeStitcher(results: [.acceptedInitial, .resourceLimit, .acceptedAppend])
         let limitSession = makeSession(engine: limitEngine)
         try await limitSession.start()
         limitSession.recordScrollActivity()
         await limitSession.test_runSamplingTick()
         XCTAssertEqual(limitSession.state, .paused(.resourceLimit))
+        XCTAssertFalse(limitSession.isSamplingArmed)
         limitSession.recordScrollActivity()
         await limitSession.test_runSamplingTick()
+        XCTAssertFalse(limitSession.isSamplingArmed)
         XCTAssertEqual(limitEngine.appendedImages.count, 2)
     }
 
-    func testAwaitingEvidenceUsesTemporaryLowConfidencePause() async throws {
-        let engine = FakeStitcher(results: [.acceptedInitial, .awaitingEvidence])
-        let session = makeSession(engine: engine)
+    func testAwaitingEvidenceKeepsLoopArmedAndAcceptedAppendPublishesWithoutNewActivity() async throws {
+        let clock = ControlledClock()
+        let engine = FakeStitcher(results: [.acceptedInitial, .awaitingEvidence, .awaitingEvidence, .acceptedAppend])
+        let presentation = PresentationRecorder()
+        let session = makeSession(engine: engine, clock: clock, presentation: presentation)
+        try await session.start()
+        session.recordScrollActivity()
+        await waitUntil { clock.pendingCount == 1 }
+
+        clock.advance()
+        await waitUntil { engine.appendedImages.count == 2 && clock.pendingCount == 1 }
+        XCTAssertEqual(session.state, .capturing)
+        XCTAssertTrue(session.isSamplingArmed)
+        XCTAssertEqual(presentation.previews.count, 1)
+        XCTAssertTrue(presentation.warningEvents.isEmpty)
+
+        clock.advance()
+        await waitUntil { engine.appendedImages.count == 3 && clock.pendingCount == 1 }
+        clock.advance()
+        await waitUntil { engine.appendedImages.count == 4 && presentation.previews.count == 2 }
+
+        XCTAssertEqual(session.state, .capturing)
+        XCTAssertTrue(session.isSamplingArmed)
+        XCTAssertTrue(presentation.warningEvents.isEmpty)
+        _ = session.cancel()
+    }
+
+    func testLowConfidenceWarnsWithoutPausingDisarmsAtStableTailAndAcceptedAppendClearsWarning() async throws {
+        let engine = FakeStitcher(results: [
+            .acceptedInitial,
+            .lowConfidenceDiscarded,
+            .lowConfidenceDiscarded,
+            .lowConfidenceDiscarded,
+            .acceptedAppend,
+        ])
+        let presentation = PresentationRecorder()
+        let session = makeSession(engine: engine, presentation: presentation)
         try await session.start()
         session.recordScrollActivity()
 
         await session.test_runSamplingTick()
+        XCTAssertEqual(session.state, .capturing)
+        XCTAssertTrue(session.isSamplingArmed)
+        XCTAssertEqual(presentation.warnings, [.lowConfidence])
+        XCTAssertEqual(presentation.previews.count, 1)
 
-        XCTAssertEqual(session.state, .paused(.lowConfidence))
+        await session.test_runSamplingTick()
+        await session.test_runSamplingTick()
+        XCTAssertEqual(session.state, .capturing)
         XCTAssertFalse(session.isSamplingArmed)
+        XCTAssertEqual(presentation.warnings, [.lowConfidence])
+
+        session.recordScrollActivity()
+        XCTAssertTrue(session.isSamplingArmed)
+        await session.test_runSamplingTick()
+
+        XCTAssertEqual(session.state, .capturing)
+        XCTAssertTrue(session.isSamplingArmed)
+        XCTAssertEqual(presentation.warningEvents.count, 2)
+        XCTAssertNil(presentation.warningEvents.last!)
+        XCTAssertEqual(presentation.previews.count, 2)
     }
 
     func testInitialAcceptedPreviewRemainsVisibleWhenFirstLiveAppendHitsResourceLimit() async throws {
@@ -409,38 +449,38 @@ final class ScrollCaptureSessionTests: XCTestCase {
         XCTAssertTrue(seed.frozenImage === session.seed.frozenImage)
     }
 
-    func testRearmedLowConfidenceLoopCannotBeClearedByRetiringLoop() async throws {
+    func testLowConfidenceStableTailRearmsOneFreshSamplingLoop() async throws {
         let clock = ControlledClock()
         let capturer = FakeCapturer()
-        let engine = FakeStitcher(results: [.acceptedInitial, .lowConfidenceDiscarded, .acceptedAppend])
-        weak var weakSession: ScrollCaptureSession?
-        let session = makeSession(
-            capturer: capturer,
-            engine: engine,
-            clock: clock,
-            presentationHandler: { update in
-                if update.isState(.paused(.lowConfidence)) {
-                    weakSession?.recordScrollActivity()
-                }
-            }
-        )
-        weakSession = session
+        let engine = FakeStitcher(results: [
+            .acceptedInitial,
+            .lowConfidenceDiscarded,
+            .lowConfidenceDiscarded,
+            .lowConfidenceDiscarded,
+            .acceptedAppend,
+        ])
+        let session = makeSession(capturer: capturer, engine: engine, clock: clock)
         try await session.start()
         session.recordScrollActivity()
         await waitUntil { clock.pendingCount == 1 }
 
-        clock.advance()
-        await waitUntil { session.state == .paused(.lowConfidence) && clock.pendingCount == 1 }
-        for _ in 0..<10 { await Task.yield() }
+        for expectedCount in 2...4 {
+            clock.advance()
+            await waitUntil {
+                engine.appendedImages.count == expectedCount
+                    && (expectedCount == 4 || clock.pendingCount == 1)
+            }
+        }
+        await waitUntil { !session.isSamplingArmed && clock.pendingCount == 0 }
+        XCTAssertEqual(session.state, .capturing)
+
         session.recordScrollActivity()
-        for _ in 0..<10 { await Task.yield() }
-        XCTAssertEqual(clock.pendingCount, 1)
+        await waitUntil { clock.pendingCount == 1 }
 
         clock.advance()
-        await waitUntil { engine.appendedImages.count == 3 }
-        for _ in 0..<10 { await Task.yield() }
+        await waitUntil { engine.appendedImages.count == 5 && clock.pendingCount == 1 }
         XCTAssertEqual(clock.pendingCount, 1)
-        XCTAssertEqual(capturer.captureCount, 2)
+        XCTAssertEqual(capturer.captureCount, 4)
         XCTAssertEqual(capturer.maximumConcurrent, 1)
         _ = session.cancel()
     }
@@ -859,13 +899,16 @@ private final class PresentationRecorder {
     private(set) var kinds: [ScrollCaptureAppendKind] = []
     private(set) var previews: [NSImage] = []
     private(set) var commands: [ScrollCaptureTerminalCommand] = []
-    var eventCount: Int { states.count + kinds.count + previews.count + commands.count }
+    private(set) var warningEvents: [ScrollCaptureMatchWarning?] = []
+    var warnings: [ScrollCaptureMatchWarning] { warningEvents.compactMap { $0 } }
+    var eventCount: Int { states.count + kinds.count + previews.count + commands.count + warningEvents.count }
     func record(_ event: ScrollCapturePresentationUpdate) {
         switch event {
         case let .terminalCommand(command): commands.append(command)
         case let .state(state): states.append(state)
         case let .append(update): kinds.append(update.kind)
         case let .preview(image): previews.append(image)
+        case let .warning(warning): warningEvents.append(warning)
         }
     }
 }

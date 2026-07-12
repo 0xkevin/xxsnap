@@ -392,17 +392,20 @@ final class CaptureCoordinator {
             break
         case .state(.capturing):
             overlay.setScrollCaptureCapturing()
-            presentation.clearWarning()
         case .state(.paused(let reason)):
             let key: L10n.Key
             switch reason {
-            case .lowConfidence: key = .scrollCaptureLowConfidence
             case .resourceLimit: key = .scrollCaptureResourceLimit
             case .captureFailure: key = .scrollCaptureFailure
             }
             let message = l10n.text(key)
             overlay.setScrollCapturePaused(message: message)
             presentation.setWarning(message)
+        case .warning(.lowConfidence):
+            overlay.setScrollCaptureCapturing()
+            presentation.setWarning(l10n.text(.scrollCaptureLowConfidence))
+        case .warning(nil):
+            presentation.clearWarning()
         case .state:
             break
         }

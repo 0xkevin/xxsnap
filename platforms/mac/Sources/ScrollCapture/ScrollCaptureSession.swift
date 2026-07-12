@@ -35,9 +35,12 @@ protocol ScrollStitching: AnyObject {
 extension ScrollCaptureBridge: ScrollStitching {}
 
 enum ScrollCapturePauseReason: Equatable {
-    case lowConfidence
     case resourceLimit
     case captureFailure
+}
+
+enum ScrollCaptureMatchWarning: Equatable {
+    case lowConfidence
 }
 
 enum ScrollCaptureSessionState: Equatable {
@@ -54,6 +57,7 @@ enum ScrollCapturePresentationUpdate {
     case state(ScrollCaptureSessionState)
     case append(ScrollCaptureAppendUpdate)
     case preview(NSImage)
+    case warning(ScrollCaptureMatchWarning?)
     case terminalCommand(ScrollCaptureTerminalCommand)
 }
 
@@ -87,6 +91,7 @@ final class ScrollCaptureSession {
     private var nextSamplingLoopID: UInt64 = 0
     private var tickInProgress = false
     private var generation = 0
+    private var currentWarning: ScrollCaptureMatchWarning?
 
     init(
         seed: ScrollCaptureSeed,
@@ -141,14 +146,10 @@ final class ScrollCaptureSession {
     }
 
     func recordScrollActivity() {
-        switch state {
-        case .capturing, .paused(.lowConfidence):
-            stabilityCount = 0
-            isSamplingArmed = true
-            ensureSamplingLoop()
-        default:
-            break
-        }
+        guard state == .capturing else { return }
+        stabilityCount = 0
+        isSamplingArmed = true
+        ensureSamplingLoop()
     }
 
     private func receiveTerminalCommand(_ command: ScrollCaptureTerminalCommand) {
@@ -238,7 +239,7 @@ final class ScrollCaptureSession {
 
     private func runSamplingTick() async {
         guard isSamplingArmed, !tickInProgress else { return }
-        guard state == .capturing || state == .paused(.lowConfidence) else { return }
+        guard state == .capturing else { return }
         let tickGeneration = generation
         tickInProgress = true
         defer { tickInProgress = false }
@@ -248,7 +249,7 @@ final class ScrollCaptureSession {
             // image-local geometry and is therefore intentionally not used for live sampling.
             let image = try await capturer.captureImage(in: seed.screenRect)
             guard generation == tickGeneration, isSamplingArmed else { return }
-            guard state == .capturing || state == .paused(.lowConfidence) else { return }
+            guard state == .capturing else { return }
             guard let stitcher else { return }
             let update = try stitcher.append(image)
             let appendState = state
@@ -260,7 +261,7 @@ final class ScrollCaptureSession {
             try handle(update, stitcher: stitcher, operationGeneration: tickGeneration)
         } catch {
             guard generation == tickGeneration else { return }
-            guard state == .capturing || state == .paused(.lowConfidence) else { return }
+            guard state == .capturing else { return }
             disarmSampling()
             _ = setState(.paused(.captureFailure), operationGeneration: tickGeneration)
         }
@@ -274,8 +275,13 @@ final class ScrollCaptureSession {
         switch update.kind {
         case .acceptedAppend:
             stabilityCount = 0
-            if state == .paused(.lowConfidence) {
-                guard setState(.capturing, operationGeneration: operationGeneration) else { return }
+            if currentWarning != nil {
+                currentWarning = nil
+                guard emit(
+                    .warning(nil),
+                    operationGeneration: operationGeneration,
+                    expectedState: .capturing
+                ) else { return }
             }
             let preview = try stitcher.preview(maximumHeight: 1_200)
             _ = emit(
@@ -286,9 +292,19 @@ final class ScrollCaptureSession {
         case .duplicateDiscarded, .reviewDiscarded:
             stabilityCount += 1
             if stabilityCount >= stabilityThreshold { disarmSampling() }
-        case .awaitingEvidence, .lowConfidenceDiscarded:
-            disarmSampling()
-            _ = setState(.paused(.lowConfidence), operationGeneration: operationGeneration)
+        case .awaitingEvidence:
+            stabilityCount = 0
+        case .lowConfidenceDiscarded:
+            stabilityCount += 1
+            if currentWarning != .lowConfidence {
+                currentWarning = .lowConfidence
+                guard emit(
+                    .warning(.lowConfidence),
+                    operationGeneration: operationGeneration,
+                    expectedState: .capturing
+                ) else { return }
+            }
+            if stabilityCount >= stabilityThreshold { disarmSampling() }
         case .resourceLimit:
             disarmSampling()
             _ = setState(.paused(.resourceLimit), operationGeneration: operationGeneration)
