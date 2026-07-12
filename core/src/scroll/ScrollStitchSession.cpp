@@ -870,6 +870,7 @@ try {
             implementation_->fixedBottomRunHeight = nextBottomRunHeight;
             result.kind = AppendKind::AwaitingEvidence;
             result.outputHeight = implementation_->height;
+            result.confidence = movementOverlap.confidence;
             return result;
         }
 
