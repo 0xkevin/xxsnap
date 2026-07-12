@@ -155,7 +155,7 @@ struct L10n {
         case (.zhHans, .cancel):
             return "取消"
         case (.zhHans, .scrollCaptureLowConfidence):
-            return "匹配置信度较低，滚动截图已暂停"
+            return "匹配置信度较低，将继续尝试拼接"
         case (.zhHans, .scrollCaptureResourceLimit):
             return "已达到资源限制，滚动截图已暂停"
         case (.zhHans, .scrollCaptureFailure):
@@ -176,7 +176,7 @@ struct L10n {
         case (.english, .cancel):
             return "Cancel"
         case (.english, .scrollCaptureLowConfidence):
-            return "Low matching confidence. Scroll capture is paused."
+            return "Low matching confidence. Continuing to stitch."
         case (.english, .scrollCaptureResourceLimit):
             return "Resource limit reached. Scroll capture is paused."
         case (.english, .scrollCaptureFailure):

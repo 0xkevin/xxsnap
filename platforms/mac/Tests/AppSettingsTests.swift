@@ -71,4 +71,16 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(L10n(language: .english).text(.colorSamplerCopyHex), "Press C to copy HEX")
         XCTAssertEqual(L10n(language: .english).text(.colorSamplerCopyRgb), "Press C to copy RGB")
     }
+
+    func testLowConfidenceWarningDescribesNonblockingMatchingInBothLanguages() {
+        let chinese = L10n(language: .zhHans).text(.scrollCaptureLowConfidence)
+        let english = L10n(language: .english).text(.scrollCaptureLowConfidence)
+
+        XCTAssertEqual(chinese, "匹配置信度较低，将继续尝试拼接")
+        XCTAssertFalse(chinese.contains("暂停"))
+        XCTAssertEqual(english, "Low matching confidence. Continuing to stitch.")
+        XCTAssertFalse(english.localizedCaseInsensitiveContains("paused"))
+        XCTAssertTrue(L10n(language: .zhHans).text(.scrollCaptureResourceLimit).contains("暂停"))
+        XCTAssertTrue(L10n(language: .english).text(.scrollCaptureResourceLimit).localizedCaseInsensitiveContains("paused"))
+    }
 }
