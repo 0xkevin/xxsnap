@@ -32,7 +32,7 @@ Use this checklist after building the exact Debug app from `build/xcode-derived`
 | D3 | Same long plain-text document, start in the middle | N/A | Mouse or trackpad; first reliable movement Up | Session locks `Up`; new lines are prepended above the seed, and the result remains in natural top-to-bottom order. | 待人工（目标应用/设备可用时） |
 | D4 | Same document and middle start as D3 | N/A | Mouse or trackpad; first reliable movement Down | Session locks `Down`; new lines are appended below the seed, and the result remains in natural top-to-bottom order. | 待人工（目标应用/设备可用时） |
 | D5 | Same document and middle start as D3 | N/A | Reverse after locking `Up` or `Down` | Reverse movement remains review/dedup: it neither changes the lock nor extends the seed's other end; capture of the other end requires a new session. | 待人工（目标应用/设备可用时） |
-| D6 | Same document with a fixed header/footer and a repeated or low-detail section | Yes | Mouse or trackpad | Awaiting fixed-band evidence continues sampling without a low-confidence warning or automatic pause. A genuine low-confidence frame warns without pausing; sustained low-confidence/stable frames may idle the timer, and the next wheel/trackpad event immediately rearms it. | 待人工（目标应用/设备可用时） |
+| D6 | Same document with a fixed header/footer and a repeated or low-detail section | Yes | Mouse or trackpad | Awaiting fixed-band evidence continues sampling, clears any prior low-confidence warning, and does not show a new warning or pause. A genuine low-confidence frame warns without pausing; sustained low-confidence/stable frames may idle the timer, and the next wheel/trackpad event immediately rearms it. | 待人工（目标应用/设备可用时） |
 
 For every executed row, save a representative PNG outside the repository and inspect the entire image at 100% zoom, especially the first seam, last seam, fixed bands and right edge.
 
@@ -45,7 +45,7 @@ For every executed row, save a representative PNG outside the repository and ins
 - [ ] After locking `Up`, scroll downward; confirm reverse frames are classified as review/dedup, do not change the lock, and do not append content below the seed. Return upward through accepted content and beyond the head; confirm new content resumes exclusively above the seed in natural document order.
 - [ ] Scroll the live preview away from the active edge; confirm it stops following while capture continues. Return it to the bottom for `Down` or the top for `Up`, and confirm following resumes.
 - [ ] Use a repeated/low-detail region that produces low match confidence; confirm a non-blocking warning appears while collection remains active and the accepted preview is retained. Allow sustained low-confidence/stable frames to idle the sampling timer, then confirm the next wheel or trackpad event immediately rearms sampling without restarting the session.
-- [ ] While fixed-header/footer classification is awaiting enough movement evidence, confirm normal sampling continues and no low-confidence pause or warning is shown.
+- [ ] While fixed-header/footer classification is awaiting enough movement evidence, confirm normal sampling continues, any prior low-confidence warning is cleared once, and no new warning or pause is shown.
 - [ ] With Safari frontmost and xxsnap granted Accessibility permission, verify `Return` and keypad `Enter` on separate active/resource-paused runs each trigger Finish Scroll Capture exactly once; verify `Esc` cancels and restores the locked selection/first-screen annotations.
 - [ ] Repeat the target-frontmost keyboard check with Chrome. Confirm a local/global duplicate delivery cannot finish or cancel twice.
 - [ ] Without Accessibility permission, do not mark target-frontmost shortcuts passed. Verify the on-screen Finish Scroll Capture and Cancel buttons still complete/cancel reliably; also verify shortcuts continue to work when the xxsnap overlay itself owns the key event.
@@ -84,7 +84,7 @@ For every executed row, save a representative PNG outside the repository and ins
 
 - [ ] Force or use a test build with a small accepted-byte budget; confirm the resource guard pauses collection, preserves the accepted preview, and leaves Finish Scroll Capture/Cancel available.
 - [ ] Finish after the resource guard pauses; confirm the retained accepted segments compose and enter the editor.
-- [ ] Simulate a transient frame-capture failure; confirm this blocking failure pauses collection, shows a warning, keeps accepted content available, and leaves recovery/Finish or Cancel available.
+- [ ] Simulate a transient frame-capture failure; confirm this blocking failure pauses collection, shows a warning, keeps accepted content available, and ignores later scroll activity instead of rearming sampling. Confirm the only reliable paths are Finish with the accepted result or Cancel.
 - [ ] Simulate final composition failure; confirm the session/accepted engine state remains alive for another Finish attempt or Cancel.
 - [ ] Simulate long-image editor creation returning `nil` and throwing; confirm the completed image is retained and a Save/Cancel fallback appears.
 - [ ] In the fallback, cancel the save panel once and confirm the fallback offers Save/Cancel again; then save successfully and verify the PNG. Canceling the fallback must end cleanly without claiming a save.

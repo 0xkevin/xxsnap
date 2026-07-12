@@ -12,13 +12,13 @@ This section records the 2026-07-12 incremental decision and supersedes the orig
 - The first unique reliable movement locks the session to `Up` or `Down`. `Down` appends below the initial seed; `Up` prepends above it. Final output remains in natural document order.
 - A session extends only one side of the seed. Reverse movement after the lock is review/dedup only and never changes direction; capturing the other side requires a new session. Horizontal capture remains deferred.
 - Low confidence produces a non-blocking warning and never automatically pauses the session. Sustained low-confidence or stable frames may let the sampling timer go idle; the next wheel or trackpad activity immediately rearms it.
-- Awaiting fixed-band evidence is normal continued sampling and does not show a low-confidence pause or warning.
+- Awaiting fixed-band evidence is normal continued sampling, clears any prior low-confidence warning, and does not show a new warning.
 - Only capture failure and resource guards create a blocking pause. Final-composition retry/cancel behavior is unchanged.
 
 ## Current State
 
 - The macOS toolbar exposes Scroll Capture behind the existing feature gate.
-- Activating the command currently shows a development placeholder.
+- Activating the command starts the implemented direction-locked scroll-capture session.
 - `ScreenCaptureService` already captures an arbitrary screen region with ScreenCaptureKit while excluding xxsnap.
 - The existing completion pipeline renders annotations and supports copy, save, and pin.
 - The current selection overlay assumes the image and annotation viewport match the on-screen selection, so it is not the right final editor for a long image.
@@ -112,7 +112,6 @@ stateDiagram-v2
   Capturing --> Capturing: Direction locked or segment accepted
   Capturing --> Capturing: Low-confidence warning or sampling idle/rearm
   Capturing --> Paused: Capture failure or resource guard
-  Paused --> Capturing: Recoverable capture failure cleared
   Capturing --> Completing: Finish or Enter
   Paused --> Completing: Finish or Enter
   Completing --> LongImageEditor: Final image available
@@ -190,7 +189,7 @@ Screen-position-stable bands such as fixed headers, toolbars, and chat inputs ar
 Their first-frame representation remains in the output, and later copies are not appended.
 
 The design must prefer false negatives over false positives.
-While fixed-band evidence is still accumulating, sampling continues normally without a low-confidence pause or warning. Failing to identify a fixed band may leave an artifact; incorrectly identifying scrolling document content as fixed would delete user content.
+While fixed-band evidence is still accumulating, sampling continues normally, clears any prior low-confidence warning, and does not show a new warning. Failing to identify a fixed band may leave an artifact; incorrectly identifying scrolling document content as fixed would delete user content.
 
 ### Scrollbar Cropping
 
@@ -247,10 +246,9 @@ Pin creates a pin for the complete long image, initially scaled to the visible s
 
 ## Error and Resource Handling
 
-- Initial capture failure returns to the locked selection with an actionable error.
+- Initial or live frame-capture failure creates a blocking pause with an actionable error while preserving accepted content; scroll activity cannot resume or rearm sampling, so the reliable paths are Finish with the accepted result or Cancel.
 - Low overlap, ambiguous placement, or excessive scroll displacement shows a non-blocking warning without mutating accepted content; sustained low-confidence frames may idle the sampling timer until input immediately rearms it.
-- Awaiting fixed-band evidence remains normal active sampling and does not show a low-confidence pause or warning.
-- A frame-capture failure creates a blocking pause while preserving accepted content and recovery/Finish/Cancel paths.
+- Awaiting fixed-band evidence remains normal active sampling, clears any prior low-confidence warning, and does not show a new warning.
 - Approaching a safe memory or image-dimension limit pauses and offers completion with the current result.
 - Final composition failure retains accepted segments and offers another Finish attempt or Cancel.
 - Editor creation failure retains the completed image and offers save.
@@ -287,7 +285,7 @@ Synthetic fixtures should be complemented by checked-in image sequences for brow
 - Preview or a text editor with a long document.
 - Mouse wheel and trackpad with inertial scrolling.
 - `Up`-first and `Down`-first sessions from the middle of the same document, plus reverse review after each lock.
-- Fixed-band evidence accumulation without automatic pause, and low-confidence warning/idle/rearm behavior.
+- Fixed-band evidence accumulation that clears any prior warning without pausing, and low-confidence warning/idle/rearm behavior.
 - Full-screen, edge-constrained, Retina, non-Retina, and multi-display selections.
 - Long-image annotation, copy, save, and full-image pinning.
 
@@ -299,6 +297,7 @@ Synthetic fixtures should be complemented by checked-in image sequences for brow
 - Fixed screen-position regions appear once.
 - High-confidence scrollbars are removed without cropping document content.
 - Unreliable matching warns without accepting a bad seam or automatically pausing; sustained low-confidence/stable frames may idle sampling and the next input immediately rearms it.
+- Capture-failure and resource-limit pauses ignore scroll activity and preserve Finish/Cancel; a final-composition failure preserves another Finish attempt or Cancel.
 - The toolbar and latest-edge preview remain responsive throughout capture.
 - Existing annotations survive into the first screen of the long-image editor.
 - Editor, clipboard, saved PNG, and pin agree on full-image content and annotations.
