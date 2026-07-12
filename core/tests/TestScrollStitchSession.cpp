@@ -131,6 +131,15 @@ ScrollFrame periodicDocumentViewport(int documentY)
     return frame;
 }
 
+ScrollFrame periodicFixedEdgeViewport(int documentY)
+{
+    auto frame = periodicDocumentViewport(documentY);
+    for (int x = 0; x < frame.width; ++x) {
+        setPixel(frame, x, 0, static_cast<std::uint8_t>(31 + x % 17));
+    }
+    return frame;
+}
+
 ScrollFrame uniqueDownwardViewport(const ScrollFrame& initial, int advance)
 {
     ScrollFrame frame(initial.width, initial.height);
@@ -399,6 +408,7 @@ private slots:
     void lockedUpReverseReviewPreservesConfirmedFixedEvidence();
     void unconfirmedDownPendingRestartsAsUpEvidence();
     void unconfirmedUpPendingRestartsAsDownEvidence();
+    void restartedDirectionRejectsAmbiguousFixedEvidence();
     void scrollingCandidateBandIsNeverConfirmedOrDropped();
     void fixedBandConfirmationIsAwaitingEvidence();
     void reliableOrdinaryMatchStillDefersStationaryFixedBands();
@@ -707,6 +717,37 @@ void TestScrollStitchSession::unconfirmedUpPendingRestartsAsDownEvidence()
     QCOMPARE(confirmation.kind, AppendKind::AcceptedAppend);
     QCOMPARE(confirmation.appendedHeight, 100);
     QCOMPARE(session.append(documentViewport(260, true)).kind, AppendKind::AcceptedAppend);
+}
+
+void TestScrollStitchSession::restartedDirectionRejectsAmbiguousFixedEvidence()
+{
+    auto config = defaultConfig();
+    config.fixedTopCandidateHeight = 1;
+    auto seed = periodicFixedEdgeViewport(0);
+    auto pendingDown = uniqueDownwardViewport(seed, 60);
+    copyRowsInto(seed, 0, 1, pendingDown, 0);
+    const auto ambiguous = periodicFixedEdgeViewport(40);
+    auto rawConfig = config.matcher;
+    rawConfig.excludedBands.left = config.scrollbarMaximumWidth;
+    rawConfig.excludedBands.right = config.scrollbarMaximumWidth;
+    QCOMPARE(VerticalOverlapMatcher().match(seed, ambiguous, rawConfig).kind,
+        OverlapKind::Reliable);
+    QCOMPARE(VerticalOverlapMatcher().match(ambiguous, seed, rawConfig).kind,
+        OverlapKind::Reliable);
+    rawConfig.excludedBands.top = 1;
+    QCOMPARE(VerticalOverlapMatcher().match(seed, ambiguous, rawConfig).kind,
+        OverlapKind::Reliable);
+    QCOMPARE(VerticalOverlapMatcher().match(ambiguous, seed, rawConfig).kind,
+        OverlapKind::Reliable);
+
+    ScrollStitchSession session(config);
+    QCOMPARE(session.append(seed).kind, AppendKind::AcceptedInitial);
+    QCOMPARE(session.append(pendingDown).kind, AppendKind::AwaitingEvidence);
+    const auto before = session.finalize();
+    QCOMPARE(session.append(ambiguous).kind, AppendKind::LowConfidenceDiscarded);
+    QCOMPARE(session.outputHeight(), before.height);
+    QCOMPARE(session.finalize().pixels, before.pixels);
+    QCOMPARE(session.append(pendingDown).kind, AppendKind::AwaitingEvidence);
 }
 
 void TestScrollStitchSession::scrollingCandidateBandIsNeverConfirmedOrDropped()

@@ -829,10 +829,14 @@ try {
             if (directional.decision != DirectionalDecision::Movement
                 || directional.candidate != restartedCandidate) {
                 const auto restartedEvidence = implementation_->fixedBandEvidence(
-                    *evidenceTail, frame, restartedCandidate);
-                if (!restartedEvidence.top && !restartedEvidence.bottom) {
-                    result.kind = AppendKind::ReviewDiscarded;
-                    result.confidence = pendingDirectional.confidence;
+                    *evidenceTail, frame, Direction::Undetermined);
+                if ((!restartedEvidence.top && !restartedEvidence.bottom)
+                    || restartedEvidence.candidate != restartedCandidate) {
+                    result.kind = directional.decision == DirectionalDecision::Ambiguous
+                        ? AppendKind::LowConfidenceDiscarded
+                        : AppendKind::ReviewDiscarded;
+                    result.confidence = std::max(
+                        pendingDirectional.confidence, directional.confidence);
                     return result;
                 }
                 directional.decision = DirectionalDecision::Movement;
