@@ -275,14 +275,7 @@ final class ScrollCaptureSession {
         switch update.kind {
         case .acceptedAppend:
             stabilityCount = 0
-            if currentWarning != nil {
-                currentWarning = nil
-                guard emit(
-                    .warning(nil),
-                    operationGeneration: operationGeneration,
-                    expectedState: .capturing
-                ) else { return }
-            }
+            guard clearCurrentWarning(operationGeneration: operationGeneration) else { return }
             let preview = try stitcher.preview(maximumHeight: 1_200)
             _ = emit(
                 .preview(preview),
@@ -293,6 +286,7 @@ final class ScrollCaptureSession {
             stabilityCount += 1
             if stabilityCount >= stabilityThreshold { disarmSampling() }
         case .awaitingEvidence:
+            guard clearCurrentWarning(operationGeneration: operationGeneration) else { return }
             stabilityCount = 0
         case .lowConfidenceDiscarded:
             stabilityCount += 1
@@ -313,6 +307,16 @@ final class ScrollCaptureSession {
         @unknown default:
             throw ScrollCaptureSessionError.initialFrameRejected(update.kind)
         }
+    }
+
+    private func clearCurrentWarning(operationGeneration: Int) -> Bool {
+        guard currentWarning != nil else { return true }
+        currentWarning = nil
+        return emit(
+            .warning(nil),
+            operationGeneration: operationGeneration,
+            expectedState: .capturing
+        )
     }
 
     private func disarmSampling() {

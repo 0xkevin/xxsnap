@@ -152,6 +152,35 @@ final class ScrollCaptureSessionTests: XCTestCase {
         XCTAssertEqual(presentation.previews.count, 2)
     }
 
+    func testAwaitingEvidenceClearsLowConfidenceWarningOnceAndKeepsSamplingArmed() async throws {
+        let engine = FakeStitcher(results: [
+            .acceptedInitial,
+            .lowConfidenceDiscarded,
+            .awaitingEvidence,
+            .awaitingEvidence,
+        ])
+        let presentation = PresentationRecorder()
+        let session = makeSession(engine: engine, presentation: presentation)
+        try await session.start()
+        session.recordScrollActivity()
+
+        await session.test_runSamplingTick()
+        XCTAssertEqual(presentation.warnings, [.lowConfidence])
+
+        await session.test_runSamplingTick()
+        XCTAssertEqual(session.state, .capturing)
+        XCTAssertTrue(session.isSamplingArmed)
+        XCTAssertEqual(presentation.warningEvents.count, 2)
+        XCTAssertNil(presentation.warningEvents.last!)
+        XCTAssertEqual(presentation.previews.count, 1)
+
+        await session.test_runSamplingTick()
+        XCTAssertEqual(session.state, .capturing)
+        XCTAssertTrue(session.isSamplingArmed)
+        XCTAssertEqual(presentation.warningEvents.count, 2)
+        XCTAssertEqual(presentation.previews.count, 1)
+    }
+
     func testInitialAcceptedPreviewRemainsVisibleWhenFirstLiveAppendHitsResourceLimit() async throws {
         let accepted = TestImageFactory.solid(size: CGSize(width: 80, height: 60), color: .red)
         let engine = FakeStitcher(results: [.acceptedInitial, .resourceLimit], final: accepted)
