@@ -578,7 +578,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project pla
 截至 2026-07-12，本分支最近一次完整验证结果：
 
 - 共享 core 的 CTest 执行 `8` 个测试，`8` passed，`0` failed。
-- macOS XCTest 执行 `813` 个测试，`808` passed，`5` failed；滚动截图直接相关的 `LongImageEditorTests`、`ScrollCaptureBridgeTests`、`ScrollCapturePresentationTests` 和 `ScrollCaptureSessionTests` 共 `115` 个测试，`115` passed；Coordinator 的目标应用全局终止键路由、默认长图编辑器副屏定位，以及长图贴图按捕获屏幕缩放居中的测试也通过。
+- macOS XCTest 执行 `820` 个测试，`815` passed，`5` failed；滚动截图直接相关的 `LongImageEditorTests`、`ScrollCaptureBridgeTests`、`ScrollCapturePresentationTests` 和 `ScrollCaptureSessionTests` 共 `121` 个测试，`121` passed；Coordinator 的低置信提示路由、目标应用全局终止键路由、默认长图编辑器副屏定位，以及长图贴图按捕获屏幕缩放居中的测试也通过。
 - `5` 个失败是滚动截图实施前已有的序号重置/控制项和状态栏图标基线：`SelectionToolbarStateTests` 中 `4` 个，`xxsnapMacTests` 中 `1` 个。本次没有放宽断言或顺带修改这些基线。
 - 自动化结果只证明确定性核心和平台状态机等代码路径；真实 Safari/Chrome/Preview/文本编辑器、鼠标/触控板惯性、多屏和显示缩放组合仍以手工清单为准，当前不记为已通过。
 
