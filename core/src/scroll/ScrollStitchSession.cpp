@@ -870,14 +870,6 @@ try {
             }
         }
     }
-    if (config.enableFixedBandDetection
-        && directional.decision != DirectionalDecision::Movement) {
-        result.kind = directional.decision == DirectionalDecision::Opposite
-            ? AppendKind::ReviewDiscarded
-            : AppendKind::LowConfidenceDiscarded;
-        return result;
-    }
-
     const bool topEvidenceBroke = !implementation_->fixedTopConfirmed
         && implementation_->fixedTopAgreement > 0 && !evidence.top;
     const bool bottomEvidenceBroke = !implementation_->fixedBottomConfirmed
@@ -900,9 +892,19 @@ try {
         const auto transition = implementation_->directionalMatch(
             evidenceTail, frame, transitionConfig, expectedDirection);
         if (transition.decision == DirectionalDecision::Movement) {
+            directional = transition;
+            overlap = transition.overlap;
+            prepend = transition.candidate == Direction::Up;
             movementOverlap = transition.overlap;
             result.confidence = transition.confidence;
         }
+    }
+    if (config.enableFixedBandDetection
+        && directional.decision != DirectionalDecision::Movement) {
+        result.kind = directional.decision == DirectionalDecision::Opposite
+            ? AppendKind::ReviewDiscarded
+            : AppendKind::LowConfidenceDiscarded;
+        return result;
     }
 
     const bool continuePending = !implementation_->pending.empty()
@@ -1034,8 +1036,18 @@ try {
             return result;
         }
 
+        const auto failedPendingCommit = [&]() {
+            implementation_->clearPending();
+            result.kind = AppendKind::ResourceLimit;
+            result.outputHeight = implementation_->height;
+            return result;
+        };
         std::vector<Implementation::Segment> preparedSegments;
-        preparedSegments.reserve(safePrefix);
+        try {
+            preparedSegments.reserve(safePrefix);
+        } catch (const std::bad_alloc&) {
+            return failedPendingCommit();
+        }
         int flushedHeight = 0;
         auto preparedScrollbar = implementation_->scrollbar;
         const ScrollFrame* previous = implementation_->tail.get();
@@ -1070,18 +1082,20 @@ try {
             flushedHeight += movement.advance;
             return true;
         };
-        for (std::size_t i = 0; i < safePrefix; ++i) {
-            const auto& movement = i < implementation_->pending.size()
-                ? implementation_->pending[i]
-                : newMovement;
-            if (!prepareMovement(movement, decisions[i].first, decisions[i].second)) {
-                result.kind = AppendKind::ResourceLimit;
-                return result;
+        try {
+            for (std::size_t i = 0; i < safePrefix; ++i) {
+                const auto& movement = i < implementation_->pending.size()
+                    ? implementation_->pending[i]
+                    : newMovement;
+                if (!prepareMovement(movement, decisions[i].first, decisions[i].second)) {
+                    return failedPendingCommit();
+                }
             }
+        } catch (const std::bad_alloc&) {
+            return failedPendingCommit();
         }
         if (flushedHeight > std::numeric_limits<int>::max() - implementation_->height) {
-            result.kind = AppendKind::ResourceLimit;
-            return result;
+            return failedPendingCommit();
         }
 
         std::size_t flushedPersistent = *projected;
@@ -1089,35 +1103,35 @@ try {
         const auto segmentBytes = imageBytes(frame.width, flushedHeight);
         if (!pendingFrameBytes.has_value() || !segmentBytes.has_value()
             || flushedPersistent < *pendingFrameBytes) {
-            result.kind = AppendKind::ResourceLimit;
-            return result;
+            return failedPendingCommit();
         }
         flushedPersistent -= *pendingFrameBytes;
         if (implementation_->tailHasSeparateStorage) {
             if (flushedPersistent < *fullFrameBytes) {
-                result.kind = AppendKind::ResourceLimit;
-                return result;
+                return failedPendingCommit();
             }
             flushedPersistent -= *fullFrameBytes;
         }
         for (const auto bytes : {*segmentBytes, *fullFrameBytes}) {
             const auto sum = checkedSum(flushedPersistent, bytes);
             if (!sum.has_value()) {
-                result.kind = AppendKind::ResourceLimit;
-                return result;
+                return failedPendingCommit();
             }
             flushedPersistent = *sum;
         }
         if (flushedPersistent >= config.maximumAcceptedBytes) {
-            result.kind = AppendKind::ResourceLimit;
-            return result;
+            return failedPendingCommit();
         }
 
-        implementation_->segments.reserve(
-            implementation_->segments.size() + preparedSegments.size());
-        implementation_->anchors.reserve(
-            implementation_->anchors.size() + safePrefix);
-        implementation_->pending.reserve(implementation_->pending.size() + 1U);
+        try {
+            implementation_->segments.reserve(
+                implementation_->segments.size() + preparedSegments.size());
+            implementation_->anchors.reserve(
+                implementation_->anchors.size() + safePrefix);
+            implementation_->pending.reserve(implementation_->pending.size() + 1U);
+        } catch (const std::bad_alloc&) {
+            return failedPendingCommit();
+        }
         for (std::size_t i = 0; i < implementation_->pending.size(); ++i) {
             implementation_->pending[i].topDecision = decisions[i].first;
             implementation_->pending[i].bottomDecision = decisions[i].second;

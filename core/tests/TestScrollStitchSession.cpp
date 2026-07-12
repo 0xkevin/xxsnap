@@ -226,6 +226,28 @@ ScrollFrame tallViewportWithFixedHeader(int documentY)
     return frame;
 }
 
+ScrollFrame tallDocumentViewport(int documentY)
+{
+    ScrollFrame frame(120, 240);
+    for (int y = 0; y < frame.height; ++y) {
+        for (int x = 0; x < frame.width; ++x) {
+            setPixel(frame, x, y, documentPixel(x, documentY + y));
+        }
+    }
+    return frame;
+}
+
+ScrollFrame tallViewportWithFixedFooter(int documentY)
+{
+    auto frame = tallDocumentViewport(documentY);
+    for (int y = frame.height - 60; y < frame.height; ++y) {
+        for (int x = 0; x < frame.width; ++x) {
+            setPixel(frame, x, y, static_cast<std::uint8_t>(61 + x % 19));
+        }
+    }
+    return frame;
+}
+
 std::uint8_t whiteGapDocumentPixel(int x, int documentY)
 {
     return documentY >= 120 && documentY < 180 ? 250 : documentPixel(x, documentY);
@@ -388,6 +410,7 @@ private slots:
     void topBreakDoesNotPreventBottomConfirmation();
     void bottomBreakDoesNotPreventTopConfirmation();
     void evidenceBreakFlushesPerMovementBeyondOldTailAdvanceBudget();
+    void evidenceBreakTransitionRematchFlushesPendingDownward();
     void nonAnchorReverseReviewPreservesPendingEvidence();
     void nonAnchorReverseReviewInsideAcceptedContentDoesNotMutate();
     void deepPendingReverseReviewSearchesRecentFrames();
@@ -606,28 +629,23 @@ void TestScrollStitchSession::rejectedUpwardPrependLeavesPixelsAndHeightUnchange
     auto config = defaultConfig();
     config.fixedTopCandidateHeight = 12;
     config.fixedBottomCandidateHeight = 8;
-    config.maximumAcceptedBytes = 300U * 1024U;
+    // Three 100-row pending movements fit as full viewport buffers, while
+    // their first safe-prefix composition plus the matcher tail does not.
+    config.maximumAcceptedBytes = 275'000U;
     ScrollStitchSession session(config);
-    QCOMPARE(session.append(documentViewport(520, true)).kind, AppendKind::AcceptedInitial);
-    QCOMPARE(session.append(documentViewport(480, true)).kind, AppendKind::AwaitingEvidence);
-    QCOMPARE(session.append(documentViewport(440, true)).kind, AppendKind::AwaitingEvidence);
-    QCOMPARE(session.append(documentViewport(400, true)).kind, AppendKind::AcceptedAppend);
+    const auto seed = documentViewport(300, true);
+    QCOMPARE(session.append(seed).kind, AppendKind::AcceptedInitial);
+    const auto before = session.finalize();
+    QCOMPARE(session.append(documentViewport(200, true)).kind, AppendKind::AwaitingEvidence);
+    QCOMPARE(session.append(documentViewport(100, true)).kind, AppendKind::AwaitingEvidence);
+    const auto rejected = session.append(documentViewport(0, true));
+    QCOMPARE(rejected.kind, AppendKind::ResourceLimit);
+    QCOMPARE(session.outputHeight(), before.height);
+    QCOMPARE(session.finalize().pixels, before.pixels);
 
-    for (int offset = 360;; offset -= 40) {
-        const auto before = session.finalize();
-        const int beforeHeight = session.outputHeight();
-        const auto result = session.append(documentViewport(offset, true));
-        if (result.kind == AppendKind::ResourceLimit) {
-            QCOMPARE(session.outputHeight(), beforeHeight);
-            QCOMPARE(session.finalize().height, before.height);
-            QCOMPARE(session.finalize().pixels, before.pixels);
-            QCOMPARE(session.append(documentViewport(offset + 40, true)).kind,
-                AppendKind::DuplicateDiscarded);
-            QCOMPARE(session.finalize().pixels, before.pixels);
-            break;
-        }
-        QCOMPARE(result.kind, AppendKind::AcceptedAppend);
-    }
+    const auto downward = uniqueDownwardViewport(seed, 60);
+    QCOMPARE(session.append(downward).kind, AppendKind::AcceptedAppend);
+    QCOMPARE(session.outputHeight(), before.height + 60);
 }
 
 void TestScrollStitchSession::lockedUpReverseReviewPreservesConfirmedFixedEvidence()
@@ -642,7 +660,9 @@ void TestScrollStitchSession::lockedUpReverseReviewPreservesConfirmedFixedEviden
     QCOMPARE(session.append(documentViewport(0, true)).kind, AppendKind::AcceptedAppend);
     const auto before = session.finalize();
 
-    QCOMPARE(session.append(documentViewport(40, true)).kind, AppendKind::ReviewDiscarded);
+    const int beforeHeight = session.outputHeight();
+    QCOMPARE(session.append(documentViewport(20, true)).kind, AppendKind::ReviewDiscarded);
+    QCOMPARE(session.outputHeight(), beforeHeight);
     QCOMPARE(session.finalize().pixels, before.pixels);
     QCOMPARE(session.append(documentViewport(-40, true)).kind, AppendKind::AcceptedAppend);
 }
@@ -968,6 +988,22 @@ void TestScrollStitchSession::evidenceBreakFlushesPerMovementBeyondOldTailAdvanc
     QCOMPARE(resumed.appendedHeight, 50);
     QCOMPARE(session.outputHeight(), 340);
     QCOMPARE(blueAt(session.finalize(), 20, 339), documentPixel(20, 339));
+}
+
+void TestScrollStitchSession::evidenceBreakTransitionRematchFlushesPendingDownward()
+{
+    auto config = defaultConfig();
+    config.fixedBottomCandidateHeight = 60;
+    ScrollStitchSession session(config);
+    QCOMPARE(session.append(tallViewportWithFixedFooter(0)).kind, AppendKind::AcceptedInitial);
+    QCOMPARE(session.append(tallViewportWithFixedFooter(60)).kind, AppendKind::AwaitingEvidence);
+    QCOMPARE(session.append(tallViewportWithFixedFooter(120)).kind, AppendKind::AwaitingEvidence);
+
+    const auto transition = session.append(tallDocumentViewport(180));
+    QCOMPARE(transition.kind, AppendKind::AcceptedAppend);
+    QCOMPARE(transition.appendedHeight, 180);
+    QCOMPARE(session.outputHeight(), 420);
+    QCOMPARE(blueAt(session.finalize(), 20, 419), documentPixel(20, 419));
 }
 
 void TestScrollStitchSession::nonAnchorReverseReviewPreservesPendingEvidence()
