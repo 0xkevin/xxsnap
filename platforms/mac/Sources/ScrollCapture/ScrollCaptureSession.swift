@@ -286,7 +286,7 @@ final class ScrollCaptureSession {
         case .duplicateDiscarded, .reviewDiscarded:
             stabilityCount += 1
             if stabilityCount >= stabilityThreshold { disarmSampling() }
-        case .lowConfidenceDiscarded:
+        case .awaitingEvidence, .lowConfidenceDiscarded:
             disarmSampling()
             _ = setState(.paused(.lowConfidence), operationGeneration: operationGeneration)
         case .resourceLimit:

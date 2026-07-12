@@ -100,6 +100,18 @@ final class ScrollCaptureSessionTests: XCTestCase {
         XCTAssertEqual(limitEngine.appendedImages.count, 2)
     }
 
+    func testAwaitingEvidenceUsesTemporaryLowConfidencePause() async throws {
+        let engine = FakeStitcher(results: [.acceptedInitial, .awaitingEvidence])
+        let session = makeSession(engine: engine)
+        try await session.start()
+        session.recordScrollActivity()
+
+        await session.test_runSamplingTick()
+
+        XCTAssertEqual(session.state, .paused(.lowConfidence))
+        XCTAssertFalse(session.isSamplingArmed)
+    }
+
     func testInitialAcceptedPreviewRemainsVisibleWhenFirstLiveAppendHitsResourceLimit() async throws {
         let accepted = TestImageFactory.solid(size: CGSize(width: 80, height: 60), color: .red)
         let engine = FakeStitcher(results: [.acceptedInitial, .resourceLimit], final: accepted)
