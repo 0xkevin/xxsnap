@@ -2,6 +2,14 @@ import AppKit
 import CoreGraphics
 
 enum TestImageFactory {
+    static func verticalDocument(
+        width: Int,
+        height: Int,
+        scale: CGFloat = 1
+    ) -> NSImage {
+        verticalDocumentViewport(offset: 0, width: width, height: height, scale: scale)
+    }
+
     static func fourCornerMarkers(width: Int = 24, height: Int = 20) -> NSImage {
         precondition(width > 1 && height > 1)
         var bytes = [UInt8](repeating: 0, count: width * height * 4)
@@ -144,6 +152,57 @@ enum TestImageFactory {
             pixelWidth: pixelWidth,
             pixelHeight: pixelHeight,
             pointSize: CGSize(width: pointWidth, height: pointHeight),
+            bytes: bytes
+        )
+    }
+
+    static func downwardDocumentWithFixedFooter(
+        initialScrollingHeight: Int,
+        appendedHeight: Int,
+        footerHeight: Int,
+        width: Int,
+        scale: CGFloat
+    ) -> NSImage {
+        let pixelWidth = Int(CGFloat(width) * scale)
+        let initialScrollingPixels = Int(CGFloat(initialScrollingHeight) * scale)
+        let appendedPixels = Int(CGFloat(appendedHeight) * scale)
+        let footerPixels = Int(CGFloat(footerHeight) * scale)
+        let pixelHeight = initialScrollingPixels + footerPixels + appendedPixels
+        var bytes = [UInt8](repeating: 0, count: pixelWidth * pixelHeight * 4)
+        for providerY in 0..<pixelHeight {
+            let visualY = pixelHeight - 1 - providerY
+            for x in 0..<pixelWidth {
+                let index = (providerY * pixelWidth + x) * 4
+                if visualY >= initialScrollingPixels,
+                   visualY < initialScrollingPixels + footerPixels {
+                    let stripe = UInt8((x / 5) % 2 == 0 ? 0x24 : 0xd2)
+                    bytes[index] = stripe
+                    bytes[index + 1] = stripe ^ 0x6b
+                    bytes[index + 2] = stripe ^ 0xb4
+                } else {
+                    let documentY = visualY < initialScrollingPixels
+                        ? visualY
+                        : visualY - footerPixels
+                    var bits = UInt32(truncatingIfNeeded: documentY / 8) &* 0x9e37_79b9
+                        ^ UInt32(truncatingIfNeeded: x / 4) &* 0x85eb_ca6b
+                    bits ^= bits >> 16
+                    bits &*= 0x7feb_352d
+                    bits ^= bits >> 15
+                    let blue = UInt8(truncatingIfNeeded: bits)
+                    bytes[index] = blue
+                    bytes[index + 1] = blue ^ 0x35
+                    bytes[index + 2] = blue ^ 0xa7
+                }
+                bytes[index + 3] = 255
+            }
+        }
+        return image(
+            pixelWidth: pixelWidth,
+            pixelHeight: pixelHeight,
+            pointSize: CGSize(
+                width: width,
+                height: initialScrollingHeight + footerHeight + appendedHeight
+            ),
             bytes: bytes
         )
     }

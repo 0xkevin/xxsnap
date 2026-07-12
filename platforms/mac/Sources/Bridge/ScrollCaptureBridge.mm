@@ -214,7 +214,8 @@ ScrollCaptureAppendKind bridgeKind(AppendKind kind)
     case AppendKind::AcceptedAppend: return ScrollCaptureAppendKindAcceptedAppend;
     case AppendKind::DuplicateDiscarded: return ScrollCaptureAppendKindDuplicateDiscarded;
     case AppendKind::ReviewDiscarded: return ScrollCaptureAppendKindReviewDiscarded;
-    case AppendKind::PausedLowConfidence: return ScrollCaptureAppendKindPausedLowConfidence;
+    case AppendKind::AwaitingEvidence: return ScrollCaptureAppendKindAwaitingEvidence;
+    case AppendKind::LowConfidenceDiscarded: return ScrollCaptureAppendKindLowConfidenceDiscarded;
     case AppendKind::ResourceLimit: return ScrollCaptureAppendKindResourceLimit;
     }
 }

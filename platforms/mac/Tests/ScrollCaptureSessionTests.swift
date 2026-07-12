@@ -76,7 +76,7 @@ final class ScrollCaptureSessionTests: XCTestCase {
     }
 
     func testPauseKindsDisarmAndOnlyLowConfidenceCanRecoverAfterActivity() async throws {
-        let lowEngine = FakeStitcher(results: [.acceptedInitial, .pausedLowConfidence, .acceptedAppend])
+        let lowEngine = FakeStitcher(results: [.acceptedInitial, .lowConfidenceDiscarded, .acceptedAppend])
         let lowSession = makeSession(engine: lowEngine)
         try await lowSession.start()
         lowSession.recordScrollActivity()
@@ -400,7 +400,7 @@ final class ScrollCaptureSessionTests: XCTestCase {
     func testRearmedLowConfidenceLoopCannotBeClearedByRetiringLoop() async throws {
         let clock = ControlledClock()
         let capturer = FakeCapturer()
-        let engine = FakeStitcher(results: [.acceptedInitial, .pausedLowConfidence, .acceptedAppend])
+        let engine = FakeStitcher(results: [.acceptedInitial, .lowConfidenceDiscarded, .acceptedAppend])
         weak var weakSession: ScrollCaptureSession?
         let session = makeSession(
             capturer: capturer,

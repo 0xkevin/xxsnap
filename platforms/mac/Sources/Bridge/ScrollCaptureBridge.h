@@ -7,7 +7,8 @@ typedef NS_ENUM(NSInteger, ScrollCaptureAppendKind) {
     ScrollCaptureAppendKindAcceptedAppend,
     ScrollCaptureAppendKindDuplicateDiscarded,
     ScrollCaptureAppendKindReviewDiscarded,
-    ScrollCaptureAppendKindPausedLowConfidence,
+    ScrollCaptureAppendKindAwaitingEvidence,
+    ScrollCaptureAppendKindLowConfidenceDiscarded,
     ScrollCaptureAppendKindResourceLimit,
 };
 

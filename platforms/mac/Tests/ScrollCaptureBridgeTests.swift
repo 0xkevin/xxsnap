@@ -4,6 +4,21 @@ import XCTest
 @testable import xxsnap
 
 final class ScrollCaptureBridgeTests: XCTestCase {
+    func testAppendKindRawValueMatrixMatchesCoreContract() {
+        XCTAssertEqual(
+            [
+                ScrollCaptureAppendKind.acceptedInitial,
+                .acceptedAppend,
+                .duplicateDiscarded,
+                .reviewDiscarded,
+                .awaitingEvidence,
+                .lowConfidenceDiscarded,
+                .resourceLimit,
+            ].map(\.rawValue),
+            Array(0...6)
+        )
+    }
+
     func testRuntimeInitializerCannotCreateDefaultAppendUpdate() throws {
         let object = try XCTUnwrap(class_createInstance(ScrollCaptureAppendUpdate.self, 0))
         let selector = NSSelectorFromString("init")
@@ -80,6 +95,7 @@ final class ScrollCaptureBridgeTests: XCTestCase {
 
     func testReviewAndLowConfidenceKindsAreMapped() throws {
         let reverseBridge = try XCTUnwrap(ScrollCaptureBridge(maximumAcceptedBytes: 16 * 1024 * 1024))
+        _ = try reverseBridge.append(TestImageFactory.verticalDocumentViewport(offset: 0))
         _ = try reverseBridge.append(TestImageFactory.verticalDocumentViewport(offset: 32))
         XCTAssertEqual(
             try reverseBridge.append(TestImageFactory.verticalDocumentViewport(offset: 0)).kind,
@@ -92,8 +108,59 @@ final class ScrollCaptureBridgeTests: XCTestCase {
             try unrelatedBridge.append(
                 TestImageFactory.solid(size: CGSize(width: 64, height: 96), color: .gray)
             ).kind,
-            .pausedLowConfidence
+            .lowConfidenceDiscarded
         )
+    }
+
+    func testFirstReliableUpwardMovementPrependsInNaturalOrder() throws {
+        let bridge = try XCTUnwrap(ScrollCaptureBridge(maximumAcceptedBytes: 16 * 1024 * 1024))
+        let offsets = [96, 64, 32, 0]
+
+        let kinds = try offsets.map { offset in
+            try bridge.append(TestImageFactory.verticalDocumentViewport(
+                offset: offset,
+                width: 64,
+                height: 96
+            )).kind
+        }
+
+        XCTAssertEqual(kinds, [
+            .acceptedInitial,
+            .acceptedAppend,
+            .acceptedAppend,
+            .acceptedAppend,
+        ])
+        let final = try XCTUnwrap(bridge.finalImage())
+        let expected = TestImageFactory.verticalDocument(width: 64, height: 192)
+        assertRenderedPixelsEqual(final, expected)
+    }
+
+    func testFixedRegionEvidenceMapsAsAwaitingWithoutLosingFinalPixels() throws {
+        let bridge = try XCTUnwrap(ScrollCaptureBridge(maximumAcceptedBytes: 32 * 1024 * 1024))
+        let seed = TestImageFactory.verticalDocumentViewportWithFixedFooter(offset: 0, scale: 1)
+
+        XCTAssertEqual(try bridge.append(seed).kind, .acceptedInitial)
+        for offset in [15, 30] {
+            let update = try bridge.append(
+                TestImageFactory.verticalDocumentViewportWithFixedFooter(offset: offset, scale: 1)
+            )
+            XCTAssertEqual(update.kind, .awaitingEvidence)
+            assertRenderedPixelsEqual(try XCTUnwrap(bridge.finalImage()), seed)
+        }
+
+        let confirmation = try bridge.append(
+            TestImageFactory.verticalDocumentViewportWithFixedFooter(offset: 45, scale: 1)
+        )
+        XCTAssertEqual(confirmation.kind, .acceptedAppend)
+        let final = try XCTUnwrap(bridge.finalImage())
+        let expected = TestImageFactory.downwardDocumentWithFixedFooter(
+            initialScrollingHeight: 280 - 64,
+            appendedHeight: 45,
+            footerHeight: 64,
+            width: 60,
+            scale: 1
+        )
+        assertRenderedPixelsEqual(final, expected)
     }
 
     func testAppendPreservesDocumentDirectionAndSeamPixels() throws {
@@ -213,6 +280,56 @@ final class ScrollCaptureBridgeTests: XCTestCase {
             let offset = y * bitmap.bytesPerRow + x * 4
             return Array(UnsafeBufferPointer(start: bytes + offset, count: 4))
         }
+    }
+
+    private func renderedBGRAPixels(_ image: NSImage) -> [UInt8] {
+        let representation = image.representations.max {
+            $0.pixelsWide * $0.pixelsHigh < $1.pixelsWide * $1.pixelsHigh
+        }
+        let width = representation?.pixelsWide ?? Int(image.size.width)
+        let height = representation?.pixelsHigh ?? Int(image.size.height)
+        let bytesPerRow = width * 4
+        var bytes = [UInt8](repeating: 0, count: bytesPerRow * height)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo.byteOrder32Little.union(
+            CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue)
+        )
+        bytes.withUnsafeMutableBytes { buffer in
+            let context = CGContext(
+                data: buffer.baseAddress,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: bytesPerRow,
+                space: colorSpace,
+                bitmapInfo: bitmapInfo.rawValue
+            )!
+            context.interpolationQuality = .none
+            var rect = NSRect(origin: .zero, size: image.size)
+            let cgImage = image.cgImage(forProposedRect: &rect, context: nil, hints: nil)!
+            context.translateBy(x: 0, y: CGFloat(height))
+            context.scaleBy(x: 1, y: -1)
+            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        }
+        return bytes
+    }
+
+    private func assertRenderedPixelsEqual(
+        _ actualImage: NSImage,
+        _ expectedImage: NSImage,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let actual = renderedBGRAPixels(actualImage)
+        let expected = renderedBGRAPixels(expectedImage)
+        XCTAssertEqual(actual.count, expected.count, file: file, line: line)
+        guard actual.count == expected.count else { return }
+        XCTAssertNil(
+            actual.indices.first { actual[$0] != expected[$0] },
+            "Rendered BGRA buffers differ",
+            file: file,
+            line: line
+        )
     }
 
     private func assertBridgeError<T>(
