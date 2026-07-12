@@ -76,6 +76,40 @@ ScrollFrame documentViewport(int documentY, bool fixedBands = false, bool scroll
     return frame;
 }
 
+ScrollFrame periodicDocumentViewport(int documentY)
+{
+    ScrollFrame frame(120, 140);
+    for (int y = 0; y < frame.height; ++y) {
+        for (int x = 0; x < frame.width; ++x) {
+            setPixel(frame, x, y, documentPixel(x, (documentY + y) % 100));
+        }
+    }
+    return frame;
+}
+
+ScrollFrame uniqueDownwardViewport(const ScrollFrame& initial, int advance)
+{
+    ScrollFrame frame(initial.width, initial.height);
+    for (int y = 0; y < initial.height - advance; ++y) {
+        for (int x = 0; x < initial.width; ++x) {
+            const auto sourceOffset = static_cast<std::size_t>(y + advance)
+                    * static_cast<std::size_t>(initial.bytesPerRow)
+                + static_cast<std::size_t>(x) * 4U;
+            const auto destinationOffset = static_cast<std::size_t>(y)
+                    * static_cast<std::size_t>(frame.bytesPerRow)
+                + static_cast<std::size_t>(x) * 4U;
+            std::copy_n(initial.pixels.cbegin() + static_cast<std::ptrdiff_t>(sourceOffset), 4,
+                frame.pixels.begin() + static_cast<std::ptrdiff_t>(destinationOffset));
+        }
+    }
+    for (int y = initial.height - advance; y < initial.height; ++y) {
+        for (int x = 0; x < initial.width; ++x) {
+            setPixel(frame, x, y, documentPixel(x, 10'000 + y));
+        }
+    }
+    return frame;
+}
+
 ScrollFrame viewportWithSparseAnimatedEdge(int documentY)
 {
     auto frame = documentViewport(documentY);
@@ -286,6 +320,9 @@ class TestScrollStitchSession final : public QObject
 
 private slots:
     void acceptsInitialAndAppendsOnlyNewBottomStrip();
+    void firstReliableDownwardMovementLocksAppendDirection();
+    void firstReliableUpwardMovementLocksPrependDirection();
+    void ambiguousOrientationDoesNotLockDirection();
     void exactDuplicateDoesNotMutateOutput();
     void reverseReviewDoesNotMutateAcceptedContent();
     void unrelatedFrameIsDiscardedAsLowConfidence();
@@ -353,6 +390,66 @@ void TestScrollStitchSession::acceptsInitialAndAppendsOnlyNewBottomStrip()
     QCOMPARE(blueAt(final, 37, 139), documentPixel(37, 139));
     QCOMPARE(blueAt(final, 37, 140), documentPixel(37, 140));
     QCOMPARE(blueAt(final, 37, 199), documentPixel(37, 199));
+}
+
+void TestScrollStitchSession::firstReliableDownwardMovementLocksAppendDirection()
+{
+    auto config = defaultConfig();
+    config.enableFixedBandDetection = false;
+    ScrollStitchSession session(config);
+    const auto frames = makeDocumentViewports({120, 180, 120, 240});
+
+    QCOMPARE(session.append(frames[0]).kind, AppendKind::AcceptedInitial);
+    QCOMPARE(session.append(frames[1]).kind, AppendKind::AcceptedAppend);
+    QCOMPARE(session.append(frames[2]).kind, AppendKind::ReviewDiscarded);
+    QCOMPARE(session.append(frames[3]).kind, AppendKind::AcceptedAppend);
+
+    const auto final = session.finalize();
+    QCOMPARE(final.height, 260);
+    QCOMPARE(blueAt(final, 37, 0), documentPixel(37, 120));
+    QCOMPARE(blueAt(final, 37, 139), documentPixel(37, 259));
+    QCOMPARE(blueAt(final, 37, 140), documentPixel(37, 260));
+    QCOMPARE(blueAt(final, 37, 259), documentPixel(37, 379));
+}
+
+void TestScrollStitchSession::firstReliableUpwardMovementLocksPrependDirection()
+{
+    auto config = defaultConfig();
+    config.enableFixedBandDetection = false;
+    ScrollStitchSession session(config);
+    const auto frames = makeDocumentViewports({120, 60, 0, 60, 180});
+
+    QCOMPARE(session.append(frames[0]).kind, AppendKind::AcceptedInitial);
+    QCOMPARE(session.append(frames[1]).kind, AppendKind::AcceptedAppend);
+    QCOMPARE(session.append(frames[2]).kind, AppendKind::AcceptedAppend);
+    QCOMPARE(session.append(frames[3]).kind, AppendKind::ReviewDiscarded);
+    QCOMPARE(session.append(frames[4]).kind, AppendKind::ReviewDiscarded);
+
+    const auto final = session.finalize();
+    QCOMPARE(final.height, 260);
+    QCOMPARE(blueAt(final, 37, 0), documentPixel(37, 0));
+    QCOMPARE(blueAt(final, 37, 119), documentPixel(37, 119));
+    QCOMPARE(blueAt(final, 37, 120), documentPixel(37, 120));
+    QCOMPARE(blueAt(final, 37, 259), documentPixel(37, 259));
+}
+
+void TestScrollStitchSession::ambiguousOrientationDoesNotLockDirection()
+{
+    auto config = defaultConfig();
+    config.enableFixedBandDetection = false;
+    ScrollStitchSession session(config);
+    const auto initial = periodicDocumentViewport(0);
+    const auto ambiguous = periodicDocumentViewport(40);
+    const auto uniqueDownward = uniqueDownwardViewport(initial, 60);
+    const auto forward = VerticalOverlapMatcher().match(initial, ambiguous, config.matcher);
+    const auto reverse = VerticalOverlapMatcher().match(ambiguous, initial, config.matcher);
+    QCOMPARE(forward.kind, OverlapKind::Reliable);
+    QCOMPARE(reverse.kind, OverlapKind::Reliable);
+
+    QCOMPARE(session.append(initial).kind, AppendKind::AcceptedInitial);
+    QCOMPARE(session.append(ambiguous).kind, AppendKind::LowConfidenceDiscarded);
+    QCOMPARE(session.append(uniqueDownward).kind, AppendKind::AcceptedAppend);
+    QCOMPARE(session.outputHeight(), 200);
 }
 
 void TestScrollStitchSession::exactDuplicateDoesNotMutateOutput()

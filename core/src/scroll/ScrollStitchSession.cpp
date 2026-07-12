@@ -191,6 +191,13 @@ public:
         Fixed,
     };
 
+    enum class Direction
+    {
+        Undetermined,
+        Down,
+        Up,
+    };
+
     struct PendingMovement final
     {
         std::shared_ptr<const ScrollFrame> frame;
@@ -213,6 +220,7 @@ public:
 
     ScrollStitchConfig config;
     bool configIsValid = false;
+    Direction direction = Direction::Undetermined;
     std::vector<Segment> segments;
     std::vector<Fingerprint> anchors;
     std::vector<PendingMovement> pending;
@@ -711,8 +719,60 @@ try {
     const auto matcherConfig = implementation_->effectiveMatcherConfig();
     auto overlap = matcher.match(evidenceTail, frame, matcherConfig);
     result.confidence = overlap.confidence;
+    bool prepend = false;
+    std::optional<Implementation::Direction> directionToLock;
+    if (!config.enableFixedBandDetection && implementation_->pending.empty()) {
+        using Direction = Implementation::Direction;
+        const auto reliableMovement = [](const OverlapResult& candidate) {
+            return candidate.kind == OverlapKind::Reliable && candidate.verticalAdvance > 0;
+        };
+        const auto reverse = matcher.match(frame, evidenceTail, matcherConfig);
+        const bool forwardReliable = reliableMovement(overlap);
+        const bool reverseReliable = reliableMovement(reverse);
+
+        if (implementation_->direction == Direction::Undetermined) {
+            if (forwardReliable == reverseReliable) {
+                result.kind = AppendKind::LowConfidenceDiscarded;
+                result.confidence = std::max(overlap.confidence, reverse.confidence);
+                return result;
+            }
+            if (reverseReliable) {
+                overlap = reverse;
+                prepend = true;
+                directionToLock = Direction::Up;
+            } else {
+                directionToLock = Direction::Down;
+            }
+        } else if (implementation_->direction == Direction::Down) {
+            const auto& topFrontier = *implementation_->segments.front().pixels;
+            const auto opposite = matcher.match(frame, topFrontier, matcherConfig);
+            if (reliableMovement(opposite)) {
+                result.kind = AppendKind::ReviewDiscarded;
+                result.confidence = opposite.confidence;
+                return result;
+            }
+            if (!forwardReliable) {
+                return result;
+            }
+        } else {
+            const auto& bottomFrontier = *implementation_->segments.back().pixels;
+            const auto opposite = matcher.match(bottomFrontier, frame, matcherConfig);
+            if (reliableMovement(opposite)) {
+                result.kind = AppendKind::ReviewDiscarded;
+                result.confidence = opposite.confidence;
+                return result;
+            }
+            if (!reverseReliable) {
+                return result;
+            }
+            overlap = reverse;
+            prepend = true;
+        }
+        result.confidence = overlap.confidence;
+    }
     const auto evidence = implementation_->fixedBandEvidence(evidenceTail, frame);
-    if (!evidence.top && !evidence.bottom && implementation_->pending.empty()) {
+    if (config.enableFixedBandDetection && !evidence.top && !evidence.bottom
+        && implementation_->pending.empty()) {
         const auto reverse = matcher.match(frame, evidenceTail, matcherConfig);
         if (reverse.kind == OverlapKind::Reliable && reverse.verticalAdvance > 0) {
             result.kind = AppendKind::ReviewDiscarded;
@@ -1010,7 +1070,9 @@ try {
     const int excludedBottom = implementation_->fixedBottomConfirmed
         ? implementation_->fixedBottomHeight
         : 0;
-    const int firstNewRow = frame.height - excludedBottom - appendedHeight;
+    const int firstNewRow = prepend
+        ? excludedTop
+        : frame.height - excludedBottom - appendedHeight;
     if (appendedHeight > std::numeric_limits<int>::max() - implementation_->height
         || firstNewRow < excludedTop) {
         result.kind = AppendKind::ResourceLimit;
@@ -1062,17 +1124,22 @@ try {
 
     const auto preparedScrollbar = implementation_->nextScrollbarState(
         implementation_->scrollbar, *implementation_->tail, frame);
-    implementation_->segments.push_back({
-        *storedSegment,
-        0,
-        appendedHeight,
-    });
+    Implementation::Segment newSegment{*storedSegment, 0, appendedHeight};
+    if (prepend) {
+        implementation_->segments.insert(
+            implementation_->segments.begin(), std::move(newSegment));
+    } else {
+        implementation_->segments.push_back(std::move(newSegment));
+    }
     implementation_->anchors.push_back(std::move(fingerprint));
     implementation_->tail = *storedTail;
     implementation_->tailHasSeparateStorage = true;
     implementation_->persistentBytes = projected;
     implementation_->scrollbar = preparedScrollbar;
     implementation_->height += appendedHeight;
+    if (directionToLock.has_value()) {
+        implementation_->direction = *directionToLock;
+    }
     result.kind = AppendKind::AcceptedAppend;
     result.appendedHeight = appendedHeight;
     result.outputHeight = implementation_->height;
