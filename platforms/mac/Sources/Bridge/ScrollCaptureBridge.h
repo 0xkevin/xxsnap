@@ -12,16 +12,26 @@ typedef NS_ENUM(NSInteger, ScrollCaptureAppendKind) {
     ScrollCaptureAppendKindResourceLimit,
 };
 
+typedef NS_ENUM(NSInteger, ScrollCaptureDirection) {
+    ScrollCaptureDirectionUnknown,
+    ScrollCaptureDirectionDown,
+    ScrollCaptureDirectionUp,
+};
+
 @interface ScrollCaptureAppendUpdate : NSObject
 - (instancetype)init NS_UNAVAILABLE;
 + (instancetype)new NS_UNAVAILABLE;
 @property(nonatomic, readonly) ScrollCaptureAppendKind kind;
+@property(nonatomic, readonly) ScrollCaptureDirection direction;
 @property(nonatomic, readonly) NSInteger appendedHeight;
 @property(nonatomic, readonly) NSInteger outputHeight;
 @property(nonatomic, readonly) double confidence;
 #if DEBUG
 + (instancetype)testValueWithKind:(ScrollCaptureAppendKind)kind
     NS_SWIFT_NAME(testValue(kind:));
++ (instancetype)testValueWithKind:(ScrollCaptureAppendKind)kind
+                         direction:(ScrollCaptureDirection)direction
+    NS_SWIFT_NAME(testValue(kind:direction:));
 #endif
 @end
 

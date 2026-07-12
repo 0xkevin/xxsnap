@@ -15,7 +15,7 @@ extension ScrollCaptureSession: ScrollCaptureSessionRunning {}
 protocol ScrollCapturePresenting: AnyObject {
     func start()
     func stop()
-    func updatePreview(_ image: NSImage)
+    func updatePreview(_ image: NSImage, following edge: ScrollCapturePreviewEdge)
     func setWarning(_ text: String)
     func clearWarning()
     func updatePlacement(selectionFrame: NSRect, visibleFrame: NSRect)
@@ -386,8 +386,8 @@ final class CaptureCoordinator {
             finishScrollCapture()
         case .terminalCommand(.cancel):
             cancelScrollCapture()
-        case .preview(let image):
-            presentation.updatePreview(image)
+        case .preview(let image, let edge):
+            presentation.updatePreview(image, following: edge)
         case .append:
             break
         case .state(.capturing):

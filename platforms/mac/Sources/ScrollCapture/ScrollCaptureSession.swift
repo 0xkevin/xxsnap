@@ -53,10 +53,15 @@ enum ScrollCaptureSessionState: Equatable {
     case cancelled
 }
 
+enum ScrollCapturePreviewEdge: Equatable {
+    case bottom
+    case top
+}
+
 enum ScrollCapturePresentationUpdate {
     case state(ScrollCaptureSessionState)
     case append(ScrollCaptureAppendUpdate)
-    case preview(NSImage)
+    case preview(NSImage, edge: ScrollCapturePreviewEdge)
     case warning(ScrollCaptureMatchWarning?)
     case terminalCommand(ScrollCaptureTerminalCommand)
 }
@@ -70,6 +75,7 @@ enum ScrollCaptureSessionError: Error, Equatable {
     case invalidState(ScrollCaptureSessionState)
     case initialFrameRejected(ScrollCaptureAppendKind)
     case operationCancelled
+    case acceptedAppendWithoutDirection
 }
 
 @MainActor
@@ -131,7 +137,7 @@ final class ScrollCaptureSession {
             }
             let preview = try stitcher.preview(maximumHeight: 1_200)
             guard emit(
-                .preview(preview),
+                .preview(preview, edge: .bottom),
                 operationGeneration: operationGeneration,
                 expectedState: .preparing
             ) else { return }
@@ -274,11 +280,20 @@ final class ScrollCaptureSession {
     ) throws {
         switch update.kind {
         case .acceptedAppend:
+            let edge: ScrollCapturePreviewEdge
+            switch update.direction {
+            case .down: edge = .bottom
+            case .up: edge = .top
+            case .unknown:
+                throw ScrollCaptureSessionError.acceptedAppendWithoutDirection
+            @unknown default:
+                throw ScrollCaptureSessionError.acceptedAppendWithoutDirection
+            }
             stabilityCount = 0
             guard clearCurrentWarning(operationGeneration: operationGeneration) else { return }
             let preview = try stitcher.preview(maximumHeight: 1_200)
             _ = emit(
-                .preview(preview),
+                .preview(preview, edge: edge),
                 operationGeneration: operationGeneration,
                 expectedState: .capturing
             )

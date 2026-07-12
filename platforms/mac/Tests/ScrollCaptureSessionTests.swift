@@ -42,6 +42,42 @@ final class ScrollCaptureSessionTests: XCTestCase {
         XCTAssertEqual(engine.appendedImages.count, 2)
     }
 
+    func testAcceptedAppendPublishesPreviewAtLockedDirectionEdge() async throws {
+        for (direction, expectedEdge) in [
+            (ScrollCaptureDirection.down, ScrollCapturePreviewEdge.bottom),
+            (.up, .top),
+        ] {
+            let engine = FakeStitcher(
+                results: [.acceptedInitial, .acceptedAppend],
+                directions: [.unknown, direction]
+            )
+            let presentation = PresentationRecorder()
+            let session = makeSession(engine: engine, presentation: presentation)
+            try await session.start()
+            session.recordScrollActivity()
+
+            await session.test_runSamplingTick()
+
+            XCTAssertEqual(presentation.previewEdges, [.bottom, expectedEdge])
+        }
+    }
+
+    func testAcceptedAppendWithUnknownDirectionFailsSafely() async throws {
+        let engine = FakeStitcher(
+            results: [.acceptedInitial, .acceptedAppend],
+            directions: [.unknown, .unknown]
+        )
+        let session = makeSession(engine: engine)
+        try await session.start()
+        session.recordScrollActivity()
+
+        await session.test_runSamplingTick()
+
+        XCTAssertEqual(session.state, .paused(.captureFailure))
+        XCTAssertFalse(session.isSamplingArmed)
+        XCTAssertEqual(engine.previewCallCount, 1)
+    }
+
     func testThreeConsecutiveDuplicatesDisarmAndNewActivityResetsStability() async throws {
         let engine = FakeStitcher(results: [.acceptedInitial, .duplicateDiscarded, .duplicateDiscarded, .duplicateDiscarded, .duplicateDiscarded])
         let session = makeSession(engine: engine)
@@ -787,6 +823,7 @@ private final class BlockingCapturer: ScrollRegionCapturing {
 @MainActor
 private final class FakeStitcher: ScrollStitching {
     private var results: [ScrollCaptureAppendKind]
+    private var directions: [ScrollCaptureDirection]
     let final: NSImage
     private let onDeinit: (() -> Void)?
     private(set) var appendedImages: [NSImage] = []
@@ -798,11 +835,13 @@ private final class FakeStitcher: ScrollStitching {
 
     init(
         results: [ScrollCaptureAppendKind],
+        directions: [ScrollCaptureDirection] = [],
         final: NSImage? = nil,
         finalErrors: [Error] = [],
         onDeinit: (() -> Void)? = nil
     ) {
         self.results = results
+        self.directions = directions
         self.final = final ?? TestImageFactory.solid(size: CGSize(width: 80, height: 120), color: .purple)
         self.finalErrors = finalErrors
         self.onDeinit = onDeinit
@@ -814,7 +853,11 @@ private final class FakeStitcher: ScrollStitching {
         defer { concurrent -= 1 }
         appendedImages.append(image)
         guard !results.isEmpty else { throw TestError.failed }
-        return .testValue(kind: results.removeFirst())
+        let kind = results.removeFirst()
+        let direction = directions.isEmpty
+            ? (kind == .acceptedAppend ? .down : .unknown)
+            : directions.removeFirst()
+        return .testValue(kind: kind, direction: direction)
     }
 
     func preview(maximumHeight: Int) throws -> NSImage {
@@ -927,6 +970,7 @@ private final class PresentationRecorder {
     private(set) var states: [ScrollCaptureSessionState] = []
     private(set) var kinds: [ScrollCaptureAppendKind] = []
     private(set) var previews: [NSImage] = []
+    private(set) var previewEdges: [ScrollCapturePreviewEdge] = []
     private(set) var commands: [ScrollCaptureTerminalCommand] = []
     private(set) var warningEvents: [ScrollCaptureMatchWarning?] = []
     var warnings: [ScrollCaptureMatchWarning] { warningEvents.compactMap { $0 } }
@@ -936,7 +980,9 @@ private final class PresentationRecorder {
         case let .terminalCommand(command): commands.append(command)
         case let .state(state): states.append(state)
         case let .append(update): kinds.append(update.kind)
-        case let .preview(image): previews.append(image)
+        case let .preview(image, edge):
+            previews.append(image)
+            previewEdges.append(edge)
         case let .warning(warning): warningEvents.append(warning)
         }
     }

@@ -28,6 +28,7 @@ final class ScrollCapturePresentationController: NSObject {
     private var isProgrammaticScroll = false
     private(set) var isFollowingTail = true
     private var reviewOffset: CGFloat = 0
+    private var followEdge: ScrollCapturePreviewEdge = .bottom
     private var terminalActionTriggered = false
     private var hasStarted = false
     private var stopped = false
@@ -178,22 +179,27 @@ final class ScrollCapturePresentationController: NSObject {
         }
     }
 
-    func updatePreview(_ image: NSImage) {
+    func updatePreview(_ image: NSImage, following edge: ScrollCapturePreviewEdge) {
         guard !stopped else { return }
         let previousDocumentHeight = imageView.frame.height
+        followEdge = edge
         imageView.image = image
         imageView.imageScaling = .scaleProportionallyDown
         let width = max(1, scrollView.contentSize.width)
         let height = max(scrollView.contentSize.height, image.size.height * width / max(image.size.width, 1))
         imageView.frame = NSRect(x: 0, y: 0, width: width, height: height)
         isProgrammaticScroll = true
+        let maximumOffset = max(0, height - scrollView.contentSize.height)
         if isFollowingTail {
-            scrollView.contentView.scroll(to: .zero)
-            reviewOffset = 0
+            reviewOffset = edge == .bottom ? 0 : maximumOffset
+            scrollView.contentView.scroll(to: NSPoint(x: 0, y: reviewOffset))
         } else {
-            let maximumOffset = max(0, height - scrollView.contentSize.height)
             let growth = max(0, height - previousDocumentHeight)
-            reviewOffset = min(reviewOffset + growth, maximumOffset)
+            if edge == .bottom {
+                reviewOffset = min(reviewOffset + growth, maximumOffset)
+            } else {
+                reviewOffset = min(reviewOffset, maximumOffset)
+            }
             scrollView.contentView.scroll(to: NSPoint(x: 0, y: reviewOffset))
         }
         scrollView.reflectScrolledClipView(scrollView.contentView)
@@ -247,7 +253,10 @@ final class ScrollCapturePresentationController: NSObject {
     @objc private func scrollBoundsChanged() {
         guard !isProgrammaticScroll else { return }
         reviewOffset = max(0, scrollView.documentVisibleRect.minY)
-        isFollowingTail = reviewOffset <= 2
+        let maximumOffset = max(0, imageView.frame.height - scrollView.contentSize.height)
+        isFollowingTail = followEdge == .bottom
+            ? reviewOffset <= 2
+            : reviewOffset >= maximumOffset - 2
     }
 
     static func previewFrame(

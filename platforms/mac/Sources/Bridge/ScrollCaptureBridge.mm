@@ -13,6 +13,7 @@ namespace {
 
 using snipory::core::scroll::AppendKind;
 using snipory::core::scroll::AppendResult;
+using snipory::core::scroll::ScrollDirection;
 using snipory::core::scroll::ScrollFrame;
 using snipory::core::scroll::ScrollStitchConfig;
 using snipory::core::scroll::ScrollStitchSession;
@@ -220,6 +221,15 @@ ScrollCaptureAppendKind bridgeKind(AppendKind kind)
     }
 }
 
+ScrollCaptureDirection bridgeDirection(ScrollDirection direction)
+{
+    switch (direction) {
+    case ScrollDirection::Undetermined: return ScrollCaptureDirectionUnknown;
+    case ScrollDirection::Down: return ScrollCaptureDirectionDown;
+    case ScrollDirection::Up: return ScrollCaptureDirectionUp;
+    }
+}
+
 BridgeImplementation *implementationOrError(void *pointer, NSError **error)
 {
     auto *implementation = static_cast<BridgeImplementation *>(pointer);
@@ -236,7 +246,8 @@ BridgeImplementation *implementationOrError(void *pointer, NSError **error)
 
 @interface ScrollCaptureAppendUpdate ()
 - (instancetype)initWithResult:(const AppendResult&)result;
-- (instancetype)initWithKind:(ScrollCaptureAppendKind)kind;
+- (instancetype)initWithKind:(ScrollCaptureAppendKind)kind
+                    direction:(ScrollCaptureDirection)direction;
 @end
 
 @implementation ScrollCaptureAppendUpdate
@@ -251,6 +262,7 @@ BridgeImplementation *implementationOrError(void *pointer, NSError **error)
     self = [super init];
     if (self != nil) {
         _kind = bridgeKind(result.kind);
+        _direction = bridgeDirection(result.direction);
         _appendedHeight = static_cast<NSInteger>(result.appendedHeight);
         _outputHeight = static_cast<NSInteger>(result.outputHeight);
         _confidence = result.confidence;
@@ -259,10 +271,12 @@ BridgeImplementation *implementationOrError(void *pointer, NSError **error)
 }
 
 - (instancetype)initWithKind:(ScrollCaptureAppendKind)kind
+                    direction:(ScrollCaptureDirection)direction
 {
     self = [super init];
     if (self != nil) {
         _kind = kind;
+        _direction = direction;
         _appendedHeight = 0;
         _outputHeight = 0;
         _confidence = 1;
@@ -273,7 +287,13 @@ BridgeImplementation *implementationOrError(void *pointer, NSError **error)
 #if DEBUG
 + (instancetype)testValueWithKind:(ScrollCaptureAppendKind)kind
 {
-    return [[self alloc] initWithKind:kind];
+    return [[self alloc] initWithKind:kind direction:ScrollCaptureDirectionUnknown];
+}
+
++ (instancetype)testValueWithKind:(ScrollCaptureAppendKind)kind
+                         direction:(ScrollCaptureDirection)direction
+{
+    return [[self alloc] initWithKind:kind direction:direction];
 }
 #endif
 

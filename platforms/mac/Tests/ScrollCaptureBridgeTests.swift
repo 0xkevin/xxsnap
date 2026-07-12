@@ -19,6 +19,17 @@ final class ScrollCaptureBridgeTests: XCTestCase {
         )
     }
 
+    func testDirectionRawValueMatrixMatchesCoreContract() {
+        XCTAssertEqual(
+            [ScrollCaptureDirection.unknown, .down, .up].map(\.rawValue),
+            Array(0...2)
+        )
+        XCTAssertEqual(
+            ScrollCaptureAppendUpdate.testValue(kind: .duplicateDiscarded).direction,
+            .unknown
+        )
+    }
+
     func testRuntimeInitializerCannotCreateDefaultAppendUpdate() throws {
         let object = try XCTUnwrap(class_createInstance(ScrollCaptureAppendUpdate.self, 0))
         let selector = NSSelectorFromString("init")
@@ -116,20 +127,21 @@ final class ScrollCaptureBridgeTests: XCTestCase {
         let bridge = try XCTUnwrap(ScrollCaptureBridge(maximumAcceptedBytes: 16 * 1024 * 1024))
         let offsets = [96, 64, 32, 0]
 
-        let kinds = try offsets.map { offset in
+        let updates = try offsets.map { offset in
             try bridge.append(TestImageFactory.verticalDocumentViewport(
                 offset: offset,
                 width: 64,
                 height: 96
-            )).kind
+            ))
         }
 
-        XCTAssertEqual(kinds, [
+        XCTAssertEqual(updates.map(\.kind), [
             .acceptedInitial,
             .acceptedAppend,
             .acceptedAppend,
             .acceptedAppend,
         ])
+        XCTAssertEqual(updates.dropFirst().map(\.direction), [.up, .up, .up])
         let final = try XCTUnwrap(bridge.finalImage())
         let expected = TestImageFactory.verticalDocument(width: 64, height: 192)
         assertRenderedPixelsEqual(final, expected)
@@ -173,6 +185,7 @@ final class ScrollCaptureBridgeTests: XCTestCase {
         let final = try XCTUnwrap(bridge.finalImage())
 
         XCTAssertEqual(update.kind, .acceptedAppend)
+        XCTAssertEqual(update.direction, .down)
         XCTAssertEqual(update.appendedHeight, 32)
         XCTAssertEqual(update.outputHeight, 128)
         XCTAssertEqual(final.representations.first?.pixelsWide, 64)
@@ -222,6 +235,7 @@ final class ScrollCaptureBridgeTests: XCTestCase {
         ))
 
         XCTAssertEqual(update.kind, .resourceLimit)
+        XCTAssertEqual(update.direction, .unknown)
         let final = try XCTUnwrap(bridge.finalImage())
         XCTAssertEqual(final.representations.first?.pixelsHigh, 48)
     }

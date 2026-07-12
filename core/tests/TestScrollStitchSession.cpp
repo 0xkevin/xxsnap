@@ -12,6 +12,7 @@ namespace {
 using snipory::core::scroll::AppendKind;
 using snipory::core::scroll::OverlapKind;
 using snipory::core::scroll::ScrollFrame;
+using snipory::core::scroll::ScrollDirection;
 using snipory::core::scroll::ScrollStitchConfig;
 using snipory::core::scroll::ScrollStitchSession;
 using snipory::core::scroll::VerticalOverlapMatcher;
@@ -463,6 +464,7 @@ void TestScrollStitchSession::acceptsInitialAndAppendsOnlyNewBottomStrip()
     QCOMPARE(session.append(frames[0]).kind, AppendKind::AcceptedInitial);
     const auto result = session.append(frames[1]);
     QCOMPARE(result.kind, AppendKind::AcceptedAppend);
+    QCOMPARE(result.direction, ScrollDirection::Down);
     QCOMPARE(result.appendedHeight, 60);
     QCOMPARE(result.outputHeight, 200);
     QCOMPARE(session.outputHeight(), 200);
@@ -483,7 +485,9 @@ void TestScrollStitchSession::firstReliableDownwardMovementLocksAppendDirection(
     const auto frames = makeDocumentViewports({120, 180, 120, 240});
 
     QCOMPARE(session.append(frames[0]).kind, AppendKind::AcceptedInitial);
-    QCOMPARE(session.append(frames[1]).kind, AppendKind::AcceptedAppend);
+    const auto firstAppend = session.append(frames[1]);
+    QCOMPARE(firstAppend.kind, AppendKind::AcceptedAppend);
+    QCOMPARE(firstAppend.direction, ScrollDirection::Down);
     QCOMPARE(session.append(frames[2]).kind, AppendKind::ReviewDiscarded);
     QCOMPARE(session.append(frames[3]).kind, AppendKind::AcceptedAppend);
 
@@ -500,7 +504,9 @@ void TestScrollStitchSession::firstReliableUpwardMovementLocksPrependDirection()
     const auto frames = makeDocumentViewports({120, 60, 0, 60, 180});
 
     QCOMPARE(session.append(frames[0]).kind, AppendKind::AcceptedInitial);
-    QCOMPARE(session.append(frames[1]).kind, AppendKind::AcceptedAppend);
+    const auto firstAppend = session.append(frames[1]);
+    QCOMPARE(firstAppend.kind, AppendKind::AcceptedAppend);
+    QCOMPARE(firstAppend.direction, ScrollDirection::Up);
     QCOMPARE(session.append(frames[2]).kind, AppendKind::AcceptedAppend);
     QCOMPARE(session.append(frames[3]).kind, AppendKind::ReviewDiscarded);
     QCOMPARE(session.append(frames[4]).kind, AppendKind::ReviewDiscarded);
@@ -652,11 +658,14 @@ void TestScrollStitchSession::rejectedUpwardPrependLeavesPixelsAndHeightUnchange
     QCOMPARE(session.append(documentViewport(100, true)).kind, AppendKind::AwaitingEvidence);
     const auto rejected = session.append(documentViewport(0, true));
     QCOMPARE(rejected.kind, AppendKind::ResourceLimit);
+    QCOMPARE(rejected.direction, ScrollDirection::Undetermined);
     QCOMPARE(session.outputHeight(), before.height);
     QCOMPARE(session.finalize().pixels, before.pixels);
 
     const auto downward = uniqueDownwardViewport(seed, 60);
-    QCOMPARE(session.append(downward).kind, AppendKind::AcceptedAppend);
+    const auto accepted = session.append(downward);
+    QCOMPARE(accepted.kind, AppendKind::AcceptedAppend);
+    QCOMPARE(accepted.direction, ScrollDirection::Down);
     QCOMPARE(session.outputHeight(), before.height + 60);
 }
 

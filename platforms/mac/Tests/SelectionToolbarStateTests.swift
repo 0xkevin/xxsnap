@@ -77,6 +77,7 @@ private final class FakeScrollCapturePresentation: ScrollCapturePresenting {
     private(set) var startCount = 0
     private(set) var stopCount = 0
     private(set) var previews: [NSImage] = []
+    private(set) var previewEdges: [ScrollCapturePreviewEdge] = []
     private(set) var warnings: [String] = []
     private(set) var clearWarningCount = 0
     private(set) var placements: [(NSRect, NSRect)] = []
@@ -86,7 +87,10 @@ private final class FakeScrollCapturePresentation: ScrollCapturePresenting {
 
     func start() { startCount += 1 }
     func stop() { stopCount += 1 }
-    func updatePreview(_ image: NSImage) { previews.append(image) }
+    func updatePreview(_ image: NSImage, following edge: ScrollCapturePreviewEdge) {
+        previews.append(image)
+        previewEdges.append(edge)
+    }
     func setWarning(_ text: String) { warnings.append(text) }
     func clearWarning() { clearWarningCount += 1 }
     func updatePlacement(selectionFrame: NSRect, visibleFrame: NSRect) {
@@ -9637,8 +9641,9 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(presentation.placements.count, 1)
         XCTAssertTrue(coordinator.test_hasScrollCaptureSession)
         let preview = NSImage(size: NSSize(width: 30, height: 80))
-        update?(.preview(preview))
+        update?(.preview(preview, edge: .top))
         XCTAssertTrue(presentation.previews.last === preview)
+        XCTAssertEqual(presentation.previewEdges, [.top])
         update?(.warning(.lowConfidence))
         XCTAssertEqual(overlay.scrollCaptureOverlayState, .capturing)
         XCTAssertEqual(presentation.warnings.last, L10n(language: .zhHans).text(.scrollCaptureLowConfidence))

@@ -191,12 +191,7 @@ public:
         Fixed,
     };
 
-    enum class Direction
-    {
-        Undetermined,
-        Down,
-        Up,
-    };
+    using Direction = ScrollDirection;
 
     enum class DirectionalDecision
     {
@@ -1232,6 +1227,7 @@ try {
             implementation_->direction = flushedDirection;
         }
         result.kind = AppendKind::AcceptedAppend;
+        result.direction = implementation_->direction;
         result.appendedHeight = flushedHeight;
         result.outputHeight = implementation_->height;
         result.confidence = movementOverlap.confidence;
@@ -1324,6 +1320,7 @@ try {
         implementation_->direction = *directionToLock;
     }
     result.kind = AppendKind::AcceptedAppend;
+    result.direction = implementation_->direction;
     result.appendedHeight = appendedHeight;
     result.outputHeight = implementation_->height;
     return result;

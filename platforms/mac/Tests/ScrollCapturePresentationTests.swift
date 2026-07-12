@@ -145,14 +145,14 @@ final class ScrollCapturePresentationTests: XCTestCase {
 
     func testPreviewTailFollowAndReviewPositionAreIndependentFromWarning() {
         let controller = makeController()
-        controller.updatePreview(NSImage(size: NSSize(width: 240, height: 900)))
+        controller.updatePreview(NSImage(size: NSSize(width: 240, height: 900)), following: .bottom)
         XCTAssertTrue(controller.test_isFollowingTail)
         XCTAssertEqual(controller.test_visibleRect.minY, 0, accuracy: 0.5)
         controller.test_userScroll(to: 160)
         XCTAssertGreaterThan(controller.test_visibleRect.minY, 100)
         let reviewOffset = controller.test_visibleRect.minY
         let oldDocumentHeight = controller.test_documentHeight
-        controller.updatePreview(NSImage(size: NSSize(width: 240, height: 1200)))
+        controller.updatePreview(NSImage(size: NSSize(width: 240, height: 1200)), following: .bottom)
         XCTAssertFalse(controller.test_isFollowingTail)
         XCTAssertEqual(
             controller.test_visibleRect.minY,
@@ -166,29 +166,52 @@ final class ScrollCapturePresentationTests: XCTestCase {
         XCTAssertNotNil(controller.test_previewImage)
         controller.test_userScroll(to: 0)
         XCTAssertTrue(controller.test_isFollowingTail)
-        controller.updatePreview(NSImage(size: NSSize(width: 240, height: 1400)))
+        controller.updatePreview(NSImage(size: NSSize(width: 240, height: 1400)), following: .bottom)
         XCTAssertEqual(controller.test_visibleRect.minY, 0, accuracy: 0.5)
+    }
+
+    func testUpPreviewFollowsTopAndPreservesReviewAnchor() {
+        let controller = makeController()
+        let width = controller.test_contentWidth
+        controller.updatePreview(NSImage(size: NSSize(width: width, height: 700)), following: .bottom)
+        controller.updatePreview(NSImage(size: NSSize(width: width, height: 900)), following: .top)
+        var maximumOffset = controller.test_documentHeight - controller.test_visibleRect.height
+        XCTAssertTrue(controller.test_isFollowingTail)
+        XCTAssertEqual(controller.test_visibleRect.minY, maximumOffset, accuracy: 0.5)
+
+        controller.test_userScroll(to: maximumOffset - 120)
+        let reviewOffset = controller.test_visibleRect.minY
+        XCTAssertFalse(controller.test_isFollowingTail)
+        controller.updatePreview(NSImage(size: NSSize(width: width, height: 1100)), following: .top)
+        XCTAssertEqual(controller.test_visibleRect.minY, reviewOffset, accuracy: 0.5)
+
+        maximumOffset = controller.test_documentHeight - controller.test_visibleRect.height
+        controller.test_userScroll(to: maximumOffset)
+        XCTAssertTrue(controller.test_isFollowingTail)
+        controller.updatePreview(NSImage(size: NSSize(width: width, height: 1300)), following: .top)
+        maximumOffset = controller.test_documentHeight - controller.test_visibleRect.height
+        XCTAssertEqual(controller.test_visibleRect.minY, maximumOffset, accuracy: 0.5)
     }
 
     func testReviewAnchorTracksGrowingTailAndClampsWhileTailFollowStaysAtZero() {
         let controller = makeController()
         let width = controller.test_contentWidth
-        controller.updatePreview(NSImage(size: NSSize(width: width, height: 600)))
+        controller.updatePreview(NSImage(size: NSSize(width: width, height: 600)), following: .bottom)
         XCTAssertEqual(controller.test_documentHeight, 600, accuracy: 0.5)
         controller.test_userScroll(to: 120)
-        controller.updatePreview(NSImage(size: NSSize(width: width, height: 720)))
+        controller.updatePreview(NSImage(size: NSSize(width: width, height: 720)), following: .bottom)
         XCTAssertEqual(controller.test_documentHeight, 720, accuracy: 0.5)
         XCTAssertEqual(controller.test_visibleRect.minY, 240, accuracy: 0.5)
 
         controller.test_userScroll(to: 400)
-        controller.updatePreview(NSImage(size: NSSize(width: width, height: 500)))
+        controller.updatePreview(NSImage(size: NSSize(width: width, height: 500)), following: .bottom)
         XCTAssertLessThanOrEqual(
             controller.test_visibleRect.maxY,
             controller.test_documentHeight + 0.5
         )
 
         controller.test_userScroll(to: 0)
-        controller.updatePreview(NSImage(size: NSSize(width: width, height: 800)))
+        controller.updatePreview(NSImage(size: NSSize(width: width, height: 800)), following: .bottom)
         XCTAssertEqual(controller.test_visibleRect.minY, 0, accuracy: 0.5)
     }
 
@@ -247,7 +270,7 @@ final class ScrollCapturePresentationTests: XCTestCase {
         autoreleasepool {
             let image = NSImage(size: NSSize(width: 400, height: 1600))
             weakImage = image
-            controller?.updatePreview(image)
+            controller?.updatePreview(image, following: .bottom)
             controller?.test_userScroll(to: 120)
             controller?.setWarning("cleanup warning")
             reviewOffset = controller?.test_reviewOffset
@@ -258,7 +281,7 @@ final class ScrollCapturePresentationTests: XCTestCase {
         XCTAssertEqual(controller?.test_reviewOffset, reviewOffset)
         XCTAssertFalse(controller?.test_hasBoundsObserver ?? true)
         XCTAssertNil(controller?.test_warningToolTip)
-        controller?.updatePreview(NSImage(size: NSSize(width: 200, height: 800)))
+        controller?.updatePreview(NSImage(size: NSSize(width: 200, height: 800)), following: .bottom)
         controller?.setWarning("late")
         XCTAssertNil(controller?.test_previewImage)
         XCTAssertNil(controller?.test_warningText)

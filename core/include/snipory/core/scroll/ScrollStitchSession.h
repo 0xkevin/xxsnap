@@ -19,9 +19,17 @@ enum class AppendKind
     ResourceLimit,
 };
 
+enum class ScrollDirection
+{
+    Undetermined,
+    Down,
+    Up,
+};
+
 struct AppendResult final
 {
     AppendKind kind = AppendKind::LowConfidenceDiscarded;
+    ScrollDirection direction = ScrollDirection::Undetermined;
     int appendedHeight = 0;
     int outputHeight = 0;
     double confidence = 0;
