@@ -482,7 +482,7 @@ void TestVerticalOverlapMatcher::avoidsQuadraticFullResolutionFallback()
 
     QCOMPARE(result.kind, OverlapKind::Reliable);
     QCOMPARE(result.verticalAdvance, advance);
-    QVERIFY2(elapsed < 3000, qPrintable(QStringLiteral("elapsed %1 ms").arg(elapsed)));
+    QVERIFY2(elapsed < 400, qPrintable(QStringLiteral("elapsed %1 ms").arg(elapsed)));
 }
 
 void TestVerticalOverlapMatcher::ignoresAdvancesWithEmptyMaskedIntersection()
@@ -528,7 +528,7 @@ void TestVerticalOverlapMatcher::avoidsFlatSignatureFullResolutionDegeneration()
     const auto elapsed = timer.elapsed();
 
     QCOMPARE(result.kind, OverlapKind::Ambiguous);
-    QVERIFY2(elapsed < 3000, qPrintable(QStringLiteral("elapsed %1 ms").arg(elapsed)));
+    QVERIFY2(elapsed < 400, qPrintable(QStringLiteral("elapsed %1 ms").arg(elapsed)));
 }
 
 void TestVerticalOverlapMatcher::returnsConservativeResultWhenEvaluationBudgetIsExhausted()
@@ -563,7 +563,7 @@ void TestVerticalOverlapMatcher::validatesFullResolutionCandidateBudget()
 {
     const ScrollFrame frame = stripedDocument(12, 20);
     OverlapConfig config;
-    QCOMPARE(config.maximumFullResolutionCandidates, 16);
+    QCOMPARE(config.maximumFullResolutionCandidates, 32);
     config.maximumFullResolutionCandidates = 0;
     QCOMPARE(VerticalOverlapMatcher().match(frame, frame, config).kind, OverlapKind::Insufficient);
     config.maximumFullResolutionCandidates = 1'000'001;

@@ -1,12 +1,18 @@
 import AppKit
 import CoreGraphics
+import ImageIO
 import UniformTypeIdentifiers
 
 @MainActor
 protocol ScrollCaptureSessionRunning: AnyObject {
     func start() async throws
+    func performStep(direction: ScrollCaptureDirection) async throws
     func finish() async throws -> NSImage
     @discardableResult func cancel() -> ScrollCaptureSeed
+}
+
+extension ScrollCaptureSessionRunning {
+    func performStep(direction: ScrollCaptureDirection) async throws {}
 }
 
 extension ScrollCaptureSession: ScrollCaptureSessionRunning {}
@@ -15,11 +21,21 @@ extension ScrollCaptureSession: ScrollCaptureSessionRunning {}
 protocol ScrollCapturePresenting: AnyObject {
     func start()
     func stop()
-    func updatePreview(_ image: NSImage, following edge: ScrollCapturePreviewEdge)
+    func updatePreview(
+        _ image: NSImage,
+        following edge: ScrollCapturePreviewEdge,
+        viewport: ScrollCapturePreviewViewport
+    )
+    func moveViewportIndicator(_ activity: ScrollCaptureScrollActivity)
+    func setStepControlState(_ state: ScrollCaptureStepControlState)
     func setWarning(_ text: String)
     func clearWarning()
     func updatePlacement(selectionFrame: NSRect, visibleFrame: NSRect)
     func resetTerminalActionsForRetry()
+}
+
+extension ScrollCapturePresenting {
+    func setStepControlState(_ state: ScrollCaptureStepControlState) {}
 }
 
 extension ScrollCapturePresentationController: ScrollCapturePresenting {}
@@ -42,6 +58,7 @@ struct ScrollCapturePresentationContext {
     let selectionFrame: NSRect
     let visibleFrame: NSRect
     let language: AppLanguage
+    let onStep: @MainActor (ScrollCaptureDirection) -> Void
     let onFinish: @MainActor () -> Void
     let onCancel: @MainActor () -> Void
 }
@@ -86,6 +103,8 @@ final class CaptureCoordinator {
     private let longImageFallbackPresenter: @MainActor (NSImage) -> LongImageFallbackChoice
     private let longImageCopyHandler: (@MainActor (NSImage) -> Bool)?
     private let longImageSaveHandler: (@MainActor (NSImage) -> Bool)?
+    private let frontmostApplicationResolver: @MainActor () -> NSRunningApplication?
+    private let applicationActivator: @MainActor (NSRunningApplication) -> Void
     private var longImageEditor: (any LongImageEditorPresenting)?
     private var longImageLifecycleActive = false
     private var scrollCaptureSession: (any ScrollCaptureSessionRunning)?
@@ -95,6 +114,7 @@ final class CaptureCoordinator {
     private var scrollCaptureFinishPending = false
     private var scrollCapturePhase: ScrollCaptureLifecyclePhase = .idle
     private var scrollCaptureGeneration: UInt64 = 0
+    private var captureTargetApplication: NSRunningApplication?
 
     init(
         permissionCoordinator: PermissionCoordinator,
@@ -117,7 +137,11 @@ final class CaptureCoordinator {
         ) throws -> (any LongImageEditorPresenting)?)? = nil,
         longImageFallbackPresenter: (@MainActor (NSImage) -> LongImageFallbackChoice)? = nil,
         longImageCopyHandler: (@MainActor (NSImage) -> Bool)? = nil,
-        longImageSaveHandler: (@MainActor (NSImage) -> Bool)? = nil
+        longImageSaveHandler: (@MainActor (NSImage) -> Bool)? = nil,
+        frontmostApplicationResolver: @escaping @MainActor () -> NSRunningApplication? = CaptureCoordinator.refreshTargetApplication,
+        applicationActivator: @escaping @MainActor (NSRunningApplication) -> Void = { application in
+            application.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        }
     ) {
         self.permissionCoordinator = permissionCoordinator
         self.screenCaptureService = screenCaptureService
@@ -125,15 +149,20 @@ final class CaptureCoordinator {
         self.pinnedWindowFactory = pinnedWindowFactory
         self.scrollCaptureSessionFactory = scrollCaptureSessionFactory ?? { seed, update in
             let maximumAcceptedBytes = Self.defaultScrollCaptureMaximumAcceptedBytes
-            guard let bridge = ScrollCaptureBridge(maximumAcceptedBytes: maximumAcceptedBytes) else {
+            guard let bridge = ScrollCaptureBridgeWorker(maximumAcceptedBytes: maximumAcceptedBytes) else {
                 preconditionFailure("Unable to create scroll capture bridge")
             }
             return ScrollCaptureSession(
                 seed: seed,
-                capturer: screenCaptureService,
+                capturer: StreamingScrollRegionCapturer(service: screenCaptureService),
                 stitcher: bridge,
                 clock: ContinuousScrollCaptureClock(),
                 activityMonitor: ScrollActivityMonitor(),
+                stepController: AutomaticScrollCaptureStepController(
+                    targetProcessIdentifierProvider: {
+                        seed.targetApplicationProcessIdentifier
+                    }
+                ),
                 presentation: update
             )
         }
@@ -152,6 +181,8 @@ final class CaptureCoordinator {
         self.longImageFallbackPresenter = longImageFallbackPresenter ?? Self.presentLongImageFallback
         self.longImageCopyHandler = longImageCopyHandler
         self.longImageSaveHandler = longImageSaveHandler
+        self.frontmostApplicationResolver = frontmostApplicationResolver
+        self.applicationActivator = applicationActivator
     }
 
     convenience init() {
@@ -205,6 +236,8 @@ final class CaptureCoordinator {
             return
         }
 
+        captureTargetApplication = frontmostApplicationResolver()
+
         startTask = Task { @MainActor [weak self] in
             guard let self else {
                 return
@@ -212,7 +245,7 @@ final class CaptureCoordinator {
             defer {
                 self.startTask = nil
             }
-            let refreshTargetApplication = Self.refreshTargetApplication()
+            let refreshTargetApplication = self.captureTargetApplication
 
             let backgroundImage: NSImage?
             do {
@@ -266,9 +299,13 @@ final class CaptureCoordinator {
     }
 
     private static var defaultScrollCaptureMaximumAcceptedBytes: UInt {
-        // Cap the stitcher's retained image storage while scaling down on memory-constrained Macs.
+        // Keep enough headroom for final-image materialization while allowing long captures
+        // to scale with the host instead of stopping at the old fixed 512 MiB ceiling.
         let physical = ProcessInfo.processInfo.physicalMemory
-        let desired = min(UInt64(512 * 1_024 * 1_024), max(UInt64(128 * 1_024 * 1_024), physical / 8))
+        let desired = min(
+            UInt64(4 * 1_024 * 1_024 * 1_024),
+            max(UInt64(512 * 1_024 * 1_024), physical / 16)
+        )
         return UInt(min(desired, UInt64(UInt.max)))
     }
 
@@ -282,6 +319,7 @@ final class CaptureCoordinator {
             selectionFrame: context.selectionFrame,
             visibleFrame: context.visibleFrame,
             language: context.language,
+            onStep: context.onStep,
             onFinish: context.onFinish,
             onCancel: context.onCancel
         )
@@ -323,22 +361,42 @@ final class CaptureCoordinator {
             scrollCapturePhase = .idle
             return
         }
-        let visibleFrame = Self.visibleFrame(containing: seed.screenRect)
+        let targetApplication = captureTargetApplication ?? frontmostApplicationResolver()
+        captureTargetApplication = targetApplication
+        let captureSeed = ScrollCaptureSeed(
+            screenRect: seed.screenRect,
+            snapshotRect: seed.snapshotRect,
+            frozenImage: seed.frozenImage,
+            annotations: seed.annotations,
+            eraserMasks: seed.eraserMasks,
+            targetApplicationProcessIdentifier: targetApplication?.processIdentifier
+        )
+        let visibleFrame = Self.visibleFrame(containing: captureSeed.screenRect)
         let presentation = scrollCapturePresentationFactory(ScrollCapturePresentationContext(
             geometry: geometry,
-            selectionFrame: seed.screenRect,
+            selectionFrame: captureSeed.screenRect,
             visibleFrame: visibleFrame,
             language: language,
+            onStep: { [weak self] direction in self?.performScrollCaptureStep(direction: direction) },
             onFinish: { [weak self] in self?.finishScrollCapture() },
             onCancel: { [weak self] in self?.cancelScrollCapture() }
         ))
-        let session = scrollCaptureSessionFactory(seed) { [weak self] update in
+        let session = scrollCaptureSessionFactory(captureSeed) { [weak self] update in
             self?.receiveScrollCaptureUpdate(update, generation: generation)
         }
-        scrollCaptureSeed = seed
+        scrollCaptureSeed = captureSeed
         scrollCaptureSession = session
         scrollCapturePresentation = presentation
-        presentation.updatePlacement(selectionFrame: seed.screenRect, visibleFrame: visibleFrame)
+        presentation.updatePlacement(selectionFrame: captureSeed.screenRect, visibleFrame: visibleFrame)
+        // Keep the transparent selection chrome visible, but return foreground ownership to
+        // the application underneath so it receives the user's scroll-wheel events.
+        if let targetApplication {
+            applicationActivator(targetApplication)
+        } else {
+            NSApp.deactivate()
+        }
+        // Present after the target application activation so AppKit does not immediately
+        // reorder the new controls behind the application being activated.
         presentation.start()
         scrollCaptureTask = Task { @MainActor [weak self, weak session] in
             do {
@@ -360,6 +418,32 @@ final class CaptureCoordinator {
                 guard let self, self.scrollCaptureGeneration == generation,
                       self.scrollCaptureSession === session else { return }
                 self.recoverScrollCaptureOverlay(generation: generation)
+            }
+        }
+    }
+
+    private func performScrollCaptureStep(direction: ScrollCaptureDirection) {
+        guard scrollCapturePhase == .active,
+              scrollCaptureTask == nil,
+              let session = scrollCaptureSession
+        else { return }
+        let generation = scrollCaptureGeneration
+        scrollCaptureTask = Task { @MainActor [weak self, weak session] in
+            do {
+                try await session?.performStep(direction: direction)
+                guard let self, self.scrollCaptureGeneration == generation,
+                      self.scrollCaptureSession === session else { return }
+                self.scrollCaptureTask = nil
+                if self.scrollCapturePhase == .finishPending {
+                    self.finishScrollCapture()
+                }
+            } catch {
+                guard let self, self.scrollCaptureGeneration == generation,
+                      self.scrollCaptureSession === session else { return }
+                self.scrollCaptureTask = nil
+                if self.scrollCapturePhase == .finishPending {
+                    self.finishScrollCapture()
+                }
             }
         }
     }
@@ -386,8 +470,17 @@ final class CaptureCoordinator {
             finishScrollCapture()
         case .terminalCommand(.cancel):
             cancelScrollCapture()
-        case .preview(let image, let edge):
-            presentation.updatePreview(image, following: edge)
+        case .preview(let image, let edge, let viewport):
+            NSLog(
+                "xxsnap scroll-capture coordinator preview edge=%@ image=%@ viewport=%ld output=%ld",
+                String(describing: edge),
+                NSStringFromSize(image.size),
+                viewport.viewportHeight,
+                viewport.outputHeight
+            )
+            presentation.updatePreview(image, following: edge, viewport: viewport)
+        case .viewportScroll(let activity):
+            presentation.moveViewportIndicator(activity)
         case .append:
             break
         case .state(.capturing):
@@ -404,20 +497,37 @@ final class CaptureCoordinator {
         case .warning(.lowConfidence):
             overlay.setScrollCaptureCapturing()
             presentation.setWarning(l10n.text(.scrollCaptureLowConfidence))
+        case .warning(.noMovement):
+            overlay.setScrollCaptureCapturing()
+            presentation.setWarning(l10n.text(.scrollCaptureNoMovement))
         case .warning(nil):
             presentation.clearWarning()
+        case .stepState(let state):
+            presentation.setStepControlState(state)
         case .state:
             break
         }
     }
 
     private func finishScrollCapture() {
+        NSLog(
+            "xxsnap scroll-capture coordinator finish requested phase=%@ task=%@ session=%@ presentation=%@",
+            String(describing: scrollCapturePhase),
+            scrollCaptureTask == nil ? "nil" : "active",
+            scrollCaptureSession == nil ? "nil" : "present",
+            scrollCapturePresentation == nil ? "nil" : "present"
+        )
         switch scrollCapturePhase {
         case .starting:
             scrollCaptureFinishPending = true
             scrollCapturePhase = .finishPending
             return
         case .active:
+            if scrollCaptureTask != nil {
+                scrollCaptureFinishPending = true
+                scrollCapturePhase = .finishPending
+                return
+            }
             break
         case .finishPending:
             guard scrollCaptureFinishPending, scrollCaptureTask == nil else { return }
@@ -429,12 +539,14 @@ final class CaptureCoordinator {
               scrollCapturePresentation != nil,
               scrollCaptureTask == nil
         else { return }
+        NSLog("xxsnap scroll-capture coordinator entering finishing")
         scrollCapturePhase = .finishing
         scrollCaptureFinishPending = false
         let generation = scrollCaptureGeneration
         scrollCaptureTask = Task { @MainActor [weak self, weak session] in
             do {
                 guard let image = try await session?.finish() else { return }
+                NSLog("xxsnap scroll-capture session returned final image size=%@", NSStringFromSize(image.size))
                 guard let self, self.scrollCaptureGeneration == generation,
                       self.scrollCaptureSession === session else { return }
                 self.scrollCapturePresentation?.stop()
@@ -458,6 +570,7 @@ final class CaptureCoordinator {
                     self.presentLongImageEditor(image: image, seed: seed)
                 }
             } catch {
+                NSLog("xxsnap scroll-capture finish failed: %@", String(describing: error))
                 guard let self, self.scrollCaptureGeneration == generation,
                       self.scrollCaptureSession === session else { return }
                 self.scrollCaptureTask = nil
@@ -784,9 +897,7 @@ final class CaptureCoordinator {
     func saveLastCapture(_ image: NSImage? = nil) -> Bool {
         guard
             let imageToSave = image ?? lastCapture,
-            let tiffData = imageToSave.tiffRepresentation,
-            let bitmap = NSBitmapImageRep(data: tiffData),
-            let pngData = bitmap.representation(using: .png, properties: [:])
+            let cgImage = imageToSave.cgImage(forProposedRect: nil, context: nil, hints: nil)
         else {
             return false
         }
@@ -801,13 +912,21 @@ final class CaptureCoordinator {
             return false
         }
 
-        do {
-            try pngData.write(to: destinationURL)
-            return true
-        } catch {
-            NSLog("xxsnap save failed: \(error.localizedDescription)")
+        guard let destination = CGImageDestinationCreateWithURL(
+            destinationURL as CFURL,
+            UTType.png.identifier as CFString,
+            1,
+            nil
+        ) else {
             return false
         }
+        CGImageDestinationAddImage(destination, cgImage, nil)
+        let didSave = CGImageDestinationFinalize(destination)
+        if !didSave {
+            try? FileManager.default.removeItem(at: destinationURL)
+            NSLog("xxsnap save failed: ImageIO could not encode PNG")
+        }
+        return didSave
     }
 
     private func copyToPasteboard(_ image: NSImage) {

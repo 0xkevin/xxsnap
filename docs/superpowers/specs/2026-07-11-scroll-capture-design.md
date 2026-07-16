@@ -158,10 +158,10 @@ flowchart TB
   Fingerprint -->|repeat or review| Discard[Discard without mutation]
   Fingerprint -->|candidate| Match[Vertical overlap estimator]
   Match -->|reliable| Fixed[Separate fixed regions and edge scrollbar]
-  Fixed --> Segments[Append below or prepend above in locked direction]
+  Fixed --> Segments[Spool accepted strips to temporary storage]
   Segments --> Preview[Follow the latest accepted edge]
   Match -->|unreliable| Warn[Warn without mutation; timer may idle]
-  Segments --> Finalize[Compose original-resolution image once]
+  Segments --> Finalize[Stream into a file-backed final image]
   Finalize --> Editor[Dedicated long-image editor]
 ```
 
@@ -183,7 +183,11 @@ The matcher estimates displacement and confidence from regions that move consist
 A frame is accepted only when overlap is sufficient, the displacement is plausible, and one placement is materially stronger than alternatives.
 
 For `Down`, only the non-overlapping bottom strip becomes a new segment appended below the seed. For `Up`, only the non-overlapping top strip becomes a new segment prepended above the seed; composition preserves natural top-to-bottom order.
-The session stores segments rather than redrawing an ever-growing bitmap after every frame.
+The session writes committed strips to an automatically removed temporary file rather than retaining them as heap images or redrawing an ever-growing bitmap after every frame. Memory retains only the initial opposite frontier, current matching viewport, bounded fixed-band evidence, a bounded recent fingerprint history, and preview buffers. Segment metadata carries stable document offsets so preview lookup remains logarithmic as frame count grows.
+
+The macOS bridge streams final rows directly into file-backed mapped storage used by Core Graphics. It does not first allocate a complete core bitmap and then copy that bitmap into a second AppKit buffer. PNG save uses ImageIO directly from the `CGImage`, avoiding TIFF and full PNG `Data` intermediates.
+
+This makes capture memory a bounded working set, but it does not make capture mathematically unlimited. Temporary-disk use, matching time, output dimensions, PNG encoding time, and downstream framework limits still grow with the accepted pixel count. Exhausted disk space or an unsupported final image dimension must preserve the accepted result and report a completion error; the product must not promise that every machine can finish an arbitrary 10,000-frame full-resolution image.
 
 ### Fixed Regions
 
@@ -268,7 +272,8 @@ Pin creates a pin for the complete long image, initially scaled to the visible s
 - High-confidence scrollbar cropping and ambiguous-edge preservation.
 - Low-confidence, fast-scroll, blank-region, and repeated-pattern warning/idle behavior.
 - Segment ordering and deferred final composition.
-- Resource-accounting behavior.
+- Resource-accounting behavior, bounded resident memory, and temporary spool growth.
+- 1,000-step fixed-band stress and 10,000-step compact storage/lookup stress.
 
 Synthetic fixtures should be complemented by checked-in image sequences for browser pages and documents in light and dark themes.
 

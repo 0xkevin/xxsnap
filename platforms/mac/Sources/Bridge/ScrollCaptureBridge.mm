@@ -8,6 +8,11 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <vector>
+
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace {
 
@@ -24,6 +29,7 @@ enum class BridgeError : NSInteger {
     InvalidConfiguration = 1,
     InvalidImage,
     InvalidPreviewHeight,
+    InvalidPreviewWidth,
     NoOutput,
     ConversionFailed,
     InternalFailure,
@@ -51,23 +57,10 @@ struct BridgeImplementation final {
 };
 
 std::unique_ptr<ScrollStitchSession> makeSession(
-    std::size_t maximumAcceptedBytes, CGFloat sourceScale, int frameHeight)
+    std::size_t maximumAcceptedBytes)
 {
     ScrollStitchConfig config;
     config.maximumAcceptedBytes = maximumAcceptedBytes;
-    constexpr int defaultFixedBandPointBudget = 96;
-    const auto scaledBudget = defaultFixedBandPointBudget * sourceScale;
-    if (!std::isfinite(scaledBudget)
-        || scaledBudget > std::numeric_limits<int>::max()) {
-        return nullptr;
-    }
-    const auto pixelBudget = std::min<long>(
-        std::lround(scaledBudget), frameHeight / 4);
-    if (pixelBudget < 0) {
-        return nullptr;
-    }
-    config.fixedTopCandidateHeight = static_cast<int>(pixelBudget);
-    config.fixedBottomCandidateHeight = static_cast<int>(pixelBudget);
     return std::make_unique<ScrollStitchSession>(config);
 }
 
@@ -208,6 +201,122 @@ NSImage *imageFromFrame(const ScrollFrame& frame, CGFloat scale, NSError **error
     return image;
 }
 
+struct MappedImageStorage final {
+    void *address = MAP_FAILED;
+    std::size_t length = 0;
+    int descriptor = -1;
+};
+
+void releaseMappedImageStorage(void *info, const void *, std::size_t)
+{
+    auto *storage = static_cast<MappedImageStorage *>(info);
+    if (storage == nullptr) {
+        return;
+    }
+    if (storage->address != MAP_FAILED) {
+        munmap(storage->address, storage->length);
+    }
+    if (storage->descriptor >= 0) {
+        close(storage->descriptor);
+    }
+    delete storage;
+}
+
+NSImage *mappedFinalImage(
+    const ScrollStitchSession& session,
+    CGFloat scale,
+    NSError **error)
+{
+    const int width = session.outputWidth();
+    const int height = session.previewOutputHeight();
+    if (width <= 0 || height <= 0 || !std::isfinite(scale) || scale <= 0) {
+        setError(error, BridgeError::NoOutput, @"No stitched image is available.");
+        return nil;
+    }
+    const auto rowBytes = static_cast<std::size_t>(width) * 4U;
+    if (rowBytes / 4U != static_cast<std::size_t>(width)
+        || static_cast<std::size_t>(height) > std::numeric_limits<std::size_t>::max() / rowBytes) {
+        setError(error, BridgeError::ConversionFailed, @"The stitched image is too large.");
+        return nil;
+    }
+    const auto byteCount = rowBytes * static_cast<std::size_t>(height);
+    if (byteCount > static_cast<std::size_t>(std::numeric_limits<off_t>::max())) {
+        setError(error, BridgeError::ConversionFailed, @"The stitched image is too large.");
+        return nil;
+    }
+
+    NSString *pathTemplate = [NSTemporaryDirectory()
+        stringByAppendingPathComponent:@"xxsnap-scroll-final-XXXXXX"];
+    const char *fileSystemPath = pathTemplate.fileSystemRepresentation;
+    std::vector<char> mutablePath(
+        fileSystemPath, fileSystemPath + std::strlen(fileSystemPath) + 1U);
+    const int descriptor = mkstemp(mutablePath.data());
+    if (descriptor < 0) {
+        setError(error, BridgeError::ConversionFailed, @"Unable to create temporary image storage.");
+        return nil;
+    }
+    unlink(mutablePath.data());
+    if (ftruncate(descriptor, static_cast<off_t>(byteCount)) != 0) {
+        close(descriptor);
+        setError(error, BridgeError::ConversionFailed, @"Unable to size temporary image storage.");
+        return nil;
+    }
+    void *address = mmap(nullptr, byteCount, PROT_READ | PROT_WRITE, MAP_SHARED, descriptor, 0);
+    if (address == MAP_FAILED) {
+        close(descriptor);
+        setError(error, BridgeError::ConversionFailed, @"Unable to map temporary image storage.");
+        return nil;
+    }
+    (void)madvise(address, byteCount, MADV_SEQUENTIAL);
+    auto *storage = new (std::nothrow) MappedImageStorage{address, byteCount, descriptor};
+    if (storage == nullptr
+        || !session.copyFinalPixels(address, byteCount, rowBytes, true, true)) {
+        if (storage != nullptr) {
+            releaseMappedImageStorage(storage, nullptr, 0);
+        } else {
+            munmap(address, byteCount);
+            close(descriptor);
+        }
+        setError(error, BridgeError::ConversionFailed, @"Unable to compose the stitched image.");
+        return nil;
+    }
+    (void)msync(address, byteCount, MS_ASYNC);
+    (void)madvise(address, byteCount, MADV_DONTNEED);
+
+    CGDataProviderRef provider = CGDataProviderCreateWithData(
+        storage, address, byteCount, releaseMappedImageStorage);
+    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+    if (provider == nullptr || colorSpace == nullptr) {
+        if (provider != nullptr) {
+            CGDataProviderRelease(provider);
+        } else {
+            releaseMappedImageStorage(storage, nullptr, 0);
+        }
+        if (colorSpace != nullptr) CGColorSpaceRelease(colorSpace);
+        setError(error, BridgeError::ConversionFailed, @"Unable to create the stitched image.");
+        return nil;
+    }
+    const CGBitmapInfo bitmapInfo = kCGBitmapByteOrder32Little
+        | static_cast<CGBitmapInfo>(kCGImageAlphaPremultipliedFirst);
+    CGImageRef cgImage = CGImageCreate(
+        static_cast<std::size_t>(width), static_cast<std::size_t>(height),
+        8, 32, rowBytes, colorSpace, bitmapInfo,
+        provider, nullptr, false, kCGRenderingIntentDefault);
+    CGColorSpaceRelease(colorSpace);
+    CGDataProviderRelease(provider);
+    if (cgImage == nullptr) {
+        setError(error, BridgeError::ConversionFailed, @"Unable to create the stitched image.");
+        return nil;
+    }
+    NSBitmapImageRep *representation = [[NSBitmapImageRep alloc] initWithCGImage:cgImage];
+    CGImageRelease(cgImage);
+    const NSSize pointSize = NSMakeSize(width / scale, height / scale);
+    representation.size = pointSize;
+    NSImage *image = [[NSImage alloc] initWithSize:pointSize];
+    [image addRepresentation:representation];
+    return image;
+}
+
 ScrollCaptureAppendKind bridgeKind(AppendKind kind)
 {
     switch (kind) {
@@ -227,6 +336,15 @@ ScrollCaptureDirection bridgeDirection(ScrollDirection direction)
     case ScrollDirection::Undetermined: return ScrollCaptureDirectionUnknown;
     case ScrollDirection::Down: return ScrollCaptureDirectionDown;
     case ScrollDirection::Up: return ScrollCaptureDirectionUp;
+    }
+}
+
+ScrollDirection coreDirection(ScrollCaptureDirection direction)
+{
+    switch (direction) {
+    case ScrollCaptureDirectionUnknown: return ScrollDirection::Undetermined;
+    case ScrollCaptureDirectionDown: return ScrollDirection::Down;
+    case ScrollCaptureDirectionUp: return ScrollDirection::Up;
     }
 }
 
@@ -333,6 +451,15 @@ BridgeImplementation *implementationOrError(void *pointer, NSError **error)
 - (nullable ScrollCaptureAppendUpdate *)appendImage:(NSImage *)image
                                               error:(NSError **)error
 {
+    return [self appendImage:image
+          preferredDirection:ScrollCaptureDirectionUnknown
+                       error:error];
+}
+
+- (nullable ScrollCaptureAppendUpdate *)appendImage:(NSImage *)image
+                                  preferredDirection:(ScrollCaptureDirection)preferredDirection
+                                               error:(NSError **)error
+{
     auto *implementation = implementationOrError(_implementation, error);
     if (implementation == nullptr) {
         return nil;
@@ -344,14 +471,14 @@ BridgeImplementation *implementationOrError(void *pointer, NSError **error)
     }
     try {
         if (implementation->session == nullptr) {
-            implementation->session = makeSession(
-                implementation->maximumAcceptedBytes, sourceScale, frame.height);
+            implementation->session = makeSession(implementation->maximumAcceptedBytes);
             if (implementation->session == nullptr) {
                 setError(error, BridgeError::InvalidImage, @"The image scale is invalid.");
                 return nil;
             }
         }
-        const AppendResult result = implementation->session->append(frame);
+        AppendResult result = implementation->session->append(
+            frame, coreDirection(preferredDirection));
         if (result.kind == AppendKind::AcceptedInitial) {
             implementation->sourceScale = sourceScale;
             implementation->acceptedImage = true;
@@ -388,6 +515,31 @@ BridgeImplementation *implementationOrError(void *pointer, NSError **error)
     }
 }
 
+- (nullable NSImage *)previewImageWithMaximumWidth:(NSInteger)maximumWidth
+                                             error:(NSError **)error
+{
+    auto *implementation = implementationOrError(_implementation, error);
+    if (implementation == nullptr) {
+        return nil;
+    }
+    if (maximumWidth <= 0 || maximumWidth > std::numeric_limits<int>::max()) {
+        setError(error, BridgeError::InvalidPreviewWidth, @"Preview width must be a positive 32-bit pixel count.");
+        return nil;
+    }
+    if (!implementation->acceptedImage) {
+        setError(error, BridgeError::NoOutput, @"Append an image before requesting a preview.");
+        return nil;
+    }
+    try {
+        return imageFromFrame(
+            implementation->session->previewForWidth(static_cast<int>(maximumWidth)),
+            implementation->sourceScale, error);
+    } catch (...) {
+        setError(error, BridgeError::InternalFailure, @"The scroll stitch engine failed to create a preview.");
+        return nil;
+    }
+}
+
 - (nullable NSImage *)finalImageAndReturnError:(NSError **)error
 {
     auto *implementation = implementationOrError(_implementation, error);
@@ -399,8 +551,8 @@ BridgeImplementation *implementationOrError(void *pointer, NSError **error)
         return nil;
     }
     try {
-        return imageFromFrame(
-            implementation->session->finalize(), implementation->sourceScale, error);
+        return mappedFinalImage(
+            *implementation->session, implementation->sourceScale, error);
     } catch (...) {
         setError(error, BridgeError::InternalFailure, @"The scroll stitch engine failed to create the final image.");
         return nil;

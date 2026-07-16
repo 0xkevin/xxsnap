@@ -15,6 +15,9 @@ namespace {
 constexpr std::array<int, 2> SignatureBinLimits{64, 127};
 constexpr std::size_t RefinementCandidateThreshold = 16;
 constexpr int MaximumFullResolutionCandidateLimit = 1'000'000;
+constexpr int MaximumSignatureRows = 192;
+constexpr int MaximumValidationColumns = 256;
+constexpr int MaximumValidationRows = 384;
 
 struct LuminanceImage final
 {
@@ -167,7 +170,8 @@ struct EvaluationBudget final
     }
     WideAccumulator difference;
     std::uint64_t count = 0;
-    for (int currentY = firstY; currentY < lastY; ++currentY) {
+    const int rowStep = std::max(1, (lastY - firstY + MaximumSignatureRows - 1) / MaximumSignatureRows);
+    for (int currentY = firstY; currentY < lastY; currentY += rowStep) {
         const auto previousRow = static_cast<std::size_t>(currentY + advance)
             * static_cast<std::size_t>(previous.binCount);
         const auto currentRow = static_cast<std::size_t>(currentY)
@@ -213,15 +217,23 @@ struct EvaluationBudget final
 
     double difference = 0;
     std::uint64_t count = 0;
+    const auto columnStep = static_cast<std::size_t>(lastY - firstY <= MaximumValidationRows
+        ? 1
+        : std::max(
+            1,
+            (lastX - firstX + MaximumValidationColumns - 1) / MaximumValidationColumns));
+    const auto rowStep = static_cast<std::size_t>(std::max(
+        1,
+        (lastY - firstY + MaximumValidationRows - 1) / MaximumValidationRows));
     for (auto currentY = static_cast<std::size_t>(firstY);
          currentY < static_cast<std::size_t>(lastY);
-         ++currentY) {
+         currentY += rowStep) {
         const auto previousRow = (currentY + static_cast<std::size_t>(advance))
             * static_cast<std::size_t>(previous.width);
         const auto currentRow = currentY * static_cast<std::size_t>(current.width);
         for (auto column = static_cast<std::size_t>(firstX);
              column < static_cast<std::size_t>(lastX);
-             ++column) {
+             column += columnStep) {
             const int previousValue = previous.pixels[previousRow + column];
             const int currentValue = current.pixels[currentRow + column];
             difference += static_cast<double>(std::abs(previousValue - currentValue));

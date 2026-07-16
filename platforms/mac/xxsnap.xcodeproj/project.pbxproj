@@ -15,6 +15,10 @@
 		1BCC88D12C8AEDFC68A01425 /* cancel-capture.svg in Resources */ = {isa = PBXBuildFile; fileRef = 9A98FE556582ECA9DC75EEAB /* cancel-capture.svg */; };
 		1F4A7C50AA4E1B2300000001 /* command.svg in Resources */ = {isa = PBXBuildFile; fileRef = 1F4A7C50AA4E1B2300000002 /* command.svg */; };
 		1F4A7C50AA4E1B2300000003 /* done.svg in Resources */ = {isa = PBXBuildFile; fileRef = 1F4A7C50AA4E1B2300000004 /* done.svg */; };
+		1F4A7C50AA4E1B2300000005 /* scroll-screen2.svg in Resources */ = {isa = PBXBuildFile; fileRef = 1F4A7C50AA4E1B2300000006 /* scroll-screen2.svg */; };
+		1F4A7C50AA4E1B2300000009 /* play-circle.svg in Resources */ = {isa = PBXBuildFile; fileRef = 1F4A7C50AA4E1B2300000007 /* play-circle.svg */; };
+		1F4A7C50AA4E1B230000000A /* stop-circle.svg in Resources */ = {isa = PBXBuildFile; fileRef = 1F4A7C50AA4E1B2300000008 /* stop-circle.svg */; };
+		1F4A7C50AA4E1B230000000B /* mouse-point.svg in Resources */ = {isa = PBXBuildFile; fileRef = 1F4A7C50AA4E1B230000000C /* mouse-point.svg */; };
 		251C81FE4D348158346520EB /* scroll-capture.png in Resources */ = {isa = PBXBuildFile; fileRef = C17198BAD6AFCEB4159B4687 /* scroll-capture.png */; };
 		260B435ACF404D352087F565 /* border-corner-rounded.svg in Resources */ = {isa = PBXBuildFile; fileRef = 0209BE008E9C5F0571BE4B9F /* border-corner-rounded.svg */; };
 		28874BF6C20345BE1676B963 /* CaptureAnnotationRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C662C2A250F475591381BB05 /* CaptureAnnotationRenderer.swift */; };
@@ -105,8 +109,8 @@
 		FDBF397BAA0A24460ECBCD14 /* pencil-tool.svg in Resources */ = {isa = PBXBuildFile; fileRef = FFD19A79C67CA725D5FD09B1 /* pencil-tool.svg */; };
 		AA5000000000000000000001 /* ScrollCaptureBridge.mm in Sources */ = {isa = PBXBuildFile; fileRef = AA5000000000000000000011 /* ScrollCaptureBridge.mm */; };
 		AA5000000000000000000002 /* FrameFingerprint.cpp in Sources */ = {isa = PBXBuildFile; fileRef = AA5000000000000000000012 /* FrameFingerprint.cpp */; };
-		AA5000000000000000000003 /* VerticalOverlapMatcher.cpp in Sources */ = {isa = PBXBuildFile; fileRef = AA5000000000000000000013 /* VerticalOverlapMatcher.cpp */; };
-		AA5000000000000000000004 /* ScrollStitchSession.cpp in Sources */ = {isa = PBXBuildFile; fileRef = AA5000000000000000000014 /* ScrollStitchSession.cpp */; };
+		AA5000000000000000000003 /* VerticalOverlapMatcher.cpp in Sources */ = {isa = PBXBuildFile; fileRef = AA5000000000000000000013 /* VerticalOverlapMatcher.cpp */; settings = {COMPILER_FLAGS = "-O2"; }; };
+		AA5000000000000000000004 /* ScrollStitchSession.cpp in Sources */ = {isa = PBXBuildFile; fileRef = AA5000000000000000000014 /* ScrollStitchSession.cpp */; settings = {COMPILER_FLAGS = "-O2"; }; };
 		AA5000000000000000000005 /* ScrollCaptureBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5000000000000000000015 /* ScrollCaptureBridgeTests.swift */; };
 		AA5000000000000000000006 /* ScrollCaptureTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5000000000000000000016 /* ScrollCaptureTestSupport.swift */; };
 		AA5100000000000000000001 /* ScrollCaptureSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5100000000000000000011 /* ScrollCaptureSession.swift */; };
@@ -143,6 +147,10 @@
 		1DB60D2449C038C54679162D /* refresh (1).svg */ = {isa = PBXFileReference; path = "refresh (1).svg"; sourceTree = "<group>"; };
 		1F4A7C50AA4E1B2300000002 /* command.svg */ = {isa = PBXFileReference; path = command.svg; sourceTree = "<group>"; };
 		1F4A7C50AA4E1B2300000004 /* done.svg */ = {isa = PBXFileReference; path = done.svg; sourceTree = "<group>"; };
+		1F4A7C50AA4E1B2300000006 /* scroll-screen2.svg */ = {isa = PBXFileReference; path = "scroll-screen2.svg"; sourceTree = "<group>"; };
+		1F4A7C50AA4E1B2300000007 /* play-circle.svg */ = {isa = PBXFileReference; path = "play-circle.svg"; sourceTree = "<group>"; };
+		1F4A7C50AA4E1B2300000008 /* stop-circle.svg */ = {isa = PBXFileReference; path = "stop-circle.svg"; sourceTree = "<group>"; };
+		1F4A7C50AA4E1B230000000C /* mouse-point.svg */ = {isa = PBXFileReference; path = "mouse-point.svg"; sourceTree = "<group>"; };
 		1FE4C4C27283A5FAF4CBCC58 /* text-tool.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "text-tool.png"; sourceTree = "<group>"; };
 		1FEF485A40BED01A907F0106 /* refresh-svgrepo-com2.svg */ = {isa = PBXFileReference; path = "refresh-svgrepo-com2.svg"; sourceTree = "<group>"; };
 		216073E47CB43ABDD6AD1B83 /* StatusItemController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusItemController.swift; sourceTree = "<group>"; };
@@ -389,6 +397,10 @@
 				0EF17E8A625E11836314572B /* crop.png */,
 				A89C77B7643079BE8890E43B /* crop.svg */,
 				1F4A7C50AA4E1B2300000004 /* done.svg */,
+				1F4A7C50AA4E1B2300000006 /* scroll-screen2.svg */,
+				1F4A7C50AA4E1B2300000007 /* play-circle.svg */,
+				1F4A7C50AA4E1B2300000008 /* stop-circle.svg */,
+				1F4A7C50AA4E1B230000000C /* mouse-point.svg */,
 				3EA6D152633E6E31441322EA /* eraser-tool.png */,
 				B26783A4C11DFDC68390DE99 /* eraser-tool.svg */,
 				30F8BFFDF14E4559FB86BF58 /* eyedropper.svg */,
@@ -543,6 +555,10 @@
 				5F56CD50B9AD87B11791D4DE /* crop.png in Resources */,
 				D9FA6CC87275C43C69EE7826 /* crop.svg in Resources */,
 				1F4A7C50AA4E1B2300000003 /* done.svg in Resources */,
+				1F4A7C50AA4E1B2300000005 /* scroll-screen2.svg in Resources */,
+				1F4A7C50AA4E1B2300000009 /* play-circle.svg in Resources */,
+				1F4A7C50AA4E1B230000000A /* stop-circle.svg in Resources */,
+				1F4A7C50AA4E1B230000000B /* mouse-point.svg in Resources */,
 				8B88348E80AD052EBD21197B /* eraser-tool.png in Resources */,
 				875D73FF8B4029D231901AE2 /* eraser-tool.svg in Resources */,
 				576F043C01E6CBB1493C8100 /* eyedropper.svg in Resources */,

@@ -1,9 +1,196 @@
 import AppKit
+import CoreImage
+import CoreMedia
 import CoreVideo
 import ScreenCaptureKit
 
 @MainActor
+final class StreamingScrollRegionCapturer: ScrollRegionCapturing, ScrollRegionCapturePriming, ScrollRegionCaptureBuffering {
+    private let service: ScreenCaptureService
+    private var frameStream: ScrollCaptureFrameStream?
+
+    init(service: ScreenCaptureService) {
+        self.service = service
+    }
+
+    func primeCapture(in selectionRect: NSRect) async throws {
+        _ = try await captureImage(in: selectionRect)
+    }
+
+    func captureImage(in selectionRect: NSRect) async throws -> NSImage {
+        if frameStream == nil {
+            frameStream = try await service.startScrollFrameStream(in: selectionRect)
+        }
+        guard let frameStream else { throw ScreenCaptureServiceError.streamStopped }
+        return try await frameStream.nextImage()
+    }
+
+    func discardBufferedFrames() {
+        frameStream?.discardBufferedImages()
+    }
+
+    deinit {
+        frameStream?.stop()
+    }
+}
+
+final class ScrollCaptureFrameStream: @unchecked Sendable {
+    private let stream: SCStream
+    private let receiver: ScrollCaptureFrameReceiver
+
+    fileprivate init(stream: SCStream, receiver: ScrollCaptureFrameReceiver) {
+        self.stream = stream
+        self.receiver = receiver
+    }
+
+    func nextImage() async throws -> NSImage {
+        NSLog("xxsnap scroll-capture stream awaiting next frame")
+        return try await receiver.nextImage()
+    }
+
+    func discardBufferedImages() {
+        receiver.discardBufferedImages()
+    }
+
+    func stop() {
+        receiver.stop()
+        let stream = self.stream
+        Task { try? await stream.stopCapture() }
+    }
+
+}
+
+final class ScrollCaptureFrameBuffer: @unchecked Sendable {
+    private let capacity: Int
+    private let lock = NSLock()
+    private var images: [NSImage] = []
+    private var waiter: CheckedContinuation<NSImage, Error>?
+    private var stopped = false
+
+    init(capacity: Int) {
+        precondition(capacity > 0)
+        self.capacity = capacity
+    }
+
+    var canAcceptImage: Bool {
+        lock.lock()
+        let result = !stopped && (waiter != nil || images.count < capacity)
+        lock.unlock()
+        return result
+    }
+
+    func enqueue(_ image: NSImage) {
+        lock.lock()
+        guard !stopped else {
+            lock.unlock()
+            return
+        }
+        if let waiter {
+            self.waiter = nil
+            lock.unlock()
+            waiter.resume(returning: image)
+            return
+        }
+        images.append(image)
+        if images.count > capacity {
+            images.removeFirst(images.count - capacity)
+        }
+        lock.unlock()
+    }
+
+    func nextImage() async throws -> NSImage {
+        try await withCheckedThrowingContinuation { continuation in
+            lock.lock()
+            if stopped {
+                lock.unlock()
+                continuation.resume(throwing: ScreenCaptureServiceError.streamStopped)
+                return
+            }
+            if !images.isEmpty {
+                let image = images.removeFirst()
+                lock.unlock()
+                continuation.resume(returning: image)
+                return
+            }
+            waiter = continuation
+            lock.unlock()
+        }
+    }
+
+    func discardBufferedImages() {
+        lock.lock()
+        images.removeAll(keepingCapacity: true)
+        lock.unlock()
+    }
+
+    func stop() {
+        lock.lock()
+        stopped = true
+        images.removeAll(keepingCapacity: false)
+        let waiter = self.waiter
+        self.waiter = nil
+        lock.unlock()
+        waiter?.resume(throwing: ScreenCaptureServiceError.streamStopped)
+    }
+}
+
+private final class ScrollCaptureFrameReceiver: NSObject, SCStreamOutput, @unchecked Sendable {
+    private let context = CIContext(options: [.cacheIntermediates: false])
+    private let pointSize: NSSize
+    private let colorSpace: CGColorSpace
+    private let frameBuffer = ScrollCaptureFrameBuffer(capacity: 8)
+
+    init(pointSize: NSSize, colorSpace: CGColorSpace) {
+        self.pointSize = pointSize
+        self.colorSpace = colorSpace
+    }
+
+    func nextImage() async throws -> NSImage {
+        try await frameBuffer.nextImage()
+    }
+
+    func discardBufferedImages() {
+        frameBuffer.discardBufferedImages()
+    }
+
+    func stop() {
+        frameBuffer.stop()
+    }
+
+    func stream(
+        _ stream: SCStream,
+        didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
+        of outputType: SCStreamOutputType
+    ) {
+        guard outputType == .screen,
+              sampleBuffer.isValid,
+              frameBuffer.canAcceptImage,
+              let pixelBuffer = sampleBuffer.imageBuffer
+        else { return }
+        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+        guard let cgImage = context.createCGImage(
+            ciImage,
+            from: CGRect(x: 0, y: 0, width: CVPixelBufferGetWidth(pixelBuffer), height: CVPixelBufferGetHeight(pixelBuffer)),
+            format: .BGRA8,
+            colorSpace: colorSpace
+        ) else { return }
+        let image = NSImage(cgImage: cgImage, size: pointSize)
+
+        frameBuffer.enqueue(image)
+    }
+}
+
+@MainActor
 final class ScreenCaptureService: ScrollRegionCapturing {
+    static func sourceRect(for selectionRect: NSRect, in screenFrame: NSRect) -> CGRect {
+        CGRect(
+            x: selectionRect.minX - screenFrame.minX,
+            y: screenFrame.maxY - selectionRect.maxY,
+            width: selectionRect.width,
+            height: selectionRect.height
+        )
+    }
+
     static func makeScreenshotConfiguration(width: Int, height: Int) -> SCStreamConfiguration {
         let configuration = SCStreamConfiguration()
         configuration.width = max(1, width)
@@ -49,8 +236,8 @@ final class ScreenCaptureService: ScrollRegionCapturing {
             Self.includeSystemChrome(in: filter)
 
             let configuration = Self.makeScreenshotConfiguration(
-                width: Int(ceil(target.display.frame.width * target.scale)),
-                height: Int(ceil(target.display.frame.height * target.scale))
+                width: Int(ceil(target.screenFrame.width * target.scale)),
+                height: Int(ceil(target.screenFrame.height * target.scale))
             )
 
             let capturedImage = try await SCScreenshotManager.captureImage(
@@ -80,8 +267,8 @@ final class ScreenCaptureService: ScrollRegionCapturing {
             Self.includeSystemChrome(in: filter)
 
             let configuration = Self.makeScreenshotConfiguration(
-                width: Int(ceil(target.display.frame.width * target.scale)),
-                height: Int(ceil(target.display.frame.height * target.scale))
+                width: Int(ceil(target.screenFrame.width * target.scale)),
+                height: Int(ceil(target.screenFrame.height * target.scale))
             )
 
             let capturedImage = try await SCScreenshotManager.captureImage(
@@ -92,13 +279,13 @@ final class ScreenCaptureService: ScrollRegionCapturing {
 
             let image = NSImage(
                 cgImage: cgImage,
-                size: NSSize(width: target.display.frame.width, height: target.display.frame.height)
+                size: target.screenFrame.size
             )
             let destination = NSRect(
-                x: target.display.frame.minX - desktopFrame.minX,
-                y: target.display.frame.minY - desktopFrame.minY,
-                width: target.display.frame.width,
-                height: target.display.frame.height
+                x: target.screenFrame.minX - desktopFrame.minX,
+                y: target.screenFrame.minY - desktopFrame.minY,
+                width: target.screenFrame.width,
+                height: target.screenFrame.height
             )
             image.draw(in: destination, from: NSRect(origin: .zero, size: image.size), operation: .copy, fraction: 1)
         }
@@ -118,7 +305,7 @@ final class ScreenCaptureService: ScrollRegionCapturing {
             throw ScreenCaptureServiceError.displayNotFound
         }
 
-        let clippedSelection = normalizedSelection.intersection(target.display.frame)
+        let clippedSelection = normalizedSelection.intersection(target.screenFrame)
         guard !clippedSelection.isEmpty else {
             throw ScreenCaptureServiceError.selectionOutsideDisplay
         }
@@ -132,12 +319,7 @@ final class ScreenCaptureService: ScrollRegionCapturing {
         )
         Self.includeSystemChrome(in: filter)
 
-        let relativeRect = CGRect(
-            x: clippedSelection.minX - target.display.frame.minX,
-            y: clippedSelection.minY - target.display.frame.minY,
-            width: clippedSelection.width,
-            height: clippedSelection.height
-        )
+        let relativeRect = Self.sourceRect(for: clippedSelection, in: target.screenFrame)
 
         let configuration = Self.makeScreenshotConfiguration(
             width: Int(ceil(relativeRect.width * target.scale)),
@@ -156,11 +338,54 @@ final class ScreenCaptureService: ScrollRegionCapturing {
             size: NSSize(width: clippedSelection.width, height: clippedSelection.height)
         )
     }
+
+    func startScrollFrameStream(in selectionRect: NSRect) async throws -> ScrollCaptureFrameStream {
+        let normalizedSelection = selectionRect.standardized
+        guard !normalizedSelection.isEmpty else { throw ScreenCaptureServiceError.emptySelection }
+        let shareableContent = try await SCShareableContent.current
+        guard let target = targetDisplay(for: normalizedSelection, displays: shareableContent.displays) else {
+            throw ScreenCaptureServiceError.displayNotFound
+        }
+        let clippedSelection = normalizedSelection.intersection(target.screenFrame)
+        guard !clippedSelection.isEmpty else { throw ScreenCaptureServiceError.selectionOutsideDisplay }
+
+        let currentProcessID = pid_t(NSRunningApplication.current.processIdentifier)
+        let excludedApplications = shareableContent.applications.filter { $0.processID == currentProcessID }
+        let filter = SCContentFilter(
+            display: target.display,
+            excludingApplications: excludedApplications,
+            exceptingWindows: []
+        )
+        Self.includeSystemChrome(in: filter)
+        let relativeRect = Self.sourceRect(for: clippedSelection, in: target.screenFrame)
+        let configuration = Self.makeScreenshotConfiguration(
+            width: Int(ceil(relativeRect.width * target.scale)),
+            height: Int(ceil(relativeRect.height * target.scale))
+        )
+        configuration.sourceRect = relativeRect
+        configuration.scalesToFit = true
+        configuration.queueDepth = 5
+        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 30)
+
+        let receiver = ScrollCaptureFrameReceiver(
+            pointSize: clippedSelection.size,
+            colorSpace: target.colorSpace
+        )
+        let stream = SCStream(filter: filter, configuration: configuration, delegate: nil)
+        try stream.addStreamOutput(
+            receiver,
+            type: .screen,
+            sampleHandlerQueue: DispatchQueue(label: "com.xxsnap.scroll-capture.frames", qos: .userInteractive)
+        )
+        try await stream.startCapture()
+        return ScrollCaptureFrameStream(stream: stream, receiver: receiver)
+    }
 }
 
 private extension ScreenCaptureService {
     struct DisplayTarget {
         let display: SCDisplay
+        let screenFrame: NSRect
         let scale: CGFloat
         let colorSpace: CGColorSpace
     }
@@ -175,13 +400,18 @@ private extension ScreenCaptureService {
             }
 
             let colorSpace = CGDisplayCopyColorSpace(CGDirectDisplayID(displayIDValue.uint32Value))
-            return DisplayTarget(display: display, scale: screen.backingScaleFactor, colorSpace: colorSpace)
+            return DisplayTarget(
+                display: display,
+                screenFrame: screen.frame,
+                scale: screen.backingScaleFactor,
+                colorSpace: colorSpace
+            )
         }
     }
 
     func targetDisplay(for selectionRect: NSRect, displays: [SCDisplay]) -> DisplayTarget? {
         let rankedDisplays = displayTargets(from: displays).compactMap { target -> (DisplayTarget, CGFloat)? in
-            let intersection = selectionRect.intersection(target.display.frame)
+            let intersection = selectionRect.intersection(target.screenFrame)
             guard !intersection.isEmpty else {
                 return nil
             }
@@ -194,10 +424,11 @@ private extension ScreenCaptureService {
     }
 }
 
-private enum ScreenCaptureServiceError: LocalizedError {
+enum ScreenCaptureServiceError: LocalizedError {
     case emptySelection
     case displayNotFound
     case selectionOutsideDisplay
+    case streamStopped
 
     var errorDescription: String? {
         switch self {
@@ -207,6 +438,8 @@ private enum ScreenCaptureServiceError: LocalizedError {
             return "Unable to match the selected region to a display."
         case .selectionOutsideDisplay:
             return "The selected region fell outside the target display."
+        case .streamStopped:
+            return "The scrolling capture stream stopped."
         }
     }
 }

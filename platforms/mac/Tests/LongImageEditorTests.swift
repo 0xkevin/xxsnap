@@ -4,6 +4,55 @@ import XCTest
 
 @MainActor
 final class LongImageEditorTests: XCTestCase {
+    func testTextOptionsToolbarRemainsVisibleWithoutCoveringMainToolbar() throws {
+        let controller = LongImageEditorWindowController(
+            canonicalImage: TestImageFactory.solid(
+                size: NSSize(width: 1_000, height: 8_000),
+                color: .white
+            ),
+            visibleFrame: NSRect(x: 0, y: 0, width: 1_920, height: 2_160),
+            initialWindowSize: NSSize(width: 1_000, height: 840)
+        )
+        controller.show()
+        let overlay = try XCTUnwrap(controller.test_editingOverlay)
+        overlay.test_activateTextTool()
+
+        let mainToolbar = try XCTUnwrap(overlay.test_mainToolbarRect())
+        let optionsToolbar = try XCTUnwrap(overlay.test_optionsToolbarRect)
+        let overlayBounds = try XCTUnwrap(overlay.contentView?.bounds)
+        XCTAssertTrue(overlayBounds.contains(mainToolbar))
+        XCTAssertTrue(overlayBounds.contains(optionsToolbar))
+        XCTAssertFalse(
+            mainToolbar.intersects(optionsToolbar),
+            "main=\(mainToolbar) options=\(optionsToolbar) bounds=\(overlayBounds)"
+        )
+        controller.stop()
+    }
+
+    func testShowReactivatesApplicationSoFinishedCaptureIsVisible() async {
+        var activationCount = 0
+        var controller: LongImageEditorWindowController!
+        var windowWasKeyWhenActivationStarted: Bool?
+        controller = LongImageEditorWindowController(
+            canonicalImage: TestImageFactory.solid(size: NSSize(width: 120, height: 800), color: .white),
+            visibleFrame: NSRect(x: 0, y: 0, width: 500, height: 400),
+            applicationActivator: {
+                activationCount += 1
+                windowWasKeyWhenActivationStarted = controller.window?.isKeyWindow
+                NSApp.activate(ignoringOtherApps: true)
+            }
+        )
+        controller.show()
+        await Task.yield()
+        await Task.yield()
+
+        XCTAssertEqual(activationCount, 1)
+        XCTAssertEqual(windowWasKeyWhenActivationStarted, false)
+        XCTAssertTrue(controller.window?.isVisible == true)
+        XCTAssertTrue(controller.test_editingOverlay?.isKeyWindow == true)
+        controller.stop()
+    }
+
     func testGeometryStartsAtDocumentTopAndMapsViewportPoints() {
         let geometry = LongImageEditorGeometry(
             imageSize: NSSize(width: 1_000, height: 8_000),
@@ -803,6 +852,28 @@ final class LongImageEditorTests: XCTestCase {
         XCTAssertTrue(received[5] === received[6])
         XCTAssertNotEqual(try pixelBytes(received[3]), try pixelBytes(received[4]))
         XCTAssertEqual(controller.test_documentRevision, firstRevision + 1)
+        controller.stop()
+    }
+
+    func testUneditedActionReusesCanonicalImageWithoutFullSizeRender() {
+        let image = TestImageFactory.solid(
+            size: NSSize(width: 120, height: 900),
+            color: .white
+        )
+        var received: NSImage?
+        let controller = LongImageEditorWindowController(
+            canonicalImage: image,
+            visibleFrame: NSRect(x: 0, y: 0, width: 500, height: 450),
+            actions: LongImageEditorActions(
+                copy: { received = $0; return true },
+                save: { _ in false },
+                pin: { _ in false }
+            )
+        )
+        controller.show()
+        controller.test_copyButton.performClick(nil)
+        XCTAssertTrue(received === image)
+        XCTAssertTrue(controller.test_cachedRenderedRevision === image)
         controller.stop()
     }
 

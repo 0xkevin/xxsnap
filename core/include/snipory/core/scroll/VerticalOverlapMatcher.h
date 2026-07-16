@@ -18,7 +18,7 @@ struct OverlapConfig final
     double maximumNormalizedError = 0.08;
     double minimumWinnerMargin = 0.015;
     PixelCrop excludedBands;
-    int maximumFullResolutionCandidates = 16;
+    int maximumFullResolutionCandidates = 32;
 };
 
 struct OverlapResult final

@@ -45,6 +45,7 @@ private final class FakeScrollCaptureSession: ScrollCaptureSessionRunning {
     private(set) var startCount = 0
     private(set) var finishCount = 0
     private(set) var cancelCount = 0
+    private(set) var stepDirections: [ScrollCaptureDirection] = []
 
     init(seed: ScrollCaptureSeed) { self.seed = seed }
 
@@ -66,6 +67,10 @@ private final class FakeScrollCaptureSession: ScrollCaptureSessionRunning {
         return finishedImage
     }
 
+    func performStep(direction: ScrollCaptureDirection) async throws {
+        stepDirections.append(direction)
+    }
+
     func cancel() -> ScrollCaptureSeed {
         cancelCount += 1
         return seed
@@ -78,18 +83,33 @@ private final class FakeScrollCapturePresentation: ScrollCapturePresenting {
     private(set) var stopCount = 0
     private(set) var previews: [NSImage] = []
     private(set) var previewEdges: [ScrollCapturePreviewEdge] = []
+    private(set) var previewViewports: [ScrollCapturePreviewViewport] = []
+    private(set) var scrollActivities: [ScrollCaptureScrollActivity] = []
     private(set) var warnings: [String] = []
     private(set) var clearWarningCount = 0
     private(set) var placements: [(NSRect, NSRect)] = []
     private(set) var resetTerminalCount = 0
     var onFinish: (() -> Void)?
     var onCancel: (() -> Void)?
+    var onStep: ((ScrollCaptureDirection) -> Void)?
+    var onStart: (() -> Void)?
 
-    func start() { startCount += 1 }
+    func start() {
+        startCount += 1
+        onStart?()
+    }
     func stop() { stopCount += 1 }
-    func updatePreview(_ image: NSImage, following edge: ScrollCapturePreviewEdge) {
+    func updatePreview(
+        _ image: NSImage,
+        following edge: ScrollCapturePreviewEdge,
+        viewport: ScrollCapturePreviewViewport
+    ) {
         previews.append(image)
         previewEdges.append(edge)
+        previewViewports.append(viewport)
+    }
+    func moveViewportIndicator(_ activity: ScrollCaptureScrollActivity) {
+        scrollActivities.append(activity)
     }
     func setWarning(_ text: String) { warnings.append(text) }
     func clearWarning() { clearWarningCount += 1 }
@@ -113,12 +133,12 @@ private final class ResourceLimitCoordinatorStitcher: ScrollStitching {
     let acceptedImage: NSImage
     private var appendCount = 0
     init(acceptedImage: NSImage) { self.acceptedImage = acceptedImage }
-    func append(_ image: NSImage) throws -> ScrollCaptureAppendUpdate {
+    func append(_ image: NSImage) async throws -> ScrollCaptureAppendUpdate {
         appendCount += 1
         return .testValue(kind: appendCount == 1 ? .acceptedInitial : .resourceLimit)
     }
-    func preview(maximumHeight: Int) throws -> NSImage { acceptedImage }
-    func finalImage() throws -> NSImage { acceptedImage }
+    func preview(maximumHeight: Int) async throws -> NSImage { acceptedImage }
+    func finalImage() async throws -> NSImage { acceptedImage }
 }
 
 @MainActor
@@ -156,6 +176,9 @@ final class SelectionToolbarStateTests: XCTestCase {
         let toolbarBefore = try XCTUnwrap(window.test_mainToolbarRect())
         let scrollBefore = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .scroll))
         let cancelBefore = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .cancel))
+        XCTAssertNotNil(window.test_measurementControlPoint(.cornerStyle))
+        XCTAssertNotNil(window.test_measurementControlPoint(.aspectRatioLock))
+        XCTAssertNotNil(window.test_measurementControlPoint(.refresh))
 
         window.test_beginScrollCapture()
 
@@ -177,6 +200,93 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertTrue(window.test_toolbarButtonIsEnabled(.scroll))
         XCTAssertTrue(window.test_toolbarButtonIsEnabled(.cancel))
         XCTAssertEqual(window.test_tooltipText(for: .scroll), L10n(language: .zhHans).text(.finishScrollCapture))
+        XCTAssertNil(window.test_measurementControlPoint(.cornerStyle))
+        XCTAssertNil(window.test_measurementControlPoint(.aspectRatioLock))
+        XCTAssertNil(window.test_measurementControlPoint(.refresh))
+    }
+
+    func testBeginScrollCaptureClearsAndSuppressesColorSamplerLayer() {
+        let image = solidImage(size: NSSize(width: 640, height: 420), color: .systemBlue)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        let selection = NSRect(x: 80, y: 60, width: 300, height: 220)
+        window.test_setLockedSelectionRect(selection)
+        let samplePoint = NSPoint(x: selection.midX, y: selection.midY)
+        window.test_updateColorSampler(at: samplePoint)
+        XCTAssertTrue(window.test_isColorSamplerVisible)
+
+        window.test_beginScrollCapture()
+
+        XCTAssertFalse(window.test_isColorSamplerVisible)
+        XCTAssertNil(window.test_sampledColorHex)
+        window.test_updateColorSampler(at: samplePoint)
+        XCTAssertFalse(window.test_isColorSamplerVisible)
+        XCTAssertNil(window.test_sampledColorHex)
+    }
+
+    func testScrollToolbarKeepsScrollIconWhileCapturing() {
+        let image = solidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 80, y: 60, width: 300, height: 220))
+        XCTAssertEqual(window.test_symbolName(for: .scroll), "toolbar-scroll-screen2")
+
+        window.test_beginScrollCapture()
+        XCTAssertEqual(window.test_symbolName(for: .scroll), "toolbar-scroll-screen2")
+
+        window.endScrollCapturePassiveMode()
+        XCTAssertEqual(window.test_symbolName(for: .scroll), "toolbar-scroll-screen2")
+    }
+
+    func testScrollCaptureSelectedIconIsBlue() throws {
+        let image = solidImage(size: NSSize(width: 900, height: 520), color: .white)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+
+        window.test_beginScrollCapture()
+
+        let button = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .scroll))
+        let overlayImage = try XCTUnwrap(window.test_renderedOverlayImage())
+        let iconPixel = try XCTUnwrap(firstBlueDominantPixel(in: overlayImage, rect: button))
+        XCTAssertGreaterThan(iconPixel.blue, iconPixel.red)
+        XCTAssertGreaterThan(iconPixel.blue, iconPixel.green)
+    }
+
+    func testBeginScrollCaptureAlignsLiveScreenRectToFrozenSeedPixels() throws {
+        let background = retinaSolidImage(
+            size: NSSize(width: 640, height: 420),
+            color: .white
+        )
+        var request: ScrollCaptureSeed?
+        let window = SelectionOverlayWindow(backgroundImage: background) { _ in }
+        window.onScrollCaptureRequested = { request = $0 }
+        let selection = NSRect(x: 80.2, y: 60.3, width: 300.1, height: 220.1)
+        window.test_setLockedSelectionRect(selection)
+
+        window.test_beginScrollCapture()
+
+        let seed = try XCTUnwrap(request)
+        let frozenPixels = try XCTUnwrap(
+            seed.frozenImage.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        )
+        XCTAssertEqual(seed.snapshotRect, selection)
+        XCTAssertEqual(seed.screenRect.width * 2, CGFloat(frozenPixels.width), accuracy: 0.001)
+        XCTAssertEqual(seed.screenRect.height * 2, CGFloat(frozenPixels.height), accuracy: 0.001)
+    }
+
+    func testScrollCapturePassiveModeShowsLiveContentInsideSelection() throws {
+        let image = solidImage(size: desktopImageSize(), color: .systemRed)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        let selection = NSRect(x: 160, y: 140, width: 420, height: 260)
+        window.test_setLockedSelectionRect(selection)
+
+        let before = try XCTUnwrap(window.test_renderedOverlayImage())
+        let beforePixel = try XCTUnwrap(rgbaRenderPixel(in: before, at: NSPoint(x: selection.midX, y: selection.midY)))
+        XCTAssertGreaterThan(beforePixel.alpha, 240)
+
+        window.test_beginScrollCapture()
+
+        let after = try XCTUnwrap(window.test_renderedOverlayImage())
+        let afterPixel = try XCTUnwrap(rgbaRenderPixel(in: after, at: NSPoint(x: selection.midX, y: selection.midY)))
+        XCTAssertLessThan(afterPixel.alpha, 10, "the selection must reveal the live scrolling application")
     }
 
     func testEscapeCancelsCapturingAndPausedScrollCaptureExactlyOnce() {
@@ -9614,36 +9724,64 @@ final class SelectionToolbarStateTests: XCTestCase {
         var update: (@MainActor (ScrollCapturePresentationUpdate) -> Void)?
         var session: FakeScrollCaptureSession?
         let presentation = FakeScrollCapturePresentation()
+        var activatedApplication: NSRunningApplication?
+        var presentationOrder: [String] = []
+        presentation.onStart = { presentationOrder.append("presentation") }
         let coordinator = CaptureCoordinator(
             permissionCoordinator: PermissionCoordinator(),
             screenCaptureService: ScreenCaptureService(),
             scrollCaptureSessionFactory: { capturedSeed, callback in
                 XCTAssertEqual(capturedSeed.screenRect, seed.screenRect)
+                XCTAssertEqual(
+                    capturedSeed.targetApplicationProcessIdentifier,
+                    NSRunningApplication.current.processIdentifier
+                )
                 update = callback
                 let value = FakeScrollCaptureSession(seed: capturedSeed)
                 session = value
                 return value
             },
             scrollCapturePresentationFactory: { context in
+                presentation.onStep = context.onStep
                 presentation.onFinish = context.onFinish
                 presentation.onCancel = context.onCancel
                 return presentation
             },
-            longImageHandoff: { _, _ in XCTFail("unexpected handoff") }
+            longImageHandoff: { _, _ in XCTFail("unexpected handoff") },
+            frontmostApplicationResolver: { .current },
+            applicationActivator: {
+                activatedApplication = $0
+                presentationOrder.append("activation")
+            }
         )
         coordinator.test_installOverlayWindow(overlay)
+        overlay.orderFrontRegardless()
+        XCTAssertTrue(overlay.isVisible)
 
         coordinator.test_requestScrollCapture(seed: seed)
         await Task.yield()
 
         XCTAssertEqual(session?.startCount, 1)
         XCTAssertEqual(presentation.startCount, 1)
+        XCTAssertEqual(presentationOrder, ["activation", "presentation"])
         XCTAssertEqual(presentation.placements.count, 1)
+        XCTAssertTrue(overlay.isVisible, "selection chrome and toolbar must remain visible while scrolling")
+        XCTAssertEqual(activatedApplication?.processIdentifier, NSRunningApplication.current.processIdentifier)
         XCTAssertTrue(coordinator.test_hasScrollCaptureSession)
+        presentation.onStep?(.up)
+        await Task.yield()
+        XCTAssertEqual(session?.stepDirections, [.up])
         let preview = NSImage(size: NSSize(width: 30, height: 80))
-        update?(.preview(preview, edge: .top))
+        update?(.preview(
+            preview,
+            edge: .top,
+            viewport: ScrollCapturePreviewViewport(viewportHeight: 100, outputHeight: 200)
+        ))
         XCTAssertTrue(presentation.previews.last === preview)
         XCTAssertEqual(presentation.previewEdges, [.top])
+        let scrollActivity = ScrollCaptureScrollActivity(direction: .down, distance: 16)
+        update?(.viewportScroll(scrollActivity))
+        XCTAssertEqual(presentation.scrollActivities, [scrollActivity])
         update?(.warning(.lowConfidence))
         XCTAssertEqual(overlay.scrollCaptureOverlayState, .capturing)
         XCTAssertEqual(presentation.warnings.last, L10n(language: .zhHans).text(.scrollCaptureLowConfidence))
@@ -12082,6 +12220,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "eyedropper"), 2)
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "copy-to-clipboard"), 2)
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "settings-more"), 2)
+        XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "scroll-screen2"), 0)
     }
 
     func testTextToolbarIconsAreBundledAndSizedConsistently() {

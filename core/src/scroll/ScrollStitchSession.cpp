@@ -6,8 +6,10 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <limits>
+#include <iterator>
 #include <memory>
 #include <new>
 #include <optional>
@@ -19,7 +21,9 @@ namespace snipory::core::scroll {
 namespace {
 
 constexpr FingerprintSize AnchorFingerprintSize{16, 12};
-constexpr std::size_t RecentAnchorCount = 8;
+constexpr std::size_t MaximumAnchorSearchCount = 256;
+constexpr double AutomaticFixedBandMaximumRatio = 0.75;
+constexpr int StationaryPixelChannelTolerance = 3;
 
 [[nodiscard]] bool validUnit(double value)
 {
@@ -53,6 +57,9 @@ constexpr std::size_t RecentAnchorCount = 8;
         && config.fixedBandConfirmationMovements >= 3
         && config.fixedBandConfirmationMovements <= 32
         && validUnit(config.fixedBandStationaryThreshold)
+        && config.fixedSideMaximumRatio > 0.0
+        && config.fixedSideMaximumRatio < 0.5
+        && validUnit(config.fixedSideStationaryThreshold)
         && config.scrollbarMaximumWidth >= 0
         && config.scrollbarConfirmationMovements >= 1
         && validUnit(config.scrollbarPersistenceThreshold)
@@ -114,6 +121,28 @@ constexpr std::size_t RecentAnchorCount = 8;
     return pixelKey(left, x, y) == pixelKey(right, x, y);
 }
 
+[[nodiscard]] bool pixelStationary(
+    const ScrollFrame& left,
+    const ScrollFrame& right,
+    int x,
+    int y)
+{
+    const auto leftOffset = static_cast<std::size_t>(y)
+            * static_cast<std::size_t>(left.bytesPerRow)
+        + static_cast<std::size_t>(x) * 4U;
+    const auto rightOffset = static_cast<std::size_t>(y)
+            * static_cast<std::size_t>(right.bytesPerRow)
+        + static_cast<std::size_t>(x) * 4U;
+    for (std::size_t channel = 0; channel < 3U; ++channel) {
+        const int difference = static_cast<int>(left.pixels[leftOffset + channel])
+            - static_cast<int>(right.pixels[rightOffset + channel]);
+        if (std::abs(difference) > StationaryPixelChannelTolerance) {
+            return false;
+        }
+    }
+    return true;
+}
+
 [[nodiscard]] ScrollFrame copyRows(const ScrollFrame& source, int firstRow, int rowCount)
 {
     if (firstRow < 0 || rowCount <= 0 || firstRow > source.height - rowCount) {
@@ -160,9 +189,99 @@ public:
 
     struct Segment final
     {
-        std::shared_ptr<const ScrollFrame> pixels;
-        int firstRow = 0;
+        std::uint64_t fileOffset = 0;
         int outputRows = 0;
+        std::int64_t documentStart = 0;
+    };
+
+    class SegmentStore final
+    {
+    public:
+        SegmentStore()
+            : file_(std::tmpfile())
+        {
+        }
+
+        ~SegmentStore()
+        {
+            if (file_ != nullptr) {
+                std::fclose(file_);
+            }
+        }
+
+        SegmentStore(const SegmentStore&) = delete;
+        SegmentStore& operator=(const SegmentStore&) = delete;
+
+        [[nodiscard]] std::optional<Segment> appendRows(
+            const ScrollFrame& frame,
+            int firstRow,
+            int rowCount)
+        {
+            if (file_ == nullptr || firstRow < 0 || rowCount <= 0
+                || firstRow > frame.height - rowCount) {
+                return std::nullopt;
+            }
+            const auto activeBytes = checkedProduct(
+                static_cast<std::size_t>(frame.width), 4U);
+            const auto appendedBytes = activeBytes.has_value()
+                ? checkedProduct(*activeBytes, static_cast<std::size_t>(rowCount))
+                : std::nullopt;
+            if (!activeBytes.has_value() || !appendedBytes.has_value()
+                || *appendedBytes > std::numeric_limits<std::uint64_t>::max() - byteCount_
+                || !seek(byteCount_)) {
+                return std::nullopt;
+            }
+            const auto offset = byteCount_;
+            for (int row = 0; row < rowCount; ++row) {
+                const auto sourceOffset = static_cast<std::size_t>(firstRow + row)
+                    * static_cast<std::size_t>(frame.bytesPerRow);
+                if (std::fwrite(frame.pixels.data() + sourceOffset, 1U, *activeBytes, file_)
+                    != *activeBytes) {
+                    return std::nullopt;
+                }
+            }
+            if (std::fflush(file_) != 0) {
+                return std::nullopt;
+            }
+            byteCount_ += *appendedBytes;
+            return Segment{offset, rowCount};
+        }
+
+        [[nodiscard]] bool readRow(
+            const Segment& segment,
+            int row,
+            std::uint8_t* destination,
+            std::size_t rowBytes) const
+        {
+            if (file_ == nullptr || destination == nullptr || row < 0
+                || row >= segment.outputRows || rowBytes == 0U) {
+                return false;
+            }
+            const auto rowOffset = checkedProduct(static_cast<std::size_t>(row), rowBytes);
+            if (!rowOffset.has_value()
+                || *rowOffset > std::numeric_limits<std::uint64_t>::max() - segment.fileOffset
+                || !seek(segment.fileOffset + *rowOffset)) {
+                return false;
+            }
+            return std::fread(destination, 1U, rowBytes, file_) == rowBytes;
+        }
+
+        [[nodiscard]] std::uint64_t byteCount() const noexcept { return byteCount_; }
+
+    private:
+        [[nodiscard]] bool seek(std::uint64_t offset) const
+        {
+#if defined(_WIN32)
+            return offset <= static_cast<std::uint64_t>(std::numeric_limits<__int64>::max())
+                && _fseeki64(file_, static_cast<__int64>(offset), SEEK_SET) == 0;
+#else
+            return offset <= static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())
+                && fseeko(file_, static_cast<off_t>(offset), SEEK_SET) == 0;
+#endif
+        }
+
+        std::FILE* file_ = nullptr;
+        std::uint64_t byteCount_ = 0;
     };
 
     struct ScrollbarObservation final
@@ -234,9 +353,11 @@ public:
     bool configIsValid = false;
     Direction direction = Direction::Undetermined;
     std::vector<Segment> segments;
+    SegmentStore segmentStore;
     std::vector<Fingerprint> anchors;
     std::vector<PendingMovement> pending;
     std::shared_ptr<const ScrollFrame> tail;
+    std::shared_ptr<const ScrollFrame> oppositeFrontier;
     bool tailHasSeparateStorage = false;
     std::size_t persistentBytes = 0;
     int height = 0;
@@ -257,6 +378,18 @@ public:
         return value.kind == OverlapKind::Reliable && value.verticalAdvance > 0;
     }
 
+    [[nodiscard]] static bool usableMovement(
+        const OverlapResult& value,
+        bool allowHighConfidenceAmbiguous)
+    {
+        constexpr double MinimumUsableAmbiguousConfidence = 0.80;
+        return value.verticalAdvance > 0
+            && (value.kind == OverlapKind::Reliable
+                || (allowHighConfidenceAmbiguous
+                    && value.kind == OverlapKind::Ambiguous
+                    && value.confidence >= MinimumUsableAmbiguousConfidence));
+    }
+
     [[nodiscard]] static OverlapResult matchInDirection(
         const ScrollFrame& previous,
         const ScrollFrame& current,
@@ -273,22 +406,57 @@ public:
         const ScrollFrame& previous,
         const ScrollFrame& current,
         const OverlapConfig& matcherConfig,
-        Direction expected) const
+        Direction expected,
+        Direction preferred = Direction::Undetermined) const
     {
+        const auto makeMovement = [expected](Direction candidate, OverlapResult overlap) {
+            DirectionalMatch result;
+            result.candidate = candidate;
+            result.confidence = overlap.confidence;
+            result.overlap = std::move(overlap);
+            result.decision = expected == Direction::Undetermined || expected == candidate
+                ? DirectionalDecision::Movement
+                : DirectionalDecision::Opposite;
+            return result;
+        };
+        if (preferred != Direction::Undetermined) {
+            auto preferredOverlap = matchInDirection(
+                previous, current, matcherConfig, preferred);
+            if (usableMovement(preferredOverlap, true)) {
+                return makeMovement(preferred, std::move(preferredOverlap));
+            }
+            const Direction opposite = preferred == Direction::Down
+                ? Direction::Up
+                : Direction::Down;
+            auto oppositeOverlap = matchInDirection(
+                previous, current, matcherConfig, opposite);
+            if (usableMovement(oppositeOverlap, true)) {
+                return makeMovement(opposite, std::move(oppositeOverlap));
+            }
+            DirectionalMatch result;
+            result.confidence = std::max(
+                preferredOverlap.confidence, oppositeOverlap.confidence);
+            return result;
+        }
         const auto down = matchInDirection(
             previous, current, matcherConfig, Direction::Down);
         const auto up = matchInDirection(
             previous, current, matcherConfig, Direction::Up);
-        const bool downReliable = reliableMovement(down);
-        const bool upReliable = reliableMovement(up);
+        const bool downReliable = usableMovement(down, false);
+        const bool upReliable = usableMovement(up, false);
         DirectionalMatch result;
         result.confidence = std::max(down.confidence, up.confidence);
-        if (downReliable == upReliable) {
+        if (!downReliable && !upReliable) {
             return result;
         }
-        const Direction candidate = downReliable ? Direction::Down : Direction::Up;
+        Direction candidate = Direction::Undetermined;
+        if (downReliable && upReliable) {
+            return result;
+        } else {
+            candidate = downReliable ? Direction::Down : Direction::Up;
+        }
         result.candidate = candidate;
-        result.overlap = downReliable ? down : up;
+        result.overlap = candidate == Direction::Down ? down : up;
         result.confidence = result.overlap.confidence;
         if (expected == Direction::Undetermined || expected == candidate) {
             result.decision = DirectionalDecision::Movement;
@@ -306,15 +474,10 @@ public:
 
     [[nodiscard]] std::optional<std::size_t> matchingAnchor(const Fingerprint& fingerprint) const
     {
-        const std::size_t recentStart = anchors.size() > RecentAnchorCount
-            ? anchors.size() - RecentAnchorCount
+        const std::size_t searchStart = anchors.size() > MaximumAnchorSearchCount
+            ? anchors.size() - MaximumAnchorSearchCount
             : 0U;
-        for (std::size_t i = anchors.size(); i > recentStart; --i) {
-            if (duplicateFingerprint(anchors[i - 1U], fingerprint)) {
-                return i - 1U;
-            }
-        }
-        for (std::size_t i = recentStart; i > 0U; --i) {
+        for (std::size_t i = anchors.size(); i > searchStart; --i) {
             if (duplicateFingerprint(anchors[i - 1U], fingerprint)) {
                 return i - 1U;
             }
@@ -332,7 +495,86 @@ public:
         return std::nullopt;
     }
 
-    [[nodiscard]] OverlapConfig effectiveMatcherConfig() const
+    [[nodiscard]] const Segment* segmentAtOutputRow(int outputRow, int& rowWithin) const
+    {
+        if (outputRow < 0 || outputRow >= height || segments.empty()) {
+            return nullptr;
+        }
+        const auto documentRow = segments.front().documentStart
+            + static_cast<std::int64_t>(outputRow);
+        const auto after = std::upper_bound(
+            segments.cbegin(),
+            segments.cend(),
+            documentRow,
+            [](std::int64_t row, const Segment& segment) {
+                return row < segment.documentStart;
+            });
+        if (after == segments.cbegin()) {
+            return nullptr;
+        }
+        const auto& segment = *std::prev(after);
+        const auto relative = documentRow - segment.documentStart;
+        if (relative < 0 || relative >= segment.outputRows) {
+            return nullptr;
+        }
+        rowWithin = static_cast<int>(relative);
+        return &segment;
+    }
+
+    [[nodiscard]] std::size_t pruneAnchorHistory()
+    {
+        if (anchors.size() <= MaximumAnchorSearchCount) {
+            return 0U;
+        }
+        const auto removeCount = anchors.size() - MaximumAnchorSearchCount;
+        std::size_t removedBytes = 0U;
+        for (std::size_t index = 0; index < removeCount; ++index) {
+            removedBytes += anchors[index].luminance.capacity();
+        }
+        anchors.erase(
+            anchors.begin(),
+            anchors.begin() + static_cast<std::ptrdiff_t>(removeCount));
+        return removedBytes;
+    }
+
+    [[nodiscard]] int stationarySideWidth(
+        const ScrollFrame& previous,
+        const ScrollFrame& current,
+        bool left) const
+    {
+        if (!config.enableFixedSideDetection) {
+            return 0;
+        }
+        const int budget = std::min(
+            current.width / 2 - 1,
+            static_cast<int>(std::floor(
+                static_cast<double>(current.width) * config.fixedSideMaximumRatio)));
+        const int firstRow = std::min(config.fixedTopCandidateHeight, current.height / 4);
+        const int lastRow = current.height
+            - std::min(config.fixedBottomCandidateHeight, current.height / 4);
+        const int rowCount = lastRow - firstRow;
+        if (budget <= 0 || rowCount <= 0) {
+            return 0;
+        }
+        int stationaryColumns = 0;
+        for (int offset = 0; offset < budget; ++offset) {
+            const int x = left ? offset : current.width - 1 - offset;
+            int equal = 0;
+            for (int y = firstRow; y < lastRow; ++y) {
+                equal += pixelStationary(previous, current, x, y) ? 1 : 0;
+            }
+            const double ratio = static_cast<double>(equal) / static_cast<double>(rowCount);
+            if (ratio < config.fixedSideStationaryThreshold) {
+                break;
+            }
+            ++stationaryColumns;
+        }
+        return stationaryColumns;
+    }
+
+    [[nodiscard]] OverlapConfig effectiveMatcherConfig(
+        const ScrollFrame* previous = nullptr,
+        const ScrollFrame* current = nullptr) const
     {
         auto result = config.matcher;
         if (fixedTopConfirmed) {
@@ -347,6 +589,14 @@ public:
             result.excludedBands.right, config.scrollbarMaximumWidth);
         result.excludedBands.left = std::max(
             result.excludedBands.left, config.scrollbarMaximumWidth);
+        if (previous != nullptr && current != nullptr) {
+            result.excludedBands.left = std::max(
+                result.excludedBands.left,
+                stationarySideWidth(*previous, *current, true));
+            result.excludedBands.right = std::max(
+                result.excludedBands.right,
+                stationarySideWidth(*previous, *current, false));
+        }
         return result;
     }
 
@@ -363,7 +613,7 @@ public:
         const auto total = static_cast<std::size_t>(rowCount) * static_cast<std::size_t>(width);
         for (int y = firstRow; y < firstRow + rowCount; ++y) {
             for (int x = 0; x < width; ++x) {
-                equal += pixelEqual(previous, current, x, y) ? 1U : 0U;
+                equal += pixelStationary(previous, current, x, y) ? 1U : 0U;
             }
         }
         return static_cast<double>(equal) / static_cast<double>(total);
@@ -391,9 +641,15 @@ public:
         const int configuredBudget = top
             ? config.fixedTopCandidateHeight
             : config.fixedBottomCandidateHeight;
+        const int minimumScrollingRows = std::max(1, static_cast<int>(std::ceil(
+            static_cast<double>(current.height) * config.matcher.minimumOverlapRatio)));
+        const int automaticBudget = std::min(
+            current.height - minimumScrollingRows,
+            std::max(96, static_cast<int>(std::floor(
+                static_cast<double>(current.height) * AutomaticFixedBandMaximumRatio))));
         const int budget = configuredBudget > 0
             ? configuredBudget
-            : std::min(96, current.height / 4);
+            : automaticBudget;
         const int edgeInset = std::min(config.scrollbarMaximumWidth, current.width / 8);
         const int firstColumn = edgeInset;
         const int columnCount = current.width - edgeInset * 2;
@@ -405,7 +661,7 @@ public:
             const int y = top ? offset : current.height - 1 - offset;
             int equal = 0;
             for (int x = firstColumn; x < firstColumn + columnCount; ++x) {
-                equal += pixelEqual(previous, current, x, y) ? 1 : 0;
+                equal += pixelStationary(previous, current, x, y) ? 1 : 0;
             }
             const double ratio = static_cast<double>(equal) / static_cast<double>(columnCount);
             if (ratio < config.fixedBandStationaryThreshold) {
@@ -426,12 +682,20 @@ public:
         evidence.bottomHeight = stationaryBandHeight(previous, current, false);
         evidence.top = evidence.topHeight > 0;
         evidence.bottom = evidence.bottomHeight > 0;
+        const int minimumScrollingRows = std::max(1, static_cast<int>(std::ceil(
+            static_cast<double>(current.height) * config.matcher.minimumOverlapRatio)));
+        if (evidence.topHeight + evidence.bottomHeight
+            > current.height - minimumScrollingRows) {
+            evidence.top = false;
+            evidence.bottom = false;
+            return evidence;
+        }
         if ((!evidence.top && !evidence.bottom) || !centralDocumentMoved(previous, current)) {
             evidence.top = false;
             evidence.bottom = false;
             return evidence;
         }
-        auto matcherConfig = effectiveMatcherConfig();
+        auto matcherConfig = effectiveMatcherConfig(&previous, &current);
         if (evidence.top) {
             matcherConfig.excludedBands.top = std::max(
                 matcherConfig.excludedBands.top,
@@ -453,6 +717,47 @@ public:
             directional.confidence = directional.overlap.confidence;
             if (reliableMovement(directional.overlap)) {
                 directional.decision = DirectionalDecision::Movement;
+            }
+        }
+        if (directional.decision != DirectionalDecision::Movement
+            && evidence.top && evidence.bottom) {
+            const auto matchSingleBand = [&](bool top) {
+                auto singleBandConfig = effectiveMatcherConfig(&previous, &current);
+                if (top) {
+                    singleBandConfig.excludedBands.top = std::max(
+                        singleBandConfig.excludedBands.top,
+                        std::max(evidence.topHeight, fixedTopRunHeight));
+                } else {
+                    singleBandConfig.excludedBands.bottom = std::max(
+                        singleBandConfig.excludedBands.bottom,
+                        std::max(evidence.bottomHeight, fixedBottomRunHeight));
+                }
+                if (establishedDirection == Direction::Undetermined) {
+                    return directionalMatch(
+                        previous, current, singleBandConfig, Direction::Undetermined);
+                }
+                DirectionalMatch result;
+                result.candidate = establishedDirection;
+                result.overlap = matchInDirection(
+                    previous, current, singleBandConfig, establishedDirection);
+                result.confidence = result.overlap.confidence;
+                if (reliableMovement(result.overlap)) {
+                    result.decision = DirectionalDecision::Movement;
+                }
+                return result;
+            };
+            const auto topOnly = matchSingleBand(true);
+            const auto bottomOnly = matchSingleBand(false);
+            const bool topMoves = topOnly.decision == DirectionalDecision::Movement;
+            const bool bottomMoves = bottomOnly.decision == DirectionalDecision::Movement;
+            const bool compatible = !topMoves || !bottomMoves
+                || topOnly.candidate == bottomOnly.candidate;
+            if (compatible && (topMoves || bottomMoves)) {
+                const bool useTop = topMoves
+                    && (!bottomMoves || topOnly.confidence >= bottomOnly.confidence);
+                directional = useTop ? topOnly : bottomOnly;
+                evidence.top = useTop;
+                evidence.bottom = !useTop;
             }
         }
         if (directional.decision != DirectionalDecision::Movement) {
@@ -532,7 +837,7 @@ public:
             if (!evidence.top && !evidence.bottom) {
                 return evidence;
             }
-            matcherConfig = effectiveMatcherConfig();
+            matcherConfig = effectiveMatcherConfig(&previous, &current);
             if (evidence.top) {
                 matcherConfig.excludedBands.top = std::max(
                     matcherConfig.excludedBands.top,
@@ -703,7 +1008,9 @@ ScrollStitchSession::~ScrollStitchSession() = default;
 ScrollStitchSession::ScrollStitchSession(ScrollStitchSession&&) noexcept = default;
 ScrollStitchSession& ScrollStitchSession::operator=(ScrollStitchSession&&) noexcept = default;
 
-AppendResult ScrollStitchSession::append(const ScrollFrame& frame)
+AppendResult ScrollStitchSession::append(
+    const ScrollFrame& frame,
+    ScrollDirection preferredDirection)
 try {
     AppendResult result;
     result.outputHeight = implementation_->height;
@@ -739,14 +1046,16 @@ try {
             return result;
         }
         const auto storedFrame = copyFrame(frame);
-        if (!storedFrame.has_value()) {
+        const auto storedSegment = implementation_->segmentStore.appendRows(
+            frame, 0, frame.height);
+        if (!storedFrame.has_value() || !storedSegment.has_value()) {
             result.kind = AppendKind::ResourceLimit;
             return result;
         }
         try {
             implementation_->segments.reserve(1U);
             implementation_->anchors.reserve(1U);
-            implementation_->segments.push_back({*storedFrame, 0, frame.height});
+            implementation_->segments.push_back(*storedSegment);
             implementation_->anchors.push_back(std::move(fingerprint));
         } catch (...) {
             implementation_->segments.clear();
@@ -755,6 +1064,7 @@ try {
             return result;
         }
         implementation_->tail = *storedFrame;
+        implementation_->oppositeFrontier = *storedFrame;
         implementation_->width = frame.width;
         implementation_->viewportHeight = frame.height;
         implementation_->height = frame.height;
@@ -789,7 +1099,7 @@ try {
     const ScrollFrame* evidenceTail = implementation_->pending.empty()
         ? implementation_->tail.get()
         : implementation_->pending.back().frame.get();
-    const auto matcherConfig = implementation_->effectiveMatcherConfig();
+    const auto matcherConfig = implementation_->effectiveMatcherConfig(evidenceTail, &frame);
     using Direction = Implementation::Direction;
     using DirectionalDecision = Implementation::DirectionalDecision;
     Direction expectedDirection = implementation_->direction != Direction::Undetermined
@@ -798,7 +1108,7 @@ try {
                 ? implementation_->pending.back().candidate
                 : Direction::Undetermined);
     auto directional = implementation_->directionalMatch(
-        *evidenceTail, frame, matcherConfig, expectedDirection);
+        *evidenceTail, frame, matcherConfig, expectedDirection, preferredDirection);
     if (implementation_->direction == Direction::Undetermined
         && !implementation_->pending.empty()) {
         auto pendingDirectionConfig = matcherConfig;
@@ -844,11 +1154,11 @@ try {
     if (implementation_->pending.empty()
         && implementation_->direction != Direction::Undetermined
         && directional.decision != DirectionalDecision::Movement) {
-        const auto& oppositeFrontier = implementation_->direction == Direction::Down
-            ? *implementation_->segments.front().pixels
-            : *implementation_->segments.back().pixels;
         const auto frontierMatch = implementation_->directionalMatch(
-            oppositeFrontier, frame, matcherConfig, implementation_->direction);
+            *implementation_->oppositeFrontier,
+            frame,
+            matcherConfig,
+            implementation_->direction);
         if (frontierMatch.decision == DirectionalDecision::Opposite) {
             directional = frontierMatch;
         }
@@ -950,8 +1260,8 @@ try {
     const bool continuePending = !implementation_->pending.empty()
         || evidence.top || evidence.bottom;
     if (continuePending) {
-        if (movementOverlap.kind != OverlapKind::Reliable
-            || movementOverlap.verticalAdvance <= 0) {
+        if (!Implementation::usableMovement(
+                movementOverlap, preferredDirection != Direction::Undetermined)) {
             auto reviewConfig = matcherConfig;
             if (implementation_->fixedTopAgreement > 0) {
                 reviewConfig.excludedBands.top = std::max(
@@ -1062,6 +1372,8 @@ try {
             ++safePrefix;
         }
         if (safePrefix == 0U) {
+            const int pendingAdvance = newMovement.advance;
+            const Direction pendingDirection = newMovement.candidate;
             implementation_->pending.reserve(implementation_->pending.size() + 1U);
             for (std::size_t i = 0; i < implementation_->pending.size(); ++i) {
                 implementation_->pending[i].topDecision = decisions[i].first;
@@ -1074,7 +1386,9 @@ try {
             implementation_->fixedTopRunHeight = nextTopRunHeight;
             implementation_->fixedBottomRunHeight = nextBottomRunHeight;
             result.kind = AppendKind::AwaitingEvidence;
-            result.outputHeight = implementation_->height;
+            result.direction = pendingDirection;
+            result.appendedHeight = pendingAdvance;
+            result.outputHeight = previewOutputHeight();
             result.confidence = movementOverlap.confidence;
             return result;
         }
@@ -1113,12 +1427,12 @@ try {
                 ? (excludeTop ? topHeight : 0)
                 : movement.frame->height - movement.advance
                     - (excludeBottom ? bottomHeight : 0);
-            auto pixels = copyRows(*movement.frame, firstRow, movement.advance);
-            if (!pixels.isValid()) {
+            auto stored = implementation_->segmentStore.appendRows(
+                *movement.frame, firstRow, movement.advance);
+            if (!stored.has_value()) {
                 return false;
             }
-            auto stored = std::make_shared<const ScrollFrame>(std::move(pixels));
-            preparedSegments.push_back({stored, 0, movement.advance});
+            preparedSegments.push_back(*stored);
             preparedScrollbar = implementation_->nextScrollbarState(
                 std::move(preparedScrollbar), *previous, *movement.frame);
             previous = movement.frame.get();
@@ -1143,8 +1457,7 @@ try {
 
         std::size_t flushedPersistent = *projected;
         const auto pendingFrameBytes = checkedProduct(*fullFrameBytes, safePrefix);
-        const auto segmentBytes = imageBytes(frame.width, flushedHeight);
-        if (!pendingFrameBytes.has_value() || !segmentBytes.has_value()
+        if (!pendingFrameBytes.has_value()
             || flushedPersistent < *pendingFrameBytes) {
             return failedPendingCommit();
         }
@@ -1155,13 +1468,11 @@ try {
             }
             flushedPersistent -= *fullFrameBytes;
         }
-        for (const auto bytes : {*segmentBytes, *fullFrameBytes}) {
-            const auto sum = checkedSum(flushedPersistent, bytes);
-            if (!sum.has_value()) {
-                return failedPendingCommit();
-            }
-            flushedPersistent = *sum;
+        const auto nextPersistent = checkedSum(flushedPersistent, *fullFrameBytes);
+        if (!nextPersistent.has_value()) {
+            return failedPendingCommit();
         }
+        flushedPersistent = *nextPersistent;
         if (flushedPersistent >= config.maximumAcceptedBytes) {
             return failedPendingCommit();
         }
@@ -1185,15 +1496,23 @@ try {
             : implementation_->pending.front().candidate;
         for (auto& segment : preparedSegments) {
             if (flushedDirection == Direction::Up) {
+                segment.documentStart = implementation_->segments.front().documentStart
+                    - segment.outputRows;
                 implementation_->segments.insert(
                     implementation_->segments.begin(), std::move(segment));
             } else {
+                const auto& last = implementation_->segments.back();
+                segment.documentStart = last.documentStart + last.outputRows;
                 implementation_->segments.push_back(std::move(segment));
             }
         }
         const auto newTail = implementation_->pending[safePrefix - 1U].frame;
         for (std::size_t i = 0; i < safePrefix; ++i) {
             implementation_->anchors.push_back(std::move(implementation_->pending[i].fingerprint));
+        }
+        const auto prunedAnchorBytes = implementation_->pruneAnchorHistory();
+        if (prunedAnchorBytes <= flushedPersistent) {
+            flushedPersistent -= prunedAnchorBytes;
         }
         implementation_->pending.erase(
             implementation_->pending.begin(),
@@ -1234,7 +1553,8 @@ try {
         return result;
     }
 
-    if (overlap.kind != OverlapKind::Reliable || overlap.verticalAdvance <= 0) {
+    if (!Implementation::usableMovement(
+            overlap, preferredDirection != Direction::Undetermined)) {
         implementation_->clearPending();
         return result;
     }
@@ -1257,13 +1577,6 @@ try {
         result.kind = AppendKind::ResourceLimit;
         return result;
     }
-    const int rawRows = appendedHeight;
-    const auto rawBytes = imageBytes(frame.width, rawRows);
-    if (!rawBytes.has_value()) {
-        result.kind = AppendKind::ResourceLimit;
-        return result;
-    }
-
     std::size_t projected = implementation_->persistentBytes;
     if (implementation_->tailHasSeparateStorage) {
         if (projected < *fullFrameBytes) {
@@ -1272,7 +1585,7 @@ try {
         }
         projected -= *fullFrameBytes;
     }
-    for (const auto bytes : {*rawBytes, *fullFrameBytes, fingerprintBytes}) {
+    for (const auto bytes : {*fullFrameBytes, fingerprintBytes}) {
         const auto sum = checkedSum(projected, bytes);
         if (!sum.has_value()) {
             result.kind = AppendKind::ResourceLimit;
@@ -1285,15 +1598,14 @@ try {
         return result;
     }
 
-    auto rawSegment = copyRows(frame, firstNewRow, rawRows);
+    const auto storedSegment = implementation_->segmentStore.appendRows(
+        frame, firstNewRow, appendedHeight);
     const auto storedTail = copyFrame(frame);
-    if (!rawSegment.isValid() || !storedTail.has_value()) {
+    if (!storedSegment.has_value() || !storedTail.has_value()) {
         result.kind = AppendKind::ResourceLimit;
         return result;
     }
-    std::optional<std::shared_ptr<const ScrollFrame>> storedSegment;
     try {
-        storedSegment = std::make_shared<const ScrollFrame>(std::move(rawSegment));
         implementation_->segments.reserve(implementation_->segments.size() + 1U);
         implementation_->anchors.reserve(implementation_->anchors.size() + 1U);
     } catch (...) {
@@ -1303,14 +1615,22 @@ try {
 
     const auto preparedScrollbar = implementation_->nextScrollbarState(
         implementation_->scrollbar, *implementation_->tail, frame);
-    Implementation::Segment newSegment{*storedSegment, 0, appendedHeight};
+    Implementation::Segment newSegment = *storedSegment;
     if (prepend) {
+        newSegment.documentStart = implementation_->segments.front().documentStart
+            - newSegment.outputRows;
         implementation_->segments.insert(
             implementation_->segments.begin(), std::move(newSegment));
     } else {
+        const auto& last = implementation_->segments.back();
+        newSegment.documentStart = last.documentStart + last.outputRows;
         implementation_->segments.push_back(std::move(newSegment));
     }
     implementation_->anchors.push_back(std::move(fingerprint));
+    const auto prunedAnchorBytes = implementation_->pruneAnchorHistory();
+    if (prunedAnchorBytes <= projected) {
+        projected -= prunedAnchorBytes;
+    }
     implementation_->tail = *storedTail;
     implementation_->tailHasSeparateStorage = true;
     implementation_->persistentBytes = projected;
@@ -1331,9 +1651,191 @@ try {
     return failure;
 }
 
+bool ScrollStitchSession::rebase(const ScrollFrame& frame)
+try {
+    if (!implementation_->configIsValid || implementation_->segments.empty()
+        || !frame.isValid() || frame.width != implementation_->width
+        || frame.height != implementation_->viewportHeight) {
+        return false;
+    }
+    const auto fullFrameBytes = imageBytes(frame.width, frame.height);
+    if (!fullFrameBytes.has_value()) {
+        return false;
+    }
+    std::size_t pendingBytes = 0U;
+    for (const auto& movement : implementation_->pending) {
+        const auto sum = checkedSum(pendingBytes, movement.persistentBytes);
+        if (!sum.has_value()) {
+            return false;
+        }
+        pendingBytes = *sum;
+    }
+    if (pendingBytes > implementation_->persistentBytes) {
+        return false;
+    }
+    std::size_t projected = implementation_->persistentBytes - pendingBytes;
+    if (!implementation_->tailHasSeparateStorage) {
+        const auto sum = checkedSum(projected, *fullFrameBytes);
+        if (!sum.has_value()) {
+            return false;
+        }
+        projected = *sum;
+    }
+    if (projected >= implementation_->config.maximumAcceptedBytes) {
+        return false;
+    }
+    const auto storedFrame = copyFrame(frame);
+    if (!storedFrame.has_value()) {
+        return false;
+    }
+    implementation_->clearPending();
+    implementation_->tail = *storedFrame;
+    implementation_->tailHasSeparateStorage = true;
+    implementation_->persistentBytes = projected;
+    implementation_->scrollbar.last.reset();
+    return true;
+} catch (const std::bad_alloc&) {
+    return false;
+}
+
 int ScrollStitchSession::outputHeight() const noexcept
 {
     return implementation_->height;
+}
+
+int ScrollStitchSession::previewOutputHeight() const noexcept
+{
+    int result = implementation_->height;
+    for (const auto& movement : implementation_->pending) {
+        if (movement.advance <= 0
+            || movement.advance > std::numeric_limits<int>::max() - result) {
+            return implementation_->height;
+        }
+        result += movement.advance;
+    }
+    return result;
+}
+
+int ScrollStitchSession::outputWidth() const noexcept
+{
+    return implementation_->segments.empty()
+        ? 0
+        : implementation_->width - implementation_->scrollbar.confirmedWidth;
+}
+
+std::size_t ScrollStitchSession::residentBytes() const noexcept
+{
+    return implementation_->persistentBytes;
+}
+
+std::uint64_t ScrollStitchSession::spooledBytes() const noexcept
+{
+    return implementation_->segmentStore.byteCount();
+}
+
+bool ScrollStitchSession::copyFinalPixels(
+    void* destination,
+    std::size_t destinationBytes,
+    std::size_t destinationBytesPerRow,
+    bool includePending,
+    bool bottomUp) const
+{
+    if (implementation_->segments.empty() || destination == nullptr) {
+        return false;
+    }
+    const int leftCrop = implementation_->scrollbar.confirmedSide < 0
+        ? implementation_->scrollbar.confirmedWidth
+        : 0;
+    const int composedWidth = outputWidth();
+    const int composedHeight = includePending
+        ? previewOutputHeight()
+        : implementation_->height;
+    const auto rowBytes = checkedProduct(static_cast<std::size_t>(composedWidth), 4U);
+    const auto requiredBytes = checkedProduct(
+        destinationBytesPerRow, static_cast<std::size_t>(composedHeight));
+    if (!rowBytes.has_value() || !requiredBytes.has_value()
+        || destinationBytesPerRow < *rowBytes || destinationBytes < *requiredBytes) {
+        return false;
+    }
+    const auto storedRowBytes = static_cast<std::size_t>(implementation_->width) * 4U;
+    std::vector<std::uint8_t> storedRow(storedRowBytes);
+    auto* destinationPixels = static_cast<std::uint8_t*>(destination);
+    int outputRow = 0;
+    const auto writeRow = [&](const std::uint8_t* pixels) {
+        if (pixels == nullptr || outputRow >= composedHeight) {
+            return false;
+        }
+        const int destinationRow = bottomUp
+            ? composedHeight - 1 - outputRow
+            : outputRow;
+        std::memcpy(
+            destinationPixels
+                + static_cast<std::size_t>(destinationRow) * destinationBytesPerRow,
+            pixels + static_cast<std::size_t>(leftCrop) * 4U,
+            *rowBytes);
+        ++outputRow;
+        return true;
+    };
+    const auto writeFrameRows = [&](const ScrollFrame& frame, int firstRow, int rowCount) {
+        if (firstRow < 0 || rowCount <= 0 || firstRow > frame.height - rowCount) {
+            return false;
+        }
+        for (int row = 0; row < rowCount; ++row) {
+            const auto* pixels = frame.pixels.data()
+                + static_cast<std::size_t>(firstRow + row)
+                    * static_cast<std::size_t>(frame.bytesPerRow);
+            if (!writeRow(pixels)) {
+                return false;
+            }
+        }
+        return true;
+    };
+    const auto writeCommitted = [&]() {
+        for (const auto& segment : implementation_->segments) {
+            for (int row = 0; row < segment.outputRows; ++row) {
+                if (!implementation_->segmentStore.readRow(
+                        segment, row, storedRow.data(), storedRowBytes)
+                    || !writeRow(storedRow.data())) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    };
+    const ScrollDirection pendingDirection = includePending && !implementation_->pending.empty()
+        ? implementation_->pending.front().candidate
+        : ScrollDirection::Undetermined;
+    if (pendingDirection == ScrollDirection::Up) {
+        for (auto movement = implementation_->pending.crbegin();
+             movement != implementation_->pending.crend(); ++movement) {
+            const int topHeight = movement->topDecision == Implementation::BandDecision::Ordinary
+                ? 0
+                : (implementation_->fixedTopConfirmed
+                        ? implementation_->fixedTopHeight
+                        : implementation_->fixedTopRunHeight);
+            if (!writeFrameRows(*movement->frame, topHeight, movement->advance)) {
+                return false;
+            }
+        }
+    }
+    if (!writeCommitted()) {
+        return false;
+    }
+    if (pendingDirection == ScrollDirection::Down) {
+        for (const auto& movement : implementation_->pending) {
+            const int bottomHeight = movement.bottomDecision
+                    == Implementation::BandDecision::Ordinary
+                ? 0
+                : (implementation_->fixedBottomConfirmed
+                        ? implementation_->fixedBottomHeight
+                        : implementation_->fixedBottomRunHeight);
+            const int firstRow = movement.frame->height - movement.advance - bottomHeight;
+            if (!writeFrameRows(*movement.frame, firstRow, movement.advance)) {
+                return false;
+            }
+        }
+    }
+    return outputRow == composedHeight;
 }
 
 ScrollFrame ScrollStitchSession::finalize() const
@@ -1341,38 +1843,44 @@ ScrollFrame ScrollStitchSession::finalize() const
     if (implementation_->segments.empty()) {
         return {};
     }
-    const int leftCrop = implementation_->scrollbar.confirmedSide < 0
-        ? implementation_->scrollbar.confirmedWidth
-        : 0;
-    const int outputWidth = implementation_->width - implementation_->scrollbar.confirmedWidth;
-    if (!imageBytes(outputWidth, implementation_->height).has_value()) {
+    const int composedWidth = outputWidth();
+    if (!imageBytes(composedWidth, implementation_->height).has_value()) {
         return {};
     }
-    ScrollFrame output(outputWidth, implementation_->height);
+    ScrollFrame output(composedWidth, implementation_->height);
     if (!output.isValid()) {
         return {};
     }
-    const auto rowBytes = static_cast<std::size_t>(outputWidth) * 4U;
-    int outputRow = 0;
-    for (const auto& segment : implementation_->segments) {
-        const int firstRow = segment.firstRow;
-        if (!segment.pixels || firstRow < 0 || segment.outputRows <= 0
-            || firstRow > segment.pixels->height - segment.outputRows) {
-            return {};
-        }
-        for (int row = 0; row < segment.outputRows; ++row, ++outputRow) {
-            const auto sourceOffset = static_cast<std::size_t>(firstRow + row)
-                    * static_cast<std::size_t>(segment.pixels->bytesPerRow)
-                + static_cast<std::size_t>(leftCrop) * 4U;
-            const auto destinationOffset = static_cast<std::size_t>(outputRow)
-                * static_cast<std::size_t>(output.bytesPerRow);
-            std::memcpy(
-                output.pixels.data() + destinationOffset,
-                segment.pixels->pixels.data() + sourceOffset,
-                rowBytes);
-        }
+    return copyFinalPixels(
+               output.pixels.data(),
+               output.pixels.size(),
+               static_cast<std::size_t>(output.bytesPerRow),
+               false)
+        ? output
+        : ScrollFrame{};
+}
+
+ScrollFrame ScrollStitchSession::finalizeIncludingPending() const
+{
+    if (implementation_->segments.empty()) {
+        return {};
     }
-    return outputRow == output.height ? output : ScrollFrame{};
+    const int composedWidth = outputWidth();
+    const int composedHeight = previewOutputHeight();
+    if (!imageBytes(composedWidth, composedHeight).has_value()) {
+        return {};
+    }
+    ScrollFrame output(composedWidth, composedHeight);
+    if (!output.isValid()) {
+        return {};
+    }
+    return copyFinalPixels(
+               output.pixels.data(),
+               output.pixels.size(),
+               static_cast<std::size_t>(output.bytesPerRow),
+               true)
+        ? output
+        : ScrollFrame{};
 }
 
 ScrollFrame ScrollStitchSession::preview(int maximumHeight) const
@@ -1380,15 +1888,42 @@ ScrollFrame ScrollStitchSession::preview(int maximumHeight) const
     if (implementation_->segments.empty() || maximumHeight <= 0) {
         return {};
     }
+    const int composedWidth = implementation_->width - implementation_->scrollbar.confirmedWidth;
+    const int sourceHeight = previewOutputHeight();
+    const int previewHeight = std::min(maximumHeight, sourceHeight);
+    const int previewWidth = previewHeight == sourceHeight
+        ? composedWidth
+        : std::max(1, static_cast<int>(std::lround(
+              static_cast<double>(composedWidth) * previewHeight / sourceHeight)));
+    return previewWithSize(previewWidth, previewHeight);
+}
+
+ScrollFrame ScrollStitchSession::previewForWidth(int maximumWidth) const
+{
+    if (implementation_->segments.empty() || maximumWidth <= 0) {
+        return {};
+    }
+    const int composedWidth = implementation_->width - implementation_->scrollbar.confirmedWidth;
+    const int previewWidth = std::min(maximumWidth, composedWidth);
+    const int sourceHeight = previewOutputHeight();
+    const double scaledHeight = static_cast<double>(sourceHeight)
+        * previewWidth / composedWidth;
+    if (!std::isfinite(scaledHeight)
+        || scaledHeight > std::numeric_limits<int>::max()) {
+        return {};
+    }
+    const int previewHeight = previewWidth == composedWidth
+        ? sourceHeight
+        : std::max(1, static_cast<int>(std::lround(scaledHeight)));
+    return previewWithSize(previewWidth, previewHeight);
+}
+
+ScrollFrame ScrollStitchSession::previewWithSize(int previewWidth, int previewHeight) const
+{
     const int leftCrop = implementation_->scrollbar.confirmedSide < 0
         ? implementation_->scrollbar.confirmedWidth
         : 0;
     const int composedWidth = implementation_->width - implementation_->scrollbar.confirmedWidth;
-    const int previewHeight = std::min(maximumHeight, implementation_->height);
-    const int previewWidth = previewHeight == implementation_->height
-        ? composedWidth
-        : std::max(1, static_cast<int>(std::lround(
-              static_cast<double>(composedWidth) * previewHeight / implementation_->height)));
     if (!imageBytes(previewWidth, previewHeight).has_value()) {
         return {};
     }
@@ -1397,33 +1932,87 @@ ScrollFrame ScrollStitchSession::preview(int maximumHeight) const
         return {};
     }
 
-    std::size_t segmentIndex = 0U;
-    int segmentStart = 0;
+    const int committedHeight = implementation_->height;
+    const int sourceHeight = previewOutputHeight();
+    int pendingHeight = sourceHeight - committedHeight;
+    const auto storedRowBytes = static_cast<std::size_t>(implementation_->width) * 4U;
+    std::vector<std::uint8_t> storedRow(storedRowBytes);
+    const ScrollDirection pendingDirection = implementation_->pending.empty()
+        ? ScrollDirection::Undetermined
+        : implementation_->pending.front().candidate;
     for (int y = 0; y < output.height; ++y) {
-        const int sourceY = static_cast<int>(
-            static_cast<std::int64_t>(y) * implementation_->height / output.height);
-        while (segmentIndex < implementation_->segments.size()
-            && sourceY >= segmentStart + implementation_->segments[segmentIndex].outputRows) {
-            segmentStart += implementation_->segments[segmentIndex].outputRows;
-            ++segmentIndex;
+        int sourceY = static_cast<int>(
+            static_cast<std::int64_t>(y) * sourceHeight / output.height);
+        const ScrollFrame* sourceFrame = nullptr;
+        const Implementation::Segment* sourceSegment = nullptr;
+        int sourceRow = 0;
+
+        if (pendingDirection == ScrollDirection::Up && sourceY < pendingHeight) {
+            int pendingStart = 0;
+            for (auto movement = implementation_->pending.crbegin();
+                 movement != implementation_->pending.crend(); ++movement) {
+                if (sourceY < pendingStart + movement->advance) {
+                    sourceFrame = movement->frame.get();
+                    const int topHeight = movement->topDecision
+                            == Implementation::BandDecision::Ordinary
+                        ? 0
+                        : (implementation_->fixedTopConfirmed
+                                  ? implementation_->fixedTopHeight
+                                  : implementation_->fixedTopRunHeight);
+                    sourceRow = topHeight + sourceY - pendingStart;
+                    break;
+                }
+                pendingStart += movement->advance;
+            }
+        } else {
+            if (pendingDirection == ScrollDirection::Up) {
+                sourceY -= pendingHeight;
+            }
+            if (sourceY < committedHeight) {
+                sourceSegment = implementation_->segmentAtOutputRow(sourceY, sourceRow);
+            } else if (pendingDirection == ScrollDirection::Down) {
+                const int pendingY = sourceY - committedHeight;
+                int pendingStart = 0;
+                for (const auto& movement : implementation_->pending) {
+                    if (pendingY < pendingStart + movement.advance) {
+                        sourceFrame = movement.frame.get();
+                        const int bottomHeight = movement.bottomDecision
+                                == Implementation::BandDecision::Ordinary
+                            ? 0
+                            : (implementation_->fixedBottomConfirmed
+                                      ? implementation_->fixedBottomHeight
+                                      : implementation_->fixedBottomRunHeight);
+                        sourceRow = movement.frame->height - movement.advance - bottomHeight
+                            + pendingY - pendingStart;
+                        break;
+                    }
+                    pendingStart += movement.advance;
+                }
+            }
         }
-        if (segmentIndex >= implementation_->segments.size()) {
+        if (sourceSegment != nullptr) {
+            if (!implementation_->segmentStore.readRow(
+                    *sourceSegment, sourceRow, storedRow.data(), storedRowBytes)) {
+                return {};
+            }
+        } else if (sourceFrame == nullptr || sourceRow < 0 || sourceRow >= sourceFrame->height) {
             return {};
         }
-        const auto& segment = implementation_->segments[segmentIndex];
-        const int segmentRow = segment.firstRow + sourceY - segmentStart;
+        const auto* sourcePixels = sourceSegment != nullptr
+            ? storedRow.data()
+            : sourceFrame->pixels.data()
+                + static_cast<std::size_t>(sourceRow)
+                    * static_cast<std::size_t>(sourceFrame->bytesPerRow);
         for (int x = 0; x < output.width; ++x) {
             const int sourceX = leftCrop + static_cast<int>(
                 static_cast<std::int64_t>(x) * composedWidth / output.width);
-            const auto sourceOffset = static_cast<std::size_t>(segmentRow)
-                    * static_cast<std::size_t>(segment.pixels->bytesPerRow)
-                + static_cast<std::size_t>(sourceX) * 4U;
+            const auto sourceOffset = static_cast<std::size_t>(sourceX) * 4U;
             const auto destinationOffset = static_cast<std::size_t>(y)
                     * static_cast<std::size_t>(output.bytesPerRow)
                 + static_cast<std::size_t>(x) * 4U;
             std::memcpy(
                 output.pixels.data() + destinationOffset,
-                segment.pixels->pixels.data() + sourceOffset,
+                sourcePixels + sourceOffset,
                 4U);
         }
     }

@@ -30,6 +30,70 @@ final class ScrollCaptureBridgeTests: XCTestCase {
         )
     }
 
+    func testPreferredDirectionIsForwardedToCoreAppend() throws {
+        let bridge = try XCTUnwrap(ScrollCaptureBridge(maximumAcceptedBytes: 16 * 1024 * 1024))
+        let first = TestImageFactory.verticalDocumentViewport(offset: 0, width: 64, height: 96)
+        let second = TestImageFactory.verticalDocumentViewport(offset: 32, width: 64, height: 96)
+
+        XCTAssertEqual(try bridge.append(first).kind, .acceptedInitial)
+        let update = try bridge.append(second, preferredDirection: .down)
+
+        XCTAssertEqual(update.kind, .acceptedAppend)
+        XCTAssertEqual(update.direction, .down)
+    }
+
+    func testViewportSizedAppendAndPreviewCompleteWithinInteractiveBudget() throws {
+        let bridge = try XCTUnwrap(ScrollCaptureBridge(maximumAcceptedBytes: 128 * 1024 * 1024))
+        let first = TestImageFactory.verticalDocumentViewportWithFixedFooter(
+            offset: 0,
+            pointWidth: 847,
+            pointHeight: 807,
+            footerPointHeight: 96,
+            scale: 2
+        )
+        XCTAssertEqual(try bridge.append(first).kind, .acceptedInitial)
+        let liveFrames = [140, 280, 420].map { offset in
+            TestImageFactory.verticalDocumentViewportWithFixedFooter(
+                offset: offset,
+                pointWidth: 847,
+                pointHeight: 807,
+                footerPointHeight: 96,
+                scale: 2
+            )
+        }
+
+        let startedAt = ProcessInfo.processInfo.systemUptime
+        var update: ScrollCaptureAppendUpdate?
+        for frame in liveFrames {
+            update = try bridge.append(frame, preferredDirection: .down)
+        }
+        let preview = try bridge.preview(maximumWidth: 600)
+        let elapsed = ProcessInfo.processInfo.systemUptime - startedAt
+
+        XCTAssertNotNil(update)
+        XCTAssertNotNil(preview)
+        XCTAssertLessThan(elapsed, 0.5, "three appends and preview took \(elapsed) seconds")
+    }
+
+    func testTenSequentialScrollFramesRemainInWidthFittedPreview() throws {
+        let bridge = try XCTUnwrap(ScrollCaptureBridge(maximumAcceptedBytes: 32 * 1024 * 1024))
+        let offsets = stride(from: 0, through: 320, by: 32)
+        let updates = try offsets.map { offset in
+            try bridge.append(
+                TestImageFactory.verticalDocumentViewport(offset: offset, width: 64, height: 96),
+                preferredDirection: .down
+            )
+        }
+
+        XCTAssertEqual(updates.first?.kind, .acceptedInitial)
+        XCTAssertTrue(updates.dropFirst().allSatisfy { $0.kind == .acceptedAppend })
+        XCTAssertEqual(updates.last?.outputHeight, 416)
+
+        let preview = try bridge.preview(maximumWidth: 32)
+        XCTAssertEqual(preview.representations.first?.pixelsWide, 32)
+        XCTAssertEqual(preview.representations.first?.pixelsHigh, 208)
+    }
+
     func testRuntimeInitializerCannotCreateDefaultAppendUpdate() throws {
         let object = try XCTUnwrap(class_createInstance(ScrollCaptureAppendUpdate.self, 0))
         let selector = NSSelectorFromString("init")
@@ -104,7 +168,7 @@ final class ScrollCaptureBridgeTests: XCTestCase {
         XCTAssertNotNil(try bridge.finalImage())
     }
 
-    func testReviewAndLowConfidenceKindsAreMapped() throws {
+    func testReviewAndLowConfidenceAreMappedWithoutChangingTheAcceptedBaseline() throws {
         let reverseBridge = try XCTUnwrap(ScrollCaptureBridge(maximumAcceptedBytes: 16 * 1024 * 1024))
         _ = try reverseBridge.append(TestImageFactory.verticalDocumentViewport(offset: 0))
         _ = try reverseBridge.append(TestImageFactory.verticalDocumentViewport(offset: 32))
@@ -113,11 +177,19 @@ final class ScrollCaptureBridgeTests: XCTestCase {
             .reviewDiscarded
         )
 
-        let unrelatedBridge = try XCTUnwrap(ScrollCaptureBridge(maximumAcceptedBytes: 16 * 1024 * 1024))
-        _ = try unrelatedBridge.append(TestImageFactory.verticalDocumentViewport(offset: 0))
+        let recoveringBridge = try XCTUnwrap(ScrollCaptureBridge(maximumAcceptedBytes: 16 * 1024 * 1024))
+        _ = try recoveringBridge.append(TestImageFactory.verticalDocumentViewport(offset: 0))
         XCTAssertEqual(
-            try unrelatedBridge.append(
-                TestImageFactory.solid(size: CGSize(width: 64, height: 96), color: .gray)
+            try recoveringBridge.append(
+                TestImageFactory.verticalDocumentViewport(offset: 500),
+                preferredDirection: .down
+            ).kind,
+            .lowConfidenceDiscarded
+        )
+        XCTAssertEqual(
+            try recoveringBridge.append(
+                TestImageFactory.verticalDocumentViewport(offset: 532),
+                preferredDirection: .down
             ).kind,
             .lowConfidenceDiscarded
         )
@@ -157,7 +229,7 @@ final class ScrollCaptureBridgeTests: XCTestCase {
                 TestImageFactory.verticalDocumentViewportWithFixedFooter(offset: offset, scale: 1)
             )
             XCTAssertEqual(update.kind, .awaitingEvidence)
-            assertRenderedPixelsEqual(try XCTUnwrap(bridge.finalImage()), seed)
+            XCTAssertEqual(try XCTUnwrap(bridge.finalImage()).size.height, seed.size.height + CGFloat(offset))
         }
 
         let confirmation = try bridge.append(
@@ -216,12 +288,28 @@ final class ScrollCaptureBridgeTests: XCTestCase {
         XCTAssertEqual(preview.size.height, 40, accuracy: 0.001)
     }
 
+    func testPreviewLimitsPixelWidthSoLongPreviewKeepsAStableDisplayWidth() throws {
+        let bridge = try XCTUnwrap(ScrollCaptureBridge(maximumAcceptedBytes: 16 * 1024 * 1024))
+        for offset in [0, 32, 64] {
+            _ = try bridge.append(TestImageFactory.verticalDocumentViewport(
+                offset: offset, width: 64, height: 96, scale: 1
+            ))
+        }
+
+        let preview = try XCTUnwrap(bridge.preview(maximumWidth: 32))
+
+        XCTAssertEqual(preview.representations.first?.pixelsWide, 32)
+        XCTAssertGreaterThan(try XCTUnwrap(preview.representations.first?.pixelsHigh), 48)
+        XCTAssertEqual(preview.size.width, 32, accuracy: 0.001)
+    }
+
     func testInvalidInputsReturnErrorsWithoutCrashing() throws {
         XCTAssertNil(ScrollCaptureBridge(maximumAcceptedBytes: 0))
         let bridge = try XCTUnwrap(ScrollCaptureBridge(maximumAcceptedBytes: 1_000_000))
 
         assertBridgeError { try bridge.append(NSImage(size: .zero)) }
         assertBridgeError { try bridge.preview(maximumHeight: 0) }
+        assertBridgeError { try bridge.preview(maximumWidth: 0) }
         assertBridgeError { try bridge.finalImage() }
     }
 
@@ -246,6 +334,34 @@ final class ScrollCaptureBridgeTests: XCTestCase {
 
     func testDefaultFixedBandBudgetKeepsOneXBehavior() throws {
         try assertFixedFooterIsRetainedOnce(scale: 1)
+    }
+
+    func testAutomaticFixedBandBudgetHandlesLargeChatComposer() throws {
+        let bridge = try XCTUnwrap(ScrollCaptureBridge(maximumAcceptedBytes: 32 * 1024 * 1024))
+        let offsets = [0, 20, 40, 60]
+        let updates = try offsets.map { offset in
+            try bridge.append(
+                TestImageFactory.verticalDocumentViewportWithFixedFooter(
+                    offset: offset,
+                    pointWidth: 320,
+                    pointHeight: 280,
+                    footerPointHeight: 120,
+                    scale: 2
+                ),
+                preferredDirection: .down
+            )
+        }
+
+        XCTAssertEqual(
+            updates.map { $0.kind.rawValue },
+            [
+                ScrollCaptureAppendKind.acceptedInitial.rawValue,
+                ScrollCaptureAppendKind.awaitingEvidence.rawValue,
+                ScrollCaptureAppendKind.awaitingEvidence.rawValue,
+                ScrollCaptureAppendKind.acceptedAppend.rawValue,
+            ]
+        )
+        XCTAssertEqual(updates.last?.outputHeight, (280 + 60) * 2)
     }
 
     private func assertFixedFooterIsRetainedOnce(scale: CGFloat) throws {

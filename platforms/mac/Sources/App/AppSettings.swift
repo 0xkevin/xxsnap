@@ -133,6 +133,7 @@ struct L10n {
         case finishScrollCapture
         case cancel
         case scrollCaptureLowConfidence
+        case scrollCaptureNoMovement
         case scrollCaptureResourceLimit
         case scrollCaptureFailure
         case longImageCopy
@@ -155,7 +156,9 @@ struct L10n {
         case (.zhHans, .cancel):
             return "取消"
         case (.zhHans, .scrollCaptureLowConfidence):
-            return "匹配置信度较低，将继续尝试拼接"
+            return "暂未识别到重叠位置，将继续尝试拼接"
+        case (.zhHans, .scrollCaptureNoMovement):
+            return "未检测到滚动，正在自动切换选区内的滚动位置"
         case (.zhHans, .scrollCaptureResourceLimit):
             return "已达到资源限制，滚动截图已暂停"
         case (.zhHans, .scrollCaptureFailure):
@@ -176,7 +179,9 @@ struct L10n {
         case (.english, .cancel):
             return "Cancel"
         case (.english, .scrollCaptureLowConfidence):
-            return "Low matching confidence. Continuing to stitch."
+            return "Overlap not found yet. Continuing to stitch."
+        case (.english, .scrollCaptureNoMovement):
+            return "No movement detected. Trying another point inside the selection."
         case (.english, .scrollCaptureResourceLimit):
             return "Resource limit reached. Scroll capture is paused."
         case (.english, .scrollCaptureFailure):

@@ -2169,7 +2169,17 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     var scrollCaptureCancelDidRequest: (() -> Void)?
     var scrollCaptureFinishDidRequest: (() -> Void)?
     var scrollCaptureOverlayState: ScrollCaptureOverlayState = .inactive {
-        didSet { needsDisplay = true }
+        didSet {
+            if scrollCaptureOverlayState != .inactive {
+                clearColorSampler()
+                eyedropperMeasurementStartPoint = nil
+                eyedropperMeasurementEndPoint = nil
+                colorSamplerCopySuccessTimer?.invalidate()
+                colorSamplerCopySuccessTimer = nil
+                colorSamplerCopySuccessUntil = nil
+            }
+            needsDisplay = true
+        }
     }
     private var backgroundImage: NSImage? {
         didSet { invalidateEraserMaskedComposite() }
@@ -4119,6 +4129,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private func updateColorSampler(at point: NSPoint) {
+        guard scrollCaptureOverlayState == .inactive else {
+            clearColorSampler()
+            return
+        }
         if isEyedropperToolActive {
             let samplePoint = eyedropperSamplePoint(forMousePoint: point)
             guard SelectionToolbarState.shouldShowExplicitColorSampler(
@@ -7183,6 +7197,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     func test_measurementControlPoint(_ control: SelectionToolbarState.MeasurementControl) -> NSPoint? {
         guard configuration.showsSelectionMeasurementControl else {
+            return nil
+        }
+        guard scrollCaptureOverlayState == .inactive else {
             return nil
         }
         guard let selectionRect else {
@@ -11342,7 +11359,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private func drawOverlay() {
-        if let backgroundImage {
+        if scrollCaptureOverlayState == .inactive, let backgroundImage {
             backgroundImage.draw(in: bounds, from: NSRect(origin: .zero, size: backgroundImage.size), operation: .copy, fraction: 1)
             if !hasEraserMasksForDrawing {
                 let usesSequentialMosaicOrdering = shouldRenderAnnotationsWithMosaicOrdering
@@ -11444,16 +11461,12 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             .font: samplerInfoFont(ofSize: 12, weight: .medium),
             .foregroundColor: NSColor.white,
         ]
-        let textSize = NSString(string: label).size(withAttributes: attributes)
-        let layout = SelectionToolbarState.measurementControlLayout(
-            anchoredTo: rect,
-            textSize: textSize,
-            inside: safeLayoutBounds
-        )
+        let layout = measurementControlLayout(for: rect)
 
         NSColor(calibratedWhite: 0.12, alpha: 0.86).setFill()
         NSBezierPath(roundedRect: layout.panel, xRadius: 5, yRadius: 5).fill()
         NSString(string: label).draw(in: layout.label.insetBy(dx: 9, dy: 4), withAttributes: attributes)
+        guard scrollCaptureOverlayState == .inactive else { return }
         drawMeasurementSeparator(layout.labelSeparator)
         drawMeasurementSeparator(layout.refreshSeparator)
 
@@ -11485,11 +11498,20 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             .font: samplerInfoFont(ofSize: 12, weight: .medium),
             .foregroundColor: NSColor.white,
         ]
-        return SelectionToolbarState.measurementControlLayout(
+        var layout = SelectionToolbarState.measurementControlLayout(
             anchoredTo: rect,
             textSize: NSString(string: label).size(withAttributes: attributes),
             inside: safeLayoutBounds
         )
+        if scrollCaptureOverlayState != .inactive {
+            layout.panel.size.width = layout.label.width
+            layout.labelSeparator = .zero
+            layout.cornerStyle = .zero
+            layout.aspectRatio = .zero
+            layout.refreshSeparator = .zero
+            layout.refresh = .zero
+        }
+        return layout
     }
 
     private func drawMeasurementControlButton(_ rect: NSRect, selected: Bool) {
@@ -13459,9 +13481,14 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                     template: true,
                     enabled: enabled,
                     inset: 0,
-                    tintColor: .black
+                    tintColor: button == .scroll ? .systemBlue : .black
                 ) {
-                    drawNumberMarkIcon(.check, in: rect.insetBy(dx: 3, dy: 3), color: .black, toolbar: true)
+                    drawNumberMarkIcon(
+                        .check,
+                        in: rect.insetBy(dx: 3, dy: 3),
+                        color: button == .scroll ? .systemBlue : .black,
+                        toolbar: true
+                    )
                 }
             } else {
                 drawToolbarButton(rect, symbol: symbolName(for: button, enabled: enabled), selected: buttonMatchesCurrentTool(button), enabled: enabled)
@@ -13592,7 +13619,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private func drawEyedropperMeasurementIfNeeded() {
-        guard isEyedropperToolActive,
+        guard scrollCaptureOverlayState == .inactive,
+              isEyedropperToolActive,
               let line = eyedropperMeasurementLine,
               let label = eyedropperMeasurementLabel
         else {
@@ -13643,6 +13671,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private func drawColorSamplerIfNeeded() {
+        guard scrollCaptureOverlayState == .inactive else { return }
         if isEyedropperToolActive {
             guard
                 let point = sampledPointerPoint,
@@ -15274,14 +15303,19 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private func drawToolbarIcon(named name: String, in rect: NSRect, enabled: Bool, selected: Bool) {
-        let color = toolbarIconColor(enabled: enabled, selected: selected)
+        let color: NSColor
+        if name == "toolbar-scroll-screen2", enabled, !selected {
+            color = .black
+        } else {
+            color = toolbarIconColor(enabled: enabled, selected: selected)
+        }
         color.set()
 
         let resourceName = name.replacingOccurrences(of: "toolbar-", with: "")
         let imageInset = toolbarIconInset(for: resourceName)
         let usesFixedColorResource = SelectionToolbarState.usesFixedColorToolbarIconResource(resourceName)
-        if drawToolbarImage(named: resourceName, in: rect, template: !usesFixedColorResource, enabled: enabled, selected: selected, inset: imageInset)
-            || drawToolbarImage(named: name, in: rect, template: !usesFixedColorResource, enabled: enabled, selected: selected, inset: imageInset) {
+        if drawToolbarImage(named: resourceName, in: rect, template: !usesFixedColorResource, enabled: enabled, selected: selected, inset: imageInset, tintColor: color)
+            || drawToolbarImage(named: name, in: rect, template: !usesFixedColorResource, enabled: enabled, selected: selected, inset: imageInset, tintColor: color) {
             return
         }
 
@@ -15589,7 +15623,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         case .pin:
             return "toolbar-pin-to-screen"
         case .scroll:
-            return "toolbar-scroll-capture"
+            return "toolbar-scroll-screen2"
         case .finishEditing:
             return "checkmark"
         }
@@ -15665,7 +15699,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         commitCurrentTextEdit()
         commitNumberEditingIfNeeded()
         let snapshotRect = lockedSelectionRect.standardized
-        guard let crop = pixelAlignedCrop(image: backgroundImage, to: snapshotRect)?.image else { return }
+        guard let crop = pixelAlignedCrop(image: backgroundImage, to: snapshotRect) else { return }
         closeTextDropdown()
         closeMagnifierZoomDropdown()
         showsStrokeStyleMenu = false
@@ -15675,9 +15709,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         activeNumberDropdown = false
         scrollCaptureOverlayState = .capturing
         scrollCaptureDidRequest?(ScrollCaptureSeed(
-            screenRect: window.convertToScreen(snapshotRect).standardized,
+            screenRect: window.convertToScreen(crop.drawRect).standardized,
             snapshotRect: snapshotRect,
-            frozenImage: crop,
+            frozenImage: crop.image,
             annotations: annotations,
             eraserMasks: eraserMasks
         ))
@@ -15853,8 +15887,12 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private func leftAlignedOptionsToolbarRect(size: NSSize, alignedWith toolbar: NSRect) -> NSRect {
         let gap: CGFloat = 8
         let safeBounds = safeLayoutBounds.insetBy(dx: gap, dy: gap)
+        let x = min(
+            max(toolbar.minX, safeBounds.minX),
+            max(safeBounds.minX, safeBounds.maxX - size.width)
+        )
         let below = NSRect(
-            x: toolbar.minX,
+            x: x,
             y: toolbar.minY - gap - size.height,
             width: size.width,
             height: size.height
@@ -15864,7 +15902,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
 
         let above = NSRect(
-            x: toolbar.minX,
+            x: x,
             y: toolbar.maxY + gap,
             width: size.width,
             height: size.height
@@ -15884,7 +15922,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         if size.width <= toolbar.width {
             x = min(max(centeredX, toolbar.minX), toolbar.maxX - size.width)
         } else {
-            x = centeredX
+            x = min(
+                max(centeredX, safeBounds.minX),
+                max(safeBounds.minX, safeBounds.maxX - size.width)
+            )
         }
         let below = NSRect(
             x: x,

@@ -159,6 +159,7 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     private let actions: LongImageEditorActions
     private let completeRenderer: CompleteRenderer
     private let language: AppLanguage
+    private let applicationActivator: @MainActor () -> Void
     private var renderedRevision: NSImage?
     private var documentRevision: UInt64 = 0
     private var lastCommittedOverlayRevision: UInt64?
@@ -187,12 +188,20 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     var fitWidthScale: CGFloat { geometry.fitWidthScale }
     var visibleImageRect: NSRect { geometry.visibleImageRect }
 
-    init(canonicalImage image: NSImage, annotations: [CaptureAnnotation] = [], eraserMasks: [EraserMask] = [], visibleFrame: NSRect? = NSScreen.main?.visibleFrame, initialWindowSize: NSSize? = nil, actions: LongImageEditorActions = .none, renderer: @escaping CompleteRenderer = { try CaptureAnnotationRenderer.renderLongImageStrict(image: $0, annotations: $1, eraserMasks: $2) }, language: AppLanguage = .zhHans) {
+    init(canonicalImage image: NSImage, annotations: [CaptureAnnotation] = [], eraserMasks: [EraserMask] = [], visibleFrame: NSRect? = NSScreen.main?.visibleFrame, initialWindowSize: NSSize? = nil, actions: LongImageEditorActions = .none, renderer: CompleteRenderer? = nil, language: AppLanguage = .zhHans, applicationActivator: @escaping @MainActor () -> Void = { NSApp.activate(ignoringOtherApps: true) }) {
         let visible = visibleFrame ?? NSRect(x: 0, y: 0, width: 1_200, height: 900)
         documentState = LongImageEditorDocument(image: image, annotations: annotations, eraserMasks: eraserMasks)
         self.actions = actions
-        completeRenderer = renderer
+        completeRenderer = renderer ?? { image, annotations, masks in
+            guard !annotations.isEmpty || !masks.isEmpty else { return image }
+            return try CaptureAnnotationRenderer.renderLongImageStrict(
+                image: image,
+                annotations: annotations,
+                eraserMasks: masks
+            )
+        }
         self.language = language
+        self.applicationActivator = applicationActivator
         let requested = initialWindowSize ?? NSSize(width: min(1_000, visible.width), height: min(840, visible.height))
         let size = NSSize(width: min(requested.width, visible.width), height: min(requested.height, visible.height))
         let frame = NSRect(x: visible.midX - size.width / 2, y: visible.midY - size.height / 2, width: size.width, height: size.height)
@@ -228,7 +237,12 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         if let boundsObserver { NotificationCenter.default.removeObserver(boundsObserver) }
     }
 
-    func show() { showWindow(nil); window?.makeKeyAndOrderFront(nil); showOverlay() }
+    func show() {
+        applicationActivator()
+        showWindow(nil)
+        window?.makeKeyAndOrderFront(nil)
+        showOverlay()
+    }
     func stop() {
         guard !didStop else { return }
         didStop = true
@@ -356,8 +370,9 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
             overlayBoundsHeight: frame.height,
             displayScale: geometry.fitWidthScale
         )
-        value.present()
         window?.addChildWindow(value, ordered: .above)
+        value.present()
+        value.makeKey()
     }
     private func refreshOverlay() {
         guard !didStop else { return }

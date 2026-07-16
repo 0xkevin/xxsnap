@@ -43,9 +43,16 @@ typedef NS_ENUM(NSInteger, ScrollCaptureDirection) {
 - (nullable ScrollCaptureAppendUpdate *)appendImage:(NSImage *)image
                                               error:(NSError * _Nullable * _Nullable)error
     NS_SWIFT_NAME(append(_:));
+- (nullable ScrollCaptureAppendUpdate *)appendImage:(NSImage *)image
+                                  preferredDirection:(ScrollCaptureDirection)preferredDirection
+                                               error:(NSError * _Nullable * _Nullable)error
+    NS_SWIFT_NAME(append(_:preferredDirection:));
 - (nullable NSImage *)previewImageWithMaximumHeight:(NSInteger)maximumHeight
                                               error:(NSError * _Nullable * _Nullable)error
     NS_SWIFT_NAME(preview(maximumHeight:));
+- (nullable NSImage *)previewImageWithMaximumWidth:(NSInteger)maximumWidth
+                                             error:(NSError * _Nullable * _Nullable)error
+    NS_SWIFT_NAME(preview(maximumWidth:));
 - (nullable NSImage *)finalImageAndReturnError:(NSError * _Nullable * _Nullable)error
     NS_SWIFT_NAME(finalImage());
 @end

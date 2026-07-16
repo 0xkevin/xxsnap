@@ -6,10 +6,128 @@ import XCTest
 @testable import xxsnap
 
 final class ScreenCaptureServiceTests: XCTestCase {
+    func testScrollFrameBufferKeepsOldestRetainedIntermediateFrames() async throws {
+        let buffer = ScrollCaptureFrameBuffer(capacity: 3)
+        let first = NSImage(size: NSSize(width: 1, height: 1))
+        let second = NSImage(size: NSSize(width: 2, height: 2))
+        let third = NSImage(size: NSSize(width: 3, height: 3))
+        let fourth = NSImage(size: NSSize(width: 4, height: 4))
+
+        buffer.enqueue(first)
+        buffer.enqueue(second)
+        buffer.enqueue(third)
+        buffer.enqueue(fourth)
+
+        let deliveredSecond = try await buffer.nextImage()
+        let deliveredThird = try await buffer.nextImage()
+        let deliveredFourth = try await buffer.nextImage()
+        XCTAssertTrue(deliveredSecond === second)
+        XCTAssertTrue(deliveredThird === third)
+        XCTAssertTrue(deliveredFourth === fourth)
+    }
+
+    func testScrollFrameBufferCanDiscardFramesCapturedBeforeAStep() async throws {
+        let buffer = ScrollCaptureFrameBuffer(capacity: 3)
+        let stale = NSImage(size: NSSize(width: 1, height: 1))
+        let fresh = NSImage(size: NSSize(width: 2, height: 2))
+        buffer.enqueue(stale)
+
+        buffer.discardBufferedImages()
+        buffer.enqueue(fresh)
+
+        let delivered = try await buffer.nextImage()
+        XCTAssertTrue(delivered === fresh)
+    }
+
+    func testScrollFrameBufferStopsExpensiveProductionWhileItsQueueIsFull() async throws {
+        let buffer = ScrollCaptureFrameBuffer(capacity: 2)
+        XCTAssertTrue(buffer.canAcceptImage)
+
+        buffer.enqueue(NSImage(size: NSSize(width: 1, height: 1)))
+        buffer.enqueue(NSImage(size: NSSize(width: 2, height: 2)))
+        XCTAssertFalse(buffer.canAcceptImage)
+
+        _ = try await buffer.nextImage()
+        XCTAssertTrue(buffer.canAcceptImage)
+    }
+
+    @MainActor
+    func testSourceRectConvertsAppKitBottomOriginToScreenCaptureTopOrigin() {
+        let sourceRect = ScreenCaptureService.sourceRect(
+            for: NSRect(x: 100, y: 150, width: 300, height: 200),
+            in: NSRect(x: 0, y: 0, width: 1_440, height: 900)
+        )
+
+        XCTAssertEqual(sourceRect, CGRect(x: 100, y: 550, width: 300, height: 200))
+    }
+
+    @MainActor
+    func testSourceRectIsRelativeToASecondaryScreenFrame() {
+        let sourceRect = ScreenCaptureService.sourceRect(
+            for: NSRect(x: -1_800, y: 100, width: 320, height: 200),
+            in: NSRect(x: -1_920, y: 0, width: 1_920, height: 1_080)
+        )
+
+        XCTAssertEqual(sourceRect, CGRect(x: 120, y: 780, width: 320, height: 200))
+    }
+
+    @MainActor
+    func testRegionCaptureMatchesTheSameAppKitScreenAreaInDesktopCapture() async throws {
+        guard NSScreen.screens.count == 1, let screen = NSScreen.main else {
+            throw XCTSkip("Coordinate regression test requires one display")
+        }
+        let selection = NSRect(
+            x: screen.frame.minX + 80,
+            y: screen.frame.maxY - 360,
+            width: min(320, screen.frame.width - 160),
+            height: 180
+        )
+        guard selection.width > 0 else {
+            throw XCTSkip("Display is too narrow for the coordinate regression test")
+        }
+
+        let service = ScreenCaptureService()
+        let desktop = try await service.captureDesktopImage()
+        let region = try await service.captureImage(in: selection)
+        let desktopSelection = NSRect(
+            x: selection.minX - screen.frame.minX,
+            y: selection.minY - screen.frame.minY,
+            width: selection.width,
+            height: selection.height
+        )
+        let expected = try XCTUnwrap(CaptureCoordinator.crop(image: desktop, rect: desktopSelection))
+
+        XCTAssertLessThan(try meanAbsoluteLuminanceDistance(expected, region), 0.03)
+    }
+
     @MainActor
     func testConformsToScrollRegionCapturingWithoutAdapter() {
         let service: any ScrollRegionCapturing = ScreenCaptureService()
         XCTAssertTrue(service is ScreenCaptureService)
+    }
+
+    @MainActor
+    func testStreamingScrollCapturerPrimesAndReturnsNextCanonicalFrame() async throws {
+        guard let screen = NSScreen.main else { throw XCTSkip("No main screen") }
+        let selection = NSRect(
+            x: screen.frame.minX + 120,
+            y: screen.frame.minY + 120,
+            width: min(320, screen.frame.width - 240),
+            height: min(200, screen.frame.height - 240)
+        )
+        guard selection.width > 0, selection.height > 0 else {
+            throw XCTSkip("Display is too small")
+        }
+        let capturer = StreamingScrollRegionCapturer(service: ScreenCaptureService())
+
+        try await capturer.primeCapture(in: selection)
+        let frame = try await capturer.captureImage(in: selection)
+
+        XCTAssertEqual(frame.size.width, selection.width, accuracy: 0.001)
+        XCTAssertEqual(frame.size.height, selection.height, accuracy: 0.001)
+        let pixels = try XCTUnwrap(frame.cgImage(forProposedRect: nil, context: nil, hints: nil))
+        XCTAssertEqual(pixels.width, Int(ceil(selection.width * screen.backingScaleFactor)))
+        XCTAssertEqual(pixels.height, Int(ceil(selection.height * screen.backingScaleFactor)))
     }
 
     @MainActor
@@ -112,4 +230,32 @@ final class ScreenCaptureServiceTests: XCTestCase {
 
         XCTAssertTrue(filter.includeMenuBar)
     }
+
+}
+
+private func meanAbsoluteLuminanceDistance(_ left: NSImage, _ right: NSImage) throws -> Double {
+    let leftImage = try XCTUnwrap(left.cgImage(forProposedRect: nil, context: nil, hints: nil))
+    let rightImage = try XCTUnwrap(right.cgImage(forProposedRect: nil, context: nil, hints: nil))
+    XCTAssertEqual(leftImage.width, rightImage.width)
+    XCTAssertEqual(leftImage.height, rightImage.height)
+    guard leftImage.width == rightImage.width, leftImage.height == rightImage.height else { return 1 }
+
+    var difference = 0.0
+    var samples = 0
+    let step = max(1, min(leftImage.width, leftImage.height) / 64)
+    for y in stride(from: 0, to: leftImage.height, by: step) {
+        for x in stride(from: 0, to: leftImage.width, by: step) {
+            let leftColor = try XCTUnwrap(SelectionToolbarState.sampleColor(atPixelX: x, y: y, in: leftImage))
+            let rightColor = try XCTUnwrap(SelectionToolbarState.sampleColor(atPixelX: x, y: y, in: rightImage))
+            let leftLuminance = 0.299 * leftColor.redComponent
+                + 0.587 * leftColor.greenComponent
+                + 0.114 * leftColor.blueComponent
+            let rightLuminance = 0.299 * rightColor.redComponent
+                + 0.587 * rightColor.greenComponent
+                + 0.114 * rightColor.blueComponent
+            difference += abs(leftLuminance - rightLuminance)
+            samples += 1
+        }
+    }
+    return samples > 0 ? difference / Double(samples) : 1
 }
