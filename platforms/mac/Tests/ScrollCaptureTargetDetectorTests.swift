@@ -24,7 +24,7 @@ final class ScrollCaptureTargetDetectorTests: XCTestCase {
         XCTAssertTrue(points.contains(NSPoint(x: selection.midX, y: selection.midY)))
     }
 
-    func testLargestScrollableIntersectionWinsOverNarrowChatSidebar() {
+    func testLargestScrollableIntersectionWinsOverNarrowChatSidebar() async {
         let selection = NSRect(x: 0, y: 0, width: 900, height: 700)
         let sidebar = ScrollCaptureTargetCandidate(
             identity: 10,
@@ -44,12 +44,12 @@ final class ScrollCaptureTargetDetectorTests: XCTestCase {
             candidateQuery: StubCandidateQuery(candidates: [sidebar, mainChat])
         )
 
-        let region = detector.scrollableRegion(in: selection, processIdentifier: 42)
+        let region = await detector.scrollableRegion(in: selection, processIdentifier: 42)
 
         XCTAssertEqual(region, mainChat.screenRect)
     }
 
-    func testCandidateIsClippedToOriginalSelectionAndNeverExpandsIt() {
+    func testCandidateIsClippedToOriginalSelectionAndNeverExpandsIt() async {
         let selection = NSRect(x: 100, y: 100, width: 500, height: 400)
         let oversizedCandidate = ScrollCaptureTargetCandidate(
             identity: 30,
@@ -62,12 +62,12 @@ final class ScrollCaptureTargetDetectorTests: XCTestCase {
             candidateQuery: StubCandidateQuery(candidates: [oversizedCandidate])
         )
 
-        let region = detector.scrollableRegion(in: selection, processIdentifier: 42)
+        let region = await detector.scrollableRegion(in: selection, processIdentifier: 42)
 
         XCTAssertEqual(region, selection)
     }
 
-    func testInvalidRangeAndSubminimumRegionFallBack() {
+    func testInvalidRangeAndSubminimumRegionFallBack() async {
         let selection = NSRect(x: 0, y: 0, width: 800, height: 600)
         let zeroRange = ScrollCaptureTargetCandidate(
             identity: 40,
@@ -103,7 +103,9 @@ final class ScrollCaptureTargetDetectorTests: XCTestCase {
             )
         )
 
-        XCTAssertNil(detector.scrollableRegion(in: selection, processIdentifier: 42))
+        let region = await detector.scrollableRegion(in: selection, processIdentifier: 42)
+
+        XCTAssertNil(region)
     }
 
     func testQuartzRectConvertsToAppKitBottomOrigin() {
@@ -125,12 +127,393 @@ final class ScrollCaptureTargetDetectorTests: XCTestCase {
             NSRect(x: -1_280, y: -900, width: 1_280, height: 200)
         )
     }
+
+    func testEqualAreaPrefersTallerIntersection() async {
+        let selection = NSRect(x: 0, y: 0, width: 1_000, height: 1_000)
+        let wider = candidate(
+            identity: 50,
+            rect: NSRect(x: 300, y: 400, width: 400, height: 200),
+            firstProbeIndex: 0
+        )
+        let taller = candidate(
+            identity: 51,
+            rect: NSRect(x: 400, y: 300, width: 200, height: 400),
+            firstProbeIndex: 1
+        )
+        let detector = ScrollCaptureTargetDetector(
+            candidateQuery: StubCandidateQuery(candidates: [wider, taller])
+        )
+
+        let region = await detector.scrollableRegion(in: selection, processIdentifier: 42)
+
+        XCTAssertEqual(region, taller.screenRect)
+    }
+
+    func testEqualAreaAndHeightPrefersCenterNearestSelectionCenter() async {
+        let selection = NSRect(x: 0, y: 0, width: 1_000, height: 1_000)
+        let offset = candidate(
+            identity: 60,
+            rect: NSRect(x: 50, y: 50, width: 200, height: 200),
+            firstProbeIndex: 0
+        )
+        let centered = candidate(
+            identity: 61,
+            rect: NSRect(x: 400, y: 400, width: 200, height: 200),
+            firstProbeIndex: 1
+        )
+        let detector = ScrollCaptureTargetDetector(
+            candidateQuery: StubCandidateQuery(candidates: [offset, centered])
+        )
+
+        let region = await detector.scrollableRegion(in: selection, processIdentifier: 42)
+
+        XCTAssertEqual(region, centered.screenRect)
+    }
+
+    func testEqualGeometryRankPrefersEarlierProbe() async {
+        let selection = NSRect(x: 0, y: 0, width: 1_000, height: 600)
+        let laterProbe = candidate(
+            identity: 70,
+            rect: NSRect(x: 700, y: 200, width: 200, height: 200),
+            firstProbeIndex: 7
+        )
+        let earlierProbe = candidate(
+            identity: 71,
+            rect: NSRect(x: 100, y: 200, width: 200, height: 200),
+            firstProbeIndex: 1
+        )
+        let detector = ScrollCaptureTargetDetector(
+            candidateQuery: StubCandidateQuery(candidates: [laterProbe, earlierProbe])
+        )
+
+        let region = await detector.scrollableRegion(in: selection, processIdentifier: 42)
+
+        XCTAssertEqual(region, earlierProbe.screenRect)
+    }
+
+    func testDuplicateIdentityRetainsEarliestProbe() async {
+        let selection = NSRect(x: 0, y: 0, width: 1_000, height: 600)
+        let laterProbe = candidate(
+            identity: 80,
+            rect: NSRect(x: 700, y: 200, width: 200, height: 200),
+            firstProbeIndex: 7
+        )
+        let earlierProbe = candidate(
+            identity: 80,
+            rect: NSRect(x: 100, y: 200, width: 200, height: 200),
+            firstProbeIndex: 1
+        )
+        let detector = ScrollCaptureTargetDetector(
+            candidateQuery: StubCandidateQuery(candidates: [laterProbe, earlierProbe])
+        )
+
+        let region = await detector.scrollableRegion(in: selection, processIdentifier: 42)
+
+        XCTAssertEqual(region, earlierProbe.screenRect)
+    }
+
+    @MainActor
+    func testAsyncDetectionRunsCandidateQueryOffMainThread() async {
+        let query = ThreadRecordingCandidateQuery()
+        let detector = ScrollCaptureTargetDetector(candidateQuery: query)
+
+        _ = await detector.scrollableRegion(
+            in: NSRect(x: 0, y: 0, width: 500, height: 500),
+            processIdentifier: 42
+        )
+
+        XCTAssertEqual(query.wasCalledOnMainThread, false)
+    }
+
+    func testMessagingTimeoutIsShortAndFailureStopsBeforeHitTesting() {
+        let reader = FakeAccessibilityReader()
+        reader.messagingTimeoutSucceeds = false
+        let query = AccessibilityScrollCaptureCandidateQuery(
+            quartzOriginYProvider: { 1_000 },
+            accessibilityReader: reader
+        )
+
+        let candidates = query.candidates(
+            processIdentifier: 42,
+            probePoints: [NSPoint(x: 100, y: 100)]
+        )
+
+        XCTAssertTrue(candidates.isEmpty)
+        XCTAssertEqual(reader.messagingTimeouts, [AccessibilityScrollCaptureCandidateQuery.messagingTimeout])
+        XCTAssertGreaterThan(AccessibilityScrollCaptureCandidateQuery.messagingTimeout, 0)
+        XCTAssertLessThan(AccessibilityScrollCaptureCandidateQuery.messagingTimeout, 1)
+        XCTAssertEqual(reader.hitTestCount, 0)
+    }
+
+    func testMessagingTimeoutIsAppliedToEveryUniqueVisitedElement() {
+        let parent = FakeAccessibilityNode()
+        let child = FakeAccessibilityNode(parent: parent)
+        let reader = FakeAccessibilityReader(hitElements: [child, child])
+        let query = makeAccessibilityQuery(reader: reader)
+
+        _ = query.candidates(
+            processIdentifier: 42,
+            probePoints: [NSPoint(x: 100, y: 100), NSPoint(x: 200, y: 200)]
+        )
+
+        XCTAssertEqual(reader.messagingTimeouts.count, 3)
+        XCTAssertTrue(reader.messagingTimeouts.allSatisfy {
+            $0 == AccessibilityScrollCaptureCandidateQuery.messagingTimeout
+        })
+    }
+
+    func testHitTestFailureSafelyReturnsNoCandidates() {
+        let reader = FakeAccessibilityReader(hitElements: [nil])
+        let query = makeAccessibilityQuery(reader: reader)
+
+        let candidates = query.candidates(
+            processIdentifier: 42,
+            probePoints: [NSPoint(x: 100, y: 100)]
+        )
+
+        XCTAssertTrue(candidates.isEmpty)
+        XCTAssertEqual(reader.hitTestCount, 1)
+        XCTAssertEqual(reader.candidateReadCount, 0)
+    }
+
+    func testParentTraversalFindsScrollableOwner() {
+        let scrollOwner = FakeAccessibilityNode(
+            candidate: candidate(
+                identity: 90,
+                rect: NSRect(x: 20, y: 30, width: 400, height: 500),
+                firstProbeIndex: -1
+            )
+        )
+        let child = FakeAccessibilityNode(parent: scrollOwner)
+        let reader = FakeAccessibilityReader(hitElements: [child])
+        let query = makeAccessibilityQuery(reader: reader)
+
+        let candidates = query.candidates(
+            processIdentifier: 42,
+            probePoints: [NSPoint(x: 100, y: 100)]
+        )
+
+        XCTAssertEqual(candidates, [candidate(
+            identity: 90,
+            rect: NSRect(x: 20, y: 30, width: 400, height: 500),
+            firstProbeIndex: 0
+        )])
+        XCTAssertEqual(reader.candidateReadCount, 2)
+    }
+
+    func testTraversalStopsAfterSixteenElements() {
+        let nodes = (0..<17).map { _ in FakeAccessibilityNode() }
+        for index in 0..<16 {
+            nodes[index].parent = nodes[index + 1]
+        }
+        nodes[16].candidate = candidate(
+            identity: 100,
+            rect: NSRect(x: 0, y: 0, width: 500, height: 500),
+            firstProbeIndex: -1
+        )
+        let reader = FakeAccessibilityReader(hitElements: [nodes[0]])
+        let query = makeAccessibilityQuery(reader: reader)
+
+        let candidates = query.candidates(
+            processIdentifier: 42,
+            probePoints: [NSPoint(x: 100, y: 100)]
+        )
+
+        XCTAssertTrue(candidates.isEmpty)
+        XCTAssertEqual(reader.candidateReadCount, 16)
+        XCTAssertEqual(reader.parentReadCount, 15)
+    }
+
+    func testMissingOrWrongTypedCandidateAttributesSafelyContinueTraversal() {
+        let wrongTypedOwner = FakeAccessibilityNode()
+        let missingAttributesOwner = FakeAccessibilityNode(parent: wrongTypedOwner)
+        let reader = FakeAccessibilityReader(hitElements: [missingAttributesOwner])
+        let query = makeAccessibilityQuery(reader: reader)
+
+        let candidates = query.candidates(
+            processIdentifier: 42,
+            probePoints: [NSPoint(x: 100, y: 100)]
+        )
+
+        XCTAssertTrue(candidates.isEmpty)
+        XCTAssertEqual(reader.candidateReadCount, 2)
+    }
+
+    func testSharedParentIsReadOnceAndKeepsEarliestProbeIndex() {
+        let sharedOwner = FakeAccessibilityNode(
+            candidate: candidate(
+                identity: 110,
+                rect: NSRect(x: 0, y: 0, width: 500, height: 500),
+                firstProbeIndex: -1
+            )
+        )
+        let firstChild = FakeAccessibilityNode(parent: sharedOwner)
+        let secondChild = FakeAccessibilityNode(parent: sharedOwner)
+        let reader = FakeAccessibilityReader(hitElements: [firstChild, secondChild])
+        let query = makeAccessibilityQuery(reader: reader)
+
+        let candidates = query.candidates(
+            processIdentifier: 42,
+            probePoints: [NSPoint(x: 100, y: 100), NSPoint(x: 200, y: 200)]
+        )
+
+        XCTAssertEqual(candidates.first?.firstProbeIndex, 0)
+        XCTAssertEqual(candidates.count, 1)
+        XCTAssertEqual(reader.candidateReads(for: sharedOwner), 1)
+        XCTAssertEqual(reader.parentReads(for: sharedOwner), 1)
+    }
+
+    private func makeAccessibilityQuery(
+        reader: FakeAccessibilityReader
+    ) -> AccessibilityScrollCaptureCandidateQuery {
+        AccessibilityScrollCaptureCandidateQuery(
+            quartzOriginYProvider: { 1_000 },
+            accessibilityReader: reader
+        )
+    }
+
+    private func candidate(
+        identity: CFHashCode,
+        rect: NSRect,
+        firstProbeIndex: Int
+    ) -> ScrollCaptureTargetCandidate {
+        ScrollCaptureTargetCandidate(
+            identity: identity,
+            screenRect: rect,
+            minimum: 0,
+            maximum: 1,
+            firstProbeIndex: firstProbeIndex
+        )
+    }
 }
 
-private struct StubCandidateQuery: ScrollCaptureTargetCandidateQuerying {
+private struct StubCandidateQuery: ScrollCaptureTargetCandidateQuerying, Sendable {
     var candidates: [ScrollCaptureTargetCandidate] = []
 
     func candidates(processIdentifier: pid_t, probePoints: [NSPoint]) -> [ScrollCaptureTargetCandidate] {
         candidates
+    }
+}
+
+private final class ThreadRecordingCandidateQuery: ScrollCaptureTargetCandidateQuerying, @unchecked Sendable {
+    private let lock = NSLock()
+    private var callThreadWasMain: Bool?
+
+    var wasCalledOnMainThread: Bool? {
+        lock.withLock { callThreadWasMain }
+    }
+
+    func candidates(processIdentifier: pid_t, probePoints: [NSPoint]) -> [ScrollCaptureTargetCandidate] {
+        lock.withLock {
+            callThreadWasMain = Thread.isMainThread
+        }
+        return []
+    }
+}
+
+private final class FakeAccessibilityNode {
+    var parent: FakeAccessibilityNode?
+    var candidate: ScrollCaptureTargetCandidate?
+
+    init(
+        parent: FakeAccessibilityNode? = nil,
+        candidate: ScrollCaptureTargetCandidate? = nil
+    ) {
+        self.parent = parent
+        self.candidate = candidate
+    }
+}
+
+private final class FakeAccessibilityReader: ScrollCaptureAccessibilityReading, @unchecked Sendable {
+    var messagingTimeoutSucceeds = true
+    private var remainingHitElements: [FakeAccessibilityNode?]
+    private(set) var messagingTimeouts: [Float] = []
+    private(set) var hitTestCount = 0
+    private var candidateReadsByNode: [ObjectIdentifier: Int] = [:]
+    private var parentReadsByNode: [ObjectIdentifier: Int] = [:]
+
+    var candidateReadCount: Int {
+        candidateReadsByNode.values.reduce(0, +)
+    }
+
+    var parentReadCount: Int {
+        parentReadsByNode.values.reduce(0, +)
+    }
+
+    init(hitElements: [FakeAccessibilityNode?] = []) {
+        remainingHitElements = hitElements
+    }
+
+    func application(processIdentifier: pid_t) -> ScrollCaptureAccessibilityElement? {
+        ScrollCaptureAccessibilityElement(rawValue: FakeAccessibilityNode())
+    }
+
+    func setMessagingTimeout(_ timeout: Float, for application: ScrollCaptureAccessibilityElement) -> Bool {
+        messagingTimeouts.append(timeout)
+        return messagingTimeoutSucceeds
+    }
+
+    func element(
+        at quartzPoint: CGPoint,
+        in application: ScrollCaptureAccessibilityElement
+    ) -> ScrollCaptureAccessibilityElement? {
+        hitTestCount += 1
+        guard !remainingHitElements.isEmpty,
+              let node = remainingHitElements.removeFirst()
+        else {
+            return nil
+        }
+        return ScrollCaptureAccessibilityElement(rawValue: node)
+    }
+
+    func parent(
+        of element: ScrollCaptureAccessibilityElement
+    ) -> ScrollCaptureAccessibilityElement? {
+        let node = node(from: element)
+        increment(&parentReadsByNode, for: node)
+        return node.parent.map { ScrollCaptureAccessibilityElement(rawValue: $0) }
+    }
+
+    func candidate(
+        from element: ScrollCaptureAccessibilityElement,
+        firstProbeIndex: Int,
+        quartzOriginY: CGFloat
+    ) -> ScrollCaptureTargetCandidate? {
+        let node = node(from: element)
+        increment(&candidateReadsByNode, for: node)
+        guard let candidate = node.candidate else { return nil }
+        return ScrollCaptureTargetCandidate(
+            identity: candidate.identity,
+            screenRect: candidate.screenRect,
+            minimum: candidate.minimum,
+            maximum: candidate.maximum,
+            firstProbeIndex: firstProbeIndex
+        )
+    }
+
+    func elementsEqual(
+        _ lhs: ScrollCaptureAccessibilityElement,
+        _ rhs: ScrollCaptureAccessibilityElement
+    ) -> Bool {
+        lhs.rawValue === rhs.rawValue
+    }
+
+    func candidateReads(for node: FakeAccessibilityNode) -> Int {
+        candidateReadsByNode[ObjectIdentifier(node), default: 0]
+    }
+
+    func parentReads(for node: FakeAccessibilityNode) -> Int {
+        parentReadsByNode[ObjectIdentifier(node), default: 0]
+    }
+
+    private func node(from element: ScrollCaptureAccessibilityElement) -> FakeAccessibilityNode {
+        element.rawValue as! FakeAccessibilityNode
+    }
+
+    private func increment(
+        _ counts: inout [ObjectIdentifier: Int],
+        for node: FakeAccessibilityNode
+    ) {
+        counts[ObjectIdentifier(node), default: 0] += 1
     }
 }
