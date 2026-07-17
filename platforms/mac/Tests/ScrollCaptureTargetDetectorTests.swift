@@ -128,6 +128,36 @@ final class ScrollCaptureTargetDetectorTests: XCTestCase {
         )
     }
 
+    func testScrollbarStateRequiresEnabledFiniteInRangeValue() {
+        XCTAssertTrue(ScrollCaptureScrollbarStateValidator.isScrollable(
+            enabled: true,
+            value: 0.5,
+            minimum: 0,
+            maximum: 1
+        ))
+
+        let invalidStates: [(Bool?, Double?, Double?, Double?)] = [
+            (false, 0.5, 0, 1),
+            (nil, 0.5, 0, 1),
+            (true, nil, 0, 1),
+            (true, .nan, 0, 1),
+            (true, .infinity, 0, 1),
+            (true, 0.5, .nan, 1),
+            (true, 0.5, 0, .infinity),
+            (true, -0.1, 0, 1),
+            (true, 1.1, 0, 1),
+            (true, 0.5, 1, 1),
+        ]
+        for (enabled, value, minimum, maximum) in invalidStates {
+            XCTAssertFalse(ScrollCaptureScrollbarStateValidator.isScrollable(
+                enabled: enabled,
+                value: value,
+                minimum: minimum,
+                maximum: maximum
+            ))
+        }
+    }
+
     func testEqualAreaPrefersTallerIntersection() async {
         let selection = NSRect(x: 0, y: 0, width: 1_000, height: 1_000)
         let wider = candidate(
@@ -225,7 +255,7 @@ final class ScrollCaptureTargetDetectorTests: XCTestCase {
         XCTAssertEqual(query.wasCalledOnMainThread, false)
     }
 
-    func testCancelledDetectionReturnsNilAfterBackgroundQueryCompletes() async {
+    func testCancelledDetectionReturnsNilWithoutWaitingForBackgroundQuery() async {
         let selection = NSRect(x: 0, y: 0, width: 500, height: 500)
         let query = BlockingCandidateQuery(candidates: [candidate(
             identity: 85,
@@ -239,10 +269,48 @@ final class ScrollCaptureTargetDetectorTests: XCTestCase {
 
         await query.waitUntilStarted()
         detection.cancel()
-        query.finish()
 
-        let region = await detection.value
+        let returned = expectation(description: "cancelled detection returned")
+        let observedResult = Task {
+            let region = await detection.value
+            returned.fulfill()
+            return region
+        }
+        await fulfillment(of: [returned], timeout: 0.2)
+
+        query.finish()
+        let region = await observedResult.value
         XCTAssertNil(region)
+    }
+
+    func testNewDetectionDoesNotWaitForCancelledBackgroundQuery() async {
+        let selection = NSRect(x: 0, y: 0, width: 500, height: 500)
+        let candidate = candidate(identity: 86, rect: selection, firstProbeIndex: 0)
+        let query = FirstCallBlockingCandidateQuery(laterCandidates: [candidate])
+        let detector = ScrollCaptureTargetDetector(candidateQuery: query)
+        let firstDetection = Task {
+            await detector.scrollableRegion(in: selection, processIdentifier: 42)
+        }
+
+        await query.waitUntilFirstCallStarts()
+        firstDetection.cancel()
+        let cancelledRegion = await firstDetection.value
+        XCTAssertNil(cancelledRegion)
+
+        let secondDetection = Task {
+            await detector.scrollableRegion(in: selection, processIdentifier: 42)
+        }
+        let returned = expectation(description: "new detection returned")
+        let observedResult = Task {
+            let region = await secondDetection.value
+            returned.fulfill()
+            return region
+        }
+        await fulfillment(of: [returned], timeout: 0.2)
+
+        query.finishFirstCall()
+        let region = await observedResult.value
+        XCTAssertEqual(region, selection)
     }
 
     func testMessagingTimeoutIsShortAndFailureStopsBeforeHitTesting() {
@@ -321,6 +389,27 @@ final class ScrollCaptureTargetDetectorTests: XCTestCase {
         XCTAssertEqual(reader.candidateReadCount, 2)
     }
 
+    func testDisabledFakeScrollbarProducesNoCandidate() {
+        let disabledOwner = FakeAccessibilityNode(
+            candidate: candidate(
+                identity: 95,
+                rect: NSRect(x: 0, y: 0, width: 500, height: 500),
+                firstProbeIndex: -1
+            ),
+            scrollbarEnabled: false
+        )
+        let reader = FakeAccessibilityReader(hitElements: [disabledOwner])
+        let query = makeAccessibilityQuery(reader: reader)
+
+        let candidates = query.candidates(
+            processIdentifier: 42,
+            probePoints: [NSPoint(x: 100, y: 100)]
+        )
+
+        XCTAssertTrue(candidates.isEmpty)
+        XCTAssertEqual(reader.candidateReadCount, 1)
+    }
+
     func testTraversalStopsAfterSixteenElements() {
         let nodes = (0..<17).map { _ in FakeAccessibilityNode() }
         for index in 0..<16 {
@@ -342,6 +431,32 @@ final class ScrollCaptureTargetDetectorTests: XCTestCase {
         XCTAssertTrue(candidates.isEmpty)
         XCTAssertEqual(reader.candidateReadCount, 16)
         XCTAssertEqual(reader.parentReadCount, 15)
+    }
+
+    func testTraversalStopsWhenDetectionDeadlineExpires() {
+        let nodes = (0..<5).map { _ in FakeAccessibilityNode() }
+        for index in 0..<4 {
+            nodes[index].parent = nodes[index + 1]
+        }
+        let clock = FakeMonotonicClock()
+        let reader = FakeAccessibilityReader(hitElements: [nodes[0]])
+        reader.onCandidateRead = { clock.advance(by: 1) }
+        reader.onParentRead = { clock.advance(by: 1) }
+        let query = makeAccessibilityQuery(reader: reader)
+        let context = ScrollCaptureTargetQueryContext(
+            totalBudget: 2.5,
+            nowProvider: { clock.now }
+        )
+
+        let candidates = query.candidates(
+            processIdentifier: 42,
+            probePoints: [NSPoint(x: 100, y: 100)],
+            context: context
+        )
+
+        XCTAssertTrue(candidates.isEmpty)
+        XCTAssertEqual(reader.candidateReadCount, 2)
+        XCTAssertEqual(reader.parentReadCount, 1)
     }
 
     func testMissingCandidateAttributesSafelyContinueTraversal() {
@@ -445,7 +560,11 @@ final class ScrollCaptureTargetDetectorTests: XCTestCase {
 private struct StubCandidateQuery: ScrollCaptureTargetCandidateQuerying, Sendable {
     var candidates: [ScrollCaptureTargetCandidate] = []
 
-    func candidates(processIdentifier: pid_t, probePoints: [NSPoint]) -> [ScrollCaptureTargetCandidate] {
+    func candidates(
+        processIdentifier: pid_t,
+        probePoints: [NSPoint],
+        context: ScrollCaptureTargetQueryContext
+    ) -> [ScrollCaptureTargetCandidate] {
         candidates
     }
 }
@@ -458,7 +577,11 @@ private final class ThreadRecordingCandidateQuery: ScrollCaptureTargetCandidateQ
         lock.withLock { callThreadWasMain }
     }
 
-    func candidates(processIdentifier: pid_t, probePoints: [NSPoint]) -> [ScrollCaptureTargetCandidate] {
+    func candidates(
+        processIdentifier: pid_t,
+        probePoints: [NSPoint],
+        context: ScrollCaptureTargetQueryContext
+    ) -> [ScrollCaptureTargetCandidate] {
         lock.withLock {
             callThreadWasMain = Thread.isMainThread
         }
@@ -477,7 +600,8 @@ private final class BlockingCandidateQuery: ScrollCaptureTargetCandidateQuerying
 
     func candidates(
         processIdentifier: pid_t,
-        probePoints: [NSPoint]
+        probePoints: [NSPoint],
+        context: ScrollCaptureTargetQueryContext
     ) -> [ScrollCaptureTargetCandidate] {
         started.signal()
         release.wait()
@@ -498,21 +622,69 @@ private final class BlockingCandidateQuery: ScrollCaptureTargetCandidateQuerying
     }
 }
 
+private final class FirstCallBlockingCandidateQuery: ScrollCaptureTargetCandidateQuerying, @unchecked Sendable {
+    private let lock = NSLock()
+    private let firstCallStarted = DispatchSemaphore(value: 0)
+    private let firstCallRelease = DispatchSemaphore(value: 0)
+    private let laterCandidates: [ScrollCaptureTargetCandidate]
+    private var callCount = 0
+
+    init(laterCandidates: [ScrollCaptureTargetCandidate]) {
+        self.laterCandidates = laterCandidates
+    }
+
+    func candidates(
+        processIdentifier: pid_t,
+        probePoints: [NSPoint],
+        context: ScrollCaptureTargetQueryContext
+    ) -> [ScrollCaptureTargetCandidate] {
+        let callIndex = lock.withLock {
+            defer { callCount += 1 }
+            return callCount
+        }
+        guard callIndex == 0 else { return laterCandidates }
+        firstCallStarted.signal()
+        firstCallRelease.wait()
+        return []
+    }
+
+    func waitUntilFirstCallStarts() async {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global().async { [firstCallStarted] in
+                firstCallStarted.wait()
+                continuation.resume()
+            }
+        }
+    }
+
+    func finishFirstCall() {
+        firstCallRelease.signal()
+    }
+}
+
 private final class FakeAccessibilityNode {
     var parent: FakeAccessibilityNode?
     var candidate: ScrollCaptureTargetCandidate?
+    var scrollbarEnabled: Bool?
+    var scrollbarValue: Double?
 
     init(
         parent: FakeAccessibilityNode? = nil,
-        candidate: ScrollCaptureTargetCandidate? = nil
+        candidate: ScrollCaptureTargetCandidate? = nil,
+        scrollbarEnabled: Bool? = true,
+        scrollbarValue: Double? = 0.5
     ) {
         self.parent = parent
         self.candidate = candidate
+        self.scrollbarEnabled = scrollbarEnabled
+        self.scrollbarValue = scrollbarValue
     }
 }
 
 private final class FakeAccessibilityReader: ScrollCaptureAccessibilityReading, @unchecked Sendable {
     var messagingTimeoutSucceeds = true
+    var onCandidateRead: (() -> Void)?
+    var onParentRead: (() -> Void)?
     private var remainingHitElements: [FakeAccessibilityNode?]
     private(set) var messagingTimeouts: [Float] = []
     private(set) var hitTestCount = 0
@@ -558,17 +730,29 @@ private final class FakeAccessibilityReader: ScrollCaptureAccessibilityReading, 
     ) -> ScrollCaptureAccessibilityElement? {
         let node = node(from: element)
         increment(&parentReadsByNode, for: node)
+        onParentRead?()
         return node.parent.map { ScrollCaptureAccessibilityElement(rawValue: $0) }
     }
 
     func candidate(
         from element: ScrollCaptureAccessibilityElement,
         firstProbeIndex: Int,
-        quartzOriginY: CGFloat
+        quartzOriginY: CGFloat,
+        context: ScrollCaptureTargetQueryContext
     ) -> ScrollCaptureTargetCandidate? {
         let node = node(from: element)
         increment(&candidateReadsByNode, for: node)
-        guard let candidate = node.candidate else { return nil }
+        onCandidateRead?()
+        guard let candidate = node.candidate,
+              ScrollCaptureScrollbarStateValidator.isScrollable(
+                  enabled: node.scrollbarEnabled,
+                  value: node.scrollbarValue,
+                  minimum: candidate.minimum,
+                  maximum: candidate.maximum
+              )
+        else {
+            return nil
+        }
         return ScrollCaptureTargetCandidate(
             identity: candidate.identity,
             screenRect: candidate.screenRect,
@@ -602,5 +786,20 @@ private final class FakeAccessibilityReader: ScrollCaptureAccessibilityReading, 
         for node: FakeAccessibilityNode
     ) {
         counts[ObjectIdentifier(node), default: 0] += 1
+    }
+}
+
+private final class FakeMonotonicClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var currentTime: TimeInterval = 0
+
+    var now: TimeInterval {
+        lock.withLock { currentTime }
+    }
+
+    func advance(by interval: TimeInterval) {
+        lock.withLock {
+            currentTime += interval
+        }
     }
 }

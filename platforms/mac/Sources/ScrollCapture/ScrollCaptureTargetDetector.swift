@@ -16,8 +16,42 @@ struct ScrollCaptureTargetCandidate: Equatable {
 protocol ScrollCaptureTargetCandidateQuerying: Sendable {
     func candidates(
         processIdentifier: pid_t,
-        probePoints: [NSPoint]
+        probePoints: [NSPoint],
+        context: ScrollCaptureTargetQueryContext
     ) -> [ScrollCaptureTargetCandidate]
+}
+
+final class ScrollCaptureTargetQueryContext: @unchecked Sendable {
+    typealias NowProvider = @Sendable () -> TimeInterval
+
+    static let totalDetectionBudget: TimeInterval = 0.7
+
+    private let lock = NSLock()
+    private let deadline: TimeInterval
+    private let nowProvider: NowProvider
+    private var cancelled = false
+
+    init(
+        totalBudget: TimeInterval = totalDetectionBudget,
+        nowProvider: @escaping NowProvider = { ProcessInfo.processInfo.systemUptime }
+    ) {
+        self.nowProvider = nowProvider
+        deadline = nowProvider() + max(0, totalBudget)
+    }
+
+    var isCancelled: Bool {
+        lock.withLock { cancelled }
+    }
+
+    func shouldContinue() -> Bool {
+        !isCancelled && nowProvider() < deadline
+    }
+
+    func cancel() {
+        lock.withLock {
+            cancelled = true
+        }
+    }
 }
 
 enum ScrollCaptureScreenCoordinates {
@@ -35,13 +69,36 @@ enum ScrollCaptureScreenCoordinates {
     }
 }
 
+enum ScrollCaptureScrollbarStateValidator {
+    static func isScrollable(
+        enabled: Bool?,
+        value: Double?,
+        minimum: Double?,
+        maximum: Double?
+    ) -> Bool {
+        guard enabled == true,
+              let value,
+              let minimum,
+              let maximum,
+              value.isFinite,
+              minimum.isFinite,
+              maximum.isFinite,
+              maximum > minimum
+        else {
+            return false
+        }
+        return value >= minimum && value <= maximum
+    }
+}
+
 final class ScrollCaptureTargetDetector: ScrollCaptureTargetDetecting {
     static let minimumRegionSize = NSSize(width: 120, height: 120)
 
     private let candidateQuery: ScrollCaptureTargetCandidateQuerying
     private let candidateQueryQueue = DispatchQueue(
         label: "com.xxsnap.scroll-capture-target-detection",
-        qos: .userInitiated
+        qos: .userInitiated,
+        attributes: .concurrent
     )
 
     init(
@@ -65,17 +122,25 @@ final class ScrollCaptureTargetDetector: ScrollCaptureTargetDetecting {
 
     func scrollableRegion(in selection: NSRect, processIdentifier: pid_t) async -> NSRect? {
         guard !Task.isCancelled else { return nil }
+        let context = ScrollCaptureTargetQueryContext()
         let selection = selection.standardized
         let probePoints = probePoints(in: selection)
-        let queriedCandidates = await withCheckedContinuation { continuation in
-            candidateQueryQueue.async { [candidateQuery] in
-                continuation.resume(returning: candidateQuery.candidates(
-                    processIdentifier: processIdentifier,
-                    probePoints: probePoints
-                ))
+        let request = ScrollCaptureTargetDetectionRequest(context: context)
+        let queriedCandidates = await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                guard request.install(continuation) else { return }
+                candidateQueryQueue.async { [candidateQuery] in
+                    request.complete(candidateQuery.candidates(
+                        processIdentifier: processIdentifier,
+                        probePoints: probePoints,
+                        context: context
+                    ))
+                }
             }
+        } onCancel: {
+            request.cancel()
         }
-        guard !Task.isCancelled else { return nil }
+        guard let queriedCandidates, !Task.isCancelled else { return nil }
         let candidates = candidatesKeepingEarliestProbe(queriedCandidates)
 
         var best: RankedCandidate?
@@ -120,6 +185,56 @@ final class ScrollCaptureTargetDetector: ScrollCaptureTargetDetecting {
             }
         }
         return uniqueCandidates
+    }
+}
+
+private final class ScrollCaptureTargetDetectionRequest: @unchecked Sendable {
+    private let lock = NSLock()
+    private let context: ScrollCaptureTargetQueryContext
+    private var isResolved = false
+    private var result: [ScrollCaptureTargetCandidate]?
+    private var continuation: CheckedContinuation<[ScrollCaptureTargetCandidate]?, Never>?
+
+    init(context: ScrollCaptureTargetQueryContext) {
+        self.context = context
+    }
+
+    func install(
+        _ continuation: CheckedContinuation<[ScrollCaptureTargetCandidate]?, Never>
+    ) -> Bool {
+        lock.lock()
+        guard !isResolved else {
+            let result = result
+            lock.unlock()
+            continuation.resume(returning: result)
+            return false
+        }
+        self.continuation = continuation
+        lock.unlock()
+        return true
+    }
+
+    func complete(_ candidates: [ScrollCaptureTargetCandidate]) {
+        resolve(with: candidates)
+    }
+
+    func cancel() {
+        context.cancel()
+        resolve(with: nil)
+    }
+
+    private func resolve(with result: [ScrollCaptureTargetCandidate]?) {
+        lock.lock()
+        guard !isResolved else {
+            lock.unlock()
+            return
+        }
+        isResolved = true
+        self.result = result
+        let continuation = continuation
+        self.continuation = nil
+        lock.unlock()
+        continuation?.resume(returning: result)
     }
 }
 
@@ -170,7 +285,8 @@ protocol ScrollCaptureAccessibilityReading: Sendable {
     func candidate(
         from element: ScrollCaptureAccessibilityElement,
         firstProbeIndex: Int,
-        quartzOriginY: CGFloat
+        quartzOriginY: CGFloat,
+        context: ScrollCaptureTargetQueryContext
     ) -> ScrollCaptureTargetCandidate?
     func elementsEqual(
         _ lhs: ScrollCaptureAccessibilityElement,
@@ -200,11 +316,25 @@ struct AccessibilityScrollCaptureCandidateQuery: ScrollCaptureTargetCandidateQue
         processIdentifier: pid_t,
         probePoints: [NSPoint]
     ) -> [ScrollCaptureTargetCandidate] {
-        guard let quartzOriginY = quartzOriginYProvider(),
+        candidates(
+            processIdentifier: processIdentifier,
+            probePoints: probePoints,
+            context: ScrollCaptureTargetQueryContext()
+        )
+    }
+
+    func candidates(
+        processIdentifier: pid_t,
+        probePoints: [NSPoint],
+        context: ScrollCaptureTargetQueryContext
+    ) -> [ScrollCaptureTargetCandidate] {
+        guard context.shouldContinue(),
+              let quartzOriginY = quartzOriginYProvider(),
               quartzOriginY.isFinite,
               let application = accessibilityReader.application(
                   processIdentifier: processIdentifier
               ),
+              context.shouldContinue(),
               accessibilityReader.setMessagingTimeout(
                   Self.messagingTimeout,
                   for: application
@@ -217,9 +347,11 @@ struct AccessibilityScrollCaptureCandidateQuery: ScrollCaptureTargetCandidateQue
         var elementCache: [ScrollCaptureAccessibilityCacheEntry] = []
 
         for (probeIndex, point) in probePoints.enumerated() {
+            guard context.shouldContinue() else { return candidates }
             let quartzPoint = CGPoint(x: point.x, y: quartzOriginY - point.y)
             guard quartzPoint.x.isFinite,
                   quartzPoint.y.isFinite,
+                  context.shouldContinue(),
                   var element = accessibilityReader.element(
                       at: quartzPoint,
                       in: application
@@ -230,6 +362,7 @@ struct AccessibilityScrollCaptureCandidateQuery: ScrollCaptureTargetCandidateQue
 
             var currentProbeElements: [ScrollCaptureAccessibilityElement] = []
             for depth in 0..<16 {
+                guard context.shouldContinue() else { return candidates }
                 if currentProbeElements.contains(where: {
                     accessibilityReader.elementsEqual($0, element)
                 }) {
@@ -243,6 +376,7 @@ struct AccessibilityScrollCaptureCandidateQuery: ScrollCaptureTargetCandidateQue
                 }) {
                     cacheIndex = existingIndex
                 } else {
+                    guard context.shouldContinue() else { return candidates }
                     guard accessibilityReader.setMessagingTimeout(
                         Self.messagingTimeout,
                         for: element
@@ -254,10 +388,12 @@ struct AccessibilityScrollCaptureCandidateQuery: ScrollCaptureTargetCandidateQue
                 }
 
                 if !elementCache[cacheIndex].candidateWasRead {
+                    guard context.shouldContinue() else { return candidates }
                     let candidate = accessibilityReader.candidate(
                         from: element,
                         firstProbeIndex: probeIndex,
-                        quartzOriginY: quartzOriginY
+                        quartzOriginY: quartzOriginY,
+                        context: context
                     )
                     elementCache[cacheIndex].candidate = candidate
                     elementCache[cacheIndex].candidateWasRead = true
@@ -273,6 +409,7 @@ struct AccessibilityScrollCaptureCandidateQuery: ScrollCaptureTargetCandidateQue
                 if elementCache[cacheIndex].parentWasRead {
                     parent = elementCache[cacheIndex].parent
                 } else {
+                    guard context.shouldContinue() else { return candidates }
                     let readParent = accessibilityReader.parent(of: element)
                     elementCache[cacheIndex].parent = readParent
                     elementCache[cacheIndex].parentWasRead = true
@@ -340,29 +477,50 @@ private struct SystemScrollCaptureAccessibilityReader: ScrollCaptureAccessibilit
     func candidate(
         from element: ScrollCaptureAccessibilityElement,
         firstProbeIndex: Int,
-        quartzOriginY: CGFloat
+        quartzOriginY: CGFloat,
+        context: ScrollCaptureTargetQueryContext
     ) -> ScrollCaptureTargetCandidate? {
-        guard let owner = axElement(from: element),
+        guard context.shouldContinue(),
+              let owner = axElement(from: element),
+              context.shouldContinue(),
               let scrollBar = Self.elementAttribute(
                   kAXVerticalScrollBarAttribute as CFString,
                   from: owner
               ),
+              context.shouldContinue(),
               Self.setMessagingTimeout(
                   AccessibilityScrollCaptureCandidateQuery.messagingTimeout,
                   on: scrollBar
               ),
+              context.shouldContinue(),
               let minimum = Self.numberAttribute(
                   kAXMinValueAttribute as CFString,
                   from: scrollBar
               ),
+              context.shouldContinue(),
               let maximum = Self.numberAttribute(
                   kAXMaxValueAttribute as CFString,
                   from: scrollBar
               ),
-              minimum.isFinite,
-              maximum.isFinite,
-              maximum > minimum,
+              context.shouldContinue(),
+              let enabled = Self.booleanAttribute(
+                  kAXEnabledAttribute as CFString,
+                  from: scrollBar
+              ),
+              context.shouldContinue(),
+              let value = Self.numberAttribute(
+                  kAXValueAttribute as CFString,
+                  from: scrollBar
+              ),
+              ScrollCaptureScrollbarStateValidator.isScrollable(
+                  enabled: enabled,
+                  value: value,
+                  minimum: minimum,
+                  maximum: maximum
+              ),
+              context.shouldContinue(),
               let position = Self.pointAttribute(kAXPositionAttribute as CFString, from: owner),
+              context.shouldContinue(),
               let size = Self.sizeAttribute(kAXSizeAttribute as CFString, from: owner),
               position.x.isFinite,
               position.y.isFinite,
@@ -436,6 +594,13 @@ private struct SystemScrollCaptureAccessibilityReader: ScrollCaptureAccessibilit
         from element: AXUIElement
     ) -> Double? {
         (copiedAttribute(attribute, from: element) as? NSNumber)?.doubleValue
+    }
+
+    private static func booleanAttribute(
+        _ attribute: CFString,
+        from element: AXUIElement
+    ) -> Bool? {
+        (copiedAttribute(attribute, from: element) as? NSNumber)?.boolValue
     }
 
     private static func pointAttribute(
