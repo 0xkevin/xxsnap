@@ -15840,16 +15840,12 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
               !localRect.isEmpty
         else { return nil }
 
-        let target = localRect.standardized
         let original = originalSelection.standardized
-        guard target.minX >= original.minX,
-              target.minY >= original.minY,
-              target.maxX <= original.maxX,
-              target.maxY <= original.maxY
-        else { return nil }
-
         let imageBounds = NSRect(origin: .zero, size: backgroundImage.size)
-        guard imageBounds.contains(target) else { return nil }
+        let clippedTarget = localRect.standardized
+            .intersection(original)
+            .intersection(imageBounds)
+        guard !clippedTarget.isNull, !clippedTarget.isEmpty else { return nil }
         let scaleX = CGFloat(cgImage.width) / max(backgroundImage.size.width, 1)
         let scaleY = CGFloat(cgImage.height) / max(backgroundImage.size.height, 1)
         guard scaleX.isFinite,
@@ -15858,16 +15854,17 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
               scaleY > 0
         else { return nil }
 
-        let minimumX = (target.minX * scaleX).rounded(.up) / scaleX
-        let maximumX = (target.maxX * scaleX).rounded(.down) / scaleX
-        let minimumY = (target.minY * scaleY).rounded(.up) / scaleY
-        let maximumY = (target.maxY * scaleY).rounded(.down) / scaleY
+        let minimumX = (clippedTarget.minX * scaleX).rounded(.up) / scaleX
+        let maximumX = (clippedTarget.maxX * scaleX).rounded(.down) / scaleX
+        let minimumY = (clippedTarget.minY * scaleY).rounded(.up) / scaleY
+        let maximumY = (clippedTarget.maxY * scaleY).rounded(.down) / scaleY
+        guard maximumX > minimumX, maximumY > minimumY else { return nil }
         let canonical = NSRect(
             x: minimumX,
             y: minimumY,
             width: maximumX - minimumX,
             height: maximumY - minimumY
-        ).standardized
+        )
         guard canonical.width >= 8,
               canonical.height >= 8,
               original.contains(canonical),

@@ -454,16 +454,96 @@ final class SelectionToolbarStateTests: XCTestCase {
             NSRect.null,
             NSRect(x: 100, y: 100, width: 7, height: 40),
             NSRect(x: 100, y: 100, width: 40, height: 7),
-            NSRect(x: 70, y: 100, width: 80, height: 60),
-            NSRect(x: 100, y: 100, width: 320, height: 60),
+            NSRect(x: 0, y: 100, width: 70, height: 60),
+            NSRect(x: 390, y: 100, width: 80, height: 60),
+            NSRect(x: 75, y: 100, width: 12, height: 40),
         ]
         for target in invalidTargets {
             XCTAssertNil(window.test_applyScrollCaptureTargetLocalRect(target))
             XCTAssertEqual(window.test_lockedSelectionRect, selection)
+            XCTAssertTrue(window.test_selectionBorderColor.isEqual(window.test_defaultSelectionColor))
+            XCTAssertTrue(window.test_selectionHandleColor.isEqual(window.test_defaultSelectionColor))
         }
         window.test_markScrollCaptureTargetFallback()
         XCTAssertTrue(window.test_selectionBorderColor.isEqual(window.test_defaultSelectionColor))
         XCTAssertTrue(window.test_selectionHandleColor.isEqual(window.test_defaultSelectionColor))
+    }
+
+    func testResolvedScrollCaptureTargetClipsOutwardOriginalSeedEnvelopeBeforeInwardAlignment() throws {
+        let imageSize = NSSize(width: 640, height: 420)
+        let original = NSRect(x: 80.25, y: 60.25, width: 300.5, height: 220.5)
+        let canonical = NSRect(x: 80.5, y: 60.5, width: 300, height: 220)
+        var configuration = SelectionOverlayConfiguration.default
+        configuration.windowFrame = NSRect(x: 137, y: 83, width: imageSize.width, height: imageSize.height)
+        var originalSeed: ScrollCaptureSeed?
+        let window = SelectionOverlayWindow(
+            backgroundImage: retinaSolidImage(size: imageSize, color: .white),
+            configuration: configuration
+        ) { _ in }
+        window.onScrollCaptureRequested = { originalSeed = $0 }
+        let annotation = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 60, y: 70, width: 40, height: 30),
+            style: CaptureAnnotationStyle(strokeWidth: 2)
+        )
+        let mask = EraserMask(
+            rect: NSRect(x: 65, y: 75, width: 12, height: 10),
+            affectedAnnotationIDs: [annotation.id]
+        )
+        window.test_setLockedSelectionRect(original)
+        window.test_setAnnotations([annotation])
+        window.test_setEraserMasks([mask])
+        let annotationOverlayRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+        let maskOverlayRect = try XCTUnwrap(window.test_eraserMaskOverlayRect(at: 0))
+
+        window.test_beginScrollCapture()
+
+        let outwardSeed = try XCTUnwrap(originalSeed)
+        let outwardWindowRect = window.convertFromScreen(outwardSeed.screenRect)
+        let outwardLocalRect = try XCTUnwrap(window.contentView).convert(outwardWindowRect, from: nil)
+        XCTAssertEqual(outwardLocalRect, NSRect(x: 80, y: 60, width: 301, height: 221))
+
+        let resolvedSeed = try XCTUnwrap(window.applyScrollCaptureTarget(screenRect: outwardSeed.screenRect))
+        let frozenPixels = try XCTUnwrap(
+            resolvedSeed.frozenImage.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        )
+
+        XCTAssertEqual(window.test_lockedSelectionRect, canonical)
+        XCTAssertEqual(resolvedSeed.snapshotRect, canonical)
+        XCTAssertEqual(resolvedSeed.screenRect, window.convertToScreen(canonical))
+        XCTAssertEqual(resolvedSeed.frozenImage.size, canonical.size)
+        XCTAssertEqual(frozenPixels.width, 600)
+        XCTAssertEqual(frozenPixels.height, 440)
+        XCTAssertTrue(original.contains(canonical))
+        XCTAssertEqual(window.test_annotationOverlayRect(at: 0), annotationOverlayRect)
+        XCTAssertEqual(window.test_eraserMaskOverlayRect(at: 0), maskOverlayRect)
+        XCTAssertTrue(window.test_selectionBorderColor.isEqual(NSColor.systemGreen))
+        XCTAssertTrue(window.test_selectionHandleColor.isEqual(NSColor.systemGreen))
+    }
+
+    func testResolvedScrollCaptureTargetClipsOneRetinaPixelOutsideOriginalSelection() throws {
+        let image = retinaSolidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        let original = NSRect(x: 80, y: 60, width: 300, height: 220)
+        let onePixelOutside = NSRect(x: 79.5, y: 90.25, width: 120.5, height: 80.5)
+        let canonical = NSRect(x: 80, y: 90.5, width: 120, height: 80)
+        window.test_setLockedSelectionRect(original)
+        window.test_beginScrollCapture()
+
+        let seed = try XCTUnwrap(window.test_applyScrollCaptureTargetLocalRect(onePixelOutside))
+        let frozenPixels = try XCTUnwrap(
+            seed.frozenImage.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        )
+
+        XCTAssertEqual(window.test_lockedSelectionRect, canonical)
+        XCTAssertEqual(seed.snapshotRect, canonical)
+        XCTAssertEqual(seed.screenRect, window.convertToScreen(canonical))
+        XCTAssertEqual(seed.frozenImage.size, canonical.size)
+        XCTAssertEqual(frozenPixels.width, 240)
+        XCTAssertEqual(frozenPixels.height, 160)
+        XCTAssertTrue(original.contains(canonical))
+        XCTAssertTrue(window.test_selectionBorderColor.isEqual(NSColor.systemGreen))
+        XCTAssertTrue(window.test_selectionHandleColor.isEqual(NSColor.systemGreen))
     }
 
     func testResolvedScrollCaptureTargetUsesOneInwardRetinaCanonicalRectAcrossWindowOrigins() throws {
@@ -10134,7 +10214,7 @@ final class SelectionToolbarStateTests: XCTestCase {
             overlay.test_setAnnotations([annotation])
             overlay.test_setEraserMasks([mask])
             let detectorTarget = usesInvalidTarget
-                ? overlay.convertToScreen(NSRect(x: 60, y: 80, width: 120, height: 80))
+                ? overlay.convertToScreen(NSRect(x: 0, y: 80, width: 70, height: 80))
                 : nil
             let detector = FakeScrollCaptureTargetDetector(results: [detectorTarget])
             var capturedSeed: ScrollCaptureSeed?
