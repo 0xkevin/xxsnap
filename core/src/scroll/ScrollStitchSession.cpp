@@ -182,7 +182,8 @@ void blendWhite(std::uint8_t* row, int width, double coverage)
     for (int x = 0; x < width; ++x) {
         auto* pixel = row + static_cast<std::size_t>(x) * 4U;
         for (std::size_t channel = 0; channel < 3U; ++channel) {
-            const double value = pixel[channel] + (255.0 - pixel[channel]) * coverage;
+            const double value = pixel[channel]
+                + (pixel[3] - pixel[channel]) * coverage;
             pixel[channel] = static_cast<std::uint8_t>(std::lround(value));
         }
     }
@@ -533,23 +534,28 @@ public:
         return &segment;
     }
 
-    [[nodiscard]] std::vector<int> seamRows(bool includePending) const
+    [[nodiscard]] std::vector<int> seamRows(bool includePending, int sourceHeight) const
     {
         std::vector<int> result;
-        const std::size_t spanCount = segments.size()
-            + (includePending ? pending.size() : 0U);
-        if (spanCount > 1U) {
-            result.reserve(spanCount - 1U);
+        const auto spanCount = checkedSum(
+            segments.size(), includePending ? pending.size() : 0U);
+        if (spanCount.has_value() && *spanCount > 1U) {
+            result.reserve(*spanCount - 1U);
         }
-        int outputRow = 0;
+        std::int64_t outputRow = 0;
         const auto appendSpan = [&](int height) {
             if (height <= 0) {
                 return;
             }
-            if (outputRow > 0) {
-                result.push_back(outputRow);
+            if (outputRow > 0 && outputRow < sourceHeight) {
+                result.push_back(static_cast<int>(outputRow));
             }
-            outputRow += height;
+            const auto spanHeight = static_cast<std::int64_t>(height);
+            if (outputRow > std::numeric_limits<std::int64_t>::max() - spanHeight) {
+                outputRow = std::numeric_limits<std::int64_t>::max();
+                return;
+            }
+            outputRow += spanHeight;
         };
         const Direction pendingDirection = includePending && !pending.empty()
             ? pending.front().candidate
@@ -1810,7 +1816,7 @@ bool ScrollStitchSession::copyFinalPixels(
     std::vector<std::uint8_t> storedRow(storedRowBytes);
     auto* destinationPixels = static_cast<std::uint8_t*>(destination);
     const auto seamRows = implementation_->config.seamWhiteCoverage > 0.0
-        ? implementation_->seamRows(includePending)
+        ? implementation_->seamRows(includePending, composedHeight)
         : std::vector<int>{};
     std::size_t seamIndex = 0U;
     int outputRow = 0;
@@ -2079,7 +2085,7 @@ ScrollFrame ScrollStitchSession::previewWithSize(int previewWidth, int previewHe
     }
     if (implementation_->config.seamWhiteCoverage > 0.0) {
         int previousPreviewY = -1;
-        for (const int sourceSeam : implementation_->seamRows(true)) {
+        for (const int sourceSeam : implementation_->seamRows(true, sourceHeight)) {
             const int previewY = std::min(
                 output.height - 1,
                 static_cast<int>(

@@ -37,14 +37,15 @@ void setBgra(
     int y,
     std::uint8_t blue,
     std::uint8_t green,
-    std::uint8_t red)
+    std::uint8_t red,
+    std::uint8_t alpha = 255)
 {
     const auto offset = static_cast<std::size_t>(y) * static_cast<std::size_t>(frame.bytesPerRow)
         + static_cast<std::size_t>(x) * 4U;
     frame.pixels[offset] = blue;
     frame.pixels[offset + 1U] = green;
     frame.pixels[offset + 2U] = red;
-    frame.pixels[offset + 3U] = 255;
+    frame.pixels[offset + 3U] = alpha;
 }
 
 std::uint8_t documentPixel(int x, int documentY)
@@ -562,6 +563,7 @@ private slots:
     void previewDownsamplesWithoutMutatingFinalImage();
     void seamWhiteCoverageRendersAcceptedDownwardBoundary();
     void previewRendersSeamAfterDownsampling();
+    void previewSeamsUseFloorMappingAndBlendCollisionsOnce();
     void duplicateAcceptedFrameDoesNotAddSeam();
     void upwardSeamsFollowNaturalDocumentOrder();
     void defaultSeamCoveragePreservesExactPixels();
@@ -1742,23 +1744,32 @@ void TestScrollStitchSession::seamWhiteCoverageRendersAcceptedDownwardBoundary()
 
     auto first = documentViewport(0);
     auto second = documentViewport(60);
-    const auto sourceOffset = static_cast<std::size_t>(80)
-            * static_cast<std::size_t>(second.bytesPerRow)
-        + static_cast<std::size_t>(37) * 4U;
-    second.pixels[sourceOffset + 3U] = 73;
+    setBgra(second, 35, 80, 0, 0, 0, 0);
+    setBgra(second, 36, 80, 10, 20, 30, 80);
+    setBgra(second, 37, 80, 100, 110, 120, 255);
 
     QCOMPARE(session.append(first, ScrollDirection::Down).kind, AppendKind::AcceptedInitial);
     QCOMPARE(session.append(second, ScrollDirection::Down).kind, AppendKind::AcceptedAppend);
 
     const auto final = session.finalize();
     QCOMPARE(final.height, 200);
-    const auto seamOffset = static_cast<std::size_t>(140)
+    const auto transparentOffset = static_cast<std::size_t>(140)
             * static_cast<std::size_t>(final.bytesPerRow)
-        + static_cast<std::size_t>(37) * 4U;
-    QCOMPARE(final.pixels[seamOffset], static_cast<std::uint8_t>(255));
-    QCOMPARE(final.pixels[seamOffset + 1U], static_cast<std::uint8_t>(255));
-    QCOMPARE(final.pixels[seamOffset + 2U], static_cast<std::uint8_t>(255));
-    QCOMPARE(final.pixels[seamOffset + 3U], static_cast<std::uint8_t>(73));
+        + static_cast<std::size_t>(35) * 4U;
+    QCOMPARE(final.pixels[transparentOffset], static_cast<std::uint8_t>(0));
+    QCOMPARE(final.pixels[transparentOffset + 1U], static_cast<std::uint8_t>(0));
+    QCOMPARE(final.pixels[transparentOffset + 2U], static_cast<std::uint8_t>(0));
+    QCOMPARE(final.pixels[transparentOffset + 3U], static_cast<std::uint8_t>(0));
+    const auto translucentOffset = transparentOffset + 4U;
+    QCOMPARE(final.pixels[translucentOffset], static_cast<std::uint8_t>(80));
+    QCOMPARE(final.pixels[translucentOffset + 1U], static_cast<std::uint8_t>(80));
+    QCOMPARE(final.pixels[translucentOffset + 2U], static_cast<std::uint8_t>(80));
+    QCOMPARE(final.pixels[translucentOffset + 3U], static_cast<std::uint8_t>(80));
+    const auto opaqueOffset = translucentOffset + 4U;
+    QCOMPARE(final.pixels[opaqueOffset], static_cast<std::uint8_t>(255));
+    QCOMPARE(final.pixels[opaqueOffset + 1U], static_cast<std::uint8_t>(255));
+    QCOMPARE(final.pixels[opaqueOffset + 2U], static_cast<std::uint8_t>(255));
+    QCOMPARE(final.pixels[opaqueOffset + 3U], static_cast<std::uint8_t>(255));
     QCOMPARE(blueAt(final, 37, 139), documentPixel(37, 139));
     QCOMPARE(blueAt(final, 37, 141), documentPixel(37, 141));
 }
@@ -1772,9 +1783,11 @@ void TestScrollStitchSession::previewRendersSeamAfterDownsampling()
     config.seamWhiteCoverage = 1.0;
     ScrollStitchSession session(config);
 
+    auto second = documentViewport(60);
+    setBgra(second, 36, 80, 10, 20, 30, 80);
     QCOMPARE(session.append(documentViewport(0), ScrollDirection::Down).kind,
         AppendKind::AcceptedInitial);
-    QCOMPARE(session.append(documentViewport(60), ScrollDirection::Down).kind,
+    QCOMPARE(session.append(second, ScrollDirection::Down).kind,
         AppendKind::AcceptedAppend);
 
     const auto preview = session.preview(100);
@@ -1782,11 +1795,57 @@ void TestScrollStitchSession::previewRendersSeamAfterDownsampling()
     const auto seamOffset = static_cast<std::size_t>(70)
             * static_cast<std::size_t>(preview.bytesPerRow)
         + static_cast<std::size_t>(18) * 4U;
-    QCOMPARE(preview.pixels[seamOffset], static_cast<std::uint8_t>(255));
-    QCOMPARE(preview.pixels[seamOffset + 1U], static_cast<std::uint8_t>(255));
-    QCOMPARE(preview.pixels[seamOffset + 2U], static_cast<std::uint8_t>(255));
+    QCOMPARE(preview.pixels[seamOffset], static_cast<std::uint8_t>(80));
+    QCOMPARE(preview.pixels[seamOffset + 1U], static_cast<std::uint8_t>(80));
+    QCOMPARE(preview.pixels[seamOffset + 2U], static_cast<std::uint8_t>(80));
+    QCOMPARE(preview.pixels[seamOffset + 3U], static_cast<std::uint8_t>(80));
     QCOMPARE(blueAt(preview, 18, 69), documentPixel(36, 138));
     QCOMPARE(blueAt(preview, 18, 71), documentPixel(36, 142));
+}
+
+void TestScrollStitchSession::previewSeamsUseFloorMappingAndBlendCollisionsOnce()
+{
+    auto config = defaultConfig();
+    config.enableFixedBandDetection = false;
+    config.enableFixedSideDetection = false;
+    config.scrollbarMaximumWidth = 0;
+    config.seamWhiteCoverage = 0.25;
+
+    ScrollStitchSession floorSession(config);
+    QCOMPARE(floorSession.append(documentViewport(0), ScrollDirection::Down).kind,
+        AppendKind::AcceptedInitial);
+    QCOMPARE(floorSession.append(documentViewport(60), ScrollDirection::Down).kind,
+        AppendKind::AcceptedAppend);
+    const auto floorPreview = floorSession.preview(74);
+    QCOMPARE(floorPreview.height, 74);
+    const auto floorSourceBlue = documentPixel(0, 51 * 200 / 74);
+    const auto expectedFloorBlue = static_cast<std::uint8_t>(std::lround(
+        floorSourceBlue + (255.0 - floorSourceBlue) * config.seamWhiteCoverage));
+    QCOMPARE(blueAt(floorPreview, 0, 51), expectedFloorBlue);
+    QCOMPARE(blueAt(floorPreview, 0, 52), documentPixel(0, 52 * 200 / 74));
+
+    ScrollStitchSession collisionSession(config);
+    QCOMPARE(collisionSession.append(documentViewport(0), ScrollDirection::Down).kind,
+        AppendKind::AcceptedInitial);
+    for (const int offset : {1, 2, 3}) {
+        QCOMPARE(collisionSession.append(documentViewport(offset), ScrollDirection::Down).kind,
+            AppendKind::AcceptedAppend);
+    }
+    const auto collisionPreview = collisionSession.preview(10);
+    QCOMPARE(collisionPreview.height, 10);
+    const auto sourceBlue = documentPixel(0, 9 * 143 / 10);
+    const auto sourceGreen = static_cast<std::uint8_t>(sourceBlue ^ 0x35U);
+    const auto sourceRed = static_cast<std::uint8_t>(sourceBlue ^ 0xa7U);
+    const auto collisionOffset = static_cast<std::size_t>(9)
+        * static_cast<std::size_t>(collisionPreview.bytesPerRow);
+    const auto blendOnce = [&](std::uint8_t channel) {
+        return static_cast<std::uint8_t>(std::lround(
+            channel + (255.0 - channel) * config.seamWhiteCoverage));
+    };
+    QCOMPARE(collisionPreview.pixels[collisionOffset], blendOnce(sourceBlue));
+    QCOMPARE(collisionPreview.pixels[collisionOffset + 1U], blendOnce(sourceGreen));
+    QCOMPARE(collisionPreview.pixels[collisionOffset + 2U], blendOnce(sourceRed));
+    QCOMPARE(collisionPreview.pixels[collisionOffset + 3U], static_cast<std::uint8_t>(255));
 }
 
 void TestScrollStitchSession::duplicateAcceptedFrameDoesNotAddSeam()
@@ -1846,13 +1905,20 @@ void TestScrollStitchSession::defaultSeamCoveragePreservesExactPixels()
     config.scrollbarMaximumWidth = 0;
     ScrollStitchSession session(config);
 
+    auto second = documentViewport(60);
+    setBgra(second, 35, 80, 0, 0, 0, 0);
+    setBgra(second, 36, 80, 10, 20, 30, 80);
+    setBgra(second, 37, 80, 100, 110, 120, 255);
     QCOMPARE(session.append(documentViewport(0), ScrollDirection::Down).kind,
         AppendKind::AcceptedInitial);
-    QCOMPARE(session.append(documentViewport(60), ScrollDirection::Down).kind,
+    QCOMPARE(session.append(second, ScrollDirection::Down).kind,
         AppendKind::AcceptedAppend);
 
     const auto final = session.finalize();
-    const auto expected = documentImage(0, 200);
+    auto expected = documentImage(0, 200);
+    setBgra(expected, 35, 140, 0, 0, 0, 0);
+    setBgra(expected, 36, 140, 10, 20, 30, 80);
+    setBgra(expected, 37, 140, 100, 110, 120, 255);
     QCOMPARE(final.height, expected.height);
     QCOMPARE(final.pixels, expected.pixels);
 }
@@ -1867,28 +1933,32 @@ void TestScrollStitchSession::partialSeamCoverageBlendsColorOnly()
     ScrollStitchSession session(config);
 
     auto second = documentViewport(60);
-    const auto sourceOffset = static_cast<std::size_t>(80)
-            * static_cast<std::size_t>(second.bytesPerRow)
-        + static_cast<std::size_t>(37) * 4U;
-    second.pixels[sourceOffset] = 100;
-    second.pixels[sourceOffset + 1U] = 100;
-    second.pixels[sourceOffset + 2U] = 100;
-    second.pixels[sourceOffset + 3U] = 73;
+    setBgra(second, 35, 80, 0, 0, 0, 0);
+    setBgra(second, 36, 80, 10, 20, 30, 80);
+    setBgra(second, 37, 80, 100, 110, 120, 255);
 
     QCOMPARE(session.append(documentViewport(0), ScrollDirection::Down).kind,
         AppendKind::AcceptedInitial);
     QCOMPARE(session.append(second, ScrollDirection::Down).kind, AppendKind::AcceptedAppend);
 
     const auto final = session.finalize();
-    const auto seamOffset = static_cast<std::size_t>(140)
+    const auto transparentOffset = static_cast<std::size_t>(140)
             * static_cast<std::size_t>(final.bytesPerRow)
-        + static_cast<std::size_t>(37) * 4U;
-    const auto expected = static_cast<std::uint8_t>(
-        std::lround(100.0 + (255.0 - 100.0) * 0.25));
-    QCOMPARE(final.pixels[seamOffset], expected);
-    QCOMPARE(final.pixels[seamOffset + 1U], expected);
-    QCOMPARE(final.pixels[seamOffset + 2U], expected);
-    QCOMPARE(final.pixels[seamOffset + 3U], static_cast<std::uint8_t>(73));
+        + static_cast<std::size_t>(35) * 4U;
+    QCOMPARE(final.pixels[transparentOffset], static_cast<std::uint8_t>(0));
+    QCOMPARE(final.pixels[transparentOffset + 1U], static_cast<std::uint8_t>(0));
+    QCOMPARE(final.pixels[transparentOffset + 2U], static_cast<std::uint8_t>(0));
+    QCOMPARE(final.pixels[transparentOffset + 3U], static_cast<std::uint8_t>(0));
+    const auto translucentOffset = transparentOffset + 4U;
+    QCOMPARE(final.pixels[translucentOffset], static_cast<std::uint8_t>(28));
+    QCOMPARE(final.pixels[translucentOffset + 1U], static_cast<std::uint8_t>(35));
+    QCOMPARE(final.pixels[translucentOffset + 2U], static_cast<std::uint8_t>(43));
+    QCOMPARE(final.pixels[translucentOffset + 3U], static_cast<std::uint8_t>(80));
+    const auto opaqueOffset = translucentOffset + 4U;
+    QCOMPARE(final.pixels[opaqueOffset], static_cast<std::uint8_t>(139));
+    QCOMPARE(final.pixels[opaqueOffset + 1U], static_cast<std::uint8_t>(146));
+    QCOMPARE(final.pixels[opaqueOffset + 2U], static_cast<std::uint8_t>(154));
+    QCOMPARE(final.pixels[opaqueOffset + 3U], static_cast<std::uint8_t>(255));
 }
 
 void TestScrollStitchSession::streamedSeamsRespectBottomUpAndPendingComposition()
