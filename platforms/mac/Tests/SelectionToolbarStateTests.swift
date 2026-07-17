@@ -120,6 +120,46 @@ private final class FakeScrollCapturePresentation: ScrollCapturePresenting {
 }
 
 @MainActor
+private final class FakeScrollCaptureTargetDetector: ScrollCaptureTargetDetecting {
+    struct Call: Equatable {
+        let selection: NSRect
+        let processIdentifier: pid_t
+    }
+
+    private var immediateResults: [NSRect?]
+    private var continuations: [CheckedContinuation<NSRect?, Never>?] = []
+    let suspendsRequests: Bool
+    private(set) var calls: [Call] = []
+
+    init(results: [NSRect?] = [nil], suspendsRequests: Bool = false) {
+        immediateResults = results
+        self.suspendsRequests = suspendsRequests
+    }
+
+    func scrollableRegion(in selection: NSRect, processIdentifier: pid_t) async -> NSRect? {
+        calls.append(Call(selection: selection, processIdentifier: processIdentifier))
+        if suspendsRequests {
+            return await withCheckedContinuation { continuation in
+                continuations.append(continuation)
+            }
+        }
+        return immediateResults.isEmpty ? nil : immediateResults.removeFirst()
+    }
+
+    var pendingRequestCount: Int {
+        continuations.compactMap { $0 }.count
+    }
+
+    func resumeRequest(at index: Int, returning result: NSRect?) {
+        guard continuations.indices.contains(index), let continuation = continuations[index] else {
+            return
+        }
+        continuations[index] = nil
+        continuation.resume(returning: result)
+    }
+}
+
+@MainActor
 private final class FakeLongImageEditor: LongImageEditorPresenting {
     var onClose: (() -> Void)?
     var onShow: (() -> Void)?
@@ -203,6 +243,113 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertNil(window.test_measurementControlPoint(.cornerStyle))
         XCTAssertNil(window.test_measurementControlPoint(.aspectRatioLock))
         XCTAssertNil(window.test_measurementControlPoint(.refresh))
+    }
+
+    func testResolvedScrollCaptureTargetTightensSelectionAndKeepsOverlayContentFixed() throws {
+        let image = coordinateRedBlueImage(width: 640, height: 420)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        let originalSelection = NSRect(x: 80, y: 60, width: 300, height: 220)
+        let resolvedSelection = NSRect(x: 118, y: 84, width: 210, height: 164)
+        let annotation = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 24, y: 28, width: 48, height: 36),
+            style: CaptureAnnotationStyle()
+        )
+        let mask = EraserMask(
+            rect: NSRect(x: 34, y: 38, width: 12, height: 10),
+            affectedAnnotationIDs: [annotation.id]
+        )
+        window.test_setLockedSelectionRect(originalSelection)
+        window.test_setAnnotations([annotation])
+        window.test_setEraserMasks([mask])
+        let annotationOverlayRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+        let maskOverlayRect = try XCTUnwrap(window.test_eraserMaskOverlayRect(at: 0))
+        window.test_beginScrollCapture()
+
+        let seed = try XCTUnwrap(window.test_applyScrollCaptureTargetLocalRect(resolvedSelection))
+
+        XCTAssertEqual(window.test_lockedSelectionRect, resolvedSelection)
+        XCTAssertEqual(seed.snapshotRect, resolvedSelection)
+        XCTAssertEqual(seed.screenRect, window.convertToScreen(resolvedSelection).standardized)
+        XCTAssertEqual(seed.frozenImage.size, resolvedSelection.size)
+        XCTAssertEqual(window.test_annotationOverlayRect(at: 0), annotationOverlayRect)
+        XCTAssertEqual(window.test_eraserMaskOverlayRect(at: 0), maskOverlayRect)
+        XCTAssertTrue(window.test_selectionBorderColor.isEqual(NSColor.systemGreen))
+        XCTAssertTrue(window.test_selectionHandleColor.isEqual(NSColor.systemGreen))
+    }
+
+    func testScrollCaptureTargetFallbackKeepsOriginalSelectionAndBlueChrome() {
+        let image = solidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        let selection = NSRect(x: 80, y: 60, width: 300, height: 220)
+        let expectedBlue = NSColor(
+            calibratedRed: 83 / 255,
+            green: 120 / 255,
+            blue: 232 / 255,
+            alpha: 1
+        )
+        window.test_setLockedSelectionRect(selection)
+        window.test_beginScrollCapture()
+
+        window.test_markScrollCaptureTargetFallback()
+
+        XCTAssertEqual(window.test_lockedSelectionRect, selection)
+        XCTAssertTrue(window.test_selectionBorderColor.isEqual(expectedBlue))
+        XCTAssertTrue(window.test_selectionHandleColor.isEqual(expectedBlue))
+    }
+
+    func testCancellingResolvedScrollCaptureTargetRestoresSelectionAndOverlayContent() throws {
+        let image = solidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        let originalSelection = NSRect(x: 70, y: 50, width: 320, height: 240)
+        let resolvedSelection = NSRect(x: 105, y: 78, width: 230, height: 170)
+        let annotation = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 22, y: 26, width: 52, height: 38),
+            style: CaptureAnnotationStyle()
+        )
+        let mask = EraserMask(
+            rect: NSRect(x: 30, y: 34, width: 16, height: 12),
+            affectedAnnotationIDs: [annotation.id]
+        )
+        window.test_setLockedSelectionRect(originalSelection)
+        window.test_setAnnotations([annotation])
+        window.test_setEraserMasks([mask])
+        let annotationOverlayRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+        let maskOverlayRect = try XCTUnwrap(window.test_eraserMaskOverlayRect(at: 0))
+        window.test_beginScrollCapture()
+        XCTAssertNotNil(window.test_applyScrollCaptureTargetLocalRect(resolvedSelection))
+
+        window.restoreAfterScrollCaptureCancellation()
+
+        XCTAssertEqual(window.test_lockedSelectionRect, originalSelection)
+        XCTAssertEqual(window.test_annotationOverlayRect(at: 0), annotationOverlayRect)
+        XCTAssertEqual(window.test_eraserMaskOverlayRect(at: 0), maskOverlayRect)
+        XCTAssertTrue(window.test_selectionBorderColor.isEqual(window.test_defaultSelectionColor))
+        XCTAssertTrue(window.test_selectionHandleColor.isEqual(window.test_defaultSelectionColor))
+    }
+
+    func testScrollCaptureTargetRejectsNullTinyAndOutOfBoundsRegions() {
+        let image = solidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        let selection = NSRect(x: 80, y: 60, width: 300, height: 220)
+        window.test_setLockedSelectionRect(selection)
+        window.test_beginScrollCapture()
+
+        let invalidTargets = [
+            NSRect.null,
+            NSRect(x: 100, y: 100, width: 7, height: 40),
+            NSRect(x: 100, y: 100, width: 40, height: 7),
+            NSRect(x: 70, y: 100, width: 80, height: 60),
+            NSRect(x: 100, y: 100, width: 320, height: 60),
+        ]
+        for target in invalidTargets {
+            XCTAssertNil(window.test_applyScrollCaptureTargetLocalRect(target))
+            XCTAssertEqual(window.test_lockedSelectionRect, selection)
+        }
+        window.test_markScrollCaptureTargetFallback()
+        XCTAssertTrue(window.test_selectionBorderColor.isEqual(window.test_defaultSelectionColor))
+        XCTAssertTrue(window.test_selectionHandleColor.isEqual(window.test_defaultSelectionColor))
     }
 
     func testBeginScrollCaptureClearsAndSuppressesColorSamplerLayer() {
@@ -9716,6 +9863,141 @@ final class SelectionToolbarStateTests: XCTestCase {
     }
 
     @MainActor
+    func testCaptureCoordinatorDetectsOnlyOnScrollRequestAndStartsResolvedTargetOnce() async throws {
+        let seed = scrollCaptureSeedForCoordinatorTests()
+        let overlay = SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in }
+        let resolvedLocalRect = NSRect(x: 20, y: 24, width: 48, height: 28)
+        let resolvedScreenRect = overlay.convertToScreen(resolvedLocalRect).standardized
+        let detector = FakeScrollCaptureTargetDetector(results: [resolvedScreenRect])
+        var capturedSeed: ScrollCaptureSeed?
+        var session: FakeScrollCaptureSession?
+        let presentation = FakeScrollCapturePresentation()
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            scrollCaptureSessionFactory: { seed, _ in
+                capturedSeed = seed
+                let value = FakeScrollCaptureSession(seed: seed)
+                session = value
+                return value
+            },
+            scrollCapturePresentationFactory: { _ in presentation },
+            frontmostApplicationResolver: { .current },
+            applicationActivator: { _ in },
+            scrollCaptureTargetDetector: detector
+        )
+
+        coordinator.test_installOverlayWindow(overlay)
+        overlay.test_setLockedSelectionRect(seed.snapshotRect)
+        XCTAssertTrue(detector.calls.isEmpty, "installing and editing an ordinary selection must not probe AX")
+
+        coordinator.test_requestScrollCapture(seed: seed)
+        for _ in 0..<20 where session?.startCount != 1 { await Task.yield() }
+
+        XCTAssertEqual(detector.calls, [FakeScrollCaptureTargetDetector.Call(
+            selection: seed.screenRect,
+            processIdentifier: NSRunningApplication.current.processIdentifier
+        )])
+        let resolvedSeed = try XCTUnwrap(capturedSeed)
+        XCTAssertEqual(resolvedSeed.snapshotRect, resolvedLocalRect)
+        XCTAssertEqual(resolvedSeed.screenRect, resolvedScreenRect)
+        XCTAssertEqual(resolvedSeed.targetApplicationProcessIdentifier, NSRunningApplication.current.processIdentifier)
+        XCTAssertEqual(session?.startCount, 1)
+        XCTAssertEqual(presentation.startCount, 1)
+        XCTAssertTrue(overlay.test_selectionBorderColor.isEqual(NSColor.systemGreen))
+        XCTAssertTrue(overlay.test_selectionHandleColor.isEqual(NSColor.systemGreen))
+    }
+
+    @MainActor
+    func testCaptureCoordinatorDetectorFallbackStartsOriginalSeedWithBlueChrome() async throws {
+        let seed = scrollCaptureSeedForCoordinatorTests()
+        let overlay = SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in }
+        let detector = FakeScrollCaptureTargetDetector(results: [nil])
+        var capturedSeed: ScrollCaptureSeed?
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            scrollCaptureSessionFactory: { seed, _ in
+                capturedSeed = seed
+                return FakeScrollCaptureSession(seed: seed)
+            },
+            scrollCapturePresentationFactory: { _ in FakeScrollCapturePresentation() },
+            frontmostApplicationResolver: { .current },
+            applicationActivator: { _ in },
+            scrollCaptureTargetDetector: detector
+        )
+        coordinator.test_installOverlayWindow(overlay)
+
+        coordinator.test_requestScrollCapture(seed: seed)
+        for _ in 0..<20 where capturedSeed == nil { await Task.yield() }
+
+        XCTAssertEqual(detector.calls.count, 1)
+        XCTAssertEqual(capturedSeed?.screenRect, seed.screenRect)
+        XCTAssertEqual(capturedSeed?.snapshotRect, seed.snapshotRect)
+        XCTAssertEqual(capturedSeed?.frozenImage, seed.frozenImage)
+        XCTAssertEqual(overlay.test_lockedSelectionRect, seed.snapshotRect)
+        XCTAssertTrue(overlay.test_selectionBorderColor.isEqual(overlay.test_defaultSelectionColor))
+        XCTAssertTrue(overlay.test_selectionHandleColor.isEqual(overlay.test_defaultSelectionColor))
+    }
+
+    @MainActor
+    func testCaptureCoordinatorDiscardsCancelledDetectionAfterNewGenerationStarts() async throws {
+        let seed = scrollCaptureSeedForCoordinatorTests()
+        let detector = FakeScrollCaptureTargetDetector(results: [], suspendsRequests: true)
+        var createdSessions: [FakeScrollCaptureSession] = []
+        var createdPresentations: [FakeScrollCapturePresentation] = []
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            scrollCaptureSessionFactory: { seed, _ in
+                let session = FakeScrollCaptureSession(seed: seed)
+                createdSessions.append(session)
+                return session
+            },
+            scrollCapturePresentationFactory: { _ in
+                let presentation = FakeScrollCapturePresentation()
+                createdPresentations.append(presentation)
+                return presentation
+            },
+            frontmostApplicationResolver: { .current },
+            applicationActivator: { _ in },
+            scrollCaptureTargetDetector: detector
+        )
+        let firstOverlay = SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in }
+        coordinator.test_installOverlayWindow(firstOverlay)
+        coordinator.test_requestScrollCapture(seed: seed)
+        for _ in 0..<20 where detector.pendingRequestCount < 1 { await Task.yield() }
+
+        coordinator.test_cancelScrollCapture()
+
+        XCTAssertTrue(createdSessions.isEmpty)
+        XCTAssertTrue(createdPresentations.isEmpty)
+        XCTAssertEqual(firstOverlay.test_lockedSelectionRect, seed.snapshotRect)
+        XCTAssertTrue(firstOverlay.test_selectionBorderColor.isEqual(firstOverlay.test_defaultSelectionColor))
+
+        let secondOverlay = SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in }
+        coordinator.test_installOverlayWindow(secondOverlay)
+        coordinator.test_requestScrollCapture(seed: seed)
+        for _ in 0..<20 where detector.pendingRequestCount < 2 { await Task.yield() }
+        detector.resumeRequest(at: 1, returning: nil)
+        for _ in 0..<20 where createdSessions.isEmpty { await Task.yield() }
+        detector.resumeRequest(
+            at: 0,
+            returning: firstOverlay.convertToScreen(NSRect(x: 20, y: 24, width: 48, height: 28))
+        )
+        for _ in 0..<5 { await Task.yield() }
+
+        XCTAssertEqual(detector.calls.count, 2)
+        XCTAssertEqual(createdSessions.count, 1)
+        XCTAssertEqual(createdSessions.first?.startCount, 1)
+        XCTAssertEqual(createdPresentations.count, 1)
+        XCTAssertEqual(createdPresentations.first?.startCount, 1)
+        XCTAssertTrue(coordinator.test_overlayWindow === secondOverlay)
+        XCTAssertEqual(firstOverlay.test_lockedSelectionRect, seed.snapshotRect)
+        XCTAssertTrue(firstOverlay.test_selectionBorderColor.isEqual(firstOverlay.test_defaultSelectionColor))
+    }
+
+    @MainActor
     func testCaptureCoordinatorStartsOneScrollSessionAndRoutesPresentationUpdates() async throws {
         let seed = scrollCaptureSeedForCoordinatorTests()
         let overlay = SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in
@@ -9752,14 +10034,15 @@ final class SelectionToolbarStateTests: XCTestCase {
             applicationActivator: {
                 activatedApplication = $0
                 presentationOrder.append("activation")
-            }
+            },
+            scrollCaptureTargetDetector: FakeScrollCaptureTargetDetector()
         )
         coordinator.test_installOverlayWindow(overlay)
         overlay.orderFrontRegardless()
         XCTAssertTrue(overlay.isVisible)
 
         coordinator.test_requestScrollCapture(seed: seed)
-        await Task.yield()
+        for _ in 0..<20 where session?.startCount != 1 { await Task.yield() }
 
         XCTAssertEqual(session?.startCount, 1)
         XCTAssertEqual(presentation.startCount, 1)
@@ -9769,7 +10052,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(activatedApplication?.processIdentifier, NSRunningApplication.current.processIdentifier)
         XCTAssertTrue(coordinator.test_hasScrollCaptureSession)
         presentation.onStep?(.up)
-        await Task.yield()
+        for _ in 0..<20 where session?.stepDirections != [.up] { await Task.yield() }
         XCTAssertEqual(session?.stepDirections, [.up])
         let preview = NSImage(size: NSSize(width: 30, height: 80))
         update?(.preview(
@@ -9819,7 +10102,8 @@ final class SelectionToolbarStateTests: XCTestCase {
                 presentation.onCancel = context.onCancel
                 return presentation
             },
-            longImageHandoff: { _, _ in XCTFail("cancel must not hand off") }
+            longImageHandoff: { _, _ in XCTFail("cancel must not hand off") },
+            scrollCaptureTargetDetector: FakeScrollCaptureTargetDetector()
         )
         coordinator.test_installOverlayWindow(overlay)
         coordinator.test_requestScrollCapture(seed: seed)
@@ -9860,7 +10144,8 @@ final class SelectionToolbarStateTests: XCTestCase {
                 XCTAssertTrue(coordinator.test_isScrollCapturePhaseIdle)
                 XCTAssertTrue(coordinator.test_canStartCapture)
                 handoffs.append(($0, $1))
-            }
+            },
+            scrollCaptureTargetDetector: FakeScrollCaptureTargetDetector()
         )
         coordinator.captureSessionDidEnd = {
             XCTAssertTrue(coordinator.test_isScrollCapturePhaseIdle)
@@ -9869,20 +10154,20 @@ final class SelectionToolbarStateTests: XCTestCase {
         }
         coordinator.test_installOverlayWindow(overlay)
         coordinator.test_requestScrollCapture(seed: seed)
-        await Task.yield()
+        for _ in 0..<20 where session.startCount != 1 { await Task.yield() }
 
         presentation.onFinish?()
         presentation.onFinish?()
-        await Task.yield()
-        await Task.yield()
+        for _ in 0..<20 where handoffs.isEmpty { await Task.yield() }
 
         XCTAssertEqual(session.finishCount, 1)
         XCTAssertEqual(presentation.stopCount, 1)
         XCTAssertEqual(handoffs.count, 1)
         XCTAssertEqual(endCount, 1)
-        XCTAssertTrue(handoffs[0].0 === session.finishedImage)
-        XCTAssertEqual(handoffs[0].1.annotations.map(\.id), seed.annotations.map(\.id))
-        XCTAssertEqual(handoffs[0].1.eraserMasks.count, seed.eraserMasks.count)
+        let handoff = try XCTUnwrap(handoffs.first)
+        XCTAssertTrue(handoff.0 === session.finishedImage)
+        XCTAssertEqual(handoff.1.annotations.map(\.id), seed.annotations.map(\.id))
+        XCTAssertEqual(handoff.1.eraserMasks.count, seed.eraserMasks.count)
         XCTAssertFalse(coordinator.test_hasScrollCaptureSession)
         XCTAssertNil(coordinator.test_overlayWindow)
     }
@@ -9915,7 +10200,8 @@ final class SelectionToolbarStateTests: XCTestCase {
                 presentation.onCancel = context.onCancel
                 return presentation
             },
-            longImageHandoff: { image, _ in handedOff = image }
+            longImageHandoff: { image, _ in handedOff = image },
+            scrollCaptureTargetDetector: FakeScrollCaptureTargetDetector()
         )
         coordinator.test_installOverlayWindow(SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in })
         coordinator.test_requestScrollCapture(seed: seed)
@@ -9950,7 +10236,8 @@ final class SelectionToolbarStateTests: XCTestCase {
                 presentation.onCancel = context.onCancel
                 return presentation
             },
-            longImageHandoff: { _, _ in handoffCount += 1 }
+            longImageHandoff: { _, _ in handoffCount += 1 },
+            scrollCaptureTargetDetector: FakeScrollCaptureTargetDetector()
         )
         let overlay = SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in }
         coordinator.test_installOverlayWindow(overlay)
@@ -9986,7 +10273,8 @@ final class SelectionToolbarStateTests: XCTestCase {
                 presentation.onCancel = context.onCancel
                 return presentation
             },
-            longImageHandoff: { _, _ in XCTFail("failed start must not hand off") }
+            longImageHandoff: { _, _ in XCTFail("failed start must not hand off") },
+            scrollCaptureTargetDetector: FakeScrollCaptureTargetDetector()
         )
         let overlay = SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in }
         coordinator.test_installOverlayWindow(overlay)
@@ -10031,7 +10319,8 @@ final class SelectionToolbarStateTests: XCTestCase {
                 value.onCancel = context.onCancel
                 return value
             },
-            longImageHandoff: { _, _ in handoffCount += 1 }
+            longImageHandoff: { _, _ in handoffCount += 1 },
+            scrollCaptureTargetDetector: FakeScrollCaptureTargetDetector()
         )
         let firstOverlay = SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in }
         coordinator.test_installOverlayWindow(firstOverlay)
@@ -10053,7 +10342,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         let secondOverlay = SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in }
         coordinator.test_installOverlayWindow(secondOverlay)
         coordinator.test_requestScrollCapture(seed: seed)
-        await Task.yield()
+        for _ in 0..<20 where secondSession.startCount != 1 { await Task.yield() }
         XCTAssertEqual(secondSession.startCount, 1)
         XCTAssertEqual(secondSession.finishCount, 0)
     }
@@ -10072,7 +10361,8 @@ final class SelectionToolbarStateTests: XCTestCase {
                 presentation.onCancel = context.onCancel
                 return presentation
             },
-            longImageHandoff: { _, _ in XCTFail("cancelled lifecycle must not hand off") }
+            longImageHandoff: { _, _ in XCTFail("cancelled lifecycle must not hand off") },
+            scrollCaptureTargetDetector: FakeScrollCaptureTargetDetector()
         )
         let overlay = SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in }
         coordinator.test_installOverlayWindow(overlay)
@@ -10102,16 +10392,17 @@ final class SelectionToolbarStateTests: XCTestCase {
                 presentation.onCancel = context.onCancel
                 return presentation
             },
-            longImageHandoff: { _, _ in }
+            longImageHandoff: { _, _ in },
+            scrollCaptureTargetDetector: FakeScrollCaptureTargetDetector()
         )
         var overlay: SelectionOverlayWindow? = SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in }
         weak var weakOverlay = overlay
         coordinator.test_installOverlayWindow(try XCTUnwrap(overlay))
         coordinator.test_requestScrollCapture(seed: seed)
-        await Task.yield()
+        for _ in 0..<20 where presentation.startCount != 1 { await Task.yield() }
 
         presentation.onFinish?()
-        for _ in 0..<10 where coordinator.test_hasScrollCaptureSession { await Task.yield() }
+        for _ in 0..<20 where coordinator.test_overlayWindow != nil { await Task.yield() }
         overlay = nil
         await Task.yield()
 
@@ -10160,7 +10451,8 @@ final class SelectionToolbarStateTests: XCTestCase {
                 return editor
             },
             longImageCopyHandler: { copiedImages.append($0); return true },
-            longImageSaveHandler: { savedImages.append($0); return true }
+            longImageSaveHandler: { savedImages.append($0); return true },
+            scrollCaptureTargetDetector: FakeScrollCaptureTargetDetector()
         )
         coordinator.captureSessionDidEnd = {
             endCount += 1
@@ -10225,7 +10517,8 @@ final class SelectionToolbarStateTests: XCTestCase {
             screenVisibleFrameResolver: { rect in
                 XCTAssertTrue(rect.contains(NSPoint(x: seed.screenRect.midX, y: seed.screenRect.midY)))
                 return secondary
-            }
+            },
+            scrollCaptureTargetDetector: FakeScrollCaptureTargetDetector()
         )
         coordinator.test_installOverlayWindow(SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in })
         coordinator.test_requestScrollCapture(seed: seed)
@@ -10295,7 +10588,8 @@ final class SelectionToolbarStateTests: XCTestCase {
             longImageSaveHandler: {
                 savedImages.append($0)
                 return savedImages.count == 2
-            }
+            },
+            scrollCaptureTargetDetector: FakeScrollCaptureTargetDetector()
         )
         coordinator.captureSessionDidEnd = {
             XCTAssertTrue(coordinator.test_canStartCapture)
@@ -10336,7 +10630,8 @@ final class SelectionToolbarStateTests: XCTestCase {
             },
             longImageEditorFactory: { _, _, _ in nil },
             longImageFallbackPresenter: { _ in fallbackChoices.removeFirst() },
-            longImageSaveHandler: { _ in saveCount += 1; return false }
+            longImageSaveHandler: { _ in saveCount += 1; return false },
+            scrollCaptureTargetDetector: FakeScrollCaptureTargetDetector()
         )
         coordinator.captureSessionDidEnd = { endCount += 1 }
         coordinator.test_installOverlayWindow(SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in })
@@ -10369,7 +10664,8 @@ final class SelectionToolbarStateTests: XCTestCase {
                 presentation.onCancel = context.onCancel
                 return presentation
             },
-            longImageHandoff: { _, _ in }
+            longImageHandoff: { _, _ in },
+            scrollCaptureTargetDetector: FakeScrollCaptureTargetDetector()
         )
         coordinator.test_installOverlayWindow(overlay)
         coordinator.test_requestScrollCapture(seed: seed)
@@ -10408,7 +10704,8 @@ final class SelectionToolbarStateTests: XCTestCase {
                 presentation.onCancel = context.onCancel
                 return presentation
             },
-            longImageHandoff: { _, _ in }
+            longImageHandoff: { _, _ in },
+            scrollCaptureTargetDetector: FakeScrollCaptureTargetDetector()
         )
         coordinator.test_installOverlayWindow(overlay)
         coordinator.test_requestScrollCapture(seed: seed)
@@ -10430,6 +10727,9 @@ final class SelectionToolbarStateTests: XCTestCase {
             let session = FakeScrollCaptureSession(seed: seed)
             if failure == .start { session.startError = failure } else { session.finishError = failure }
             let presentation = FakeScrollCapturePresentation()
+            let detector = FakeScrollCaptureTargetDetector(results: [
+                overlay.convertToScreen(NSRect(x: 20, y: 24, width: 48, height: 28))
+            ])
             let coordinator = CaptureCoordinator(
                 permissionCoordinator: PermissionCoordinator(),
                 screenCaptureService: ScreenCaptureService(),
@@ -10439,11 +10739,12 @@ final class SelectionToolbarStateTests: XCTestCase {
                     presentation.onCancel = context.onCancel
                     return presentation
                 },
-                longImageHandoff: { _, _ in XCTFail("error must not hand off") }
+                longImageHandoff: { _, _ in XCTFail("error must not hand off") },
+                scrollCaptureTargetDetector: detector
             )
             coordinator.test_installOverlayWindow(overlay)
             coordinator.test_requestScrollCapture(seed: seed)
-            await Task.yield()
+            for _ in 0..<20 where presentation.stopCount != 1 { await Task.yield() }
             if failure == .finish {
                 presentation.onFinish?()
                 await Task.yield()
@@ -10455,6 +10756,8 @@ final class SelectionToolbarStateTests: XCTestCase {
             XCTAssertTrue(coordinator.test_overlayWindow === overlay)
             XCTAssertEqual(overlay.scrollCaptureOverlayState, .inactive)
             XCTAssertFalse(overlay.ignoresMouseEvents)
+            XCTAssertEqual(overlay.test_lockedSelectionRect, seed.snapshotRect)
+            XCTAssertTrue(overlay.test_selectionBorderColor.isEqual(overlay.test_defaultSelectionColor))
         }
     }
 
@@ -10478,7 +10781,8 @@ final class SelectionToolbarStateTests: XCTestCase {
             longImageHandoff: { image, _ in
                 XCTAssertTrue(image === session.finishedImage)
                 handoffCount += 1
-            }
+            },
+            scrollCaptureTargetDetector: FakeScrollCaptureTargetDetector()
         )
         coordinator.test_installOverlayWindow(overlay)
         coordinator.test_requestScrollCapture(seed: seed)
@@ -10522,7 +10826,8 @@ final class SelectionToolbarStateTests: XCTestCase {
                 value.onCancel = context.onCancel
                 return value
             },
-            longImageHandoff: { _, _ in XCTFail("stale start must not hand off") }
+            longImageHandoff: { _, _ in XCTFail("stale start must not hand off") },
+            scrollCaptureTargetDetector: FakeScrollCaptureTargetDetector()
         )
         let firstOverlay = SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in }
         coordinator.test_installOverlayWindow(firstOverlay)
@@ -10558,7 +10863,8 @@ final class SelectionToolbarStateTests: XCTestCase {
                     presentation.onCancel = context.onCancel
                     return presentation
                 },
-                longImageHandoff: { _, _ in }
+                longImageHandoff: { _, _ in },
+                scrollCaptureTargetDetector: FakeScrollCaptureTargetDetector()
             )
             weakCoordinator = coordinator
             coordinator?.test_installOverlayWindow(SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in })

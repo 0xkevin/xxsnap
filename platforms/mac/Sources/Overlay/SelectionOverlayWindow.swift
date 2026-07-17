@@ -851,6 +851,17 @@ final class SelectionOverlayWindow: NSWindow {
         )
     }
 
+    func applyScrollCaptureTarget(screenRect: NSRect) -> ScrollCaptureSeed? {
+        guard let overlayView = contentView as? SelectionOverlayView else { return nil }
+        let windowRect = convertFromScreen(screenRect)
+        let localRect = overlayView.convert(windowRect, from: nil)
+        return overlayView.applyScrollCaptureTarget(localRect: localRect)
+    }
+
+    func markScrollCaptureTargetFallback() {
+        (contentView as? SelectionOverlayView)?.markScrollCaptureTargetFallback()
+    }
+
     func setScrollCapturePaused(message: String) {
         guard scrollCaptureOverlayState != .inactive else { return }
         scrollCaptureOverlayState = .paused(message: message)
@@ -869,19 +880,26 @@ final class SelectionOverlayWindow: NSWindow {
         scrollCaptureTerminalActionTriggered = false
     }
 
-    func endScrollCapturePassiveMode() {
+    private func leaveScrollCapturePassiveMode() {
         guard scrollCaptureOverlayState != .inactive else { return }
         scrollCaptureOverlayState = .inactive
         ignoresMouseEvents = false
         (contentView as? SelectionOverlayView)?.endScrollCapturePassiveMode()
     }
 
+    func endScrollCapturePassiveMode() {
+        leaveScrollCapturePassiveMode()
+        (contentView as? SelectionOverlayView)?.clearScrollCaptureTargetResolution()
+    }
+
     func restoreAfterScrollCaptureCancellation() {
-        endScrollCapturePassiveMode()
+        leaveScrollCapturePassiveMode()
+        (contentView as? SelectionOverlayView)?.restoreAfterScrollCaptureCancellation()
     }
 
     func finishScrollCaptureAndDismiss() {
-        endScrollCapturePassiveMode()
+        leaveScrollCapturePassiveMode()
+        (contentView as? SelectionOverlayView)?.clearScrollCaptureTargetResolution()
         onScrollCaptureRequested = nil
         onScrollCaptureFinishRequested = nil
         onScrollCaptureCancelRequested = nil
@@ -891,7 +909,7 @@ final class SelectionOverlayWindow: NSWindow {
     private func requestScrollCaptureCancel() {
         guard scrollCaptureOverlayState != .inactive, !scrollCaptureTerminalActionTriggered else { return }
         scrollCaptureTerminalActionTriggered = true
-        endScrollCapturePassiveMode()
+        leaveScrollCapturePassiveMode()
         onScrollCaptureCancelRequested?()
     }
 
@@ -938,6 +956,30 @@ final class SelectionOverlayWindow: NSWindow {
 #if DEBUG
     func test_beginScrollCapture() {
         (contentView as? SelectionOverlayView)?.beginScrollCapture()
+    }
+
+    func test_prepareScrollCaptureTargetResolution() {
+        (contentView as? SelectionOverlayView)?.prepareScrollCaptureTargetResolution()
+    }
+
+    func test_applyScrollCaptureTargetLocalRect(_ rect: NSRect) -> ScrollCaptureSeed? {
+        (contentView as? SelectionOverlayView)?.applyScrollCaptureTarget(localRect: rect)
+    }
+
+    func test_markScrollCaptureTargetFallback() {
+        markScrollCaptureTargetFallback()
+    }
+
+    var test_selectionBorderColor: NSColor {
+        (contentView as? SelectionOverlayView)?.test_selectionBorderColor ?? .clear
+    }
+
+    var test_selectionHandleColor: NSColor {
+        (contentView as? SelectionOverlayView)?.test_selectionHandleColor ?? .clear
+    }
+
+    var test_defaultSelectionColor: NSColor {
+        (contentView as? SelectionOverlayView)?.test_defaultSelectionColor ?? .clear
     }
 
     func test_toolbarButtonIsEnabled(_ button: TestToolbarButton) -> Bool {
@@ -1651,6 +1693,10 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_eraserMask(at: index)
     }
 
+    func test_eraserMaskOverlayRect(at index: Int) -> NSRect? {
+        (contentView as? SelectionOverlayView)?.test_eraserMaskOverlayRect(at: index)
+    }
+
     var test_damagedAnnotationIDs: Set<AnnotationID> {
         (contentView as? SelectionOverlayView)?.test_damagedAnnotationIDs ?? []
     }
@@ -2125,6 +2171,13 @@ private final class SelectionTextEditor: NSTextView {
 }
 
 private final class SelectionOverlayView: NSView, NSTextViewDelegate {
+    private enum ScrollCaptureTargetVisualState {
+        case inactive
+        case resolving
+        case resolved
+        case fallback
+    }
+
     private enum NumberHandleKind {
         case delete
         case resize
@@ -2180,6 +2233,17 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             }
             needsDisplay = true
         }
+    }
+    private let defaultSelectionColor = NSColor(
+        calibratedRed: 83 / 255,
+        green: 120 / 255,
+        blue: 232 / 255,
+        alpha: 1
+    )
+    private var scrollCaptureTargetVisualState: ScrollCaptureTargetVisualState = .inactive
+    private var scrollCaptureOriginalSelectionRect: NSRect?
+    private var selectionChromeColor: NSColor {
+        scrollCaptureTargetVisualState == .resolved ? .systemGreen : defaultSelectionColor
     }
     private var backgroundImage: NSImage? {
         didSet { invalidateEraserMaskedComposite() }
@@ -7780,6 +7844,11 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         eraserMasks.indices.contains(index) ? eraserMasks[index] : nil
     }
 
+    func test_eraserMaskOverlayRect(at index: Int) -> NSRect? {
+        guard eraserMasks.indices.contains(index) else { return nil }
+        return overlayRect(fromLocalAnnotationRect: eraserMasks[index].rect)
+    }
+
     var test_damagedAnnotationIDs: Set<AnnotationID> {
         damagedAnnotationIDs
     }
@@ -7790,6 +7859,18 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     var test_lockedSelectionRect: NSRect? {
         lockedSelectionRect?.standardized
+    }
+
+    var test_selectionBorderColor: NSColor {
+        selectionChromeColor
+    }
+
+    var test_selectionHandleColor: NSColor {
+        selectionChromeColor
+    }
+
+    var test_defaultSelectionColor: NSColor {
+        defaultSelectionColor
     }
 
     var test_currentSelectionRect: NSRect? {
@@ -11424,7 +11505,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private func drawSelectionBorder(_ rect: NSRect) {
-        NSColor(calibratedRed: 83 / 255, green: 120 / 255, blue: 232 / 255, alpha: 1).setStroke()
+        selectionChromeColor.setStroke()
         let border = selectionPath(in: rect)
         border.lineWidth = 2
         border.stroke()
@@ -11444,7 +11525,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
         let handles = SelectionToolbarState.selectionHandlePoints(in: rect, cornerRadius: selectionCornerRadius)
 
-        NSColor(calibratedRed: 83 / 255, green: 120 / 255, blue: 232 / 255, alpha: 1).setFill()
+        selectionChromeColor.setFill()
         NSColor(calibratedWhite: 1, alpha: 0.95).setStroke()
         for handle in handles {
             let handleRect = NSRect(x: handle.x - 5, y: handle.y - 5, width: 10, height: 10)
@@ -15691,15 +15772,103 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         )
     }
 
+    func prepareScrollCaptureTargetResolution() {
+        guard let lockedSelectionRect else { return }
+        scrollCaptureOriginalSelectionRect = lockedSelectionRect.standardized
+        scrollCaptureTargetVisualState = .resolving
+        needsDisplay = true
+    }
+
+    private func makeScrollCaptureSeed(for selectionRect: NSRect) -> ScrollCaptureSeed? {
+        guard let window,
+              let backgroundImage,
+              let crop = pixelAlignedCrop(image: backgroundImage, to: selectionRect.standardized)
+        else { return nil }
+        let windowRect = convert(crop.drawRect, to: nil)
+        return ScrollCaptureSeed(
+            screenRect: window.convertToScreen(windowRect).standardized,
+            snapshotRect: selectionRect.standardized,
+            frozenImage: crop.image,
+            annotations: annotations,
+            eraserMasks: eraserMasks
+        )
+    }
+
+    func applyScrollCaptureTarget(localRect: NSRect) -> ScrollCaptureSeed? {
+        guard scrollCaptureTargetVisualState == .resolving,
+              let originalSelection = scrollCaptureOriginalSelectionRect?.standardized,
+              lockedSelectionRect != nil,
+              !localRect.isNull,
+              !localRect.isEmpty
+        else { return nil }
+        let target = localRect.standardized
+        guard target.width >= 8,
+              target.height >= 8,
+              target.minX >= originalSelection.minX,
+              target.minY >= originalSelection.minY,
+              target.maxX <= originalSelection.maxX,
+              target.maxY <= originalSelection.maxY
+        else { return nil }
+
+        resizeSelectionPreservingOverlayPositions(to: target)
+        guard let seed = makeScrollCaptureSeed(for: target) else {
+            resizeSelectionPreservingOverlayPositions(to: originalSelection)
+            return nil
+        }
+        scrollCaptureTargetVisualState = .resolved
+        needsDisplay = true
+        return seed
+    }
+
+    func markScrollCaptureTargetFallback() {
+        guard scrollCaptureOriginalSelectionRect != nil,
+              scrollCaptureTargetVisualState != .resolved
+        else { return }
+        scrollCaptureTargetVisualState = .fallback
+        needsDisplay = true
+    }
+
+    func restoreAfterScrollCaptureCancellation() {
+        if let originalSelection = scrollCaptureOriginalSelectionRect?.standardized,
+           lockedSelectionRect?.standardized != originalSelection {
+            resizeSelectionPreservingOverlayPositions(to: originalSelection)
+        }
+        clearScrollCaptureTargetResolution()
+        scrollCaptureOverlayState = .inactive
+        invalidateCursorRectsAndRefresh()
+    }
+
+    func clearScrollCaptureTargetResolution() {
+        scrollCaptureOriginalSelectionRect = nil
+        scrollCaptureTargetVisualState = .inactive
+        needsDisplay = true
+    }
+
+    private func resizeSelectionPreservingOverlayPositions(to selectionRect: NSRect) {
+        guard let currentSelection = lockedSelectionRect?.standardized else { return }
+        let maskOverlayRects = eraserMasks.map { overlayRect(fromLocalAnnotationRect: $0.rect) }
+        applySelectionWheelResize(from: currentSelection, to: selectionRect.standardized)
+        let remappedMaskRects = SelectionToolbarState.localAnnotationRectsPreservingOverlayPositions(
+            maskOverlayRects,
+            selectionRect: selectionRect.standardized
+        )
+        for index in eraserMasks.indices where remappedMaskRects.indices.contains(index) {
+            eraserMasks[index].rect = remappedMaskRects[index]
+        }
+        let normalizedSelection = selectionRect.standardized
+        selectionStartPoint = normalizedSelection.origin
+        selectionCurrentPoint = NSPoint(x: normalizedSelection.maxX, y: normalizedSelection.maxY)
+        needsDisplay = true
+    }
+
     func beginScrollCapture() {
         guard scrollCaptureOverlayState == .inactive,
               let lockedSelectionRect,
-              let window,
-              let backgroundImage else { return }
+              backgroundImage != nil else { return }
         commitCurrentTextEdit()
         commitNumberEditingIfNeeded()
         let snapshotRect = lockedSelectionRect.standardized
-        guard let crop = pixelAlignedCrop(image: backgroundImage, to: snapshotRect) else { return }
+        guard let seed = makeScrollCaptureSeed(for: snapshotRect) else { return }
         closeTextDropdown()
         closeMagnifierZoomDropdown()
         showsStrokeStyleMenu = false
@@ -15707,14 +15876,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         showsStartArrowTypeMenu = false
         showsEndArrowTypeMenu = false
         activeNumberDropdown = false
+        prepareScrollCaptureTargetResolution()
         scrollCaptureOverlayState = .capturing
-        scrollCaptureDidRequest?(ScrollCaptureSeed(
-            screenRect: window.convertToScreen(crop.drawRect).standardized,
-            snapshotRect: snapshotRect,
-            frozenImage: crop.image,
-            annotations: annotations,
-            eraserMasks: eraserMasks
-        ))
+        scrollCaptureDidRequest?(seed)
     }
 
     func endScrollCapturePassiveMode() {

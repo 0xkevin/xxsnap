@@ -105,6 +105,7 @@ final class CaptureCoordinator {
     private let longImageSaveHandler: (@MainActor (NSImage) -> Bool)?
     private let frontmostApplicationResolver: @MainActor () -> NSRunningApplication?
     private let applicationActivator: @MainActor (NSRunningApplication) -> Void
+    private let scrollCaptureTargetDetector: any ScrollCaptureTargetDetecting
     private var longImageEditor: (any LongImageEditorPresenting)?
     private var longImageLifecycleActive = false
     private var scrollCaptureSession: (any ScrollCaptureSessionRunning)?
@@ -141,7 +142,8 @@ final class CaptureCoordinator {
         frontmostApplicationResolver: @escaping @MainActor () -> NSRunningApplication? = CaptureCoordinator.refreshTargetApplication,
         applicationActivator: @escaping @MainActor (NSRunningApplication) -> Void = { application in
             application.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
-        }
+        },
+        scrollCaptureTargetDetector: any ScrollCaptureTargetDetecting = ScrollCaptureTargetDetector()
     ) {
         self.permissionCoordinator = permissionCoordinator
         self.screenCaptureService = screenCaptureService
@@ -183,6 +185,7 @@ final class CaptureCoordinator {
         self.longImageSaveHandler = longImageSaveHandler
         self.frontmostApplicationResolver = frontmostApplicationResolver
         self.applicationActivator = applicationActivator
+        self.scrollCaptureTargetDetector = scrollCaptureTargetDetector
     }
 
     convenience init() {
@@ -353,24 +356,83 @@ final class CaptureCoordinator {
         overlay.setScrollCaptureCapturing()
         scrollCaptureGeneration &+= 1
         let generation = scrollCaptureGeneration
+        let targetApplication = captureTargetApplication ?? frontmostApplicationResolver()
+        captureTargetApplication = targetApplication
+        let targetProcessIdentifier = targetApplication?.processIdentifier
+        let detector = scrollCaptureTargetDetector
+        scrollCaptureTask = Task { @MainActor [weak self, weak overlay] in
+            let resolvedScreenRect: NSRect?
+            if let targetProcessIdentifier {
+                resolvedScreenRect = await detector.scrollableRegion(
+                    in: seed.screenRect,
+                    processIdentifier: targetProcessIdentifier
+                )
+            } else {
+                resolvedScreenRect = nil
+            }
+            guard let self,
+                  let overlay,
+                  !Task.isCancelled,
+                  self.scrollCaptureGeneration == generation,
+                  self.scrollCapturePhase == .starting || self.scrollCapturePhase == .finishPending,
+                  self.overlayWindow === overlay
+            else { return }
+
+            self.scrollCaptureTask = nil
+            let adjustedSeed = resolvedScreenRect.flatMap {
+                overlay.applyScrollCaptureTarget(screenRect: $0)
+            }
+            let didResolveTarget = adjustedSeed != nil
+            if !didResolveTarget {
+                overlay.markScrollCaptureTargetFallback()
+            }
+            let targetSeed = adjustedSeed ?? seed
+            let captureSeed = ScrollCaptureSeed(
+                screenRect: targetSeed.screenRect,
+                snapshotRect: targetSeed.snapshotRect,
+                frozenImage: targetSeed.frozenImage,
+                annotations: targetSeed.annotations,
+                eraserMasks: targetSeed.eraserMasks,
+                targetApplicationProcessIdentifier: targetProcessIdentifier
+            )
+            NSLog(
+                "xxsnap scroll-capture target original=%@ final=%@ pid=%d result=%@",
+                NSStringFromRect(seed.screenRect),
+                NSStringFromRect(captureSeed.screenRect),
+                targetProcessIdentifier ?? -1,
+                didResolveTarget ? "resolved" : "fallback"
+            )
+            self.startResolvedScrollCapture(
+                captureSeed: captureSeed,
+                targetApplication: targetApplication,
+                overlay: overlay,
+                generation: generation
+            )
+        }
+    }
+
+    private func startResolvedScrollCapture(
+        captureSeed: ScrollCaptureSeed,
+        targetApplication: NSRunningApplication?,
+        overlay: SelectionOverlayWindow,
+        generation: UInt64
+    ) {
+        guard scrollCaptureGeneration == generation,
+              scrollCapturePhase == .starting || scrollCapturePhase == .finishPending,
+              overlayWindow === overlay,
+              scrollCaptureTask == nil,
+              scrollCaptureSession == nil,
+              scrollCapturePresentation == nil
+        else { return }
         let language = settingsStore.load().language
         guard let geometry = overlay.scrollCaptureControlGeometry else {
+            scrollCaptureGeneration &+= 1
             overlay.restoreAfterScrollCaptureCancellation()
             overlay.present()
             scrollCaptureFinishPending = false
             scrollCapturePhase = .idle
             return
         }
-        let targetApplication = captureTargetApplication ?? frontmostApplicationResolver()
-        captureTargetApplication = targetApplication
-        let captureSeed = ScrollCaptureSeed(
-            screenRect: seed.screenRect,
-            snapshotRect: seed.snapshotRect,
-            frozenImage: seed.frozenImage,
-            annotations: seed.annotations,
-            eraserMasks: seed.eraserMasks,
-            targetApplicationProcessIdentifier: targetApplication?.processIdentifier
-        )
         let visibleFrame = Self.visibleFrame(containing: captureSeed.screenRect)
         let presentation = scrollCapturePresentationFactory(ScrollCapturePresentationContext(
             geometry: geometry,
@@ -589,12 +651,11 @@ final class CaptureCoordinator {
         case .idle, .finishPending, .finishing, .cancelling:
             return
         }
-        guard let session = scrollCaptureSession else { return }
         scrollCapturePhase = .cancelling
         scrollCaptureGeneration &+= 1
         scrollCaptureTask?.cancel()
         scrollCaptureTask = nil
-        _ = session.cancel()
+        _ = scrollCaptureSession?.cancel()
         scrollCapturePresentation?.stop()
         scrollCapturePresentation = nil
         scrollCaptureSession = nil
@@ -979,6 +1040,7 @@ extension CaptureCoordinator {
 
     func test_requestScrollCapture(seed: ScrollCaptureSeed) {
         overlayWindow?.test_setLockedSelectionRect(seed.snapshotRect)
+        overlayWindow?.test_prepareScrollCaptureTargetResolution()
         requestScrollCapture(seed: seed)
     }
 
