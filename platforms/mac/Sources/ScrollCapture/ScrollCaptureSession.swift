@@ -232,10 +232,15 @@ enum ScrollCaptureSessionError: Error, Equatable {
 
 @MainActor
 final class ScrollCaptureSession {
-    // A whole-window selection can contain a large fixed composer, title bar,
-    // and sidebars. Keeping 70% of the selected height between samples also
-    // leaves enough overlap inside the smaller message viewport.
-    private static let stepViewportRatio: CGFloat = 0.3
+    private static let largeViewportThreshold: CGFloat = 600
+    private static let compactViewportRatio: CGFloat = 0.30
+    private static let largeViewportRatio: CGFloat = 0.50
+
+    static func stepDistance(forViewportHeight height: CGFloat) -> CGFloat {
+        guard height.isFinite else { return 1 }
+        let ratio = height >= largeViewportThreshold ? largeViewportRatio : compactViewportRatio
+        return max(1, height * ratio)
+    }
 
     let seed: ScrollCaptureSeed
     private(set) var state: ScrollCaptureSessionState = .idle
@@ -366,7 +371,7 @@ final class ScrollCaptureSession {
         }
 
         do {
-            let distance = max(1, seed.screenRect.height * Self.stepViewportRatio)
+            let distance = Self.stepDistance(forViewportHeight: seed.screenRect.height)
             let scrollPoints = Self.stepScrollPoints(in: seed.screenRect)
             let boundaryStates = scrollPoints.map {
                 stepController.boundaryState(direction: effectiveDirection, at: $0)

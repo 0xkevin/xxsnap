@@ -4,6 +4,36 @@ import XCTest
 
 @MainActor
 final class ScrollCaptureSessionTests: XCTestCase {
+    func testAutomaticStepDistanceUsesThirtyPercentBelowSixHundredPoints() {
+        XCTAssertEqual(
+            ScrollCaptureSession.stepDistance(forViewportHeight: 599),
+            179.7,
+            accuracy: 0.001
+        )
+    }
+
+    func testAutomaticStepDistanceUsesFiftyPercentAtSixHundredPoints() {
+        XCTAssertEqual(
+            ScrollCaptureSession.stepDistance(forViewportHeight: 600),
+            300,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            ScrollCaptureSession.stepDistance(forViewportHeight: 900),
+            450,
+            accuracy: 0.001
+        )
+    }
+
+    func testAutomaticStepDistanceReturnsAtLeastOnePointForInvalidOrTinyHeights() {
+        XCTAssertEqual(ScrollCaptureSession.stepDistance(forViewportHeight: 0), 1)
+        XCTAssertEqual(ScrollCaptureSession.stepDistance(forViewportHeight: -100), 1)
+        XCTAssertEqual(ScrollCaptureSession.stepDistance(forViewportHeight: 0.01), 1)
+        XCTAssertEqual(ScrollCaptureSession.stepDistance(forViewportHeight: .nan), 1)
+        XCTAssertEqual(ScrollCaptureSession.stepDistance(forViewportHeight: .infinity), 1)
+        XCTAssertEqual(ScrollCaptureSession.stepDistance(forViewportHeight: -.infinity), 1)
+    }
+
     func testStepModeProbesUpperSelectionZoneBeforeCenterForChatComposer() async throws {
         let controller = FakeStepController()
         let engine = FakeStitcher(
@@ -52,6 +82,33 @@ final class ScrollCaptureSessionTests: XCTestCase {
             .executing,
             .ready(directionLocked: true),
         ])
+    }
+
+    func testStepModeUsesFiftyPercentOfLargeSessionSeedHeight() async throws {
+        let controller = FakeStepController()
+        let monitor = FakeActivityMonitor()
+        let engine = FakeStitcher(
+            results: [.acceptedInitial, .acceptedAppend],
+            directions: [.unknown, .down]
+        )
+        let presentation = PresentationRecorder()
+        let session = makeSession(
+            engine: engine,
+            monitor: monitor,
+            stepController: controller,
+            presentation: presentation,
+            screenRect: NSRect(x: 100, y: 200, width: 80, height: 800)
+        )
+
+        try await session.start()
+        try await session.performStep(direction: .down)
+
+        XCTAssertEqual(controller.steps.count, 1)
+        XCTAssertEqual(controller.steps[0].distance, 400, accuracy: 0.001)
+        XCTAssertEqual(presentation.scrollActivities, [
+            ScrollCaptureScrollActivity(direction: .down, distance: 400),
+        ])
+        XCTAssertEqual(monitor.startCount, 1)
     }
 
     func testStepModeRunsOneThousandOverlappingViewportStepsWithoutFallbackOrReverse() async throws {
@@ -1403,12 +1460,13 @@ final class ScrollCaptureSessionTests: XCTestCase {
         monitor: (any ScrollActivityMonitoring)? = nil,
         stepController: (any ScrollCaptureStepControlling)? = nil,
         presentation: PresentationRecorder? = nil,
-        presentationHandler: (@MainActor (ScrollCapturePresentationUpdate) -> Void)? = nil
+        presentationHandler: (@MainActor (ScrollCapturePresentationUpdate) -> Void)? = nil,
+        screenRect: NSRect = NSRect(x: 100, y: 200, width: 80, height: 60)
     ) -> ScrollCaptureSession {
         let presentation = presentation ?? PresentationRecorder()
         return ScrollCaptureSession(
             seed: ScrollCaptureSeed(
-                screenRect: NSRect(x: 100, y: 200, width: 80, height: 60),
+                screenRect: screenRect,
                 snapshotRect: NSRect(x: 0, y: 0, width: 80, height: 60),
                 frozenImage: TestImageFactory.solid(size: CGSize(width: 80, height: 60), color: .red),
                 annotations: [],
