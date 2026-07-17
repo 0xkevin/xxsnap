@@ -21,6 +21,45 @@ protocol ScrollCaptureTargetCandidateQuerying: Sendable {
     ) -> [ScrollCaptureTargetCandidate]
 }
 
+protocol ScrollCaptureDeadlineCancellation: Sendable {
+    func cancel()
+}
+
+protocol ScrollCaptureDeadlineScheduling: Sendable {
+    func schedule(
+        after interval: TimeInterval,
+        action: @escaping @Sendable () -> Void
+    ) -> ScrollCaptureDeadlineCancellation
+}
+
+private struct DispatchScrollCaptureDeadlineScheduler: ScrollCaptureDeadlineScheduling {
+    private static let queue = DispatchQueue(
+        label: "com.xxsnap.scroll-capture-target-deadline",
+        qos: .userInitiated
+    )
+
+    func schedule(
+        after interval: TimeInterval,
+        action: @escaping @Sendable () -> Void
+    ) -> ScrollCaptureDeadlineCancellation {
+        let workItem = DispatchWorkItem(block: action)
+        Self.queue.asyncAfter(deadline: .now() + max(0, interval), execute: workItem)
+        return DispatchScrollCaptureDeadlineCancellation(workItem: workItem)
+    }
+}
+
+private final class DispatchScrollCaptureDeadlineCancellation: ScrollCaptureDeadlineCancellation, @unchecked Sendable {
+    private let workItem: DispatchWorkItem
+
+    init(workItem: DispatchWorkItem) {
+        self.workItem = workItem
+    }
+
+    func cancel() {
+        workItem.cancel()
+    }
+}
+
 final class ScrollCaptureTargetQueryContext: @unchecked Sendable {
     typealias NowProvider = @Sendable () -> TimeInterval
 
@@ -29,7 +68,13 @@ final class ScrollCaptureTargetQueryContext: @unchecked Sendable {
     private let lock = NSLock()
     private let deadline: TimeInterval
     private let nowProvider: NowProvider
-    private var cancelled = false
+    private var state = State.active
+
+    private enum State {
+        case active
+        case cancelled
+        case expired
+    }
 
     init(
         totalBudget: TimeInterval = totalDetectionBudget,
@@ -40,16 +85,31 @@ final class ScrollCaptureTargetQueryContext: @unchecked Sendable {
     }
 
     var isCancelled: Bool {
-        lock.withLock { cancelled }
+        lock.withLock { state == .cancelled }
     }
 
     func shouldContinue() -> Bool {
-        !isCancelled && nowProvider() < deadline
+        lock.withLock {
+            guard state == .active else { return false }
+            guard nowProvider() < deadline else {
+                state = .expired
+                return false
+            }
+            return true
+        }
     }
 
     func cancel() {
         lock.withLock {
-            cancelled = true
+            guard state == .active else { return }
+            state = .cancelled
+        }
+    }
+
+    func expire() {
+        lock.withLock {
+            guard state == .active else { return }
+            state = .expired
         }
     }
 }
@@ -95,6 +155,8 @@ final class ScrollCaptureTargetDetector: ScrollCaptureTargetDetecting {
     static let minimumRegionSize = NSSize(width: 120, height: 120)
 
     private let candidateQuery: ScrollCaptureTargetCandidateQuerying
+    private let deadlineScheduler: ScrollCaptureDeadlineScheduling
+    private let detectionTimeout: TimeInterval
     private let candidateQueryQueue = DispatchQueue(
         label: "com.xxsnap.scroll-capture-target-detection",
         qos: .userInitiated,
@@ -102,9 +164,13 @@ final class ScrollCaptureTargetDetector: ScrollCaptureTargetDetecting {
     )
 
     init(
-        candidateQuery: ScrollCaptureTargetCandidateQuerying = AccessibilityScrollCaptureCandidateQuery()
+        candidateQuery: ScrollCaptureTargetCandidateQuerying = AccessibilityScrollCaptureCandidateQuery(),
+        deadlineScheduler: ScrollCaptureDeadlineScheduling? = nil,
+        detectionTimeout: TimeInterval = ScrollCaptureTargetQueryContext.totalDetectionBudget
     ) {
         self.candidateQuery = candidateQuery
+        self.deadlineScheduler = deadlineScheduler ?? DispatchScrollCaptureDeadlineScheduler()
+        self.detectionTimeout = detectionTimeout
     }
 
     func probePoints(in selection: NSRect) -> [NSPoint] {
@@ -122,10 +188,13 @@ final class ScrollCaptureTargetDetector: ScrollCaptureTargetDetecting {
 
     func scrollableRegion(in selection: NSRect, processIdentifier: pid_t) async -> NSRect? {
         guard !Task.isCancelled else { return nil }
-        let context = ScrollCaptureTargetQueryContext()
+        let context = ScrollCaptureTargetQueryContext(totalBudget: detectionTimeout)
         let selection = selection.standardized
         let probePoints = probePoints(in: selection)
         let request = ScrollCaptureTargetDetectionRequest(context: context)
+        let deadlineCancellation = deadlineScheduler.schedule(after: detectionTimeout) {
+            request.expire()
+        }
         let queriedCandidates = await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 guard request.install(continuation) else { return }
@@ -140,6 +209,7 @@ final class ScrollCaptureTargetDetector: ScrollCaptureTargetDetecting {
         } onCancel: {
             request.cancel()
         }
+        deadlineCancellation.cancel()
         guard let queriedCandidates, !Task.isCancelled else { return nil }
         let candidates = candidatesKeepingEarliestProbe(queriedCandidates)
 
@@ -215,20 +285,38 @@ private final class ScrollCaptureTargetDetectionRequest: @unchecked Sendable {
     }
 
     func complete(_ candidates: [ScrollCaptureTargetCandidate]) {
-        resolve(with: candidates)
+        resolve {
+            guard context.shouldContinue() else {
+                context.expire()
+                return nil
+            }
+            return candidates
+        }
     }
 
     func cancel() {
-        context.cancel()
-        resolve(with: nil)
+        resolve {
+            context.cancel()
+            return nil
+        }
     }
 
-    private func resolve(with result: [ScrollCaptureTargetCandidate]?) {
+    func expire() {
+        resolve {
+            context.expire()
+            return nil
+        }
+    }
+
+    private func resolve(
+        with resultProvider: () -> [ScrollCaptureTargetCandidate]?
+    ) {
         lock.lock()
         guard !isResolved else {
             lock.unlock()
             return
         }
+        let result = resultProvider()
         isResolved = true
         self.result = result
         let continuation = continuation

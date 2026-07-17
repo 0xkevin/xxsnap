@@ -313,6 +313,115 @@ final class ScrollCaptureTargetDetectorTests: XCTestCase {
         XCTAssertEqual(region, selection)
     }
 
+    func testDeadlineReturnsNilWithoutWaitingForBlockedCandidateQuery() async {
+        let selection = NSRect(x: 0, y: 0, width: 500, height: 500)
+        let query = BlockingCandidateQuery(candidates: [candidate(
+            identity: 87,
+            rect: selection,
+            firstProbeIndex: 0
+        )])
+        let scheduler = ManualScrollCaptureDeadlineScheduler()
+        let detector = ScrollCaptureTargetDetector(
+            candidateQuery: query,
+            deadlineScheduler: scheduler,
+            detectionTimeout: 0.01
+        )
+        let detection = Task {
+            await detector.scrollableRegion(in: selection, processIdentifier: 42)
+        }
+
+        await query.waitUntilStarted()
+        scheduler.trigger()
+
+        let returned = expectation(description: "deadline completed detection")
+        let observedResult = Task {
+            let region = await detection.value
+            returned.fulfill()
+            return region
+        }
+        await fulfillment(of: [returned], timeout: 0.2)
+
+        XCTAssertEqual(scheduler.scheduledIntervals, [0.01])
+        let region = await observedResult.value
+        XCTAssertNil(region)
+        query.finish()
+        await query.waitUntilCompleted()
+    }
+
+    func testQueryCompletionWinsAndCancelsDeadline() async {
+        let selection = NSRect(x: 0, y: 0, width: 500, height: 500)
+        let candidate = candidate(identity: 88, rect: selection, firstProbeIndex: 0)
+        let scheduler = ManualScrollCaptureDeadlineScheduler()
+        let detector = ScrollCaptureTargetDetector(
+            candidateQuery: StubCandidateQuery(candidates: [candidate]),
+            deadlineScheduler: scheduler,
+            detectionTimeout: 0.7
+        )
+
+        let region = await detector.scrollableRegion(in: selection, processIdentifier: 42)
+        scheduler.trigger()
+
+        XCTAssertEqual(region, selection)
+        XCTAssertEqual(scheduler.cancellationCount, 1)
+    }
+
+    func testDeadlineWinsAndDropsLateQueryCompletion() async {
+        let selection = NSRect(x: 0, y: 0, width: 500, height: 500)
+        let query = BlockingCandidateQuery(candidates: [candidate(
+            identity: 89,
+            rect: selection,
+            firstProbeIndex: 0
+        )])
+        let scheduler = ManualScrollCaptureDeadlineScheduler()
+        let detector = ScrollCaptureTargetDetector(
+            candidateQuery: query,
+            deadlineScheduler: scheduler,
+            detectionTimeout: 0.7
+        )
+        let detection = Task {
+            await detector.scrollableRegion(in: selection, processIdentifier: 42)
+        }
+
+        await query.waitUntilStarted()
+        scheduler.trigger()
+        let region = await detection.value
+        query.finish()
+        await query.waitUntilCompleted()
+        await Task.yield()
+
+        XCTAssertNil(region)
+    }
+
+    func testTaskCancellationRacingDeadlineResumesOnce() async {
+        let selection = NSRect(x: 0, y: 0, width: 500, height: 500)
+        let query = BlockingCandidateQuery(candidates: [])
+        let scheduler = ManualScrollCaptureDeadlineScheduler()
+        let detector = ScrollCaptureTargetDetector(
+            candidateQuery: query,
+            deadlineScheduler: scheduler,
+            detectionTimeout: 0.7
+        )
+        let detection = Task {
+            await detector.scrollableRegion(in: selection, processIdentifier: 42)
+        }
+
+        await query.waitUntilStarted()
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                detection.cancel()
+            }
+            group.addTask {
+                scheduler.trigger()
+            }
+        }
+        let region = await detection.value
+        query.finish()
+        await query.waitUntilCompleted()
+        await Task.yield()
+
+        XCTAssertNil(region)
+    }
+
     func testMessagingTimeoutIsShortAndFailureStopsBeforeHitTesting() {
         let reader = FakeAccessibilityReader()
         reader.messagingTimeoutSucceeds = false
@@ -592,6 +701,7 @@ private final class ThreadRecordingCandidateQuery: ScrollCaptureTargetCandidateQ
 private final class BlockingCandidateQuery: ScrollCaptureTargetCandidateQuerying, @unchecked Sendable {
     private let started = DispatchSemaphore(value: 0)
     private let release = DispatchSemaphore(value: 0)
+    private let completed = DispatchSemaphore(value: 0)
     private let result: [ScrollCaptureTargetCandidate]
 
     init(candidates: [ScrollCaptureTargetCandidate]) {
@@ -605,6 +715,7 @@ private final class BlockingCandidateQuery: ScrollCaptureTargetCandidateQuerying
     ) -> [ScrollCaptureTargetCandidate] {
         started.signal()
         release.wait()
+        completed.signal()
         return result
     }
 
@@ -619,6 +730,71 @@ private final class BlockingCandidateQuery: ScrollCaptureTargetCandidateQuerying
 
     func finish() {
         release.signal()
+    }
+
+    func waitUntilCompleted() async {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global().async { [completed] in
+                completed.wait()
+                continuation.resume()
+            }
+        }
+    }
+}
+
+private final class ManualScrollCaptureDeadlineScheduler: ScrollCaptureDeadlineScheduling, @unchecked Sendable {
+    private let lock = NSLock()
+    private var action: (@Sendable () -> Void)?
+    private var recordedIntervals: [TimeInterval] = []
+    private var recordedCancellationCount = 0
+
+    var scheduledIntervals: [TimeInterval] {
+        lock.withLock { recordedIntervals }
+    }
+
+    var cancellationCount: Int {
+        lock.withLock { recordedCancellationCount }
+    }
+
+    func schedule(
+        after interval: TimeInterval,
+        action: @escaping @Sendable () -> Void
+    ) -> ScrollCaptureDeadlineCancellation {
+        lock.withLock {
+            recordedIntervals.append(interval)
+            self.action = action
+        }
+        return ManualScrollCaptureDeadlineCancellation { [weak self] in
+            self?.cancel()
+        }
+    }
+
+    func trigger() {
+        let action = lock.withLock {
+            defer { self.action = nil }
+            return self.action
+        }
+        action?()
+    }
+
+    private func cancel() {
+        lock.withLock {
+            guard action != nil else { return }
+            action = nil
+            recordedCancellationCount += 1
+        }
+    }
+}
+
+private final class ManualScrollCaptureDeadlineCancellation: ScrollCaptureDeadlineCancellation, @unchecked Sendable {
+    private let cancellation: @Sendable () -> Void
+
+    init(cancellation: @escaping @Sendable () -> Void) {
+        self.cancellation = cancellation
+    }
+
+    func cancel() {
+        cancellation()
     }
 }
 
