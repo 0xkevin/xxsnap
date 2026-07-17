@@ -40,6 +40,7 @@ struct ScrollStitchConfig final
 {
     OverlapConfig matcher;
     double duplicateThreshold = 0.01;
+    double seamWhiteCoverage = 0.0;
     // Caps persistent BGRA buffers and fingerprint byte payloads. Small
     // per-entry container bookkeeping is excluded from this byte budget.
     std::size_t maximumAcceptedBytes = 256U * 1024U * 1024U;

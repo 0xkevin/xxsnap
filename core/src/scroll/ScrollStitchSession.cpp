@@ -51,6 +51,7 @@ constexpr int StationaryPixelChannelTolerance = 3;
         && matcher.excludedBands.bottom >= 0;
     return matcherIsValid
         && validUnit(config.duplicateThreshold)
+        && validUnit(config.seamWhiteCoverage)
         && config.maximumAcceptedBytes > 0U
         && config.fixedTopCandidateHeight >= 0
         && config.fixedBottomCandidateHeight >= 0
@@ -173,6 +174,17 @@ constexpr int StationaryPixelChannelTolerance = 3;
         return std::make_shared<const ScrollFrame>(std::move(normalized));
     } catch (...) {
         return std::nullopt;
+    }
+}
+
+void blendWhite(std::uint8_t* row, int width, double coverage)
+{
+    for (int x = 0; x < width; ++x) {
+        auto* pixel = row + static_cast<std::size_t>(x) * 4U;
+        for (std::size_t channel = 0; channel < 3U; ++channel) {
+            const double value = pixel[channel] + (255.0 - pixel[channel]) * coverage;
+            pixel[channel] = static_cast<std::uint8_t>(std::lround(value));
+        }
     }
 }
 
@@ -519,6 +531,43 @@ public:
         }
         rowWithin = static_cast<int>(relative);
         return &segment;
+    }
+
+    [[nodiscard]] std::vector<int> seamRows(bool includePending) const
+    {
+        std::vector<int> result;
+        const std::size_t spanCount = segments.size()
+            + (includePending ? pending.size() : 0U);
+        if (spanCount > 1U) {
+            result.reserve(spanCount - 1U);
+        }
+        int outputRow = 0;
+        const auto appendSpan = [&](int height) {
+            if (height <= 0) {
+                return;
+            }
+            if (outputRow > 0) {
+                result.push_back(outputRow);
+            }
+            outputRow += height;
+        };
+        const Direction pendingDirection = includePending && !pending.empty()
+            ? pending.front().candidate
+            : Direction::Undetermined;
+        if (pendingDirection == Direction::Up) {
+            for (auto movement = pending.crbegin(); movement != pending.crend(); ++movement) {
+                appendSpan(movement->advance);
+            }
+        }
+        for (const auto& segment : segments) {
+            appendSpan(segment.outputRows);
+        }
+        if (pendingDirection == Direction::Down) {
+            for (const auto& movement : pending) {
+                appendSpan(movement.advance);
+            }
+        }
+        return result;
     }
 
     [[nodiscard]] std::size_t pruneAnchorHistory()
@@ -1760,6 +1809,10 @@ bool ScrollStitchSession::copyFinalPixels(
     const auto storedRowBytes = static_cast<std::size_t>(implementation_->width) * 4U;
     std::vector<std::uint8_t> storedRow(storedRowBytes);
     auto* destinationPixels = static_cast<std::uint8_t*>(destination);
+    const auto seamRows = implementation_->config.seamWhiteCoverage > 0.0
+        ? implementation_->seamRows(includePending)
+        : std::vector<int>{};
+    std::size_t seamIndex = 0U;
     int outputRow = 0;
     const auto writeRow = [&](const std::uint8_t* pixels) {
         if (pixels == nullptr || outputRow >= composedHeight) {
@@ -1768,11 +1821,19 @@ bool ScrollStitchSession::copyFinalPixels(
         const int destinationRow = bottomUp
             ? composedHeight - 1 - outputRow
             : outputRow;
+        auto* destinationRowPixels = destinationPixels
+            + static_cast<std::size_t>(destinationRow) * destinationBytesPerRow;
         std::memcpy(
-            destinationPixels
-                + static_cast<std::size_t>(destinationRow) * destinationBytesPerRow,
+            destinationRowPixels,
             pixels + static_cast<std::size_t>(leftCrop) * 4U,
             *rowBytes);
+        if (seamIndex < seamRows.size() && outputRow == seamRows[seamIndex]) {
+            blendWhite(
+                destinationRowPixels,
+                composedWidth,
+                implementation_->config.seamWhiteCoverage);
+            ++seamIndex;
+        }
         ++outputRow;
         return true;
     };
@@ -2014,6 +2075,25 @@ ScrollFrame ScrollStitchSession::previewWithSize(int previewWidth, int previewHe
                 output.pixels.data() + destinationOffset,
                 sourcePixels + sourceOffset,
                 4U);
+        }
+    }
+    if (implementation_->config.seamWhiteCoverage > 0.0) {
+        int previousPreviewY = -1;
+        for (const int sourceSeam : implementation_->seamRows(true)) {
+            const int previewY = std::min(
+                output.height - 1,
+                static_cast<int>(
+                    static_cast<std::int64_t>(sourceSeam) * output.height / sourceHeight));
+            if (previewY == previousPreviewY) {
+                continue;
+            }
+            blendWhite(
+                output.pixels.data()
+                    + static_cast<std::size_t>(previewY)
+                        * static_cast<std::size_t>(output.bytesPerRow),
+                output.width,
+                implementation_->config.seamWhiteCoverage);
+            previousPreviewY = previewY;
         }
     }
     return output;

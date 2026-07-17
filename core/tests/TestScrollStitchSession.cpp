@@ -5,8 +5,10 @@
 #include <QDebug>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 namespace {
@@ -474,6 +476,30 @@ std::uint8_t blueAt(const ScrollFrame& frame, int x, int y)
         + static_cast<std::size_t>(x) * 4U];
 }
 
+bool rowHasOnlyWhiteColorChannels(const ScrollFrame& frame, int y)
+{
+    for (int x = 0; x < frame.width; ++x) {
+        const auto offset = static_cast<std::size_t>(y)
+                * static_cast<std::size_t>(frame.bytesPerRow)
+            + static_cast<std::size_t>(x) * 4U;
+        if (frame.pixels[offset] != 255U
+            || frame.pixels[offset + 1U] != 255U
+            || frame.pixels[offset + 2U] != 255U) {
+            return false;
+        }
+    }
+    return true;
+}
+
+int whiteColorRowCount(const ScrollFrame& frame)
+{
+    int count = 0;
+    for (int y = 0; y < frame.height; ++y) {
+        count += rowHasOnlyWhiteColorChannels(frame, y) ? 1 : 0;
+    }
+    return count;
+}
+
 class TestScrollStitchSession final : public QObject
 {
     Q_OBJECT
@@ -534,6 +560,13 @@ private slots:
     void diskBackedSegmentsDoNotGrowResidentBudget();
     void lightweightAnchorHistoryDoesNotConsumeViewportPerAcceptance();
     void previewDownsamplesWithoutMutatingFinalImage();
+    void seamWhiteCoverageRendersAcceptedDownwardBoundary();
+    void previewRendersSeamAfterDownsampling();
+    void duplicateAcceptedFrameDoesNotAddSeam();
+    void upwardSeamsFollowNaturalDocumentOrder();
+    void defaultSeamCoveragePreservesExactPixels();
+    void partialSeamCoverageBlendsColorOnly();
+    void streamedSeamsRespectBottomUpAndPendingComposition();
     void previewForWidthPreservesDocumentAspectRatio();
     void smallPreviewSamplesLongNearLimitCompositionDirectly();
     void automaticFixedBandDetectionWorksWithProductionDefaults();
@@ -548,6 +581,7 @@ private slots:
     void maximumPendingRunSearchesAllFramesForReverseReview();
     void rejectsInvalidAndDimensionMismatchedFrames();
     void invalidConfigurationNeverAcceptsContent();
+    void invalidSeamCoverageNeverAcceptsContent();
 };
 
 void TestScrollStitchSession::acceptsInitialAndAppendsOnlyNewBottomStrip()
@@ -1697,6 +1731,212 @@ void TestScrollStitchSession::previewDownsamplesWithoutMutatingFinalImage()
     QCOMPARE(session.finalize().height, 260);
 }
 
+void TestScrollStitchSession::seamWhiteCoverageRendersAcceptedDownwardBoundary()
+{
+    auto config = defaultConfig();
+    config.enableFixedBandDetection = false;
+    config.enableFixedSideDetection = false;
+    config.scrollbarMaximumWidth = 0;
+    config.seamWhiteCoverage = 1.0;
+    ScrollStitchSession session(config);
+
+    auto first = documentViewport(0);
+    auto second = documentViewport(60);
+    const auto sourceOffset = static_cast<std::size_t>(80)
+            * static_cast<std::size_t>(second.bytesPerRow)
+        + static_cast<std::size_t>(37) * 4U;
+    second.pixels[sourceOffset + 3U] = 73;
+
+    QCOMPARE(session.append(first, ScrollDirection::Down).kind, AppendKind::AcceptedInitial);
+    QCOMPARE(session.append(second, ScrollDirection::Down).kind, AppendKind::AcceptedAppend);
+
+    const auto final = session.finalize();
+    QCOMPARE(final.height, 200);
+    const auto seamOffset = static_cast<std::size_t>(140)
+            * static_cast<std::size_t>(final.bytesPerRow)
+        + static_cast<std::size_t>(37) * 4U;
+    QCOMPARE(final.pixels[seamOffset], static_cast<std::uint8_t>(255));
+    QCOMPARE(final.pixels[seamOffset + 1U], static_cast<std::uint8_t>(255));
+    QCOMPARE(final.pixels[seamOffset + 2U], static_cast<std::uint8_t>(255));
+    QCOMPARE(final.pixels[seamOffset + 3U], static_cast<std::uint8_t>(73));
+    QCOMPARE(blueAt(final, 37, 139), documentPixel(37, 139));
+    QCOMPARE(blueAt(final, 37, 141), documentPixel(37, 141));
+}
+
+void TestScrollStitchSession::previewRendersSeamAfterDownsampling()
+{
+    auto config = defaultConfig();
+    config.enableFixedBandDetection = false;
+    config.enableFixedSideDetection = false;
+    config.scrollbarMaximumWidth = 0;
+    config.seamWhiteCoverage = 1.0;
+    ScrollStitchSession session(config);
+
+    QCOMPARE(session.append(documentViewport(0), ScrollDirection::Down).kind,
+        AppendKind::AcceptedInitial);
+    QCOMPARE(session.append(documentViewport(60), ScrollDirection::Down).kind,
+        AppendKind::AcceptedAppend);
+
+    const auto preview = session.preview(100);
+    QCOMPARE(preview.height, 100);
+    const auto seamOffset = static_cast<std::size_t>(70)
+            * static_cast<std::size_t>(preview.bytesPerRow)
+        + static_cast<std::size_t>(18) * 4U;
+    QCOMPARE(preview.pixels[seamOffset], static_cast<std::uint8_t>(255));
+    QCOMPARE(preview.pixels[seamOffset + 1U], static_cast<std::uint8_t>(255));
+    QCOMPARE(preview.pixels[seamOffset + 2U], static_cast<std::uint8_t>(255));
+    QCOMPARE(blueAt(preview, 18, 69), documentPixel(36, 138));
+    QCOMPARE(blueAt(preview, 18, 71), documentPixel(36, 142));
+}
+
+void TestScrollStitchSession::duplicateAcceptedFrameDoesNotAddSeam()
+{
+    auto config = defaultConfig();
+    config.enableFixedBandDetection = false;
+    config.enableFixedSideDetection = false;
+    config.scrollbarMaximumWidth = 0;
+    config.seamWhiteCoverage = 1.0;
+    ScrollStitchSession session(config);
+    const auto first = documentViewport(0);
+    const auto second = documentViewport(60);
+
+    QCOMPARE(session.append(first, ScrollDirection::Down).kind, AppendKind::AcceptedInitial);
+    QCOMPARE(session.append(second, ScrollDirection::Down).kind, AppendKind::AcceptedAppend);
+    const auto before = session.finalize();
+    QCOMPARE(whiteColorRowCount(before), 1);
+
+    QCOMPARE(session.append(second, ScrollDirection::Down).kind, AppendKind::DuplicateDiscarded);
+    const auto after = session.finalize();
+    QCOMPARE(after.height, before.height);
+    QCOMPARE(after.pixels, before.pixels);
+    QCOMPARE(whiteColorRowCount(after), 1);
+}
+
+void TestScrollStitchSession::upwardSeamsFollowNaturalDocumentOrder()
+{
+    auto config = defaultConfig();
+    config.enableFixedBandDetection = false;
+    config.enableFixedSideDetection = false;
+    config.scrollbarMaximumWidth = 0;
+    config.seamWhiteCoverage = 1.0;
+    ScrollStitchSession session(config);
+
+    QCOMPARE(session.append(documentViewport(120), ScrollDirection::Up).kind,
+        AppendKind::AcceptedInitial);
+    QCOMPARE(session.append(documentViewport(60), ScrollDirection::Up).kind,
+        AppendKind::AcceptedAppend);
+    QCOMPARE(session.append(documentViewport(0), ScrollDirection::Up).kind,
+        AppendKind::AcceptedAppend);
+
+    const auto final = session.finalize();
+    QCOMPARE(final.height, 260);
+    QVERIFY(rowHasOnlyWhiteColorChannels(final, 60));
+    QVERIFY(rowHasOnlyWhiteColorChannels(final, 120));
+    QCOMPARE(blueAt(final, 37, 59), documentPixel(37, 59));
+    QCOMPARE(blueAt(final, 37, 61), documentPixel(37, 61));
+    QCOMPARE(blueAt(final, 37, 119), documentPixel(37, 119));
+    QCOMPARE(blueAt(final, 37, 121), documentPixel(37, 121));
+}
+
+void TestScrollStitchSession::defaultSeamCoveragePreservesExactPixels()
+{
+    auto config = defaultConfig();
+    config.enableFixedBandDetection = false;
+    config.enableFixedSideDetection = false;
+    config.scrollbarMaximumWidth = 0;
+    ScrollStitchSession session(config);
+
+    QCOMPARE(session.append(documentViewport(0), ScrollDirection::Down).kind,
+        AppendKind::AcceptedInitial);
+    QCOMPARE(session.append(documentViewport(60), ScrollDirection::Down).kind,
+        AppendKind::AcceptedAppend);
+
+    const auto final = session.finalize();
+    const auto expected = documentImage(0, 200);
+    QCOMPARE(final.height, expected.height);
+    QCOMPARE(final.pixels, expected.pixels);
+}
+
+void TestScrollStitchSession::partialSeamCoverageBlendsColorOnly()
+{
+    auto config = defaultConfig();
+    config.enableFixedBandDetection = false;
+    config.enableFixedSideDetection = false;
+    config.scrollbarMaximumWidth = 0;
+    config.seamWhiteCoverage = 0.25;
+    ScrollStitchSession session(config);
+
+    auto second = documentViewport(60);
+    const auto sourceOffset = static_cast<std::size_t>(80)
+            * static_cast<std::size_t>(second.bytesPerRow)
+        + static_cast<std::size_t>(37) * 4U;
+    second.pixels[sourceOffset] = 100;
+    second.pixels[sourceOffset + 1U] = 100;
+    second.pixels[sourceOffset + 2U] = 100;
+    second.pixels[sourceOffset + 3U] = 73;
+
+    QCOMPARE(session.append(documentViewport(0), ScrollDirection::Down).kind,
+        AppendKind::AcceptedInitial);
+    QCOMPARE(session.append(second, ScrollDirection::Down).kind, AppendKind::AcceptedAppend);
+
+    const auto final = session.finalize();
+    const auto seamOffset = static_cast<std::size_t>(140)
+            * static_cast<std::size_t>(final.bytesPerRow)
+        + static_cast<std::size_t>(37) * 4U;
+    const auto expected = static_cast<std::uint8_t>(
+        std::lround(100.0 + (255.0 - 100.0) * 0.25));
+    QCOMPARE(final.pixels[seamOffset], expected);
+    QCOMPARE(final.pixels[seamOffset + 1U], expected);
+    QCOMPARE(final.pixels[seamOffset + 2U], expected);
+    QCOMPARE(final.pixels[seamOffset + 3U], static_cast<std::uint8_t>(73));
+}
+
+void TestScrollStitchSession::streamedSeamsRespectBottomUpAndPendingComposition()
+{
+    auto config = defaultConfig();
+    config.enableFixedSideDetection = false;
+    config.scrollbarMaximumWidth = 0;
+    config.seamWhiteCoverage = 1.0;
+    ScrollStitchSession session(config);
+
+    QCOMPARE(session.append(documentViewport(0, true), ScrollDirection::Down).kind,
+        AppendKind::AcceptedInitial);
+    QCOMPARE(session.append(documentViewport(40, true), ScrollDirection::Down).kind,
+        AppendKind::AwaitingEvidence);
+
+    std::vector<std::uint8_t> committedPixels(120U * 140U * 4U);
+    QVERIFY(session.copyFinalPixels(
+        committedPixels.data(), committedPixels.size(), 120U * 4U, false, true));
+    ScrollFrame committed(120, 140);
+    committed.pixels = committedPixels;
+    QCOMPARE(whiteColorRowCount(committed), 0);
+
+    std::vector<std::uint8_t> pendingPixels(120U * 180U * 4U);
+    QVERIFY(session.copyFinalPixels(
+        pendingPixels.data(), pendingPixels.size(), 120U * 4U, true, true));
+    ScrollFrame bottomUp(120, 180);
+    bottomUp.pixels = pendingPixels;
+    QVERIFY(rowHasOnlyWhiteColorChannels(bottomUp, 39));
+    QVERIFY(!rowHasOnlyWhiteColorChannels(bottomUp, 38));
+    QVERIFY(!rowHasOnlyWhiteColorChannels(bottomUp, 40));
+    QCOMPARE(whiteColorRowCount(bottomUp), 1);
+
+    ScrollStitchSession upward(config);
+    QCOMPARE(upward.append(documentViewport(120, true), ScrollDirection::Up).kind,
+        AppendKind::AcceptedInitial);
+    QCOMPARE(upward.append(documentViewport(80, true), ScrollDirection::Up).kind,
+        AppendKind::AwaitingEvidence);
+    std::vector<std::uint8_t> upwardPixels(120U * 180U * 4U);
+    QVERIFY(upward.copyFinalPixels(
+        upwardPixels.data(), upwardPixels.size(), 120U * 4U, true));
+    ScrollFrame topDown(120, 180);
+    topDown.pixels = upwardPixels;
+    QVERIFY(rowHasOnlyWhiteColorChannels(topDown, 40));
+    QVERIFY(!rowHasOnlyWhiteColorChannels(topDown, 39));
+    QVERIFY(!rowHasOnlyWhiteColorChannels(topDown, 41));
+    QCOMPARE(whiteColorRowCount(topDown), 1);
+}
+
 void TestScrollStitchSession::previewForWidthPreservesDocumentAspectRatio()
 {
     ScrollStitchSession session(defaultConfig());
@@ -1924,6 +2164,24 @@ void TestScrollStitchSession::invalidConfigurationNeverAcceptsContent()
     QCOMPARE(session.append(documentViewport(0)).kind, AppendKind::LowConfidenceDiscarded);
     QCOMPARE(session.outputHeight(), 0);
     QVERIFY(!session.finalize().isValid());
+}
+
+void TestScrollStitchSession::invalidSeamCoverageNeverAcceptsContent()
+{
+    const double invalidCoverages[] = {
+        -0.01,
+        1.01,
+        std::numeric_limits<double>::quiet_NaN(),
+        std::numeric_limits<double>::infinity(),
+    };
+    for (const double coverage : invalidCoverages) {
+        auto config = defaultConfig();
+        config.seamWhiteCoverage = coverage;
+        ScrollStitchSession session(config);
+        QCOMPARE(session.append(documentViewport(0)).kind, AppendKind::LowConfidenceDiscarded);
+        QCOMPARE(session.outputHeight(), 0);
+        QVERIFY(!session.finalize().isValid());
+    }
 }
 
 } // namespace
