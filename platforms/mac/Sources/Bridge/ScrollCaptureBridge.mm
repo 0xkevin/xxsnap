@@ -57,10 +57,13 @@ struct BridgeImplementation final {
 };
 
 std::unique_ptr<ScrollStitchSession> makeSession(
-    std::size_t maximumAcceptedBytes)
+    std::size_t maximumAcceptedBytes,
+    CGFloat sourceScale)
 {
     ScrollStitchConfig config;
     config.maximumAcceptedBytes = maximumAcceptedBytes;
+    config.seamWhiteCoverage = std::clamp(
+        0.1 * static_cast<double>(sourceScale), 0.0, 1.0);
     return std::make_unique<ScrollStitchSession>(config);
 }
 
@@ -471,7 +474,8 @@ BridgeImplementation *implementationOrError(void *pointer, NSError **error)
     }
     try {
         if (implementation->session == nullptr) {
-            implementation->session = makeSession(implementation->maximumAcceptedBytes);
+            implementation->session = makeSession(
+                implementation->maximumAcceptedBytes, sourceScale);
             if (implementation->session == nullptr) {
                 setError(error, BridgeError::InvalidImage, @"The image scale is invalid.");
                 return nil;

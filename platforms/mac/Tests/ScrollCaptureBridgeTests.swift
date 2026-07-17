@@ -158,14 +158,22 @@ final class ScrollCaptureBridgeTests: XCTestCase {
         XCTAssertEqual(renderedPixels(source, at: points), renderedPixels(final, at: points))
     }
 
-    func testDuplicateIsDiscardedAndInitialFrameRemainsFinal() throws {
+    func testInitialFrameHasNoSeamAndDuplicateDoesNotAddAnotherBoundary() throws {
         let bridge = try XCTUnwrap(ScrollCaptureBridge(maximumAcceptedBytes: 16 * 1024 * 1024))
-        let first = TestImageFactory.verticalDocumentViewport(offset: 0)
-        let duplicate = TestImageFactory.verticalDocumentViewport(offset: 0)
+        let first = TestImageFactory.verticalDocumentViewport(offset: 0, width: 64, height: 96)
+        let second = TestImageFactory.verticalDocumentViewport(offset: 32, width: 64, height: 96)
 
         XCTAssertEqual(try bridge.append(first).kind, .acceptedInitial)
-        XCTAssertEqual(try bridge.append(duplicate).kind, .duplicateDiscarded)
-        XCTAssertNotNil(try bridge.finalImage())
+        let initialFinal = try XCTUnwrap(bridge.finalImage())
+        XCTAssertEqual(renderedBGRAPixels(initialFinal), renderedBGRAPixels(first))
+
+        XCTAssertEqual(try bridge.append(second).kind, .acceptedAppend)
+        let beforeDuplicate = try XCTUnwrap(bridge.finalImage())
+        XCTAssertEqual(try bridge.append(second).kind, .duplicateDiscarded)
+        let afterDuplicate = try XCTUnwrap(bridge.finalImage())
+
+        XCTAssertEqual(afterDuplicate.representations.first?.pixelsHigh, 128)
+        XCTAssertEqual(renderedBGRAPixels(afterDuplicate), renderedBGRAPixels(beforeDuplicate))
     }
 
     func testReviewAndLowConfidenceAreMappedWithoutChangingTheAcceptedBaseline() throws {
@@ -216,7 +224,7 @@ final class ScrollCaptureBridgeTests: XCTestCase {
         XCTAssertEqual(updates.dropFirst().map(\.direction), [.up, .up, .up])
         let final = try XCTUnwrap(bridge.finalImage())
         let expected = TestImageFactory.verticalDocument(width: 64, height: 192)
-        assertRenderedPixelsEqual(final, expected)
+        assertRenderedPixelsEqualAllowingSeamCoverage(final, expected, scale: 1)
     }
 
     func testFixedRegionEvidenceMapsAsAwaitingWithoutLosingFinalPixels() throws {
@@ -244,48 +252,160 @@ final class ScrollCaptureBridgeTests: XCTestCase {
             width: 60,
             scale: 1
         )
-        assertRenderedPixelsEqual(final, expected)
+        assertRenderedPixelsEqualAllowingSeamCoverage(final, expected, scale: 1)
     }
 
-    func testAppendPreservesDocumentDirectionAndSeamPixels() throws {
+    func testOneXFinalBlendsOnePhysicalSeamRowTowardPremultipliedAlpha() throws {
+        let scale: CGFloat = 1
+        let width = 64
+        let height = 96
+        let seamY = 96
+        let sourceSeamY = 64
+        let sampleX = 13
         let bridge = try XCTUnwrap(ScrollCaptureBridge(maximumAcceptedBytes: 16 * 1024 * 1024))
-        let first = TestImageFactory.verticalDocumentViewport(offset: 0, width: 64, height: 96)
-        let second = TestImageFactory.verticalDocumentViewport(offset: 32, width: 64, height: 96)
+        let first = TestImageFactory.verticalDocumentViewport(
+            offset: 0, width: width, height: height, scale: scale
+        )
+        let second = replacingBGRAPixel(
+            in: TestImageFactory.verticalDocumentViewport(
+                offset: 32, width: width, height: height, scale: scale
+            ),
+            x: sampleX,
+            topDownY: sourceSeamY,
+            with: [10, 20, 30, 80]
+        )
 
-        _ = try bridge.append(first)
+        XCTAssertEqual(try bridge.append(first).kind, .acceptedInitial)
         let update = try bridge.append(second)
         let final = try XCTUnwrap(bridge.finalImage())
+        let firstPixels = renderedBGRAPixels(first)
+        let secondPixels = renderedBGRAPixels(second)
+        let finalPixels = renderedBGRAPixels(final)
+        let sourcePixel = bgraPixel(
+            secondPixels, width: width, x: sampleX, y: sourceSeamY
+        )
 
         XCTAssertEqual(update.kind, .acceptedAppend)
         XCTAssertEqual(update.direction, .down)
         XCTAssertEqual(update.appendedHeight, 32)
         XCTAssertEqual(update.outputHeight, 128)
-        XCTAssertEqual(final.representations.first?.pixelsWide, 64)
+        XCTAssertEqual(final.representations.first?.pixelsWide, width)
         XCTAssertEqual(final.representations.first?.pixelsHigh, 128)
-        guard update.kind == .acceptedAppend,
-              final.representations.first?.pixelsHigh == 128 else { return }
-        XCTAssertEqual(
-            renderedPixels(final, at: [(13, 96)]),
-            renderedPixels(first, at: [(13, 64)])
+        XCTAssertEqual(final.size.height, 128, accuracy: 0.001)
+        XCTAssertEqual(sourcePixel, [10, 20, 30, 80])
+        assertSeamPixel(
+            bgraPixel(finalPixels, width: width, x: sampleX, y: seamY),
+            source: sourcePixel,
+            scale: scale
         )
         XCTAssertEqual(
-            renderedPixels(final, at: [(13, 31)]),
-            renderedPixels(second, at: [(13, 31)])
+            bgraPixel(finalPixels, width: width, x: sampleX, y: seamY - 1),
+            bgraPixel(firstPixels, width: width, x: sampleX, y: height - 1)
+        )
+        XCTAssertEqual(
+            bgraPixel(finalPixels, width: width, x: sampleX, y: seamY + 1),
+            bgraPixel(secondPixels, width: width, x: sampleX, y: sourceSeamY + 1)
         )
     }
 
-    func testPreviewLimitsPixelHeightAndPreservesTwoXPointScale() throws {
+    func testTwoXFinalUsesTwentyPercentCoverageWithoutAddingAPixelRow() throws {
+        let scale: CGFloat = 2
+        let pointWidth = 64
+        let pointHeight = 96
+        let pixelWidth = Int(CGFloat(pointWidth) * scale)
+        let seamY = Int(CGFloat(pointHeight) * scale)
+        let sourceSeamY = Int(CGFloat(64) * scale)
+        let sampleX = 26
         let bridge = try XCTUnwrap(ScrollCaptureBridge(maximumAcceptedBytes: 16 * 1024 * 1024))
-        _ = try bridge.append(TestImageFactory.verticalDocumentViewport(
+        let first = TestImageFactory.verticalDocumentViewport(
+            offset: 0, width: pointWidth, height: pointHeight, scale: scale
+        )
+        let second = TestImageFactory.verticalDocumentViewport(
+            offset: 32, width: pointWidth, height: pointHeight, scale: scale
+        )
+
+        XCTAssertEqual(try bridge.append(first).kind, .acceptedInitial)
+        let update = try bridge.append(second)
+        let final = try XCTUnwrap(bridge.finalImage())
+        let firstPixels = renderedBGRAPixels(first)
+        let secondPixels = renderedBGRAPixels(second)
+        let finalPixels = renderedBGRAPixels(final)
+        let sourcePixel = bgraPixel(
+            secondPixels, width: pixelWidth, x: sampleX, y: sourceSeamY
+        )
+
+        XCTAssertEqual(update.kind, .acceptedAppend)
+        XCTAssertEqual(update.appendedHeight, 64)
+        XCTAssertEqual(update.outputHeight, 256)
+        XCTAssertEqual(final.representations.first?.pixelsWide, pixelWidth)
+        XCTAssertEqual(final.representations.first?.pixelsHigh, 256)
+        XCTAssertEqual(final.size.height, 128, accuracy: 0.001)
+        assertSeamPixel(
+            bgraPixel(finalPixels, width: pixelWidth, x: sampleX, y: seamY),
+            source: sourcePixel,
+            scale: scale
+        )
+        XCTAssertEqual(
+            bgraPixel(finalPixels, width: pixelWidth, x: sampleX, y: seamY - 1),
+            bgraPixel(firstPixels, width: pixelWidth, x: sampleX, y: seamY - 1)
+        )
+        XCTAssertEqual(
+            bgraPixel(finalPixels, width: pixelWidth, x: sampleX, y: seamY + 1),
+            bgraPixel(secondPixels, width: pixelWidth, x: sampleX, y: sourceSeamY + 1)
+        )
+    }
+
+    func testDownsampledPreviewAndFinalUseTheSameMappedSeamCoverage() throws {
+        let width = 64
+        let height = 96
+        let bridge = try XCTUnwrap(ScrollCaptureBridge(maximumAcceptedBytes: 16 * 1024 * 1024))
+        let first = TestImageFactory.verticalDocumentViewport(offset: 0, width: width, height: height)
+        let second = TestImageFactory.verticalDocumentViewport(offset: 32, width: width, height: height)
+
+        XCTAssertEqual(try bridge.append(first).kind, .acceptedInitial)
+        XCTAssertEqual(try bridge.append(second).kind, .acceptedAppend)
+        let final = try XCTUnwrap(bridge.finalImage())
+        let preview = try XCTUnwrap(bridge.preview(maximumHeight: 64))
+        let sourcePixels = renderedBGRAPixels(second)
+        let finalPixels = renderedBGRAPixels(final)
+        let previewPixels = renderedBGRAPixels(preview)
+        let sourcePixel = bgraPixel(sourcePixels, width: width, x: 12, y: 64)
+        let finalSeam = bgraPixel(finalPixels, width: width, x: 12, y: 96)
+        let previewSeam = bgraPixel(previewPixels, width: 32, x: 6, y: 48)
+
+        XCTAssertEqual(preview.representations.first?.pixelsWide, 32)
+        XCTAssertEqual(preview.representations.first?.pixelsHigh, 64)
+        assertSeamPixel(finalSeam, source: sourcePixel, scale: 1)
+        assertSeamPixel(previewSeam, source: sourcePixel, scale: 1)
+        XCTAssertEqual(previewSeam, finalSeam)
+        XCTAssertEqual(
+            bgraPixel(previewPixels, width: 32, x: 6, y: 47),
+            bgraPixel(finalPixels, width: width, x: 12, y: 94)
+        )
+        XCTAssertEqual(
+            bgraPixel(previewPixels, width: 32, x: 6, y: 49),
+            bgraPixel(finalPixels, width: width, x: 12, y: 98)
+        )
+    }
+
+    func testInitialTwoXFrameKeepsFinalAndPreviewPixelAndPointDimensions() throws {
+        let bridge = try XCTUnwrap(ScrollCaptureBridge(maximumAcceptedBytes: 16 * 1024 * 1024))
+        let source = TestImageFactory.verticalDocumentViewport(
             offset: 0, width: 40, height: 80, scale: 2
-        ))
+        )
+        XCTAssertEqual(try bridge.append(source).kind, .acceptedInitial)
 
         let preview = try XCTUnwrap(bridge.preview(maximumHeight: 80))
+        let final = try XCTUnwrap(bridge.finalImage())
 
         XCTAssertEqual(preview.representations.first?.pixelsWide, 40)
         XCTAssertEqual(preview.representations.first?.pixelsHigh, 80)
         XCTAssertEqual(preview.size.width, 20, accuracy: 0.001)
         XCTAssertEqual(preview.size.height, 40, accuracy: 0.001)
+        XCTAssertEqual(final.representations.first?.pixelsWide, 80)
+        XCTAssertEqual(final.representations.first?.pixelsHigh, 160)
+        XCTAssertEqual(final.size.width, 40, accuracy: 0.001)
+        XCTAssertEqual(final.size.height, 80, accuracy: 0.001)
     }
 
     func testPreviewLimitsPixelWidthSoLongPreviewKeepsAStableDisplayWidth() throws {
@@ -444,9 +564,92 @@ final class ScrollCaptureBridgeTests: XCTestCase {
         return bytes
     }
 
-    private func assertRenderedPixelsEqual(
+    private func expectedSeamChannel(
+        _ value: UInt8,
+        alpha: UInt8 = 255,
+        scale: CGFloat
+    ) -> UInt8 {
+        let coverage = min(1, 0.1 * scale)
+        return UInt8((CGFloat(value) + (CGFloat(alpha) - CGFloat(value)) * coverage).rounded())
+    }
+
+    private func bgraPixel(
+        _ pixels: [UInt8],
+        width: Int,
+        x: Int,
+        y: Int
+    ) -> [UInt8] {
+        let offset = (y * width + x) * 4
+        return Array(pixels[offset..<(offset + 4)])
+    }
+
+    private func assertSeamPixel(
+        _ actual: [UInt8],
+        source: [UInt8],
+        scale: CGFloat,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertEqual(actual.count, 4, file: file, line: line)
+        XCTAssertEqual(source.count, 4, file: file, line: line)
+        guard actual.count == 4, source.count == 4 else { return }
+        XCTAssertNotEqual(source[0], source[1], file: file, line: line)
+        XCTAssertNotEqual(source[0], source[2], file: file, line: line)
+        XCTAssertNotEqual(source[1], source[2], file: file, line: line)
+        for channel in 0..<3 {
+            XCTAssertEqual(
+                actual[channel],
+                expectedSeamChannel(source[channel], alpha: source[3], scale: scale),
+                "Unexpected BGRA channel \(channel)",
+                file: file,
+                line: line
+            )
+        }
+        XCTAssertEqual(actual[3], source[3], "Seam changed alpha", file: file, line: line)
+    }
+
+    private func replacingBGRAPixel(
+        in image: NSImage,
+        x: Int,
+        topDownY: Int,
+        with pixel: [UInt8]
+    ) -> NSImage {
+        precondition(pixel.count == 4)
+        var proposedRect = NSRect(origin: .zero, size: image.size)
+        let source = image.cgImage(forProposedRect: &proposedRect, context: nil, hints: nil)!
+        let sourceData = source.dataProvider!.data!
+        var bytes = Data(
+            bytes: CFDataGetBytePtr(sourceData)!,
+            count: CFDataGetLength(sourceData)
+        )
+        let providerY = source.height - 1 - topDownY
+        let offset = providerY * source.bytesPerRow + x * 4
+        bytes.replaceSubrange(offset..<(offset + 4), with: pixel)
+        let provider = CGDataProvider(data: bytes as CFData)!
+        let replacement = CGImage(
+            width: source.width,
+            height: source.height,
+            bitsPerComponent: source.bitsPerComponent,
+            bitsPerPixel: source.bitsPerPixel,
+            bytesPerRow: source.bytesPerRow,
+            space: source.colorSpace ?? CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: source.bitmapInfo,
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: false,
+            intent: source.renderingIntent
+        )!
+        let representation = NSBitmapImageRep(cgImage: replacement)
+        representation.size = image.size
+        let result = NSImage(size: image.size)
+        result.addRepresentation(representation)
+        return result
+    }
+
+    private func assertRenderedPixelsEqualAllowingSeamCoverage(
         _ actualImage: NSImage,
         _ expectedImage: NSImage,
+        scale: CGFloat,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
@@ -454,12 +657,20 @@ final class ScrollCaptureBridgeTests: XCTestCase {
         let expected = renderedBGRAPixels(expectedImage)
         XCTAssertEqual(actual.count, expected.count, file: file, line: line)
         guard actual.count == expected.count else { return }
-        XCTAssertNil(
-            actual.indices.first { actual[$0] != expected[$0] },
-            "Rendered BGRA buffers differ",
-            file: file,
-            line: line
-        )
+        for offset in stride(from: 0, to: actual.count, by: 4) {
+            let actualPixel = Array(actual[offset..<(offset + 4)])
+            let expectedPixel = Array(expected[offset..<(offset + 4)])
+            let expectedSeamPixel = [
+                expectedSeamChannel(expectedPixel[0], alpha: expectedPixel[3], scale: scale),
+                expectedSeamChannel(expectedPixel[1], alpha: expectedPixel[3], scale: scale),
+                expectedSeamChannel(expectedPixel[2], alpha: expectedPixel[3], scale: scale),
+                expectedPixel[3],
+            ]
+            if actualPixel != expectedPixel && actualPixel != expectedSeamPixel {
+                XCTFail("Rendered BGRA buffers differ at pixel \(offset / 4)", file: file, line: line)
+                return
+            }
+        }
     }
 
     private func assertBridgeError<T>(
