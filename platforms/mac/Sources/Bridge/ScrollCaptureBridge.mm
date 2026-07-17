@@ -474,19 +474,23 @@ BridgeImplementation *implementationOrError(void *pointer, NSError **error)
     }
     try {
         if (implementation->session == nullptr) {
-            implementation->session = makeSession(
+            auto candidate = makeSession(
                 implementation->maximumAcceptedBytes, sourceScale);
-            if (implementation->session == nullptr) {
+            if (candidate == nullptr) {
                 setError(error, BridgeError::InvalidImage, @"The image scale is invalid.");
                 return nil;
             }
+            AppendResult result = candidate->append(
+                frame, coreDirection(preferredDirection));
+            if (result.kind == AppendKind::AcceptedInitial) {
+                implementation->session = std::move(candidate);
+                implementation->sourceScale = sourceScale;
+                implementation->acceptedImage = true;
+            }
+            return [[ScrollCaptureAppendUpdate alloc] initWithResult:result];
         }
         AppendResult result = implementation->session->append(
             frame, coreDirection(preferredDirection));
-        if (result.kind == AppendKind::AcceptedInitial) {
-            implementation->sourceScale = sourceScale;
-            implementation->acceptedImage = true;
-        }
         return [[ScrollCaptureAppendUpdate alloc] initWithResult:result];
     } catch (...) {
         setError(error, BridgeError::InternalFailure, @"The scroll stitch engine failed to append the image.");

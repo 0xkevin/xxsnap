@@ -224,7 +224,12 @@ final class ScrollCaptureBridgeTests: XCTestCase {
         XCTAssertEqual(updates.dropFirst().map(\.direction), [.up, .up, .up])
         let final = try XCTUnwrap(bridge.finalImage())
         let expected = TestImageFactory.verticalDocument(width: 64, height: 192)
-        assertRenderedPixelsEqualAllowingSeamCoverage(final, expected, scale: 1)
+        assertRenderedPixelsEqual(
+            final,
+            expected,
+            seamRows: [32, 64, 96],
+            scale: 1
+        )
     }
 
     func testFixedRegionEvidenceMapsAsAwaitingWithoutLosingFinalPixels() throws {
@@ -252,7 +257,7 @@ final class ScrollCaptureBridgeTests: XCTestCase {
             width: 60,
             scale: 1
         )
-        assertRenderedPixelsEqualAllowingSeamCoverage(final, expected, scale: 1)
+        assertRenderedPixelsEqual(final, expected, seamRows: [280, 295, 310], scale: 1)
     }
 
     func testOneXFinalBlendsOnePhysicalSeamRowTowardPremultipliedAlpha() throws {
@@ -352,6 +357,41 @@ final class ScrollCaptureBridgeTests: XCTestCase {
         XCTAssertEqual(
             bgraPixel(finalPixels, width: pixelWidth, x: sampleX, y: seamY + 1),
             bgraPixel(secondPixels, width: pixelWidth, x: sampleX, y: sourceSeamY + 1)
+        )
+    }
+
+    func testRejectedTwoXSeedDoesNotSetCoverageForAcceptedOneXSession() throws {
+        let width = 64
+        let height = 96
+        let bridge = try XCTUnwrap(ScrollCaptureBridge(maximumAcceptedBytes: 80_000))
+        let rejectedSeed = TestImageFactory.verticalDocumentViewport(
+            offset: 0, width: width, height: height, scale: 2
+        )
+        let acceptedSeed = TestImageFactory.verticalDocumentViewport(
+            offset: 0, width: width, height: height, scale: 1
+        )
+        let second = TestImageFactory.verticalDocumentViewport(
+            offset: 32, width: width, height: height, scale: 1
+        )
+
+        XCTAssertEqual(try bridge.append(rejectedSeed).kind, .resourceLimit)
+        XCTAssertEqual(try bridge.append(acceptedSeed).kind, .acceptedInitial)
+        let update = try bridge.append(second)
+        let final = try XCTUnwrap(bridge.finalImage())
+        let finalPixels = renderedBGRAPixels(final)
+        let secondPixels = renderedBGRAPixels(second)
+        let sourcePixel = bgraPixel(secondPixels, width: width, x: 13, y: 64)
+        let seamPixel = bgraPixel(finalPixels, width: width, x: 13, y: 96)
+
+        XCTAssertEqual(update.kind, .acceptedAppend)
+        XCTAssertEqual(update.outputHeight, 128)
+        XCTAssertEqual(final.representations.first?.pixelsWide, width)
+        XCTAssertEqual(final.representations.first?.pixelsHigh, 128)
+        XCTAssertEqual(final.size, CGSize(width: 64, height: 128))
+        assertSeamPixel(seamPixel, source: sourcePixel, scale: 1)
+        XCTAssertNotEqual(
+            seamPixel[0],
+            expectedSeamChannel(sourcePixel[0], alpha: sourcePixel[3], scale: 2)
         )
     }
 
@@ -646,31 +686,78 @@ final class ScrollCaptureBridgeTests: XCTestCase {
         return result
     }
 
-    private func assertRenderedPixelsEqualAllowingSeamCoverage(
+    private func assertRenderedPixelsEqual(
         _ actualImage: NSImage,
         _ expectedImage: NSImage,
+        seamRows: Set<Int>,
         scale: CGFloat,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
         let actual = renderedBGRAPixels(actualImage)
         let expected = renderedBGRAPixels(expectedImage)
+        let representation = expectedImage.representations.max {
+            $0.pixelsWide * $0.pixelsHigh < $1.pixelsWide * $1.pixelsHigh
+        }
+        let width = representation?.pixelsWide ?? Int(expectedImage.size.width)
+        let height = representation?.pixelsHigh ?? Int(expectedImage.size.height)
         XCTAssertEqual(actual.count, expected.count, file: file, line: line)
-        guard actual.count == expected.count else { return }
-        for offset in stride(from: 0, to: actual.count, by: 4) {
-            let actualPixel = Array(actual[offset..<(offset + 4)])
-            let expectedPixel = Array(expected[offset..<(offset + 4)])
-            let expectedSeamPixel = [
-                expectedSeamChannel(expectedPixel[0], alpha: expectedPixel[3], scale: scale),
-                expectedSeamChannel(expectedPixel[1], alpha: expectedPixel[3], scale: scale),
-                expectedSeamChannel(expectedPixel[2], alpha: expectedPixel[3], scale: scale),
-                expectedPixel[3],
-            ]
-            if actualPixel != expectedPixel && actualPixel != expectedSeamPixel {
-                XCTFail("Rendered BGRA buffers differ at pixel \(offset / 4)", file: file, line: line)
-                return
+        XCTAssertEqual(expected.count, width * height * 4, file: file, line: line)
+        XCTAssertTrue(
+            seamRows.allSatisfy { $0 >= 0 && $0 < height },
+            "Expected seam row is outside the image",
+            file: file,
+            line: line
+        )
+        guard actual.count == expected.count,
+              expected.count == width * height * 4,
+              seamRows.allSatisfy({ $0 >= 0 && $0 < height }) else { return }
+
+        var changedSeamRows = Set<Int>()
+        for y in 0..<height {
+            for x in 0..<width {
+                let offset = (y * width + x) * 4
+                let actualPixel = Array(actual[offset..<(offset + 4)])
+                let expectedPixel = Array(expected[offset..<(offset + 4)])
+                if !seamRows.contains(y) {
+                    if actualPixel != expectedPixel {
+                        XCTFail(
+                            "Rendered BGRA buffers differ outside seam at (\(x), \(y))",
+                            file: file,
+                            line: line
+                        )
+                        return
+                    }
+                    continue
+                }
+                let expectedSeamPixel = [
+                    expectedSeamChannel(expectedPixel[0], alpha: expectedPixel[3], scale: scale),
+                    expectedSeamChannel(expectedPixel[1], alpha: expectedPixel[3], scale: scale),
+                    expectedSeamChannel(expectedPixel[2], alpha: expectedPixel[3], scale: scale),
+                    expectedPixel[3],
+                ]
+                if actualPixel != expectedSeamPixel {
+                    XCTFail(
+                        "Unexpected seam coverage at (\(x), \(y))",
+                        file: file,
+                        line: line
+                    )
+                    return
+                }
+                if expectedPixel[3] > 0,
+                   expectedPixel[..<3].contains(where: { $0 < expectedPixel[3] }),
+                   actualPixel != expectedPixel {
+                    changedSeamRows.insert(y)
+                }
             }
         }
+        XCTAssertEqual(
+            changedSeamRows,
+            seamRows,
+            "Every expected seam row must visibly change a valid non-white pixel",
+            file: file,
+            line: line
+        )
     }
 
     private func assertBridgeError<T>(
