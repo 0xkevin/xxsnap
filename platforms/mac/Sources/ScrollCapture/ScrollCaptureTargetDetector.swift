@@ -64,6 +64,7 @@ final class ScrollCaptureTargetDetector: ScrollCaptureTargetDetecting {
     }
 
     func scrollableRegion(in selection: NSRect, processIdentifier: pid_t) async -> NSRect? {
+        guard !Task.isCancelled else { return nil }
         let selection = selection.standardized
         let probePoints = probePoints(in: selection)
         let queriedCandidates = await withCheckedContinuation { continuation in
@@ -74,6 +75,7 @@ final class ScrollCaptureTargetDetector: ScrollCaptureTargetDetecting {
                 ))
             }
         }
+        guard !Task.isCancelled else { return nil }
         let candidates = candidatesKeepingEarliestProbe(queriedCandidates)
 
         var best: RankedCandidate?
@@ -212,7 +214,7 @@ struct AccessibilityScrollCaptureCandidateQuery: ScrollCaptureTargetCandidateQue
         }
 
         var candidates: [ScrollCaptureTargetCandidate] = []
-        var visitedElements: [ScrollCaptureAccessibilityElement] = []
+        var elementCache: [ScrollCaptureAccessibilityCacheEntry] = []
 
         for (probeIndex, point) in probePoints.enumerated() {
             let quartzPoint = CGPoint(x: point.x, y: quartzOriginY - point.y)
@@ -226,38 +228,70 @@ struct AccessibilityScrollCaptureCandidateQuery: ScrollCaptureTargetCandidateQue
                 continue
             }
 
+            var currentProbeElements: [ScrollCaptureAccessibilityElement] = []
             for depth in 0..<16 {
-                if visitedElements.contains(where: {
+                if currentProbeElements.contains(where: {
                     accessibilityReader.elementsEqual($0, element)
                 }) {
                     break
                 }
-                visitedElements.append(element)
-                guard accessibilityReader.setMessagingTimeout(
-                    Self.messagingTimeout,
-                    for: element
-                ) else {
-                    return []
+                currentProbeElements.append(element)
+
+                let cacheIndex: Int
+                if let existingIndex = elementCache.firstIndex(where: {
+                    accessibilityReader.elementsEqual($0.element, element)
+                }) {
+                    cacheIndex = existingIndex
+                } else {
+                    guard accessibilityReader.setMessagingTimeout(
+                        Self.messagingTimeout,
+                        for: element
+                    ) else {
+                        return []
+                    }
+                    cacheIndex = elementCache.count
+                    elementCache.append(ScrollCaptureAccessibilityCacheEntry(element: element))
                 }
 
-                if let candidate = accessibilityReader.candidate(
-                    from: element,
-                    firstProbeIndex: probeIndex,
-                    quartzOriginY: quartzOriginY
-                ) {
-                    candidates.append(candidate)
+                if !elementCache[cacheIndex].candidateWasRead {
+                    let candidate = accessibilityReader.candidate(
+                        from: element,
+                        firstProbeIndex: probeIndex,
+                        quartzOriginY: quartzOriginY
+                    )
+                    elementCache[cacheIndex].candidate = candidate
+                    elementCache[cacheIndex].candidateWasRead = true
+                    if let candidate {
+                        candidates.append(candidate)
+                    }
                 }
 
-                guard depth < 15,
-                      let parent = accessibilityReader.parent(of: element)
-                else {
+                guard depth < 15 else {
                     break
                 }
+                let parent: ScrollCaptureAccessibilityElement?
+                if elementCache[cacheIndex].parentWasRead {
+                    parent = elementCache[cacheIndex].parent
+                } else {
+                    let readParent = accessibilityReader.parent(of: element)
+                    elementCache[cacheIndex].parent = readParent
+                    elementCache[cacheIndex].parentWasRead = true
+                    parent = readParent
+                }
+                guard let parent else { break }
                 element = parent
             }
         }
         return candidates
     }
+}
+
+private struct ScrollCaptureAccessibilityCacheEntry {
+    let element: ScrollCaptureAccessibilityElement
+    var candidateWasRead = false
+    var candidate: ScrollCaptureTargetCandidate?
+    var parentWasRead = false
+    var parent: ScrollCaptureAccessibilityElement?
 }
 
 private struct SystemScrollCaptureAccessibilityReader: ScrollCaptureAccessibilityReading {

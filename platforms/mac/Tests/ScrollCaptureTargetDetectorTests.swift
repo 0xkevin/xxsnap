@@ -225,6 +225,26 @@ final class ScrollCaptureTargetDetectorTests: XCTestCase {
         XCTAssertEqual(query.wasCalledOnMainThread, false)
     }
 
+    func testCancelledDetectionReturnsNilAfterBackgroundQueryCompletes() async {
+        let selection = NSRect(x: 0, y: 0, width: 500, height: 500)
+        let query = BlockingCandidateQuery(candidates: [candidate(
+            identity: 85,
+            rect: selection,
+            firstProbeIndex: 0
+        )])
+        let detector = ScrollCaptureTargetDetector(candidateQuery: query)
+        let detection = Task {
+            await detector.scrollableRegion(in: selection, processIdentifier: 42)
+        }
+
+        await query.waitUntilStarted()
+        detection.cancel()
+        query.finish()
+
+        let region = await detection.value
+        XCTAssertNil(region)
+    }
+
     func testMessagingTimeoutIsShortAndFailureStopsBeforeHitTesting() {
         let reader = FakeAccessibilityReader()
         reader.messagingTimeoutSucceeds = false
@@ -324,9 +344,9 @@ final class ScrollCaptureTargetDetectorTests: XCTestCase {
         XCTAssertEqual(reader.parentReadCount, 15)
     }
 
-    func testMissingOrWrongTypedCandidateAttributesSafelyContinueTraversal() {
-        let wrongTypedOwner = FakeAccessibilityNode()
-        let missingAttributesOwner = FakeAccessibilityNode(parent: wrongTypedOwner)
+    func testMissingCandidateAttributesSafelyContinueTraversal() {
+        let missingParentOwner = FakeAccessibilityNode()
+        let missingAttributesOwner = FakeAccessibilityNode(parent: missingParentOwner)
         let reader = FakeAccessibilityReader(hitElements: [missingAttributesOwner])
         let query = makeAccessibilityQuery(reader: reader)
 
@@ -361,6 +381,41 @@ final class ScrollCaptureTargetDetectorTests: XCTestCase {
         XCTAssertEqual(candidates.count, 1)
         XCTAssertEqual(reader.candidateReads(for: sharedOwner), 1)
         XCTAssertEqual(reader.parentReads(for: sharedOwner), 1)
+    }
+
+    func testCachedBoundaryNodeContinuesWithFreshDepthBudgetWithoutRepeatingReads() {
+        let nodes = (0..<17).map { _ in FakeAccessibilityNode() }
+        for index in 0..<16 {
+            nodes[index].parent = nodes[index + 1]
+        }
+        nodes[16].candidate = candidate(
+            identity: 120,
+            rect: NSRect(x: 0, y: 0, width: 500, height: 500),
+            firstProbeIndex: -1
+        )
+        let reader = FakeAccessibilityReader(
+            hitElements: [nodes[0], nodes[15], nodes[15]]
+        )
+        let query = makeAccessibilityQuery(reader: reader)
+
+        let candidates = query.candidates(
+            processIdentifier: 42,
+            probePoints: [
+                NSPoint(x: 100, y: 100),
+                NSPoint(x: 200, y: 200),
+                NSPoint(x: 300, y: 300),
+            ]
+        )
+
+        XCTAssertEqual(candidates, [candidate(
+            identity: 120,
+            rect: NSRect(x: 0, y: 0, width: 500, height: 500),
+            firstProbeIndex: 1
+        )])
+        for node in nodes {
+            XCTAssertEqual(reader.candidateReads(for: node), 1)
+            XCTAssertEqual(reader.parentReads(for: node), 1)
+        }
     }
 
     private func makeAccessibilityQuery(
@@ -408,6 +463,38 @@ private final class ThreadRecordingCandidateQuery: ScrollCaptureTargetCandidateQ
             callThreadWasMain = Thread.isMainThread
         }
         return []
+    }
+}
+
+private final class BlockingCandidateQuery: ScrollCaptureTargetCandidateQuerying, @unchecked Sendable {
+    private let started = DispatchSemaphore(value: 0)
+    private let release = DispatchSemaphore(value: 0)
+    private let result: [ScrollCaptureTargetCandidate]
+
+    init(candidates: [ScrollCaptureTargetCandidate]) {
+        result = candidates
+    }
+
+    func candidates(
+        processIdentifier: pid_t,
+        probePoints: [NSPoint]
+    ) -> [ScrollCaptureTargetCandidate] {
+        started.signal()
+        release.wait()
+        return result
+    }
+
+    func waitUntilStarted() async {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global().async { [started] in
+                started.wait()
+                continuation.resume()
+            }
+        }
+    }
+
+    func finish() {
+        release.signal()
     }
 }
 
