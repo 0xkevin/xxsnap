@@ -853,8 +853,8 @@ final class SelectionOverlayWindow: NSWindow {
 
     func applyScrollCaptureTarget(screenRect: NSRect) -> ScrollCaptureSeed? {
         guard let overlayView = contentView as? SelectionOverlayView else { return nil }
-        let windowRect = convertFromScreen(screenRect)
-        let localRect = overlayView.convert(windowRect, from: nil)
+        let windowRect = convertFromScreen(screenRect.standardized)
+        let localRect = overlayView.convert(windowRect, from: nil).standardized
         return overlayView.applyScrollCaptureTarget(localRect: localRect)
     }
 
@@ -909,7 +909,6 @@ final class SelectionOverlayWindow: NSWindow {
     private func requestScrollCaptureCancel() {
         guard scrollCaptureOverlayState != .inactive, !scrollCaptureTerminalActionTriggered else { return }
         scrollCaptureTerminalActionTriggered = true
-        leaveScrollCapturePassiveMode()
         onScrollCaptureCancelRequested?()
     }
 
@@ -15779,19 +15778,91 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         needsDisplay = true
     }
 
-    private func makeScrollCaptureSeed(for selectionRect: NSRect) -> ScrollCaptureSeed? {
+    private func makeScrollCaptureSeed(
+        for selectionRect: NSRect,
+        requiresExactPixelBounds: Bool = false
+    ) -> ScrollCaptureSeed? {
         guard let window,
               let backgroundImage,
               let crop = pixelAlignedCrop(image: backgroundImage, to: selectionRect.standardized)
         else { return nil }
+        if requiresExactPixelBounds, crop.drawRect != selectionRect.standardized {
+            return nil
+        }
         let windowRect = convert(crop.drawRect, to: nil)
+        let viewportBounds = NSRect(origin: .zero, size: selectionRect.standardized.size)
+        let seedAnnotations = annotations.filter { annotation in
+            let visualBounds = CaptureAnnotationRenderer.longImageVisualBounds(for: annotation).standardized
+            return !visualBounds.isNull
+                && !visualBounds.isEmpty
+                && viewportBounds.contains(visualBounds)
+        }
+        let seedAnnotationIDs = Set(seedAnnotations.map(\.id))
+        let seedMasks = eraserMasks.compactMap { mask -> EraserMask? in
+            let affectedAnnotationIDs = mask.affectedAnnotationIDs.intersection(seedAnnotationIDs)
+            let clippedRect = mask.rect.standardized.intersection(viewportBounds)
+            guard !affectedAnnotationIDs.isEmpty,
+                  !clippedRect.isNull,
+                  !clippedRect.isEmpty
+            else { return nil }
+            var seedMask = mask
+            seedMask.rect = clippedRect
+            seedMask.affectedAnnotationIDs = affectedAnnotationIDs
+            return seedMask
+        }
         return ScrollCaptureSeed(
             screenRect: window.convertToScreen(windowRect).standardized,
             snapshotRect: selectionRect.standardized,
             frozenImage: crop.image,
-            annotations: annotations,
-            eraserMasks: eraserMasks
+            annotations: seedAnnotations,
+            eraserMasks: seedMasks
         )
+    }
+
+    private func canonicalScrollCaptureTargetRect(
+        _ localRect: NSRect,
+        constrainedTo originalSelection: NSRect
+    ) -> NSRect? {
+        guard let backgroundImage,
+              let cgImage = backgroundImage.cgImage(forProposedRect: nil, context: nil, hints: nil),
+              !localRect.isNull,
+              !localRect.isEmpty
+        else { return nil }
+
+        let target = localRect.standardized
+        let original = originalSelection.standardized
+        guard target.minX >= original.minX,
+              target.minY >= original.minY,
+              target.maxX <= original.maxX,
+              target.maxY <= original.maxY
+        else { return nil }
+
+        let imageBounds = NSRect(origin: .zero, size: backgroundImage.size)
+        guard imageBounds.contains(target) else { return nil }
+        let scaleX = CGFloat(cgImage.width) / max(backgroundImage.size.width, 1)
+        let scaleY = CGFloat(cgImage.height) / max(backgroundImage.size.height, 1)
+        guard scaleX.isFinite,
+              scaleY.isFinite,
+              scaleX > 0,
+              scaleY > 0
+        else { return nil }
+
+        let minimumX = (target.minX * scaleX).rounded(.up) / scaleX
+        let maximumX = (target.maxX * scaleX).rounded(.down) / scaleX
+        let minimumY = (target.minY * scaleY).rounded(.up) / scaleY
+        let maximumY = (target.maxY * scaleY).rounded(.down) / scaleY
+        let canonical = NSRect(
+            x: minimumX,
+            y: minimumY,
+            width: maximumX - minimumX,
+            height: maximumY - minimumY
+        ).standardized
+        guard canonical.width >= 8,
+              canonical.height >= 8,
+              original.contains(canonical),
+              imageBounds.contains(canonical)
+        else { return nil }
+        return canonical
     }
 
     func applyScrollCaptureTarget(localRect: NSRect) -> ScrollCaptureSeed? {
@@ -15801,17 +15872,13 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
               !localRect.isNull,
               !localRect.isEmpty
         else { return nil }
-        let target = localRect.standardized
-        guard target.width >= 8,
-              target.height >= 8,
-              target.minX >= originalSelection.minX,
-              target.minY >= originalSelection.minY,
-              target.maxX <= originalSelection.maxX,
-              target.maxY <= originalSelection.maxY
-        else { return nil }
+        guard let target = canonicalScrollCaptureTargetRect(
+            localRect,
+            constrainedTo: originalSelection
+        ) else { return nil }
 
         resizeSelectionPreservingOverlayPositions(to: target)
-        guard let seed = makeScrollCaptureSeed(for: target) else {
+        guard let seed = makeScrollCaptureSeed(for: target, requiresExactPixelBounds: true) else {
             resizeSelectionPreservingOverlayPositions(to: originalSelection)
             return nil
         }

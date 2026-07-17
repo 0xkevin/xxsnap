@@ -278,6 +278,89 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertTrue(window.test_selectionHandleColor.isEqual(NSColor.systemGreen))
     }
 
+    func testResolvedScrollCaptureSeedFiltersUnsafeAnnotationsAndClipsMasksWithoutMutatingOverlay() throws {
+        let image = solidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        let originalSelection = NSRect(x: 40, y: 40, width: 400, height: 300)
+        let resolvedSelection = NSRect(x: 140, y: 90, width: 240, height: 180)
+        let inside = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 140, y: 80, width: 40, height: 30),
+            style: CaptureAnnotationStyle(strokeWidth: 2)
+        )
+        let outside = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 10, y: 80, width: 40, height: 30),
+            style: CaptureAnnotationStyle(strokeWidth: 2)
+        )
+        let crossingArrowLine = CaptureArrowLine(
+            start: NSPoint(x: 80, y: 120),
+            end: NSPoint(x: 160, y: 120),
+            control: NSPoint(x: 120, y: 140),
+            startArrowType: .none,
+            endArrowType: .normal
+        )
+        let crossingArrow = CaptureAnnotation(
+            kind: .arrowLine,
+            rect: crossingArrowLine.boundingRect,
+            style: CaptureAnnotationStyle(strokeWidth: 2),
+            arrowLine: crossingArrowLine
+        )
+        let crossingBrushPath = CaptureBrushPath(points: [
+            NSPoint(x: 200, y: 150),
+            NSPoint(x: 280, y: 165),
+            NSPoint(x: 360, y: 150),
+        ])
+        let crossingBrush = CaptureAnnotation(
+            kind: .brush,
+            rect: crossingBrushPath.boundingRect,
+            style: CaptureAnnotationStyle(strokeWidth: 2),
+            brushPath: crossingBrushPath
+        )
+        let annotations = [inside, outside, crossingArrow, crossingBrush]
+        let insideMask = EraserMask(
+            rect: NSRect(x: 135, y: 85, width: 20, height: 12),
+            affectedAnnotationIDs: [inside.id, outside.id]
+        )
+        let crossingMask = EraserMask(
+            rect: NSRect(x: 90, y: 90, width: 70, height: 20),
+            affectedAnnotationIDs: [inside.id]
+        )
+        let outsideMask = EraserMask(
+            rect: NSRect(x: 10, y: 90, width: 20, height: 20),
+            affectedAnnotationIDs: [outside.id]
+        )
+        let masks = [insideMask, crossingMask, outsideMask]
+        window.test_setLockedSelectionRect(originalSelection)
+        window.test_setAnnotations(annotations)
+        window.test_setEraserMasks(masks)
+        window.test_beginScrollCapture()
+
+        let seed = try XCTUnwrap(window.test_applyScrollCaptureTargetLocalRect(resolvedSelection))
+        let seedInside = try XCTUnwrap(seed.annotations.first)
+
+        XCTAssertEqual(seed.annotations.map(\.id), [inside.id])
+        XCTAssertEqual(seedInside.rect, NSRect(x: 40, y: 30, width: 40, height: 30))
+        XCTAssertTrue(NSRect(origin: .zero, size: seed.snapshotRect.size).contains(
+            CaptureAnnotationRenderer.longImageVisualBounds(for: seedInside)
+        ))
+        XCTAssertEqual(seed.eraserMasks.count, 2)
+        XCTAssertEqual(seed.eraserMasks[0].affectedAnnotationIDs, [inside.id])
+        XCTAssertEqual(seed.eraserMasks[0].rect, NSRect(x: 35, y: 35, width: 20, height: 12))
+        XCTAssertEqual(seed.eraserMasks[1].affectedAnnotationIDs, [inside.id])
+        XCTAssertEqual(seed.eraserMasks[1].rect, NSRect(x: 0, y: 40, width: 60, height: 20))
+        XCTAssertEqual(
+            (0..<annotations.count).compactMap(window.test_annotation(at:)).map(\.id),
+            annotations.map(\.id)
+        )
+        XCTAssertEqual((0..<masks.count).compactMap(window.test_eraserMask(at:)).count, masks.count)
+
+        window.restoreAfterScrollCaptureCancellation()
+
+        XCTAssertEqual((0..<annotations.count).compactMap(window.test_annotation(at:)), annotations)
+        XCTAssertEqual((0..<masks.count).compactMap(window.test_eraserMask(at:)), masks)
+    }
+
     func testScrollCaptureTargetFallbackKeepsOriginalSelectionAndBlueChrome() {
         let image = solidImage(size: NSSize(width: 640, height: 420), color: .white)
         let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
@@ -350,6 +433,67 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_markScrollCaptureTargetFallback()
         XCTAssertTrue(window.test_selectionBorderColor.isEqual(window.test_defaultSelectionColor))
         XCTAssertTrue(window.test_selectionHandleColor.isEqual(window.test_defaultSelectionColor))
+    }
+
+    func testResolvedScrollCaptureTargetUsesOneInwardRetinaCanonicalRectAcrossWindowOrigins() throws {
+        let imageSize = NSSize(width: 640, height: 420)
+        let original = NSRect(x: 80.25, y: 60.25, width: 300.5, height: 220.5)
+        let fractionalTarget = NSRect(x: 80.3, y: 60.3, width: 300.4, height: 220.4)
+        let canonical = NSRect(x: 80.5, y: 60.5, width: 300, height: 220)
+
+        for windowOrigin in [NSPoint(x: 137, y: 83), NSPoint(x: -480, y: -220)] {
+            var configuration = SelectionOverlayConfiguration.default
+            configuration.windowFrame = NSRect(origin: windowOrigin, size: imageSize)
+            let window = SelectionOverlayWindow(
+                backgroundImage: retinaSolidImage(size: imageSize, color: .white),
+                configuration: configuration
+            ) { _ in }
+            let annotation = CaptureAnnotation(
+                kind: .rectangle,
+                rect: NSRect(x: 60, y: 70, width: 40, height: 30),
+                style: CaptureAnnotationStyle(strokeWidth: 2)
+            )
+            let mask = EraserMask(
+                rect: NSRect(x: 65, y: 75, width: 12, height: 10),
+                affectedAnnotationIDs: [annotation.id]
+            )
+            window.test_setLockedSelectionRect(original)
+            window.test_setAnnotations([annotation])
+            window.test_setEraserMasks([mask])
+            let annotationOverlayRect = try XCTUnwrap(window.test_annotationOverlayRect(at: 0))
+            let maskOverlayRect = try XCTUnwrap(window.test_eraserMaskOverlayRect(at: 0))
+            window.test_beginScrollCapture()
+
+            let seed = try XCTUnwrap(window.test_applyScrollCaptureTargetLocalRect(fractionalTarget))
+            let frozenPixels = try XCTUnwrap(
+                seed.frozenImage.cgImage(forProposedRect: nil, context: nil, hints: nil)
+            )
+
+            XCTAssertEqual(window.test_lockedSelectionRect, canonical)
+            XCTAssertEqual(seed.snapshotRect, canonical)
+            XCTAssertEqual(seed.screenRect, window.convertToScreen(canonical))
+            XCTAssertTrue(original.contains(seed.snapshotRect))
+            XCTAssertEqual(seed.frozenImage.size, canonical.size)
+            XCTAssertEqual(frozenPixels.width, 600)
+            XCTAssertEqual(frozenPixels.height, 440)
+            XCTAssertEqual(CGFloat(frozenPixels.width) / 2, seed.snapshotRect.width)
+            XCTAssertEqual(CGFloat(frozenPixels.height) / 2, seed.snapshotRect.height)
+            XCTAssertEqual(window.test_annotationOverlayRect(at: 0), annotationOverlayRect)
+            XCTAssertEqual(window.test_eraserMaskOverlayRect(at: 0), maskOverlayRect)
+        }
+    }
+
+    func testScrollCaptureTargetRejectsRectThatBecomesSubminimumAfterInwardPixelAlignment() {
+        let image = retinaSolidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        let original = NSRect(x: 80, y: 60, width: 300, height: 220)
+        let fractionalTarget = NSRect(x: 100.1, y: 90.1, width: 8.1, height: 40.2)
+        window.test_setLockedSelectionRect(original)
+        window.test_beginScrollCapture()
+
+        XCTAssertNil(window.test_applyScrollCaptureTargetLocalRect(fractionalTarget))
+        XCTAssertEqual(window.test_lockedSelectionRect, original)
+        XCTAssertTrue(window.test_selectionBorderColor.isEqual(window.test_defaultSelectionColor))
     }
 
     func testBeginScrollCaptureClearsAndSuppressesColorSamplerLayer() {
@@ -436,7 +580,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertLessThan(afterPixel.alpha, 10, "the selection must reveal the live scrolling application")
     }
 
-    func testEscapeCancelsCapturingAndPausedScrollCaptureExactlyOnce() {
+    func testEscapeRequestsScrollCaptureCancelWithoutLeavingPassiveMode() {
         for paused in [false, true] {
             var ordinaryCompletionCount = 0
             var cancelCount = 0
@@ -453,8 +597,8 @@ final class SelectionToolbarStateTests: XCTestCase {
             window.test_keyDown(keyCode: 53)
             XCTAssertEqual(cancelCount, 1)
             XCTAssertEqual(ordinaryCompletionCount, 0)
-            XCTAssertEqual(window.scrollCaptureOverlayState, .inactive)
-            XCTAssertFalse(window.ignoresMouseEvents)
+            XCTAssertNotEqual(window.scrollCaptureOverlayState, .inactive)
+            XCTAssertTrue(window.ignoresMouseEvents)
             XCTAssertTrue(window.test_toolbarButtonIsSelected(.rectangle))
             window.test_keyDown(keyCode: 53)
             XCTAssertEqual(cancelCount, 1)
@@ -10256,6 +10400,154 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(session.finishCount, 1)
         XCTAssertEqual(handoffCount, 1)
         XCTAssertEqual(presentation.stopCount, 1)
+    }
+
+    @MainActor
+    func testCaptureCoordinatorFinishPendingRejectsEscapeWithoutLeavingPassiveMode() async throws {
+        let seed = scrollCaptureSeedForCoordinatorTests()
+        let detector = FakeScrollCaptureTargetDetector(results: [], suspendsRequests: true)
+        let session = FakeScrollCaptureSession(seed: seed)
+        let presentation = FakeScrollCapturePresentation()
+        var handoffCount = 0
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            scrollCaptureSessionFactory: { _, _ in session },
+            scrollCapturePresentationFactory: { context in
+                presentation.onFinish = context.onFinish
+                presentation.onCancel = context.onCancel
+                return presentation
+            },
+            longImageHandoff: { _, _ in handoffCount += 1 },
+            frontmostApplicationResolver: { .current },
+            applicationActivator: { _ in },
+            scrollCaptureTargetDetector: detector
+        )
+        let overlay = SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in }
+        coordinator.test_installOverlayWindow(overlay)
+        coordinator.test_requestScrollCapture(seed: seed)
+        for _ in 0..<20 where detector.pendingRequestCount == 0 { await Task.yield() }
+
+        overlay.onScrollCaptureFinishRequested?()
+        overlay.test_keyDown(keyCode: 53)
+
+        XCTAssertEqual(overlay.scrollCaptureOverlayState, .capturing)
+        XCTAssertTrue(overlay.ignoresMouseEvents)
+        XCTAssertEqual(session.cancelCount, 0)
+
+        detector.resumeRequest(at: 0, returning: nil)
+        for _ in 0..<40 where handoffCount == 0 { await Task.yield() }
+
+        XCTAssertEqual(handoffCount, 1)
+        XCTAssertEqual(overlay.scrollCaptureOverlayState, .inactive)
+        XCTAssertFalse(overlay.ignoresMouseEvents)
+    }
+
+    @MainActor
+    func testCaptureCoordinatorFinishingRejectsEscapeWithoutLeavingPassiveMode() async throws {
+        let seed = scrollCaptureSeedForCoordinatorTests()
+        let session = FakeScrollCaptureSession(seed: seed)
+        session.suspendsFinish = true
+        let presentation = FakeScrollCapturePresentation()
+        var handoffCount = 0
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            scrollCaptureSessionFactory: { _, _ in session },
+            scrollCapturePresentationFactory: { context in
+                presentation.onFinish = context.onFinish
+                presentation.onCancel = context.onCancel
+                return presentation
+            },
+            longImageHandoff: { _, _ in handoffCount += 1 },
+            scrollCaptureTargetDetector: FakeScrollCaptureTargetDetector()
+        )
+        let overlay = SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in }
+        coordinator.test_installOverlayWindow(overlay)
+        coordinator.test_requestScrollCapture(seed: seed)
+        for _ in 0..<20 where session.startCount == 0 { await Task.yield() }
+
+        presentation.onFinish?()
+        for _ in 0..<20 where session.finishContinuation == nil { await Task.yield() }
+        overlay.test_keyDown(keyCode: 53)
+
+        XCTAssertEqual(overlay.scrollCaptureOverlayState, .capturing)
+        XCTAssertTrue(overlay.ignoresMouseEvents)
+        XCTAssertEqual(session.cancelCount, 0)
+
+        session.finishContinuation?.resume(returning: session.finishedImage)
+        for _ in 0..<20 where handoffCount == 0 { await Task.yield() }
+
+        XCTAssertEqual(handoffCount, 1)
+        XCTAssertEqual(overlay.scrollCaptureOverlayState, .inactive)
+        XCTAssertFalse(overlay.ignoresMouseEvents)
+    }
+
+    @MainActor
+    func testCaptureCoordinatorEscapeCancelsStartingDetectionAndRestoresInteractiveBlueOverlay() async throws {
+        let seed = scrollCaptureSeedForCoordinatorTests()
+        let detector = FakeScrollCaptureTargetDetector(results: [], suspendsRequests: true)
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            scrollCaptureSessionFactory: { _, _ in
+                XCTFail("cancelled detection must not create a session")
+                return FakeScrollCaptureSession(seed: seed)
+            },
+            scrollCapturePresentationFactory: { _ in
+                XCTFail("cancelled detection must not create presentation")
+                return FakeScrollCapturePresentation()
+            },
+            frontmostApplicationResolver: { .current },
+            applicationActivator: { _ in },
+            scrollCaptureTargetDetector: detector
+        )
+        let overlay = SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in }
+        coordinator.test_installOverlayWindow(overlay)
+        coordinator.test_requestScrollCapture(seed: seed)
+        for _ in 0..<20 where detector.pendingRequestCount == 0 { await Task.yield() }
+
+        overlay.test_keyDown(keyCode: 53)
+
+        XCTAssertEqual(overlay.scrollCaptureOverlayState, .inactive)
+        XCTAssertFalse(overlay.ignoresMouseEvents)
+        XCTAssertEqual(overlay.test_lockedSelectionRect, seed.snapshotRect)
+        XCTAssertTrue(overlay.test_selectionBorderColor.isEqual(overlay.test_defaultSelectionColor))
+        detector.resumeRequest(at: 0, returning: nil)
+        await Task.yield()
+    }
+
+    @MainActor
+    func testCaptureCoordinatorEscapeCancelsActiveResolvedCaptureAndRestoresOriginalSelection() async throws {
+        let seed = scrollCaptureSeedForCoordinatorTests()
+        let overlay = SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in }
+        let resolvedLocalRect = NSRect(x: 20, y: 24, width: 48, height: 28)
+        let detector = FakeScrollCaptureTargetDetector(results: [overlay.convertToScreen(resolvedLocalRect)])
+        let session = FakeScrollCaptureSession(seed: seed)
+        let presentation = FakeScrollCapturePresentation()
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            scrollCaptureSessionFactory: { _, _ in session },
+            scrollCapturePresentationFactory: { _ in presentation },
+            frontmostApplicationResolver: { .current },
+            applicationActivator: { _ in },
+            scrollCaptureTargetDetector: detector
+        )
+        coordinator.test_installOverlayWindow(overlay)
+        coordinator.test_requestScrollCapture(seed: seed)
+        for _ in 0..<20 where session.startCount == 0 { await Task.yield() }
+        XCTAssertEqual(overlay.test_lockedSelectionRect, resolvedLocalRect)
+        XCTAssertTrue(overlay.test_selectionBorderColor.isEqual(NSColor.systemGreen))
+
+        overlay.test_keyDown(keyCode: 53)
+
+        XCTAssertEqual(session.cancelCount, 1)
+        XCTAssertEqual(presentation.stopCount, 1)
+        XCTAssertEqual(overlay.scrollCaptureOverlayState, .inactive)
+        XCTAssertFalse(overlay.ignoresMouseEvents)
+        XCTAssertEqual(overlay.test_lockedSelectionRect, seed.snapshotRect)
+        XCTAssertTrue(overlay.test_selectionBorderColor.isEqual(overlay.test_defaultSelectionColor))
     }
 
     @MainActor
