@@ -15778,37 +15778,48 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         needsDisplay = true
     }
 
+    private enum ScrollCaptureSeedPurpose {
+        case originalFallbackEligible
+        case resolvedCanonical
+    }
+
     private func makeScrollCaptureSeed(
         for selectionRect: NSRect,
-        requiresExactPixelBounds: Bool = false
+        purpose: ScrollCaptureSeedPurpose
     ) -> ScrollCaptureSeed? {
         guard let window,
               let backgroundImage,
               let crop = pixelAlignedCrop(image: backgroundImage, to: selectionRect.standardized)
         else { return nil }
-        if requiresExactPixelBounds, crop.drawRect != selectionRect.standardized {
-            return nil
-        }
         let windowRect = convert(crop.drawRect, to: nil)
-        let viewportBounds = NSRect(origin: .zero, size: selectionRect.standardized.size)
-        let seedAnnotations = annotations.filter { annotation in
-            let visualBounds = CaptureAnnotationRenderer.longImageVisualBounds(for: annotation).standardized
-            return !visualBounds.isNull
-                && !visualBounds.isEmpty
-                && viewportBounds.contains(visualBounds)
-        }
-        let seedAnnotationIDs = Set(seedAnnotations.map(\.id))
-        let seedMasks = eraserMasks.compactMap { mask -> EraserMask? in
-            let affectedAnnotationIDs = mask.affectedAnnotationIDs.intersection(seedAnnotationIDs)
-            let clippedRect = mask.rect.standardized.intersection(viewportBounds)
-            guard !affectedAnnotationIDs.isEmpty,
-                  !clippedRect.isNull,
-                  !clippedRect.isEmpty
-            else { return nil }
-            var seedMask = mask
-            seedMask.rect = clippedRect
-            seedMask.affectedAnnotationIDs = affectedAnnotationIDs
-            return seedMask
+        let seedAnnotations: [CaptureAnnotation]
+        let seedMasks: [EraserMask]
+        switch purpose {
+        case .originalFallbackEligible:
+            seedAnnotations = annotations
+            seedMasks = eraserMasks
+        case .resolvedCanonical:
+            guard crop.drawRect == selectionRect.standardized else { return nil }
+            let viewportBounds = NSRect(origin: .zero, size: selectionRect.standardized.size)
+            seedAnnotations = annotations.filter { annotation in
+                let visualBounds = CaptureAnnotationRenderer.longImageVisualBounds(for: annotation).standardized
+                return !visualBounds.isNull
+                    && !visualBounds.isEmpty
+                    && viewportBounds.contains(visualBounds)
+            }
+            let seedAnnotationIDs = Set(seedAnnotations.map(\.id))
+            seedMasks = eraserMasks.compactMap { mask -> EraserMask? in
+                let affectedAnnotationIDs = mask.affectedAnnotationIDs.intersection(seedAnnotationIDs)
+                let clippedRect = mask.rect.standardized.intersection(viewportBounds)
+                guard !affectedAnnotationIDs.isEmpty,
+                      !clippedRect.isNull,
+                      !clippedRect.isEmpty
+                else { return nil }
+                var seedMask = mask
+                seedMask.rect = clippedRect
+                seedMask.affectedAnnotationIDs = affectedAnnotationIDs
+                return seedMask
+            }
         }
         return ScrollCaptureSeed(
             screenRect: window.convertToScreen(windowRect).standardized,
@@ -15878,7 +15889,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         ) else { return nil }
 
         resizeSelectionPreservingOverlayPositions(to: target)
-        guard let seed = makeScrollCaptureSeed(for: target, requiresExactPixelBounds: true) else {
+        guard let seed = makeScrollCaptureSeed(for: target, purpose: .resolvedCanonical) else {
             resizeSelectionPreservingOverlayPositions(to: originalSelection)
             return nil
         }
@@ -15935,7 +15946,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         commitCurrentTextEdit()
         commitNumberEditingIfNeeded()
         let snapshotRect = lockedSelectionRect.standardized
-        guard let seed = makeScrollCaptureSeed(for: snapshotRect) else { return }
+        guard let seed = makeScrollCaptureSeed(
+            for: snapshotRect,
+            purpose: .originalFallbackEligible
+        ) else { return }
         closeTextDropdown()
         closeMagnifierZoomDropdown()
         showsStrokeStyleMenu = false
