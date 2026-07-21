@@ -84,6 +84,7 @@ struct SelectionOverlayConfiguration {
     var pinnedImageContextMenuHandler: ((NSPoint) -> Void)?
     var pinnedImageWindowCommandHandler: ((PinnedImageWindowCommand) -> Void)?
     var pinnedImageToolbarToggleHandler: (() -> Void)?
+    var additionalKeyDownHandler: ((NSEvent) -> Bool)?
 
     static let `default` = SelectionOverlayConfiguration(
         windowFrame: nil,
@@ -113,7 +114,8 @@ struct SelectionOverlayConfiguration {
         pinnedImageDragEnded: nil,
         pinnedImageContextMenuHandler: nil,
         pinnedImageWindowCommandHandler: nil,
-        pinnedImageToolbarToggleHandler: nil
+        pinnedImageToolbarToggleHandler: nil,
+        additionalKeyDownHandler: nil
     )
 
     static func pinnedImageEditor(
@@ -155,7 +157,8 @@ struct SelectionOverlayConfiguration {
             pinnedImageDragEnded: pinnedImageDragEnded,
             pinnedImageContextMenuHandler: pinnedImageContextMenuHandler,
             pinnedImageWindowCommandHandler: pinnedImageWindowCommandHandler,
-            pinnedImageToolbarToggleHandler: pinnedImageToolbarToggleHandler
+            pinnedImageToolbarToggleHandler: pinnedImageToolbarToggleHandler,
+            additionalKeyDownHandler: nil
         )
     }
 
@@ -168,7 +171,9 @@ struct SelectionOverlayConfiguration {
         interactionBegan: (() -> Void)? = nil,
         interactionTargetBegan: ((AnnotationID?) -> Void)? = nil,
         interactionEnded: (() -> Void)? = nil,
-        scrollHandler: ((CGFloat) -> Void)? = nil
+        scrollHandler: ((CGFloat) -> Void)? = nil,
+        toolbarToggleHandler: (() -> Void)? = nil,
+        keyDownHandler: ((NSEvent) -> Bool)? = nil
     ) -> SelectionOverlayConfiguration {
         SelectionOverlayConfiguration(
             windowFrame: windowFrame,
@@ -198,7 +203,8 @@ struct SelectionOverlayConfiguration {
             pinnedImageDragEnded: nil,
             pinnedImageContextMenuHandler: nil,
             pinnedImageWindowCommandHandler: nil,
-            pinnedImageToolbarToggleHandler: nil
+            pinnedImageToolbarToggleHandler: toolbarToggleHandler,
+            additionalKeyDownHandler: keyDownHandler
         )
     }
 
@@ -744,6 +750,10 @@ final class SelectionOverlayWindow: NSWindow {
 
     var editorSnapshot: SelectionOverlayEditorSnapshot? {
         (contentView as? SelectionOverlayView)?.editorSnapshot
+    }
+
+    var hasActiveTextEdit: Bool {
+        (contentView as? SelectionOverlayView)?.hasActiveTextEdit ?? false
     }
 
     func updateLongImageEditor(
@@ -2941,9 +2951,23 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             || isNumberToolActive
             || isMagnifierToolActive
             || isEraserToolActive
-        let targetID = startsNewContent ? nil : annotationIndexForBorder(at: point).map { annotations[$0].id }
-        configuration.annotationInteractionTargetBegan?(targetID)
-        configuration.annotationInteractionBegan?()
+        let targetIndex: Int?
+        if isTextToolActive {
+            targetIndex = textAnnotationIndex(at: point) ?? annotationIndexForBorder(at: point)
+        } else if isNumberToolActive {
+            targetIndex = numberAnnotationIndex(at: point)
+        } else if isMagnifierToolActive {
+            targetIndex = annotationIndexForBorder(at: point)
+        } else {
+            targetIndex = startsNewContent ? nil : annotationIndexForBorder(at: point)
+        }
+        let targetID = targetIndex.map { annotations[$0].id }
+        if !isToolbarOrPanelPoint(point) {
+            if isEraserToolActive || (!isEyedropperToolActive && targetID != nil) {
+                configuration.annotationInteractionTargetBegan?(targetID)
+            }
+            configuration.annotationInteractionBegan?()
+        }
         NSLog("xxsnap overlay mouseDown mode=%@ point=(%.0f, %.0f)", "\(interactionMode)", point.x, point.y)
 
         cancelSelectionWheelAnimation()
@@ -3714,6 +3738,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             modifierFlags: event.modifierFlags
         ),
            copySampledColorToPasteboard() {
+            return true
+        }
+
+        if configuration.additionalKeyDownHandler?(event) == true {
             return true
         }
 
@@ -5797,6 +5825,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         validEditingTextAnnotationIndex() != nil
     }
 
+    fileprivate var hasActiveTextEdit: Bool {
+        isEditingTextAnnotation
+    }
+
     private func validEditingTextAnnotationIndex() -> Int? {
         guard let editingTextAnnotationIndex,
               annotations.indices.contains(editingTextAnnotationIndex),
@@ -6046,25 +6078,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private func textAnnotationSize(text: String, style: CaptureAnnotationStyle) -> NSSize {
-        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let lineHeight = CaptureAnnotationRenderer.textLineHeight(style: style)
-        let horizontalPadding = CaptureAnnotationRenderer.textHorizontalPadding * 2
-        guard !trimmedText.isEmpty else {
-            return NSSize(width: horizontalPadding + textCaretAnnotationWidth, height: lineHeight)
-        }
-
-        let attributedText = NSAttributedString(
-            string: text,
-            attributes: CaptureAnnotationRenderer.textAttributes(style: style)
-        )
-        let measured = attributedText.boundingRect(
-            with: NSSize(width: 10_000, height: CGFloat.greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading]
-        )
-        return NSSize(
-            width: horizontalPadding + max(textCaretAnnotationWidth, ceil(measured.width)),
-            height: max(lineHeight, ceil(measured.height))
-        )
+        CaptureAnnotationRenderer.textAnnotationSize(text: text, style: style)
     }
 
     private func refreshSelectionBackground() {

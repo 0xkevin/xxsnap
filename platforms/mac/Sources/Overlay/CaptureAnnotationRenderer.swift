@@ -1231,10 +1231,30 @@ enum CaptureAnnotationRenderer {
     }
 
     static let textHorizontalPadding: CGFloat = 8
+    static let textCaretAnnotationWidth: CGFloat = 1
 
     static func textContentRect(in rect: NSRect) -> NSRect {
         let horizontalPadding = min(textHorizontalPadding, max(0, rect.width / 2))
         return rect.insetBy(dx: horizontalPadding, dy: 0)
+    }
+
+    static func textAnnotationSize(text: String, style: CaptureAnnotationStyle) -> NSSize {
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lineHeight = textLineHeight(style: style)
+        let horizontalPadding = textHorizontalPadding * 2
+        guard !trimmedText.isEmpty else {
+            return NSSize(width: horizontalPadding + textCaretAnnotationWidth, height: lineHeight)
+        }
+
+        let attributedText = NSAttributedString(string: text, attributes: textAttributes(style: style))
+        let measured = attributedText.boundingRect(
+            with: NSSize(width: 10_000, height: CGFloat.greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading]
+        )
+        return NSSize(
+            width: horizontalPadding + max(textCaretAnnotationWidth, ceil(measured.width)),
+            height: max(lineHeight, ceil(measured.height))
+        )
     }
 
     static func textAttributes(style: CaptureAnnotationStyle) -> [NSAttributedString.Key: Any] {

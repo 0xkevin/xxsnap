@@ -14,6 +14,7 @@ final class LongImageEditorTests: XCTestCase {
             initialWindowSize: NSSize(width: 1_000, height: 840)
         )
         controller.show()
+        controller.showEditingToolbar()
         let overlay = try XCTUnwrap(controller.test_editingOverlay)
         overlay.test_activateTextTool()
 
@@ -49,7 +50,8 @@ final class LongImageEditorTests: XCTestCase {
         XCTAssertEqual(activationCount, 1)
         XCTAssertEqual(windowWasKeyWhenActivationStarted, false)
         XCTAssertTrue(controller.window?.isVisible == true)
-        XCTAssertTrue(controller.test_editingOverlay?.isKeyWindow == true)
+        XCTAssertTrue(controller.window?.firstResponder === controller.scrollView.documentView)
+        XCTAssertNil(controller.test_editingOverlay)
         controller.stop()
     }
 
@@ -86,7 +88,11 @@ final class LongImageEditorTests: XCTestCase {
         )
 
         XCTAssertEqual(controller.imagePixelSize, NSSize(width: 2_000, height: 16_000))
-        XCTAssertEqual(controller.fitWidthScale, 1, accuracy: 0.0001)
+        XCTAssertEqual(
+            controller.fitWidthScale,
+            controller.scrollView.contentSize.width / image.size.width,
+            accuracy: 0.0001
+        )
         XCTAssertEqual(controller.visibleImageRect.minY, 0, accuracy: 0.0001)
     }
 
@@ -123,10 +129,12 @@ final class LongImageEditorTests: XCTestCase {
     }
 
     func testTranslationScalesBetweenImageAndViewportCoordinatesWithoutDrift() {
+        var style = CaptureAnnotationStyle()
+        style.strokeWidth = 6
         let original = CaptureAnnotation(
             kind: .brush,
             rect: NSRect(x: 20, y: 620, width: 80, height: 40),
-            style: CaptureAnnotationStyle(),
+            style: style,
             brushPath: CaptureBrushPath(points: [NSPoint(x: 20, y: 620), NSPoint(x: 100, y: 660)])
         )
         let viewport = LongImageAnnotationTranslation.annotation(
@@ -136,6 +144,7 @@ final class LongImageEditorTests: XCTestCase {
         )
         XCTAssertEqual(viewport.rect, NSRect(x: 10, y: 10, width: 40, height: 20))
         XCTAssertEqual(viewport.brushPath?.points, [NSPoint(x: 10, y: 10), NSPoint(x: 50, y: 30)])
+        XCTAssertEqual(viewport.style.strokeWidth, 3, accuracy: 0.0001)
 
         let restored = LongImageAnnotationTranslation.annotation(
             viewport,
@@ -144,6 +153,34 @@ final class LongImageEditorTests: XCTestCase {
         )
         XCTAssertEqual(restored.rect, original.rect)
         XCTAssertEqual(restored.brushPath?.points, original.brushPath?.points)
+        XCTAssertEqual(restored.style.strokeWidth, original.style.strokeWidth, accuracy: 0.0001)
+    }
+
+    func testBrushStrokeWidthStaysStableAfterLongImageCommitAtMagnifiedScale() throws {
+        let controller = LongImageEditorWindowController(
+            canonicalImage: TestImageFactory.solid(
+                size: NSSize(width: 160, height: 1_200),
+                color: .white
+            ),
+            visibleFrame: NSRect(x: 0, y: 0, width: 500, height: 450),
+            initialWindowSize: NSSize(width: 400, height: 400)
+        )
+        controller.show()
+        controller.showEditingToolbar()
+        let overlay = try XCTUnwrap(controller.test_editingOverlay)
+        XCTAssertGreaterThan(controller.fitWidthScale, 1)
+
+        overlay.test_activateShapeTool(.brush)
+        overlay.test_drag(from: NSPoint(x: 80, y: 180), to: NSPoint(x: 180, y: 260))
+
+        let viewportStrokeWidth = try XCTUnwrap(overlay.test_annotation(at: 0)).style.strokeWidth
+        let canonicalStrokeWidth = try XCTUnwrap(controller.test_fullAnnotations.first).style.strokeWidth
+        XCTAssertEqual(
+            canonicalStrokeWidth * controller.fitWidthScale,
+            viewportStrokeWidth,
+            accuracy: 0.0001
+        )
+        controller.stop()
     }
 
     func testVisibleSliceFiltersAndTranslatesWithoutChangingOrderOrIDs() {
@@ -495,7 +532,7 @@ final class LongImageEditorTests: XCTestCase {
         XCTAssertEqual(after.fitWidthScale, 1, accuracy: 0.0001)
     }
 
-    func testWindowIsTitledResizableBoundedAndToolbarIsOutsideScrollView() {
+    func testWindowUsesPinnedStyleContextMenuInsteadOfFixedControlStrip() throws {
         let visible = NSRect(x: 20, y: 40, width: 1_200, height: 900)
         let controller = LongImageEditorWindowController(
             image: TestImageFactory.solid(size: NSSize(width: 1_000, height: 8_000), color: .white),
@@ -507,8 +544,148 @@ final class LongImageEditorTests: XCTestCase {
         XCTAssertTrue(window.styleMask.contains(.titled))
         XCTAssertTrue(window.styleMask.contains(.resizable))
         XCTAssertTrue(visible.contains(window.frame))
-        XCTAssertFalse(controller.scrollView.isDescendant(of: controller.controlStripView))
-        XCTAssertFalse(controller.controlStripView.isDescendant(of: controller.scrollView))
+        controller.show()
+        let contentView = try XCTUnwrap(window.contentView)
+        contentView.layoutSubtreeIfNeeded()
+        XCTAssertEqual(controller.scrollView.frame, contentView.bounds)
+        XCTAssertNil(controller.test_editingOverlay)
+
+        let menu = try XCTUnwrap(controller.scrollView.menu)
+        XCTAssertEqual(menu.items.map { $0.isSeparatorItem ? nil : $0.title }, [
+            "显示工具条 (⇧)",
+            nil,
+            "贴图",
+            "复制图片",
+            "保存图片",
+            nil,
+            "关闭",
+        ])
+        let toolbarItem = try XCTUnwrap(menu.items.first { $0.title == "显示工具条 (⇧)" })
+        XCTAssertEqual(toolbarItem.state, .off)
+        let copyItem = try XCTUnwrap(menu.items.first { $0.title == "复制图片" })
+        XCTAssertEqual(copyItem.keyEquivalent, "c")
+        XCTAssertEqual(copyItem.keyEquivalentModifierMask, [.command])
+        let saveItem = try XCTUnwrap(menu.items.first { $0.title == "保存图片" })
+        XCTAssertEqual(saveItem.keyEquivalent, "s")
+        XCTAssertEqual(saveItem.keyEquivalentModifierMask, [.command])
+        let closeItem = try XCTUnwrap(menu.items.first { $0.title == "关闭" })
+        XCTAssertEqual(closeItem.keyEquivalent, "w")
+        XCTAssertEqual(closeItem.keyEquivalentModifierMask, [.command])
+        XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(toolbarItem.action), to: toolbarItem.target, from: toolbarItem))
+        XCTAssertNotNil(controller.test_editingOverlay)
+        XCTAssertEqual(toolbarItem.state, .on)
+        XCTAssertEqual(controller.window?.isVisible, true)
+        controller.stop()
+    }
+
+    func testShiftReleaseTogglesLongImageToolbarLikePinnedImage() throws {
+        let controller = makeTallController()
+        controller.show()
+        let documentView = try XCTUnwrap(controller.scrollView.documentView)
+        try XCTUnwrap(controller.window).makeFirstResponder(documentView)
+
+        func flagsEvent(_ modifierFlags: NSEvent.ModifierFlags) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.keyEvent(
+                with: .flagsChanged,
+                location: .zero,
+                modifierFlags: modifierFlags,
+                timestamp: 0,
+                windowNumber: controller.window?.windowNumber ?? 0,
+                context: nil,
+                characters: "",
+                charactersIgnoringModifiers: "",
+                isARepeat: false,
+                keyCode: 56
+            ))
+        }
+
+        documentView.flagsChanged(with: try flagsEvent([.shift]))
+        XCTAssertNil(controller.test_editingOverlay)
+        documentView.flagsChanged(with: try flagsEvent([]))
+        let overlay = try XCTUnwrap(controller.test_editingOverlay)
+
+        overlay.test_flagsChanged(modifierFlags: [.shift])
+        XCTAssertNotNil(controller.test_editingOverlay)
+        overlay.test_flagsChanged(modifierFlags: [])
+        XCTAssertNil(controller.test_editingOverlay)
+        XCTAssertEqual(controller.window?.isVisible, true)
+        controller.stop()
+    }
+
+    func testLongImageKeyboardShortcutsWorkWithAndWithoutEditingToolbar() throws {
+        var copyCount = 0
+        var saveCount = 0
+        var closeCount = 0
+        let controller = LongImageEditorWindowController(
+            image: TestImageFactory.solid(size: NSSize(width: 1_000, height: 8_000), color: .white),
+            visibleFrame: NSRect(x: 0, y: 0, width: 1_200, height: 900),
+            actions: LongImageEditorActions(
+                copy: { _ in copyCount += 1; return true },
+                save: { _ in saveCount += 1; return true },
+                pin: { _ in true }
+            )
+        )
+        controller.onClose = { closeCount += 1 }
+        controller.show()
+
+        func keyEvent(_ keyCode: UInt16, _ characters: String) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.keyEvent(
+                with: .keyDown,
+                location: .zero,
+                modifierFlags: [.command],
+                timestamp: 0,
+                windowNumber: controller.window?.windowNumber ?? 0,
+                context: nil,
+                characters: characters,
+                charactersIgnoringModifiers: characters,
+                isARepeat: false,
+                keyCode: keyCode
+            ))
+        }
+
+        let documentView = try XCTUnwrap(controller.scrollView.documentView)
+        documentView.keyDown(with: try keyEvent(8, "c"))
+        documentView.keyDown(with: try keyEvent(1, "s"))
+        XCTAssertEqual(copyCount, 1)
+        XCTAssertEqual(saveCount, 1)
+
+        controller.showEditingToolbar()
+        let overlay = try XCTUnwrap(controller.test_editingOverlay)
+        overlay.test_keyDown(keyCode: 13, charactersIgnoringModifiers: "w", modifierFlags: [.command])
+        XCTAssertEqual(closeCount, 1)
+        XCTAssertFalse(controller.window?.isVisible == true)
+    }
+
+    func testTallLongImageShowsPersistentVerticalScrollerWithoutWindowResize() throws {
+        let controller = makeTallController()
+        controller.show()
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let documentView = try XCTUnwrap(controller.scrollView.documentView)
+        XCTAssertGreaterThan(documentView.frame.height, controller.scrollView.contentSize.height)
+        XCTAssertTrue(controller.scrollView.hasVerticalScroller)
+        XCTAssertFalse(controller.scrollView.autohidesScrollers)
+        XCTAssertEqual(controller.scrollView.scrollerStyle, .legacy)
+        XCTAssertFalse(try XCTUnwrap(controller.scrollView.verticalScroller).isHidden)
+        controller.stop()
+    }
+
+    func testEditingOverlayLeavesPersistentVerticalScrollerVisible() throws {
+        let controller = makeTallController()
+        controller.show()
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+        controller.showEditingToolbar()
+
+        let window = try XCTUnwrap(controller.window)
+        let overlay = try XCTUnwrap(controller.test_editingOverlay)
+        let scroller = try XCTUnwrap(controller.scrollView.verticalScroller)
+        let scrollerFrameInWindow = scroller.convert(scroller.bounds, to: nil)
+        let scrollerScreenFrame = window.convertToScreen(scrollerFrameInWindow)
+
+        XCTAssertFalse(scroller.isHidden)
+        XCTAssertTrue(scroller.isEnabled)
+        XCTAssertFalse(overlay.frame.intersects(scrollerScreenFrame))
+        controller.stop()
     }
 
     func testLongImageConfigurationUsesEditorContract() {
@@ -726,23 +903,90 @@ final class LongImageEditorTests: XCTestCase {
     func testOverlayWheelScrollsDocumentInsteadOfZoomingSelectionAndIsIgnoredWhileLocked() throws {
         let controller = makeTallController()
         controller.show()
+        controller.showEditingToolbar()
         let overlay = try XCTUnwrap(controller.test_editingOverlay)
         let before = controller.visibleImageRect.minY
         overlay.test_scrollWheel(at: NSPoint(x: 100, y: 100), deltaY: -120)
         XCTAssertGreaterThan(controller.visibleImageRect.minY, before)
 
         overlay.test_activateShapeTool(.rectangle)
-        overlay.test_mouseDown(at: NSPoint(x: 30, y: 40))
+        overlay.test_mouseDown(at: NSPoint(x: 150, y: 260))
         let locked = controller.visibleImageRect.minY
         overlay.test_scrollWheel(at: NSPoint(x: 100, y: 100), deltaY: -120)
         XCTAssertEqual(controller.visibleImageRect.minY, locked, accuracy: 0.001)
-        overlay.test_mouseUp(at: NSPoint(x: 60, y: 80))
+        overlay.test_mouseUp(at: NSPoint(x: 180, y: 300))
+        controller.stop()
+    }
+
+    func testCreatingTextKeepsEditorActiveAfterMouseUpAndAcceptsTyping() throws {
+        let controller = makeTallController()
+        controller.show()
+        controller.showEditingToolbar()
+        let overlay = try XCTUnwrap(controller.test_editingOverlay)
+        let insertionPoint = NSPoint(x: 100, y: 120)
+
+        overlay.test_activateTextTool()
+        overlay.test_mouseDown(at: insertionPoint)
+        overlay.test_mouseUp(at: insertionPoint)
+
+        XCTAssertTrue(overlay.test_isEditingTextAnnotation)
+        XCTAssertTrue(overlay.test_textEditorIsFirstResponder)
+
+        overlay.firstResponder?.insertText("长图文字")
+        overlay.test_commitTextEditing()
+        controller.test_commitOverlay()
+
+        XCTAssertEqual(controller.test_fullAnnotations.count, 1)
+        XCTAssertEqual(controller.test_fullAnnotations.first?.text, "长图文字")
+        controller.stop()
+    }
+
+    func testMagnifiedViewportCommitsTextAtCanonicalScaleWithoutClipping() throws {
+        let controller = LongImageEditorWindowController(
+            canonicalImage: TestImageFactory.solid(
+                size: NSSize(width: 160, height: 1_200),
+                color: .white
+            ),
+            visibleFrame: NSRect(x: 0, y: 0, width: 500, height: 450),
+            initialWindowSize: NSSize(width: 400, height: 400)
+        )
+        controller.show()
+        controller.showEditingToolbar()
+        let overlay = try XCTUnwrap(controller.test_editingOverlay)
+        XCTAssertGreaterThan(controller.fitWidthScale, 1)
+
+        overlay.test_activateTextTool()
+        overlay.test_mouseDown(at: NSPoint(x: 60, y: 120))
+        overlay.test_mouseUp(at: NSPoint(x: 60, y: 120))
+        overlay.firstResponder?.insertText("字体标注后不会丢字")
+        let viewportAnnotation = try XCTUnwrap(overlay.test_annotation(at: 0))
+        overlay.test_commitTextEditing()
+        controller.test_commitOverlay()
+
+        let canonicalAnnotation = try XCTUnwrap(controller.test_fullAnnotations.first)
+        let measuredCanonicalText = NSAttributedString(
+            string: canonicalAnnotation.text ?? "",
+            attributes: CaptureAnnotationRenderer.textAttributes(style: canonicalAnnotation.style)
+        ).boundingRect(
+            with: NSSize(width: 10_000, height: CGFloat.greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading]
+        )
+        let canonicalContentRect = CaptureAnnotationRenderer.textContentRect(in: canonicalAnnotation.rect)
+
+        XCTAssertEqual(
+            canonicalAnnotation.style.textSize,
+            viewportAnnotation.style.textSize / controller.fitWidthScale,
+            accuracy: 0.001
+        )
+        XCTAssertGreaterThanOrEqual(canonicalContentRect.width, ceil(measuredCanonicalText.width))
+        XCTAssertGreaterThanOrEqual(canonicalContentRect.height, ceil(measuredCanonicalText.height))
         controller.stop()
     }
 
     func testMovingWindowRealignsOverlayToViewportScreenFrame() throws {
         let controller = makeTallController()
         controller.show()
+        controller.showEditingToolbar()
         let overlay = try XCTUnwrap(controller.test_editingOverlay)
         let before = overlay.frame
         let windowOrigin = try XCTUnwrap(controller.window).frame.origin
@@ -761,6 +1005,7 @@ final class LongImageEditorTests: XCTestCase {
             annotations: [text], visibleFrame: NSRect(x: 0, y: 0, width: 500, height: 450)
         )
         controller.show()
+        controller.showEditingToolbar()
         let overlay = try XCTUnwrap(controller.test_editingOverlay)
         var edited = try XCTUnwrap(overlay.test_annotation(at: 0)); edited.text = "committed on move"
         overlay.test_setAnnotations([edited])
@@ -770,7 +1015,7 @@ final class LongImageEditorTests: XCTestCase {
         controller.stop()
     }
 
-    func testControlStripContainsAccessibleFinishButtonAndCommitsCurrentEdits() throws {
+    func testFinishEditingCommitsCurrentEditsAndKeepsLongImageWindowOpen() throws {
         let controller = makeTallController()
         var completionCount = 0
         var completedAnnotations: [CaptureAnnotation] = []
@@ -779,16 +1024,59 @@ final class LongImageEditorTests: XCTestCase {
             completedAnnotations = annotations
         }
         controller.show()
+        let imageView = try XCTUnwrap(controller.scrollView.documentView?.subviews.compactMap { $0 as? NSImageView }.first)
+        let verticalScroller = try XCTUnwrap(controller.scrollView.verticalScroller)
+        let uneditedPixels = try pixelBytes(try XCTUnwrap(imageView.image))
+        XCTAssertFalse(verticalScroller.isHidden)
+        XCTAssertTrue(verticalScroller.isEnabled)
+        controller.showEditingToolbar()
         let overlay = try XCTUnwrap(controller.test_editingOverlay)
         overlay.test_activateShapeTool(.rectangle)
         overlay.test_drag(from: NSPoint(x: 40, y: 80), to: NSPoint(x: 120, y: 150))
-        let button = controller.test_finishButton
-        XCTAssertTrue(button.isDescendant(of: controller.controlStripView))
-        XCTAssertEqual(button.title, "完成编辑")
-        XCTAssertEqual(button.accessibilityLabel(), "完成编辑")
-        button.performClick(nil)
+        let finishPoint = try XCTUnwrap(overlay.test_mainToolbarButtonPoint(for: .finishEditing))
+        overlay.test_mouseDown(at: finishPoint)
         XCTAssertEqual(completionCount, 1)
         XCTAssertEqual(completedAnnotations.count, 1)
+        XCTAssertEqual(controller.test_fullAnnotations.count, 1)
+        XCTAssertNil(controller.test_editingOverlay)
+        XCTAssertEqual(controller.window?.isVisible, true)
+        XCTAssertNotEqual(try pixelBytes(try XCTUnwrap(imageView.image)), uneditedPixels)
+        XCTAssertEqual(controller.scrollView.scrollerStyle, .legacy)
+        XCTAssertTrue(controller.scrollView.hasVerticalScroller)
+        XCTAssertFalse(verticalScroller.isHidden)
+        XCTAssertTrue(verticalScroller.isEnabled)
+        XCTAssertGreaterThan(
+            try XCTUnwrap(controller.scrollView.documentView).frame.height,
+            controller.scrollView.contentSize.height
+        )
+        controller.stop()
+    }
+
+    func testFloatingToolbarCopyCommitsEditsAndKeepsLongImageWindowOpen() throws {
+        var copiedImage: NSImage?
+        let controller = LongImageEditorWindowController(
+            canonicalImage: TestImageFactory.solid(size: NSSize(width: 200, height: 1_000), color: .white),
+            visibleFrame: NSRect(x: 0, y: 0, width: 500, height: 450),
+            actions: LongImageEditorActions(
+                copy: { copiedImage = $0; return true },
+                save: { _ in false },
+                pin: { _ in false }
+            )
+        )
+        controller.show()
+        controller.showEditingToolbar()
+        let overlay = try XCTUnwrap(controller.test_editingOverlay)
+        overlay.test_activateShapeTool(.rectangle)
+        overlay.test_drag(from: NSPoint(x: 40, y: 80), to: NSPoint(x: 120, y: 150))
+        let copyPoint = try XCTUnwrap(overlay.test_mainToolbarButtonPoint(for: .copy))
+
+        overlay.test_mouseDown(at: copyPoint)
+
+        XCTAssertNotNil(copiedImage)
+        XCTAssertEqual(controller.test_fullAnnotations.count, 1)
+        XCTAssertNil(controller.test_editingOverlay)
+        XCTAssertEqual(controller.window?.isVisible, true)
+        controller.stop()
     }
 
     func testCopySaveAndPinUseSameCompleteRenderedRevisionAndFailureKeepsEditorOpen() throws {
@@ -819,9 +1107,10 @@ final class LongImageEditorTests: XCTestCase {
         )
         controller.show()
 
-        controller.test_copyButton.performClick(nil)
-        controller.test_saveButton.performClick(nil)
-        controller.test_pinButton.performClick(nil)
+        controller.showEditingToolbar()
+        controller.test_performContextMenuAction(.copy)
+        controller.test_performContextMenuAction(.save)
+        controller.test_performContextMenuAction(.pin)
 
         XCTAssertEqual(received.count, 3)
         XCTAssertTrue(received[0] === received[1])
@@ -829,22 +1118,20 @@ final class LongImageEditorTests: XCTestCase {
         XCTAssertEqual(pixelSize(received[0]), NSSize(width: 120, height: 900))
         XCTAssertNotEqual(try pixelBytes(received[0]), try pixelBytes(image))
         XCTAssertEqual(controller.window?.isVisible, true)
-        XCTAssertEqual(controller.test_copyButton.accessibilityLabel(), "复制完整长截图")
-        XCTAssertEqual(controller.test_saveButton.accessibilityLabel(), "保存完整长截图")
-        XCTAssertEqual(controller.test_pinButton.accessibilityLabel(), "贴出完整长截图")
+        XCTAssertEqual(controller.test_contextMenuTitles, ["显示工具条 (⇧)", nil, "贴图", "复制图片", "保存图片", nil, "关闭"])
 
         let firstRevision = controller.test_documentRevision
         controller.windowDidResize(Notification(name: NSWindow.didResizeNotification))
-        controller.test_copyButton.performClick(nil)
+        controller.test_performContextMenuAction(.copy)
         XCTAssertTrue(received[2] === received[3])
         XCTAssertEqual(controller.test_documentRevision, firstRevision)
 
         var edited = try XCTUnwrap(controller.test_editingOverlay?.test_annotation(at: 0))
         edited.rect.origin.x += 10
         controller.test_editingOverlay?.test_setAnnotations([edited])
-        controller.test_copyButton.performClick(nil)
-        controller.test_saveButton.performClick(nil)
-        controller.test_pinButton.performClick(nil)
+        controller.test_performContextMenuAction(.copy)
+        controller.test_performContextMenuAction(.save)
+        controller.test_performContextMenuAction(.pin)
 
         XCTAssertEqual(received.count, 7)
         XCTAssertFalse(received[3] === received[4])
@@ -871,7 +1158,7 @@ final class LongImageEditorTests: XCTestCase {
             )
         )
         controller.show()
-        controller.test_copyButton.performClick(nil)
+        controller.test_performContextMenuAction(.copy)
         XCTAssertTrue(received === image)
         XCTAssertTrue(controller.test_cachedRenderedRevision === image)
         controller.stop()
@@ -951,7 +1238,7 @@ final class LongImageEditorTests: XCTestCase {
         )
         controller.show()
 
-        controller.test_copyButton.performClick(nil)
+        controller.test_performContextMenuAction(.copy)
         XCTAssertEqual(actionCount, 0)
         XCTAssertNil(controller.test_cachedRenderedRevision)
         XCTAssertEqual(
@@ -961,7 +1248,7 @@ final class LongImageEditorTests: XCTestCase {
         XCTAssertEqual(controller.window?.isVisible, true)
 
         injectedFailure = nil
-        controller.test_copyButton.performClick(nil)
+        controller.test_performContextMenuAction(.copy)
         XCTAssertEqual(actionCount, 1)
         XCTAssertNotNil(controller.test_cachedRenderedRevision)
         XCTAssertNil(controller.test_lastRenderError)
@@ -990,16 +1277,16 @@ final class LongImageEditorTests: XCTestCase {
                 }
             )
             controller.show()
-            let button = [controller.test_copyButton, controller.test_saveButton, controller.test_pinButton][actionIndex]
+            let action: CaptureCompletionAction = [.copy, .save, .pin][actionIndex]
             let countsBeforeFailure = actionCounts
-            button.performClick(nil)
+            controller.test_performContextMenuAction(action)
             XCTAssertEqual(actionCounts, countsBeforeFailure)
             XCTAssertNil(controller.test_cachedRenderedRevision)
             XCTAssertNotNil(controller.test_lastRenderError)
             XCTAssertEqual(controller.window?.isVisible, true)
 
             shouldFail = false
-            button.performClick(nil)
+            controller.test_performContextMenuAction(action)
             XCTAssertEqual(actionCounts[actionIndex], 1)
             XCTAssertTrue(controller.test_cachedRenderedRevision === rendered)
             XCTAssertNil(controller.test_lastRenderError)
@@ -1016,11 +1303,7 @@ final class LongImageEditorTests: XCTestCase {
             visibleFrame: NSRect(x: 0, y: 0, width: 500, height: 450),
             language: .english
         )
-        XCTAssertEqual(controller.test_copyButton.title, "Copy")
-        XCTAssertEqual(controller.test_copyButton.toolTip, "Copy complete long screenshot")
-        XCTAssertEqual(controller.test_saveButton.title, "Save")
-        XCTAssertEqual(controller.test_pinButton.title, "Pin")
-        XCTAssertEqual(controller.test_finishButton.title, "Finish")
+        XCTAssertEqual(controller.test_contextMenuTitles, ["Show Toolbar (⇧)", nil, "Pin Image", "Copy Image", "Save Image", nil, "Close"])
         controller.stop()
     }
 
@@ -1056,6 +1339,7 @@ final class LongImageEditorTests: XCTestCase {
             visibleFrame: NSRect(x: 0, y: 0, width: 500, height: 450)
         )
         controller.show()
+        controller.showEditingToolbar()
         var overlay = try XCTUnwrap(controller.test_editingOverlay)
         let canonicalID = try XCTUnwrap(overlay.test_annotation(at: 0)).id
         overlay.test_scrollWheel(at: NSPoint(x: 100, y: 100), deltaY: -600)
@@ -1141,14 +1425,15 @@ final class LongImageEditorTests: XCTestCase {
     func testInteractionLockRestoresProgrammaticClipMovementBeforeCommit() throws {
         let controller = makeTallController()
         controller.show()
+        controller.showEditingToolbar()
         let overlay = try XCTUnwrap(controller.test_editingOverlay)
         overlay.test_activateShapeTool(.rectangle)
-        overlay.test_mouseDown(at: NSPoint(x: 30, y: 40))
+        overlay.test_mouseDown(at: NSPoint(x: 150, y: 260))
         let origin = controller.scrollView.contentView.bounds.origin
         controller.scrollView.contentView.scroll(to: NSPoint(x: 0, y: origin.y + 200))
         NotificationCenter.default.post(name: NSView.boundsDidChangeNotification, object: controller.scrollView.contentView)
         XCTAssertEqual(controller.scrollView.contentView.bounds.origin, origin)
-        overlay.test_mouseUp(at: NSPoint(x: 60, y: 80))
+        overlay.test_mouseUp(at: NSPoint(x: 180, y: 300))
         controller.stop()
     }
 
@@ -1163,6 +1448,7 @@ final class LongImageEditorTests: XCTestCase {
             visibleFrame: NSRect(x: 0, y: 0, width: 500, height: 450)
         )
         controller.show()
+        controller.showEditingToolbar()
         let overlay = try XCTUnwrap(controller.test_editingOverlay)
         overlay.test_setAnnotations([])
         controller.test_commitOverlay()
@@ -1183,6 +1469,7 @@ final class LongImageEditorTests: XCTestCase {
             visibleFrame: NSRect(x: 0, y: 0, width: 500, height: 450)
         )
         controller.show()
+        controller.showEditingToolbar()
         let overlay = try XCTUnwrap(controller.test_editingOverlay)
         let newMask = EraserMask(rect: NSRect(x: 30, y: 60, width: 20, height: 15), affectedAnnotationIDs: [visible.id])
         overlay.test_addEraserMask(newMask)
@@ -1214,6 +1501,7 @@ final class LongImageEditorTests: XCTestCase {
             initialWindowSize: NSSize(width: 400, height: 420)
         )
         controller.show()
+        controller.showEditingToolbar()
         let overlay = try XCTUnwrap(controller.test_editingOverlay)
         let mask = EraserMask(rect: NSRect(x: 40, y: 80, width: 20, height: 15), affectedAnnotationIDs: [rectangle.id])
         overlay.test_addEraserMask(mask)
@@ -1239,8 +1527,16 @@ final class LongImageEditorTests: XCTestCase {
         try resizeBy100()
         try resizeBy100()
 
-        XCTAssertEqual(controller.test_fullAnnotations.first { $0.id == rectangle.id }?.rect, rectangle.rect)
-        XCTAssertEqual(controller.test_fullAnnotations.first { $0.id == text.id }?.rect, text.rect)
+        let committedRectangle = try XCTUnwrap(controller.test_fullAnnotations.first { $0.id == rectangle.id }?.rect)
+        XCTAssertEqual(committedRectangle.minX, rectangle.rect.minX, accuracy: 0.001)
+        XCTAssertEqual(committedRectangle.minY, rectangle.rect.minY, accuracy: 0.001)
+        XCTAssertEqual(committedRectangle.width, rectangle.rect.width, accuracy: 0.001)
+        XCTAssertEqual(committedRectangle.height, rectangle.rect.height, accuracy: 0.001)
+        let committedText = try XCTUnwrap(controller.test_fullAnnotations.first { $0.id == text.id }?.rect)
+        XCTAssertEqual(committedText.minX, text.rect.minX, accuracy: 0.001)
+        XCTAssertEqual(committedText.minY, text.rect.minY, accuracy: 0.001)
+        XCTAssertEqual(committedText.width, text.rect.width, accuracy: 0.001)
+        XCTAssertEqual(committedText.height, text.rect.height, accuracy: 0.001)
         let committedMask = try XCTUnwrap(controller.test_fullEraserMasks.first { $0.id == mask.id })
         XCTAssertEqual(committedMask.rect.minY, firstCommittedMaskY, accuracy: 0.001)
         XCTAssertEqual(controller.test_fullAnnotations.first { $0.id == text.id }?.rect, firstActiveTextRect)
@@ -1250,6 +1546,7 @@ final class LongImageEditorTests: XCTestCase {
     func testLongImageOverlayIsChildAndDoesNotRemainOrphanedWhenMiniaturized() throws {
         let controller = makeTallController()
         controller.show()
+        controller.showEditingToolbar()
         let window = try XCTUnwrap(controller.window)
         let overlay = try XCTUnwrap(controller.test_editingOverlay)
         XCTAssertTrue(window.childWindows?.contains(overlay) == true)
@@ -1258,7 +1555,8 @@ final class LongImageEditorTests: XCTestCase {
         XCTAssertFalse(overlay.isVisible)
         controller.windowDidDeminiaturize(Notification(name: NSWindow.didDeminiaturizeNotification))
         XCTAssertTrue(overlay.isVisible)
-        let expectedFrame = window.convertToScreen(controller.scrollView.convert(controller.scrollView.bounds, to: nil))
+        let clipView = controller.scrollView.contentView
+        let expectedFrame = window.convertToScreen(clipView.convert(clipView.bounds, to: nil))
         XCTAssertEqual(overlay.frame, expectedFrame)
 
         controller.stop()
@@ -1310,6 +1608,7 @@ final class LongImageEditorTests: XCTestCase {
             initialWindowSize: NSSize(width: 400, height: 420)
         )
         controller.show()
+        controller.showEditingToolbar()
         let overlay = try XCTUnwrap(controller.test_editingOverlay)
         let background = try XCTUnwrap(overlay.test_backgroundImage)
         let expected = CaptureAnnotationRenderer.renderVisibleLongImageSlice(
@@ -1326,6 +1625,69 @@ final class LongImageEditorTests: XCTestCase {
         controller.test_refreshOverlay()
         XCTAssertTrue(controller.test_fullAnnotations.isEmpty)
         XCTAssertTrue(try XCTUnwrap(controller.test_editingOverlay?.test_suppressedAnnotationIDs).isEmpty)
+        controller.stop()
+    }
+
+    func testSelectingAnnotationToolDoesNotFlashBakedPreviewOrDisableScroller() throws {
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = .red
+        style.strokeWidth = 8
+        let existing = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 20, y: 40, width: 80, height: 60),
+            style: style
+        )
+        let controller = LongImageEditorWindowController(
+            canonicalImage: TestImageFactory.solid(size: NSSize(width: 200, height: 1_000), color: .white),
+            annotations: [existing],
+            visibleFrame: NSRect(x: 0, y: 0, width: 600, height: 500),
+            initialWindowSize: NSSize(width: 400, height: 420)
+        )
+        controller.show()
+        controller.showEditingToolbar()
+        let overlay = try XCTUnwrap(controller.test_editingOverlay)
+        let initialBackground = try pixelBytes(try XCTUnwrap(overlay.test_backgroundImage))
+        let initialSuppressedIDs = overlay.test_suppressedAnnotationIDs
+        let rectangleButton = try XCTUnwrap(overlay.test_mainToolbarButtonPoint(for: .rectangle))
+
+        overlay.test_mouseDown(at: rectangleButton)
+
+        XCTAssertTrue(try XCTUnwrap(controller.scrollView.verticalScroller).isEnabled)
+        XCTAssertEqual(try pixelBytes(try XCTUnwrap(overlay.test_backgroundImage)), initialBackground)
+        XCTAssertEqual(overlay.test_suppressedAnnotationIDs, initialSuppressedIDs)
+        overlay.test_mouseUp(at: rectangleButton)
+        controller.stop()
+    }
+
+    func testStartingNewAnnotationKeepsBakedPreviewStableDuringDrawing() throws {
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = .red
+        style.strokeWidth = 8
+        let existing = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 20, y: 40, width: 80, height: 60),
+            style: style
+        )
+        let controller = LongImageEditorWindowController(
+            canonicalImage: TestImageFactory.solid(size: NSSize(width: 200, height: 1_000), color: .white),
+            annotations: [existing],
+            visibleFrame: NSRect(x: 0, y: 0, width: 600, height: 500),
+            initialWindowSize: NSSize(width: 400, height: 420)
+        )
+        controller.show()
+        controller.showEditingToolbar()
+        let overlay = try XCTUnwrap(controller.test_editingOverlay)
+        overlay.test_activateShapeTool(.rectangle)
+        let initialBackground = try pixelBytes(try XCTUnwrap(overlay.test_backgroundImage))
+        let initialSuppressedIDs = overlay.test_suppressedAnnotationIDs
+        let startPoint = NSPoint(x: 150, y: 260)
+
+        overlay.test_mouseDown(at: startPoint)
+
+        XCTAssertTrue(try XCTUnwrap(controller.scrollView.verticalScroller).isEnabled)
+        XCTAssertEqual(try pixelBytes(try XCTUnwrap(overlay.test_backgroundImage)), initialBackground)
+        XCTAssertEqual(overlay.test_suppressedAnnotationIDs, initialSuppressedIDs)
+        overlay.test_mouseUp(at: NSPoint(x: 180, y: 300))
         controller.stop()
     }
 
@@ -1349,6 +1711,7 @@ final class LongImageEditorTests: XCTestCase {
             initialWindowSize: NSSize(width: 400, height: 420)
         )
         controller.show()
+        controller.showEditingToolbar()
         let overlay = try XCTUnwrap(controller.test_editingOverlay)
         let local = try XCTUnwrap(overlay.editorSnapshot?.annotations.first { $0.id == selected.id })
         let down = NSPoint(x: local.rect.minX, y: local.rect.midY)
@@ -1389,6 +1752,7 @@ final class LongImageEditorTests: XCTestCase {
             initialWindowSize: NSSize(width: 400, height: 420)
         )
         controller.show()
+        controller.showEditingToolbar()
         let overlay = try XCTUnwrap(controller.test_editingOverlay)
         let local = try XCTUnwrap(overlay.editorSnapshot?.annotations.first { $0.id == selected.id })
         overlay.test_mouseDown(at: NSPoint(x: local.rect.minX, y: local.rect.midY))
@@ -1432,6 +1796,7 @@ final class LongImageEditorTests: XCTestCase {
             initialWindowSize: NSSize(width: 400, height: 420)
         )
         controller.show()
+        controller.showEditingToolbar()
         let overlay = try XCTUnwrap(controller.test_editingOverlay)
         overlay.test_activateShapeTool(.rectangle)
         overlay.test_mouseDown(at: NSPoint(x: 40, y: 80))
@@ -1469,6 +1834,7 @@ final class LongImageEditorTests: XCTestCase {
                 image: image!, visibleFrame: NSRect(x: 0, y: 0, width: 500, height: 400)
             )
             retainedController?.show()
+            retainedController?.showEditingToolbar()
             weakController = retainedController
             weakOverlay = retainedController?.test_editingOverlay
             weakImage = image

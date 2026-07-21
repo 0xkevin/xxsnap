@@ -79,6 +79,37 @@ enum LongImageAnnotationTranslation {
     private static func scaled(_ source: CaptureAnnotation, by scale: CGFloat) -> CaptureAnnotation {
         var result = source
         result.rect = NSRect(x: result.rect.minX * scale, y: result.rect.minY * scale, width: result.rect.width * scale, height: result.rect.height * scale)
+        result.style.strokeWidth *= scale
+        if result.kind == .text {
+            result.style.textSize *= scale
+            let sourceMinimumSize = CaptureAnnotationRenderer.textAnnotationSize(
+                text: source.text ?? "",
+                style: source.style
+            )
+            let targetMinimumSize = CaptureAnnotationRenderer.textAnnotationSize(
+                text: result.text ?? "",
+                style: result.style
+            )
+            let center = NSPoint(x: result.rect.midX, y: result.rect.midY)
+            let isTightlySized = abs(source.rect.width - sourceMinimumSize.width) <= 1
+                && abs(source.rect.height - sourceMinimumSize.height) <= 1
+            if isTightlySized {
+                result.rect.size = targetMinimumSize
+            } else {
+                let sourceContentWidth = max(
+                    0,
+                    source.rect.width - CaptureAnnotationRenderer.textHorizontalPadding * 2
+                )
+                result.rect.size = NSSize(
+                    width: sourceContentWidth * scale + CaptureAnnotationRenderer.textHorizontalPadding * 2,
+                    height: source.rect.height * scale
+                )
+            }
+            result.rect.origin = NSPoint(
+                x: center.x - result.rect.width / 2,
+                y: center.y - result.rect.height / 2
+            )
+        }
         if var line = result.arrowLine {
             line.start = scalePoint(line.start, scale); line.end = scalePoint(line.end, scale); line.control = scalePoint(line.control, scale); result.arrowLine = line
         }
@@ -128,7 +159,34 @@ struct LongImageEditorDocument {
     }
 }
 
-private final class LongImageFlippedView: NSView { override var isFlipped: Bool { true } }
+private final class LongImageFlippedView: NSView {
+    var toolbarToggleHandler: (() -> Void)?
+    var keyDownHandler: ((NSEvent) -> Bool)?
+    private var shiftToolbarShortcutCandidate = false
+
+    override var isFlipped: Bool { true }
+    override var acceptsFirstResponder: Bool { true }
+
+    override func flagsChanged(with event: NSEvent) {
+        let relevantModifiers = event.modifierFlags.intersection([.command, .shift, .control, .option])
+        if relevantModifiers == [.shift] {
+            shiftToolbarShortcutCandidate = true
+        } else if relevantModifiers.isEmpty, shiftToolbarShortcutCandidate {
+            shiftToolbarShortcutCandidate = false
+            toolbarToggleHandler?()
+        } else {
+            shiftToolbarShortcutCandidate = false
+        }
+        super.flagsChanged(with: event)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if keyDownHandler?(event) == true {
+            return
+        }
+        super.keyDown(with: event)
+    }
+}
 
 struct LongImageEditorActions {
     var copy: @MainActor (NSImage) -> Bool
@@ -146,14 +204,7 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         var overlayBoundsHeight: CGFloat
         var displayScale: CGFloat
     }
-    static let controlStripHeight: CGFloat = 52
     let scrollView = NSScrollView()
-    let controlStripView = NSView()
-    private let finishButton = NSButton(title: "完成编辑", target: nil, action: nil)
-    private let copyButton = NSButton(title: "复制", target: nil, action: nil)
-    private let saveButton = NSButton(title: "保存", target: nil, action: nil)
-    private let pinButton = NSButton(title: "贴图", target: nil, action: nil)
-    private let closeButton = NSButton(title: "关闭", target: nil, action: nil)
     private let imageView = NSImageView(), documentView = LongImageFlippedView()
     private var documentState: LongImageEditorDocument
     private let actions: LongImageEditorActions
@@ -176,6 +227,7 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     private var presentedContext: PresentedContext?
     private var didStop = false
     private var viewportRefreshCount = 0
+    private var toolbarMenuItem: NSMenuItem?
     private(set) var geometry: LongImageEditorGeometry
     private let initialWindowFrame: NSRect
     var onFinishEditing: ((NSImage, [CaptureAnnotation], [EraserMask]) -> Void)?
@@ -210,7 +262,7 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         window.setFrame(frame, display: false)
         window.title = "长截图编辑"
         initialWindowFrame = frame
-        geometry = LongImageEditorGeometry(imageSize: image.size, viewportSize: NSSize(width: size.width, height: size.height - Self.controlStripHeight), scrollOffset: 0)
+        geometry = LongImageEditorGeometry(imageSize: image.size, viewportSize: size, scrollOffset: 0)
         super.init(window: window)
         window.delegate = self
         configureViews()
@@ -241,7 +293,7 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         applicationActivator()
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
-        showOverlay()
+        window?.makeFirstResponder(documentView)
     }
     func stop() {
         guard !didStop else { return }
@@ -272,44 +324,72 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
 
     private func configureViews() {
         guard let content = window?.contentView else { return }
-        let l10n = L10n(language: language)
-        copyButton.title = l10n.text(.longImageCopy)
-        saveButton.title = l10n.text(.longImageSave)
-        pinButton.title = l10n.text(.longImagePin)
-        finishButton.title = l10n.text(.longImageFinish)
-        closeButton.title = l10n.text(.longImageClose)
-        controlStripView.translatesAutoresizingMaskIntoConstraints = false
-        finishButton.translatesAutoresizingMaskIntoConstraints = false
-        finishButton.target = self
-        finishButton.action = #selector(finishButtonPressed(_:))
-        let finishLabel = language == .english ? "Finish editing long screenshot" : "完成编辑"
-        finishButton.setAccessibilityLabel(finishLabel)
-        finishButton.toolTip = finishLabel
-        configureActionButton(copyButton, label: language == .english ? "Copy complete long screenshot" : "复制完整长截图", action: #selector(copyButtonPressed(_:)))
-        configureActionButton(saveButton, label: language == .english ? "Save complete long screenshot" : "保存完整长截图", action: #selector(saveButtonPressed(_:)))
-        configureActionButton(pinButton, label: language == .english ? "Pin complete long screenshot" : "贴出完整长截图", action: #selector(pinButtonPressed(_:)))
-        configureActionButton(closeButton, label: language == .english ? "Close long screenshot editor" : "关闭长截图编辑器", action: #selector(closeButtonPressed(_:)))
-        [copyButton, saveButton, pinButton, closeButton, finishButton].forEach(controlStripView.addSubview)
         scrollView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.scrollerStyle = .overlay
+        scrollView.scrollerStyle = .legacy
+        scrollView.autohidesScrollers = false
         scrollView.hasVerticalScroller = true; scrollView.hasHorizontalScroller = false
         scrollView.contentView.postsBoundsChangedNotifications = true
         imageView.image = documentState.image; imageView.imageScaling = .scaleAxesIndependently
+        documentView.toolbarToggleHandler = { [weak self] in self?.toggleEditingToolbar() }
+        documentView.keyDownHandler = { [weak self] event in self?.handleKeyDown(event) == true }
         documentView.addSubview(imageView); scrollView.documentView = documentView
-        content.addSubview(scrollView); content.addSubview(controlStripView)
+        let contextMenu = makeContextMenu()
+        scrollView.menu = contextMenu
+        documentView.menu = contextMenu
+        imageView.menu = contextMenu
+        content.addSubview(scrollView)
         NSLayoutConstraint.activate([
-            controlStripView.leadingAnchor.constraint(equalTo: content.leadingAnchor), controlStripView.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            controlStripView.topAnchor.constraint(equalTo: content.topAnchor), controlStripView.heightAnchor.constraint(equalToConstant: Self.controlStripHeight),
             scrollView.leadingAnchor.constraint(equalTo: content.leadingAnchor), scrollView.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            scrollView.topAnchor.constraint(equalTo: controlStripView.bottomAnchor), scrollView.bottomAnchor.constraint(equalTo: content.bottomAnchor),
-            finishButton.trailingAnchor.constraint(equalTo: controlStripView.trailingAnchor, constant: -12),
-            finishButton.centerYAnchor.constraint(equalTo: controlStripView.centerYAnchor),
-            closeButton.trailingAnchor.constraint(equalTo: finishButton.leadingAnchor, constant: -8), closeButton.centerYAnchor.constraint(equalTo: controlStripView.centerYAnchor),
-            pinButton.leadingAnchor.constraint(equalTo: controlStripView.leadingAnchor, constant: 12), pinButton.centerYAnchor.constraint(equalTo: controlStripView.centerYAnchor),
-            saveButton.leadingAnchor.constraint(equalTo: pinButton.trailingAnchor, constant: 8), saveButton.centerYAnchor.constraint(equalTo: controlStripView.centerYAnchor),
-            copyButton.leadingAnchor.constraint(equalTo: saveButton.trailingAnchor, constant: 8), copyButton.centerYAnchor.constraint(equalTo: controlStripView.centerYAnchor),
+            scrollView.topAnchor.constraint(equalTo: content.topAnchor), scrollView.bottomAnchor.constraint(equalTo: content.bottomAnchor),
         ])
         content.layoutSubtreeIfNeeded()
+    }
+
+    private func makeContextMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        let showToolbarTitle = language == .english ? "Show Toolbar (⇧)" : "显示工具条 (⇧)"
+        let toolbarItem = menuItem(title: showToolbarTitle, action: #selector(toggleEditingToolbarFromMenu(_:)))
+        toolbarItem.state = overlay == nil ? .off : .on
+        toolbarMenuItem = toolbarItem
+        menu.addItem(toolbarItem)
+        menu.addItem(.separator())
+        menu.addItem(menuItem(
+            title: language == .english ? "Pin Image" : "贴图",
+            action: #selector(pinButtonPressed(_:))
+        ))
+        menu.addItem(menuItem(
+            title: language == .english ? "Copy Image" : "复制图片",
+            action: #selector(copyButtonPressed(_:)),
+            keyEquivalent: "c",
+            modifierMask: [.command]
+        ))
+        menu.addItem(menuItem(
+            title: language == .english ? "Save Image" : "保存图片",
+            action: #selector(saveButtonPressed(_:)),
+            keyEquivalent: "s",
+            modifierMask: [.command]
+        ))
+        menu.addItem(.separator())
+        menu.addItem(menuItem(
+            title: language == .english ? "Close" : "关闭",
+            action: #selector(closeButtonPressed(_:)),
+            keyEquivalent: "w",
+            modifierMask: [.command]
+        ))
+        return menu
+    }
+
+    private func menuItem(
+        title: String,
+        action: Selector,
+        keyEquivalent: String = "",
+        modifierMask: NSEvent.ModifierFlags = []
+    ) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: keyEquivalent)
+        item.keyEquivalentModifierMask = modifierMask
+        item.target = self
+        return item
     }
     private func observeScroll() {
         boundsObserver = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: scrollView.contentView, queue: .main) { [weak self] _ in
@@ -333,9 +413,11 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     }
     private func updateOffset() { geometry.scrollOffset = scrollView.contentView.bounds.minY / max(geometry.fitWidthScale, 0.0001) }
     private func viewportScreenFrame() -> NSRect {
-        guard let window else { return .zero }; return window.convertToScreen(scrollView.convert(scrollView.bounds, to: nil))
+        guard let window else { return .zero }
+        let clipView = scrollView.contentView
+        return window.convertToScreen(clipView.convert(clipView.bounds, to: nil))
     }
-    private func showOverlay() {
+    func showEditingToolbar() {
         guard overlay == nil else { refreshOverlay(); return }
         let slice = LongImageEditorDocument.visibleSlice(image: documentState.image, annotations: documentState.annotations, eraserMasks: documentState.eraserMasks, imageRect: visibleImageRect)
         presentedAnnotationIDs = Set(slice.annotations.map(\.id))
@@ -361,18 +443,86 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
             interactionBegan: { [weak self] in self?.lock(true) },
             interactionTargetBegan: { [weak self] id in self?.prepareLivePresentation(targetID: id) },
             interactionEnded: { [weak self] in self?.lock(false) },
-            scrollHandler: { [weak self] deltaY in self?.handleOverlayScroll(deltaY: deltaY) }
+            scrollHandler: { [weak self] deltaY in self?.handleOverlayScroll(deltaY: deltaY) },
+            toolbarToggleHandler: { [weak self] in self?.toggleEditingToolbar() },
+            keyDownHandler: { [weak self] event in self?.handleKeyDown(event) == true }
         )
         let value = SelectionOverlayWindow(backgroundImage: displayImage(preview, size: frame.size), configuration: config) { [weak self] in self?.finish($0) }
         overlay = value
+        toolbarMenuItem?.state = .on
         presentedContext = PresentedContext(
             sliceRect: slice.imageRect,
             overlayBoundsHeight: frame.height,
             displayScale: geometry.fitWidthScale
         )
         window?.addChildWindow(value, ordered: .above)
+        value.contentView?.menu = scrollView.menu
         value.present()
         value.makeKey()
+    }
+
+    func hideEditingToolbar() {
+        guard let overlay else { return }
+        commitOverlay()
+        if interactionLocked {
+            restoreLockedClipOrigin()
+            interactionLocked = false
+            lockedClipOrigin = nil
+            scrollView.verticalScroller?.isEnabled = true
+        }
+        do {
+            imageView.image = try completeRenderedImage()
+            lastRenderError = nil
+        } catch {
+            lastRenderError = error
+            NSLog("xxsnap long image preview render failed: \(error.localizedDescription)")
+        }
+        window?.removeChildWindow(overlay)
+        overlay.orderOut(nil)
+        self.overlay = nil
+        presentedContext = nil
+        toolbarMenuItem?.state = .off
+        window?.makeKeyAndOrderFront(nil)
+        window?.makeFirstResponder(documentView)
+    }
+
+    @objc private func toggleEditingToolbarFromMenu(_ sender: Any?) {
+        toggleEditingToolbar()
+    }
+
+    private func toggleEditingToolbar() {
+        if overlay == nil {
+            showEditingToolbar()
+        } else {
+            hideEditingToolbar()
+        }
+    }
+
+    private func handleKeyDown(_ event: NSEvent) -> Bool {
+        if SelectionToolbarState.toolbarShortcut(for: "copy")?.matches(
+            charactersIgnoringModifiers: event.charactersIgnoringModifiers,
+            modifierFlags: event.modifierFlags
+        ) == true {
+            performAction(actions.copy)
+            return true
+        }
+        if SelectionToolbarState.toolbarShortcut(for: "save")?.matches(
+            charactersIgnoringModifiers: event.charactersIgnoringModifiers,
+            modifierFlags: event.modifierFlags
+        ) == true {
+            performAction(actions.save)
+            return true
+        }
+        guard let command = PinnedImageWindowCommand(event: event) else {
+            return false
+        }
+        switch command {
+        case .closeCurrent:
+            closeButtonPressed(nil)
+            return true
+        case .resetSize, .toggleAlwaysOnTop, .closeAll:
+            return false
+        }
     }
     private func refreshOverlay() {
         guard !didStop else { return }
@@ -485,14 +635,6 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         }
     }
 
-    private func configureActionButton(_ button: NSButton, label: String, action: Selector) {
-        button.translatesAutoresizingMaskIntoConstraints = false
-        button.target = self
-        button.action = action
-        button.toolTip = label
-        button.setAccessibilityLabel(label)
-    }
-
     private func notifyClosed() {
         guard !didNotifyClose else { return }
         didNotifyClose = true
@@ -505,13 +647,12 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
             guard !interactionLocked else { return }
             interactionLocked = true
             lockedClipOrigin = scrollView.contentView.bounds.origin
-            scrollView.verticalScroller?.isEnabled = false
         } else {
             guard interactionLocked else { return }
             restoreLockedClipOrigin()
             interactionLocked = false
             lockedClipOrigin = nil
-            scrollView.verticalScroller?.isEnabled = true
+            guard overlay?.hasActiveTextEdit != true else { return }
             commitOverlay(); refreshOverlay()
         }
     }
@@ -541,10 +682,22 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         )
     }
     private func finish(_ result: CaptureSelectionResult?) {
-        guard result?.action == .finishEditing else { return }; commitOverlay()
-        onFinishEditing?(documentState.image, documentState.annotations, documentState.eraserMasks)
-        close()
-        stop()
+        guard let result else {
+            hideEditingToolbar()
+            return
+        }
+        commitOverlay()
+        switch result.action {
+        case .copy:
+            performAction(actions.copy)
+        case .save:
+            performAction(actions.save)
+        case .pin:
+            performAction(actions.pin)
+        case .finishEditing:
+            onFinishEditing?(documentState.image, documentState.annotations, documentState.eraserMasks)
+        }
+        hideEditingToolbar()
     }
     private func displayImage(_ image: NSImage, size: NSSize) -> NSImage {
         guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return image }
@@ -568,12 +721,6 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         updateOffset()
         refreshOverlay()
     }
-    @objc private func finishButtonPressed(_ sender: Any?) {
-        commitOverlay()
-        onFinishEditing?(documentState.image, documentState.annotations, documentState.eraserMasks)
-        close()
-        stop()
-    }
     @objc private func copyButtonPressed(_ sender: Any?) { performAction(actions.copy) }
     @objc private func saveButtonPressed(_ sender: Any?) { performAction(actions.save) }
     @objc private func pinButtonPressed(_ sender: Any?) { performAction(actions.pin) }
@@ -583,16 +730,31 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     var test_isDocumentScrollingEnabled: Bool { !interactionLocked }
     var test_hasBoundsObserver: Bool { boundsObserver != nil }
     var test_viewportRefreshCount: Int { viewportRefreshCount }
-    var test_finishButton: NSButton { finishButton }
-    var test_copyButton: NSButton { copyButton }
-    var test_saveButton: NSButton { saveButton }
-    var test_pinButton: NSButton { pinButton }
     var test_documentRevision: UInt64 { documentRevision }
     var test_cachedRenderedRevision: NSImage? { renderedRevision }
     var test_lastRenderError: Error? { lastRenderError }
     var test_initialWindowFrame: NSRect { initialWindowFrame }
     var test_fullAnnotations: [CaptureAnnotation] { documentState.annotations }
     var test_fullEraserMasks: [EraserMask] { documentState.eraserMasks }
+    var test_contextMenuTitles: [String?] {
+        scrollView.menu?.items.map { $0.isSeparatorItem ? nil : $0.title } ?? []
+    }
+    func test_performContextMenuAction(_ action: CaptureCompletionAction) {
+        let selector: Selector
+        switch action {
+        case .copy:
+            selector = #selector(copyButtonPressed(_:))
+        case .save:
+            selector = #selector(saveButtonPressed(_:))
+        case .pin:
+            selector = #selector(pinButtonPressed(_:))
+        case .finishEditing:
+            return
+        }
+        guard let item = scrollView.menu?.items.first(where: { $0.action == selector }),
+              let itemAction = item.action else { return }
+        _ = NSApp.sendAction(itemAction, to: item.target, from: item)
+    }
     func test_commitOverlay() { commitOverlay() }
     func test_refreshOverlay() { refreshOverlay() }
 #endif
