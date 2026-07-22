@@ -25,9 +25,9 @@ Use this checklist after building the exact Debug app from `build/xcode-derived`
 | --- | --- | --- | --- | --- |
 | C1 | Whole chat window, Accessibility available | Click Scroll Capture | Selection snaps to the main message scroll area; fixed sidebar/title/input are excluded; outline and handles are green. | 待人工 |
 | C2 | Non-scrollable region or Accessibility unavailable | Click Scroll Capture | Original selection stays unchanged and blue; existing fallback capture remains available. | 待人工 |
-| C3 | Scroll region height 599pt | One automatic step | Step distance is 30% of region height. | 待人工 |
+| C3 | Scroll region height 599pt | One automatic step | Step distance is 40% of region height. | 待人工 |
 | C4 | Scroll region height 600pt or taller | One automatic step | Step distance is 50% of region height. | 待人工 |
-| C5 | Retina and non-Retina stitched output | Inspect preview and exported PNG at 100% | Each accepted segment boundary has the same subtle white 0.1pt-equivalent seam; no blue seam appears. | 待人工 |
+| C5 | Retina and non-Retina stitched output | Inspect preview and exported PNG at 100% | Each accepted segment boundary has the same subtle white 0.05pt-equivalent seam; no blue seam appears. | 待人工 |
 | C6 | Left preview and viewport indicator | Start and finish capture | Preview remains on the existing left side and the viewport indicator remains blue with its existing geometry. | 待人工 |
 
 ## Browser and document matrix

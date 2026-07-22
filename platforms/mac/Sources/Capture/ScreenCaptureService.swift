@@ -6,6 +6,8 @@ import ScreenCaptureKit
 
 @MainActor
 final class StreamingScrollRegionCapturer: ScrollRegionCapturing, ScrollRegionCapturePriming, ScrollRegionCaptureBuffering {
+    private static let nextFrameMaximumWait: TimeInterval = 0.35
+
     private let service: ScreenCaptureService
     private var frameStream: ScrollCaptureFrameStream?
 
@@ -18,11 +20,14 @@ final class StreamingScrollRegionCapturer: ScrollRegionCapturing, ScrollRegionCa
     }
 
     func captureImage(in selectionRect: NSRect) async throws -> NSImage {
+        let isStartingStream = frameStream == nil
         if frameStream == nil {
             frameStream = try await service.startScrollFrameStream(in: selectionRect)
         }
         guard let frameStream else { throw ScreenCaptureServiceError.streamStopped }
-        return try await frameStream.nextImage()
+        return try await frameStream.nextImage(
+            maximumWait: isStartingStream ? nil : Self.nextFrameMaximumWait
+        )
     }
 
     func discardBufferedFrames() {
@@ -43,9 +48,9 @@ final class ScrollCaptureFrameStream: @unchecked Sendable {
         self.receiver = receiver
     }
 
-    func nextImage() async throws -> NSImage {
+    func nextImage(maximumWait: TimeInterval? = nil) async throws -> NSImage {
         NSLog("xxsnap scroll-capture stream awaiting next frame")
-        return try await receiver.nextImage()
+        return try await receiver.nextImage(maximumWait: maximumWait)
     }
 
     func discardBufferedImages() {
@@ -61,10 +66,23 @@ final class ScrollCaptureFrameStream: @unchecked Sendable {
 }
 
 final class ScrollCaptureFrameBuffer: @unchecked Sendable {
+    private struct Waiter {
+        let id: UInt64
+        let continuation: CheckedContinuation<NSImage, Error>
+        let timeout: DispatchWorkItem?
+    }
+
+    private static let timeoutQueue = DispatchQueue(
+        label: "com.xxsnap.scroll-capture-frame-timeout",
+        qos: .userInitiated
+    )
+
     private let capacity: Int
     private let lock = NSLock()
     private var images: [NSImage] = []
-    private var waiter: CheckedContinuation<NSImage, Error>?
+    private var latestImage: NSImage?
+    private var waiter: Waiter?
+    private var nextWaiterID: UInt64 = 0
     private var stopped = false
 
     init(capacity: Int) {
@@ -85,10 +103,12 @@ final class ScrollCaptureFrameBuffer: @unchecked Sendable {
             lock.unlock()
             return
         }
+        latestImage = image
         if let waiter {
             self.waiter = nil
             lock.unlock()
-            waiter.resume(returning: image)
+            waiter.timeout?.cancel()
+            waiter.continuation.resume(returning: image)
             return
         }
         images.append(image)
@@ -98,7 +118,7 @@ final class ScrollCaptureFrameBuffer: @unchecked Sendable {
         lock.unlock()
     }
 
-    func nextImage() async throws -> NSImage {
+    func nextImage(maximumWait: TimeInterval? = nil) async throws -> NSImage {
         try await withCheckedThrowingContinuation { continuation in
             lock.lock()
             if stopped {
@@ -112,8 +132,21 @@ final class ScrollCaptureFrameBuffer: @unchecked Sendable {
                 continuation.resume(returning: image)
                 return
             }
-            waiter = continuation
+            let waiterID = nextWaiterID
+            nextWaiterID &+= 1
+            let timeout = maximumWait.map { maximumWait in
+                DispatchWorkItem { [weak self] in
+                    self?.resumeTimedOutWaiter(id: waiterID)
+                }
+            }
+            waiter = Waiter(id: waiterID, continuation: continuation, timeout: timeout)
             lock.unlock()
+            if let timeout, let maximumWait {
+                Self.timeoutQueue.asyncAfter(
+                    deadline: .now() + max(0, maximumWait),
+                    execute: timeout
+                )
+            }
         }
     }
 
@@ -127,10 +160,28 @@ final class ScrollCaptureFrameBuffer: @unchecked Sendable {
         lock.lock()
         stopped = true
         images.removeAll(keepingCapacity: false)
+        latestImage = nil
         let waiter = self.waiter
         self.waiter = nil
         lock.unlock()
-        waiter?.resume(throwing: ScreenCaptureServiceError.streamStopped)
+        waiter?.timeout?.cancel()
+        waiter?.continuation.resume(throwing: ScreenCaptureServiceError.streamStopped)
+    }
+
+    private func resumeTimedOutWaiter(id: UInt64) {
+        lock.lock()
+        guard let waiter, waiter.id == id else {
+            lock.unlock()
+            return
+        }
+        self.waiter = nil
+        let latestImage = self.latestImage
+        lock.unlock()
+        if let latestImage {
+            waiter.continuation.resume(returning: latestImage)
+        } else {
+            waiter.continuation.resume(throwing: ScreenCaptureServiceError.frameTimedOut)
+        }
     }
 }
 
@@ -145,8 +196,8 @@ private final class ScrollCaptureFrameReceiver: NSObject, SCStreamOutput, @unche
         self.colorSpace = colorSpace
     }
 
-    func nextImage() async throws -> NSImage {
-        try await frameBuffer.nextImage()
+    func nextImage(maximumWait: TimeInterval? = nil) async throws -> NSImage {
+        try await frameBuffer.nextImage(maximumWait: maximumWait)
     }
 
     func discardBufferedImages() {
@@ -429,6 +480,7 @@ enum ScreenCaptureServiceError: LocalizedError {
     case displayNotFound
     case selectionOutsideDisplay
     case streamStopped
+    case frameTimedOut
 
     var errorDescription: String? {
         switch self {
@@ -440,6 +492,8 @@ enum ScreenCaptureServiceError: LocalizedError {
             return "The selected region fell outside the target display."
         case .streamStopped:
             return "The scrolling capture stream stopped."
+        case .frameTimedOut:
+            return "The scrolling capture stream did not produce a frame in time."
         }
     }
 }

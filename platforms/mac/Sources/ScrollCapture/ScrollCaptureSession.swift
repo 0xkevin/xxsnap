@@ -64,6 +64,17 @@ protocol ScrollCaptureStepControlling: AnyObject {
         distance: CGFloat,
         at point: NSPoint
     ) async throws
+    func performTargetedStep(
+        direction: ScrollCaptureDirection,
+        distance: CGFloat,
+        at point: NSPoint
+    ) async throws -> Bool
+    func performScrollbarStep(
+        direction: ScrollCaptureDirection,
+        distance: CGFloat,
+        in viewport: NSRect,
+        capturedImage: NSImage
+    ) async throws -> Bool
     func performKeyboardStep(
         direction: ScrollCaptureDirection,
         distance: CGFloat
@@ -85,6 +96,23 @@ extension ScrollCaptureStepControlling {
     ) async throws -> Bool {
         false
     }
+
+    func performTargetedStep(
+        direction: ScrollCaptureDirection,
+        distance: CGFloat,
+        at point: NSPoint
+    ) async throws -> Bool {
+        false
+    }
+
+    func performScrollbarStep(
+        direction: ScrollCaptureDirection,
+        distance: CGFloat,
+        in viewport: NSRect,
+        capturedImage: NSImage
+    ) async throws -> Bool {
+        false
+    }
 }
 
 @MainActor
@@ -100,6 +128,11 @@ protocol ScrollStitching: AnyObject {
         _ image: NSImage,
         preferredDirection: ScrollCaptureDirection
     ) async throws -> ScrollCaptureAppendUpdate
+    func append(
+        _ image: NSImage,
+        preferredDirection: ScrollCaptureDirection,
+        expectedAdvance: CGFloat
+    ) async throws -> ScrollCaptureAppendUpdate
     func preview(maximumHeight: Int) async throws -> NSImage
     func preview(maximumWidth: Int) async throws -> NSImage
     func finalImage() async throws -> NSImage
@@ -111,6 +144,14 @@ extension ScrollStitching {
         preferredDirection: ScrollCaptureDirection
     ) async throws -> ScrollCaptureAppendUpdate {
         try await append(image)
+    }
+
+    func append(
+        _ image: NSImage,
+        preferredDirection: ScrollCaptureDirection,
+        expectedAdvance: CGFloat
+    ) async throws -> ScrollCaptureAppendUpdate {
+        try await append(image, preferredDirection: preferredDirection)
     }
 
     func preview(maximumWidth: Int) async throws -> NSImage {
@@ -140,6 +181,20 @@ final class ScrollCaptureBridgeWorker: ScrollStitching, @unchecked Sendable {
     ) async throws -> ScrollCaptureAppendUpdate {
         try await Task.detached(priority: .userInitiated) { [bridge] in
             try bridge.append(image, preferredDirection: preferredDirection)
+        }.value
+    }
+
+    func append(
+        _ image: NSImage,
+        preferredDirection: ScrollCaptureDirection,
+        expectedAdvance: CGFloat
+    ) async throws -> ScrollCaptureAppendUpdate {
+        try await Task.detached(priority: .userInitiated) { [bridge] in
+            try bridge.append(
+                image,
+                preferredDirection: preferredDirection,
+                expectedAdvance: expectedAdvance
+            )
         }.value
     }
 
@@ -233,8 +288,9 @@ enum ScrollCaptureSessionError: Error, Equatable {
 @MainActor
 final class ScrollCaptureSession {
     private static let largeViewportThreshold: CGFloat = 600
-    private static let compactViewportRatio: CGFloat = 0.30
+    private static let compactViewportRatio: CGFloat = 0.40
     private static let largeViewportRatio: CGFloat = 0.50
+    private static let lowConfidenceVisualBoundaryThreshold = 2
 
     static func stepDistance(forViewportHeight height: CGFloat) -> CGFloat {
         guard height.isFinite else { return 1 }
@@ -262,11 +318,15 @@ final class ScrollCaptureSession {
     private var preferredDirection: ScrollCaptureDirection = .unknown
     private var captureViewportPixelHeight = 1
     private var lockedStepDirection: ScrollCaptureDirection?
+    private var lockedContentDirection: ScrollCaptureDirection?
+    private var lastAcceptedStepContentDirection: ScrollCaptureDirection?
     private var stepInProgress = false
     private var consecutiveNoMovementSteps = 0
+    private var consecutiveLowConfidenceSteps = 0
     private var stepTargetIndex = 0
     private var performedStepCount = 0
     private var reachedStepBoundary = false
+    private var lastStepCandidateImage: NSImage?
 
     init(
         seed: ScrollCaptureSeed,
@@ -349,6 +409,7 @@ final class ScrollCaptureSession {
         guard effectiveDirection == .up || effectiveDirection == .down else { return }
         let operationGeneration = generation
         stepInProgress = true
+        lastStepCandidateImage = nil
         performedStepCount += 1
         NSLog(
             "xxsnap scroll-capture step begin number=%ld direction=%@ locked=%@ noMovementCount=%ld targetIndex=%ld",
@@ -361,6 +422,7 @@ final class ScrollCaptureSession {
         presentation(.stepState(.executing))
         defer {
             stepInProgress = false
+            lastStepCandidateImage = nil
             if generation == operationGeneration, state == .capturing {
                 presentation(.stepState(
                     reachedStepBoundary
@@ -373,13 +435,34 @@ final class ScrollCaptureSession {
         do {
             let distance = Self.stepDistance(forViewportHeight: seed.screenRect.height)
             let scrollPoints = Self.stepScrollPoints(in: seed.screenRect)
+            let boundaryDirection = lockedContentDirection ?? effectiveDirection
             let boundaryStates = scrollPoints.map {
-                stepController.boundaryState(direction: effectiveDirection, at: $0)
+                stepController.boundaryState(direction: boundaryDirection, at: $0)
             }
+            let accessibilityConfirmsMoreContent = boundaryStates.contains(.notAtBoundary)
             if boundaryStates.allSatisfy({ $0 == .atBoundary }) {
-                consecutiveNoMovementSteps = 1
-                reachedStepBoundary = true
-                _ = clearCurrentWarning(operationGeneration: operationGeneration)
+                (capturer as? any ScrollRegionCaptureBuffering)?.discardBufferedFrames()
+                let boundaryOutcome = try await collectStepCandidates(
+                    direction: effectiveDirection,
+                    operationGeneration: operationGeneration,
+                    maximumCandidates: 1
+                )
+                if boundaryOutcome == .accepted {
+                    consecutiveNoMovementSteps = 0
+                    consecutiveLowConfidenceSteps = 0
+                    reachedStepBoundary = false
+                    lockedStepDirection = effectiveDirection
+                    if let acceptedDirection = lastAcceptedStepContentDirection {
+                        lockedContentDirection = acceptedDirection
+                    }
+                    return
+                }
+                if boundaryOutcome != .terminal {
+                    consecutiveNoMovementSteps = 1
+                    consecutiveLowConfidenceSteps = 0
+                    reachedStepBoundary = true
+                    _ = clearCurrentWarning(operationGeneration: operationGeneration)
+                }
                 NSLog(
                     "xxsnap scroll-capture %@ boundary confirmed by accessibility",
                     effectiveDirection == .up ? "top" : "bottom"
@@ -400,11 +483,23 @@ final class ScrollCaptureSession {
             }
             var activeScrollPoint = scrollPoints[probeIndices[0]]
             var outcomeUsesKeyboard = false
+            var attemptedScrollbarFallback = false
             presentation(.viewportScroll(ScrollCaptureScrollActivity(
                 direction: effectiveDirection,
                 distance: distance
             )))
             var outcome: StepCandidateOutcome = .noMovement
+            var deferredProbeOutcome: StepCandidateOutcome = .noMovement
+            func rememberDeferredProbeOutcome(_ candidate: StepCandidateOutcome) {
+                switch candidate {
+                case .lowConfidence:
+                    deferredProbeOutcome = .lowConfidence
+                case .review where deferredProbeOutcome != .lowConfidence:
+                    deferredProbeOutcome = .review
+                default:
+                    break
+                }
+            }
             for targetIndex in probeIndices where boundaryStates[targetIndex] != .atBoundary {
                 let scrollPoint = scrollPoints[targetIndex]
                 activeScrollPoint = scrollPoint
@@ -425,13 +520,84 @@ final class ScrollCaptureSession {
                 outcome = try await collectStepCandidates(
                     direction: effectiveDirection,
                     operationGeneration: operationGeneration,
+                    expectedAdvance: distance,
                     maximumCandidates: 1
                 )
-                if outcome != .noMovement {
+                if outcome == .noMovement,
+                   lockedStepDirection != nil,
+                   !attemptedScrollbarFallback,
+                   let lastStepCandidateImage {
+                    attemptedScrollbarFallback = true
+                    if try await stepController.performScrollbarStep(
+                        direction: effectiveDirection,
+                        distance: distance,
+                        in: seed.screenRect,
+                        capturedImage: lastStepCandidateImage
+                    ) {
+                        NSLog("xxsnap scroll-capture first wheel stationary; dragging detected outer scrollbar")
+                        (capturer as? any ScrollRegionCaptureBuffering)?.discardBufferedFrames()
+                        outcome = try await collectStepCandidates(
+                            direction: effectiveDirection,
+                            operationGeneration: operationGeneration,
+                            expectedAdvance: distance,
+                            maximumCandidates: 1
+                        )
+                    }
+                }
+                if outcome == .accepted || outcome == .terminal {
                     stepTargetIndex = targetIndex
                     break
                 }
+                if outcome == .lowConfidence {
+                    stepTargetIndex = targetIndex
+                    break
+                }
+                if outcome == .review,
+                   boundaryStates[targetIndex] == .notAtBoundary {
+                    stepTargetIndex = targetIndex
+                    break
+                }
+                rememberDeferredProbeOutcome(outcome)
                 stepTargetIndex = (targetIndex + 1) % scrollPoints.count
+                outcome = .noMovement
+            }
+            if outcome == .noMovement, deferredProbeOutcome != .noMovement {
+                outcome = deferredProbeOutcome
+            }
+            if outcome == .noMovement, !attemptedScrollbarFallback {
+                if let lastStepCandidateImage,
+                   try await stepController.performScrollbarStep(
+                       direction: effectiveDirection,
+                       distance: distance,
+                       in: seed.screenRect,
+                       capturedImage: lastStepCandidateImage
+                   ) {
+                    NSLog("xxsnap scroll-capture wheel stationary; dragging detected outer scrollbar")
+                    (capturer as? any ScrollRegionCaptureBuffering)?.discardBufferedFrames()
+                    outcome = try await collectStepCandidates(
+                        direction: effectiveDirection,
+                        operationGeneration: operationGeneration,
+                        expectedAdvance: distance,
+                        maximumCandidates: 1
+                    )
+                }
+            }
+            if outcome == .noMovement {
+                (capturer as? any ScrollRegionCaptureBuffering)?.discardBufferedFrames()
+                if try await stepController.performTargetedStep(
+                    direction: effectiveDirection,
+                    distance: distance,
+                    at: activeScrollPoint
+                ) {
+                    NSLog("xxsnap scroll-capture global wheel stationary; trying targeted wheel delivery")
+                    (capturer as? any ScrollRegionCaptureBuffering)?.discardBufferedFrames()
+                    outcome = try await collectStepCandidates(
+                        direction: effectiveDirection,
+                        operationGeneration: operationGeneration,
+                        expectedAdvance: distance,
+                        maximumCandidates: 1
+                    )
+                }
             }
             if outcome == .noMovement {
                 (capturer as? any ScrollRegionCaptureBuffering)?.discardBufferedFrames()
@@ -444,22 +610,25 @@ final class ScrollCaptureSession {
                     (capturer as? any ScrollRegionCaptureBuffering)?.discardBufferedFrames()
                     outcome = try await collectStepCandidates(
                         direction: effectiveDirection,
-                        operationGeneration: operationGeneration
+                        operationGeneration: operationGeneration,
+                        expectedAdvance: distance
                     )
                 }
             }
-            if outcome == .lowConfidence {
+            if outcome == .lowConfidence || outcome == .review {
                 let delayedOutcome = try await collectStepCandidates(
                     direction: effectiveDirection,
                     operationGeneration: operationGeneration,
+                    expectedAdvance: distance,
                     maximumCandidates: 1
                 )
                 if delayedOutcome == .accepted || delayedOutcome == .terminal {
                     outcome = delayedOutcome
+                } else if delayedOutcome == .lowConfidence || delayedOutcome == .review {
+                    outcome = delayedOutcome
                 }
             }
-            if outcome == .lowConfidence {
-                let recoveryDistance = distance / 2
+            if outcome == .lowConfidence || outcome == .review {
                 let reverseDirection = Self.opposite(of: effectiveDirection)
                 presentation(.viewportScroll(ScrollCaptureScrollActivity(
                     direction: reverseDirection,
@@ -478,29 +647,32 @@ final class ScrollCaptureSession {
                         at: activeScrollPoint
                     )
                 }
-                presentation(.viewportScroll(ScrollCaptureScrollActivity(
-                    direction: effectiveDirection,
-                    distance: recoveryDistance
-                )))
-                (capturer as? any ScrollRegionCaptureBuffering)?.discardBufferedFrames()
-                if outcomeUsesKeyboard {
-                    _ = try await stepController.performKeyboardStep(
+                for recoveryDistance in [distance / 2, distance / 4] {
+                    presentation(.viewportScroll(ScrollCaptureScrollActivity(
                         direction: effectiveDirection,
                         distance: recoveryDistance
-                    )
-                } else {
-                    try await stepController.performStep(
+                    )))
+                    (capturer as? any ScrollRegionCaptureBuffering)?.discardBufferedFrames()
+                    if outcomeUsesKeyboard {
+                        _ = try await stepController.performKeyboardStep(
+                            direction: effectiveDirection,
+                            distance: recoveryDistance
+                        )
+                    } else {
+                        try await stepController.performStep(
+                            direction: effectiveDirection,
+                            distance: recoveryDistance,
+                            at: activeScrollPoint
+                        )
+                    }
+                    (capturer as? any ScrollRegionCaptureBuffering)?.discardBufferedFrames()
+                    outcome = try await collectStepCandidates(
                         direction: effectiveDirection,
-                        distance: recoveryDistance,
-                        at: activeScrollPoint
+                        operationGeneration: operationGeneration,
+                        expectedAdvance: recoveryDistance
                     )
-                }
-                (capturer as? any ScrollRegionCaptureBuffering)?.discardBufferedFrames()
-                outcome = try await collectStepCandidates(
-                    direction: effectiveDirection,
-                    operationGeneration: operationGeneration
-                )
-                if outcome == .lowConfidence {
+                    guard outcome == .lowConfidence || outcome == .review else { break }
+
                     presentation(.viewportScroll(ScrollCaptureScrollActivity(
                         direction: reverseDirection,
                         distance: recoveryDistance
@@ -524,18 +696,49 @@ final class ScrollCaptureSession {
             switch outcome {
             case .accepted:
                 consecutiveNoMovementSteps = 0
+                consecutiveLowConfidenceSteps = 0
                 reachedStepBoundary = false
                 lockedStepDirection = effectiveDirection
+                if let acceptedDirection = lastAcceptedStepContentDirection {
+                    lockedContentDirection = acceptedDirection
+                }
             case .noMovement:
+                consecutiveLowConfidenceSteps = 0
                 consecutiveNoMovementSteps += 1
-                // One user action has already checked every viable wheel target and
-                // the focused-keyboard fallback, so requiring more clicks only
-                // repeats the same evidence.
-                reachedStepBoundary = true
-                _ = clearCurrentWarning(operationGeneration: operationGeneration)
+                if accessibilityConfirmsMoreContent {
+                    reachedStepBoundary = false
+                    setCurrentWarning(.lowConfidence, operationGeneration: operationGeneration)
+                } else {
+                    // One user action has already checked every viable wheel target and
+                    // the focused-keyboard fallback, so requiring more clicks only
+                    // repeats the same evidence.
+                    reachedStepBoundary = true
+                    _ = clearCurrentWarning(operationGeneration: operationGeneration)
+                }
             case .lowConfidence:
                 consecutiveNoMovementSteps = 0
-                setCurrentWarning(.lowConfidence, operationGeneration: operationGeneration)
+                if lockedStepDirection != nil {
+                    consecutiveLowConfidenceSteps += 1
+                } else {
+                    consecutiveLowConfidenceSteps = 0
+                }
+                if consecutiveLowConfidenceSteps >= Self.lowConfidenceVisualBoundaryThreshold {
+                    reachedStepBoundary = true
+                    _ = clearCurrentWarning(operationGeneration: operationGeneration)
+                } else {
+                    setCurrentWarning(.lowConfidence, operationGeneration: operationGeneration)
+                }
+            case .review:
+                consecutiveNoMovementSteps = 0
+                consecutiveLowConfidenceSteps = 0
+                if let lockedStepDirection,
+                   let lockedContentDirection,
+                   lockedStepDirection != lockedContentDirection {
+                    reachedStepBoundary = true
+                    _ = clearCurrentWarning(operationGeneration: operationGeneration)
+                } else {
+                    setCurrentWarning(.lowConfidence, operationGeneration: operationGeneration)
+                }
             case .terminal:
                 break
             }
@@ -556,24 +759,33 @@ final class ScrollCaptureSession {
         case accepted
         case noMovement
         case lowConfidence
+        case review
         case terminal
     }
 
     private func collectStepCandidates(
         direction: ScrollCaptureDirection,
         operationGeneration: Int,
+        expectedAdvance: CGFloat = 0,
         maximumCandidates: Int = 2
     ) async throws -> StepCandidateOutcome {
         var sawLowConfidence = false
+        var sawReview = false
         for candidateIndex in 0..<maximumCandidates {
             guard generation == operationGeneration, state == .capturing else { return .terminal }
             let image = try await capturer.captureImage(in: seed.screenRect)
+            lastStepCandidateImage = image
             guard generation == operationGeneration, state == .capturing else { return .terminal }
             guard let stitcher else { return .terminal }
-            let update = try await stitcher.append(image, preferredDirection: direction)
+            let update = try await stitcher.append(
+                image,
+                preferredDirection: lockedContentDirection ?? direction,
+                expectedAdvance: expectedAdvance
+            )
             NSLog(
-                "xxsnap scroll-capture step candidate=%ld kind=%@ direction=%@ confidence=%.3f appendedHeight=%ld outputHeight=%ld",
+                "xxsnap scroll-capture step candidate=%ld expectedAdvance=%.1f kind=%@ direction=%@ confidence=%.3f appendedHeight=%ld outputHeight=%ld",
                 candidateIndex + 1,
+                expectedAdvance,
                 String(describing: update.kind),
                 String(describing: update.direction),
                 update.confidence,
@@ -589,14 +801,23 @@ final class ScrollCaptureSession {
             // retrying at half distance. Only expose low confidence after those
             // recovery attempts have also failed.
             if update.kind != .lowConfidenceDiscarded {
-                try await handle(update, stitcher: stitcher, operationGeneration: operationGeneration)
+                try await handle(
+                    update,
+                    previewDirection: direction,
+                    stitcher: stitcher,
+                    operationGeneration: operationGeneration
+                )
             }
             switch update.kind {
             case .acceptedAppend:
+                if update.direction == .up || update.direction == .down {
+                    lastAcceptedStepContentDirection = update.direction
+                }
                 return .accepted
             case .awaitingEvidence:
                 if update.appendedHeight > 0,
                    update.direction == .up || update.direction == .down {
+                    lastAcceptedStepContentDirection = update.direction
                     return .accepted
                 }
                 sawLowConfidence = true
@@ -608,7 +829,7 @@ final class ScrollCaptureSession {
                 // A review frame matched already-seen content rather than the
                 // current viewport. That is inconclusive, not proof that the
                 // scrollable control is at its boundary.
-                sawLowConfidence = true
+                sawReview = true
             case .duplicateDiscarded:
                 break
             case .acceptedInitial:
@@ -617,7 +838,9 @@ final class ScrollCaptureSession {
                 throw ScrollCaptureSessionError.initialFrameRejected(update.kind)
             }
         }
-        return sawLowConfidence ? .lowConfidence : .noMovement
+        if sawLowConfidence { return .lowConfidence }
+        if sawReview { return .review }
+        return .noMovement
     }
 
     private static func opposite(of direction: ScrollCaptureDirection) -> ScrollCaptureDirection {
@@ -629,16 +852,21 @@ final class ScrollCaptureSession {
         }
     }
 
-    private static func stepScrollPoints(in rect: NSRect) -> [NSPoint] {
-        let horizontalOffset = max(4, min(48, rect.width * 0.10))
+    static func stepScrollPoints(in rect: NSRect) -> [NSPoint] {
+        let horizontalInset = min(rect.width / 2, min(16, max(8, rect.width * 0.04)))
         let verticalOffset = max(4, rect.height * 0.25)
-        let center = NSPoint(x: rect.midX, y: rect.midY)
+        let rightX = rect.maxX - horizontalInset
+        let centerX = rect.midX
+        let leftX = rect.minX + horizontalInset
         return [
-            NSPoint(x: center.x, y: center.y + verticalOffset),
-            center,
-            NSPoint(x: center.x - horizontalOffset, y: center.y),
-            NSPoint(x: center.x + horizontalOffset, y: center.y),
-            NSPoint(x: center.x, y: center.y - verticalOffset),
+            NSPoint(x: rightX, y: rect.midY),
+            NSPoint(x: rightX, y: rect.midY + verticalOffset),
+            NSPoint(x: rightX, y: rect.midY - verticalOffset),
+            NSPoint(x: centerX, y: rect.midY),
+            NSPoint(x: centerX, y: rect.midY + verticalOffset),
+            NSPoint(x: centerX, y: rect.midY - verticalOffset),
+            NSPoint(x: leftX, y: rect.midY),
+            NSPoint(x: leftX, y: rect.midY + verticalOffset),
         ]
     }
 
@@ -801,13 +1029,17 @@ final class ScrollCaptureSession {
 
     private func handle(
         _ update: ScrollCaptureAppendUpdate,
+        previewDirection: ScrollCaptureDirection? = nil,
         stitcher: any ScrollStitching,
         operationGeneration: Int
     ) async throws {
         switch update.kind {
         case .acceptedAppend:
+            guard update.direction == .down || update.direction == .up else {
+                throw ScrollCaptureSessionError.acceptedAppendWithoutDirection
+            }
             let edge: ScrollCapturePreviewEdge
-            switch update.direction {
+            switch previewDirection ?? update.direction {
             case .down: edge = .bottom
             case .up: edge = .top
             case .unknown:
@@ -833,8 +1065,9 @@ final class ScrollCaptureSession {
         case .awaitingEvidence:
             guard clearCurrentWarning(operationGeneration: operationGeneration) else { return }
             guard update.appendedHeight > 0 else { return }
+            guard update.direction == .down || update.direction == .up else { return }
             let edge: ScrollCapturePreviewEdge
-            switch update.direction {
+            switch previewDirection ?? update.direction {
             case .down: edge = .bottom
             case .up: edge = .top
             case .unknown: return

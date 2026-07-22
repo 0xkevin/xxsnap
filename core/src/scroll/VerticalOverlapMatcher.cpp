@@ -18,6 +18,8 @@ constexpr int MaximumFullResolutionCandidateLimit = 1'000'000;
 constexpr int MaximumSignatureRows = 192;
 constexpr int MaximumValidationColumns = 256;
 constexpr int MaximumValidationRows = 384;
+constexpr int NearWhiteLuminanceThreshold = 224;
+constexpr std::uint64_t MinimumForegroundValidationSamples = 256;
 
 struct LuminanceImage final
 {
@@ -78,6 +80,8 @@ struct EvaluationBudget final
         && config.maximumAdvanceRatio <= 1.0
         && config.maximumNormalizedError >= 0.0
         && config.minimumWinnerMargin >= 0.0
+        && config.expectedAdvance >= 0
+        && config.expectedAdvanceTolerance >= 0
         && config.maximumFullResolutionCandidates > 0
         && config.maximumFullResolutionCandidates <= MaximumFullResolutionCandidateLimit
         && config.excludedBands.left >= 0
@@ -243,6 +247,55 @@ struct EvaluationBudget final
     return difference / (static_cast<double>(count) * 255.0);
 }
 
+[[nodiscard]] double nearWhiteSuppressedError(
+    const LuminanceImage& previous,
+    const LuminanceImage& current,
+    int advance,
+    const PixelCrop& excludedBands)
+{
+    const int firstX = excludedBands.left;
+    const int lastX = previous.width - excludedBands.right;
+    const int firstY = excludedBands.top;
+    const int lastY = previous.height - excludedBands.bottom - advance;
+    if (firstX >= lastX || firstY >= lastY) {
+        return std::numeric_limits<double>::infinity();
+    }
+
+    double difference = 0;
+    std::uint64_t count = 0;
+    const auto columnStep = static_cast<std::size_t>(lastY - firstY <= MaximumValidationRows
+        ? 1
+        : std::max(
+            1,
+            (lastX - firstX + MaximumValidationColumns - 1) / MaximumValidationColumns));
+    const auto rowStep = static_cast<std::size_t>(std::max(
+        1,
+        (lastY - firstY + MaximumValidationRows - 1) / MaximumValidationRows));
+    for (auto currentY = static_cast<std::size_t>(firstY);
+         currentY < static_cast<std::size_t>(lastY);
+         currentY += rowStep) {
+        const auto previousRow = (currentY + static_cast<std::size_t>(advance))
+            * static_cast<std::size_t>(previous.width);
+        const auto currentRow = currentY * static_cast<std::size_t>(current.width);
+        for (auto column = static_cast<std::size_t>(firstX);
+             column < static_cast<std::size_t>(lastX);
+             column += columnStep) {
+            const int previousValue = previous.pixels[previousRow + column];
+            const int currentValue = current.pixels[currentRow + column];
+            if (previousValue >= NearWhiteLuminanceThreshold
+                && currentValue >= NearWhiteLuminanceThreshold) {
+                continue;
+            }
+            difference += static_cast<double>(std::abs(previousValue - currentValue));
+            ++count;
+        }
+    }
+    if (count < MinimumForegroundValidationSamples) {
+        return std::numeric_limits<double>::infinity();
+    }
+    return difference / (static_cast<double>(count) * 255.0);
+}
+
 void sortByError(std::vector<ScoredAdvance>& scores)
 {
     std::sort(scores.begin(), scores.end(), [](const auto& left, const auto& right) {
@@ -377,6 +430,56 @@ OverlapResult VerticalOverlapMatcher::match(
 
     const auto previousLuminance = makeLuminance(previous);
     const auto currentLuminance = makeLuminance(current);
+    const auto expectedResult = [&]() -> std::optional<OverlapResult> {
+        if (config.expectedAdvance <= 0) {
+            return std::nullopt;
+        }
+        const int first = std::max(1, config.expectedAdvance - config.expectedAdvanceTolerance);
+        const int last = std::min(
+            maximumAdvance, config.expectedAdvance + config.expectedAdvanceTolerance);
+        if (first > last) {
+            return std::nullopt;
+        }
+
+        const auto bestExpectedAdvance = [&](bool suppressNearWhite) {
+            ScoredAdvance expectedBest;
+            for (int advance = first; advance <= last; ++advance) {
+                const double error = suppressNearWhite
+                    ? nearWhiteSuppressedError(
+                        previousLuminance, currentLuminance, advance, config.excludedBands)
+                    : fullResolutionError(
+                        previousLuminance, currentLuminance, advance, config.excludedBands);
+                if (error < expectedBest.error
+                    || (error == expectedBest.error
+                        && std::abs(advance - config.expectedAdvance)
+                            < std::abs(expectedBest.advance - config.expectedAdvance))) {
+                    expectedBest = {advance, error};
+                }
+            }
+            return expectedBest;
+        };
+        const double maximumExpectedError = std::min(
+            config.maximumNormalizedError, 0.03);
+        auto expectedBest = bestExpectedAdvance(false);
+        const auto foregroundBest = bestExpectedAdvance(true);
+        if (std::isfinite(foregroundBest.error)
+            && foregroundBest.error <= maximumExpectedError) {
+            expectedBest = foregroundBest;
+        }
+        if (!std::isfinite(expectedBest.error) || expectedBest.error > maximumExpectedError) {
+            return std::nullopt;
+        }
+
+        OverlapResult resolved;
+        resolved.kind = OverlapKind::Reliable;
+        resolved.verticalAdvance = expectedBest.advance;
+        resolved.overlapHeight = height - expectedBest.advance;
+        resolved.normalizedError = expectedBest.error;
+        resolved.confidence = maximumExpectedError > 0.0
+            ? std::clamp(1.0 - expectedBest.error / maximumExpectedError, 0.0, 1.0)
+            : (expectedBest.error == 0.0 ? 1.0 : 0.0);
+        return resolved;
+    };
     std::vector<ScoredAdvance> lowerBounds;
     lowerBounds.reserve(static_cast<std::size_t>(maximumAdvance) + 1U);
     for (int advance = 0; advance <= maximumAdvance; ++advance) {
@@ -521,6 +624,9 @@ OverlapResult VerticalOverlapMatcher::match(
     }
     sortByError(evaluated);
     if (evaluated.empty() || !std::isfinite(evaluated.front().error)) {
+        if (const auto expected = expectedResult(); expected.has_value()) {
+            return *expected;
+        }
         return result;
     }
 
@@ -529,11 +635,17 @@ OverlapResult VerticalOverlapMatcher::match(
     result.overlapHeight = height - best.advance;
     result.normalizedError = best.error;
     if (evaluationBudget.exhausted) {
+        if (const auto expected = expectedResult(); expected.has_value()) {
+            return *expected;
+        }
         result.kind = OverlapKind::Ambiguous;
         result.confidence = 0.0;
         return result;
     }
     if (best.error > config.maximumNormalizedError) {
+        if (const auto expected = expectedResult(); expected.has_value()) {
+            return *expected;
+        }
         return result;
     }
 
@@ -555,6 +667,9 @@ OverlapResult VerticalOverlapMatcher::match(
         : std::numeric_limits<double>::infinity();
     const double winnerMargin = runnerUpError - best.error;
     if (evaluationBudget.exhausted) {
+        if (const auto expected = expectedResult(); expected.has_value()) {
+            return *expected;
+        }
         result.kind = OverlapKind::Ambiguous;
         result.confidence = 0.0;
         return result;
@@ -569,6 +684,15 @@ OverlapResult VerticalOverlapMatcher::match(
     result.kind = certifiedAmbiguity || winnerMargin < config.minimumWinnerMargin
         ? OverlapKind::Ambiguous
         : OverlapKind::Reliable;
+    if ((result.kind != OverlapKind::Reliable
+            || result.verticalAdvance == 0
+            || std::abs(result.verticalAdvance - config.expectedAdvance)
+                > config.expectedAdvanceTolerance)
+        && config.expectedAdvance > 0) {
+        if (const auto expected = expectedResult(); expected.has_value()) {
+            return *expected;
+        }
+    }
     return result;
 }
 

@@ -67,6 +67,7 @@ struct SelectionOverlayConfiguration {
     var showsSelectionMeasurementControl: Bool
     var allowsPassiveColorSampler: Bool
     var usesArrowCursorWhenIdle: Bool
+    var usesMoveCursorInsideSelectionWhenIdle: Bool
     var outsideSelectionDimAlpha: CGFloat
     var usesWindowBoundsForLayout: Bool
     var completesBeforeOrderingOut: Bool
@@ -98,6 +99,7 @@ struct SelectionOverlayConfiguration {
         showsSelectionMeasurementControl: true,
         allowsPassiveColorSampler: true,
         usesArrowCursorWhenIdle: false,
+        usesMoveCursorInsideSelectionWhenIdle: false,
         outsideSelectionDimAlpha: 0.34,
         usesWindowBoundsForLayout: false,
         completesBeforeOrderingOut: false,
@@ -141,6 +143,7 @@ struct SelectionOverlayConfiguration {
             showsSelectionMeasurementControl: false,
             allowsPassiveColorSampler: false,
             usesArrowCursorWhenIdle: true,
+            usesMoveCursorInsideSelectionWhenIdle: true,
             outsideSelectionDimAlpha: 0,
             usesWindowBoundsForLayout: true,
             completesBeforeOrderingOut: true,
@@ -187,6 +190,7 @@ struct SelectionOverlayConfiguration {
             showsSelectionMeasurementControl: false,
             allowsPassiveColorSampler: false,
             usesArrowCursorWhenIdle: true,
+            usesMoveCursorInsideSelectionWhenIdle: false,
             outsideSelectionDimAlpha: 0,
             usesWindowBoundsForLayout: true,
             completesBeforeOrderingOut: true,
@@ -885,6 +889,11 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.scrollCaptureOverlayState = .capturing
     }
 
+    func setScrollCaptureOutputHeight(_ outputHeight: Int) {
+        guard scrollCaptureOverlayState != .inactive else { return }
+        (contentView as? SelectionOverlayView)?.setScrollCaptureOutputHeight(outputHeight)
+    }
+
     func resetScrollCaptureTerminalActionsForRetry() {
         guard scrollCaptureOverlayState != .inactive else { return }
         scrollCaptureTerminalActionTriggered = false
@@ -1324,6 +1333,10 @@ final class SelectionOverlayWindow: NSWindow {
 
     func test_measurementControlPoint(_ control: SelectionToolbarState.MeasurementControl) -> NSPoint? {
         (contentView as? SelectionOverlayView)?.test_measurementControlPoint(control)
+    }
+
+    var test_measurementLabelText: String? {
+        (contentView as? SelectionOverlayView)?.test_measurementLabelText
     }
 
     func test_optionsStrokeWidthPoint(at index: Int) -> NSPoint? {
@@ -2239,6 +2252,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 colorSamplerCopySuccessTimer?.invalidate()
                 colorSamplerCopySuccessTimer = nil
                 colorSamplerCopySuccessUntil = nil
+            } else {
+                scrollCaptureOutputHeight = nil
             }
             needsDisplay = true
         }
@@ -2251,6 +2266,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     )
     private var scrollCaptureTargetVisualState: ScrollCaptureTargetVisualState = .inactive
     private var scrollCaptureOriginalSelectionRect: NSRect?
+    private var scrollCaptureOutputHeight: Int?
     private var selectionChromeColor: NSColor {
         scrollCaptureTargetVisualState == .resolved ? .systemGreen : defaultSelectionColor
     }
@@ -2261,6 +2277,14 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private var suppressedAnnotationIDs: Set<AnnotationID>
     private var backgroundLuminanceCache: [String: CGFloat] = [:]
     private let settings: AppSettings
+    private lazy var scrollHeightNumberFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.locale = Locale(identifier: settings.language == .zhHans ? "zh_CN" : "en_US")
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 0
+        formatter.usesGroupingSeparator = true
+        return formatter
+    }()
     private let featureGate: FeatureGate
     private let configuration: SelectionOverlayConfiguration
     private let refreshHandler: (() async throws -> NSImage?)?
@@ -3202,7 +3226,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
            !isMagnifierToolActive,
            !isEraserToolActive,
            !isEyedropperToolActive {
-            if let lockedSelectionRect,
+            if configuration.usesMoveCursorInsideSelectionWhenIdle,
+               let lockedSelectionRect,
                !isToolbarOrPanelPoint(point),
                lockedSelectionRect.standardized.contains(point) {
                 return backgroundAwareCursorStyle(.move, at: point)
@@ -7293,6 +7318,11 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             rect = layout.refresh
         }
         return NSPoint(x: rect.midX, y: rect.midY)
+    }
+
+    var test_measurementLabelText: String? {
+        guard let selectionRect else { return nil }
+        return measurementLabelText(for: selectionRect)
     }
 
     func test_optionsStrokeWidthPoint(at index: Int) -> NSPoint? {
@@ -11550,7 +11580,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private func drawMeasurementLabel(_ rect: NSRect) {
-        let label = "\(Int(rect.width)) x \(Int(rect.height))  px"
+        let label = measurementLabelText(for: rect)
         let attributes: [NSAttributedString.Key: Any] = [
             .font: samplerInfoFont(ofSize: 12, weight: .medium),
             .foregroundColor: NSColor.white,
@@ -11587,7 +11617,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private func measurementControlLayout(for rect: NSRect) -> SelectionToolbarState.MeasurementControlLayout {
-        let label = "\(Int(rect.width)) x \(Int(rect.height))  px"
+        let label = measurementLabelText(for: rect)
         let attributes: [NSAttributedString.Key: Any] = [
             .font: samplerInfoFont(ofSize: 12, weight: .medium),
             .foregroundColor: NSColor.white,
@@ -11606,6 +11636,20 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             layout.refresh = .zero
         }
         return layout
+    }
+
+    private func measurementLabelText(for rect: NSRect) -> String {
+        let size = "\(Int(rect.width)) x \(Int(rect.height))  px"
+        guard scrollCaptureOverlayState != .inactive,
+              let scrollCaptureOutputHeight
+        else { return size }
+        let formattedHeight = scrollHeightNumberFormatter.string(
+            from: NSNumber(value: scrollCaptureOutputHeight)
+        ) ?? String(scrollCaptureOutputHeight)
+        let height = settings.language == .zhHans
+            ? "滚动高度：\(formattedHeight) px"
+            : "Scroll height: \(formattedHeight) px"
+        return "\(size)    \(height)"
     }
 
     private func drawMeasurementControlButton(_ rect: NSRect, selected: Bool) {
@@ -15971,6 +16015,12 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         prepareScrollCaptureTargetResolution()
         scrollCaptureOverlayState = .capturing
         scrollCaptureDidRequest?(seed)
+    }
+
+    func setScrollCaptureOutputHeight(_ outputHeight: Int) {
+        guard scrollCaptureOverlayState != .inactive, outputHeight > 0 else { return }
+        scrollCaptureOutputHeight = outputHeight
+        needsDisplay = true
     }
 
     func endScrollCapturePassiveMode() {

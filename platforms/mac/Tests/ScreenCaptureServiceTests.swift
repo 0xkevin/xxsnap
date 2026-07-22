@@ -39,6 +39,19 @@ final class ScreenCaptureServiceTests: XCTestCase {
         XCTAssertTrue(delivered === fresh)
     }
 
+    func testScrollFrameBufferReusesLatestFrameWhenScreenStopsProducingFrames() async throws {
+        let buffer = ScrollCaptureFrameBuffer(capacity: 3)
+        let latest = NSImage(size: NSSize(width: 2, height: 2))
+        buffer.enqueue(latest)
+        _ = try await buffer.nextImage()
+
+        let startedAt = ContinuousClock.now
+        let delivered = try await buffer.nextImage(maximumWait: 0.02)
+
+        XCTAssertTrue(delivered === latest)
+        XCTAssertLessThan(startedAt.duration(to: .now), .milliseconds(200))
+    }
+
     func testScrollFrameBufferStopsExpensiveProductionWhileItsQueueIsFull() async throws {
         let buffer = ScrollCaptureFrameBuffer(capacity: 2)
         XCTAssertTrue(buffer.canAcceptImage)

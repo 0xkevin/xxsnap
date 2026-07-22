@@ -42,6 +42,28 @@ final class ScrollCaptureBridgeTests: XCTestCase {
         XCTAssertEqual(update.direction, .down)
     }
 
+    func testExpectedPointAdvanceResolvesRetinaStationaryWatermarkAmbiguity() throws {
+        let bridge = try XCTUnwrap(ScrollCaptureBridge(maximumAcceptedBytes: 16 * 1024 * 1024))
+        XCTAssertEqual(
+            try bridge.append(
+                TestImageFactory.sparseChatWithStationaryWatermark(offset: 40),
+                preferredDirection: .down,
+                expectedAdvance: 0
+            ).kind,
+            .acceptedInitial
+        )
+
+        let update = try bridge.append(
+            TestImageFactory.sparseChatWithStationaryWatermark(offset: 80),
+            preferredDirection: .down,
+            expectedAdvance: 40
+        )
+
+        XCTAssertEqual(update.kind, .acceptedAppend)
+        XCTAssertEqual(update.appendedHeight, 80)
+        XCTAssertEqual(update.outputHeight, 320)
+    }
+
     func testViewportSizedAppendAndPreviewCompleteWithinInteractiveBudget() throws {
         let bridge = try XCTUnwrap(ScrollCaptureBridge(maximumAcceptedBytes: 128 * 1024 * 1024))
         let first = TestImageFactory.verticalDocumentViewportWithFixedFooter(
@@ -65,7 +87,11 @@ final class ScrollCaptureBridgeTests: XCTestCase {
         let startedAt = ProcessInfo.processInfo.systemUptime
         var update: ScrollCaptureAppendUpdate?
         for frame in liveFrames {
-            update = try bridge.append(frame, preferredDirection: .down)
+            update = try bridge.append(
+                frame,
+                preferredDirection: .down,
+                expectedAdvance: 140
+            )
         }
         let preview = try bridge.preview(maximumWidth: 600)
         let elapsed = ProcessInfo.processInfo.systemUptime - startedAt
@@ -260,7 +286,7 @@ final class ScrollCaptureBridgeTests: XCTestCase {
         assertRenderedPixelsEqual(final, expected, seamRows: [280, 295, 310], scale: 1)
     }
 
-    func testOneXFinalBlendsOnePhysicalSeamRowTowardPremultipliedAlpha() throws {
+    func testOneXFinalDoesNotModifyPixelsAtAcceptedBoundary() throws {
         let scale: CGFloat = 1
         let width = 64
         let height = 96
@@ -298,10 +324,9 @@ final class ScrollCaptureBridgeTests: XCTestCase {
         XCTAssertEqual(final.representations.first?.pixelsHigh, 128)
         XCTAssertEqual(final.size.height, 128, accuracy: 0.001)
         XCTAssertEqual(sourcePixel, [10, 20, 30, 80])
-        assertSeamPixel(
+        XCTAssertEqual(
             bgraPixel(finalPixels, width: width, x: sampleX, y: seamY),
-            source: sourcePixel,
-            scale: scale
+            sourcePixel
         )
         XCTAssertEqual(
             bgraPixel(finalPixels, width: width, x: sampleX, y: seamY - 1),
@@ -313,7 +338,7 @@ final class ScrollCaptureBridgeTests: XCTestCase {
         )
     }
 
-    func testTwoXFinalUsesTwentyPercentCoverageWithoutAddingAPixelRow() throws {
+    func testTwoXFinalDoesNotModifyPixelsAtAcceptedBoundary() throws {
         let scale: CGFloat = 2
         let pointWidth = 64
         let pointHeight = 96
@@ -345,10 +370,9 @@ final class ScrollCaptureBridgeTests: XCTestCase {
         XCTAssertEqual(final.representations.first?.pixelsWide, pixelWidth)
         XCTAssertEqual(final.representations.first?.pixelsHigh, 256)
         XCTAssertEqual(final.size.height, 128, accuracy: 0.001)
-        assertSeamPixel(
+        XCTAssertEqual(
             bgraPixel(finalPixels, width: pixelWidth, x: sampleX, y: seamY),
-            source: sourcePixel,
-            scale: scale
+            sourcePixel
         )
         XCTAssertEqual(
             bgraPixel(finalPixels, width: pixelWidth, x: sampleX, y: seamY - 1),
@@ -360,7 +384,7 @@ final class ScrollCaptureBridgeTests: XCTestCase {
         )
     }
 
-    func testRejectedTwoXSeedDoesNotSetCoverageForAcceptedOneXSession() throws {
+    func testRejectedTwoXSeedDoesNotAffectAcceptedOneXBoundaryPixels() throws {
         let width = 64
         let height = 96
         let bridge = try XCTUnwrap(ScrollCaptureBridge(maximumAcceptedBytes: 80_000))
@@ -389,10 +413,6 @@ final class ScrollCaptureBridgeTests: XCTestCase {
         XCTAssertEqual(final.representations.first?.pixelsHigh, 128)
         XCTAssertEqual(final.size, CGSize(width: 64, height: 128))
         assertSeamPixel(seamPixel, source: sourcePixel, scale: 1)
-        XCTAssertNotEqual(
-            seamPixel[0],
-            expectedSeamChannel(sourcePixel[0], alpha: sourcePixel[3], scale: 2)
-        )
     }
 
     func testDownsampledPreviewAndFinalUseTheSameMappedSeamCoverage() throws {
@@ -606,11 +626,10 @@ final class ScrollCaptureBridgeTests: XCTestCase {
 
     private func expectedSeamChannel(
         _ value: UInt8,
-        alpha: UInt8 = 255,
-        scale: CGFloat
+        alpha _: UInt8 = 255,
+        scale _: CGFloat
     ) -> UInt8 {
-        let coverage = min(1, 0.1 * scale)
-        return UInt8((CGFloat(value) + (CGFloat(alpha) - CGFloat(value)) * coverage).rounded())
+        value
     }
 
     private func bgraPixel(
@@ -751,10 +770,9 @@ final class ScrollCaptureBridgeTests: XCTestCase {
                 }
             }
         }
-        XCTAssertEqual(
-            changedSeamRows,
-            seamRows,
-            "Every expected seam row must visibly change a valid non-white pixel",
+        XCTAssertTrue(
+            changedSeamRows.isEmpty,
+            "Accepted boundaries must not alter source pixels",
             file: file,
             line: line
         )

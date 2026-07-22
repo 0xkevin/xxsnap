@@ -76,7 +76,7 @@ final class AppSettingsTests: XCTestCase {
         let chinese = L10n(language: .zhHans).text(.scrollCaptureLowConfidence)
         let english = L10n(language: .english).text(.scrollCaptureLowConfidence)
 
-        XCTAssertEqual(chinese, "暂未识别到重叠位置，将继续尝试拼接")
+        XCTAssertEqual(chinese, "暂无法识别到拼接位置，将继续尝试拼接")
         XCTAssertFalse(chinese.contains("暂停"))
         XCTAssertEqual(english, "Overlap not found yet. Continuing to stitch.")
         XCTAssertFalse(english.localizedCaseInsensitiveContains("paused"))

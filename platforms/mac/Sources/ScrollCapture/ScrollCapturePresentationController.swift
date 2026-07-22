@@ -8,6 +8,59 @@ private final class ScrollCapturePreviewDocumentView: NSView {
     override var isFlipped: Bool { true }
 }
 
+enum ScrollCaptureStepGuidePointerDirection: Equatable {
+    case up
+    case down
+}
+
+struct ScrollCaptureStepGuidePlacement: Equatable {
+    let frame: NSRect
+    let pointerDirection: ScrollCaptureStepGuidePointerDirection
+}
+
+private final class ScrollCaptureStepGuideView: NSView {
+    static let pointerHeight: CGFloat = 8
+    var fillColor = NSColor.systemBlue { didSet { needsDisplay = true } }
+    var pointerDirection = ScrollCaptureStepGuidePointerDirection.down {
+        didSet { needsDisplay = true }
+    }
+    var pointerCenterX: CGFloat = 0 { didSet { needsDisplay = true } }
+
+    var bodyRect: NSRect {
+        switch pointerDirection {
+        case .up:
+            return NSRect(x: 0, y: 0, width: bounds.width, height: bounds.height - Self.pointerHeight)
+        case .down:
+            return NSRect(
+                x: 0,
+                y: Self.pointerHeight,
+                width: bounds.width,
+                height: bounds.height - Self.pointerHeight
+            )
+        }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        fillColor.setFill()
+        NSBezierPath(roundedRect: bodyRect, xRadius: 9, yRadius: 9).fill()
+        let centerX = min(max(pointerCenterX, 10), max(10, bounds.width - 10))
+        let pointer = NSBezierPath()
+        switch pointerDirection {
+        case .up:
+            pointer.move(to: NSPoint(x: centerX - 8, y: bodyRect.maxY))
+            pointer.line(to: NSPoint(x: centerX, y: bounds.maxY))
+            pointer.line(to: NSPoint(x: centerX + 8, y: bodyRect.maxY))
+        case .down:
+            pointer.move(to: NSPoint(x: centerX - 8, y: bodyRect.minY))
+            pointer.line(to: NSPoint(x: centerX, y: bounds.minY))
+            pointer.line(to: NSPoint(x: centerX + 8, y: bodyRect.minY))
+        }
+        pointer.close()
+        pointer.fill()
+    }
+}
+
 private enum ScrollCapturePreviewVerticalAnchor: Equatable {
     case top
     case bottom
@@ -36,6 +89,7 @@ struct ScrollCaptureControlGeometry: Equatable {
 final class ScrollCapturePresentationController: NSObject {
     private let controlPanel: NSPanel
     private let stepPanel: NSPanel
+    private let stepGuidePanel: NSPanel
     private let previewPanel: NSPanel
     private let warningPanel: NSPanel
     private let boundaryPanel: NSPanel
@@ -50,6 +104,9 @@ final class ScrollCapturePresentationController: NSObject {
     private let startButton = NSButton()
     private let stepProgressIndicator = NSProgressIndicator()
     private let stopButton = NSButton()
+    private let stepGuideBackground = ScrollCaptureStepGuideView()
+    private let stepGuideLabel = NSTextField(labelWithString: "")
+    private let stepGuideBackgroundColor = NSColor.systemBlue
     private var startButtonIdleImage: NSImage?
     private let scrollView = NSScrollView()
     private let previewDocumentView = ScrollCapturePreviewDocumentView()
@@ -87,6 +144,7 @@ final class ScrollCapturePresentationController: NSObject {
     private var boundaryWarningVisible = false
     private var boundaryDismissTask: DispatchWorkItem?
     private var hasStarted = false
+    private var hasDismissedStepGuide = false
     private var stopped = false
 
     init(
@@ -124,6 +182,18 @@ final class ScrollCapturePresentationController: NSObject {
                 size: stepSize,
                 visibleFrame: visibleFrame
             ),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        let guideSize = NSSize(width: 250, height: 42)
+        stepGuidePanel = NSPanel(
+            contentRect: Self.stepGuidePlacement(
+                stepToolbarFrame: stepPanel.frame,
+                selectionFrame: selectionFrame,
+                size: guideSize,
+                visibleFrame: visibleFrame
+            ).frame,
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -177,6 +247,7 @@ final class ScrollCapturePresentationController: NSObject {
             cancelLabel: l10n.text(.cancel)
         )
         configureStepPanel(language: language)
+        configureStepGuide(language: language)
         configurePreviewPanel()
         configureWarningPanel()
         configureBoundaryPanel()
@@ -259,6 +330,42 @@ final class ScrollCapturePresentationController: NSObject {
         stepPanel.contentView = content
         directionChanged()
         setStepControlState(.preparing)
+    }
+
+    private func configureStepGuide(language: AppLanguage) {
+        stepGuidePanel.level = .screenSaver
+        stepGuidePanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        stepGuidePanel.isOpaque = false
+        stepGuidePanel.backgroundColor = .clear
+        stepGuidePanel.hasShadow = true
+        stepGuidePanel.ignoresMouseEvents = true
+
+        let content = NSView(frame: NSRect(origin: .zero, size: stepGuidePanel.frame.size))
+        stepGuideBackground.frame = content.bounds
+        stepGuideBackground.autoresizingMask = [.width, .height]
+        let placement = Self.stepGuidePlacement(
+            stepToolbarFrame: stepPanel.frame,
+            selectionFrame: placementSelectionFrame,
+            size: stepGuidePanel.frame.size,
+            visibleFrame: placementVisibleFrame
+        )
+        stepGuideBackground.fillColor = stepGuideBackgroundColor
+        stepGuideBackground.pointerDirection = placement.pointerDirection
+        stepGuideBackground.pointerCenterX = stepPanel.frame.minX + 120 - placement.frame.minX
+
+        stepGuideLabel.frame = stepGuideBackground.bodyRect.insetBy(dx: 12, dy: 6)
+        stepGuideLabel.stringValue = language == .zhHans
+            ? "引导提示：请点击进行单步滚动"
+            : "Guide: Click for single-step scrolling"
+        stepGuideLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        stepGuideLabel.textColor = .white
+        stepGuideLabel.alignment = .center
+        stepGuideLabel.lineBreakMode = .byTruncatingTail
+        stepGuideLabel.maximumNumberOfLines = 1
+
+        stepGuideBackground.addSubview(stepGuideLabel)
+        content.addSubview(stepGuideBackground)
+        stepGuidePanel.contentView = content
     }
 
     private func configureStepButton(
@@ -458,6 +565,9 @@ final class ScrollCapturePresentationController: NSObject {
         controlPanel.orderFrontRegardless()
         stepPanel.orderFrontRegardless()
         previewPanel.orderFrontRegardless()
+        if !hasDismissedStepGuide {
+            stepGuidePanel.orderFrontRegardless()
+        }
     }
 
     func stop() {
@@ -472,7 +582,7 @@ final class ScrollCapturePresentationController: NSObject {
             self.boundsObserver = nil
         }
         dismissBoundaryAlert()
-        [controlPanel, stepPanel, previewPanel, warningPanel, boundaryPanel].forEach { panel in
+        [controlPanel, stepPanel, stepGuidePanel, previewPanel, warningPanel, boundaryPanel].forEach { panel in
             panel.orderOut(nil)
             panel.close()
         }
@@ -486,6 +596,7 @@ final class ScrollCapturePresentationController: NSObject {
         scrollView.documentView = nil
         controlPanel.contentView = nil
         stepPanel.contentView = nil
+        stepGuidePanel.contentView = nil
         previewPanel.contentView = nil
         warningPanel.contentView = nil
         boundaryPanel.contentView = nil
@@ -816,6 +927,16 @@ final class ScrollCapturePresentationController: NSObject {
             size: stepPanel.frame.size,
             visibleFrame: visibleFrame
         ), display: false)
+        let guidePlacement = Self.stepGuidePlacement(
+            stepToolbarFrame: stepPanel.frame,
+            selectionFrame: selectionFrame,
+            size: stepGuidePanel.frame.size,
+            visibleFrame: visibleFrame
+        )
+        stepGuidePanel.setFrame(guidePlacement.frame, display: false)
+        stepGuideBackground.pointerDirection = guidePlacement.pointerDirection
+        stepGuideBackground.pointerCenterX = stepPanel.frame.minX + 120 - guidePlacement.frame.minX
+        stepGuideLabel.frame = stepGuideBackground.bodyRect.insetBy(dx: 12, dy: 6)
         previewGrowthFrame = Self.previewFrameAvoidingControls(
             selection: selectionFrame,
             previewSize: maximumPreviewContentSize,
@@ -942,6 +1063,10 @@ final class ScrollCapturePresentationController: NSObject {
 
     @objc private func startPressed() {
         guard startButton.isEnabled else { return }
+        if !hasDismissedStepGuide {
+            hasDismissedStepGuide = true
+            stepGuidePanel.orderOut(nil)
+        }
         let direction: ScrollCaptureDirection = directionControl.indexOfSelectedItem == 1 ? .up : .down
         onStep(direction)
     }
@@ -1040,6 +1165,44 @@ final class ScrollCapturePresentationController: NSObject {
             y: min(max(above.minY, visible.minY), visible.maxY - size.height),
             width: size.width,
             height: size.height
+        )
+    }
+
+    static func stepGuidePlacement(
+        stepToolbarFrame: NSRect,
+        selectionFrame: NSRect,
+        size: NSSize,
+        visibleFrame: NSRect,
+        spacing: CGFloat = 4
+    ) -> ScrollCaptureStepGuidePlacement {
+        let visible = visibleFrame.standardized
+        let size = NSSize(
+            width: min(size.width, visible.width),
+            height: min(size.height, visible.height)
+        )
+        let startButtonCenterX = stepToolbarFrame.minX + 120
+        let x = min(
+            max(startButtonCenterX - size.width / 2, visible.minX),
+            visible.maxX - size.width
+        )
+        let belowY = stepToolbarFrame.minY - spacing - size.height
+        let isFullScreen = SelectionToolbarState.isFullScreenSelection(
+            selectionFrame.standardized,
+            in: visible
+        )
+        if !isFullScreen, belowY >= visible.minY {
+            return ScrollCaptureStepGuidePlacement(
+                frame: NSRect(x: x, y: belowY, width: size.width, height: size.height),
+                pointerDirection: .up
+            )
+        }
+        let aboveY = min(
+            stepToolbarFrame.maxY + spacing,
+            visible.maxY - size.height
+        )
+        return ScrollCaptureStepGuidePlacement(
+            frame: NSRect(x: x, y: max(visible.minY, aboveY), width: size.width, height: size.height),
+            pointerDirection: .down
         )
     }
 
@@ -1337,6 +1500,7 @@ final class ScrollCapturePresentationController: NSObject {
     var test_hasVisiblePanels: Bool {
         controlPanel.isVisible
             || stepPanel.isVisible
+            || stepGuidePanel.isVisible
             || previewPanel.isVisible
             || warningPanel.isVisible
             || boundaryPanel.isVisible
@@ -1344,11 +1508,21 @@ final class ScrollCapturePresentationController: NSObject {
     var test_panelsAreClosedAndDetached: Bool {
         controlPanel.contentView == nil
             && stepPanel.contentView == nil
+            && stepGuidePanel.contentView == nil
             && previewPanel.contentView == nil
             && warningPanel.contentView == nil
             && boundaryPanel.contentView == nil
     }
     var test_stepToolbarFrame: NSRect { stepPanel.frame }
+    var test_stepGuideIsVisible: Bool { stepGuidePanel.isVisible }
+    var test_stepGuideText: String { stepGuideLabel.stringValue }
+    var test_stepGuideBackgroundColor: NSColor { stepGuideBackgroundColor }
+    var test_stepGuideTextColor: NSColor? { stepGuideLabel.textColor }
+    var test_stepGuideFrame: NSRect { stepGuidePanel.frame }
+    var test_stepGuidePointerDirection: ScrollCaptureStepGuidePointerDirection {
+        stepGuideBackground.pointerDirection
+    }
+    var test_stepGuidePointerHeight: CGFloat { ScrollCaptureStepGuideView.pointerHeight }
     var test_directionControlIsEnabled: Bool { directionControl.isEnabled }
     var test_startButtonIsEnabled: Bool { startButton.isEnabled }
     var test_startButtonTint: NSColor? { startButton.contentTintColor }

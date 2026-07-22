@@ -55,6 +55,26 @@ ScrollFrame repeatedRows(int width, int height, int period)
     return frame;
 }
 
+ScrollFrame sparseChatWithStationaryWatermark(int documentY)
+{
+    ScrollFrame frame(240, 240);
+    for (int y = 0; y < frame.height; ++y) {
+        const int sourceY = documentY + y;
+        for (int x = 0; x < frame.width; ++x) {
+            std::uint8_t value = 255;
+            if (sourceY >= 190 && sourceY < 225 && x >= 24 && x < 132) {
+                value = static_cast<std::uint8_t>(72 + (sourceY * 7 + x * 11) % 96);
+            }
+            if ((x + y * 2) % 72 < 12) {
+                value = static_cast<std::uint8_t>(
+                    static_cast<unsigned>(value) * 232U / 255U);
+            }
+            setGray(frame, x, y, value);
+        }
+    }
+    return frame;
+}
+
 ScrollFrame verticalGradient(int width, int height)
 {
     ScrollFrame frame(width, height);
@@ -217,6 +237,8 @@ private slots:
     void avoidsQuadraticFullResolutionFallback();
     void ignoresAdvancesWithEmptyMaskedIntersection();
     void detectsIndependentPeaksHiddenByFlatSignature();
+    void usesExpectedAdvanceToResolveStationaryWatermarkAmbiguity();
+    void expectedAdvanceDoesNotPromoteNearThresholdVisualMismatch();
     void avoidsFlatSignatureFullResolutionDegeneration();
     void returnsConservativeResultWhenEvaluationBudgetIsExhausted();
     void sufficientBudgetResolvesSmallCommonNullspaceInput();
@@ -236,6 +258,36 @@ void TestVerticalOverlapMatcher::findsDownwardOffset()
     QCOMPARE(result.verticalAdvance, 72);
     QCOMPARE(result.overlapHeight, 108);
     QVERIFY(result.confidence >= 0.8);
+}
+
+void TestVerticalOverlapMatcher::usesExpectedAdvanceToResolveStationaryWatermarkAmbiguity()
+{
+    const auto previous = sparseChatWithStationaryWatermark(80);
+    const auto current = sparseChatWithStationaryWatermark(160);
+    OverlapConfig config;
+    config.expectedAdvance = 80;
+    config.expectedAdvanceTolerance = 8;
+
+    const auto result = VerticalOverlapMatcher().match(previous, current, config);
+
+    QCOMPARE(result.kind, OverlapKind::Reliable);
+    QCOMPARE(result.verticalAdvance, 80);
+    QVERIFY(result.normalizedError <= config.maximumNormalizedError);
+}
+
+void TestVerticalOverlapMatcher::expectedAdvanceDoesNotPromoteNearThresholdVisualMismatch()
+{
+    ScrollFrame previous(120, 180);
+    ScrollFrame current(120, 180);
+    std::fill(previous.pixels.begin(), previous.pixels.end(), 100);
+    std::fill(current.pixels.begin(), current.pixels.end(), 109);
+    OverlapConfig config;
+    config.expectedAdvance = 60;
+    config.expectedAdvanceTolerance = 2;
+
+    const auto result = VerticalOverlapMatcher().match(previous, current, config);
+
+    QVERIFY(result.kind != OverlapKind::Reliable);
 }
 
 void TestVerticalOverlapMatcher::rejectsRepeatedPatternWithAmbiguousPlacement()
@@ -415,6 +467,12 @@ void TestVerticalOverlapMatcher::rejectsInvalidInputsAndConfig()
     QCOMPARE(VerticalOverlapMatcher().match(valid, valid, config).kind, OverlapKind::Insufficient);
     config = {};
     config.minimumWinnerMargin = -0.1;
+    QCOMPARE(VerticalOverlapMatcher().match(valid, valid, config).kind, OverlapKind::Insufficient);
+    config = {};
+    config.expectedAdvance = -1;
+    QCOMPARE(VerticalOverlapMatcher().match(valid, valid, config).kind, OverlapKind::Insufficient);
+    config = {};
+    config.expectedAdvanceTolerance = -1;
     QCOMPARE(VerticalOverlapMatcher().match(valid, valid, config).kind, OverlapKind::Insufficient);
     config = {};
     config.excludedBands.left = -1;

@@ -361,6 +361,42 @@ ScrollFrame viewportAcrossWhiteDocumentGap(int documentY)
     return frame;
 }
 
+ScrollFrame sparseChatWithStationaryWatermark(int documentY)
+{
+    ScrollFrame frame(240, 240);
+    for (int y = 0; y < frame.height; ++y) {
+        const int sourceY = documentY + y;
+        for (int x = 0; x < frame.width; ++x) {
+            std::uint8_t value = 255;
+            if (sourceY >= 190 && sourceY < 225 && x >= 24 && x < 132) {
+                value = static_cast<std::uint8_t>(72 + (sourceY * 7 + x * 11) % 96);
+            }
+            if ((x + y * 2) % 72 < 12) {
+                value = static_cast<std::uint8_t>(
+                    static_cast<unsigned>(value) * 232U / 255U);
+            }
+            setBgra(frame, x, y, value, value, value);
+        }
+    }
+    return frame;
+}
+
+ScrollFrame nearPeriodicSparseChatViewport(int documentY)
+{
+    ScrollFrame frame(240, 240);
+    for (int y = 0; y < frame.height; ++y) {
+        const int sourceY = documentY + y;
+        for (int x = 0; x < frame.width; ++x) {
+            std::uint8_t value = 240;
+            if (sourceY >= 195 && sourceY < 215 && x >= 24 && x < 84) {
+                value = static_cast<std::uint8_t>(72 + (sourceY * 7 + x * 11) % 96);
+            }
+            setBgra(frame, x, y, value, value, value);
+        }
+    }
+    return frame;
+}
+
 ScrollFrame viewportWithLowInformationBottomGradient(int documentY)
 {
     auto frame = documentViewport(documentY);
@@ -567,6 +603,7 @@ private slots:
     void duplicateAcceptedFrameDoesNotAddSeam();
     void upwardSeamsFollowNaturalDocumentOrder();
     void defaultSeamCoveragePreservesExactPixels();
+    void defaultSeamCoverageRepairsIsolatedWhiteBoundaryRow();
     void partialSeamCoverageBlendsColorOnly();
     void streamedSeamsRespectBottomUpAndPendingComposition();
     void previewForWidthPreservesDocumentAspectRatio();
@@ -576,6 +613,8 @@ private slots:
     void automaticFixedBandDetectionHandlesLargeChatComposer();
     void automaticFixedBandDetectionDoesNotDelayScrollingEdges();
     void automaticFixedBandDetectionRejectsWhiteDocumentGap();
+    void expectedAdvanceResolvesSparseChatWithStationaryWatermark();
+    void expectedAdvanceKeepsUsableControlledDirectionWhenOppositeLooksStronger();
     void automaticFixedBandDetectionRejectsLowInformationGradient();
     void inconsistentBandHeightsRestartEvidenceRun();
     void constantBlueTexturedFixedBandsStillConfirm();
@@ -858,7 +897,7 @@ void TestScrollStitchSession::exactDuplicateDoesNotMutateOutput()
     QCOMPARE(session.append(frame).kind, AppendKind::AcceptedInitial);
     const auto before = session.finalize();
 
-    const auto result = session.append(frame);
+    const auto result = session.append(frame, ScrollDirection::Down, 40);
     QCOMPARE(result.kind, AppendKind::DuplicateDiscarded);
     QCOMPARE(result.appendedHeight, 0);
     QCOMPARE(session.finalize().pixels, before.pixels);
@@ -888,7 +927,7 @@ void TestScrollStitchSession::unrelatedFrameIsDiscardedAsLowConfidence()
     std::fill(unrelated.pixels.begin(), unrelated.pixels.end(), 127);
     const auto before = session.finalize();
 
-    const auto result = session.append(unrelated);
+    const auto result = session.append(unrelated, ScrollDirection::Down, 40);
     QCOMPARE(result.kind, AppendKind::LowConfidenceDiscarded);
     QCOMPARE(session.outputHeight(), 140);
     QCOMPARE(session.finalize().pixels, before.pixels);
@@ -1923,6 +1962,49 @@ void TestScrollStitchSession::defaultSeamCoveragePreservesExactPixels()
     QCOMPARE(final.pixels, expected.pixels);
 }
 
+void TestScrollStitchSession::defaultSeamCoverageRepairsIsolatedWhiteBoundaryRow()
+{
+    auto config = defaultConfig();
+    config.enableFixedBandDetection = false;
+    config.enableFixedSideDetection = false;
+    config.scrollbarMaximumWidth = 0;
+    ScrollStitchSession session(config);
+
+    auto second = documentViewport(60);
+    for (int x = 0; x < second.width; ++x) {
+        setBgra(second, x, 80, 255, 255, 255);
+    }
+    QCOMPARE(session.append(documentViewport(0), ScrollDirection::Down).kind,
+        AppendKind::AcceptedInitial);
+    QCOMPARE(session.append(second, ScrollDirection::Down).kind,
+        AppendKind::AcceptedAppend);
+
+    const auto final = session.finalize();
+    QVERIFY(!rowHasOnlyWhiteColorChannels(final, 140));
+    for (int x : {0, 37, 119}) {
+        const auto expectedBlue = static_cast<std::uint8_t>(
+            (static_cast<unsigned>(blueAt(final, x, 139))
+                + static_cast<unsigned>(blueAt(final, x, 141))
+                + 1U)
+            / 2U);
+        QCOMPARE(blueAt(final, x, 140), expectedBlue);
+    }
+
+    const auto preview = session.preview(100);
+    QVERIFY(!rowHasOnlyWhiteColorChannels(preview, 70));
+
+    std::vector<std::uint8_t> bottomUpPixels(final.pixels.size());
+    QVERIFY(session.copyFinalPixels(
+        bottomUpPixels.data(),
+        bottomUpPixels.size(),
+        static_cast<std::size_t>(final.bytesPerRow),
+        true,
+        true));
+    ScrollFrame bottomUp(final.width, final.height);
+    bottomUp.pixels = std::move(bottomUpPixels);
+    QVERIFY(!rowHasOnlyWhiteColorChannels(bottomUp, final.height - 1 - 140));
+}
+
 void TestScrollStitchSession::partialSeamCoverageBlendsColorOnly()
 {
     auto config = defaultConfig();
@@ -2109,6 +2191,42 @@ void TestScrollStitchSession::automaticFixedBandDetectionRejectsWhiteDocumentGap
     QCOMPARE(blueAt(final, 20, 179), whiteGapDocumentPixel(20, 179));
     QCOMPARE(blueAt(final, 20, 180), whiteGapDocumentPixel(20, 180));
     QCOMPARE(blueAt(final, 20, 199), whiteGapDocumentPixel(20, 199));
+}
+
+void TestScrollStitchSession::expectedAdvanceResolvesSparseChatWithStationaryWatermark()
+{
+    ScrollStitchConfig config;
+    config.enableFixedBandDetection = false;
+    config.enableFixedSideDetection = false;
+    ScrollStitchSession session(config);
+    QCOMPARE(session.append(
+        sparseChatWithStationaryWatermark(80), ScrollDirection::Down).kind,
+        AppendKind::AcceptedInitial);
+
+    const auto result = session.append(
+        sparseChatWithStationaryWatermark(160), ScrollDirection::Down, 80);
+
+    QCOMPARE(result.kind, AppendKind::AcceptedAppend);
+    QCOMPARE(result.appendedHeight, 80);
+    QCOMPARE(result.outputHeight, 320);
+}
+
+void TestScrollStitchSession::expectedAdvanceKeepsUsableControlledDirectionWhenOppositeLooksStronger()
+{
+    ScrollStitchConfig config;
+    config.enableFixedBandDetection = false;
+    config.enableFixedSideDetection = false;
+    ScrollStitchSession session(config);
+    QCOMPARE(session.append(
+        nearPeriodicSparseChatViewport(80), ScrollDirection::Up).kind,
+        AppendKind::AcceptedInitial);
+    const auto result = session.append(
+        nearPeriodicSparseChatViewport(160), ScrollDirection::Up, 80);
+
+    QCOMPARE(result.kind, AppendKind::AcceptedAppend);
+    QCOMPARE(result.direction, ScrollDirection::Up);
+    QVERIFY(result.appendedHeight >= 72 && result.appendedHeight <= 88);
+    QCOMPARE(result.outputHeight, 240 + result.appendedHeight);
 }
 
 void TestScrollStitchSession::automaticFixedBandDetectionRejectsLowInformationGradient()

@@ -307,6 +307,35 @@ final class xxsnapMacTests: XCTestCase {
         XCTAssertGreaterThan(crossCorner.blue, 245)
     }
 
+    func testCheckAndCrossExportGlyphSizeMatchesStaticEditorMarkBounds() throws {
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = .systemRed
+        style.textSize = 8
+        let check = CaptureAnnotation(
+            kind: .numberSequence,
+            rect: NSRect(x: 20, y: 20, width: 40, height: 40),
+            style: style,
+            numberMarkType: .check
+        )
+        let cross = CaptureAnnotation(
+            kind: .numberSequence,
+            rect: NSRect(x: 80, y: 20, width: 40, height: 40),
+            style: style,
+            numberMarkType: .cross
+        )
+        let image = try makeBitmapImage(
+            pointSize: NSSize(width: 140, height: 80),
+            pixelWidth: 140,
+            pixelHeight: 80,
+            fill: .white
+        )
+
+        let rendered = CaptureAnnotationRenderer.render(image: image, annotations: [check, cross])
+
+        XCTAssertGreaterThan(redPixelCount(in: rendered, within: check.rect), 100)
+        XCTAssertGreaterThan(redPixelCount(in: rendered, within: cross.rect), 100)
+    }
+
     func testAnnotationRendererDrawsGaussianMosaicOntoImage() throws {
         let image = try makeBitmapImageWithBlackTextStripe()
         var style = CaptureAnnotationStyle()

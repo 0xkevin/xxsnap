@@ -2309,9 +2309,9 @@ enum CaptureAnnotationRenderer {
                 withAttributes: attributes
             )
         case .check:
-            drawNumberSymbol("✓", in: pixelRect, color: style.strokeColor, size: style.textSize)
+            drawNumberSymbol("✓", in: pixelRect, color: style.strokeColor, size: pixelRect.height)
         case .cross:
-            drawNumberSymbol("×", in: pixelRect, color: style.strokeColor, size: style.textSize)
+            drawNumberSymbol("×", in: pixelRect, color: style.strokeColor, size: pixelRect.height)
         }
 
         NSGraphicsContext.current = previousGraphicsContext

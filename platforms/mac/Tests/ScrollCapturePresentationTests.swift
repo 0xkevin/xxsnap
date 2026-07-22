@@ -11,6 +11,70 @@ final class ScrollCapturePresentationTests: XCTestCase {
         XCTAssertEqual(controller.test_stopButtonImageSize, NSSize(width: 20, height: 20))
     }
 
+    func testSingleStepGuideUsesBlueWhiteStyleAndHidesAfterFirstAcceptedStep() {
+        var directions: [ScrollCaptureDirection] = []
+        let controller = makeController(language: .zhHans, onStep: { directions.append($0) })
+        controller.start()
+
+        XCTAssertTrue(controller.test_stepGuideIsVisible)
+        XCTAssertEqual(controller.test_stepGuideText, "引导提示：请点击进行单步滚动")
+        XCTAssertEqual(controller.test_stepGuideBackgroundColor, .systemBlue)
+        XCTAssertEqual(controller.test_stepGuideTextColor, .white)
+        XCTAssertLessThanOrEqual(controller.test_stepGuideFrame.maxY, controller.test_stepToolbarFrame.minY)
+        XCTAssertEqual(controller.test_stepGuidePointerDirection, .up)
+        XCTAssertEqual(controller.test_stepGuidePointerHeight, 8)
+
+        controller.setStepControlState(.ready(directionLocked: false))
+        controller.test_triggerStart()
+
+        XCTAssertEqual(directions, [.down])
+        XCTAssertFalse(controller.test_stepGuideIsVisible)
+    }
+
+    func testSingleStepGuideUsesEnglishCopy() {
+        let controller = makeController(language: .english)
+        controller.start()
+
+        XCTAssertEqual(controller.test_stepGuideText, "Guide: Click for single-step scrolling")
+    }
+
+    func testNonFullscreenStepGuideUsesSpaceBelowToolbarAndPointsUp() {
+        let placement = ScrollCapturePresentationController.stepGuidePlacement(
+            stepToolbarFrame: NSRect(x: 300, y: 100, width: 168, height: 32),
+            selectionFrame: NSRect(x: 100, y: 180, width: 600, height: 400),
+            size: NSSize(width: 240, height: 42),
+            visibleFrame: NSRect(x: 0, y: 0, width: 1_000, height: 700)
+        )
+
+        XCTAssertEqual(placement.frame.maxY, 96, accuracy: 0.5)
+        XCTAssertEqual(placement.pointerDirection, .up)
+    }
+
+    func testNonFullscreenStepGuideFallsBackAboveWhenSpaceBelowIsInsufficient() {
+        let placement = ScrollCapturePresentationController.stepGuidePlacement(
+            stepToolbarFrame: NSRect(x: 300, y: 5, width: 168, height: 32),
+            selectionFrame: NSRect(x: 100, y: 80, width: 600, height: 400),
+            size: NSSize(width: 240, height: 42),
+            visibleFrame: NSRect(x: 0, y: 0, width: 1_000, height: 700)
+        )
+
+        XCTAssertEqual(placement.frame.minY, 41, accuracy: 0.5)
+        XCTAssertEqual(placement.pointerDirection, .down)
+    }
+
+    func testFullscreenStepGuideStaysAboveToolbarAndPointsDown() {
+        let visible = NSRect(x: 0, y: 0, width: 1_000, height: 700)
+        let placement = ScrollCapturePresentationController.stepGuidePlacement(
+            stepToolbarFrame: NSRect(x: 300, y: 100, width: 168, height: 32),
+            selectionFrame: visible,
+            size: NSSize(width: 240, height: 42),
+            visibleFrame: visible
+        )
+
+        XCTAssertEqual(placement.frame.minY, 136, accuracy: 0.5)
+        XCTAssertEqual(placement.pointerDirection, .down)
+    }
+
     func testWarningUsesSameBlackAndYellowToastStyleAsBoundaryNotice() {
         let controller = makeController()
 

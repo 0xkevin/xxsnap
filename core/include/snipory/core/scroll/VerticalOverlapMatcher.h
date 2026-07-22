@@ -17,6 +17,10 @@ struct OverlapConfig final
     double maximumAdvanceRatio = 0.85;
     double maximumNormalizedError = 0.08;
     double minimumWinnerMargin = 0.015;
+    // A non-zero motion hint resolves otherwise plausible periodic placements;
+    // pixel error limits still reject unrelated frames.
+    int expectedAdvance = 0;
+    int expectedAdvanceTolerance = 0;
     PixelCrop excludedBands;
     int maximumFullResolutionCandidates = 32;
 };

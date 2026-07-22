@@ -4,10 +4,10 @@ import XCTest
 
 @MainActor
 final class ScrollCaptureSessionTests: XCTestCase {
-    func testAutomaticStepDistanceUsesThirtyPercentBelowSixHundredPoints() {
+    func testAutomaticStepDistanceUsesFortyPercentBelowSixHundredPoints() {
         XCTAssertEqual(
             ScrollCaptureSession.stepDistance(forViewportHeight: 599),
-            179.7,
+            239.6,
             accuracy: 0.001
         )
     }
@@ -34,7 +34,7 @@ final class ScrollCaptureSessionTests: XCTestCase {
         XCTAssertEqual(ScrollCaptureSession.stepDistance(forViewportHeight: -.infinity), 1)
     }
 
-    func testStepModeProbesUpperSelectionZoneBeforeCenterForChatComposer() async throws {
+    func testStepModeProbesRightEdgeBeforeOtherTargetsForChatComposer() async throws {
         let controller = FakeStepController()
         let engine = FakeStitcher(
             results: [.acceptedInitial, .acceptedAppend],
@@ -45,10 +45,27 @@ final class ScrollCaptureSessionTests: XCTestCase {
 
         try await session.performStep(direction: .down)
 
-        XCTAssertEqual(controller.steps.map(\.point), [NSPoint(x: 140, y: 245)])
+        XCTAssertEqual(controller.steps.map(\.point), [NSPoint(x: 172, y: 230)])
     }
 
-    func testStepModeKeepsSeventyPercentViewportOverlapAndLocksDirectionAfterAppend() async throws {
+    func testStepScrollPointsPreferRightEdgeThenContentCenter() {
+        let rect = NSRect(x: 100, y: 200, width: 80, height: 60)
+
+        let points = ScrollCaptureSession.stepScrollPoints(in: rect)
+
+        XCTAssertEqual(points, [
+            NSPoint(x: 172, y: 230),
+            NSPoint(x: 172, y: 245),
+            NSPoint(x: 172, y: 215),
+            NSPoint(x: 140, y: 230),
+            NSPoint(x: 140, y: 245),
+            NSPoint(x: 140, y: 215),
+            NSPoint(x: 108, y: 230),
+            NSPoint(x: 108, y: 245),
+        ])
+    }
+
+    func testStepModeKeepsSixtyPercentViewportOverlapAndLocksDirectionAfterAppend() async throws {
         let controller = FakeStepController()
         let monitor = FakeActivityMonitor()
         let engine = FakeStitcher(
@@ -69,12 +86,13 @@ final class ScrollCaptureSessionTests: XCTestCase {
         XCTAssertEqual(controller.startCount, 1)
         XCTAssertEqual(controller.steps.count, 1)
         XCTAssertEqual(controller.steps[0].direction, .down)
-        XCTAssertEqual(controller.steps[0].distance, 18, accuracy: 0.001)
+        XCTAssertEqual(controller.steps[0].distance, 24, accuracy: 0.001)
         XCTAssertEqual(engine.preferredDirections, [.down])
+        XCTAssertEqual(engine.expectedAdvances, [24])
         XCTAssertEqual(engine.previewHeights, [1_200, 1_200])
         XCTAssertEqual(engine.previewWidths, [])
         XCTAssertEqual(presentation.scrollActivities, [
-            ScrollCaptureScrollActivity(direction: .down, distance: 18),
+            ScrollCaptureScrollActivity(direction: .down, distance: 24),
         ])
         XCTAssertEqual(monitor.startCount, 1)
         XCTAssertEqual(presentation.stepStates, [
@@ -82,6 +100,25 @@ final class ScrollCaptureSessionTests: XCTestCase {
             .executing,
             .ready(directionLocked: true),
         ])
+    }
+
+    func testStepModePreviewFollowsRequestedDownwardEdgeWhenCoreDirectionIsUp() async throws {
+        let controller = FakeStepController()
+        let engine = FakeStitcher(
+            results: [.acceptedInitial, .acceptedAppend],
+            directions: [.unknown, .up]
+        )
+        let presentation = PresentationRecorder()
+        let session = makeSession(
+            engine: engine,
+            stepController: controller,
+            presentation: presentation
+        )
+        try await session.start()
+
+        try await session.performStep(direction: .down)
+
+        XCTAssertEqual(presentation.previewEdges, [.bottom, .bottom])
     }
 
     func testStepModeUsesFiftyPercentOfLargeSessionSeedHeight() async throws {
@@ -128,8 +165,8 @@ final class ScrollCaptureSessionTests: XCTestCase {
         XCTAssertEqual(controller.steps.count, stepCount)
         XCTAssertTrue(controller.steps.allSatisfy {
             $0.direction == .down
-                && abs($0.distance - 18) < 0.001
-                && $0.point == NSPoint(x: 140, y: 245)
+                && abs($0.distance - 24) < 0.001
+                && $0.point == NSPoint(x: 172, y: 230)
         })
         XCTAssertEqual(engine.preferredDirections, Array(repeating: .down, count: stepCount))
     }
@@ -143,6 +180,44 @@ final class ScrollCaptureSessionTests: XCTestCase {
             AutomaticScrollCaptureStepController.wheelDelta(direction: .up, distance: 420),
             420
         )
+    }
+
+    func testAutomaticStepEventPolicyBlocksPointerButtonsOnlyDuringProgrammaticStep() {
+        XCTAssertFalse(AutomaticScrollCaptureEventPolicy.shouldBlock(
+            type: .leftMouseDown,
+            sourceTag: 0,
+            blocksPointerButtons: false
+        ))
+        XCTAssertTrue(AutomaticScrollCaptureEventPolicy.shouldBlock(
+            type: .leftMouseDown,
+            sourceTag: 0,
+            blocksPointerButtons: true
+        ))
+        XCTAssertTrue(AutomaticScrollCaptureEventPolicy.shouldBlock(
+            type: .leftMouseUp,
+            sourceTag: 0,
+            blocksPointerButtons: true
+        ))
+        XCTAssertFalse(AutomaticScrollCaptureEventPolicy.shouldBlock(
+            type: .leftMouseDown,
+            sourceTag: automaticScrollCaptureEventTag,
+            blocksPointerButtons: true
+        ))
+        XCTAssertFalse(AutomaticScrollCaptureEventPolicy.shouldBlock(
+            type: .mouseMoved,
+            sourceTag: 0,
+            blocksPointerButtons: true
+        ))
+        XCTAssertTrue(AutomaticScrollCaptureEventPolicy.shouldBlock(
+            type: .scrollWheel,
+            sourceTag: 0,
+            blocksPointerButtons: false
+        ))
+        XCTAssertFalse(AutomaticScrollCaptureEventPolicy.shouldBlock(
+            type: .scrollWheel,
+            sourceTag: automaticScrollCaptureEventTag,
+            blocksPointerButtons: false
+        ))
     }
 
     func testAutomaticStepControllerDetectsTopAndBottomFromScrollBarRange() {
@@ -192,7 +267,7 @@ final class ScrollCaptureSessionTests: XCTestCase {
         var continuousScrollFlags: [Int64] = []
         var pointerMoves: [CGPoint] = []
         let controller = AutomaticScrollCaptureStepController(
-            eventDispatcher: { event in
+            eventDispatcher: { event, _ in
                 eventLocations.append(event.location)
                 if event.type == .scrollWheel {
                     scrollPhases.append(event.getIntegerValueField(.scrollWheelEventScrollPhase))
@@ -210,12 +285,12 @@ final class ScrollCaptureSessionTests: XCTestCase {
             at: NSPoint(x: 240, y: 320)
         )
 
-        XCTAssertEqual(eventLocations.count, 9)
+        XCTAssertEqual(eventLocations.count, 3)
         XCTAssertTrue(eventLocations.allSatisfy { $0 != .zero })
         XCTAssertTrue(eventLocations.allSatisfy { $0 != originalPointer })
-        XCTAssertEqual(scrollPhases, Array(repeating: 0, count: 7))
-        XCTAssertEqual(momentumPhases, Array(repeating: 0, count: 7))
-        XCTAssertEqual(continuousScrollFlags, Array(repeating: 1, count: 7))
+        XCTAssertEqual(scrollPhases, [0])
+        XCTAssertEqual(momentumPhases, [0])
+        XCTAssertEqual(continuousScrollFlags, [0])
         XCTAssertEqual(pointerMoves.count, 3)
         XCTAssertEqual(pointerMoves.first, eventLocations.first)
         XCTAssertEqual(pointerMoves[1], eventLocations[1])
@@ -223,14 +298,143 @@ final class ScrollCaptureSessionTests: XCTestCase {
         controller.stop()
     }
 
+    func testAutomaticStepUsesBoundedDiscreteWheelTicksForLargeViewport() async throws {
+        var continuousScrollFlags: [Int64] = []
+        var wheelDeltas: [Int64] = []
+        let controller = AutomaticScrollCaptureStepController(
+            eventDispatcher: { event, _ in
+                guard event.type == .scrollWheel else { return }
+                continuousScrollFlags.append(
+                    event.getIntegerValueField(.scrollWheelEventIsContinuous)
+                )
+                wheelDeltas.append(
+                    event.getIntegerValueField(.scrollWheelEventDeltaAxis1)
+                )
+            },
+            pointerLocationProvider: { CGPoint(x: 910, y: 640) },
+            pointerWarper: { _ in }
+        )
+
+        try await controller.performStep(
+            direction: .down,
+            distance: 1_019,
+            at: NSPoint(x: 240, y: 320)
+        )
+
+        XCTAssertEqual(continuousScrollFlags, Array(repeating: 0, count: 9))
+        XCTAssertEqual(wheelDeltas.reduce(0, +), -25)
+        XCTAssertTrue(wheelDeltas.allSatisfy { abs($0) <= 3 })
+        controller.stop()
+    }
+
+    func testAutomaticStepKeepsPointerRoutedWheelEventsGlobal() async throws {
+        var deliveredProcessIdentifiers: [pid_t?] = []
+        var activatedProcessIdentifiers: [pid_t] = []
+        let controller = AutomaticScrollCaptureStepController(
+            eventDispatcher: { _, processIdentifier in
+                deliveredProcessIdentifiers.append(processIdentifier)
+            },
+            targetProcessIdentifierProvider: { 42 },
+            targetApplicationActivator: { activatedProcessIdentifiers.append($0) }
+        )
+
+        try await controller.performStep(
+            direction: .down,
+            distance: 70,
+            at: NSPoint(x: 240, y: 320)
+        )
+
+        XCTAssertEqual(deliveredProcessIdentifiers.count, 3)
+        XCTAssertTrue(deliveredProcessIdentifiers.allSatisfy { $0 == nil })
+        XCTAssertEqual(activatedProcessIdentifiers, [42])
+    }
+
+    func testAutomaticTargetedStepPostsWheelEventsDirectlyToCapturedApplication() async throws {
+        var eventTypes: [CGEventType] = []
+        var deliveredProcessIdentifiers: [pid_t?] = []
+        let controller = AutomaticScrollCaptureStepController(
+            eventDispatcher: { event, processIdentifier in
+                eventTypes.append(event.type)
+                deliveredProcessIdentifiers.append(processIdentifier)
+            },
+            pointerLocationProvider: { CGPoint(x: 910, y: 640) },
+            pointerWarper: { _ in },
+            targetProcessIdentifierProvider: { 42 }
+        )
+
+        let performed = try await controller.performTargetedStep(
+            direction: .down,
+            distance: 70,
+            at: NSPoint(x: 240, y: 320)
+        )
+
+        XCTAssertTrue(performed)
+        XCTAssertEqual(eventTypes, [.mouseMoved, .mouseMoved, .scrollWheel])
+        XCTAssertEqual(deliveredProcessIdentifiers.compactMap { $0 }, [42, 42, 42])
+    }
+
+    func testOuterScrollbarDetectorFindsAContiguousDarkThumbAtTheRightEdge() throws {
+        let image = TestImageFactory.browserScrollbar()
+
+        let observation = try XCTUnwrap(OuterScrollbarThumbDetector.detect(in: image))
+
+        XCTAssertGreaterThan(observation.pixelX, 220)
+        XCTAssertEqual(observation.thumbLength, 40, accuracy: 2)
+    }
+
+    func testOuterScrollbarDetectorIgnoresSeparateDarkWindowBorderAtTop() throws {
+        let image = TestImageFactory.browserScrollbar(
+            thumbVisualRange: 70..<150,
+            extraDarkVisualRange: 0..<6
+        )
+
+        let observation = try XCTUnwrap(OuterScrollbarThumbDetector.detect(in: image))
+
+        XCTAssertEqual(observation.thumbLength, 80, accuracy: 2)
+    }
+
+    func testAutomaticScrollbarStepDragsDetectedThumbWithoutClickingPageContent() async throws {
+        var eventTypes: [CGEventType] = []
+        var eventLocations: [CGPoint] = []
+        let image = TestImageFactory.browserScrollbar()
+        let controller = AutomaticScrollCaptureStepController(
+            eventDispatcher: { event, _ in
+                eventTypes.append(event.type)
+                eventLocations.append(event.location)
+            },
+            pointerLocationProvider: { CGPoint(x: 900, y: 700) },
+            pointerWarper: { _ in },
+            targetProcessIdentifierProvider: { 42 }
+        )
+
+        let performed = try await controller.performScrollbarStep(
+            direction: .down,
+            distance: 50,
+            in: NSRect(x: 100, y: 200, width: 120, height: 100),
+            capturedImage: image
+        )
+
+        XCTAssertTrue(performed)
+        XCTAssertEqual(eventTypes.first, .mouseMoved)
+        XCTAssertEqual(eventTypes.dropFirst().first, .leftMouseDown)
+        XCTAssertTrue(eventTypes.contains(.leftMouseDragged))
+        XCTAssertEqual(eventTypes.last, .leftMouseUp)
+        XCTAssertTrue(eventLocations.allSatisfy { $0.x > 210 })
+    }
+
     func testAutomaticKeyboardFallbackPostsArrowKeysForFocusedScrollArea() async throws {
         var eventTypes: [CGEventType] = []
         var keyCodes: [Int64] = []
+        var deliveredProcessIdentifiers: [pid_t?] = []
+        var activatedProcessIdentifiers: [pid_t] = []
         let controller = AutomaticScrollCaptureStepController(
-            eventDispatcher: { event in
+            eventDispatcher: { event, processIdentifier in
                 eventTypes.append(event.type)
                 keyCodes.append(event.getIntegerValueField(.keyboardEventKeycode))
-            }
+                deliveredProcessIdentifiers.append(processIdentifier)
+            },
+            targetProcessIdentifierProvider: { 42 },
+            targetApplicationActivator: { activatedProcessIdentifiers.append($0) }
         )
 
         let performed = try await controller.performKeyboardStep(direction: .down, distance: 70)
@@ -238,6 +442,21 @@ final class ScrollCaptureSessionTests: XCTestCase {
         XCTAssertTrue(performed)
         XCTAssertEqual(eventTypes, [.keyDown, .keyUp, .keyDown, .keyUp])
         XCTAssertEqual(keyCodes, [125, 125, 125, 125])
+        XCTAssertEqual(deliveredProcessIdentifiers.compactMap { $0 }, Array(repeating: 42, count: 4))
+        XCTAssertEqual(activatedProcessIdentifiers, [42])
+    }
+
+    func testAutomaticKeyboardFallbackCoversLargeViewportStepWithoutTwelvePressCap() async throws {
+        var eventCount = 0
+        let controller = AutomaticScrollCaptureStepController(
+            eventDispatcher: { _, _ in eventCount += 1 },
+            targetProcessIdentifierProvider: { 42 }
+        )
+
+        let performed = try await controller.performKeyboardStep(direction: .up, distance: 1_019)
+
+        XCTAssertTrue(performed)
+        XCTAssertEqual(eventCount, 50)
     }
 
     func testStepModeDropsFramesCapturedDuringSyntheticScrollBeforeMatching() async throws {
@@ -310,25 +529,53 @@ final class ScrollCaptureSessionTests: XCTestCase {
         try await session.performStep(direction: .down)
 
         XCTAssertEqual(controller.steps.map(\.direction), [.down, .up, .down])
-        XCTAssertEqual(controller.steps.map(\.distance), [18, 18, 9])
+        XCTAssertEqual(controller.steps.map(\.distance), [24, 24, 12])
         XCTAssertEqual(controller.steps.map(\.point), [
-            NSPoint(x: 140, y: 245),
-            NSPoint(x: 140, y: 245),
-            NSPoint(x: 140, y: 245),
+            NSPoint(x: 172, y: 230),
+            NSPoint(x: 172, y: 230),
+            NSPoint(x: 172, y: 230),
         ])
         XCTAssertEqual(presentation.scrollActivities, [
-            ScrollCaptureScrollActivity(direction: .down, distance: 18),
-            ScrollCaptureScrollActivity(direction: .up, distance: 18),
-            ScrollCaptureScrollActivity(direction: .down, distance: 9),
+            ScrollCaptureScrollActivity(direction: .down, distance: 24),
+            ScrollCaptureScrollActivity(direction: .up, distance: 24),
+            ScrollCaptureScrollActivity(direction: .down, distance: 12),
         ])
         XCTAssertTrue(presentation.warnings.isEmpty)
         XCTAssertEqual(presentation.stepStates.last, .ready(directionLocked: true))
     }
 
-    func testStepModeWarnsOnlyAfterHalfDistanceRecoveryAlsoHasLowConfidence() async throws {
+    func testStepModeRetriesAtQuarterDistanceWhenLargeWhiteRegionDefeatsHalfStep() async throws {
+        let controller = FakeStepController()
+        let engine = FakeStitcher(
+            results: [
+                .acceptedInitial,
+                .lowConfidenceDiscarded, .lowConfidenceDiscarded,
+                .lowConfidenceDiscarded, .lowConfidenceDiscarded,
+                .acceptedAppend,
+            ],
+            directions: [.unknown, .unknown, .unknown, .unknown, .unknown, .down]
+        )
+        let presentation = PresentationRecorder()
+        let session = makeSession(
+            engine: engine,
+            stepController: controller,
+            presentation: presentation
+        )
+        try await session.start()
+
+        try await session.performStep(direction: .down)
+
+        XCTAssertEqual(controller.steps.map(\.direction), [.down, .up, .down, .up, .down])
+        XCTAssertEqual(controller.steps.map(\.distance), [24, 24, 12, 12, 6])
+        XCTAssertTrue(presentation.warnings.isEmpty)
+        XCTAssertEqual(presentation.stepStates.last, .ready(directionLocked: true))
+    }
+
+    func testStepModeWarnsOnlyAfterProgressiveRecoveryAlsoHasLowConfidence() async throws {
         let controller = FakeStepController()
         let engine = FakeStitcher(results: [
             .acceptedInitial,
+            .lowConfidenceDiscarded, .lowConfidenceDiscarded,
             .lowConfidenceDiscarded, .lowConfidenceDiscarded,
             .lowConfidenceDiscarded, .lowConfidenceDiscarded,
         ])
@@ -346,9 +593,156 @@ final class ScrollCaptureSessionTests: XCTestCase {
         XCTAssertEqual(presentation.warningEvents.count, 1)
     }
 
+    func testStepModeTreatsRepeatedLowConfidenceWithoutGrowthAsVisualBoundaryAfterProgress() async throws {
+        let controller = FakeStepController(boundaryState: .notAtBoundary)
+        let engine = FakeStitcher(
+            results: [
+                .acceptedInitial,
+                .acceptedAppend,
+            ] + Array(repeating: .lowConfidenceDiscarded, count: 12),
+            directions: [.unknown, .down]
+        )
+        let presentation = PresentationRecorder()
+        let session = makeSession(
+            engine: engine,
+            stepController: controller,
+            presentation: presentation
+        )
+        try await session.start()
+        try await session.performStep(direction: .down)
+
+        try await session.performStep(direction: .down)
+        XCTAssertEqual(presentation.stepStates.last, .ready(directionLocked: true))
+        XCTAssertEqual(presentation.warnings, [.lowConfidence])
+
+        try await session.performStep(direction: .down)
+        XCTAssertEqual(presentation.stepStates.last, .boundary)
+        XCTAssertNil(presentation.warningEvents.last!)
+    }
+
+    func testStepModeUsesAcceptedContentDirectionForSubsequentMatching() async throws {
+        let controller = FakeStepController()
+        let engine = FakeStitcher(
+            results: [.acceptedInitial, .acceptedAppend, .acceptedAppend],
+            directions: [.unknown, .down, .down]
+        )
+        let session = makeSession(engine: engine, stepController: controller)
+        try await session.start()
+
+        try await session.performStep(direction: .up)
+        try await session.performStep(direction: .up)
+
+        XCTAssertEqual(engine.preferredDirections, [.up, .down])
+    }
+
+    func testStepModeUsesAcceptedContentDirectionForBoundaryChecks() async throws {
+        let controller = FakeStepController { direction, _ in
+            direction == .down ? .atBoundary : .notAtBoundary
+        }
+        let engine = FakeStitcher(
+            results: [.acceptedInitial, .acceptedAppend, .duplicateDiscarded],
+            directions: [.unknown, .down]
+        )
+        let presentation = PresentationRecorder()
+        let session = makeSession(
+            engine: engine,
+            stepController: controller,
+            presentation: presentation
+        )
+        try await session.start()
+
+        try await session.performStep(direction: .up)
+        try await session.performStep(direction: .up)
+
+        XCTAssertEqual(controller.steps.count, 1)
+        XCTAssertEqual(controller.boundaryChecks.suffix(5).map(\.direction), Array(repeating: .down, count: 5))
+        XCTAssertEqual(presentation.stepStates.last, .boundary)
+    }
+
+    func testStepModeTreatsRepeatedReviewAfterLockedMovementAsVisualBoundary() async throws {
+        let controller = FakeStepController(boundaryState: .notAtBoundary)
+        let engine = FakeStitcher(
+            results: [
+                .acceptedInitial,
+                .acceptedAppend,
+                .reviewDiscarded, .reviewDiscarded,
+                .reviewDiscarded, .reviewDiscarded,
+                .reviewDiscarded, .reviewDiscarded,
+            ],
+            directions: [.unknown, .down]
+        )
+        let presentation = PresentationRecorder()
+        let session = makeSession(
+            engine: engine,
+            stepController: controller,
+            presentation: presentation
+        )
+        try await session.start()
+        try await session.performStep(direction: .up)
+
+        try await session.performStep(direction: .up)
+
+        XCTAssertEqual(presentation.stepStates.last, .boundary)
+        XCTAssertTrue(presentation.warnings.isEmpty)
+    }
+
+    func testStepModeDoesNotTreatRepeatedReviewAsBoundaryWhenDirectionsAgree() async throws {
+        let controller = FakeStepController(boundaryState: .notAtBoundary)
+        let engine = FakeStitcher(
+            results: [
+                .acceptedInitial,
+                .acceptedAppend,
+                .reviewDiscarded, .reviewDiscarded,
+                .reviewDiscarded, .reviewDiscarded,
+                .reviewDiscarded, .reviewDiscarded,
+            ],
+            directions: [.unknown, .down]
+        )
+        let presentation = PresentationRecorder()
+        let session = makeSession(
+            engine: engine,
+            stepController: controller,
+            presentation: presentation
+        )
+        try await session.start()
+        try await session.performStep(direction: .down)
+
+        try await session.performStep(direction: .down)
+
+        XCTAssertEqual(presentation.stepStates.last, .ready(directionLocked: true))
+        XCTAssertEqual(presentation.warnings, [.lowConfidence])
+    }
+
+    func testStepModeStillAcceptsPartialStepAfterReviewRecovery() async throws {
+        let controller = FakeStepController(boundaryState: .notAtBoundary)
+        let engine = FakeStitcher(
+            results: [
+                .acceptedInitial,
+                .acceptedAppend,
+                .reviewDiscarded, .reviewDiscarded,
+                .acceptedAppend,
+            ],
+            directions: [.unknown, .down, .unknown, .unknown, .down]
+        )
+        let presentation = PresentationRecorder()
+        let session = makeSession(
+            engine: engine,
+            stepController: controller,
+            presentation: presentation
+        )
+        try await session.start()
+        try await session.performStep(direction: .down)
+
+        try await session.performStep(direction: .down)
+
+        XCTAssertEqual(presentation.stepStates.last, .ready(directionLocked: true))
+        XCTAssertTrue(presentation.warnings.isEmpty)
+        XCTAssertEqual(controller.steps.map(\.direction), [.down, .down, .up, .down])
+    }
+
     func testStepModeConfirmsBottomBoundaryFromAccessibilityWithoutScrolling() async throws {
         let controller = FakeStepController(boundaryState: .atBoundary)
-        let engine = FakeStitcher(results: [.acceptedInitial])
+        let engine = FakeStitcher(results: [.acceptedInitial, .duplicateDiscarded])
         let presentation = PresentationRecorder()
         let session = makeSession(
             engine: engine,
@@ -359,7 +753,7 @@ final class ScrollCaptureSessionTests: XCTestCase {
 
         try await session.performStep(direction: .down)
 
-        XCTAssertEqual(controller.boundaryChecks.count, 5)
+        XCTAssertEqual(controller.boundaryChecks.count, 8)
         XCTAssertTrue(controller.boundaryChecks.allSatisfy { $0.direction == .down })
         XCTAssertTrue(controller.steps.isEmpty)
         XCTAssertTrue(controller.keyboardSteps.isEmpty)
@@ -368,7 +762,7 @@ final class ScrollCaptureSessionTests: XCTestCase {
 
     func testStepModeConfirmsTopBoundaryFromAccessibilityWithoutScrolling() async throws {
         let controller = FakeStepController(boundaryState: .atBoundary)
-        let engine = FakeStitcher(results: [.acceptedInitial])
+        let engine = FakeStitcher(results: [.acceptedInitial, .duplicateDiscarded])
         let presentation = PresentationRecorder()
         let session = makeSession(
             engine: engine,
@@ -379,7 +773,7 @@ final class ScrollCaptureSessionTests: XCTestCase {
 
         try await session.performStep(direction: .up)
 
-        XCTAssertEqual(controller.boundaryChecks.count, 5)
+        XCTAssertEqual(controller.boundaryChecks.count, 8)
         XCTAssertTrue(controller.boundaryChecks.allSatisfy { $0.direction == .up })
         XCTAssertTrue(controller.steps.isEmpty)
         XCTAssertTrue(controller.keyboardSteps.isEmpty)
@@ -387,7 +781,7 @@ final class ScrollCaptureSessionTests: XCTestCase {
     }
 
     func testStepModeUsesAccessibilityScrollableTargetBeforeUnknownTargets() async throws {
-        let scrollablePoint = NSPoint(x: 148, y: 230)
+        let scrollablePoint = NSPoint(x: 172, y: 245)
         let controller = FakeStepController { _, point in
             point == scrollablePoint ? .notAtBoundary : .unavailable
         }
@@ -409,10 +803,33 @@ final class ScrollCaptureSessionTests: XCTestCase {
         XCTAssertEqual(presentation.stepStates.last, .ready(directionLocked: true))
     }
 
+    func testStepModeAppendsCurrentFrameBeforeTrustingAccessibilityBoundary() async throws {
+        let controller = FakeStepController(boundaryState: .atBoundary)
+        let engine = FakeStitcher(
+            results: [.acceptedInitial, .acceptedAppend],
+            directions: [.unknown, .down]
+        )
+        let presentation = PresentationRecorder()
+        let session = makeSession(
+            engine: engine,
+            stepController: controller,
+            presentation: presentation
+        )
+        try await session.start()
+
+        try await session.performStep(direction: .down)
+
+        XCTAssertTrue(controller.steps.isEmpty)
+        XCTAssertEqual(engine.appendedImages.count, 2)
+        XCTAssertEqual(presentation.previewEdges, [.bottom, .bottom])
+        XCTAssertEqual(presentation.stepStates.last, .ready(directionLocked: true))
+    }
+
     func testStepModeConfirmsBottomBoundaryAfterOneClickWhenAccessibilityIsUnavailable() async throws {
         let controller = FakeStepController()
         let engine = FakeStitcher(results: [
             .acceptedInitial,
+            .duplicateDiscarded, .duplicateDiscarded, .duplicateDiscarded,
             .duplicateDiscarded, .duplicateDiscarded, .duplicateDiscarded,
             .duplicateDiscarded, .duplicateDiscarded,
         ])
@@ -426,19 +843,22 @@ final class ScrollCaptureSessionTests: XCTestCase {
 
         try await session.performStep(direction: .down)
 
-        XCTAssertEqual(controller.steps.map(\.distance), [18, 18, 18, 18, 18])
+        XCTAssertEqual(controller.steps.map(\.distance), Array(repeating: 24, count: 8))
         XCTAssertEqual(controller.steps.map(\.point), [
-            NSPoint(x: 140, y: 245),
+            NSPoint(x: 172, y: 230),
+            NSPoint(x: 172, y: 245),
+            NSPoint(x: 172, y: 215),
             NSPoint(x: 140, y: 230),
-            NSPoint(x: 132, y: 230),
-            NSPoint(x: 148, y: 230),
+            NSPoint(x: 140, y: 245),
             NSPoint(x: 140, y: 215),
+            NSPoint(x: 108, y: 230),
+            NSPoint(x: 108, y: 245),
         ])
         XCTAssertEqual(presentation.stepStates.last, .boundary)
         XCTAssertTrue(presentation.warnings.isEmpty)
 
         try await session.performStep(direction: .down)
-        XCTAssertEqual(controller.steps.count, 5)
+        XCTAssertEqual(controller.steps.count, 8)
         XCTAssertEqual(presentation.stepStates.last, .boundary)
     }
 
@@ -446,6 +866,7 @@ final class ScrollCaptureSessionTests: XCTestCase {
         let controller = FakeStepController()
         let engine = FakeStitcher(results: [
             .acceptedInitial,
+            .duplicateDiscarded, .duplicateDiscarded, .duplicateDiscarded,
             .duplicateDiscarded, .duplicateDiscarded, .duplicateDiscarded,
             .duplicateDiscarded, .duplicateDiscarded,
         ])
@@ -459,7 +880,7 @@ final class ScrollCaptureSessionTests: XCTestCase {
 
         try await session.performStep(direction: .up)
 
-        XCTAssertEqual(controller.steps.count, 5)
+        XCTAssertEqual(controller.steps.count, 8)
         XCTAssertTrue(controller.steps.allSatisfy { $0.direction == .up })
         XCTAssertEqual(presentation.stepStates.last, .boundary)
         XCTAssertTrue(presentation.warnings.isEmpty)
@@ -469,7 +890,7 @@ final class ScrollCaptureSessionTests: XCTestCase {
         let controller = FakeStepController()
         let engine = FakeStitcher(results: [
             .acceptedInitial,
-        ] + Array(repeating: .reviewDiscarded, count: 10))
+        ] + Array(repeating: .reviewDiscarded, count: 16))
         let presentation = PresentationRecorder()
         let session = makeSession(
             engine: engine,
@@ -481,6 +902,27 @@ final class ScrollCaptureSessionTests: XCTestCase {
         try await session.performStep(direction: .up)
 
         XCTAssertNotEqual(presentation.stepStates.last, .boundary)
+        XCTAssertEqual(presentation.stepStates.last, .ready(directionLocked: false))
+        XCTAssertEqual(presentation.warnings, [.lowConfidence])
+    }
+
+    func testStepModeDoesNotReportBoundaryWhenAccessibilitySaysMoreContentRemains() async throws {
+        let controller = FakeStepController(boundaryState: .notAtBoundary)
+        let engine = FakeStitcher(results: [
+            .acceptedInitial,
+            .lowConfidenceDiscarded, .lowConfidenceDiscarded,
+            .duplicateDiscarded, .duplicateDiscarded,
+        ])
+        let presentation = PresentationRecorder()
+        let session = makeSession(
+            engine: engine,
+            stepController: controller,
+            presentation: presentation
+        )
+        try await session.start()
+
+        try await session.performStep(direction: .down)
+
         XCTAssertEqual(presentation.stepStates.last, .ready(directionLocked: false))
         XCTAssertEqual(presentation.warnings, [.lowConfidence])
     }
@@ -508,10 +950,10 @@ final class ScrollCaptureSessionTests: XCTestCase {
         try await session.performStep(direction: .down)
 
         XCTAssertEqual(controller.steps.map(\.point), [
-            NSPoint(x: 140, y: 245),
-            NSPoint(x: 140, y: 230),
-            NSPoint(x: 132, y: 230),
-            NSPoint(x: 132, y: 230),
+            NSPoint(x: 172, y: 230),
+            NSPoint(x: 172, y: 245),
+            NSPoint(x: 172, y: 215),
+            NSPoint(x: 172, y: 215),
         ])
         XCTAssertEqual(presentation.stepStates.last, .ready(directionLocked: true))
         XCTAssertTrue(presentation.warnings.isEmpty)
@@ -523,10 +965,11 @@ final class ScrollCaptureSessionTests: XCTestCase {
             results: [
                 .acceptedInitial,
                 .duplicateDiscarded, .duplicateDiscarded, .duplicateDiscarded,
+                .duplicateDiscarded, .duplicateDiscarded, .duplicateDiscarded,
                 .duplicateDiscarded, .duplicateDiscarded,
                 .acceptedAppend,
             ],
-            directions: [.unknown, .unknown, .unknown, .unknown, .unknown, .unknown, .down]
+            directions: [.unknown] + Array(repeating: .unknown, count: 8) + [.down]
         )
         let presentation = PresentationRecorder()
         let session = makeSession(
@@ -538,10 +981,115 @@ final class ScrollCaptureSessionTests: XCTestCase {
 
         try await session.performStep(direction: .down)
 
-        XCTAssertEqual(controller.steps.count, 5)
+        XCTAssertEqual(controller.steps.count, 8)
         XCTAssertEqual(controller.keyboardSteps.count, 1)
         XCTAssertEqual(controller.keyboardSteps[0].direction, .down)
-        XCTAssertEqual(controller.keyboardSteps[0].distance, 18, accuracy: 0.001)
+        XCTAssertEqual(controller.keyboardSteps[0].distance, 24, accuracy: 0.001)
+        XCTAssertEqual(presentation.stepStates.last, .ready(directionLocked: true))
+        XCTAssertTrue(presentation.warnings.isEmpty)
+    }
+
+    func testStepModeUsesTargetedWheelFallbackBeforeKeyboardWhenGlobalWheelStopsMoving() async throws {
+        let controller = FakeStepController(targetedResult: true, keyboardResult: true)
+        let engine = FakeStitcher(
+            results: [
+                .acceptedInitial,
+                .duplicateDiscarded, .duplicateDiscarded, .duplicateDiscarded,
+                .duplicateDiscarded, .duplicateDiscarded, .duplicateDiscarded,
+                .duplicateDiscarded, .duplicateDiscarded,
+                .acceptedAppend,
+            ],
+            directions: [.unknown] + Array(repeating: .unknown, count: 8) + [.down]
+        )
+        let session = makeSession(engine: engine, stepController: controller)
+        try await session.start()
+
+        try await session.performStep(direction: .down)
+
+        XCTAssertEqual(controller.targetedSteps.count, 1)
+        XCTAssertEqual(controller.targetedSteps[0].direction, .down)
+        XCTAssertTrue(controller.keyboardSteps.isEmpty)
+    }
+
+    func testStepModeUsesVisibleScrollbarFallbackBeforeKeyboard() async throws {
+        let controller = FakeStepController(
+            targetedResult: true,
+            scrollbarResult: true,
+            keyboardResult: true
+        )
+        let engine = FakeStitcher(
+            results: [
+                .acceptedInitial,
+                .duplicateDiscarded, .duplicateDiscarded, .duplicateDiscarded,
+                .duplicateDiscarded, .duplicateDiscarded, .duplicateDiscarded,
+                .duplicateDiscarded, .duplicateDiscarded,
+                .acceptedAppend,
+            ],
+            directions: [.unknown] + Array(repeating: .unknown, count: 8) + [.down]
+        )
+        let session = makeSession(engine: engine, stepController: controller)
+        try await session.start()
+
+        try await session.performStep(direction: .down)
+
+        XCTAssertEqual(controller.scrollbarSteps.count, 1)
+        XCTAssertEqual(controller.scrollbarSteps[0].direction, .down)
+        XCTAssertTrue(controller.targetedSteps.isEmpty)
+        XCTAssertTrue(controller.keyboardSteps.isEmpty)
+    }
+
+    func testLockedStepUsesVisibleScrollbarAfterFirstStationaryWheelProbe() async throws {
+        let controller = FakeStepController(scrollbarResult: true)
+        let engine = FakeStitcher(
+            results: [
+                .acceptedInitial,
+                .acceptedAppend,
+                .duplicateDiscarded,
+                .acceptedAppend,
+            ],
+            directions: [.unknown, .down, .unknown, .down]
+        )
+        let session = makeSession(engine: engine, stepController: controller)
+        try await session.start()
+
+        try await session.performStep(direction: .down)
+        try await session.performStep(direction: .down)
+
+        XCTAssertEqual(controller.steps.count, 2)
+        XCTAssertEqual(controller.scrollbarSteps.count, 1)
+        XCTAssertTrue(controller.targetedSteps.isEmpty)
+        XCTAssertTrue(controller.keyboardSteps.isEmpty)
+    }
+
+    func testLockedStepContinuesProbingAfterScrollbarReviewAtEdge() async throws {
+        let controller = FakeStepController(scrollbarResult: true)
+        let engine = FakeStitcher(
+            results: [
+                .acceptedInitial,
+                .acceptedAppend,
+                .duplicateDiscarded,
+                .reviewDiscarded,
+                .acceptedAppend,
+            ],
+            directions: [.unknown, .down, .unknown, .unknown, .down]
+        )
+        let presentation = PresentationRecorder()
+        let session = makeSession(
+            engine: engine,
+            stepController: controller,
+            presentation: presentation
+        )
+        try await session.start()
+
+        try await session.performStep(direction: .down)
+        try await session.performStep(direction: .down)
+
+        XCTAssertEqual(controller.steps.map(\.point), [
+            NSPoint(x: 172, y: 230),
+            NSPoint(x: 172, y: 230),
+            NSPoint(x: 172, y: 245),
+        ])
+        XCTAssertEqual(controller.scrollbarSteps.count, 1)
         XCTAssertEqual(presentation.stepStates.last, .ready(directionLocked: true))
         XCTAssertTrue(presentation.warnings.isEmpty)
     }
@@ -564,11 +1112,11 @@ final class ScrollCaptureSessionTests: XCTestCase {
 
         XCTAssertEqual(controller.steps.map(\.direction), [.down, .down, .down, .up, .down])
         XCTAssertEqual(controller.steps.map(\.point), [
-            NSPoint(x: 140, y: 245),
-            NSPoint(x: 140, y: 230),
-            NSPoint(x: 132, y: 230),
-            NSPoint(x: 132, y: 230),
-            NSPoint(x: 132, y: 230),
+            NSPoint(x: 172, y: 230),
+            NSPoint(x: 172, y: 245),
+            NSPoint(x: 172, y: 215),
+            NSPoint(x: 172, y: 215),
+            NSPoint(x: 172, y: 215),
         ])
     }
 
@@ -577,14 +1125,12 @@ final class ScrollCaptureSessionTests: XCTestCase {
         let engine = FakeStitcher(
             results: [
                 .acceptedInitial,
-                .duplicateDiscarded, .duplicateDiscarded, .duplicateDiscarded, .duplicateDiscarded,
+                .duplicateDiscarded, .duplicateDiscarded, .duplicateDiscarded,
+                .duplicateDiscarded, .duplicateDiscarded, .duplicateDiscarded,
+                .duplicateDiscarded,
                 .acceptedAppend,
             ],
-            directions: [
-                .unknown,
-                .unknown, .unknown, .unknown, .unknown,
-                .down,
-            ]
+            directions: [.unknown] + Array(repeating: .unknown, count: 7) + [.down]
         )
         let presentation = PresentationRecorder()
         let session = makeSession(
@@ -598,7 +1144,36 @@ final class ScrollCaptureSessionTests: XCTestCase {
 
         XCTAssertEqual(presentation.kinds.last, .acceptedAppend)
         XCTAssertEqual(presentation.stepStates.last, .ready(directionLocked: true))
-        XCTAssertEqual(controller.steps.count, 5)
+        XCTAssertEqual(controller.steps.count, 8)
+    }
+
+    func testStepModeFindsMovementAtContentCenterAfterRightEdgeFails() async throws {
+        let controller = FakeStepController()
+        let engine = FakeStitcher(
+            results: [
+                .acceptedInitial,
+                .duplicateDiscarded, .duplicateDiscarded, .duplicateDiscarded,
+                .acceptedAppend,
+            ],
+            directions: [.unknown, .unknown, .unknown, .unknown, .down]
+        )
+        let presentation = PresentationRecorder()
+        let session = makeSession(
+            engine: engine,
+            stepController: controller,
+            presentation: presentation
+        )
+        try await session.start()
+
+        try await session.performStep(direction: .down)
+
+        XCTAssertEqual(controller.steps.map(\.point), [
+            NSPoint(x: 172, y: 230),
+            NSPoint(x: 172, y: 245),
+            NSPoint(x: 172, y: 215),
+            NSPoint(x: 140, y: 230),
+        ])
+        XCTAssertEqual(presentation.stepStates.last, .ready(directionLocked: true))
     }
 
     func testScrollDirectionIsForwardedToLiveStitchAppend() async throws {
@@ -1505,18 +2080,26 @@ private final class FakeStepController: ScrollCaptureStepControlling {
     private(set) var startCount = 0
     private(set) var stopCount = 0
     private(set) var steps: [Step] = []
+    private(set) var targetedSteps: [Step] = []
+    private(set) var scrollbarSteps: [Step] = []
     private(set) var keyboardSteps: [KeyboardStep] = []
     private(set) var boundaryChecks: [BoundaryCheck] = []
 
     private let onStep: () -> Void
+    private let targetedResult: Bool
+    private let scrollbarResult: Bool
     private let keyboardResult: Bool
     private let boundaryStateResolver: (ScrollCaptureDirection, NSPoint) -> ScrollCaptureBoundaryState
 
     init(
+        targetedResult: Bool = false,
+        scrollbarResult: Bool = false,
         keyboardResult: Bool = false,
         boundaryState: ScrollCaptureBoundaryState = .unavailable,
         onStep: @escaping () -> Void = {}
     ) {
+        self.targetedResult = targetedResult
+        self.scrollbarResult = scrollbarResult
         self.keyboardResult = keyboardResult
         self.boundaryStateResolver = { _, _ in boundaryState }
         self.onStep = onStep
@@ -1528,6 +2111,8 @@ private final class FakeStepController: ScrollCaptureStepControlling {
             NSPoint
         ) -> ScrollCaptureBoundaryState
     ) {
+        self.targetedResult = false
+        self.scrollbarResult = false
         self.keyboardResult = false
         self.boundaryStateResolver = boundaryStateResolver
         self.onStep = {}
@@ -1544,6 +2129,27 @@ private final class FakeStepController: ScrollCaptureStepControlling {
     func performStep(direction: ScrollCaptureDirection, distance: CGFloat, at point: NSPoint) async throws {
         steps.append(Step(direction: direction, distance: distance, point: point))
         onStep()
+    }
+    func performTargetedStep(
+        direction: ScrollCaptureDirection,
+        distance: CGFloat,
+        at point: NSPoint
+    ) async throws -> Bool {
+        targetedSteps.append(Step(direction: direction, distance: distance, point: point))
+        return targetedResult
+    }
+    func performScrollbarStep(
+        direction: ScrollCaptureDirection,
+        distance: CGFloat,
+        in viewport: NSRect,
+        capturedImage: NSImage
+    ) async throws -> Bool {
+        scrollbarSteps.append(Step(
+            direction: direction,
+            distance: distance,
+            point: NSPoint(x: viewport.maxX, y: viewport.midY)
+        ))
+        return scrollbarResult
     }
     func performKeyboardStep(
         direction: ScrollCaptureDirection,
@@ -1655,6 +2261,7 @@ private final class FakeStitcher: ScrollStitching {
     private let onDeinit: (() -> Void)?
     private(set) var appendedImages: [NSImage] = []
     private(set) var preferredDirections: [ScrollCaptureDirection] = []
+    private(set) var expectedAdvances: [CGFloat] = []
     private(set) var concurrent = 0
     private(set) var maximumConcurrent = 0
     private(set) var previewCallCount = 0
@@ -1696,6 +2303,15 @@ private final class FakeStitcher: ScrollStitching {
     ) async throws -> ScrollCaptureAppendUpdate {
         preferredDirections.append(preferredDirection)
         return try await append(image)
+    }
+
+    func append(
+        _ image: NSImage,
+        preferredDirection: ScrollCaptureDirection,
+        expectedAdvance: CGFloat
+    ) async throws -> ScrollCaptureAppendUpdate {
+        expectedAdvances.append(expectedAdvance)
+        return try await append(image, preferredDirection: preferredDirection)
     }
 
     func preview(maximumHeight: Int) async throws -> NSImage {

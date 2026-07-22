@@ -294,6 +294,7 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         window?.makeFirstResponder(documentView)
+        showEditingToolbar()
     }
     func stop() {
         guard !didStop else { return }

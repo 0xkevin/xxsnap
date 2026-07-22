@@ -176,7 +176,7 @@ final class ScrollCaptureTargetDetector: ScrollCaptureTargetDetecting {
     func probePoints(in selection: NSRect) -> [NSPoint] {
         let selection = selection.standardized
         let fractions: [CGFloat] = [0.2, 0.5, 0.8]
-        return fractions.flatMap { yFraction in
+        let grid = fractions.flatMap { yFraction in
             fractions.map { xFraction in
                 NSPoint(
                     x: selection.minX + selection.width * xFraction,
@@ -184,6 +184,8 @@ final class ScrollCaptureTargetDetector: ScrollCaptureTargetDetecting {
                 )
             }
         }
+        let center = NSPoint(x: selection.midX, y: selection.midY)
+        return [center] + grid.filter { $0 != center }
     }
 
     func scrollableRegion(in selection: NSRect, processIdentifier: pid_t) async -> NSRect? {
@@ -505,6 +507,9 @@ struct AccessibilityScrollCaptureCandidateQuery: ScrollCaptureTargetCandidateQue
                 }
                 guard let parent else { break }
                 element = parent
+            }
+            if !candidates.isEmpty {
+                return candidates
             }
         }
         return candidates

@@ -76,7 +76,8 @@ public:
 
     [[nodiscard]] AppendResult append(
         const ScrollFrame& frame,
-        ScrollDirection preferredDirection = ScrollDirection::Undetermined);
+        ScrollDirection preferredDirection = ScrollDirection::Undetermined,
+        int expectedAdvance = 0);
     // Replaces only the matching baseline. Accepted output is unchanged, so a
     // later overlapping frame can recover after an unmatchable jump.
     [[nodiscard]] bool rebase(const ScrollFrame& frame);

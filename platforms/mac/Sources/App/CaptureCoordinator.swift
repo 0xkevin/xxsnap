@@ -540,6 +540,7 @@ final class CaptureCoordinator {
                 viewport.viewportHeight,
                 viewport.outputHeight
             )
+            overlay.setScrollCaptureOutputHeight(viewport.outputHeight)
             presentation.updatePreview(image, following: edge, viewport: viewport)
         case .viewportScroll(let activity):
             presentation.moveViewportIndicator(activity)

@@ -43,6 +43,8 @@ constexpr int StationaryPixelChannelTolerance = 3;
         && matcher.maximumAdvanceRatio <= 1.0
         && matcher.maximumNormalizedError >= 0.0
         && matcher.minimumWinnerMargin >= 0.0
+        && matcher.expectedAdvance >= 0
+        && matcher.expectedAdvanceTolerance >= 0
         && matcher.maximumFullResolutionCandidates > 0
         && matcher.maximumFullResolutionCandidates <= 1'000'000
         && matcher.excludedBands.left >= 0
@@ -97,6 +99,66 @@ constexpr int StationaryPixelChannelTolerance = 3;
         static_cast<std::size_t>(width),
         static_cast<std::size_t>(height));
     return pixels.has_value() ? checkedProduct(*pixels, 4U) : std::nullopt;
+}
+
+[[nodiscard]] double nearWhitePixelRatio(
+    const std::uint8_t* row,
+    int width)
+{
+    if (row == nullptr || width <= 0) {
+        return 0.0;
+    }
+    int nearWhitePixels = 0;
+    for (int x = 0; x < width; ++x) {
+        const auto* pixel = row + static_cast<std::size_t>(x) * 4U;
+        nearWhitePixels += pixel[0] >= 250U
+                && pixel[1] >= 250U
+                && pixel[2] >= 250U
+                && pixel[3] >= 250U
+            ? 1
+            : 0;
+    }
+    return static_cast<double>(nearWhitePixels) / static_cast<double>(width);
+}
+
+void repairIsolatedNearWhiteSeamRows(
+    std::uint8_t* pixels,
+    int width,
+    int height,
+    std::size_t bytesPerRow,
+    const std::vector<int>& seamRows,
+    bool bottomUp = false)
+{
+    if (pixels == nullptr || width <= 0 || height <= 2) {
+        return;
+    }
+    const auto rowAt = [&](int logicalRow) {
+        const int physicalRow = bottomUp ? height - 1 - logicalRow : logicalRow;
+        return pixels + static_cast<std::size_t>(physicalRow) * bytesPerRow;
+    };
+    for (const int seamRow : seamRows) {
+        if (seamRow <= 0 || seamRow >= height - 1) {
+            continue;
+        }
+        auto* seam = rowAt(seamRow);
+        const auto* above = rowAt(seamRow - 1);
+        const auto* below = rowAt(seamRow + 1);
+        if (nearWhitePixelRatio(seam, width) < 0.98
+            || nearWhitePixelRatio(above, width) > 0.90
+            || nearWhitePixelRatio(below, width) > 0.90) {
+            continue;
+        }
+        for (int x = 0; x < width; ++x) {
+            const auto offset = static_cast<std::size_t>(x) * 4U;
+            for (std::size_t channel = 0; channel < 4U; ++channel) {
+                seam[offset + channel] = static_cast<std::uint8_t>(
+                    (static_cast<unsigned>(above[offset + channel])
+                        + static_cast<unsigned>(below[offset + channel])
+                        + 1U)
+                    / 2U);
+            }
+        }
+    }
 }
 
 [[nodiscard]] std::uint32_t pixelKey(const ScrollFrame& frame, int x, int y)
@@ -435,7 +497,8 @@ public:
         if (preferred != Direction::Undetermined) {
             auto preferredOverlap = matchInDirection(
                 previous, current, matcherConfig, preferred);
-            if (usableMovement(preferredOverlap, true)) {
+            const bool preferredUsable = usableMovement(preferredOverlap, true);
+            if (matcherConfig.expectedAdvance > 0 && preferredUsable) {
                 return makeMovement(preferred, std::move(preferredOverlap));
             }
             const Direction opposite = preferred == Direction::Down
@@ -443,7 +506,14 @@ public:
                 : Direction::Down;
             auto oppositeOverlap = matchInDirection(
                 previous, current, matcherConfig, opposite);
-            if (usableMovement(oppositeOverlap, true)) {
+            const bool oppositeUsable = usableMovement(oppositeOverlap, true);
+            const bool oppositeIsSubstantiallyBetter = preferredUsable && oppositeUsable
+                && oppositeOverlap.normalizedError + matcherConfig.minimumWinnerMargin
+                    < preferredOverlap.normalizedError;
+            if (preferredUsable && !oppositeIsSubstantiallyBetter) {
+                return makeMovement(preferred, std::move(preferredOverlap));
+            }
+            if (oppositeUsable) {
                 return makeMovement(opposite, std::move(oppositeOverlap));
             }
             DirectionalMatch result;
@@ -1065,7 +1135,8 @@ ScrollStitchSession& ScrollStitchSession::operator=(ScrollStitchSession&&) noexc
 
 AppendResult ScrollStitchSession::append(
     const ScrollFrame& frame,
-    ScrollDirection preferredDirection)
+    ScrollDirection preferredDirection,
+    int expectedAdvance)
 try {
     AppendResult result;
     result.outputHeight = implementation_->height;
@@ -1154,7 +1225,12 @@ try {
     const ScrollFrame* evidenceTail = implementation_->pending.empty()
         ? implementation_->tail.get()
         : implementation_->pending.back().frame.get();
-    const auto matcherConfig = implementation_->effectiveMatcherConfig(evidenceTail, &frame);
+    auto matcherConfig = implementation_->effectiveMatcherConfig(evidenceTail, &frame);
+    if (expectedAdvance > 0) {
+        matcherConfig.expectedAdvance = expectedAdvance;
+        matcherConfig.expectedAdvanceTolerance = std::min(
+            16, std::max(2, static_cast<int>(std::ceil(expectedAdvance * 0.03))));
+    }
     using Direction = Implementation::Direction;
     using DirectionalDecision = Implementation::DirectionalDecision;
     Direction expectedDirection = implementation_->direction != Direction::Undetermined
@@ -1815,9 +1891,7 @@ bool ScrollStitchSession::copyFinalPixels(
     const auto storedRowBytes = static_cast<std::size_t>(implementation_->width) * 4U;
     std::vector<std::uint8_t> storedRow(storedRowBytes);
     auto* destinationPixels = static_cast<std::uint8_t*>(destination);
-    const auto seamRows = implementation_->config.seamWhiteCoverage > 0.0
-        ? implementation_->seamRows(includePending, composedHeight)
-        : std::vector<int>{};
+    const auto seamRows = implementation_->seamRows(includePending, composedHeight);
     std::size_t seamIndex = 0U;
     int outputRow = 0;
     const auto writeRow = [&](const std::uint8_t* pixels) {
@@ -1833,7 +1907,8 @@ bool ScrollStitchSession::copyFinalPixels(
             destinationRowPixels,
             pixels + static_cast<std::size_t>(leftCrop) * 4U,
             *rowBytes);
-        if (seamIndex < seamRows.size() && outputRow == seamRows[seamIndex]) {
+        if (implementation_->config.seamWhiteCoverage > 0.0
+            && seamIndex < seamRows.size() && outputRow == seamRows[seamIndex]) {
             blendWhite(
                 destinationRowPixels,
                 composedWidth,
@@ -1902,7 +1977,19 @@ bool ScrollStitchSession::copyFinalPixels(
             }
         }
     }
-    return outputRow == composedHeight;
+    if (outputRow != composedHeight) {
+        return false;
+    }
+    if (implementation_->config.seamWhiteCoverage == 0.0) {
+        repairIsolatedNearWhiteSeamRows(
+            destinationPixels,
+            composedWidth,
+            composedHeight,
+            destinationBytesPerRow,
+            seamRows,
+            bottomUp);
+    }
+    return true;
 }
 
 ScrollFrame ScrollStitchSession::finalize() const
@@ -2083,9 +2170,10 @@ ScrollFrame ScrollStitchSession::previewWithSize(int previewWidth, int previewHe
                 4U);
         }
     }
+    const auto sourceSeams = implementation_->seamRows(true, sourceHeight);
     if (implementation_->config.seamWhiteCoverage > 0.0) {
         int previousPreviewY = -1;
-        for (const int sourceSeam : implementation_->seamRows(true, sourceHeight)) {
+        for (const int sourceSeam : sourceSeams) {
             const int previewY = std::min(
                 output.height - 1,
                 static_cast<int>(
@@ -2101,6 +2189,24 @@ ScrollFrame ScrollStitchSession::previewWithSize(int previewWidth, int previewHe
                 implementation_->config.seamWhiteCoverage);
             previousPreviewY = previewY;
         }
+    } else {
+        std::vector<int> previewSeams;
+        previewSeams.reserve(sourceSeams.size());
+        for (const int sourceSeam : sourceSeams) {
+            const int previewY = std::min(
+                output.height - 1,
+                static_cast<int>(
+                    static_cast<std::int64_t>(sourceSeam) * output.height / sourceHeight));
+            if (previewSeams.empty() || previewSeams.back() != previewY) {
+                previewSeams.push_back(previewY);
+            }
+        }
+        repairIsolatedNearWhiteSeamRows(
+            output.pixels.data(),
+            output.width,
+            output.height,
+            static_cast<std::size_t>(output.bytesPerRow),
+            previewSeams);
     }
     return output;
 }

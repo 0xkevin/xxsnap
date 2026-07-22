@@ -156,7 +156,7 @@ struct L10n {
         case (.zhHans, .cancel):
             return "取消"
         case (.zhHans, .scrollCaptureLowConfidence):
-            return "暂未识别到重叠位置，将继续尝试拼接"
+            return "暂无法识别到拼接位置，将继续尝试拼接"
         case (.zhHans, .scrollCaptureNoMovement):
             return "未检测到滚动，正在自动切换选区内的滚动位置"
         case (.zhHans, .scrollCaptureResourceLimit):

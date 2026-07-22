@@ -51,7 +51,7 @@ final class LongImageEditorTests: XCTestCase {
         XCTAssertEqual(windowWasKeyWhenActivationStarted, false)
         XCTAssertTrue(controller.window?.isVisible == true)
         XCTAssertTrue(controller.window?.firstResponder === controller.scrollView.documentView)
-        XCTAssertNil(controller.test_editingOverlay)
+        XCTAssertNotNil(controller.test_editingOverlay)
         controller.stop()
     }
 
@@ -548,7 +548,7 @@ final class LongImageEditorTests: XCTestCase {
         let contentView = try XCTUnwrap(window.contentView)
         contentView.layoutSubtreeIfNeeded()
         XCTAssertEqual(controller.scrollView.frame, contentView.bounds)
-        XCTAssertNil(controller.test_editingOverlay)
+        XCTAssertNotNil(controller.test_editingOverlay)
 
         let menu = try XCTUnwrap(controller.scrollView.menu)
         XCTAssertEqual(menu.items.map { $0.isSeparatorItem ? nil : $0.title }, [
@@ -561,7 +561,7 @@ final class LongImageEditorTests: XCTestCase {
             "关闭",
         ])
         let toolbarItem = try XCTUnwrap(menu.items.first { $0.title == "显示工具条 (⇧)" })
-        XCTAssertEqual(toolbarItem.state, .off)
+        XCTAssertEqual(toolbarItem.state, .on)
         let copyItem = try XCTUnwrap(menu.items.first { $0.title == "复制图片" })
         XCTAssertEqual(copyItem.keyEquivalent, "c")
         XCTAssertEqual(copyItem.keyEquivalentModifierMask, [.command])
@@ -572,9 +572,23 @@ final class LongImageEditorTests: XCTestCase {
         XCTAssertEqual(closeItem.keyEquivalent, "w")
         XCTAssertEqual(closeItem.keyEquivalentModifierMask, [.command])
         XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(toolbarItem.action), to: toolbarItem.target, from: toolbarItem))
-        XCTAssertNotNil(controller.test_editingOverlay)
-        XCTAssertEqual(toolbarItem.state, .on)
+        XCTAssertNil(controller.test_editingOverlay)
+        XCTAssertEqual(toolbarItem.state, .off)
         XCTAssertEqual(controller.window?.isVisible, true)
+        controller.stop()
+    }
+
+    func testShowingLongImageEditorDisplaysEditingToolbarByDefault() throws {
+        let controller = makeTallController()
+        XCTAssertNil(controller.test_editingOverlay)
+
+        controller.show()
+
+        XCTAssertNotNil(controller.test_editingOverlay)
+        let toolbarItem = try XCTUnwrap(
+            controller.scrollView.menu?.items.first { $0.title == "显示工具条 (⇧)" }
+        )
+        XCTAssertEqual(toolbarItem.state, .on)
         controller.stop()
     }
 
@@ -600,7 +614,11 @@ final class LongImageEditorTests: XCTestCase {
         }
 
         documentView.flagsChanged(with: try flagsEvent([.shift]))
+        XCTAssertNotNil(controller.test_editingOverlay)
+        documentView.flagsChanged(with: try flagsEvent([]))
         XCTAssertNil(controller.test_editingOverlay)
+
+        documentView.flagsChanged(with: try flagsEvent([.shift]))
         documentView.flagsChanged(with: try flagsEvent([]))
         let overlay = try XCTUnwrap(controller.test_editingOverlay)
 
@@ -701,6 +719,22 @@ final class LongImageEditorTests: XCTestCase {
         XCTAssertFalse(configuration.showsSelectionMeasurementControl)
         XCTAssertFalse(configuration.allowsPassiveColorSampler)
         XCTAssertEqual(configuration.outsideSelectionDimAlpha, 0)
+    }
+
+    func testLongImageEditorUsesArrowCursorInsideEditingAreaWhenNoToolIsSelected() {
+        let editingRect = NSRect(x: 0, y: 0, width: 500, height: 400)
+        let overlay = SelectionOverlayWindow(
+            backgroundImage: nil,
+            configuration: .longImageEditor(
+                windowFrame: editingRect,
+                selectionRect: editingRect
+            )
+        ) { _ in }
+
+        XCTAssertEqual(
+            overlay.test_cursorStyle(at: NSPoint(x: editingRect.midX, y: editingRect.midY)),
+            .arrow
+        )
     }
 
     func testFullLongImageRendererPreservesPixelDimensions() throws {
@@ -1691,6 +1725,64 @@ final class LongImageEditorTests: XCTestCase {
         controller.stop()
     }
 
+    func testCheckAndCrossDoNotGrowWhenPointEraserBegins() throws {
+        let image = TestImageFactory.solid(size: NSSize(width: 200, height: 1_000), color: .white)
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = .systemRed
+        style.textSize = 8
+        let check = CaptureAnnotation(
+            kind: .numberSequence,
+            rect: NSRect(x: 30, y: 40, width: 36, height: 36),
+            style: style,
+            numberMarkType: .check
+        )
+        let cross = CaptureAnnotation(
+            kind: .numberSequence,
+            rect: NSRect(x: 100, y: 110, width: 36, height: 36),
+            style: style,
+            numberMarkType: .cross
+        )
+        let controller = LongImageEditorWindowController(
+            canonicalImage: image,
+            annotations: [check, cross],
+            visibleFrame: NSRect(x: 0, y: 0, width: 600, height: 500),
+            initialWindowSize: NSSize(width: 400, height: 420)
+        )
+        controller.show()
+        controller.showEditingToolbar()
+        let overlay = try XCTUnwrap(controller.test_editingOverlay)
+        overlay.test_activateEraserTool()
+        let before = try XCTUnwrap(overlay.test_renderedOverlayImage())
+        let beforeCount = redDominantPixelCount(before)
+        let bounds = try XCTUnwrap(overlay.contentView?.bounds)
+        let mainToolbar = overlay.test_mainToolbarRect() ?? .zero
+        let optionsToolbar = overlay.test_optionsToolbarRect ?? .zero
+        let annotationRects = overlay.editorSnapshot?.annotations.map(\.rect) ?? []
+        let clickPoint = try XCTUnwrap([
+            NSPoint(x: 20, y: 20),
+            NSPoint(x: bounds.midX, y: bounds.midY),
+            NSPoint(x: bounds.maxX - 20, y: bounds.maxY - 20),
+        ].first { point in
+            !mainToolbar.contains(point)
+                && !optionsToolbar.contains(point)
+                && !annotationRects.contains(where: { $0.contains(point) })
+        })
+
+        overlay.test_mouseDown(at: clickPoint)
+
+        XCTAssertTrue(overlay.test_suppressedAnnotationIDs.isEmpty)
+        let during = try XCTUnwrap(overlay.test_renderedOverlayImage())
+        let duringCount = redDominantPixelCount(during)
+        XCTAssertGreaterThan(beforeCount, 0)
+        XCTAssertEqual(
+            Double(duringCount),
+            Double(beforeCount),
+            accuracy: max(20, Double(beforeCount) * 0.3)
+        )
+        overlay.test_mouseUp(at: clickPoint)
+        controller.stop()
+    }
+
     func testBakedPreviewUnsuppressesSelectedAnnotationDuringLiveDragAndRebakesOnMouseUp() throws {
         let image = TestImageFactory.verticalDocumentViewport(offset: 0, width: 200, height: 1_000, scale: 2)
         var style = CaptureAnnotationStyle(); style.strokeColor = .red; style.strokeWidth = 8
@@ -1907,6 +1999,18 @@ final class LongImageEditorTests: XCTestCase {
     private func maxChannelDifference(_ lhs: Data, _ rhs: Data) -> Int {
         guard lhs.count == rhs.count else { return .max }
         return zip(lhs, rhs).reduce(0) { max($0, abs(Int($1.0) - Int($1.1))) }
+    }
+
+    private func redDominantPixelCount(_ image: NSImage) -> Int {
+        guard let bytes = try? pixelBytes(image) else { return 0 }
+        return stride(from: 0, to: bytes.count, by: 4).reduce(into: 0) { count, index in
+            if bytes[index] > 180,
+               bytes[index + 1] < 130,
+               bytes[index + 2] < 130,
+               bytes[index + 3] > 0 {
+                count += 1
+            }
+        }
     }
 
     private func makeTallController() -> LongImageEditorWindowController {

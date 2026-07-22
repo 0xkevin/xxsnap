@@ -3,23 +3,18 @@ import XCTest
 @testable import xxsnap
 
 final class ScrollCaptureTargetDetectorTests: XCTestCase {
-    func testProbePointsCoverCenterAndThreeByThreeInteriorGrid() {
+    func testProbePointsStartAtCenterAndCoverThreeByThreeInteriorGrid() {
         let selection = NSRect(x: 100, y: 200, width: 500, height: 400)
         let detector = ScrollCaptureTargetDetector(candidateQuery: StubCandidateQuery())
 
         let points = detector.probePoints(in: selection)
 
-        XCTAssertEqual(points, [
-            NSPoint(x: 200, y: 280),
-            NSPoint(x: 350, y: 280),
-            NSPoint(x: 500, y: 280),
-            NSPoint(x: 200, y: 400),
-            NSPoint(x: 350, y: 400),
-            NSPoint(x: 500, y: 400),
-            NSPoint(x: 200, y: 520),
-            NSPoint(x: 350, y: 520),
-            NSPoint(x: 500, y: 520),
-        ])
+        XCTAssertEqual(points.first, NSPoint(x: 350, y: 400))
+        XCTAssertEqual(Set(points.map { "\($0.x),\($0.y)" }), Set([
+            "200.0,280.0", "350.0,280.0", "500.0,280.0",
+            "200.0,400.0", "350.0,400.0", "500.0,400.0",
+            "200.0,520.0", "350.0,520.0", "500.0,520.0",
+        ]))
         XCTAssertTrue(points.allSatisfy(selection.contains))
         XCTAssertTrue(points.contains(NSPoint(x: selection.midX, y: selection.midY)))
     }
@@ -496,6 +491,28 @@ final class ScrollCaptureTargetDetectorTests: XCTestCase {
             firstProbeIndex: 0
         )])
         XCTAssertEqual(reader.candidateReadCount, 2)
+    }
+
+    func testFirstProbeWithScrollableOwnerReturnsWithoutSpendingBudgetOnGridFallbacks() {
+        let scrollOwner = FakeAccessibilityNode(
+            candidate: candidate(
+                identity: 91,
+                rect: NSRect(x: 20, y: 30, width: 400, height: 500),
+                firstProbeIndex: -1
+            )
+        )
+        let firstChild = FakeAccessibilityNode(parent: scrollOwner)
+        let secondChild = FakeAccessibilityNode()
+        let reader = FakeAccessibilityReader(hitElements: [firstChild, secondChild])
+        let query = makeAccessibilityQuery(reader: reader)
+
+        let candidates = query.candidates(
+            processIdentifier: 42,
+            probePoints: [NSPoint(x: 100, y: 100), NSPoint(x: 200, y: 200)]
+        )
+
+        XCTAssertEqual(candidates.first?.identity, 91)
+        XCTAssertEqual(reader.hitTestCount, 1)
     }
 
     func testDisabledFakeScrollbarProducesNoCandidate() {

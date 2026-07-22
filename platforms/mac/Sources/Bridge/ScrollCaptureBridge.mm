@@ -57,13 +57,11 @@ struct BridgeImplementation final {
 };
 
 std::unique_ptr<ScrollStitchSession> makeSession(
-    std::size_t maximumAcceptedBytes,
-    CGFloat sourceScale)
+    std::size_t maximumAcceptedBytes)
 {
     ScrollStitchConfig config;
     config.maximumAcceptedBytes = maximumAcceptedBytes;
-    config.seamWhiteCoverage = std::clamp(
-        0.1 * static_cast<double>(sourceScale), 0.0, 1.0);
+    config.seamWhiteCoverage = 0.0;
     return std::make_unique<ScrollStitchSession>(config);
 }
 
@@ -456,11 +454,23 @@ BridgeImplementation *implementationOrError(void *pointer, NSError **error)
 {
     return [self appendImage:image
           preferredDirection:ScrollCaptureDirectionUnknown
+             expectedAdvance:0
                        error:error];
 }
 
 - (nullable ScrollCaptureAppendUpdate *)appendImage:(NSImage *)image
                                   preferredDirection:(ScrollCaptureDirection)preferredDirection
+                                               error:(NSError **)error
+{
+    return [self appendImage:image
+          preferredDirection:preferredDirection
+             expectedAdvance:0
+                       error:error];
+}
+
+- (nullable ScrollCaptureAppendUpdate *)appendImage:(NSImage *)image
+                                  preferredDirection:(ScrollCaptureDirection)preferredDirection
+                                     expectedAdvance:(CGFloat)expectedAdvance
                                                error:(NSError **)error
 {
     auto *implementation = implementationOrError(_implementation, error);
@@ -472,16 +482,26 @@ BridgeImplementation *implementationOrError(void *pointer, NSError **error)
     if (!frameFromImage(image, frame, sourceScale, error)) {
         return nil;
     }
+    if (!std::isfinite(expectedAdvance) || expectedAdvance < 0) {
+        setError(error, BridgeError::InvalidConfiguration, @"The expected scroll advance is invalid.");
+        return nil;
+    }
+    const double scaledExpectedAdvance = static_cast<double>(expectedAdvance * sourceScale);
+    if (scaledExpectedAdvance > std::numeric_limits<int>::max()) {
+        setError(error, BridgeError::InvalidConfiguration, @"The expected scroll advance is too large.");
+        return nil;
+    }
+    const int expectedAdvancePixels = static_cast<int>(std::lround(scaledExpectedAdvance));
     try {
         if (implementation->session == nullptr) {
             auto candidate = makeSession(
-                implementation->maximumAcceptedBytes, sourceScale);
+                implementation->maximumAcceptedBytes);
             if (candidate == nullptr) {
                 setError(error, BridgeError::InvalidImage, @"The image scale is invalid.");
                 return nil;
             }
             AppendResult result = candidate->append(
-                frame, coreDirection(preferredDirection));
+                frame, coreDirection(preferredDirection), expectedAdvancePixels);
             if (result.kind == AppendKind::AcceptedInitial) {
                 implementation->session = std::move(candidate);
                 implementation->sourceScale = sourceScale;
@@ -490,7 +510,7 @@ BridgeImplementation *implementationOrError(void *pointer, NSError **error)
             return [[ScrollCaptureAppendUpdate alloc] initWithResult:result];
         }
         AppendResult result = implementation->session->append(
-            frame, coreDirection(preferredDirection));
+            frame, coreDirection(preferredDirection), expectedAdvancePixels);
         return [[ScrollCaptureAppendUpdate alloc] initWithResult:result];
     } catch (...) {
         setError(error, BridgeError::InternalFailure, @"The scroll stitch engine failed to append the image.");

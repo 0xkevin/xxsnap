@@ -243,6 +243,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertNil(window.test_measurementControlPoint(.cornerStyle))
         XCTAssertNil(window.test_measurementControlPoint(.aspectRatioLock))
         XCTAssertNil(window.test_measurementControlPoint(.refresh))
+        XCTAssertEqual(window.test_measurementLabelText, "300 x 220  px")
     }
 
     func testBeginScrollCapturePreservesBoundaryCrossingOverlayContentInOriginalSeed() throws {
@@ -10367,10 +10368,14 @@ final class SelectionToolbarStateTests: XCTestCase {
         update?(.preview(
             preview,
             edge: .top,
-            viewport: ScrollCapturePreviewViewport(viewportHeight: 100, outputHeight: 200)
+            viewport: ScrollCapturePreviewViewport(viewportHeight: 100, outputHeight: 13_174)
         ))
         XCTAssertTrue(presentation.previews.last === preview)
         XCTAssertEqual(presentation.previewEdges, [.top])
+        XCTAssertEqual(
+            overlay.test_measurementLabelText,
+            "80 x 60  px    滚动高度：13,174 px"
+        )
         let scrollActivity = ScrollCaptureScrollActivity(direction: .down, distance: 16)
         update?(.viewportScroll(scrollActivity))
         XCTAssertEqual(presentation.scrollActivities, [scrollActivity])

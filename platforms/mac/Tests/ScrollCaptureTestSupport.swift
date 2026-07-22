@@ -74,6 +74,40 @@ enum TestImageFactory {
         )
     }
 
+    static func browserScrollbar(
+        pointSize: CGSize = CGSize(width: 120, height: 100),
+        scale: CGFloat = 2,
+        thumbVisualRange: Range<Int> = 20..<60,
+        extraDarkVisualRange: Range<Int>? = nil
+    ) -> NSImage {
+        let pixelWidth = Int(pointSize.width * scale)
+        let pixelHeight = Int(pointSize.height * scale)
+        let scrollbarWidth = max(6, Int(6 * scale))
+        var bytes = [UInt8](repeating: 0, count: pixelWidth * pixelHeight * 4)
+        for providerY in 0..<pixelHeight {
+            let visualY = pixelHeight - 1 - providerY
+            for x in 0..<pixelWidth {
+                let index = (providerY * pixelWidth + x) * 4
+                let isTrack = x >= pixelWidth - scrollbarWidth - 3 && x < pixelWidth - 3
+                let isThumb = isTrack && (
+                    thumbVisualRange.contains(visualY)
+                        || extraDarkVisualRange?.contains(visualY) == true
+                )
+                let value: UInt8 = isThumb ? 205 : (isTrack ? 251 : 238)
+                bytes[index] = value
+                bytes[index + 1] = value
+                bytes[index + 2] = value
+                bytes[index + 3] = 255
+            }
+        }
+        return image(
+            pixelWidth: pixelWidth,
+            pixelHeight: pixelHeight,
+            pointSize: pointSize,
+            bytes: bytes
+        )
+    }
+
     static func verticalDocumentViewport(
         offset: Int,
         width: Int = 64,
@@ -107,6 +141,41 @@ enum TestImageFactory {
             pixelWidth: pixelWidth,
             pixelHeight: pixelHeight,
             pointSize: CGSize(width: width, height: height),
+            bytes: bytes
+        )
+    }
+
+    static func sparseChatWithStationaryWatermark(
+        offset: Int,
+        pointSize: CGSize = CGSize(width: 120, height: 120),
+        scale: CGFloat = 2
+    ) -> NSImage {
+        let pixelWidth = Int(pointSize.width * scale)
+        let pixelHeight = Int(pointSize.height * scale)
+        let pixelOffset = Int(CGFloat(offset) * scale)
+        var bytes = [UInt8](repeating: 0, count: pixelWidth * pixelHeight * 4)
+        for providerY in 0..<pixelHeight {
+            let visualY = pixelHeight - 1 - providerY
+            let sourceY = pixelOffset + visualY
+            for x in 0..<pixelWidth {
+                var value: UInt8 = 255
+                if sourceY >= 190, sourceY < 225, x >= 24, x < 132 {
+                    value = UInt8(72 + (sourceY * 7 + x * 11) % 96)
+                }
+                if (x + visualY * 2) % 72 < 12 {
+                    value = UInt8(UInt16(value) * 232 / 255)
+                }
+                let index = (providerY * pixelWidth + x) * 4
+                bytes[index] = value
+                bytes[index + 1] = value
+                bytes[index + 2] = value
+                bytes[index + 3] = 255
+            }
+        }
+        return image(
+            pixelWidth: pixelWidth,
+            pixelHeight: pixelHeight,
+            pointSize: pointSize,
             bytes: bytes
         )
     }
