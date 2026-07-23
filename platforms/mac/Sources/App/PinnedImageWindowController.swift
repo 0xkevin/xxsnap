@@ -70,6 +70,11 @@ protocol PinnedImageWindowPresenting: AnyObject {
     var onHide: (() -> Void)? { get set }
     var onClose: (() -> Void)? { get set }
     func show()
+    func updateLanguage(_ language: AppLanguage)
+}
+
+extension PinnedImageWindowPresenting {
+    func updateLanguage(_ language: AppLanguage) {}
 }
 
 @MainActor
@@ -88,6 +93,8 @@ final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPr
     private let imageAspectRatio: CGFloat
     private var editingOverlayWindow: SelectionOverlayWindow?
     private var editingDragOffsetInScreen: NSPoint?
+    private let filenameProvider: any CaptureFilenameProviding
+    private var language: AppLanguage
 #if DEBUG
     private var imageActionHandlerForTesting: ((CaptureCompletionAction) -> Void)?
 #endif
@@ -96,9 +103,13 @@ final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPr
         image: NSImage,
         screenRect: NSRect? = nil,
         visibleFrame: NSRect? = nil,
+        filenameProvider: any CaptureFilenameProviding = CaptureFilenameProvider(),
+        language: AppLanguage = .zhHans,
         screenResolver: (NSRect) -> NSRect? = PinnedImageWindowController.visibleFrame(containing:)
     ) {
         self.pinnedImage = image
+        self.filenameProvider = filenameProvider
+        self.language = language
         let requestedRect = screenRect?.standardized ?? NSRect(origin: .zero, size: image.size)
         self.screenRect = requestedRect.isEmpty ? NSRect(origin: .zero, size: image.size) : requestedRect
         self.imageAspectRatio = image.size.width / max(image.size.height, 1)
@@ -175,6 +186,11 @@ final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPr
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    func updateLanguage(_ language: AppLanguage) {
+        self.language = language
+        editingOverlayWindow?.updateLanguage(language)
+    }
+
     func scale(by factor: CGFloat, around anchorInScreen: NSPoint? = nil) {
         guard let window else {
             return
@@ -214,8 +230,11 @@ final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPr
             frameSize: overlayGeometry.windowFrame.size,
             imageRect: overlayGeometry.selectionRect
         )
+        var settings = AppSettings.default
+        settings.language = language
         let overlayWindow = SelectionOverlayWindow(
             backgroundImage: backgroundImage,
+            settings: settings,
             configuration: .pinnedImageEditor(
                 windowFrame: overlayGeometry.windowFrame,
                 selectionRect: overlayGeometry.selectionRect,
@@ -261,31 +280,39 @@ final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPr
     }
 
     func makeContextMenu() -> NSMenu {
+        let isEnglish = language == .english
         let menu = NSMenu()
-        let toolbarItem = menuItem(title: "显示工具条 (⇧)", action: #selector(toggleEditingToolbarFromMenu))
+        let toolbarItem = menuItem(
+            title: isEnglish ? "Show Toolbar (⇧)" : "显示工具条 (⇧)",
+            action: #selector(toggleEditingToolbarFromMenu)
+        )
         toolbarItem.state = editingOverlayWindow == nil ? .off : .on
         menu.addItem(toolbarItem)
         menu.addItem(menuItem(
-            title: "复制图片",
+            title: isEnglish ? "Copy Image" : "复制图片",
             action: #selector(copyImage),
             keyEquivalent: "c",
             modifierMask: [.command]
         ))
         menu.addItem(menuItem(
-            title: "保存图片",
+            title: isEnglish ? "Save Image" : "保存图片",
             action: #selector(saveImage),
             keyEquivalent: "s",
             modifierMask: [.command]
         ))
         menu.addItem(.separator())
         menu.addItem(menuItem(
-            title: "重置大小",
+            title: isEnglish ? "Reset Size" : "重置大小",
             action: #selector(resetSize),
             keyEquivalent: "r",
             modifierMask: [.command]
         ))
 
-        let opacityItem = NSMenuItem(title: "透明度", action: nil, keyEquivalent: "")
+        let opacityItem = NSMenuItem(
+            title: isEnglish ? "Opacity" : "透明度",
+            action: nil,
+            keyEquivalent: ""
+        )
         let opacityMenu = NSMenu()
         for option in [1.0, 0.8, 0.6, 0.4] as [CGFloat] {
             let item = menuItem(title: "\(Int(option * 100))%", action: #selector(setOpacity(_:)))
@@ -297,7 +324,7 @@ final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPr
         menu.addItem(opacityItem)
 
         let topItem = menuItem(
-            title: "置顶",
+            title: isEnglish ? "Always on Top" : "置顶",
             action: #selector(toggleAlwaysOnTop),
             keyEquivalent: "t",
             modifierMask: [.command]
@@ -307,13 +334,13 @@ final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPr
 
         menu.addItem(.separator())
         menu.addItem(menuItem(
-            title: "关闭",
+            title: isEnglish ? "Close" : "关闭",
             action: #selector(closePinnedWindow),
             keyEquivalent: "w",
             modifierMask: [.command]
         ))
         menu.addItem(menuItem(
-            title: "关闭全部贴图",
+            title: isEnglish ? "Close All Pins" : "关闭全部贴图",
             action: #selector(closeAllPinnedWindows),
             keyEquivalent: "w",
             modifierMask: [.command, .shift]
@@ -737,7 +764,7 @@ final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPr
         }
         let savePanel = NSSavePanel()
         savePanel.allowedContentTypes = [.png]
-        savePanel.nameFieldStringValue = CaptureCoordinator.defaultCaptureFilename()
+        savePanel.nameFieldStringValue = filenameProvider.suggestedFilename()
         savePanel.level = .modalPanel
         NSApp.activate(ignoringOtherApps: true)
         guard savePanel.runModal() == .OK, let destinationURL = savePanel.url else {

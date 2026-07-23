@@ -74,7 +74,12 @@ struct AppSettings: Codable, Equatable {
     }
 }
 
-final class SettingsStore {
+protocol AppSettingsStoring: AnyObject {
+    func load() -> AppSettings
+    func save(_ settings: AppSettings) throws
+}
+
+final class SettingsStore: AppSettingsStoring {
     private let key = "appSettings.v1"
     private let userDefaults: UserDefaults
     private let encoder = JSONEncoder()
@@ -141,8 +146,21 @@ struct L10n {
         case longImagePin
         case longImageFinish
         case longImageClose
+        case longImageEditorTitle
+        case longImageEditorUnavailable
+        case longImageEditorUnavailableDetail
+        case screenRecordingPermissionRequired
+        case screenRecordingPermissionRestartDetail
+        case screenRecordingPermissionMissing
+        case screenRecordingPermissionSettingsDetail
+        case openSystemSettings
+        case later
+        case confirm
         case colorSamplerCopyHex
         case colorSamplerCopyRgb
+        case colorSamplerCopySuccess
+        case colorSamplerSwitchMode
+        case cornerRadius
     }
 
     var language: AppLanguage
@@ -168,10 +186,26 @@ struct L10n {
         case (.zhHans, .longImagePin): return "贴图"
         case (.zhHans, .longImageFinish): return "完成编辑"
         case (.zhHans, .longImageClose): return "关闭"
+        case (.zhHans, .longImageEditorTitle): return "长截图编辑"
+        case (.zhHans, .longImageEditorUnavailable): return "无法打开长截图编辑器"
+        case (.zhHans, .longImageEditorUnavailableDetail):
+            return "完整长截图已保留。是否立即保存为 PNG？"
+        case (.zhHans, .screenRecordingPermissionRequired): return "需要录屏权限"
+        case (.zhHans, .screenRecordingPermissionRestartDetail):
+            return "请在系统设置中允许 xxsnap 录屏，然后退出并重新打开 xxsnap。"
+        case (.zhHans, .screenRecordingPermissionMissing): return "xxsnap 没有录屏权限"
+        case (.zhHans, .screenRecordingPermissionSettingsDetail):
+            return "请在系统设置 > 隐私与安全性 > 录屏与系统录音中打开 xxsnap。打开后需要重启 xxsnap。"
+        case (.zhHans, .openSystemSettings): return "打开系统设置"
+        case (.zhHans, .later): return "稍后"
+        case (.zhHans, .confirm): return "确定"
         case (.zhHans, .colorSamplerCopyHex):
             return "按 C 复制HEX颜色值"
         case (.zhHans, .colorSamplerCopyRgb):
             return "按 C 复制RGB颜色值"
+        case (.zhHans, .colorSamplerCopySuccess): return "复制成功"
+        case (.zhHans, .colorSamplerSwitchMode): return "按 Shift 切换 RGB/HEX"
+        case (.zhHans, .cornerRadius): return "圆角半径"
         case (.english, .toolbarScrollCapture):
             return "Scroll Capture"
         case (.english, .finishScrollCapture):
@@ -191,10 +225,126 @@ struct L10n {
         case (.english, .longImagePin): return "Pin"
         case (.english, .longImageFinish): return "Finish"
         case (.english, .longImageClose): return "Close"
+        case (.english, .longImageEditorTitle): return "Long Capture Editor"
+        case (.english, .longImageEditorUnavailable): return "Unable to Open Long Capture Editor"
+        case (.english, .longImageEditorUnavailableDetail):
+            return "The complete long capture is preserved. Save it as PNG now?"
+        case (.english, .screenRecordingPermissionRequired): return "Screen Recording Permission Required"
+        case (.english, .screenRecordingPermissionRestartDetail):
+            return "Allow xxsnap to record the screen in System Settings, then quit and reopen xxsnap."
+        case (.english, .screenRecordingPermissionMissing): return "xxsnap Cannot Record the Screen"
+        case (.english, .screenRecordingPermissionSettingsDetail):
+            return "Enable xxsnap in System Settings > Privacy & Security > Screen & System Audio Recording, then restart xxsnap."
+        case (.english, .openSystemSettings): return "Open System Settings"
+        case (.english, .later): return "Later"
+        case (.english, .confirm): return "OK"
         case (.english, .colorSamplerCopyHex):
             return "Press C to copy HEX"
         case (.english, .colorSamplerCopyRgb):
             return "Press C to copy RGB"
+        case (.english, .colorSamplerCopySuccess): return "Copied"
+        case (.english, .colorSamplerSwitchMode): return "Press Shift to switch RGB/HEX"
+        case (.english, .cornerRadius): return "Corner Radius"
         }
+    }
+
+    func toolbarTooltip(for identifier: String) -> String? {
+        let chinese = [
+            "rectangle": "形状",
+            "polyline": "箭头线",
+            "pen": "画笔",
+            "marker": "荧光笔",
+            "eyedropper": "取色 ｜ 测距",
+            "mosaic": "马赛克",
+            "mosaicBlur": "高斯",
+            "mosaicPixel": "马赛克",
+            "mosaicSmallDot": "细",
+            "mosaicMediumDot": "中",
+            "mosaicLargeDot": "粗",
+            "mosaicRectangle": "矩形模糊",
+            "text": "文字",
+            "number": "序号",
+            "magnifier": "放大镜",
+            "eraser": "橡皮擦",
+            "eraserPoint": "橡皮擦",
+            "eraserRectangle": "矩形擦除",
+            "eraserClearAll": "清除所有",
+            "undo": "撤销",
+            "redo": "重做",
+            "cancel": "取消",
+            "pin": "贴图",
+            "save": "保存",
+            "copy": "复制到剪切板",
+            "finishEditing": "完成编辑",
+            "scroll": "滚动截图",
+            "strokeWidthThin": "细",
+            "strokeWidthMedium": "中",
+            "strokeWidthThick": "粗",
+            "fill": "填充",
+            "shapeRectangle": "方形",
+            "shapeEllipse": "圆形",
+            "strokeStyle": "线条类型",
+            "textBold": "加粗",
+            "textItalic": "斜体",
+            "textOutline": "描边",
+            "startArrowType": "开始箭头",
+            "endArrowType": "结束箭头",
+            "customColor": "自定义颜色",
+            "cornerStyle": "直角/圆角切换",
+            "aspectRatioLockedOn": "锁定长宽比(开)",
+            "aspectRatioLockedOff": "锁定长宽比(关)",
+            "refreshCapture": "刷新截图",
+        ]
+        let english = [
+            "rectangle": "Shape",
+            "polyline": "Arrow",
+            "pen": "Pen",
+            "marker": "Highlighter",
+            "eyedropper": "Color Picker | Measure",
+            "mosaic": "Redact",
+            "mosaicBlur": "Gaussian Blur",
+            "mosaicPixel": "Pixelate",
+            "mosaicSmallDot": "Thin",
+            "mosaicMediumDot": "Medium",
+            "mosaicLargeDot": "Thick",
+            "mosaicRectangle": "Rectangle Blur",
+            "text": "Text",
+            "number": "Number",
+            "magnifier": "Magnifier",
+            "eraser": "Eraser",
+            "eraserPoint": "Eraser",
+            "eraserRectangle": "Rectangle Eraser",
+            "eraserClearAll": "Clear All",
+            "undo": "Undo",
+            "redo": "Redo",
+            "cancel": "Cancel",
+            "pin": "Pin",
+            "save": "Save",
+            "copy": "Copy to Clipboard",
+            "finishEditing": "Finish Editing",
+            "scroll": "Scroll Capture",
+            "strokeWidthThin": "Thin",
+            "strokeWidthMedium": "Medium",
+            "strokeWidthThick": "Thick",
+            "fill": "Fill",
+            "shapeRectangle": "Rectangle",
+            "shapeEllipse": "Ellipse",
+            "strokeStyle": "Line Style",
+            "textBold": "Bold",
+            "textItalic": "Italic",
+            "textOutline": "Outline",
+            "startArrowType": "Start Arrow",
+            "endArrowType": "End Arrow",
+            "customColor": "Custom Color",
+            "cornerStyle": "Square/Rounded Corners",
+            "aspectRatioLockedOn": "Lock Aspect Ratio (On)",
+            "aspectRatioLockedOff": "Lock Aspect Ratio (Off)",
+            "refreshCapture": "Refresh Capture",
+        ]
+        return (language == .zhHans ? chinese : english)[identifier]
+    }
+
+    func unavailableFeatureMessage(_ feature: String) -> String {
+        language == .zhHans ? "\(feature)功能开发中。" : "\(feature) is under development."
     }
 }

@@ -4,6 +4,30 @@ import XCTest
 
 @MainActor
 final class ScrollCapturePresentationTests: XCTestCase {
+    func testOpenScrollCaptureControlsUpdateWhenLanguageChanges() {
+        let controller = makeController(language: .zhHans)
+
+        XCTAssertEqual(controller.test_stepGuideText, "引导提示：请点击进行单步滚动")
+        XCTAssertEqual(controller.test_cancelButtonToolTip, "取消")
+
+        controller.updateLanguage(.english)
+
+        XCTAssertEqual(controller.test_stepGuideText, "Guide: Click for single-step scrolling")
+        XCTAssertEqual(controller.test_cancelButtonToolTip, "Cancel")
+        XCTAssertEqual(controller.test_finishButtonToolTip, "Finish Scroll Capture")
+        XCTAssertEqual(controller.test_cancelAccessibilityLabel, "Cancel")
+        assertDirectionTitlesFit(controller)
+        assertStepGuideTextFits(controller)
+    }
+
+    func testEnglishDirectionMenuShowsEveryTitleWithoutTruncation() {
+        let controller = makeController(language: .english)
+
+        XCTAssertEqual(controller.test_directionControlTitles, ["Scroll Down", "Scroll Up"])
+        assertDirectionTitlesFit(controller)
+        XCTAssertGreaterThan(controller.test_stepToolbarFrame.width, 168)
+    }
+
     func testStepButtonsUseMatchingCompactIconSize() {
         let controller = makeController()
 
@@ -59,6 +83,23 @@ final class ScrollCapturePresentationTests: XCTestCase {
         XCTAssertEqual(
             controller.test_stepGuideLineBreakMode,
             .byClipping,
+            file: file,
+            line: line
+        )
+    }
+
+    private func assertDirectionTitlesFit(
+        _ controller: ScrollCapturePresentationController,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        let widestTitle = controller.test_directionControlTitles
+            .map { NSString(string: $0).size(withAttributes: [.font: font]).width }
+            .max() ?? 0
+        XCTAssertGreaterThanOrEqual(
+            controller.test_directionControlFrame.width,
+            widestTitle + 42,
             file: file,
             line: line
         )
@@ -240,7 +281,8 @@ final class ScrollCapturePresentationTests: XCTestCase {
         XCTAssertEqual(controller.test_boundaryAlertIconDescription, "已经到顶")
         XCTAssertTrue(controller.test_boundaryAutoDismissScheduled)
         let alertFrame = try XCTUnwrap(controller.test_boundaryAlertFrame)
-        XCTAssertEqual(alertFrame.size, NSSize(width: 252, height: 44))
+        XCTAssertEqual(alertFrame.height, 44)
+        XCTAssertTrue(controller.test_boundaryAlertTextFits)
         XCTAssertEqual(alertFrame.midX, selection.midX, accuracy: 0.5)
         XCTAssertEqual(alertFrame.midY, selection.midY, accuracy: 0.5)
         XCTAssertFalse(controller.test_startButtonIsEnabled)
@@ -302,12 +344,40 @@ final class ScrollCapturePresentationTests: XCTestCase {
         XCTAssertEqual(controller.test_boundaryAlertActionButtonCount, 0)
         XCTAssertEqual(controller.test_boundaryAlertCloseAccessibilityLabel, "Dismiss")
         XCTAssertEqual(controller.test_boundaryAlertIconDescription, "Already at the top")
+        XCTAssertTrue(controller.test_boundaryAlertTextFits)
         let alertFrame = try XCTUnwrap(controller.test_boundaryAlertFrame)
         XCTAssertEqual(alertFrame.midX, selection.midX, accuracy: 0.5)
         XCTAssertEqual(alertFrame.midY, selection.midY, accuracy: 0.5)
 
         controller.test_triggerBoundaryAlertClose()
         XCTAssertNil(controller.test_boundaryAlertMessage)
+    }
+
+    func testBoundaryToastDynamicallyFitsChineseAndEnglishCopy() throws {
+        let selection = NSRect(x: 200, y: 200, width: 500, height: 300)
+        let visible = NSRect(x: 0, y: 0, width: 1_200, height: 800)
+        let chinese = makeController(
+            language: .zhHans,
+            selectionFrame: selection,
+            visibleFrame: visible
+        )
+        chinese.test_selectDirection(.down)
+        chinese.setStepControlState(.boundary)
+        let chineseFrame = try XCTUnwrap(chinese.test_boundaryAlertFrame)
+        XCTAssertEqual(chinese.test_boundaryAlertMessage, "已经到底")
+        XCTAssertTrue(chinese.test_boundaryAlertTextFits)
+
+        let english = makeController(
+            language: .english,
+            selectionFrame: selection,
+            visibleFrame: visible
+        )
+        english.test_selectDirection(.down)
+        english.setStepControlState(.boundary)
+        let englishFrame = try XCTUnwrap(english.test_boundaryAlertFrame)
+        XCTAssertEqual(english.test_boundaryAlertMessage, "Already at the bottom")
+        XCTAssertTrue(english.test_boundaryAlertTextFits)
+        XCTAssertGreaterThan(englishFrame.width, chineseFrame.width)
     }
 
     func testPreviewFrameBottomAlignsWithNonFullscreenSelection() {
@@ -966,7 +1036,7 @@ final class ScrollCapturePresentationTests: XCTestCase {
             onCancel: {}
         )
 
-        XCTAssertEqual(controller.test_stepToolbarFrame, NSRect(x: 346, y: 342, width: 168, height: 32))
+        XCTAssertEqual(controller.test_stepToolbarFrame, NSRect(x: 329, y: 342, width: 202, height: 32))
         XCTAssertFalse(controller.test_previewFrame.intersects(controller.test_stepToolbarFrame))
         XCTAssertTrue(fullscreen.contains(controller.test_previewFrame))
         XCTAssertEqual(controller.test_previewFrame.minY, fullscreen.minY, accuracy: 0.5)
@@ -1066,6 +1136,10 @@ final class ScrollCapturePresentationTests: XCTestCase {
                 XCTAssertEqual(controller.test_warningFrame.height, 44)
                 XCTAssertFalse(controller.test_warningWraps)
                 XCTAssertEqual(controller.test_warningFontSize, 13)
+                XCTAssertTrue(
+                    controller.test_warningTextFits,
+                    "\(language) \(key) must fit without truncation"
+                )
                 XCTAssertEqual(controller.test_warningToolTip, warning)
             }
         }

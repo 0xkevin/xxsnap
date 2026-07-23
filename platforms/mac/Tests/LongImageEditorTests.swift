@@ -979,6 +979,111 @@ final class LongImageEditorTests: XCTestCase {
         controller.stop()
     }
 
+    func testNumberSequenceContinuesAcrossNonOverlappingLongImageViewports() throws {
+        let controller = makeTallController()
+        controller.show()
+        controller.showEditingToolbar()
+        let overlay = try XCTUnwrap(controller.test_editingOverlay)
+        let markPoint = NSPoint(x: 120, y: 180)
+
+        overlay.test_activateNumberTool()
+        overlay.test_mouseDown(at: markPoint)
+        overlay.test_mouseUp(at: markPoint)
+        XCTAssertEqual(controller.test_fullAnnotations.map(\.numberSequenceIndex), [1])
+
+        overlay.test_scrollWheel(at: NSPoint(x: 100, y: 100), deltaY: -600)
+        XCTAssertGreaterThan(controller.visibleImageRect.minY, 0)
+        overlay.test_mouseDown(at: markPoint)
+        overlay.test_mouseUp(at: markPoint)
+
+        XCTAssertEqual(controller.test_fullAnnotations.map(\.numberSequenceIndex), [1, 2])
+        controller.stop()
+    }
+
+    func testNumberAnnotationSelectionAndControlsSurviveLongImageRefresh() throws {
+        let controller = makeTallController()
+        controller.show()
+        controller.showEditingToolbar()
+        let overlay = try XCTUnwrap(controller.test_editingOverlay)
+        let firstPoint = NSPoint(x: 120, y: 180)
+        let secondPoint = NSPoint(x: 220, y: 180)
+
+        overlay.test_activateNumberTool()
+        overlay.test_mouseDown(at: firstPoint)
+        overlay.test_mouseUp(at: firstPoint)
+        overlay.test_mouseDown(at: secondPoint)
+        overlay.test_mouseUp(at: secondPoint)
+
+        overlay.test_mouseDown(at: firstPoint)
+        overlay.test_mouseUp(at: firstPoint)
+
+        XCTAssertEqual(overlay.test_selectedAnnotationIndex, 0)
+        XCTAssertTrue(overlay.test_numberControlsVisible)
+
+        let incrementPoint = try XCTUnwrap(overlay.test_numberIncrementHandlePoint())
+        overlay.test_mouseDown(at: incrementPoint)
+        overlay.test_mouseUp(at: incrementPoint)
+
+        XCTAssertEqual(controller.test_fullAnnotations.map(\.numberSequenceIndex), [2, 1])
+        XCTAssertEqual(overlay.test_selectedAnnotationIndex, 0)
+        controller.stop()
+    }
+
+    func testEraserClearAllCoversWholeLongImageAndSupportsUndoRedo() throws {
+        let first = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 20, y: 40, width: 60, height: 50),
+            style: CaptureAnnotationStyle()
+        )
+        let second = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 30, y: 900, width: 70, height: 60),
+            style: CaptureAnnotationStyle()
+        )
+        let mask = EraserMask(
+            rect: NSRect(x: 45, y: 915, width: 15, height: 20),
+            affectedAnnotationIDs: [second.id]
+        )
+        let controller = LongImageEditorWindowController(
+            canonicalImage: TestImageFactory.solid(
+                size: NSSize(width: 200, height: 1_200),
+                color: .white
+            ),
+            annotations: [first, second],
+            eraserMasks: [mask],
+            visibleFrame: NSRect(x: 50, y: 40, width: 500, height: 450),
+            initialWindowSize: NSSize(width: 400, height: 400)
+        )
+        controller.show()
+        controller.showEditingToolbar()
+        let overlay = try XCTUnwrap(controller.test_editingOverlay)
+
+        overlay.test_activateEraserTool()
+        let clearAllPoint = try XCTUnwrap(overlay.test_eraserClearAllOptionPoint())
+        overlay.test_mouseDown(at: clearAllPoint)
+        overlay.test_mouseUp(at: clearAllPoint)
+
+        XCTAssertTrue(controller.test_fullAnnotations.isEmpty)
+        XCTAssertTrue(controller.test_fullEraserMasks.isEmpty)
+
+        overlay.test_keyDown(
+            keyCode: 6,
+            charactersIgnoringModifiers: "z",
+            modifierFlags: [.command]
+        )
+        XCTAssertEqual(Set(controller.test_fullAnnotations.map(\.id)), [first.id, second.id])
+        XCTAssertEqual(controller.test_fullEraserMasks.map(\.id), [mask.id])
+
+        overlay.test_keyDown(
+            keyCode: 6,
+            charactersIgnoringModifiers: "z",
+            modifierFlags: [.command, .shift]
+        )
+        XCTAssertTrue(controller.test_fullAnnotations.isEmpty)
+        XCTAssertTrue(controller.test_fullEraserMasks.isEmpty)
+        controller.stop()
+    }
+
     func testCreatingTextKeepsEditorActiveAfterMouseUpAndAcceptsTyping() throws {
         let controller = makeTallController()
         controller.show()
@@ -1404,7 +1509,7 @@ final class LongImageEditorTests: XCTestCase {
         var overlay = try XCTUnwrap(controller.test_editingOverlay)
         let canonicalID = try XCTUnwrap(overlay.test_annotation(at: 0)).id
         overlay.test_scrollWheel(at: NSPoint(x: 100, y: 100), deltaY: -600)
-        XCTAssertNil(overlay.test_annotation(at: 0))
+        XCTAssertEqual(overlay.test_annotation(at: 0)?.id, canonicalID)
         overlay.test_scrollWheel(at: NSPoint(x: 100, y: 100), deltaY: 600)
         overlay = try XCTUnwrap(controller.test_editingOverlay)
         XCTAssertEqual(overlay.test_annotation(at: 0)?.id, canonicalID)
@@ -1511,7 +1616,7 @@ final class LongImageEditorTests: XCTestCase {
         controller.show()
         controller.showEditingToolbar()
         let overlay = try XCTUnwrap(controller.test_editingOverlay)
-        overlay.test_setAnnotations([])
+        XCTAssertTrue(overlay.test_deleteAnnotations(at: [0]))
         controller.test_commitOverlay()
         XCTAssertEqual(controller.test_fullAnnotations.map(\.id), [offscreen.id])
         XCTAssertEqual(controller.test_fullEraserMasks.count, 1)

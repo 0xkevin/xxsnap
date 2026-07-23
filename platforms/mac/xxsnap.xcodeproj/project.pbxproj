@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		AB6000000000000000000001 /* AppServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB6000000000000000000011 /* AppServices.swift */; };
+		AB6000000000000000000002 /* CaptureHotKeyController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB6000000000000000000012 /* CaptureHotKeyController.swift */; };
+		AB6000000000000000000003 /* PreferencesSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB6000000000000000000013 /* PreferencesSettings.swift */; };
+		AB6000000000000000000004 /* PreferencesWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB6000000000000000000014 /* PreferencesWindowController.swift */; };
 		06D0A675DA873D0AEC83074A /* redo-disabled.svg in Resources */ = {isa = PBXBuildFile; fileRef = D28A278CFB0A71EF7C226931 /* redo-disabled.svg */; };
 		0FB0F41C5A5ABD609008810E /* CaptureControlWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24BDEB3AE00354C36614F3C1 /* CaptureControlWindowController.swift */; };
 		0FE265B997BADE94F03E511A /* WindowSelectionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7E12CD93A98EF67FC506F54 /* WindowSelectionState.swift */; };
@@ -133,6 +137,10 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		AB6000000000000000000011 /* AppServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppServices.swift; sourceTree = "<group>"; };
+		AB6000000000000000000012 /* CaptureHotKeyController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureHotKeyController.swift; sourceTree = "<group>"; };
+		AB6000000000000000000013 /* PreferencesSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencesSettings.swift; sourceTree = "<group>"; };
+		AB6000000000000000000014 /* PreferencesWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencesWindowController.swift; sourceTree = "<group>"; };
 		0209BE008E9C5F0571BE4B9F /* border-corner-rounded.svg */ = {isa = PBXFileReference; path = "border-corner-rounded.svg"; sourceTree = "<group>"; };
 		0ABE865C6E2158661014F31D /* palette-tool.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "palette-tool.png"; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4B6C /* bold.svg */ = {isa = PBXFileReference; path = "bold.svg"; sourceTree = "<group>"; };
@@ -259,13 +267,17 @@
 			isa = PBXGroup;
 			children = (
 				F7D7DA546BB3234545506458 /* AppDelegate.swift */,
+				AB6000000000000000000011 /* AppServices.swift */,
 				AA5300000000000000000012 /* LongImageEditorWindowController.swift */,
 				24BFA4790A577CD9B35EBC9C /* AppSettings.swift */,
+				AB6000000000000000000012 /* CaptureHotKeyController.swift */,
 				24BDEB3AE00354C36614F3C1 /* CaptureControlWindowController.swift */,
 				A177154367D4DF7657018B06 /* CaptureCoordinator.swift */,
 				DE8CA0660F22BC823E1A8DBC /* main.swift */,
 				6F196A38351C3089668432BA /* PermissionCoordinator.swift */,
 				A177154367D4DF7657018B07 /* PinnedImageWindowController.swift */,
+				AB6000000000000000000013 /* PreferencesSettings.swift */,
+				AB6000000000000000000014 /* PreferencesWindowController.swift */,
 				216073E47CB43ABDD6AD1B83 /* StatusItemController.swift */,
 			);
 			path = App;
@@ -650,13 +662,17 @@
 				AA5000000000000000000003 /* VerticalOverlapMatcher.cpp in Sources */,
 				AA5000000000000000000004 /* ScrollStitchSession.cpp in Sources */,
 				8A1D5C6713066839A5C21C4C /* AppDelegate.swift in Sources */,
+				AB6000000000000000000001 /* AppServices.swift in Sources */,
 				2AE784E6242C209A3757AFA2 /* AppSettings.swift in Sources */,
+				AB6000000000000000000002 /* CaptureHotKeyController.swift in Sources */,
 				28874BF6C20345BE1676B963 /* CaptureAnnotationRenderer.swift in Sources */,
 				0FB0F41C5A5ABD609008810E /* CaptureControlWindowController.swift in Sources */,
 				5FABC128915B0C423DD63EC6 /* CaptureCoordinator.swift in Sources */,
 				4A423183222F53C45C9E493F /* CaptureToolbarWindowController.swift in Sources */,
 				3255124AE9CD7B90D40C887F /* PermissionCoordinator.swift in Sources */,
 				5FABC128915B0C423DD63EC7 /* PinnedImageWindowController.swift in Sources */,
+				AB6000000000000000000003 /* PreferencesSettings.swift in Sources */,
+				AB6000000000000000000004 /* PreferencesWindowController.swift in Sources */,
 				8409AD72830E942955B95FE9 /* ScreenCaptureService.swift in Sources */,
 				8D2D0027AE3671BF227FE0B4 /* SelectionOverlayWindow.swift in Sources */,
 				5A59D8B15DBEFA8A46BAC5D6 /* SelectionToolbarState.swift in Sources */,

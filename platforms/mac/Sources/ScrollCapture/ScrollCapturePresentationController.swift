@@ -97,7 +97,7 @@ final class ScrollCapturePresentationController: NSObject {
     private let stepAnchorButtonFrame: NSRect
     private let captureViewportPointHeight: CGFloat
     private let maximumPreviewContentSize: NSSize
-    private let language: AppLanguage
+    private var language: AppLanguage
     private let finishButton = NSButton()
     private let cancelButton = NSButton()
     private let directionControl = NSPopUpButton()
@@ -125,6 +125,13 @@ final class ScrollCapturePresentationController: NSObject {
     private let boundaryAccentView = NSView()
     private let boundaryTitleLabel = NSTextField(labelWithString: "")
     private let boundaryDismissButton = NSButton()
+    private static let boundaryPanelHeight: CGFloat = 44
+    private static let boundaryTitleLeading: CGFloat = 60
+    private static let boundaryTitleTrailing: CGFloat = 20
+    private static let boundaryTextRenderingAllowance: CGFloat = 4
+    private static let boundaryMinimumWidth: CGFloat = 156
+    private static let stepToolbarSize = NSSize(width: 202, height: 32)
+    private static let directionControlWidth: CGFloat = 126
     private let onStep: (ScrollCaptureDirection) -> Void
     private let onFinish: () -> Void
     private let onCancel: () -> Void
@@ -145,6 +152,7 @@ final class ScrollCapturePresentationController: NSObject {
     private var terminalActionTriggered = false
     private var stepControlState: ScrollCaptureStepControlState = .preparing
     private var boundaryWarningVisible = false
+    private var boundaryIsTop: Bool?
     private var boundaryDismissTask: DispatchWorkItem?
     private var hasStarted = false
     private var hasDismissedStepGuide = false
@@ -176,7 +184,7 @@ final class ScrollCapturePresentationController: NSObject {
             backing: .buffered,
             defer: false
         )
-        let stepSize = NSSize(width: 168, height: 32)
+        let stepSize = Self.stepToolbarSize
         stepPanel = ScrollCaptureHitPanel(
             contentRect: Self.stepToolbarFrame(
                 anchoredTo: finishButtonFrame,
@@ -233,7 +241,7 @@ final class ScrollCapturePresentationController: NSObject {
         boundaryPanel = ScrollCaptureHitPanel(
             contentRect: Self.warningPanelFrame(
                 selection: selectionFrame,
-                size: NSSize(width: 252, height: 44),
+                size: NSSize(width: Self.boundaryMinimumWidth, height: Self.boundaryPanelHeight),
                 visibleFrame: visibleFrame,
                 blockedFrames: []
             ),
@@ -255,6 +263,52 @@ final class ScrollCapturePresentationController: NSObject {
         configureWarningPanel()
         configureBoundaryPanel()
         installBoundsObserver()
+    }
+
+    func updateLanguage(_ language: AppLanguage) {
+        guard self.language != language, !stopped else { return }
+        self.language = language
+        let l10n = L10n(language: language)
+
+        cancelButton.toolTip = l10n.text(.cancel)
+        cancelButton.setAccessibilityLabel(l10n.text(.cancel))
+
+        let selectedDirection = directionControl.indexOfSelectedItem
+        directionControl.removeAllItems()
+        directionControl.addItems(withTitles: language == .zhHans
+            ? ["向下滚动", "向上滚动"]
+            : ["Scroll Down", "Scroll Up"])
+        directionControl.selectItem(at: max(0, selectedDirection))
+
+        let startLabel = language == .zhHans ? "开始单步滚动" : "Start Scroll Step"
+        startButton.toolTip = startLabel
+        startButton.setAccessibilityLabel(startLabel)
+        let finishLabel = l10n.text(.finishScrollCapture)
+        stopButton.toolTip = finishLabel
+        stopButton.setAccessibilityLabel(finishLabel)
+
+        let guideSize = Self.stepGuideSize(for: language)
+        stepGuidePanel.setContentSize(guideSize)
+        stepGuidePanel.contentView?.frame = NSRect(origin: .zero, size: guideSize)
+        stepGuideBackground.frame = NSRect(origin: .zero, size: guideSize)
+        stepGuideLabel.stringValue = Self.stepGuideCopy(for: language)
+
+        let notice = language == .zhHans ? "提示" : "Notice"
+        warningIconView.image = NSImage(
+            systemSymbolName: "exclamationmark.circle",
+            accessibilityDescription: notice
+        )?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 18, weight: .medium))
+        warningIconView.image?.isTemplate = true
+        let dismiss = language == .zhHans ? "关闭提示" : "Dismiss"
+        warningCloseButton.toolTip = dismiss
+        warningCloseButton.setAccessibilityLabel(dismiss)
+        boundaryDismissButton.toolTip = language == .zhHans ? "点击关闭提示" : "Click to dismiss"
+        boundaryDismissButton.setAccessibilityLabel(dismiss)
+
+        updatePlacement(selectionFrame: placementSelectionFrame, visibleFrame: placementVisibleFrame)
+        if let boundaryIsTop {
+            updateBoundaryCopy(isTopBoundary: boundaryIsTop)
+        }
     }
 
     private func configureControlPanel(
@@ -289,7 +343,12 @@ final class ScrollCapturePresentationController: NSObject {
         stepPanel.ignoresMouseEvents = false
 
         let content = NSView(frame: NSRect(origin: .zero, size: stepPanel.frame.size))
-        directionControl.frame = NSRect(x: 6, y: 4, width: 96, height: 24)
+        directionControl.frame = NSRect(
+            x: 6,
+            y: 4,
+            width: Self.directionControlWidth,
+            height: 24
+        )
         directionControl.removeAllItems()
         directionControl.addItems(withTitles: language == .zhHans
             ? ["向下滚动", "向上滚动"]
@@ -300,7 +359,7 @@ final class ScrollCapturePresentationController: NSObject {
 
         configureStepButton(
             startButton,
-            frame: NSRect(x: 106, y: 2, width: 28, height: 28),
+            frame: NSRect(x: 138, y: 2, width: 28, height: 28),
             resourceName: "mouse-point",
             fallbackSymbol: "play.circle",
             action: #selector(startPressed),
@@ -320,7 +379,7 @@ final class ScrollCapturePresentationController: NSObject {
         stepProgressIndicator.isHidden = true
         configureStepButton(
             stopButton,
-            frame: NSRect(x: 136, y: 2, width: 28, height: 28),
+            frame: NSRect(x: 168, y: 2, width: 28, height: 28),
             resourceName: "stop-circle",
             fallbackSymbol: "stop.circle",
             action: #selector(finishPressed),
@@ -354,7 +413,9 @@ final class ScrollCapturePresentationController: NSObject {
         )
         stepGuideBackground.fillColor = stepGuideBackgroundColor
         stepGuideBackground.pointerDirection = placement.pointerDirection
-        stepGuideBackground.pointerCenterX = stepPanel.frame.minX + 120 - placement.frame.minX
+        stepGuideBackground.pointerCenterX = stepPanel.frame.minX
+            + startButton.frame.midX
+            - placement.frame.minX
 
         stepGuideLabel.stringValue = Self.stepGuideCopy(for: language)
         stepGuideLabel.font = Self.stepGuideFont
@@ -478,7 +539,7 @@ final class ScrollCapturePresentationController: NSObject {
         warningLabel.font = .systemFont(ofSize: 13, weight: .semibold)
         warningLabel.textColor = .white
         warningLabel.maximumNumberOfLines = 1
-        warningLabel.lineBreakMode = .byTruncatingTail
+        warningLabel.lineBreakMode = .byClipping
         warningLabel.cell?.wraps = false
         warningLabel.cell?.usesSingleLineMode = true
         warningLabel.isHidden = true
@@ -528,26 +589,25 @@ final class ScrollCapturePresentationController: NSObject {
         boundaryTextBackground.layer?.shadowRadius = 8
         boundaryTextBackground.layer?.shadowOffset = NSSize(width: 0, height: -3)
 
-        boundaryAccentView.frame = NSRect(x: 0, y: 0, width: 5, height: 44)
         boundaryAccentView.wantsLayer = true
         let warningYellow = NSColor(srgbRed: 1, green: 176 / 255, blue: 32 / 255, alpha: 1)
         boundaryAccentView.layer?.backgroundColor = warningYellow.cgColor
         boundaryAccentView.layer?.cornerRadius = 2.5
 
-        boundaryIconView.frame = NSRect(x: 22, y: 10, width: 24, height: 24)
         boundaryIconView.imageScaling = .scaleProportionallyDown
         boundaryIconView.contentTintColor = warningYellow
 
-        boundaryTitleLabel.frame = NSRect(x: 60, y: 9, width: 168, height: 24)
         boundaryTitleLabel.font = .systemFont(ofSize: 18, weight: .semibold)
         boundaryTitleLabel.textColor = .white
         boundaryTitleLabel.alignment = .left
-        boundaryTitleLabel.lineBreakMode = .byTruncatingTail
+        boundaryTitleLabel.maximumNumberOfLines = 1
+        boundaryTitleLabel.lineBreakMode = .byClipping
+        boundaryTitleLabel.cell?.wraps = false
+        boundaryTitleLabel.cell?.usesSingleLineMode = true
         boundaryTextBackground.addSubview(boundaryAccentView)
         boundaryTextBackground.addSubview(boundaryIconView)
         boundaryTextBackground.addSubview(boundaryTitleLabel)
 
-        boundaryDismissButton.frame = content.bounds
         boundaryDismissButton.autoresizingMask = [.width, .height]
         boundaryDismissButton.title = ""
         boundaryDismissButton.isBordered = false
@@ -561,6 +621,7 @@ final class ScrollCapturePresentationController: NSObject {
         content.addSubview(boundaryTextBackground)
         content.addSubview(boundaryDismissButton)
         boundaryPanel.contentView = content
+        layoutBoundaryContent()
     }
 
     func start() {
@@ -836,19 +897,13 @@ final class ScrollCapturePresentationController: NSObject {
 
     private func showBoundaryAlert(isTopBoundary: Bool) {
         dismissBoundaryAlert()
+        boundaryIsTop = isTopBoundary
         warningPanel.orderOut(nil)
         warningLabel.stringValue = ""
         warningLabel.toolTip = nil
         warningLabel.isHidden = true
 
-        boundaryTitleLabel.stringValue = language == .zhHans
-            ? (isTopBoundary ? "已经到顶" : "已经到底")
-            : (isTopBoundary ? "Already at the top" : "Already at the bottom")
-        boundaryIconView.image = NSImage(
-            systemSymbolName: "exclamationmark.circle",
-            accessibilityDescription: boundaryTitleLabel.stringValue
-        )?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 22, weight: .medium))
-        boundaryIconView.image?.isTemplate = true
+        updateBoundaryCopy(isTopBoundary: isTopBoundary)
 
         let frame = Self.warningPanelFrame(
             selection: placementSelectionFrame,
@@ -869,6 +924,18 @@ final class ScrollCapturePresentationController: NSObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.4, execute: dismissTask)
     }
 
+    private func updateBoundaryCopy(isTopBoundary: Bool) {
+        boundaryTitleLabel.stringValue = language == .zhHans
+            ? (isTopBoundary ? "已经到顶" : "已经到底")
+            : (isTopBoundary ? "Already at the top" : "Already at the bottom")
+        resizeBoundaryPanel(for: boundaryTitleLabel.stringValue)
+        boundaryIconView.image = NSImage(
+            systemSymbolName: "exclamationmark.circle",
+            accessibilityDescription: boundaryTitleLabel.stringValue
+        )?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 22, weight: .medium))
+        boundaryIconView.image?.isTemplate = true
+    }
+
     @objc private func dismissBoundaryAlertPressed() {
         dismissBoundaryAlert()
     }
@@ -879,12 +946,62 @@ final class ScrollCapturePresentationController: NSObject {
         boundaryPanel.orderOut(nil)
         boundaryTitleLabel.stringValue = ""
         boundaryIconView.image = nil
+        boundaryIsTop = nil
+    }
+
+    private func resizeBoundaryPanel(for text: String) {
+        let font = boundaryTitleLabel.font ?? .systemFont(ofSize: 18, weight: .semibold)
+        let measuredWidth = ceil((text as NSString).size(withAttributes: [.font: font]).width)
+        let desiredWidth = max(
+            Self.boundaryMinimumWidth,
+            Self.boundaryTitleLeading
+                + measuredWidth
+                + Self.boundaryTextRenderingAllowance
+                + Self.boundaryTitleTrailing
+        )
+        let maximumWidth = max(1, placementVisibleFrame.width - 16)
+        let size = NSSize(
+            width: min(desiredWidth, maximumWidth),
+            height: Self.boundaryPanelHeight
+        )
+        boundaryPanel.setFrame(Self.warningPanelFrame(
+            selection: placementSelectionFrame,
+            size: size,
+            visibleFrame: placementVisibleFrame,
+            blockedFrames: []
+        ), display: false)
+        layoutBoundaryContent()
+    }
+
+    private func layoutBoundaryContent() {
+        guard let content = boundaryPanel.contentView else { return }
+        content.frame = NSRect(origin: .zero, size: boundaryPanel.frame.size)
+        boundaryTextBackground.frame = content.bounds
+        boundaryAccentView.frame = NSRect(
+            x: 0,
+            y: 0,
+            width: 5,
+            height: content.bounds.height
+        )
+        boundaryIconView.frame = NSRect(x: 22, y: 10, width: 24, height: 24)
+        boundaryTitleLabel.frame = NSRect(
+            x: Self.boundaryTitleLeading,
+            y: 9,
+            width: max(
+                1,
+                content.bounds.width
+                    - Self.boundaryTitleLeading
+                    - Self.boundaryTitleTrailing
+            ),
+            height: 24
+        )
+        boundaryDismissButton.frame = content.bounds
     }
 
     private func resizeWarningPanel(for text: String) {
         let font = warningLabel.font ?? .systemFont(ofSize: 13, weight: .semibold)
         let measuredWidth = ceil((text as NSString).size(withAttributes: [.font: font]).width)
-        let maximumWidth = max(120, min(520, placementVisibleFrame.width - 16))
+        let maximumWidth = max(120, placementVisibleFrame.width - 16)
         let size = NSSize(
             width: min(maximumWidth, max(252, measuredWidth + 96)),
             height: 44
@@ -897,7 +1014,7 @@ final class ScrollCapturePresentationController: NSObject {
         ), display: false)
         layoutWarningContent()
         warningLabel.maximumNumberOfLines = 1
-        warningLabel.lineBreakMode = .byTruncatingTail
+        warningLabel.lineBreakMode = .byClipping
         warningLabel.cell?.wraps = false
     }
 
@@ -1539,6 +1656,8 @@ final class ScrollCapturePresentationController: NSObject {
             && boundaryPanel.contentView == nil
     }
     var test_stepToolbarFrame: NSRect { stepPanel.frame }
+    var test_directionControlFrame: NSRect { directionControl.frame }
+    var test_directionControlTitles: [String] { directionControl.itemTitles }
     var test_stepGuideIsVisible: Bool { stepGuidePanel.isVisible }
     var test_stepGuideText: String { stepGuideLabel.stringValue }
     var test_stepGuideBackgroundColor: NSColor { stepGuideBackgroundColor }
@@ -1584,6 +1703,13 @@ final class ScrollCapturePresentationController: NSObject {
     var test_warningFontSize: CGFloat { warningLabel.font?.pointSize ?? 0 }
     var test_warningIconFrame: NSRect { warningIconView.frame }
     var test_warningTextFrame: NSRect { warningLabel.frame }
+    var test_warningTextFits: Bool {
+        guard let font = warningLabel.font else { return false }
+        let measuredWidth = ceil(
+            (warningLabel.stringValue as NSString).size(withAttributes: [.font: font]).width
+        )
+        return measuredWidth <= warningLabel.frame.width
+    }
     var test_warningIgnoresMouseEvents: Bool { warningPanel.ignoresMouseEvents }
     var test_warningWraps: Bool { warningLabel.lineBreakMode == .byWordWrapping && warningLabel.maximumNumberOfLines == 2 }
     var test_warningToolTip: String? { warningLabel.toolTip }
@@ -1607,6 +1733,13 @@ final class ScrollCapturePresentationController: NSObject {
     var test_boundaryAlertIconTintColor: NSColor? { boundaryIconView.contentTintColor }
     var test_boundaryAlertIconFrame: NSRect { boundaryIconView.frame }
     var test_boundaryAlertTextFrame: NSRect { boundaryTitleLabel.frame }
+    var test_boundaryAlertTextFits: Bool {
+        guard let font = boundaryTitleLabel.font else { return false }
+        let measuredWidth = ceil(
+            (boundaryTitleLabel.stringValue as NSString).size(withAttributes: [.font: font]).width
+        )
+        return measuredWidth <= boundaryTitleLabel.frame.width
+    }
     var test_boundaryAlertAccentColor: NSColor? {
         boundaryAccentView.layer?.backgroundColor.flatMap(NSColor.init(cgColor:))
     }

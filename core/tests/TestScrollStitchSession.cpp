@@ -614,7 +614,7 @@ private slots:
     void automaticFixedBandDetectionDoesNotDelayScrollingEdges();
     void automaticFixedBandDetectionRejectsWhiteDocumentGap();
     void expectedAdvanceResolvesSparseChatWithStationaryWatermark();
-    void expectedAdvanceKeepsUsableControlledDirectionWhenOppositeLooksStronger();
+    void expectedAdvanceDoesNotOverrideSubstantiallyStrongerOppositeDirection();
     void automaticFixedBandDetectionRejectsLowInformationGradient();
     void inconsistentBandHeightsRestartEvidenceRun();
     void constantBlueTexturedFixedBandsStillConfirm();
@@ -2211,7 +2211,7 @@ void TestScrollStitchSession::expectedAdvanceResolvesSparseChatWithStationaryWat
     QCOMPARE(result.outputHeight, 320);
 }
 
-void TestScrollStitchSession::expectedAdvanceKeepsUsableControlledDirectionWhenOppositeLooksStronger()
+void TestScrollStitchSession::expectedAdvanceDoesNotOverrideSubstantiallyStrongerOppositeDirection()
 {
     ScrollStitchConfig config;
     config.enableFixedBandDetection = false;
@@ -2224,7 +2224,7 @@ void TestScrollStitchSession::expectedAdvanceKeepsUsableControlledDirectionWhenO
         nearPeriodicSparseChatViewport(160), ScrollDirection::Up, 80);
 
     QCOMPARE(result.kind, AppendKind::AcceptedAppend);
-    QCOMPARE(result.direction, ScrollDirection::Up);
+    QCOMPARE(result.direction, ScrollDirection::Down);
     QVERIFY(result.appendedHeight >= 72 && result.appendedHeight <= 88);
     QCOMPARE(result.outputHeight, 240 + result.appendedHeight);
 }

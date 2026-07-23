@@ -37,6 +37,7 @@ enum SelectionToolbarState {
             "number": ToolbarShortcut(key: "n", modifiers: [], iconName: nil, displayText: "N"),
             "magnifier": ToolbarShortcut(key: "g", modifiers: [], iconName: nil, displayText: "G"),
             "eraser": ToolbarShortcut(key: "e", modifiers: [], iconName: nil, displayText: "E"),
+            "scroll": ToolbarShortcut(key: "r", modifiers: [], iconName: nil, displayText: "R"),
             "undo": ToolbarShortcut(key: "z", modifiers: command, iconName: "command", displayText: "Z"),
             "redo": ToolbarShortcut(key: "z", modifiers: [command, .shift], iconName: "command", displayText: "⇧Z"),
             "cancel": ToolbarShortcut(key: "\u{1b}", modifiers: [], iconName: nil, displayText: "ESC"),
@@ -301,53 +302,11 @@ enum SelectionToolbarState {
         return style
     }
 
-    static func tooltipTitle(for identifier: String) -> String? {
-        [
-            "rectangle": "形状",
-            "polyline": "箭头线",
-            "pen": "画笔",
-            "marker": "荧光笔",
-            "eyedropper": "取色 ｜ 测距",
-            "mosaic": "马赛克",
-            "mosaicBlur": "高斯",
-            "mosaicPixel": "马赛克",
-            "mosaicSmallDot": "细",
-            "mosaicMediumDot": "中",
-            "mosaicLargeDot": "粗",
-            "mosaicRectangle": "矩形模糊",
-            "text": "文字",
-            "number": "序号",
-            "magnifier": "放大镜",
-            "eraser": "橡皮擦",
-            "eraserPoint": "橡皮擦",
-            "eraserRectangle": "矩形擦除",
-            "eraserClearAll": "清除所有",
-            "undo": "撤销",
-            "redo": "重做",
-            "cancel": "取消",
-            "pin": "贴图",
-            "save": "保存",
-            "copy": "复制到剪切板",
-            "finishEditing": "完成编辑",
-            "scroll": "滚动截图",
-            "strokeWidthThin": "细",
-            "strokeWidthMedium": "中",
-            "strokeWidthThick": "粗",
-            "fill": "填充",
-            "shapeRectangle": "方形",
-            "shapeEllipse": "圆形",
-            "strokeStyle": "线条类型",
-            "textBold": "加粗",
-            "textItalic": "斜体",
-            "textOutline": "描边",
-            "startArrowType": "开始箭头",
-            "endArrowType": "结束箭头",
-            "customColor": "自定义颜色",
-            "cornerStyle": "直角/圆角切换",
-            "aspectRatioLockedOn": "锁定长宽比(开)",
-            "aspectRatioLockedOff": "锁定长宽比(关)",
-            "refreshCapture": "刷新截图",
-        ][identifier]
+    static func tooltipTitle(
+        for identifier: String,
+        language: AppLanguage = .zhHans
+    ) -> String? {
+        L10n(language: language).toolbarTooltip(for: identifier)
     }
 
     static func toolbarShortcut(for identifier: String) -> ToolbarShortcut? {
@@ -1149,12 +1108,16 @@ enum SelectionToolbarState {
         }
     }
 
-    static func textFontDisplayName(for family: String) -> String {
+    static func textFontDisplayName(
+        for family: String,
+        language: AppLanguage = .zhHans
+    ) -> String {
         let normalized = family.trimmingCharacters(in: .whitespacesAndNewlines)
         if normalized == "System" || normalized == NSFont.systemFont(ofSize: 12).familyName {
-            return "系统"
+            return language == .zhHans ? "系统" : "System"
         }
-        if let displayName = localizedChineseTextFontDisplayNames[normalized] {
+        if language == .zhHans,
+           let displayName = localizedChineseTextFontDisplayNames[normalized] {
             return displayName
         }
         return normalized
