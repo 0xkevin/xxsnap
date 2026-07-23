@@ -89,6 +89,7 @@ private final class FakeScrollCapturePresentation: ScrollCapturePresenting {
     private(set) var clearWarningCount = 0
     private(set) var placements: [(NSRect, NSRect)] = []
     private(set) var resetTerminalCount = 0
+    private(set) var languages: [AppLanguage] = []
     var onFinish: (() -> Void)?
     var onCancel: (() -> Void)?
     var onStep: ((ScrollCaptureDirection) -> Void)?
@@ -117,6 +118,7 @@ private final class FakeScrollCapturePresentation: ScrollCapturePresenting {
         placements.append((selectionFrame, visibleFrame))
     }
     func resetTerminalActionsForRetry() { resetTerminalCount += 1 }
+    func updateLanguage(_ language: AppLanguage) { languages.append(language) }
 }
 
 @MainActor
@@ -199,6 +201,24 @@ private final class ResourceLimitCoordinatorMonitor: ScrollActivityMonitoring {
 }
 
 final class SelectionToolbarStateTests: XCTestCase {
+    func testOpenCaptureToolbarUpdatesTooltipsWhenLanguageChanges() throws {
+        var settings = AppSettings.default
+        settings.language = .zhHans
+        let window = SelectionOverlayWindow(
+            backgroundImage: solidImage(size: NSSize(width: 640, height: 420), color: .white),
+            settings: settings
+        ) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 80, y: 60, width: 300, height: 220))
+
+        XCTAssertEqual(window.test_tooltipText(for: .save), "保存")
+        XCTAssertEqual(window.test_tooltipText(for: .eyedropper), "取色 ｜ 测距")
+
+        window.updateLanguage(.english)
+
+        XCTAssertEqual(window.test_tooltipText(for: .save), "Save")
+        XCTAssertEqual(window.test_tooltipText(for: .eyedropper), "Color Picker | Measure")
+    }
+
     func testBeginScrollCaptureFreezesSeedAndEntersPassiveModeWithoutOrdinaryCompletion() throws {
         let image = solidImage(size: NSSize(width: 640, height: 420), color: .white)
         var ordinaryCompletionCount = 0
@@ -244,6 +264,22 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertNil(window.test_measurementControlPoint(.aspectRatioLock))
         XCTAssertNil(window.test_measurementControlPoint(.refresh))
         XCTAssertEqual(window.test_measurementLabelText, "300 x 220  px")
+    }
+
+    func testPlainRStartsScrollCaptureFromTheMainToolbar() {
+        let image = solidImage(size: NSSize(width: 640, height: 420), color: .white)
+        var request: ScrollCaptureSeed?
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.onScrollCaptureRequested = { request = $0 }
+        window.test_setLockedSelectionRect(NSRect(x: 80, y: 60, width: 300, height: 220))
+
+        XCTAssertTrue(window.test_handleKeyDown(
+            keyCode: 15,
+            charactersIgnoringModifiers: "r"
+        ))
+
+        XCTAssertNotNil(request)
+        XCTAssertEqual(window.scrollCaptureOverlayState, .capturing)
     }
 
     func testBeginScrollCapturePreservesBoundaryCrossingOverlayContentInOriginalSeed() throws {
@@ -10309,6 +10345,14 @@ final class SelectionToolbarStateTests: XCTestCase {
 
     @MainActor
     func testCaptureCoordinatorStartsOneScrollSessionAndRoutesPresentationUpdates() async throws {
+        let suiteName = "com.xxsnap.tests.capture-language.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        let settingsStore = SettingsStore(userDefaults: defaults)
+        try settingsStore.save(.default)
+
         let seed = scrollCaptureSeedForCoordinatorTests()
         let overlay = SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in
             XCTFail("scroll capture must not use ordinary completion")
@@ -10322,6 +10366,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         let coordinator = CaptureCoordinator(
             permissionCoordinator: PermissionCoordinator(),
             screenCaptureService: ScreenCaptureService(),
+            settingsStore: settingsStore,
             scrollCaptureSessionFactory: { capturedSeed, callback in
                 XCTAssertEqual(capturedSeed.screenRect, seed.screenRect)
                 XCTAssertEqual(
@@ -10395,6 +10440,18 @@ final class SelectionToolbarStateTests: XCTestCase {
         update?(.state(.paused(.captureFailure)))
         XCTAssertEqual(overlay.scrollCaptureOverlayState, .paused(message: L10n(language: .zhHans).text(.scrollCaptureFailure)))
         XCTAssertEqual(presentation.warnings.last, L10n(language: .zhHans).text(.scrollCaptureFailure))
+
+        coordinator.updateLanguage(.english)
+
+        XCTAssertEqual(presentation.languages, [.english])
+        XCTAssertEqual(
+            overlay.scrollCaptureOverlayState,
+            .paused(message: L10n(language: .english).text(.scrollCaptureFailure))
+        )
+        XCTAssertEqual(
+            presentation.warnings.last,
+            L10n(language: .english).text(.scrollCaptureFailure)
+        )
     }
 
     @MainActor
@@ -12956,7 +13013,7 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         XCTAssertEqual(
             CaptureCoordinator.defaultCaptureFilename(date: date, timeZone: TimeZone(secondsFromGMT: 0)!),
-            "xxsnap 截图 19700101-000000.png"
+            "xxsnap_截图_19700101_000000.png"
         )
     }
 
@@ -15451,6 +15508,7 @@ final class SelectionToolbarStateTests: XCTestCase {
             "number": ("n", []),
             "magnifier": ("g", []),
             "eraser": ("e", []),
+            "scroll": ("r", []),
             "undo": ("z", [.command]),
             "redo": ("z", [.command, .shift]),
             "cancel": ("\u{1b}", []),
@@ -15465,7 +15523,6 @@ final class SelectionToolbarStateTests: XCTestCase {
             XCTAssertEqual(shortcut?.key, expectedShortcut.key, identifier)
             XCTAssertEqual(shortcut?.modifiers, expectedShortcut.modifiers, identifier)
         }
-        XCTAssertNil(SelectionToolbarState.toolbarShortcut(for: "scroll"))
     }
 
     func testToolbarShortcutMatchingIsCaseInsensitiveAndRequiresExactRelevantModifiers() throws {

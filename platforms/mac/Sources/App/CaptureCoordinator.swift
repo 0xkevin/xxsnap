@@ -32,10 +32,12 @@ protocol ScrollCapturePresenting: AnyObject {
     func clearWarning()
     func updatePlacement(selectionFrame: NSRect, visibleFrame: NSRect)
     func resetTerminalActionsForRetry()
+    func updateLanguage(_ language: AppLanguage)
 }
 
 extension ScrollCapturePresenting {
     func setStepControlState(_ state: ScrollCaptureStepControlState) {}
+    func updateLanguage(_ language: AppLanguage) {}
 }
 
 extension ScrollCapturePresentationController: ScrollCapturePresenting {}
@@ -44,6 +46,11 @@ extension ScrollCapturePresentationController: ScrollCapturePresenting {}
 protocol LongImageEditorPresenting: AnyObject {
     var onClose: (() -> Void)? { get set }
     func show()
+    func updateLanguage(_ language: AppLanguage)
+}
+
+extension LongImageEditorPresenting {
+    func updateLanguage(_ language: AppLanguage) {}
 }
 
 extension LongImageEditorWindowController: LongImageEditorPresenting {}
@@ -72,6 +79,14 @@ private enum ScrollCaptureLifecyclePhase: Equatable {
     case cancelling
 }
 
+private final class CaptureLanguageSnapshot {
+    var language: AppLanguage
+
+    init(language: AppLanguage) {
+        self.language = language
+    }
+}
+
 @MainActor
 final class CaptureCoordinator {
     var captureOverlayDidPresent: (() -> Void)?
@@ -81,6 +96,8 @@ final class CaptureCoordinator {
     private let permissionCoordinator: PermissionCoordinator
     private let screenCaptureService: ScreenCaptureService
     private let settingsStore: SettingsStore
+    private let filenameProvider: any CaptureFilenameProviding
+    private let languageSnapshot: CaptureLanguageSnapshot
     private var captureTask: Task<Void, Never>?
     private var startTask: Task<Void, Never>?
     private var overlayWindow: SelectionOverlayWindow?
@@ -113,6 +130,7 @@ final class CaptureCoordinator {
     private var scrollCaptureTask: Task<Void, Never>?
     private var scrollCaptureSeed: ScrollCaptureSeed?
     private var scrollCaptureFinishPending = false
+    private var scrollCaptureMessageKey: L10n.Key?
     private var scrollCapturePhase: ScrollCaptureLifecyclePhase = .idle
     private var scrollCaptureGeneration: UInt64 = 0
     private var captureTargetApplication: NSRunningApplication?
@@ -121,9 +139,8 @@ final class CaptureCoordinator {
         permissionCoordinator: PermissionCoordinator,
         screenCaptureService: ScreenCaptureService,
         settingsStore: SettingsStore = SettingsStore(),
-        pinnedWindowFactory: @escaping @MainActor (NSImage, NSRect) -> PinnedImageWindowPresenting = {
-            PinnedImageWindowController(image: $0, screenRect: $1)
-        },
+        filenameProvider: any CaptureFilenameProviding = CaptureFilenameProvider(),
+        pinnedWindowFactory: (@MainActor (NSImage, NSRect) -> PinnedImageWindowPresenting)? = nil,
         scrollCaptureSessionFactory: (@MainActor (
             ScrollCaptureSeed,
             @escaping @MainActor (ScrollCapturePresentationUpdate) -> Void
@@ -148,7 +165,17 @@ final class CaptureCoordinator {
         self.permissionCoordinator = permissionCoordinator
         self.screenCaptureService = screenCaptureService
         self.settingsStore = settingsStore
-        self.pinnedWindowFactory = pinnedWindowFactory
+        self.filenameProvider = filenameProvider
+        let languageSnapshot = CaptureLanguageSnapshot(language: settingsStore.load().language)
+        self.languageSnapshot = languageSnapshot
+        self.pinnedWindowFactory = pinnedWindowFactory ?? { image, screenRect in
+            PinnedImageWindowController(
+                image: image,
+                screenRect: screenRect,
+                filenameProvider: filenameProvider,
+                language: languageSnapshot.language
+            )
+        }
         self.scrollCaptureSessionFactory = scrollCaptureSessionFactory ?? { seed, update in
             let maximumAcceptedBytes = Self.defaultScrollCaptureMaximumAcceptedBytes
             guard let bridge = ScrollCaptureBridgeWorker(maximumAcceptedBytes: maximumAcceptedBytes) else {
@@ -177,10 +204,12 @@ final class CaptureCoordinator {
                 seed: seed,
                 visibleFrame: resolveVisibleFrame(seed.screenRect),
                 actions: actions,
-                language: settingsStore.load().language
+                language: languageSnapshot.language
             )
         }
-        self.longImageFallbackPresenter = longImageFallbackPresenter ?? Self.presentLongImageFallback
+        self.longImageFallbackPresenter = longImageFallbackPresenter ?? { image in
+            Self.presentLongImageFallback(image, language: languageSnapshot.language)
+        }
         self.longImageCopyHandler = longImageCopyHandler
         self.longImageSaveHandler = longImageSaveHandler
         self.frontmostApplicationResolver = frontmostApplicationResolver
@@ -224,6 +253,7 @@ final class CaptureCoordinator {
             return
         }
 
+        languageSnapshot.language = settingsStore.load().language
         if !permissionCoordinator.hasScreenCapturePermission() {
             NSLog("xxsnap missing screen capture permission")
             guard permissionCoordinator.shouldShowScreenCaptureGuidance() else {
@@ -260,7 +290,8 @@ final class CaptureCoordinator {
                 frozenDesktopImage = nil
             }
 
-            let settings = settingsStore.load()
+            var settings = settingsStore.load()
+            settings.language = self.languageSnapshot.language
             let overlayWindow = SelectionOverlayWindow(
                 backgroundImage: backgroundImage,
                 settings: settings,
@@ -299,6 +330,21 @@ final class CaptureCoordinator {
             && startTask == nil
             && !longImageLifecycleActive
             && scrollCapturePhase == .idle
+    }
+
+    func updateLanguage(_ language: AppLanguage) {
+        languageSnapshot.language = language
+        overlayWindow?.updateLanguage(language)
+        scrollCapturePresentation?.updateLanguage(language)
+        longImageEditor?.updateLanguage(language)
+        pinnedWindowControllers.forEach { $0.updateLanguage(language) }
+
+        guard let scrollCaptureMessageKey else { return }
+        let message = L10n(language: language).text(scrollCaptureMessageKey)
+        if case .paused = overlayWindow?.scrollCaptureOverlayState {
+            overlayWindow?.setScrollCapturePaused(message: message)
+        }
+        scrollCapturePresentation?.setWarning(message)
     }
 
     private static var defaultScrollCaptureMaximumAcceptedBytes: UInt {
@@ -424,7 +470,7 @@ final class CaptureCoordinator {
               scrollCaptureSession == nil,
               scrollCapturePresentation == nil
         else { return }
-        let language = settingsStore.load().language
+        let language = languageSnapshot.language
         guard let geometry = overlay.scrollCaptureControlGeometry else {
             scrollCaptureGeneration &+= 1
             overlay.restoreAfterScrollCaptureCancellation()
@@ -526,7 +572,7 @@ final class CaptureCoordinator {
               let overlay = overlayWindow,
               let presentation = scrollCapturePresentation
         else { return }
-        let l10n = L10n(language: settingsStore.load().language)
+        let l10n = L10n(language: languageSnapshot.language)
         switch update {
         case .terminalCommand(.finish):
             finishScrollCapture()
@@ -555,15 +601,19 @@ final class CaptureCoordinator {
             case .captureFailure: key = .scrollCaptureFailure
             }
             let message = l10n.text(key)
+            scrollCaptureMessageKey = key
             overlay.setScrollCapturePaused(message: message)
             presentation.setWarning(message)
         case .warning(.lowConfidence):
             overlay.setScrollCaptureCapturing()
+            scrollCaptureMessageKey = .scrollCaptureLowConfidence
             presentation.setWarning(l10n.text(.scrollCaptureLowConfidence))
         case .warning(.noMovement):
             overlay.setScrollCaptureCapturing()
+            scrollCaptureMessageKey = .scrollCaptureNoMovement
             presentation.setWarning(l10n.text(.scrollCaptureNoMovement))
         case .warning(nil):
+            scrollCaptureMessageKey = nil
             presentation.clearWarning()
         case .stepState(let state):
             presentation.setStepControlState(state)
@@ -616,6 +666,7 @@ final class CaptureCoordinator {
                 self.scrollCapturePresentation = nil
                 self.scrollCaptureSession = nil
                 self.scrollCaptureSeed = nil
+                self.scrollCaptureMessageKey = nil
                 self.scrollCaptureTask = nil
                 if let overlay = self.overlayWindow {
                     overlay.finishScrollCaptureAndDismiss()
@@ -661,6 +712,7 @@ final class CaptureCoordinator {
         scrollCapturePresentation = nil
         scrollCaptureSession = nil
         scrollCaptureSeed = nil
+        scrollCaptureMessageKey = nil
         scrollCaptureFinishPending = false
         overlayWindow?.restoreAfterScrollCaptureCancellation()
         overlayWindow?.present()
@@ -676,6 +728,7 @@ final class CaptureCoordinator {
         _ = scrollCaptureSession?.cancel()
         scrollCaptureSession = nil
         scrollCaptureSeed = nil
+        scrollCaptureMessageKey = nil
         scrollCaptureFinishPending = false
         overlayWindow?.restoreAfterScrollCaptureCancellation()
         overlayWindow?.present()
@@ -736,12 +789,16 @@ final class CaptureCoordinator {
         }
     }
 
-    private static func presentLongImageFallback(_ image: NSImage) -> LongImageFallbackChoice {
+    private static func presentLongImageFallback(
+        _ image: NSImage,
+        language: AppLanguage
+    ) -> LongImageFallbackChoice {
         let alert = NSAlert()
-        alert.messageText = "无法打开长截图编辑器"
-        alert.informativeText = "完整长截图已保留。是否立即保存为 PNG？"
-        alert.addButton(withTitle: "保存")
-        alert.addButton(withTitle: "取消")
+        let l10n = L10n(language: language)
+        alert.messageText = l10n.text(.longImageEditorUnavailable)
+        alert.informativeText = l10n.text(.longImageEditorUnavailableDetail)
+        alert.addButton(withTitle: l10n.text(.longImageSave))
+        alert.addButton(withTitle: l10n.text(.cancel))
         return alert.runModal() == .alertFirstButtonReturn ? .save : .cancel
     }
 
@@ -767,10 +824,11 @@ final class CaptureCoordinator {
 
     private func showPermissionRestartAlert() {
         let alert = NSAlert()
-        alert.messageText = "需要录屏权限"
-        alert.informativeText = "请在系统设置中允许 xxsnap 录屏，然后退出并重新打开 xxsnap。"
-        alert.addButton(withTitle: "打开系统设置")
-        alert.addButton(withTitle: "稍后")
+        let l10n = L10n(language: languageSnapshot.language)
+        alert.messageText = l10n.text(.screenRecordingPermissionRequired)
+        alert.informativeText = l10n.text(.screenRecordingPermissionRestartDetail)
+        alert.addButton(withTitle: l10n.text(.openSystemSettings))
+        alert.addButton(withTitle: l10n.text(.later))
         if alert.runModal() == .alertFirstButtonReturn {
             openScreenCaptureSettings()
         }
@@ -778,10 +836,11 @@ final class CaptureCoordinator {
 
     private func showPermissionSettingsAlert() {
         let alert = NSAlert()
-        alert.messageText = "xxsnap 没有录屏权限"
-        alert.informativeText = "请在系统设置 > 隐私与安全性 > 录屏与系统录音中打开 xxsnap。打开后需要重启 xxsnap。"
-        alert.addButton(withTitle: "打开系统设置")
-        alert.addButton(withTitle: "取消")
+        let l10n = L10n(language: languageSnapshot.language)
+        alert.messageText = l10n.text(.screenRecordingPermissionMissing)
+        alert.informativeText = l10n.text(.screenRecordingPermissionSettingsDetail)
+        alert.addButton(withTitle: l10n.text(.openSystemSettings))
+        alert.addButton(withTitle: l10n.text(.cancel))
         if alert.runModal() == .alertFirstButtonReturn {
             openScreenCaptureSettings()
         }
@@ -966,7 +1025,7 @@ final class CaptureCoordinator {
 
         let savePanel = NSSavePanel()
         savePanel.allowedContentTypes = [.png]
-        savePanel.nameFieldStringValue = Self.defaultCaptureFilename()
+        savePanel.nameFieldStringValue = filenameProvider.suggestedFilename()
         savePanel.level = .modalPanel
 
         NSApp.activate(ignoringOtherApps: true)
@@ -997,11 +1056,11 @@ final class CaptureCoordinator {
     }
 
     nonisolated static func defaultCaptureFilename(date: Date = Date(), timeZone: TimeZone = .current) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = timeZone
-        formatter.dateFormat = "yyyyMMdd-HHmmss"
-        return "xxsnap 截图 \(formatter.string(from: date)).png"
+        (try? FilenameTemplateRenderer().filename(
+            template: PreferencesSettings.defaultFilenameTemplate,
+            date: date,
+            timeZone: timeZone
+        )) ?? "xxsnap_截图.png"
     }
 }
 

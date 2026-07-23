@@ -498,9 +498,6 @@ public:
             auto preferredOverlap = matchInDirection(
                 previous, current, matcherConfig, preferred);
             const bool preferredUsable = usableMovement(preferredOverlap, true);
-            if (matcherConfig.expectedAdvance > 0 && preferredUsable) {
-                return makeMovement(preferred, std::move(preferredOverlap));
-            }
             const Direction opposite = preferred == Direction::Down
                 ? Direction::Up
                 : Direction::Down;

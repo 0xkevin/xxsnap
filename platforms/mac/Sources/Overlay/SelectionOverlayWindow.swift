@@ -228,10 +228,10 @@ struct SelectionOverlayConfiguration {
 }
 
 private extension NSAlert {
-    static func showTransient(message: String, in window: NSWindow?) {
+    static func showTransient(message: String, language: AppLanguage, in window: NSWindow?) {
         let alert = NSAlert()
         alert.messageText = message
-        alert.addButton(withTitle: "确定")
+        alert.addButton(withTitle: L10n(language: language).text(.confirm))
         if let window {
             alert.beginSheetModal(for: window)
         } else {
@@ -797,6 +797,10 @@ final class SelectionOverlayWindow: NSWindow {
             backgroundImage: backgroundImage,
             suppressedAnnotationIDs: suppressedAnnotationIDs
         )
+    }
+
+    func updateLanguage(_ language: AppLanguage) {
+        (contentView as? SelectionOverlayView)?.updateLanguage(language)
     }
 
     private func installEscapeKeyMonitor() {
@@ -2284,7 +2288,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private var backgroundBitmap: NSBitmapImageRep?
     private var suppressedAnnotationIDs: Set<AnnotationID>
     private var backgroundLuminanceCache: [String: CGFloat] = [:]
-    private let settings: AppSettings
+    private var settings: AppSettings
     private lazy var scrollHeightNumberFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
         formatter.locale = Locale(identifier: settings.language == .zhHans ? "zh_CN" : "en_US")
@@ -2337,6 +2341,22 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         nil
+    }
+
+    func updateLanguage(_ language: AppLanguage) {
+        guard settings.language != language else { return }
+        settings.language = language
+        scrollHeightNumberFormatter.locale = Locale(
+            identifier: language == .zhHans ? "zh_CN" : "en_US"
+        )
+        if let hoveredTooltip {
+            self.hoveredTooltip = (
+                identifier: hoveredTooltip.identifier,
+                text: tooltipTitle(for: hoveredTooltip.identifier) ?? hoveredTooltip.text,
+                anchor: hoveredTooltip.anchor
+            )
+        }
+        needsDisplay = true
     }
 
     private enum InteractionMode {
@@ -4526,7 +4546,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 if button == .scroll, scrollCaptureOverlayState != .inactive {
                     return (identifier, L10n(language: settings.language).text(.finishScrollCapture), rect)
                 }
-                guard let title = SelectionToolbarState.tooltipTitle(for: identifier) else {
+                guard let title = tooltipTitle(for: identifier) else {
                     return nil
                 }
                 return (identifier, title, rect)
@@ -4536,17 +4556,17 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         if configuration.showsSelectionMeasurementControl {
             let measurementLayout = measurementControlLayout(for: selectionRect)
             if measurementLayout.cornerStyle.contains(point),
-               let title = SelectionToolbarState.tooltipTitle(for: "cornerStyle") {
+               let title = tooltipTitle(for: "cornerStyle") {
                 return ("cornerStyle", title, measurementLayout.cornerStyle)
             }
             if measurementLayout.aspectRatio.contains(point) {
                 let identifier = isSelectionAspectRatioLocked ? "aspectRatioLockedOn" : "aspectRatioLockedOff"
-                if let title = SelectionToolbarState.tooltipTitle(for: identifier) {
+                if let title = tooltipTitle(for: identifier) {
                     return (identifier, title, measurementLayout.aspectRatio)
                 }
             }
             if measurementLayout.refresh.contains(point),
-               let title = SelectionToolbarState.tooltipTitle(for: "refreshCapture") {
+               let title = tooltipTitle(for: "refreshCapture") {
                 return ("refreshCapture", title, measurementLayout.refresh)
             }
         }
@@ -4559,26 +4579,26 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         for (index, rect) in layout.strokeWidths.enumerated() where rect.contains(point) {
             let identifiers = ["strokeWidthThin", "strokeWidthMedium", "strokeWidthThick"]
             let identifier = identifiers[index]
-            return (identifier, SelectionToolbarState.tooltipTitle(for: identifier) ?? "线条粗细", rect)
+            return (identifier, tooltipTitle(for: identifier) ?? identifier, rect)
         }
 
         if let fillRect = layout.fillToggle,
            fillRect.contains(point),
-           let title = SelectionToolbarState.tooltipTitle(for: "fill") {
+           let title = tooltipTitle(for: "fill") {
             return ("fill", title, fillRect)
         }
 
         if let rectangleMode = layout.rectangleMode {
             let rectangleButton = shapeModeBackgroundRect(for: rectangleMode)
             let identifier = optionsToolbarMode == .mosaic ? "mosaicRectangle" : "shapeRectangle"
-            if rectangleButton.contains(point), let title = SelectionToolbarState.tooltipTitle(for: identifier) {
+            if rectangleButton.contains(point), let title = tooltipTitle(for: identifier) {
                 return (identifier, title, rectangleButton)
             }
         }
 
         if let ellipseButton = layout.ellipseMode,
            ellipseButton.contains(point),
-           let title = SelectionToolbarState.tooltipTitle(for: "shapeEllipse") {
+           let title = tooltipTitle(for: "shapeEllipse") {
             return ("shapeEllipse", title, ellipseButton)
         }
 
@@ -4586,7 +4606,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             let redactionTypeRect = optionButtonBackgroundRect(for: SelectionToolbarState.mosaicRedactionTypeButtonRect(in: optionsRect))
             if redactionTypeRect.contains(point) {
                 let identifier = mosaicRedactionType == .gaussianBlur ? "mosaicBlur" : "mosaicPixel"
-                if let title = SelectionToolbarState.tooltipTitle(for: identifier) {
+                if let title = tooltipTitle(for: identifier) {
                     return (identifier, title, redactionTypeRect)
                 }
             }
@@ -4603,46 +4623,50 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                     continue
                 }
                 let button = optionButtonBackgroundRect(for: rect)
-                if button.contains(point), let title = SelectionToolbarState.tooltipTitle(for: identifier) {
+                if button.contains(point), let title = tooltipTitle(for: identifier) {
                     return (identifier, title, button)
                 }
             }
         }
 
         if optionsToolbarMode == .text {
-            if layout.textBold.contains(point), let title = SelectionToolbarState.tooltipTitle(for: "textBold") {
+            if layout.textBold.contains(point), let title = tooltipTitle(for: "textBold") {
                 return ("textBold", title, layout.textBold)
             }
-            if layout.textItalic.contains(point), let title = SelectionToolbarState.tooltipTitle(for: "textItalic") {
+            if layout.textItalic.contains(point), let title = tooltipTitle(for: "textItalic") {
                 return ("textItalic", title, layout.textItalic)
             }
-            if layout.textOutline.contains(point), let title = SelectionToolbarState.tooltipTitle(for: "textOutline") {
+            if layout.textOutline.contains(point), let title = tooltipTitle(for: "textOutline") {
                 return ("textOutline", title, layout.textOutline)
             }
         }
 
         if SelectionToolbarState.showsStrokeStyleField(for: optionsToolbarMode),
            layout.strokeStyle.contains(point),
-           let title = SelectionToolbarState.tooltipTitle(for: "strokeStyle") {
+           let title = tooltipTitle(for: "strokeStyle") {
             return ("strokeStyle", title, layout.strokeStyle)
         }
 
         if let startArrowType = layout.startArrowType, startArrowType.contains(point) {
-            return ("startArrowType", SelectionToolbarState.tooltipTitle(for: "startArrowType") ?? "开始箭头", startArrowType)
+            return ("startArrowType", tooltipTitle(for: "startArrowType") ?? "startArrowType", startArrowType)
         }
 
         if let endArrowType = layout.endArrowType, endArrowType.contains(point) {
-            return ("endArrowType", SelectionToolbarState.tooltipTitle(for: "endArrowType") ?? "结束箭头", endArrowType)
+            return ("endArrowType", tooltipTitle(for: "endArrowType") ?? "endArrowType", endArrowType)
         }
 
         for (index, rect) in layout.colorSwatches.enumerated() where rect.insetBy(dx: -4, dy: -4).contains(point) {
-            if index == visiblePaletteCount, let title = SelectionToolbarState.tooltipTitle(for: "customColor") {
+            if index == visiblePaletteCount, let title = tooltipTitle(for: "customColor") {
                 return ("customColor", title, rect)
             }
             return nil
         }
 
         return nil
+    }
+
+    private func tooltipTitle(for identifier: String) -> String? {
+        SelectionToolbarState.tooltipTitle(for: identifier, language: settings.language)
     }
 
     private func tooltipIdentifier(for button: ToolbarButton) -> String {
@@ -6865,6 +6889,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         suppressedAnnotationIDs: Set<AnnotationID>
     ) {
         commitCurrentTextEdit()
+        let selectedAnnotationID = selectedAnnotationIndex.flatMap { index in
+            self.annotations.indices.contains(index) ? self.annotations[index].id : nil
+        }
         self.backgroundImage = backgroundImage
         if let cgImage = backgroundImage?.cgImage(forProposedRect: nil, context: nil, hints: nil) {
             backgroundBitmap = NSBitmapImageRep(cgImage: cgImage)
@@ -6875,7 +6902,15 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         self.annotations = annotations
         self.eraserMasks = eraserMasks
         self.suppressedAnnotationIDs = suppressedAnnotationIDs
-        selectedAnnotationIndex = nil
+        selectedAnnotationIndex = selectedAnnotationID.flatMap { selectedID in
+            annotations.firstIndex { $0.id == selectedID }
+        }.flatMap { index in
+            annotationIsEditable(at: index) ? index : nil
+        }
+        if selectedAnnotationIndex == nil {
+            selectedNumberAnnotationCanFollowTypeDropdown = false
+            revealedNumberControlsIndex = nil
+        }
         setLockedSelectionRect(selectionRect.standardized)
         resetMosaicPreviewCaches()
         clearColorSampler()
@@ -8301,47 +8336,14 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 #endif
 
     private func showPlaceholder(for button: ToolbarButton) {
-        let label: String
-        switch button {
-        case .pin:
-            label = "贴图"
-        case .polyline:
-            label = "箭头线"
-        case .pen:
-            label = "画笔"
-        case .marker:
-            label = "标记"
-        case .eyedropper:
-            label = "取色"
-        case .mosaic:
-            label = "马赛克"
-        case .text:
-            label = "文字"
-        case .number:
-            label = "序号"
-        case .magnifier:
-            label = "放大镜"
-        case .eraser:
-            label = "橡皮擦"
-        case .scroll:
-            label = "滚动截图"
-        case .undo:
-            label = "撤销"
-        case .redo:
-            label = "重做"
-        case .copy:
-            label = "复制"
-        case .save:
-            label = "保存"
-        case .cancel:
-            label = "退出"
-        case .rectangle:
-            label = "矩形"
-        case .finishEditing:
-            label = "完成编辑"
-        }
-
-        NSAlert.showTransient(message: "\(label)功能开发中。", in: window)
+        let identifier = tooltipIdentifier(for: button)
+        let label = tooltipTitle(for: identifier) ?? identifier
+        let l10n = L10n(language: settings.language)
+        NSAlert.showTransient(
+            message: l10n.unavailableFeatureMessage(label),
+            language: settings.language,
+            in: window
+        )
     }
 
     private func finish(action: CaptureCompletionAction) {
@@ -8872,7 +8874,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
            optionButtonBackgroundRect(for: clearAllButton).contains(point) {
             eraserRectangleStartPoint = nil
             eraserRectangleCurrentPoint = nil
-            _ = clearAllAnnotationsAndMasks()
+            let didClear = clearAllAnnotationsAndMasks()
+            if didClear {
+                configuration.annotationHistoryChanged?()
+            }
             invalidateCursorRectsAndRefresh(at: point)
             needsDisplay = true
             return true
@@ -13942,20 +13947,24 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 ? SelectionToolbarState.colorSamplerCopySuccessTextColor
                 : SelectionToolbarState.colorSamplerCopyHintTextColor,
         ]
+        let l10n = L10n(language: settings.language)
         let copyText = NSMutableAttributedString(
             string: isShowingCopySuccess
-                ? SelectionToolbarState.colorSamplerCopySuccessText
+                ? l10n.text(.colorSamplerCopySuccess)
                 : SelectionToolbarState.colorSamplerCopyHintText(
                     for: colorSamplerCopyMode,
-                    l10n: L10n(language: settings.language)
+                    l10n: l10n
                 ),
             attributes: copyHintAttributes
         )
         if !isShowingCopySuccess {
-            copyText.addAttributes(
-                [.font: samplerInfoFont(ofSize: 12, weight: .bold)],
-                range: NSRange(location: 1, length: 1)
-            )
+            let cRange = (copyText.string as NSString).range(of: "C")
+            if cRange.location != NSNotFound {
+                copyText.addAttributes(
+                    [.font: samplerInfoFont(ofSize: 12, weight: .bold)],
+                    range: cRange
+                )
+            }
         }
         let copyBounds = copyText.boundingRect(
             with: NSSize(width: infoRect.width - 24, height: 20),
@@ -13975,13 +13984,16 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             .foregroundColor: SelectionToolbarState.colorSamplerSwitchHintTextColor,
         ]
         let switchText = NSMutableAttributedString(
-            string: "按 Shift 切换 RGB/HEX",
+            string: l10n.text(.colorSamplerSwitchMode),
             attributes: switchHintAttributes
         )
-        switchText.addAttributes(
-            [.font: samplerInfoFont(ofSize: 12, weight: .semibold)],
-            range: NSRange(location: 2, length: 5)
-        )
+        let shiftRange = (switchText.string as NSString).range(of: "Shift")
+        if shiftRange.location != NSNotFound {
+            switchText.addAttributes(
+                [.font: samplerInfoFont(ofSize: 12, weight: .semibold)],
+                range: shiftRange
+            )
+        }
         let switchBounds = switchText.boundingRect(
             with: NSSize(width: infoRect.width - 20, height: 20),
             options: [.usesLineFragmentOrigin, .usesFontLeading]
@@ -14544,7 +14556,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             .font: NSFont.systemFont(ofSize: 11),
             .foregroundColor: NSColor.labelColor,
         ]
-        NSString(string: "圆角半径").draw(at: NSPoint(x: panel.minX + 8, y: panel.minY + 8), withAttributes: labelAttributes)
+        NSString(string: L10n(language: settings.language).text(.cornerRadius)).draw(
+            at: NSPoint(x: panel.minX + 8, y: panel.minY + 8),
+            withAttributes: labelAttributes
+        )
 
         let valueRect = cornerRadiusValueRect(in: panel)
         let track = cornerRadiusSliderTrackRect(in: panel, valueRect: valueRect)
@@ -14600,7 +14615,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         drawTextIconToggle(named: "italic", in: layout.textItalic, selected: currentStyle.textItalic)
         drawTextIconToggle(named: "stroke", in: layout.textOutline, selected: currentStyle.textOutlineEnabled)
         drawTextPopupField(
-            SelectionToolbarState.textFontDisplayName(for: currentTextFontFamily()),
+            SelectionToolbarState.textFontDisplayName(
+                for: currentTextFontFamily(),
+                language: settings.language
+            ),
             in: layout.textFont,
             compact: false
         )
@@ -14781,7 +14799,12 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         switch kind {
         case .font:
             let families = SelectionToolbarState.installedTextFontFamilies()
-            labels = families.map { SelectionToolbarState.textFontDisplayName(for: $0) }
+            labels = families.map {
+                SelectionToolbarState.textFontDisplayName(
+                    for: $0,
+                    language: settings.language
+                )
+            }
             selectedIndex = families.firstIndex(of: currentTextFontFamily())
         case .size:
             let sizes = textSizeValuesForActiveTool()

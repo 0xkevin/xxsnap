@@ -209,7 +209,7 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     private var documentState: LongImageEditorDocument
     private let actions: LongImageEditorActions
     private let completeRenderer: CompleteRenderer
-    private let language: AppLanguage
+    private var language: AppLanguage
     private let applicationActivator: @MainActor () -> Void
     private var renderedRevision: NSImage?
     private var documentRevision: UInt64 = 0
@@ -260,7 +260,7 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         let window = NSWindow(contentRect: frame, styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         // `visibleFrame` bounds the complete titled window, not just its content.
         window.setFrame(frame, display: false)
-        window.title = "长截图编辑"
+        window.title = L10n(language: language).text(.longImageEditorTitle)
         initialWindowFrame = frame
         geometry = LongImageEditorGeometry(imageSize: image.size, viewportSize: size, scrollOffset: 0)
         super.init(window: window)
@@ -295,6 +295,17 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         window?.makeKeyAndOrderFront(nil)
         window?.makeFirstResponder(documentView)
         showEditingToolbar()
+    }
+    func updateLanguage(_ language: AppLanguage) {
+        guard self.language != language else { return }
+        self.language = language
+        window?.title = L10n(language: language).text(.longImageEditorTitle)
+        let contextMenu = makeContextMenu()
+        scrollView.menu = contextMenu
+        documentView.menu = contextMenu
+        imageView.menu = contextMenu
+        overlay?.contentView?.menu = contextMenu
+        overlay?.updateLanguage(language)
     }
     func stop() {
         guard !didStop else { return }
@@ -421,9 +432,9 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     func showEditingToolbar() {
         guard overlay == nil else { refreshOverlay(); return }
         let slice = LongImageEditorDocument.visibleSlice(image: documentState.image, annotations: documentState.annotations, eraserMasks: documentState.eraserMasks, imageRect: visibleImageRect)
-        presentedAnnotationIDs = Set(slice.annotations.map(\.id))
-        presentedMaskIDs = Set(slice.eraserMasks.map(\.id))
         let frame = viewportScreenFrame()
+        presentedAnnotationIDs = Set(documentState.annotations.map(\.id))
+        presentedMaskIDs = Set(documentState.eraserMasks.map(\.id))
         let preview = CaptureAnnotationRenderer.renderVisibleLongImageSlice(
             image: documentState.image,
             annotations: documentState.annotations,
@@ -432,14 +443,14 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         )
         let config = SelectionOverlayConfiguration.longImageEditor(
             windowFrame: frame, selectionRect: NSRect(origin: .zero, size: frame.size),
-            initialAnnotations: slice.annotations.map {
-                let viewportTop = LongImageAnnotationTranslation.annotation($0, fromImageSliceOrigin: .zero, displayScale: geometry.fitWidthScale)
-                return LongImageAnnotationTranslation.annotationFromTopOriginToRenderer(viewportTop, imageHeight: frame.height)
-            },
-            initialEraserMasks: slice.eraserMasks.map {
-                let viewportTop = LongImageAnnotationTranslation.mask($0, fromImageSliceOrigin: .zero, displayScale: geometry.fitWidthScale)
-                return LongImageAnnotationTranslation.maskFromTopOriginToRenderer(viewportTop, imageHeight: frame.height)
-            },
+            initialAnnotations: overlayAnnotations(
+                sliceRect: slice.imageRect,
+                overlayHeight: frame.height
+            ),
+            initialEraserMasks: overlayEraserMasks(
+                sliceRect: slice.imageRect,
+                overlayHeight: frame.height
+            ),
             suppressedAnnotationIDs: presentedAnnotationIDs,
             interactionBegan: { [weak self] in self?.lock(true) },
             interactionTargetBegan: { [weak self] id in self?.prepareLivePresentation(targetID: id) },
@@ -449,7 +460,13 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
             toolbarToggleHandler: { [weak self] in self?.toggleEditingToolbar() },
             keyDownHandler: { [weak self] event in self?.handleKeyDown(event) == true }
         )
-        let value = SelectionOverlayWindow(backgroundImage: displayImage(preview, size: frame.size), configuration: config) { [weak self] in self?.finish($0) }
+        var settings = AppSettings.default
+        settings.language = language
+        let value = SelectionOverlayWindow(
+            backgroundImage: displayImage(preview, size: frame.size),
+            settings: settings,
+            configuration: config
+        ) { [weak self] in self?.finish($0) }
         overlay = value
         toolbarMenuItem?.state = .on
         presentedContext = PresentedContext(
@@ -531,9 +548,9 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         viewportRefreshCount += 1
         guard let overlay else { return }
         let slice = LongImageEditorDocument.visibleSlice(image: documentState.image, annotations: documentState.annotations, eraserMasks: documentState.eraserMasks, imageRect: visibleImageRect)
-        presentedAnnotationIDs = Set(slice.annotations.map(\.id))
-        presentedMaskIDs = Set(slice.eraserMasks.map(\.id))
         let frame = viewportScreenFrame()
+        presentedAnnotationIDs = Set(documentState.annotations.map(\.id))
+        presentedMaskIDs = Set(documentState.eraserMasks.map(\.id))
         let preview = CaptureAnnotationRenderer.renderVisibleLongImageSlice(
             image: documentState.image,
             annotations: documentState.annotations,
@@ -548,17 +565,52 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         overlay.updateLongImageEditor(
             windowFrame: frame, backgroundImage: displayImage(preview, size: frame.size),
             selectionRect: NSRect(origin: .zero, size: frame.size),
-            annotations: slice.annotations.map {
-                let viewportTop = LongImageAnnotationTranslation.annotation($0, fromImageSliceOrigin: .zero, displayScale: geometry.fitWidthScale)
-                return LongImageAnnotationTranslation.annotationFromTopOriginToRenderer(viewportTop, imageHeight: frame.height)
-            },
-            eraserMasks: slice.eraserMasks.map {
-                let viewportTop = LongImageAnnotationTranslation.mask($0, fromImageSliceOrigin: .zero, displayScale: geometry.fitWidthScale)
-                return LongImageAnnotationTranslation.maskFromTopOriginToRenderer(viewportTop, imageHeight: frame.height)
-            },
+            annotations: overlayAnnotations(
+                sliceRect: slice.imageRect,
+                overlayHeight: frame.height
+            ),
+            eraserMasks: overlayEraserMasks(
+                sliceRect: slice.imageRect,
+                overlayHeight: frame.height
+            ),
             suppressedAnnotationIDs: presentedAnnotationIDs
         )
     }
+
+    private func overlayAnnotations(
+        sliceRect: NSRect,
+        overlayHeight: CGFloat
+    ) -> [CaptureAnnotation] {
+        documentState.annotations.map { annotation in
+            let viewportTop = LongImageAnnotationTranslation.annotation(
+                annotation,
+                fromImageSliceOrigin: sliceRect.origin,
+                displayScale: geometry.fitWidthScale
+            )
+            return LongImageAnnotationTranslation.annotationFromTopOriginToRenderer(
+                viewportTop,
+                imageHeight: overlayHeight
+            )
+        }
+    }
+
+    private func overlayEraserMasks(
+        sliceRect: NSRect,
+        overlayHeight: CGFloat
+    ) -> [EraserMask] {
+        documentState.eraserMasks.map { mask in
+            let viewportTop = LongImageAnnotationTranslation.mask(
+                mask,
+                fromImageSliceOrigin: sliceRect.origin,
+                displayScale: geometry.fitWidthScale
+            )
+            return LongImageAnnotationTranslation.maskFromTopOriginToRenderer(
+                viewportTop,
+                imageHeight: overlayHeight
+            )
+        }
+    }
+
     private func commitOverlay() {
         guard let snapshot = overlay?.editorSnapshot, let presentedContext else { return }
         guard lastCommittedOverlayRevision != snapshot.revision else { return }
@@ -601,13 +653,8 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
             }
             documentState.eraserMasks.removeAll { $0.affectedAnnotationIDs.isEmpty }
         }
-        presentedAnnotationIDs = Set(documentState.annotations.filter {
-            CaptureAnnotationRenderer.longImageVisualBounds(for: $0).intersects(presentedContext.sliceRect)
-        }.map(\.id))
-        presentedMaskIDs = Set(documentState.eraserMasks.filter {
-            !presentedAnnotationIDs.isDisjoint(with: $0.affectedAnnotationIDs)
-                && $0.rect.intersects(presentedContext.sliceRect)
-        }.map(\.id))
+        presentedAnnotationIDs = Set(documentState.annotations.map(\.id))
+        presentedMaskIDs = Set(documentState.eraserMasks.map(\.id))
         if previousAnnotations != documentState.annotations || previousMasks != documentState.eraserMasks {
             documentRevision &+= 1
             renderedRevision = nil

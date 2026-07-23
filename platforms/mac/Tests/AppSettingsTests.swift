@@ -51,6 +51,423 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(store.load().paletteVisibleCount, 8)
     }
 
+    func testPreferencesSettingsDefaultsAndPersistence() throws {
+        let suiteName = "com.xxsnap.tests.preferences.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        let store = PreferencesSettingsStore(userDefaults: defaults)
+
+        XCTAssertEqual(store.load(), .default)
+
+        let settings = PreferencesSettings(
+            filenameTemplate: "Capture {yyyyMMdd}_{HHmmss}",
+            checksForUpdatesAtLaunch: false,
+            updateCheckIntervalHours: 6
+        )
+        try store.save(settings)
+
+        XCTAssertEqual(store.load(), settings)
+    }
+
+    func testPreferencesSettingsRecoversOnlyInvalidFields() {
+        let suiteName = "com.xxsnap.tests.preferences.partial.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        defaults.set(
+            Data(
+                """
+                {
+                  "filenameTemplate": "Archive {yyyyMMdd}",
+                  "checksForUpdatesAtLaunch": "invalid",
+                  "updateCheckIntervalHours": 6
+                }
+                """.utf8
+            ),
+            forKey: "preferencesSettings.v1"
+        )
+
+        let settings = PreferencesSettingsStore(userDefaults: defaults).load()
+
+        XCTAssertEqual(settings.filenameTemplate, "Archive {yyyyMMdd}")
+        XCTAssertEqual(
+            settings.checksForUpdatesAtLaunch,
+            PreferencesSettings.default.checksForUpdatesAtLaunch
+        )
+        XCTAssertEqual(settings.updateCheckIntervalHours, 6)
+    }
+
+    func testFilenameTemplateRendererUsesSupportedVariablesAndAddsPng() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let timeZone = TimeZone(secondsFromGMT: 0)!
+        let date = calendar.date(from: DateComponents(
+            timeZone: timeZone,
+            year: 2026,
+            month: 7,
+            day: 23,
+            hour: 16,
+            minute: 8,
+            second: 35
+        ))!
+
+        let filename = try FilenameTemplateRenderer().filename(
+            template: PreferencesSettings.defaultFilenameTemplate,
+            date: date,
+            timeZone: timeZone
+        )
+
+        XCTAssertEqual(filename, "xxsnap_截图_20260723_160835.png")
+    }
+
+    func testFilenameTemplateRendererRejectsUnsafeOrUnknownValues() {
+        let renderer = FilenameTemplateRenderer()
+
+        XCTAssertThrowsError(try renderer.filename(template: "   ")) {
+            XCTAssertEqual($0 as? FilenameTemplateError, .empty)
+        }
+        XCTAssertThrowsError(try renderer.filename(template: "folder/name")) {
+            XCTAssertEqual($0 as? FilenameTemplateError, .pathSeparator)
+        }
+        XCTAssertThrowsError(try renderer.filename(template: "capture {date}")) {
+            XCTAssertEqual($0 as? FilenameTemplateError, .unknownVariable("{date}"))
+        }
+    }
+
+    func testCaptureFilenameProviderFallsBackWhenStoredTemplateIsInvalid() {
+        let store = FakePreferencesSettingsStore()
+        store.settings.filenameTemplate = "invalid/name"
+        let provider = CaptureFilenameProvider(settingsStore: store)
+        let timeZone = TimeZone(secondsFromGMT: 0)!
+        let date = Calendar(identifier: .gregorian).date(from: DateComponents(
+            timeZone: timeZone,
+            year: 2026,
+            month: 7,
+            day: 23,
+            hour: 16,
+            minute: 8,
+            second: 35
+        ))!
+
+        XCTAssertEqual(
+            provider.suggestedFilename(date: date, timeZone: timeZone),
+            "xxsnap_截图_20260723_160835.png"
+        )
+    }
+
+    func testPreferencesSettingsMigratesLegacyDefaultFilenameTemplate() throws {
+        let suiteName = "com.xxsnap.tests.preferences.filename-migration.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        defaults.set(
+            try JSONEncoder().encode(PreferencesSettings(
+                filenameTemplate: "xxsnap 截图 {yyyyMMdd}-{HHmmss}",
+                checksForUpdatesAtLaunch: true,
+                updateCheckIntervalHours: 24
+            )),
+            forKey: "preferencesSettings.v1"
+        )
+
+        let store = PreferencesSettingsStore(userDefaults: defaults)
+
+        XCTAssertEqual(
+            store.load().filenameTemplate,
+            "xxsnap_截图_{yyyyMMdd}_{HHmmss}"
+        )
+        XCTAssertEqual(
+            store.load().filenameTemplate,
+            PreferencesSettings.defaultFilenameTemplate
+        )
+    }
+
+    @MainActor
+    func testHotKeyControllerPersistsSuccessfulChanges() {
+        let store = FakeAppSettingsStore()
+        let registrar = FakeGlobalHotKeyRegistrar()
+        let controller = makeHotKeyController(store: store, registrar: registrar)
+        let replacement = HotKeySettings(
+            keyCode: HotKeyAction.capture.defaultSettings.keyCode + 2,
+            modifiers: HotKeyAction.capture.defaultSettings.modifiers
+        )
+
+        assertHotKeySuccess(controller.apply(replacement, to: .capture))
+        XCTAssertEqual(controller.configuredHotKey(for: .capture), replacement)
+        XCTAssertEqual(store.settings.hotkeys[HotKeyAction.capture.rawValue], replacement)
+        XCTAssertEqual(registrar.registered[.capture], replacement)
+    }
+
+    @MainActor
+    func testHotKeyControllerRejectsDuplicatesWithoutChangingRegistration() {
+        let store = FakeAppSettingsStore()
+        let registrar = FakeGlobalHotKeyRegistrar()
+        let controller = makeHotKeyController(store: store, registrar: registrar)
+        let restoreShortcut = controller.configuredHotKey(
+            for: .restoreMostRecentlyHiddenPinnedImage
+        )
+
+        assertHotKeyFailure(
+            controller.apply(restoreShortcut, to: .capture),
+            equals: .duplicate
+        )
+        XCTAssertEqual(
+            controller.configuredHotKey(for: .capture),
+            HotKeyAction.capture.defaultSettings
+        )
+        XCTAssertEqual(registrar.registered[.capture], HotKeyAction.capture.defaultSettings)
+    }
+
+    @MainActor
+    func testHotKeyControllerRollsBackWhenPersistenceFails() {
+        let store = FakeAppSettingsStore()
+        let registrar = FakeGlobalHotKeyRegistrar()
+        let controller = makeHotKeyController(store: store, registrar: registrar)
+        let replacement = HotKeySettings(
+            keyCode: HotKeyAction.capture.defaultSettings.keyCode + 2,
+            modifiers: HotKeyAction.capture.defaultSettings.modifiers
+        )
+        store.shouldFailSave = true
+
+        assertHotKeyFailure(
+            controller.apply(replacement, to: .capture),
+            equals: .persistenceFailed
+        )
+        XCTAssertEqual(
+            controller.configuredHotKey(for: .capture),
+            HotKeyAction.capture.defaultSettings
+        )
+        XCTAssertEqual(registrar.registered[.capture], HotKeyAction.capture.defaultSettings)
+    }
+
+    @MainActor
+    func testHotKeyControllerDisablesRestoreShortcutDuringCapture() {
+        let store = FakeAppSettingsStore()
+        let registrar = FakeGlobalHotKeyRegistrar()
+        let controller = makeHotKeyController(store: store, registrar: registrar)
+
+        controller.setCaptureSessionActive(true)
+
+        XCTAssertNil(controller.registeredHotKey(for: .restoreMostRecentlyHiddenPinnedImage))
+        assertHotKeyFailure(
+            controller.apply(HotKeyAction.capture.defaultSettings, to: .capture),
+            equals: .captureInProgress
+        )
+
+        controller.setCaptureSessionActive(false)
+
+        XCTAssertEqual(
+            controller.registeredHotKey(for: .restoreMostRecentlyHiddenPinnedImage),
+            HotKeyAction.restoreMostRecentlyHiddenPinnedImage.defaultSettings
+        )
+    }
+
+    @MainActor
+    func testHotKeyControllerRestoresPreviousConfigurationWhenDefaultRegistrationFails() {
+        let store = FakeAppSettingsStore()
+        let registrar = FakeGlobalHotKeyRegistrar()
+        let controller = makeHotKeyController(store: store, registrar: registrar)
+        let customCapture = HotKeySettings(
+            keyCode: HotKeyAction.capture.defaultSettings.keyCode + 2,
+            modifiers: HotKeyAction.capture.defaultSettings.modifiers
+        )
+        let customRestore = HotKeySettings(
+            keyCode: HotKeyAction.restoreMostRecentlyHiddenPinnedImage.defaultSettings.keyCode + 3,
+            modifiers: HotKeyAction.restoreMostRecentlyHiddenPinnedImage.defaultSettings.modifiers
+        )
+        assertHotKeySuccess(controller.apply(customCapture, to: .capture))
+        assertHotKeySuccess(
+            controller.apply(customRestore, to: .restoreMostRecentlyHiddenPinnedImage)
+        )
+        registrar.failedSettings[.restoreMostRecentlyHiddenPinnedImage] =
+            HotKeyAction.restoreMostRecentlyHiddenPinnedImage.defaultSettings
+
+        assertHotKeyFailure(
+            controller.restoreDefaults(),
+            equals: .registrationFailed(FakeGlobalHotKeyRegistrar.failureStatus)
+        )
+        XCTAssertEqual(controller.configuredHotKey(for: .capture), customCapture)
+        XCTAssertEqual(
+            controller.configuredHotKey(for: .restoreMostRecentlyHiddenPinnedImage),
+            customRestore
+        )
+        XCTAssertEqual(registrar.registered[.capture], customCapture)
+        XCTAssertEqual(
+            registrar.registered[.restoreMostRecentlyHiddenPinnedImage],
+            customRestore
+        )
+    }
+
+    @MainActor
+    func testPreferencesWindowBuildsEveryPageAndRefreshesToolbarLanguage() {
+        let settingsStore = FakeAppSettingsStore()
+        let preferencesStore = FakePreferencesSettingsStore()
+        let hotKeyController = makeHotKeyController(
+            store: settingsStore,
+            registrar: FakeGlobalHotKeyRegistrar()
+        )
+        let controller = PreferencesWindowController(
+            settingsStore: settingsStore,
+            preferencesSettingsStore: preferencesStore,
+            hotKeyController: hotKeyController,
+            launchAtLoginManager: FakeLaunchAtLoginManager(),
+            updateChecker: FakeUpdateChecker()
+        )
+        defer {
+            controller.close()
+        }
+
+        XCTAssertEqual(
+            controller.window?.toolbar?.items.map(\.label),
+            ["通用", "快捷键", "保存", "更新", "关于"]
+        )
+        XCTAssertEqual(controller.window?.contentLayoutRect.width ?? 0, 680, accuracy: 1)
+        XCTAssertEqual(controller.window?.contentLayoutRect.height ?? 0, 280, accuracy: 1)
+        XCTAssertFalse(controller.window?.styleMask.contains(.resizable) == true)
+        for section in PreferencesSection.allCases {
+            controller.show(section: section)
+            controller.window?.contentView?.layoutSubtreeIfNeeded()
+            XCTAssertFalse(
+                controller.window?.contentView?.subviews.isEmpty ?? true,
+                "\(section.rawValue) page should not be blank"
+            )
+            if section != .about {
+                let root = controller.window?.contentView
+                let group = descendants(of: root, matching: NSStackView.self).first {
+                    $0.identifier?.rawValue == "preferencesGroup"
+                }
+                XCTAssertNotNil(group)
+                XCTAssertGreaterThanOrEqual(
+                    group?.frame.width ?? 0,
+                    (root?.bounds.width ?? 0) - 70,
+                    "\(section.rawValue) group should fill the page"
+                )
+                let groupFrameInRoot = group.flatMap { group in
+                    root.map { group.convert(group.bounds, to: $0) }
+                }
+                XCTAssertEqual(
+                    groupFrameInRoot?.midX ?? 0,
+                    root?.bounds.midX ?? 0,
+                    accuracy: 1,
+                    "\(section.rawValue) group should be centered"
+                )
+            }
+        }
+
+        settingsStore.settings.language = .english
+        controller.refresh()
+
+        XCTAssertEqual(
+            controller.window?.toolbar?.items.map(\.label),
+            ["General", "Shortcuts", "Save", "Update", "About"]
+        )
+        controller.show(section: .about)
+        let imageViews = descendants(
+            of: controller.window?.contentView,
+            matching: NSImageView.self
+        )
+        XCTAssertTrue(imageViews.contains(where: { $0.image === NSApp.applicationIconImage }))
+        XCTAssertFalse(NSApp.applicationIconImage.isTemplate)
+    }
+
+    @MainActor
+    func testSavePreferencesUsesWideEditorAndFramedPreview() {
+        let settingsStore = FakeAppSettingsStore()
+        let controller = PreferencesWindowController(
+            settingsStore: settingsStore,
+            preferencesSettingsStore: FakePreferencesSettingsStore(),
+            hotKeyController: makeHotKeyController(
+                store: settingsStore,
+                registrar: FakeGlobalHotKeyRegistrar()
+            ),
+            launchAtLoginManager: FakeLaunchAtLoginManager(),
+            updateChecker: FakeUpdateChecker()
+        )
+        defer {
+            controller.close()
+        }
+
+        controller.show(section: .save)
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let fields = descendants(of: controller.window?.contentView, matching: NSTextField.self)
+        let templateField = fields.first {
+            $0.identifier?.rawValue == "filenameTemplateField"
+        }
+        XCTAssertGreaterThanOrEqual(templateField?.frame.width ?? 0, 560)
+        XCTAssertEqual(templateField?.frame.height ?? 0, 32, accuracy: 1)
+
+        let stacks = descendants(of: controller.window?.contentView, matching: NSStackView.self)
+        let previewPanel = stacks.first {
+            $0.identifier?.rawValue == "filenamePreviewPanel"
+        }
+        XCTAssertNotNil(previewPanel)
+        XCTAssertGreaterThanOrEqual(previewPanel?.frame.width ?? 0, 610)
+        XCTAssertTrue(fields.contains {
+            $0.identifier?.rawValue == "filenamePreviewLabel"
+                && $0.stringValue.hasSuffix(".png")
+        })
+    }
+
+    @MainActor
+    func testShortcutValuesUseLargeCenteredText() {
+        let settingsStore = FakeAppSettingsStore()
+        let controller = PreferencesWindowController(
+            settingsStore: settingsStore,
+            preferencesSettingsStore: FakePreferencesSettingsStore(),
+            hotKeyController: makeHotKeyController(
+                store: settingsStore,
+                registrar: FakeGlobalHotKeyRegistrar()
+            ),
+            launchAtLoginManager: FakeLaunchAtLoginManager(),
+            updateChecker: FakeUpdateChecker()
+        )
+        defer {
+            controller.close()
+        }
+
+        controller.show(section: .shortcuts)
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let badges = descendants(of: controller.window?.contentView, matching: NSView.self).filter {
+            $0.identifier?.rawValue == "shortcutValueBadge"
+        }
+        let values = descendants(of: controller.window?.contentView, matching: NSTextField.self).filter {
+            $0.identifier?.rawValue == "shortcutValueText"
+        }
+        XCTAssertEqual(badges.count, 2)
+        XCTAssertEqual(values.count, 2)
+        for (badge, value) in zip(badges, values) {
+            XCTAssertEqual(badge.frame.size, NSSize(width: 102, height: 36))
+            XCTAssertEqual(value.font?.pointSize, 16)
+            XCTAssertFalse(
+                value.font?.fontDescriptor.symbolicTraits.contains(.monoSpace) ?? true
+            )
+            XCTAssertEqual(value.alignment, .center)
+            XCTAssertEqual(value.frame.midX, badge.bounds.midX, accuracy: 1)
+            XCTAssertEqual(value.frame.midY, badge.bounds.midY, accuracy: 1)
+        }
+        let captureValue = values.first {
+            $0.stringValue == HotKeyFormatter.displayString(
+                HotKeyAction.capture.defaultSettings
+            )
+        }
+        let lastCharacterIndex = max((captureValue?.stringValue.utf16.count ?? 1) - 1, 0)
+        let baselineOffset = captureValue?.attributedStringValue.attribute(
+                .baselineOffset,
+                at: lastCharacterIndex,
+                effectiveRange: nil
+            ) as? NSNumber
+        XCTAssertEqual(baselineOffset?.intValue, -3)
+    }
+
+    func testPreferencesMenuUsesShortAboutTitle() {
+        XCTAssertEqual(PreferencesStrings(language: .zhHans).aboutXxSnap, "关于")
+        XCTAssertEqual(PreferencesStrings(language: .english).aboutXxSnap, "About")
+    }
+
     func testFeatureGateKeepsTrialFullyOpenAndRestrictsFreeCoreFeatures() {
         XCTAssertTrue(FeatureGate(license: LicenseState(plan: .trial)).isEnabled(.scrollCapture))
         XCTAssertTrue(FeatureGate(license: LicenseState(plan: .trial)).isEnabled(.ocr))
@@ -70,6 +487,16 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(L10n(language: .zhHans).text(.colorSamplerCopyRgb), "按 C 复制RGB颜色值")
         XCTAssertEqual(L10n(language: .english).text(.colorSamplerCopyHex), "Press C to copy HEX")
         XCTAssertEqual(L10n(language: .english).text(.colorSamplerCopyRgb), "Press C to copy RGB")
+        XCTAssertEqual(L10n(language: .zhHans).toolbarTooltip(for: "save"), "保存")
+        XCTAssertEqual(L10n(language: .english).toolbarTooltip(for: "save"), "Save")
+        XCTAssertEqual(
+            L10n(language: .english).text(.screenRecordingPermissionRequired),
+            "Screen Recording Permission Required"
+        )
+        XCTAssertEqual(
+            PreferencesStrings(language: .english).filenameTemplateError(FilenameTemplateError.empty),
+            "The filename template cannot be empty."
+        )
     }
 
     func testOverlapWarningDescribesNonblockingMatchingInBothLanguages() {
@@ -82,5 +509,131 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertFalse(english.localizedCaseInsensitiveContains("paused"))
         XCTAssertTrue(L10n(language: .zhHans).text(.scrollCaptureResourceLimit).contains("暂停"))
         XCTAssertTrue(L10n(language: .english).text(.scrollCaptureResourceLimit).localizedCaseInsensitiveContains("paused"))
+    }
+
+    @MainActor
+    private func makeHotKeyController(
+        store: FakeAppSettingsStore,
+        registrar: FakeGlobalHotKeyRegistrar
+    ) -> CaptureHotKeyController {
+        CaptureHotKeyController(
+            settingsStore: store,
+            registrar: registrar,
+            captureHandler: {},
+            restorePinnedImageHandler: {}
+        )
+    }
+
+    private func assertHotKeySuccess(
+        _ result: Result<Void, HotKeyConfigurationError>,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        if case .failure(let error) = result {
+            XCTFail("Expected success, got \(error)", file: file, line: line)
+        }
+    }
+
+    private func assertHotKeyFailure(
+        _ result: Result<Void, HotKeyConfigurationError>,
+        equals expected: HotKeyConfigurationError,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        switch result {
+        case .success:
+            XCTFail("Expected failure \(expected), got success", file: file, line: line)
+        case .failure(let error):
+            XCTAssertEqual(error, expected, file: file, line: line)
+        }
+    }
+
+    private func descendants<View: NSView>(
+        of root: NSView?,
+        matching type: View.Type
+    ) -> [View] {
+        guard let root else { return [] }
+        return root.subviews.flatMap { view in
+            ([view as? View].compactMap { $0 }) + descendants(of: view, matching: type)
+        }
+    }
+}
+
+private enum TestStoreError: Error {
+    case failed
+}
+
+private final class FakePreferencesSettingsStore: PreferencesSettingsStoring {
+    var settings = PreferencesSettings.default
+
+    func load() -> PreferencesSettings {
+        settings
+    }
+
+    func save(_ settings: PreferencesSettings) throws {
+        self.settings = settings
+    }
+}
+
+private final class FakeAppSettingsStore: AppSettingsStoring {
+    var settings = AppSettings.default
+    var shouldFailSave = false
+
+    func load() -> AppSettings {
+        settings
+    }
+
+    func save(_ settings: AppSettings) throws {
+        if shouldFailSave {
+            throw TestStoreError.failed
+        }
+        self.settings = settings
+    }
+}
+
+private final class FakeGlobalHotKeyRegistrar: GlobalHotKeyRegistering {
+    static let failureStatus: OSStatus = -1
+
+    var onHotKeyPressed: ((HotKeyAction) -> Void)?
+    var failedSettings: [HotKeyAction: HotKeySettings] = [:]
+    private(set) var registered: [HotKeyAction: HotKeySettings] = [:]
+
+    private var actionsByToken: [ObjectIdentifier: HotKeyAction] = [:]
+
+    func register(
+        _ settings: HotKeySettings,
+        action: HotKeyAction
+    ) -> Result<HotKeyRegistrationToken, GlobalHotKeyRegistrationError> {
+        if failedSettings[action] == settings {
+            return .failure(GlobalHotKeyRegistrationError(status: Self.failureStatus))
+        }
+        let token = HotKeyRegistrationToken()
+        actionsByToken[ObjectIdentifier(token)] = action
+        registered[action] = settings
+        return .success(token)
+    }
+
+    func unregister(_ token: HotKeyRegistrationToken) {
+        guard let action = actionsByToken.removeValue(forKey: ObjectIdentifier(token)) else {
+            return
+        }
+        registered[action] = nil
+    }
+}
+
+@MainActor
+private final class FakeLaunchAtLoginManager: LaunchAtLoginManaging {
+    var status: LaunchAtLoginStatus = .notRegistered
+
+    func setEnabled(_ isEnabled: Bool) async throws {
+        status = isEnabled ? .enabled : .notRegistered
+    }
+
+    func openSystemSettings() {}
+}
+
+private struct FakeUpdateChecker: UpdateChecking {
+    func checkForUpdates() async -> UpdateCheckResult {
+        .placeholderUpToDate
     }
 }
