@@ -444,6 +444,7 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
             interactionBegan: { [weak self] in self?.lock(true) },
             interactionTargetBegan: { [weak self] id in self?.prepareLivePresentation(targetID: id) },
             interactionEnded: { [weak self] in self?.lock(false) },
+            historyChanged: { [weak self] in self?.handleOverlayHistoryChanged() },
             scrollHandler: { [weak self] deltaY in self?.handleOverlayScroll(deltaY: deltaY) },
             toolbarToggleHandler: { [weak self] in self?.toggleEditingToolbar() },
             keyDownHandler: { [weak self] event in self?.handleKeyDown(event) == true }
@@ -720,6 +721,11 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         scrollView.contentView.scroll(to: NSPoint(x: 0, y: nextY))
         scrollView.reflectScrolledClipView(scrollView.contentView)
         updateOffset()
+        refreshOverlay()
+    }
+    private func handleOverlayHistoryChanged() {
+        guard !interactionLocked else { return }
+        commitOverlay()
         refreshOverlay()
     }
     @objc private func copyButtonPressed(_ sender: Any?) { performAction(actions.copy) }

@@ -183,6 +183,33 @@ final class LongImageEditorTests: XCTestCase {
         controller.stop()
     }
 
+    func testUndoRedoToolbarActionsSynchronizeLongImageDocumentAfterRefresh() throws {
+        let controller = LongImageEditorWindowController(
+            canonicalImage: TestImageFactory.solid(
+                size: NSSize(width: 240, height: 1_200),
+                color: .white
+            ),
+            visibleFrame: NSRect(x: 0, y: 0, width: 500, height: 450),
+            initialWindowSize: NSSize(width: 360, height: 360)
+        )
+        controller.show()
+        controller.showEditingToolbar()
+        let overlay = try XCTUnwrap(controller.test_editingOverlay)
+
+        overlay.test_activateShapeTool(.rectangle)
+        overlay.test_drag(from: NSPoint(x: 80, y: 120), to: NSPoint(x: 180, y: 220))
+        XCTAssertEqual(controller.test_fullAnnotations.count, 1)
+
+        overlay.test_keyDown(keyCode: 6, charactersIgnoringModifiers: "z", modifierFlags: [.command])
+        XCTAssertEqual(controller.test_fullAnnotations.count, 0)
+        XCTAssertEqual(overlay.test_annotationCount, 0)
+
+        overlay.test_keyDown(keyCode: 6, charactersIgnoringModifiers: "z", modifierFlags: [.command, .shift])
+        XCTAssertEqual(controller.test_fullAnnotations.count, 1)
+        XCTAssertEqual(overlay.test_annotationCount, 1)
+        controller.stop()
+    }
+
     func testVisibleSliceFiltersAndTranslatesWithoutChangingOrderOrIDs() {
         let style = CaptureAnnotationStyle()
         let first = CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 10, y: 20, width: 30, height: 30), style: style)

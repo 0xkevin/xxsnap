@@ -20,6 +20,8 @@ final class ScrollCapturePresentationTests: XCTestCase {
         XCTAssertEqual(controller.test_stepGuideText, "引导提示：请点击进行单步滚动")
         XCTAssertEqual(controller.test_stepGuideBackgroundColor, .systemBlue)
         XCTAssertEqual(controller.test_stepGuideTextColor, .white)
+        XCTAssertLessThan(controller.test_stepGuideFrame.width, 220)
+        assertStepGuideTextFits(controller)
         XCTAssertLessThanOrEqual(controller.test_stepGuideFrame.maxY, controller.test_stepToolbarFrame.minY)
         XCTAssertEqual(controller.test_stepGuidePointerDirection, .up)
         XCTAssertEqual(controller.test_stepGuidePointerHeight, 8)
@@ -36,6 +38,30 @@ final class ScrollCapturePresentationTests: XCTestCase {
         controller.start()
 
         XCTAssertEqual(controller.test_stepGuideText, "Guide: Click for single-step scrolling")
+        assertStepGuideTextFits(controller)
+        XCTAssertLessThan(controller.test_stepGuideFrame.width, 245)
+    }
+
+    private func assertStepGuideTextFits(
+        _ controller: ScrollCapturePresentationController,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let measuringLabel = NSTextField(labelWithString: controller.test_stepGuideText)
+        measuringLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+
+        XCTAssertGreaterThanOrEqual(
+            controller.test_stepGuideTextFrame.width,
+            measuringLabel.fittingSize.width + 4,
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            controller.test_stepGuideLineBreakMode,
+            .byClipping,
+            file: file,
+            line: line
+        )
     }
 
     func testNonFullscreenStepGuideUsesSpaceBelowToolbarAndPointsUp() {

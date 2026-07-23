@@ -77,6 +77,7 @@ struct SelectionOverlayConfiguration {
     var annotationInteractionBegan: (() -> Void)?
     var annotationInteractionTargetBegan: ((AnnotationID?) -> Void)?
     var annotationInteractionEnded: (() -> Void)?
+    var annotationHistoryChanged: (() -> Void)?
     var longImageScrollHandler: ((CGFloat) -> Void)?
     var pinnedImageScaleHandler: ((CGFloat, NSPoint) -> Void)?
     var pinnedImageDragBegan: ((NSPoint) -> Void)?
@@ -109,6 +110,7 @@ struct SelectionOverlayConfiguration {
         annotationInteractionBegan: nil,
         annotationInteractionTargetBegan: nil,
         annotationInteractionEnded: nil,
+        annotationHistoryChanged: nil,
         longImageScrollHandler: nil,
         pinnedImageScaleHandler: nil,
         pinnedImageDragBegan: nil,
@@ -153,6 +155,7 @@ struct SelectionOverlayConfiguration {
             annotationInteractionBegan: nil,
             annotationInteractionTargetBegan: nil,
             annotationInteractionEnded: nil,
+            annotationHistoryChanged: nil,
             longImageScrollHandler: nil,
             pinnedImageScaleHandler: pinnedImageScaleHandler,
             pinnedImageDragBegan: pinnedImageDragBegan,
@@ -174,6 +177,7 @@ struct SelectionOverlayConfiguration {
         interactionBegan: (() -> Void)? = nil,
         interactionTargetBegan: ((AnnotationID?) -> Void)? = nil,
         interactionEnded: (() -> Void)? = nil,
+        historyChanged: (() -> Void)? = nil,
         scrollHandler: ((CGFloat) -> Void)? = nil,
         toolbarToggleHandler: (() -> Void)? = nil,
         keyDownHandler: ((NSEvent) -> Bool)? = nil
@@ -200,6 +204,7 @@ struct SelectionOverlayConfiguration {
             annotationInteractionBegan: interactionBegan,
             annotationInteractionTargetBegan: interactionTargetBegan,
             annotationInteractionEnded: interactionEnded,
+            annotationHistoryChanged: historyChanged,
             longImageScrollHandler: scrollHandler,
             pinnedImageScaleHandler: nil,
             pinnedImageDragBegan: nil,
@@ -406,10 +411,10 @@ extension NSCursor {
     static let xxsnapMoveLight: NSCursor = moveCursor(foreground: .white, outline: NSColor.black.withAlphaComponent(0.75))
     static let xxsnapResizeLeftRightLight: NSCursor = resizeCursor(angle: 0, foreground: .white)
     static let xxsnapResizeUpDownLight: NSCursor = resizeCursor(angle: .pi / 2, foreground: .white)
-    static let xxsnapResizeTopLeftLight: NSCursor = resizeCursor(angle: -.pi / 4, foreground: .white)
-    static let xxsnapResizeTopRightLight: NSCursor = resizeCursor(angle: .pi / 4, foreground: .white)
-    static let xxsnapResizeBottomLeftLight: NSCursor = resizeCursor(angle: .pi / 4, foreground: .white)
-    static let xxsnapResizeBottomRightLight: NSCursor = resizeCursor(angle: -.pi / 4, foreground: .white)
+    static let xxsnapResizeTopLeftLight: NSCursor = resizeCursor(angle: -.pi / 4, foreground: .white, drawsOutline: false)
+    static let xxsnapResizeTopRightLight: NSCursor = resizeCursor(angle: .pi / 4, foreground: .white, drawsOutline: false)
+    static let xxsnapResizeBottomLeftLight: NSCursor = resizeCursor(angle: .pi / 4, foreground: .white, drawsOutline: false)
+    static let xxsnapResizeBottomRightLight: NSCursor = resizeCursor(angle: -.pi / 4, foreground: .white, drawsOutline: false)
 
     private static func moveCursor(foreground: NSColor, outline: NSColor) -> NSCursor {
         let size = NSSize(width: 28, height: 28)
@@ -450,7 +455,7 @@ extension NSCursor {
         return NSCursor(image: image, hotSpot: NSPoint(x: size.width / 2, y: size.height / 2))
     }
 
-    private static func resizeCursor(angle: CGFloat, foreground: NSColor) -> NSCursor {
+    private static func resizeCursor(angle: CGFloat, foreground: NSColor, drawsOutline: Bool = true) -> NSCursor {
         let size = NSSize(width: 24, height: 24)
         let center = NSPoint(x: size.width / 2, y: size.height / 2)
         let image = NSImage(size: size)
@@ -474,11 +479,14 @@ extension NSCursor {
         path.move(to: NSPoint(x: 19, y: 12))
         path.line(to: NSPoint(x: 15, y: 16))
 
-        NSColor.black.withAlphaComponent(0.75).setStroke()
-        path.lineWidth = 5
         path.lineCapStyle = .round
         path.lineJoinStyle = .round
-        path.stroke()
+
+        if drawsOutline {
+            NSColor.black.withAlphaComponent(0.75).setStroke()
+            path.lineWidth = 5
+            path.stroke()
+        }
 
         foreground.setStroke()
         path.lineWidth = 2
@@ -8356,9 +8364,11 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private func undoLastAnnotation() {
+        var didMutate = false
         if let entry = undoAnnotationEntries.popLast() {
             applyUndo(entry)
             redoAnnotationEntries.append(entry)
+            didMutate = true
         } else {
             guard let removed = annotations.popLast() else {
                 return
@@ -8368,8 +8378,12 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             if removed.kind == .mosaicStroke || removed.kind == .mosaicRectangle {
                 resetMosaicPreviewCaches()
             }
+            didMutate = true
         }
         needsDisplay = true
+        if didMutate {
+            configuration.annotationHistoryChanged?()
+        }
     }
 
     private func redoLastAnnotation() {
@@ -8379,6 +8393,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         applyRedo(entry)
         undoAnnotationEntries.append(entry)
         needsDisplay = true
+        configuration.annotationHistoryChanged?()
     }
 
     private func recordAnnotationAdd(at index: Int) {

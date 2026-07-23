@@ -107,6 +107,9 @@ final class ScrollCapturePresentationController: NSObject {
     private let stepGuideBackground = ScrollCaptureStepGuideView()
     private let stepGuideLabel = NSTextField(labelWithString: "")
     private let stepGuideBackgroundColor = NSColor.systemBlue
+    private static let stepGuideFont = NSFont.systemFont(ofSize: 13, weight: .semibold)
+    private static let stepGuideHorizontalTextPadding: CGFloat = 3
+    private static let stepGuideTextRenderingAllowance: CGFloat = 4
     private var startButtonIdleImage: NSImage?
     private let scrollView = NSScrollView()
     private let previewDocumentView = ScrollCapturePreviewDocumentView()
@@ -186,7 +189,7 @@ final class ScrollCapturePresentationController: NSObject {
             backing: .buffered,
             defer: false
         )
-        let guideSize = NSSize(width: 250, height: 42)
+        let guideSize = Self.stepGuideSize(for: language)
         stepGuidePanel = NSPanel(
             contentRect: Self.stepGuidePlacement(
                 stepToolbarFrame: stepPanel.frame,
@@ -353,14 +356,15 @@ final class ScrollCapturePresentationController: NSObject {
         stepGuideBackground.pointerDirection = placement.pointerDirection
         stepGuideBackground.pointerCenterX = stepPanel.frame.minX + 120 - placement.frame.minX
 
-        stepGuideLabel.frame = stepGuideBackground.bodyRect.insetBy(dx: 12, dy: 6)
-        stepGuideLabel.stringValue = language == .zhHans
-            ? "引导提示：请点击进行单步滚动"
-            : "Guide: Click for single-step scrolling"
-        stepGuideLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        stepGuideLabel.stringValue = Self.stepGuideCopy(for: language)
+        stepGuideLabel.font = Self.stepGuideFont
+        stepGuideLabel.frame = stepGuideBackground.bodyRect.insetBy(
+            dx: Self.stepGuideHorizontalTextPadding,
+            dy: 6
+        )
         stepGuideLabel.textColor = .white
         stepGuideLabel.alignment = .center
-        stepGuideLabel.lineBreakMode = .byTruncatingTail
+        stepGuideLabel.lineBreakMode = .byClipping
         stepGuideLabel.maximumNumberOfLines = 1
 
         stepGuideBackground.addSubview(stepGuideLabel)
@@ -936,7 +940,10 @@ final class ScrollCapturePresentationController: NSObject {
         stepGuidePanel.setFrame(guidePlacement.frame, display: false)
         stepGuideBackground.pointerDirection = guidePlacement.pointerDirection
         stepGuideBackground.pointerCenterX = stepPanel.frame.minX + 120 - guidePlacement.frame.minX
-        stepGuideLabel.frame = stepGuideBackground.bodyRect.insetBy(dx: 12, dy: 6)
+        stepGuideLabel.frame = stepGuideBackground.bodyRect.insetBy(
+            dx: Self.stepGuideHorizontalTextPadding,
+            dy: 6
+        )
         previewGrowthFrame = Self.previewFrameAvoidingControls(
             selection: selectionFrame,
             previewSize: maximumPreviewContentSize,
@@ -1203,6 +1210,24 @@ final class ScrollCapturePresentationController: NSObject {
         return ScrollCaptureStepGuidePlacement(
             frame: NSRect(x: x, y: max(visible.minY, aboveY), width: size.width, height: size.height),
             pointerDirection: .down
+        )
+    }
+
+    private static func stepGuideCopy(for language: AppLanguage) -> String {
+        language == .zhHans
+            ? "引导提示：请点击进行单步滚动"
+            : "Guide: Click for single-step scrolling"
+    }
+
+    private static func stepGuideSize(for language: AppLanguage) -> NSSize {
+        let measuringLabel = NSTextField(labelWithString: stepGuideCopy(for: language))
+        measuringLabel.font = stepGuideFont
+        let copyWidth = ceil(
+            measuringLabel.fittingSize.width + stepGuideTextRenderingAllowance
+        )
+        return NSSize(
+            width: copyWidth + stepGuideHorizontalTextPadding * 2,
+            height: 42
         )
     }
 
@@ -1519,6 +1544,8 @@ final class ScrollCapturePresentationController: NSObject {
     var test_stepGuideBackgroundColor: NSColor { stepGuideBackgroundColor }
     var test_stepGuideTextColor: NSColor? { stepGuideLabel.textColor }
     var test_stepGuideFrame: NSRect { stepGuidePanel.frame }
+    var test_stepGuideTextFrame: NSRect { stepGuideLabel.frame }
+    var test_stepGuideLineBreakMode: NSLineBreakMode { stepGuideLabel.lineBreakMode }
     var test_stepGuidePointerDirection: ScrollCaptureStepGuidePointerDirection {
         stepGuideBackground.pointerDirection
     }
