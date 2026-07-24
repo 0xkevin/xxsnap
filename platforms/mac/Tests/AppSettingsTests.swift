@@ -21,7 +21,35 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.paletteVisibleCount, 20)
         XCTAssertNil(settings.interfaceFont)
         XCTAssertTrue(settings.hotkeys.isEmpty)
+        XCTAssertTrue(settings.disabledHotkeys.isEmpty)
         XCTAssertEqual(settings.license.plan, .trial)
+    }
+
+    func testSettingsStoreDecodesExistingSettingsWithoutDisabledHotKeys() {
+        let suiteName = "com.snipory.tests.settings.migration.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        defaults.set(
+            Data(
+                """
+                {
+                  "language": "english",
+                  "paletteVisibleCount": 8,
+                  "hotkeys": {},
+                  "license": { "plan": "trial" }
+                }
+                """.utf8
+            ),
+            forKey: "appSettings.v1"
+        )
+
+        let settings = SettingsStore(userDefaults: defaults).load()
+
+        XCTAssertEqual(settings.language, .english)
+        XCTAssertEqual(settings.paletteVisibleCount, 8)
+        XCTAssertTrue(settings.disabledHotkeys.isEmpty)
     }
 
     func testPaletteVisibleCountIsClampedToSupportedRange() {
@@ -198,6 +226,43 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(controller.configuredHotKey(for: .capture), replacement)
         XCTAssertEqual(store.settings.hotkeys[HotKeyAction.capture.rawValue], replacement)
         XCTAssertEqual(registrar.registered[.capture], replacement)
+    }
+
+    @MainActor
+    func testHotKeyControllerDisablesAndReenablesIndividualShortcut() {
+        let store = FakeAppSettingsStore()
+        let registrar = FakeGlobalHotKeyRegistrar()
+        let controller = makeHotKeyController(store: store, registrar: registrar)
+
+        assertHotKeySuccess(controller.disable(.capture))
+
+        XCTAssertFalse(controller.isHotKeyEnabled(for: .capture))
+        XCTAssertNil(controller.registeredHotKey(for: .capture))
+        XCTAssertNil(registrar.registered[.capture])
+        XCTAssertTrue(store.settings.disabledHotkeys.contains(HotKeyAction.capture.rawValue))
+
+        let replacement = HotKeySettings(
+            keyCode: HotKeyAction.capture.defaultSettings.keyCode + 2,
+            modifiers: HotKeyAction.capture.defaultSettings.modifiers
+        )
+        assertHotKeySuccess(controller.apply(replacement, to: .capture))
+
+        XCTAssertTrue(controller.isHotKeyEnabled(for: .capture))
+        XCTAssertEqual(controller.registeredHotKey(for: .capture), replacement)
+        XCTAssertFalse(store.settings.disabledHotkeys.contains(HotKeyAction.capture.rawValue))
+    }
+
+    @MainActor
+    func testDisabledHotKeyRemainsDisabledAfterControllerRestarts() {
+        let store = FakeAppSettingsStore()
+        store.settings.disabledHotkeys = [HotKeyAction.teachingPen.rawValue]
+        let registrar = FakeGlobalHotKeyRegistrar()
+
+        let controller = makeHotKeyController(store: store, registrar: registrar)
+
+        XCTAssertFalse(controller.isHotKeyEnabled(for: .teachingPen))
+        XCTAssertNil(controller.registeredHotKey(for: .teachingPen))
+        XCTAssertNil(registrar.registered[.teachingPen])
     }
 
     @MainActor
@@ -481,7 +546,7 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
-    func testShortcutValuesUseLargeCenteredText() {
+    func testShortcutRecorderUsesSingleFieldWithCurrentShortcut() {
         let settingsStore = FakeAppSettingsStore()
         let controller = PreferencesWindowController(
             settingsStore: settingsStore,
@@ -500,36 +565,29 @@ final class AppSettingsTests: XCTestCase {
         controller.show(section: .shortcuts)
         controller.window?.contentView?.layoutSubtreeIfNeeded()
 
-        let badges = descendants(of: controller.window?.contentView, matching: NSView.self).filter {
-            $0.identifier?.rawValue == "shortcutValueBadge"
+        let recorderControls = descendants(of: controller.window?.contentView, matching: NSView.self)
+            .filter { $0.identifier?.rawValue == "shortcutRecorderControl" }
+        let recorderButtons = descendants(of: controller.window?.contentView, matching: NSButton.self)
+            .filter { $0.identifier?.rawValue == "shortcutRecorderButton" }
+        let clearButtons = descendants(of: controller.window?.contentView, matching: NSButton.self)
+            .filter { $0.identifier?.rawValue == "shortcutClearButton" }
+        let legacyBadges = descendants(of: controller.window?.contentView, matching: NSView.self)
+            .filter { $0.identifier?.rawValue == "shortcutValueBadge" }
+
+        XCTAssertEqual(recorderControls.count, 3)
+        XCTAssertEqual(recorderButtons.count, 3)
+        XCTAssertEqual(clearButtons.count, 3)
+        XCTAssertTrue(legacyBadges.isEmpty)
+        for control in recorderControls {
+            XCTAssertEqual(control.frame.size, NSSize(width: 258, height: 42))
         }
-        let values = descendants(of: controller.window?.contentView, matching: NSTextField.self).filter {
-            $0.identifier?.rawValue == "shortcutValueText"
-        }
-        XCTAssertEqual(badges.count, 3)
-        XCTAssertEqual(values.count, 3)
-        for (badge, value) in zip(badges, values) {
-            XCTAssertEqual(badge.frame.size, NSSize(width: 102, height: 36))
-            XCTAssertEqual(value.font?.pointSize, 16)
-            XCTAssertFalse(
-                value.font?.fontDescriptor.symbolicTraits.contains(.monoSpace) ?? true
-            )
-            XCTAssertEqual(value.alignment, .center)
-            XCTAssertEqual(value.frame.midX, badge.bounds.midX, accuracy: 1)
-            XCTAssertEqual(value.frame.midY, badge.bounds.midY, accuracy: 1)
-        }
-        let captureValue = values.first {
-            $0.stringValue == HotKeyFormatter.displayString(
-                HotKeyAction.capture.defaultSettings
-            )
-        }
-        let lastCharacterIndex = max((captureValue?.stringValue.utf16.count ?? 1) - 1, 0)
-        let baselineOffset = captureValue?.attributedStringValue.attribute(
-                .baselineOffset,
-                at: lastCharacterIndex,
-                effectiveRange: nil
-            ) as? NSNumber
-        XCTAssertEqual(baselineOffset?.intValue, -3)
+        XCTAssertEqual(
+            Set(recorderButtons.map(\.title)),
+            Set(HotKeyAction.allCases.map {
+                HotKeyFormatter.displayString($0.defaultSettings)
+            })
+        )
+        XCTAssertTrue(clearButtons.allSatisfy { !$0.isHidden })
     }
 
     @MainActor
@@ -555,13 +613,12 @@ final class AppSettingsTests: XCTestCase {
         let rows = descendants(of: controller.window?.contentView, matching: NSStackView.self)
             .filter { $0.identifier?.rawValue == "shortcutRow" }
         XCTAssertEqual(rows.count, 3)
-        var badgeFrames: [NSRect] = []
         var recorderFrames: [NSRect] = []
 
         for row in rows {
             guard
                 let labels = row.arrangedSubviews.first as? NSStackView,
-                let controls = row.arrangedSubviews.last as? NSStackView
+                let controls = row.arrangedSubviews.last
             else {
                 XCTFail("Expected shortcut row labels and controls")
                 continue
@@ -572,38 +629,115 @@ final class AppSettingsTests: XCTestCase {
                 XCTAssertEqual(label.alignment, .left)
             }
 
-            XCTAssertEqual(controls.identifier?.rawValue, "shortcutControls")
-            XCTAssertEqual(controls.frame.width, 230, accuracy: 1)
+            XCTAssertEqual(controls.identifier?.rawValue, "shortcutRecorderControl")
+            XCTAssertEqual(controls.frame.width, 258, accuracy: 1)
             XCTAssertEqual(
                 controls.frame.maxX,
                 row.bounds.maxX - row.edgeInsets.right,
                 accuracy: 1
             )
-
-            let badge = controls.arrangedSubviews.first
-            let recorder = controls.arrangedSubviews.last
-            XCTAssertEqual(badge?.frame.width ?? 0, 102, accuracy: 1)
-            if let badge {
-                badgeFrames.append(badge.frame)
-            }
-            if let recorder {
-                recorderFrames.append(recorder.frame)
-                XCTAssertEqual(
-                    recorder.alignmentRect(forFrame: recorder.frame).width,
-                    120,
-                    accuracy: 1
-                )
-            }
-        }
-
-        for frame in badgeFrames.dropFirst() {
-            XCTAssertEqual(frame.minX, badgeFrames[0].minX, accuracy: 1)
-            XCTAssertEqual(frame.maxX, badgeFrames[0].maxX, accuracy: 1)
+            recorderFrames.append(controls.frame)
         }
         for frame in recorderFrames.dropFirst() {
             XCTAssertEqual(frame.minX, recorderFrames[0].minX, accuracy: 1)
             XCTAssertEqual(frame.maxX, recorderFrames[0].maxX, accuracy: 1)
         }
+    }
+
+    @MainActor
+    func testShortcutClearButtonDisablesShortcutAndShowsPlaceholder() {
+        let settingsStore = FakeAppSettingsStore()
+        let registrar = FakeGlobalHotKeyRegistrar()
+        let controller = PreferencesWindowController(
+            settingsStore: settingsStore,
+            preferencesSettingsStore: FakePreferencesSettingsStore(),
+            hotKeyController: makeHotKeyController(
+                store: settingsStore,
+                registrar: registrar
+            ),
+            launchAtLoginManager: FakeLaunchAtLoginManager(),
+            updateChecker: FakeUpdateChecker()
+        )
+        defer {
+            controller.close()
+        }
+
+        controller.show(section: .shortcuts)
+        let rows = descendants(of: controller.window?.contentView, matching: NSStackView.self)
+            .filter { $0.identifier?.rawValue == "shortcutRow" }
+        let captureControl = rows.first?.arrangedSubviews.last
+        let clearButton = descendants(of: captureControl, matching: NSButton.self)
+            .first { $0.identifier?.rawValue == "shortcutClearButton" }
+
+        clearButton?.performClick(nil)
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(settingsStore.settings.disabledHotkeys.contains(HotKeyAction.capture.rawValue))
+        XCTAssertNil(registrar.registered[.capture])
+        let refreshedRows = descendants(of: controller.window?.contentView, matching: NSStackView.self)
+            .filter { $0.identifier?.rawValue == "shortcutRow" }
+        let refreshedCaptureControl = refreshedRows.first?.arrangedSubviews.last
+        let recorder = descendants(of: refreshedCaptureControl, matching: NSButton.self)
+            .first { $0.identifier?.rawValue == "shortcutRecorderButton" }
+        let refreshedClearButton = descendants(of: refreshedCaptureControl, matching: NSButton.self)
+            .first { $0.identifier?.rawValue == "shortcutClearButton" }
+        XCTAssertEqual(recorder?.title, "录制快捷键")
+        XCTAssertEqual(refreshedClearButton?.isHidden, true)
+    }
+
+    @MainActor
+    func testShortcutRecorderAcceptsCommandNumberAfterShortcutWasCleared() throws {
+        let settingsStore = FakeAppSettingsStore()
+        settingsStore.settings.disabledHotkeys = [HotKeyAction.teachingPen.rawValue]
+        let registrar = FakeGlobalHotKeyRegistrar()
+        let controller = PreferencesWindowController(
+            settingsStore: settingsStore,
+            preferencesSettingsStore: FakePreferencesSettingsStore(),
+            hotKeyController: makeHotKeyController(
+                store: settingsStore,
+                registrar: registrar
+            ),
+            launchAtLoginManager: FakeLaunchAtLoginManager(),
+            updateChecker: FakeUpdateChecker()
+        )
+        defer {
+            controller.close()
+        }
+
+        controller.show(section: .shortcuts)
+        let rows = descendants(of: controller.window?.contentView, matching: NSStackView.self)
+            .filter { $0.identifier?.rawValue == "shortcutRow" }
+        let teachingPenControl = rows[1].arrangedSubviews.last
+        let recorder = try XCTUnwrap(
+            descendants(of: teachingPenControl, matching: NSButton.self)
+                .first { $0.identifier?.rawValue == "shortcutRecorderButton" }
+        )
+        recorder.performClick(nil)
+        let event = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [.command],
+            timestamp: 0,
+            windowNumber: controller.window?.windowNumber ?? 0,
+            context: nil,
+            characters: "2",
+            charactersIgnoringModifiers: "2",
+            isARepeat: false,
+            keyCode: UInt16(HotKeyAction.teachingPen.defaultSettings.keyCode)
+        ))
+
+        XCTAssertTrue(recorder.performKeyEquivalent(with: event))
+        XCTAssertFalse(
+            settingsStore.settings.disabledHotkeys.contains(HotKeyAction.teachingPen.rawValue)
+        )
+        XCTAssertEqual(
+            settingsStore.settings.hotkeys[HotKeyAction.teachingPen.rawValue],
+            HotKeyAction.teachingPen.defaultSettings
+        )
+        XCTAssertEqual(
+            registrar.registered[.teachingPen],
+            HotKeyAction.teachingPen.defaultSettings
+        )
     }
 
     func testPreferencesMenuUsesShortAboutTitle() {

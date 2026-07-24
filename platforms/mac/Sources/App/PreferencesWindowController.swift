@@ -222,47 +222,28 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
         title: String,
         detail: String
     ) -> NSView {
-        let hotKey = hotKeyController.configuredHotKey(for: action)
-        let displayValue = HotKeyFormatter.displayString(hotKey)
-        let keyText = NSTextField(labelWithString: displayValue)
-        keyText.identifier = NSUserInterfaceItemIdentifier("shortcutValueText")
-        keyText.alignment = .center
-        let keyFont = NSFont.systemFont(ofSize: 16, weight: .semibold)
-        keyText.font = keyFont
-        if hotKey.keyCode == HotKeyAction.capture.defaultSettings.keyCode {
-            let text = NSMutableAttributedString(
-                string: displayValue,
-                attributes: [.font: keyFont]
-            )
-            text.addAttribute(
-                .baselineOffset,
-                value: -3,
-                range: NSRange(location: max(displayValue.utf16.count - 1, 0), length: 1)
-            )
-            keyText.attributedStringValue = text
-        }
-        keyText.translatesAutoresizingMaskIntoConstraints = false
-
-        let keyBadge = NSView()
-        keyBadge.identifier = NSUserInterfaceItemIdentifier("shortcutValueBadge")
-        keyBadge.wantsLayer = true
-        keyBadge.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
-        keyBadge.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.45).cgColor
-        keyBadge.layer?.borderWidth = 1
-        keyBadge.layer?.cornerRadius = 6
-        keyBadge.addSubview(keyText)
-        NSLayoutConstraint.activate([
-            keyBadge.widthAnchor.constraint(equalToConstant: 102),
-            keyBadge.heightAnchor.constraint(equalToConstant: 36),
-            keyText.centerXAnchor.constraint(equalTo: keyBadge.centerXAnchor),
-            keyText.centerYAnchor.constraint(equalTo: keyBadge.centerYAnchor)
-        ])
-
-        let recorder = ShortcutRecorderButton(title: strings.record)
-        recorder.identifier = NSUserInterfaceItemIdentifier("shortcutRecorderButton")
+        let isAssigned = hotKeyController.isHotKeyEnabled(for: action)
+        let displayValue = isAssigned
+            ? HotKeyFormatter.displayString(hotKeyController.configuredHotKey(for: action))
+            : nil
+        let recorder = ShortcutRecorderControl(
+            shortcutTitle: displayValue,
+            placeholderTitle: strings.recordShortcut,
+            recordingTitle: strings.recording,
+            clearToolTip: strings.clearShortcut
+        )
+        recorder.identifier = NSUserInterfaceItemIdentifier("shortcutRecorderControl")
         recorder.isEnabled = !hotKeyController.isCaptureSessionActive
-        recorder.recordingTitle = strings.recording
-        recorder.widthAnchor.constraint(equalToConstant: 120).isActive = true
+        recorder.widthAnchor.constraint(equalToConstant: 258).isActive = true
+        recorder.heightAnchor.constraint(equalToConstant: 42).isActive = true
+        recorder.onClear = { [weak self] in
+            guard let self else { return }
+            let result = self.hotKeyController.disable(action)
+            if case .failure(let error) = result {
+                self.presentHotKeyError(error)
+            }
+            self.refresh()
+        }
         recorder.onCancel = { [weak self] in
             self?.refresh()
         }
@@ -275,14 +256,7 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
             self.refresh()
         }
 
-        let controls = NSStackView(views: [keyBadge, recorder])
-        controls.identifier = NSUserInterfaceItemIdentifier("shortcutControls")
-        controls.orientation = .horizontal
-        controls.alignment = .centerY
-        controls.spacing = 8
-        controls.widthAnchor.constraint(equalToConstant: 230).isActive = true
-
-        let row = makeRow(title: title, detail: detail, control: controls)
+        let row = makeRow(title: title, detail: detail, control: recorder)
         row.identifier = NSUserInterfaceItemIdentifier("shortcutRow")
         if let error = hotKeyController.errors[action] {
             row.toolTip = localizedHotKeyError(error)
@@ -765,19 +739,110 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
 }
 
 @MainActor
+private final class ShortcutRecorderControl: NSView {
+    var onRecorded: ((HotKeySettings) -> Void)?
+    var onCancel: (() -> Void)?
+    var onClear: (() -> Void)?
+
+    var isEnabled = true {
+        didSet {
+            recorderButton.isEnabled = isEnabled
+            clearButton.isEnabled = isEnabled
+        }
+    }
+
+    private let recorderButton: ShortcutRecorderButton
+    private let clearButton: NSButton
+    private let hasShortcut: Bool
+
+    init(
+        shortcutTitle: String?,
+        placeholderTitle: String,
+        recordingTitle: String,
+        clearToolTip: String
+    ) {
+        hasShortcut = shortcutTitle != nil
+        recorderButton = ShortcutRecorderButton(
+            title: shortcutTitle ?? placeholderTitle,
+            usesPlaceholderStyle: shortcutTitle == nil
+        )
+        clearButton = NSButton(
+            image: NSImage(
+                systemSymbolName: "xmark.circle.fill",
+                accessibilityDescription: clearToolTip
+            ) ?? NSImage(),
+            target: nil,
+            action: nil
+        )
+        super.init(frame: .zero)
+
+        recorderButton.identifier = NSUserInterfaceItemIdentifier("shortcutRecorderButton")
+        recorderButton.recordingTitle = recordingTitle
+        recorderButton.onRecorded = { [weak self] settings in
+            self?.onRecorded?(settings)
+        }
+        recorderButton.onCancel = { [weak self] in
+            self?.onCancel?()
+        }
+        recorderButton.onRecordingStateChange = { [weak self] isRecording in
+            guard let self else { return }
+            self.clearButton.isHidden = isRecording || !self.hasShortcut
+        }
+
+        clearButton.identifier = NSUserInterfaceItemIdentifier("shortcutClearButton")
+        clearButton.isBordered = false
+        clearButton.imagePosition = .imageOnly
+        clearButton.contentTintColor = .secondaryLabelColor
+        clearButton.toolTip = clearToolTip
+        clearButton.target = self
+        clearButton.action = #selector(clearShortcut)
+        clearButton.isHidden = !hasShortcut
+
+        recorderButton.translatesAutoresizingMaskIntoConstraints = false
+        clearButton.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(recorderButton)
+        addSubview(clearButton)
+        NSLayoutConstraint.activate([
+            recorderButton.leadingAnchor.constraint(equalTo: leadingAnchor),
+            recorderButton.trailingAnchor.constraint(equalTo: trailingAnchor),
+            recorderButton.topAnchor.constraint(equalTo: topAnchor),
+            recorderButton.bottomAnchor.constraint(equalTo: bottomAnchor),
+            clearButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            clearButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            clearButton.widthAnchor.constraint(equalToConstant: 24),
+            clearButton.heightAnchor.constraint(equalToConstant: 24)
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    @objc private func clearShortcut() {
+        guard isEnabled, hasShortcut else { return }
+        onClear?()
+    }
+}
+
+@MainActor
 private final class ShortcutRecorderButton: NSButton {
     var recordingTitle = "Press shortcut…"
     var onRecorded: ((HotKeySettings) -> Void)?
     var onCancel: (() -> Void)?
+    var onRecordingStateChange: ((Bool) -> Void)?
 
     private let idleTitle: String
+    private let usesPlaceholderStyle: Bool
     private var isRecording = false
 
-    init(title: String) {
+    init(title: String, usesPlaceholderStyle: Bool) {
         idleTitle = title
+        self.usesPlaceholderStyle = usesPlaceholderStyle
         super.init(frame: .zero)
-        self.title = title
+        setDisplayedTitle(title, placeholder: usesPlaceholderStyle)
         bezelStyle = .rounded
+        controlSize = .large
+        focusRingType = .default
         target = self
         action = #selector(beginRecording)
     }
@@ -791,7 +856,8 @@ private final class ShortcutRecorderButton: NSButton {
     @objc private func beginRecording() {
         guard isEnabled else { return }
         isRecording = true
-        title = recordingTitle
+        setDisplayedTitle(recordingTitle, placeholder: true)
+        onRecordingStateChange?(true)
         window?.makeFirstResponder(self)
     }
 
@@ -800,6 +866,18 @@ private final class ShortcutRecorderButton: NSButton {
             super.keyDown(with: event)
             return
         }
+        record(event)
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard isRecording else {
+            return super.performKeyEquivalent(with: event)
+        }
+        record(event)
+        return true
+    }
+
+    private func record(_ event: NSEvent) {
         if event.keyCode == 53 {
             finishRecording()
             onCancel?()
@@ -820,6 +898,23 @@ private final class ShortcutRecorderButton: NSButton {
 
     private func finishRecording() {
         isRecording = false
-        title = idleTitle
+        setDisplayedTitle(idleTitle, placeholder: usesPlaceholderStyle)
+        onRecordingStateChange?(false)
+    }
+
+    private func setDisplayedTitle(_ value: String, placeholder: Bool) {
+        title = value
+        attributedTitle = NSAttributedString(
+            string: value,
+            attributes: [
+                .font: NSFont.systemFont(
+                    ofSize: 16,
+                    weight: placeholder ? .regular : .semibold
+                ),
+                .foregroundColor: placeholder
+                    ? NSColor.placeholderTextColor
+                    : NSColor.labelColor
+            ]
+        )
     }
 }
