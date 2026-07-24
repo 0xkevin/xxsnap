@@ -770,6 +770,26 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(HotKeyAction.recognizeText.defaultSettings.modifiers, UInt32(cmdKey))
     }
 
+    func testOCRJoinCandidatesSortsTopToBottomThenLeftToRight() {
+        let candidates = [
+            RecognizedTextCandidate(text: "World", boundingBox: CGRect(x: 0.45, y: 0.70, width: 0.2, height: 0.1)),
+            RecognizedTextCandidate(text: "Hello", boundingBox: CGRect(x: 0.10, y: 0.70, width: 0.2, height: 0.1)),
+            RecognizedTextCandidate(text: "Second line", boundingBox: CGRect(x: 0.10, y: 0.40, width: 0.5, height: 0.1)),
+        ]
+
+        XCTAssertEqual(OCRTextRecognitionService.join(candidates), "Hello World\nSecond line")
+    }
+
+    func testOCRJoinCandidatesTrimsEmptyTextAndWhitespace() {
+        let candidates = [
+            RecognizedTextCandidate(text: "  Alpha  ", boundingBox: CGRect(x: 0.1, y: 0.8, width: 0.2, height: 0.1)),
+            RecognizedTextCandidate(text: "   ", boundingBox: CGRect(x: 0.3, y: 0.8, width: 0.2, height: 0.1)),
+            RecognizedTextCandidate(text: "Beta", boundingBox: CGRect(x: 0.1, y: 0.5, width: 0.2, height: 0.1)),
+        ]
+
+        XCTAssertEqual(OCRTextRecognitionService.join(candidates), "Alpha\nBeta")
+    }
+
     func testFeatureGateKeepsTrialFullyOpenAndRestrictsFreeCoreFeatures() {
         XCTAssertTrue(FeatureGate(license: LicenseState(plan: .trial)).isEnabled(.scrollCapture))
         XCTAssertTrue(FeatureGate(license: LicenseState(plan: .trial)).isEnabled(.ocr))
