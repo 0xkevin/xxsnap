@@ -50,7 +50,7 @@
 
 ```text
 Capture                       Command + `
-Recognize Text                Command + 3
+Capture Text                  Command + 3
 Presentation Pen              Command + 2
 Preferences…
 Check for Updates…
