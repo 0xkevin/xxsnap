@@ -102,6 +102,7 @@ final class CaptureCoordinator {
     private let permissionCoordinator: PermissionCoordinator
     private let screenCaptureService: ScreenCaptureService
     private let settingsStore: SettingsStore
+    private let preferencesSettingsStore: any PreferencesSettingsStoring
     private let filenameProvider: any CaptureFilenameProviding
     private let languageSnapshot: CaptureLanguageSnapshot
     private var captureTask: Task<Void, Never>?
@@ -129,6 +130,7 @@ final class CaptureCoordinator {
     private let longImageSaveHandler: (@MainActor (NSImage) -> Bool)?
     private let ocrTextRecognizer: any OCRTextRecognizing
     private let textCopyHandler: @MainActor (String) -> Bool
+    private let ocrResultPresenter: OCRResultPresentationController
     private let frontmostApplicationResolver: @MainActor () -> NSRunningApplication?
     private let applicationActivator: @MainActor (NSRunningApplication) -> Void
     private let scrollCaptureTargetDetector: any ScrollCaptureTargetDetecting
@@ -150,6 +152,7 @@ final class CaptureCoordinator {
         permissionCoordinator: PermissionCoordinator,
         screenCaptureService: ScreenCaptureService,
         settingsStore: SettingsStore = SettingsStore(),
+        preferencesSettingsStore: any PreferencesSettingsStoring = PreferencesSettingsStore(),
         filenameProvider: any CaptureFilenameProviding = CaptureFilenameProvider(),
         pinnedWindowFactory: (@MainActor (NSImage, NSRect) -> PinnedImageWindowPresenting)? = nil,
         scrollCaptureSessionFactory: (@MainActor (
@@ -169,6 +172,7 @@ final class CaptureCoordinator {
         longImageSaveHandler: (@MainActor (NSImage) -> Bool)? = nil,
         ocrTextRecognizer: any OCRTextRecognizing = OCRTextRecognitionService(),
         textCopyHandler: (@MainActor (String) -> Bool)? = nil,
+        ocrResultPresenter: OCRResultPresentationController? = nil,
         frontmostApplicationResolver: @escaping @MainActor () -> NSRunningApplication? = CaptureCoordinator.refreshTargetApplication,
         applicationActivator: @escaping @MainActor (NSRunningApplication) -> Void = { application in
             application.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
@@ -180,6 +184,7 @@ final class CaptureCoordinator {
         self.permissionCoordinator = permissionCoordinator
         self.screenCaptureService = screenCaptureService
         self.settingsStore = settingsStore
+        self.preferencesSettingsStore = preferencesSettingsStore
         self.filenameProvider = filenameProvider
         let languageSnapshot = CaptureLanguageSnapshot(language: settingsStore.load().language)
         self.languageSnapshot = languageSnapshot
@@ -229,6 +234,7 @@ final class CaptureCoordinator {
         self.longImageSaveHandler = longImageSaveHandler
         self.ocrTextRecognizer = ocrTextRecognizer
         self.textCopyHandler = textCopyHandler ?? Self.copyTextToPasteboard
+        self.ocrResultPresenter = ocrResultPresenter ?? OCRResultPresentationController()
         self.frontmostApplicationResolver = frontmostApplicationResolver
         self.applicationActivator = applicationActivator
         self.scrollCaptureTargetDetector = scrollCaptureTargetDetector
@@ -1005,7 +1011,7 @@ final class CaptureCoordinator {
                     )
                 }
                 if completedOverlayMode == .textRecognition {
-                    try await handleTextRecognition(image)
+                    await handleTextRecognition(image, screenRect: result.screenRect)
                     self.frozenDesktopImage = nil
                     return
                 }
@@ -1060,23 +1066,39 @@ final class CaptureCoordinator {
                 )
             } catch {
                 self.frozenDesktopImage = nil
+                if completedOverlayMode == .textRecognition {
+                    self.ocrResultPresenter.showFailure(near: result.screenRect)
+                }
                 NSLog("xxsnap capture failed: \(error.localizedDescription)")
             }
         }
     }
 
-    private func handleTextRecognition(_ image: NSImage) async throws {
-        let text = try await ocrTextRecognizer.recognizeText(in: image)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else {
-            NSLog("xxsnap text recognition completed with empty result")
-            return
+    private func handleTextRecognition(_ image: NSImage, screenRect: NSRect) async {
+        do {
+            let text = try await ocrTextRecognizer.recognizeText(in: image)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else {
+                ocrResultPresenter.showFailure(near: screenRect)
+                NSLog("xxsnap text recognition completed with empty result")
+                return
+            }
+            guard textCopyHandler(text) else {
+                ocrResultPresenter.showFailure(near: screenRect)
+                NSLog("xxsnap text recognition copy failed")
+                return
+            }
+            let preferences = preferencesSettingsStore.load()
+            ocrResultPresenter.showSuccess(
+                near: screenRect,
+                playsSound: !preferences.disablesTextRecognitionSound,
+                showsNotification: !preferences.disablesTextRecognitionSuccessNotification
+            )
+            NSLog("xxsnap text recognition copied %ld characters", text.count)
+        } catch {
+            ocrResultPresenter.showFailure(near: screenRect)
+            NSLog("xxsnap text recognition failed: \(error.localizedDescription)")
         }
-        guard textCopyHandler(text) else {
-            NSLog("xxsnap text recognition copy failed")
-            return
-        }
-        NSLog("xxsnap text recognition copied %ld characters", text.count)
     }
 
     private func captureFallbackImage(

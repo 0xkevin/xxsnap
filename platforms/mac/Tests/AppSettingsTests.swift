@@ -93,7 +93,9 @@ final class AppSettingsTests: XCTestCase {
         let settings = PreferencesSettings(
             filenameTemplate: "Capture {yyyyMMdd}_{HHmmss}",
             checksForUpdatesAtLaunch: false,
-            updateCheckIntervalHours: 6
+            updateCheckIntervalHours: 6,
+            disablesTextRecognitionSound: false,
+            disablesTextRecognitionSuccessNotification: false
         )
         try store.save(settings)
 
@@ -127,6 +129,8 @@ final class AppSettingsTests: XCTestCase {
             PreferencesSettings.default.checksForUpdatesAtLaunch
         )
         XCTAssertEqual(settings.updateCheckIntervalHours, 6)
+        XCTAssertTrue(settings.disablesTextRecognitionSound)
+        XCTAssertTrue(settings.disablesTextRecognitionSuccessNotification)
     }
 
     func testFilenameTemplateRendererUsesSupportedVariablesAndAddsPng() throws {
@@ -508,6 +512,52 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testGeneralPreferencesPersistTextRecognitionFeedbackSwitches() throws {
+        let settingsStore = FakeAppSettingsStore()
+        let preferencesStore = FakePreferencesSettingsStore()
+        let controller = PreferencesWindowController(
+            settingsStore: settingsStore,
+            preferencesSettingsStore: preferencesStore,
+            hotKeyController: makeHotKeyController(
+                store: settingsStore,
+                registrar: FakeGlobalHotKeyRegistrar()
+            ),
+            launchAtLoginManager: FakeLaunchAtLoginManager(),
+            updateChecker: FakeUpdateChecker()
+        )
+        defer {
+            controller.close()
+        }
+
+        controller.show(section: .general)
+        let labels = descendants(
+            of: controller.window?.contentView,
+            matching: NSTextField.self
+        ).map(\.stringValue)
+        XCTAssertTrue(labels.contains("禁用识别文字提示音"))
+        XCTAssertTrue(labels.contains("禁用识别文字通知"))
+
+        let switches = descendants(
+            of: controller.window?.contentView,
+            matching: NSSwitch.self
+        )
+        let soundSwitch = try XCTUnwrap(switches.first {
+            $0.identifier?.rawValue == "disableTextRecognitionSound"
+        })
+        let notificationSwitch = try XCTUnwrap(switches.first {
+            $0.identifier?.rawValue == "disableTextRecognitionSuccessNotification"
+        })
+        XCTAssertEqual(soundSwitch.state, .on)
+        XCTAssertEqual(notificationSwitch.state, .on)
+
+        soundSwitch.performClick(nil)
+        notificationSwitch.performClick(nil)
+
+        XCTAssertFalse(preferencesStore.settings.disablesTextRecognitionSound)
+        XCTAssertFalse(preferencesStore.settings.disablesTextRecognitionSuccessNotification)
+    }
+
+    @MainActor
     func testSavePreferencesUsesWideEditorAndFramedPreview() {
         let settingsStore = FakeAppSettingsStore()
         let controller = PreferencesWindowController(
@@ -790,15 +840,33 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(OCRTextRecognitionService.join(candidates), "Alpha\nBeta")
     }
 
-    func testTextRecognitionOverlayConfigurationHidesScreenshotTools() {
+    func testTextRecognitionOverlayConfigurationHidesScreenshotTools() throws {
         let configuration = SelectionOverlayConfiguration.textRecognition()
 
         XCTAssertFalse(configuration.showsAnnotationToolbarButtons)
         XCTAssertTrue(configuration.hiddenMainToolbarButtons.contains(.scroll))
+        XCTAssertTrue(configuration.hiddenMainToolbarButtons.contains(.cancel))
         XCTAssertTrue(configuration.hiddenMainToolbarButtons.contains(.pin))
         XCTAssertTrue(configuration.hiddenMainToolbarButtons.contains(.save))
-        XCTAssertFalse(configuration.hiddenMainToolbarButtons.contains(.copy))
-        XCTAssertFalse(configuration.hiddenMainToolbarButtons.contains(.cancel))
+        XCTAssertTrue(configuration.hiddenMainToolbarButtons.contains(.copy))
+        XCTAssertFalse(configuration.allowsSelectionGeometryEditing)
+        XCTAssertFalse(configuration.showsSelectionMeasurementControl)
+        XCTAssertEqual(configuration.outsideSelectionDimAlpha, 0)
+        let fillColor = try XCTUnwrap(configuration.selectionFillColor)
+        XCTAssertEqual(fillColor.whiteComponent, 0.70, accuracy: 0.001)
+        XCTAssertEqual(fillColor.alphaComponent, 0.28, accuracy: 0.001)
+    }
+
+    func testCorrectIconIsBundledForTextRecognitionSuccess() {
+        XCTAssertNotNil(Bundle.main.url(forResource: "correct", withExtension: "svg"))
+    }
+
+    func testFailedIconIsBundledForTextRecognitionFailure() {
+        XCTAssertNotNil(Bundle.main.url(forResource: "failed", withExtension: "svg"))
+    }
+
+    func testNotificationSoundIsBundledForTextRecognitionSuccess() {
+        XCTAssertNotNil(Bundle.main.url(forResource: "notification", withExtension: "mp3"))
     }
 
     func testFeatureGateKeepsTrialFullyOpenAndRestrictsFreeCoreFeatures() {

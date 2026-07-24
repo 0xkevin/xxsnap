@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             permissionCoordinator: PermissionCoordinator(),
             screenCaptureService: ScreenCaptureService(),
             settingsStore: settingsStore,
+            preferencesSettingsStore: preferencesSettingsStore,
             filenameProvider: filenameProvider
         )
         self.settingsStore = settingsStore

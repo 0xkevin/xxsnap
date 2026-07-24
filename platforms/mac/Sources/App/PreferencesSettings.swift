@@ -8,21 +8,29 @@ struct PreferencesSettings: Codable, Equatable {
     var filenameTemplate: String
     var checksForUpdatesAtLaunch: Bool
     var updateCheckIntervalHours: Int
+    var disablesTextRecognitionSound: Bool
+    var disablesTextRecognitionSuccessNotification: Bool
 
     static let `default` = PreferencesSettings(
         filenameTemplate: defaultFilenameTemplate,
         checksForUpdatesAtLaunch: true,
-        updateCheckIntervalHours: 24
+        updateCheckIntervalHours: 24,
+        disablesTextRecognitionSound: true,
+        disablesTextRecognitionSuccessNotification: true
     )
 
     init(
         filenameTemplate: String,
         checksForUpdatesAtLaunch: Bool,
-        updateCheckIntervalHours: Int
+        updateCheckIntervalHours: Int,
+        disablesTextRecognitionSound: Bool = true,
+        disablesTextRecognitionSuccessNotification: Bool = true
     ) {
         self.filenameTemplate = filenameTemplate
         self.checksForUpdatesAtLaunch = checksForUpdatesAtLaunch
         self.updateCheckIntervalHours = Self.normalizedUpdateInterval(updateCheckIntervalHours)
+        self.disablesTextRecognitionSound = disablesTextRecognitionSound
+        self.disablesTextRecognitionSuccessNotification = disablesTextRecognitionSuccessNotification
     }
 
     init(from decoder: Decoder) throws {
@@ -35,6 +43,12 @@ struct PreferencesSettings: Codable, Equatable {
         let decodedInterval = (try? container.decode(Int.self, forKey: .updateCheckIntervalHours))
             ?? defaults.updateCheckIntervalHours
         updateCheckIntervalHours = Self.normalizedUpdateInterval(decodedInterval)
+        disablesTextRecognitionSound =
+            (try? container.decode(Bool.self, forKey: .disablesTextRecognitionSound))
+            ?? defaults.disablesTextRecognitionSound
+        disablesTextRecognitionSuccessNotification =
+            (try? container.decode(Bool.self, forKey: .disablesTextRecognitionSuccessNotification))
+            ?? defaults.disablesTextRecognitionSuccessNotification
     }
 
     private static func normalizedUpdateInterval(_ value: Int) -> Int {
@@ -205,6 +219,20 @@ struct PreferencesStrings {
     var languageTitle: String { isEnglish ? "Language" : "语言" }
     var languageDetail: String {
         isEnglish ? "Menu and preferences update immediately" : "菜单和首选项立即切换"
+    }
+    var disableTextRecognitionSound: String {
+        isEnglish ? "Disable Capture Text sound" : "禁用识别文字提示音"
+    }
+    var disableTextRecognitionSoundDetail: String {
+        isEnglish ? "Do not play a sound after successful recognition" : "识别成功后不播放提示音"
+    }
+    var disableTextRecognitionSuccessNotification: String {
+        isEnglish ? "Disable Capture Text notification" : "禁用识别文字通知"
+    }
+    var disableTextRecognitionSuccessNotificationDetail: String {
+        isEnglish
+            ? "Hide successful recognition notifications; failures are always shown"
+            : "不显示识别成功提示，识别失败仍会正常提示"
     }
     var needsApproval: String {
         isEnglish ? "Allow XxSnap in System Settings to finish enabling this option." : "需要在系统设置中允许 XxSnap。"

@@ -43,6 +43,18 @@ private final class FakeOCRTextRecognizer: OCRTextRecognizing {
     }
 }
 
+private final class FakeOCRPreferencesSettingsStore: PreferencesSettingsStoring {
+    var settings = PreferencesSettings.default
+
+    func load() -> PreferencesSettings {
+        settings
+    }
+
+    func save(_ settings: PreferencesSettings) throws {
+        self.settings = settings
+    }
+}
+
 @MainActor
 private final class FakeScrollCaptureSession: ScrollCaptureSessionRunning {
     enum Failure: Error, Equatable { case start, finish }
@@ -4434,7 +4446,7 @@ final class SelectionToolbarStateTests: XCTestCase {
     }
 
     @MainActor
-    func testTextRecognitionToolbarContainsOnlyCancelAndCopy() throws {
+    func testTextRecognitionDoesNotShowToolbar() {
         let image = solidImage(size: NSSize(width: 640, height: 420), color: .white)
         let window = SelectionOverlayWindow(
             backgroundImage: image,
@@ -4442,18 +4454,90 @@ final class SelectionToolbarStateTests: XCTestCase {
         ) { _ in }
         window.test_setLockedSelectionRect(NSRect(x: 80, y: 60, width: 260, height: 180))
 
-        XCTAssertNotNil(window.test_mainToolbarButtonRect(for: .cancel))
-        XCTAssertNotNil(window.test_mainToolbarButtonRect(for: .copy))
-
-        let hiddenButtons: [TestToolbarButton] = [
+        let buttons: [TestToolbarButton] = [
             .rectangle, .arrow, .pen, .marker, .eyedropper, .mosaic,
             .text, .number, .magnifier, .eraser,
-            .undo, .redo, .pin, .save, .scroll, .finishEditing,
+            .undo, .redo, .cancel, .pin, .save, .copy, .scroll, .finishEditing,
         ]
-        for button in hiddenButtons {
+        for button in buttons {
             XCTAssertNil(window.test_mainToolbarButtonRect(for: button), "\(button) should be hidden")
         }
-        XCTAssertEqual(window.test_mainToolbarButtonRects().count, 2)
+        XCTAssertTrue(window.test_mainToolbarButtonRects().isEmpty)
+        XCTAssertNil(window.test_mainToolbarRect())
+    }
+
+    @MainActor
+    func testTextRecognitionDoesNotCreateHoverMaskBeforeDrag() {
+        let window = SelectionOverlayWindow(
+            backgroundImage: solidImage(size: NSSize(width: 400, height: 300), color: .white),
+            configuration: .textRecognition()
+        ) { _ in }
+        window.test_setWindowSelectionCandidates([
+            WindowSelectionCandidate(
+                id: 1,
+                ownerPID: 10,
+                layer: 0,
+                alpha: 1,
+                bounds: NSRect(x: 0, y: 0, width: 400, height: 300),
+                name: "desktop"
+            ),
+        ])
+
+        window.test_mouseMoved(to: NSPoint(x: 200, y: 150))
+
+        XCTAssertNil(window.test_currentSelectionRect)
+    }
+
+    @MainActor
+    func testTextRecognitionCompletesAutomaticallyWhenSelectionEnds() async throws {
+        let image = solidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let completion = expectation(description: "automatic OCR selection")
+        var result: CaptureSelectionResult?
+        let window = SelectionOverlayWindow(
+            backgroundImage: image,
+            configuration: .textRecognition()
+        ) {
+            result = $0
+            completion.fulfill()
+        }
+
+        window.test_drag(
+            from: NSPoint(x: 80, y: 60),
+            to: NSPoint(x: 340, y: 240)
+        )
+        await fulfillment(of: [completion], timeout: 1)
+
+        XCTAssertEqual(result?.snapshotRect, NSRect(x: 80, y: 60, width: 260, height: 180))
+        XCTAssertEqual(result?.action, .copy)
+    }
+
+    @MainActor
+    func testTextRecognitionSelectionUsesUndimmedHairlineSquareStyle() throws {
+        let image = solidImage(size: NSSize(width: 400, height: 300), color: .black)
+        let window = SelectionOverlayWindow(
+            backgroundImage: image,
+            configuration: .textRecognition()
+        ) { _ in }
+        XCTAssertNil(window.test_backgroundImage)
+
+        window.test_mouseDown(at: NSPoint(x: 80, y: 60))
+        window.test_mouseDragged(to: NSPoint(x: 320, y: 220))
+
+        let rendered = try XCTUnwrap(window.test_renderedOverlayImage())
+        let outside = try XCTUnwrap(rgbaRenderPixel(in: rendered, at: NSPoint(x: 30, y: 30)))
+        let inside = try XCTUnwrap(rgbaRenderPixel(in: rendered, at: NSPoint(x: 180, y: 140)))
+        let border = try XCTUnwrap(rgbaRenderPixel(in: rendered, at: NSPoint(x: 80, y: 140)))
+
+        XCTAssertEqual(outside.red, 0)
+        XCTAssertEqual(outside.green, 0)
+        XCTAssertEqual(outside.blue, 0)
+        XCTAssertGreaterThan(inside.red, 0)
+        XCTAssertEqual(inside.red, inside.green)
+        XCTAssertEqual(inside.green, inside.blue)
+        XCTAssertGreaterThanOrEqual(border.red, 245)
+        XCTAssertGreaterThanOrEqual(border.green, 245)
+        XCTAssertGreaterThanOrEqual(border.blue, 245)
+        XCTAssertEqual(window.test_selectionCornerRadius, 0)
     }
 
     @MainActor
@@ -10622,9 +10706,15 @@ final class SelectionToolbarStateTests: XCTestCase {
 
     @MainActor
     func testCaptureCoordinatorTextRecognitionEmptyResultDoesNotCopy() async throws {
+        let panelIdentifier = NSUserInterfaceItemIdentifier("xxsnap.ocr-copy-success")
+        NSApp.windows
+            .filter { $0.identifier == panelIdentifier }
+            .forEach { $0.close() }
+
         let image = solidImage(size: NSSize(width: 80, height: 60), color: .white)
         let recognizer = FakeOCRTextRecognizer(result: " \n ")
         var copyCount = 0
+        var successSoundCount = 0
         let result = CaptureSelectionResult(
             screenRect: NSRect(origin: .zero, size: image.size),
             snapshotRect: NSRect(origin: .zero, size: image.size),
@@ -10638,6 +10728,9 @@ final class SelectionToolbarStateTests: XCTestCase {
             textCopyHandler: { _ in
                 copyCount += 1
                 return true
+            },
+            ocrResultPresenter: OCRResultPresentationController {
+                successSoundCount += 1
             }
         )
         let expectation = expectation(description: "empty text recognition")
@@ -10652,8 +10745,205 @@ final class SelectionToolbarStateTests: XCTestCase {
         await fulfillment(of: [expectation], timeout: 2)
 
         XCTAssertEqual(copyCount, 0)
+        XCTAssertEqual(successSoundCount, 0)
         XCTAssertEqual(recognizer.images.count, 1)
         XCTAssertNil(coordinator.test_lastCapture)
+
+        let panel = try XCTUnwrap(NSApp.windows.first { $0.identifier == panelIdentifier })
+        XCTAssertTrue(panel.isVisible)
+        XCTAssertEqual(panel.contentView?.accessibilityLabel(), "识别失败")
+        panel.orderOut(nil)
+    }
+
+    @MainActor
+    func testCaptureCoordinatorShowsLowerCenterCopySuccessPanelForThreeSeconds() async throws {
+        let panelIdentifier = NSUserInterfaceItemIdentifier("xxsnap.ocr-copy-success")
+        NSApp.windows
+            .filter { $0.identifier == panelIdentifier }
+            .forEach { $0.close() }
+
+        let image = solidImage(size: NSSize(width: 80, height: 60), color: .white)
+        let preferencesStore = FakeOCRPreferencesSettingsStore()
+        preferencesStore.settings.disablesTextRecognitionSound = false
+        preferencesStore.settings.disablesTextRecognitionSuccessNotification = false
+        var successSoundCount = 0
+        let result = CaptureSelectionResult(
+            screenRect: NSRect(origin: .zero, size: image.size),
+            snapshotRect: NSRect(origin: .zero, size: image.size),
+            annotations: [],
+            action: .copy
+        )
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            preferencesSettingsStore: preferencesStore,
+            ocrTextRecognizer: FakeOCRTextRecognizer(result: "Hello"),
+            textCopyHandler: { _ in true },
+            ocrResultPresenter: OCRResultPresentationController {
+                successSoundCount += 1
+            }
+        )
+        let completion = expectation(description: "text recognition")
+        coordinator.captureSessionDidEnd = {
+            completion.fulfill()
+        }
+
+        coordinator.test_installTextRecognitionOverlayWindow(
+            SelectionOverlayWindow(backgroundImage: image, configuration: .textRecognition()) { _ in }
+        )
+        coordinator.test_handleSelection(result, frozenDesktopImage: image)
+        await fulfillment(of: [completion], timeout: 2)
+
+        let panel = try XCTUnwrap(NSApp.windows.first { $0.identifier == panelIdentifier })
+        let screen = NSScreen.screens.first { $0.frame.intersects(result.screenRect) } ?? NSScreen.main
+        let visibleFrame = try XCTUnwrap(screen?.visibleFrame)
+        XCTAssertTrue(panel.isVisible)
+        XCTAssertEqual(panel.frame.size, NSSize(width: 176, height: 124))
+        XCTAssertEqual(panel.frame.midX, visibleFrame.midX, accuracy: 1)
+        XCTAssertGreaterThan(panel.frame.midY, visibleFrame.minY + visibleFrame.height * 0.20)
+        XCTAssertLessThan(panel.frame.midY, visibleFrame.minY + visibleFrame.height * 0.45)
+        XCTAssertEqual(panel.contentView?.accessibilityLabel(), "识别成功\n已复制到剪切板")
+        XCTAssertEqual(successSoundCount, 1)
+
+        try await Task.sleep(nanoseconds: 2_800_000_000)
+        XCTAssertTrue(panel.isVisible)
+        XCTAssertGreaterThan(panel.alphaValue, 0)
+        XCTAssertLessThan(panel.alphaValue, 1)
+
+        try await Task.sleep(nanoseconds: 450_000_000)
+        XCTAssertFalse(panel.isVisible)
+    }
+
+    @MainActor
+    func testCaptureCoordinatorCanDisableTextRecognitionSuccessSound() async throws {
+        let panelIdentifier = NSUserInterfaceItemIdentifier("xxsnap.ocr-copy-success")
+        NSApp.windows
+            .filter { $0.identifier == panelIdentifier }
+            .forEach { $0.close() }
+
+        let preferencesStore = FakeOCRPreferencesSettingsStore()
+        preferencesStore.settings.disablesTextRecognitionSound = true
+        preferencesStore.settings.disablesTextRecognitionSuccessNotification = false
+        var successSoundCount = 0
+        let image = solidImage(size: NSSize(width: 80, height: 60), color: .white)
+        let result = CaptureSelectionResult(
+            screenRect: NSRect(origin: .zero, size: image.size),
+            snapshotRect: NSRect(origin: .zero, size: image.size),
+            annotations: [],
+            action: .copy
+        )
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            preferencesSettingsStore: preferencesStore,
+            ocrTextRecognizer: FakeOCRTextRecognizer(result: "Hello"),
+            textCopyHandler: { _ in true },
+            ocrResultPresenter: OCRResultPresentationController {
+                successSoundCount += 1
+            }
+        )
+        let completion = expectation(description: "text recognition")
+        coordinator.captureSessionDidEnd = {
+            completion.fulfill()
+        }
+
+        coordinator.test_installTextRecognitionOverlayWindow(
+            SelectionOverlayWindow(backgroundImage: image, configuration: .textRecognition()) { _ in }
+        )
+        coordinator.test_handleSelection(result, frozenDesktopImage: image)
+        await fulfillment(of: [completion], timeout: 2)
+
+        XCTAssertEqual(successSoundCount, 0)
+        let panel = try XCTUnwrap(NSApp.windows.first { $0.identifier == panelIdentifier })
+        XCTAssertTrue(panel.isVisible)
+        XCTAssertEqual(panel.contentView?.accessibilityLabel(), "识别成功\n已复制到剪切板")
+        panel.orderOut(nil)
+    }
+
+    @MainActor
+    func testCaptureCoordinatorCanDisableOnlyTextRecognitionSuccessNotification() async {
+        let panelIdentifier = NSUserInterfaceItemIdentifier("xxsnap.ocr-copy-success")
+        NSApp.windows
+            .filter { $0.identifier == panelIdentifier }
+            .forEach { $0.close() }
+
+        let preferencesStore = FakeOCRPreferencesSettingsStore()
+        preferencesStore.settings.disablesTextRecognitionSound = false
+        preferencesStore.settings.disablesTextRecognitionSuccessNotification = true
+        var successSoundCount = 0
+        let image = solidImage(size: NSSize(width: 80, height: 60), color: .white)
+        let result = CaptureSelectionResult(
+            screenRect: NSRect(origin: .zero, size: image.size),
+            snapshotRect: NSRect(origin: .zero, size: image.size),
+            annotations: [],
+            action: .copy
+        )
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            preferencesSettingsStore: preferencesStore,
+            ocrTextRecognizer: FakeOCRTextRecognizer(result: "Hello"),
+            textCopyHandler: { _ in true },
+            ocrResultPresenter: OCRResultPresentationController {
+                successSoundCount += 1
+            }
+        )
+        let completion = expectation(description: "text recognition")
+        coordinator.captureSessionDidEnd = {
+            completion.fulfill()
+        }
+
+        coordinator.test_installTextRecognitionOverlayWindow(
+            SelectionOverlayWindow(backgroundImage: image, configuration: .textRecognition()) { _ in }
+        )
+        coordinator.test_handleSelection(result, frozenDesktopImage: image)
+        await fulfillment(of: [completion], timeout: 2)
+
+        XCTAssertEqual(successSoundCount, 1)
+        XCTAssertFalse(NSApp.windows.contains {
+            $0.identifier == panelIdentifier && $0.isVisible
+        })
+    }
+
+    @MainActor
+    func testCaptureCoordinatorAlwaysShowsTextRecognitionFailureNotification() async throws {
+        let panelIdentifier = NSUserInterfaceItemIdentifier("xxsnap.ocr-copy-success")
+        NSApp.windows
+            .filter { $0.identifier == panelIdentifier }
+            .forEach { $0.close() }
+
+        let preferencesStore = FakeOCRPreferencesSettingsStore()
+        preferencesStore.settings.disablesTextRecognitionSound = true
+        preferencesStore.settings.disablesTextRecognitionSuccessNotification = true
+        let image = solidImage(size: NSSize(width: 80, height: 60), color: .white)
+        let result = CaptureSelectionResult(
+            screenRect: NSRect(origin: .zero, size: image.size),
+            snapshotRect: NSRect(origin: .zero, size: image.size),
+            annotations: [],
+            action: .copy
+        )
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            preferencesSettingsStore: preferencesStore,
+            ocrTextRecognizer: FakeOCRTextRecognizer(result: " "),
+            textCopyHandler: { _ in true }
+        )
+        let completion = expectation(description: "text recognition failure")
+        coordinator.captureSessionDidEnd = {
+            completion.fulfill()
+        }
+
+        coordinator.test_installTextRecognitionOverlayWindow(
+            SelectionOverlayWindow(backgroundImage: image, configuration: .textRecognition()) { _ in }
+        )
+        coordinator.test_handleSelection(result, frozenDesktopImage: image)
+        await fulfillment(of: [completion], timeout: 2)
+
+        let panel = try XCTUnwrap(NSApp.windows.first { $0.identifier == panelIdentifier })
+        XCTAssertTrue(panel.isVisible)
+        XCTAssertEqual(panel.contentView?.accessibilityLabel(), "识别失败")
+        panel.orderOut(nil)
     }
 
     @MainActor
