@@ -37,6 +37,7 @@ struct AppSettings: Codable, Equatable {
     var language: AppLanguage
     var interfaceFont: InterfaceFontSettings?
     var hotkeys: [String: HotKeySettings]
+    var disabledHotkeys: Set<String>
     var license: LicenseState
 
     var paletteVisibleCount: Int {
@@ -51,6 +52,7 @@ struct AppSettings: Codable, Equatable {
             paletteVisibleCount: maximumPaletteVisibleCount,
             interfaceFont: nil,
             hotkeys: [:],
+            disabledHotkeys: [],
             license: LicenseState(plan: .trial)
         )
     }
@@ -60,13 +62,60 @@ struct AppSettings: Codable, Equatable {
         paletteVisibleCount: Int,
         interfaceFont: InterfaceFontSettings?,
         hotkeys: [String: HotKeySettings],
+        disabledHotkeys: Set<String> = [],
         license: LicenseState
     ) {
         self.language = language
         self.paletteVisibleCount = Self.clampedPaletteVisibleCount(paletteVisibleCount)
         self.interfaceFont = interfaceFont
         self.hotkeys = hotkeys
+        self.disabledHotkeys = disabledHotkeys
         self.license = license
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case language
+        case interfaceFont
+        case hotkeys
+        case disabledHotkeys
+        case license
+        case paletteVisibleCount
+    }
+
+    init(from decoder: Decoder) throws {
+        let defaults = Self.default
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        language = try container.decodeIfPresent(AppLanguage.self, forKey: .language)
+            ?? defaults.language
+        interfaceFont = try container.decodeIfPresent(
+            InterfaceFontSettings.self,
+            forKey: .interfaceFont
+        )
+        hotkeys = try container.decodeIfPresent(
+            [String: HotKeySettings].self,
+            forKey: .hotkeys
+        ) ?? defaults.hotkeys
+        disabledHotkeys = try container.decodeIfPresent(
+            Set<String>.self,
+            forKey: .disabledHotkeys
+        ) ?? defaults.disabledHotkeys
+        license = try container.decodeIfPresent(LicenseState.self, forKey: .license)
+            ?? defaults.license
+        let decodedPaletteCount = try container.decodeIfPresent(
+            Int.self,
+            forKey: .paletteVisibleCount
+        ) ?? defaults.paletteVisibleCount
+        paletteVisibleCount = Self.clampedPaletteVisibleCount(decodedPaletteCount)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(language, forKey: .language)
+        try container.encodeIfPresent(interfaceFont, forKey: .interfaceFont)
+        try container.encode(hotkeys, forKey: .hotkeys)
+        try container.encode(disabledHotkeys, forKey: .disabledHotkeys)
+        try container.encode(license, forKey: .license)
+        try container.encode(paletteVisibleCount, forKey: .paletteVisibleCount)
     }
 
     private static func clampedPaletteVisibleCount(_ count: Int) -> Int {

@@ -226,7 +226,9 @@ struct PreferencesStrings {
         isEnglish ? "Temporarily unavailable during capture" : "截图进行中会暂时停用"
     }
     var record: String { isEnglish ? "Record" : "录制" }
+    var recordShortcut: String { isEnglish ? "Record Shortcut" : "录制快捷键" }
     var recording: String { isEnglish ? "Press shortcut…" : "请按快捷键…" }
+    var clearShortcut: String { isEnglish ? "Clear Shortcut" : "清除快捷键" }
     var resetShortcuts: String { isEnglish ? "Restore Defaults" : "恢复默认快捷键" }
     var captureInProgress: String { isEnglish ? "Capture in progress" : "截图进行中" }
     var shortcutNeedsModifier: String {
