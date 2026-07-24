@@ -984,6 +984,13 @@ enum SelectionToolbarState {
         mode: OptionsToolbarMode = .shape
     ) -> SwatchSelection? {
         let rects = colorSwatchRects(in: optionsRect, paletteCount: paletteCount, mode: mode)
+        return swatchHitTarget(at: point, in: rects)
+    }
+
+    static func swatchHitTarget(
+        at point: NSPoint,
+        in rects: [NSRect]
+    ) -> SwatchSelection? {
         guard let customRect = rects.last else {
             return nil
         }
@@ -1636,6 +1643,73 @@ enum SelectionToolbarState {
         }
 
         return clamp(rect: candidates[0], inside: safeBounds)
+    }
+
+    static func contextualToolbarRect(
+        size: NSSize,
+        pointer: NSPoint,
+        inside bounds: NSRect,
+        gap: CGFloat = 6,
+        margin: CGFloat = 4
+    ) -> NSRect {
+        let safeBounds = bounds.insetBy(dx: margin, dy: margin)
+        let x = pointer.x + gap + size.width <= safeBounds.maxX
+            ? pointer.x + gap
+            : pointer.x - gap - size.width
+        let y = pointer.y - gap - size.height >= safeBounds.minY
+            ? pointer.y - gap - size.height
+            : pointer.y + gap
+        return clamp(
+            rect: NSRect(x: x, y: y, width: size.width, height: size.height),
+            inside: safeBounds
+        )
+    }
+
+    static func attachedToolbarRect(
+        size: NSSize,
+        attachedTo toolbar: NSRect,
+        inside bounds: NSRect,
+        gap: CGFloat = 4,
+        margin: CGFloat = 4
+    ) -> NSRect {
+        let safeBounds = bounds.insetBy(dx: margin, dy: margin)
+        let rightX = toolbar.maxX + gap
+        let leftX = toolbar.minX - gap - size.width
+        let x: CGFloat
+        if rightX + size.width <= safeBounds.maxX {
+            x = rightX
+        } else if leftX >= safeBounds.minX {
+            x = leftX
+        } else {
+            let rightSpace = safeBounds.maxX - toolbar.maxX
+            let leftSpace = toolbar.minX - safeBounds.minX
+            x = rightSpace >= leftSpace ? rightX : leftX
+        }
+        let y = toolbar.maxY - size.height
+        return clamp(
+            rect: NSRect(x: x, y: y, width: size.width, height: size.height),
+            inside: safeBounds
+        )
+    }
+
+    static func localScreenBounds(
+        containing point: NSPoint,
+        windowFrame: NSRect,
+        screenFrames: [NSRect]
+    ) -> NSRect? {
+        let screenPoint = NSPoint(
+            x: point.x + windowFrame.minX,
+            y: point.y + windowFrame.minY
+        )
+        guard let screenFrame = screenFrames.first(where: { $0.contains(screenPoint) }) else {
+            return nil
+        }
+        return NSRect(
+            x: screenFrame.minX - windowFrame.minX,
+            y: screenFrame.minY - windowFrame.minY,
+            width: screenFrame.width,
+            height: screenFrame.height
+        )
     }
 
     static func isFullScreenSelection(_ selectionRect: NSRect, in screenBounds: NSRect, tolerance: CGFloat = 1) -> Bool {

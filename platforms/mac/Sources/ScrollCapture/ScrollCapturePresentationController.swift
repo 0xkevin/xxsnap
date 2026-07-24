@@ -132,6 +132,7 @@ final class ScrollCapturePresentationController: NSObject {
     private static let boundaryMinimumWidth: CGFloat = 156
     private static let stepToolbarSize = NSSize(width: 202, height: 32)
     private static let directionControlWidth: CGFloat = 126
+    private static let startButtonFrame = NSRect(x: 138, y: 2, width: 28, height: 28)
     private let onStep: (ScrollCaptureDirection) -> Void
     private let onFinish: () -> Void
     private let onCancel: () -> Void
@@ -359,7 +360,7 @@ final class ScrollCapturePresentationController: NSObject {
 
         configureStepButton(
             startButton,
-            frame: NSRect(x: 138, y: 2, width: 28, height: 28),
+            frame: Self.startButtonFrame,
             resourceName: "mouse-point",
             fallbackSymbol: "play.circle",
             action: #selector(startPressed),
@@ -1056,7 +1057,9 @@ final class ScrollCapturePresentationController: NSObject {
         )
         stepGuidePanel.setFrame(guidePlacement.frame, display: false)
         stepGuideBackground.pointerDirection = guidePlacement.pointerDirection
-        stepGuideBackground.pointerCenterX = stepPanel.frame.minX + 120 - guidePlacement.frame.minX
+        stepGuideBackground.pointerCenterX = stepPanel.frame.minX
+            + startButton.frame.midX
+            - guidePlacement.frame.minX
         stepGuideLabel.frame = stepGuideBackground.bodyRect.insetBy(
             dx: Self.stepGuideHorizontalTextPadding,
             dy: 6
@@ -1304,7 +1307,7 @@ final class ScrollCapturePresentationController: NSObject {
             width: min(size.width, visible.width),
             height: min(size.height, visible.height)
         )
-        let startButtonCenterX = stepToolbarFrame.minX + 120
+        let startButtonCenterX = stepToolbarFrame.minX + startButtonFrame.midX
         let x = min(
             max(startButtonCenterX - size.width / 2, visible.minX),
             visible.maxX - size.width
@@ -1669,6 +1672,16 @@ final class ScrollCapturePresentationController: NSObject {
         stepGuideBackground.pointerDirection
     }
     var test_stepGuidePointerHeight: CGFloat { ScrollCaptureStepGuideView.pointerHeight }
+    var test_stepGuidePointerScreenX: CGFloat {
+        let centerX = min(
+            max(stepGuideBackground.pointerCenterX, 10),
+            max(10, stepGuideBackground.bounds.width - 10)
+        )
+        return stepGuidePanel.frame.minX + centerX
+    }
+    var test_startButtonScreenMidX: CGFloat {
+        stepPanel.frame.minX + startButton.frame.midX
+    }
     var test_directionControlIsEnabled: Bool { directionControl.isEnabled }
     var test_startButtonIsEnabled: Bool { startButton.isEnabled }
     var test_startButtonTint: NSColor? { startButton.contentTintColor }

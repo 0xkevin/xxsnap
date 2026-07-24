@@ -4294,6 +4294,505 @@ final class SelectionToolbarStateTests: XCTestCase {
     }
 
     @MainActor
+    func testTeachingPenStartsFullScreenWithBrushAndHiddenToolbars() {
+        let frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        let window = SelectionOverlayWindow(
+            backgroundImage: solidImage(size: frame.size, color: .white),
+            configuration: .teachingPen(windowFrame: frame)
+        ) { _ in }
+
+        XCTAssertEqual(window.test_lockedSelectionRect, NSRect(origin: .zero, size: frame.size))
+        XCTAssertEqual(window.test_currentShapeKind, .brush)
+        XCTAssertTrue(window.test_toolbarButtonIsSelected(.pen))
+        XCTAssertNil(window.test_mainToolbarRect())
+        XCTAssertNil(window.test_optionsToolbarRect)
+    }
+
+    @MainActor
+    func testTeachingPenRightClickShowsCompactToolbarBelowRightAndHidesBothToolbars() throws {
+        let frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        let window = SelectionOverlayWindow(
+            backgroundImage: solidImage(size: frame.size, color: .white),
+            configuration: .teachingPen(windowFrame: frame)
+        ) { _ in }
+        let pointer = NSPoint(x: 360, y: 420)
+
+        window.test_rightMouseDown(at: pointer)
+
+        let main = try XCTUnwrap(window.test_mainToolbarRect())
+        let options = try XCTUnwrap(window.test_optionsToolbarRect)
+        XCTAssertGreaterThan(main.minX, pointer.x)
+        XCTAssertLessThan(main.maxY, pointer.y)
+        XCTAssertLessThanOrEqual(main.minX - pointer.x, 10)
+        XCTAssertLessThanOrEqual(pointer.y - main.maxY, 10)
+        XCTAssertLessThan(options.width, options.height)
+        XCTAssertLessThanOrEqual(
+            min(abs(options.minX - main.maxX), abs(main.minX - options.maxX)),
+            5
+        )
+        XCTAssertEqual(main.size, NSSize(width: 56, height: 168))
+        XCTAssertEqual(options.width, main.width)
+        window.test_rightMouseDown(at: pointer)
+
+        XCTAssertNil(window.test_mainToolbarRect())
+        XCTAssertNil(window.test_optionsToolbarRect)
+    }
+
+    @MainActor
+    func testTeachingPenCanvasClickHidesToolbarsAndStartsSelectedTool() throws {
+        let frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        let window = SelectionOverlayWindow(
+            backgroundImage: solidImage(size: frame.size, color: .white),
+            configuration: .teachingPen(windowFrame: frame)
+        ) { _ in }
+        window.test_rightMouseDown(at: NSPoint(x: 360, y: 420))
+
+        let shapeButton = try XCTUnwrap(window.test_mainToolbarButtonPoint(for: .rectangle))
+        window.test_mouseDown(at: shapeButton)
+        window.test_mouseUp(at: shapeButton)
+
+        XCTAssertEqual(window.test_currentShapeKind, .rectangle)
+        XCTAssertNotNil(window.test_mainToolbarRect())
+        XCTAssertNotNil(window.test_optionsToolbarRect)
+
+        window.test_drag(
+            from: NSPoint(x: 100, y: 100),
+            to: NSPoint(x: 180, y: 160)
+        )
+
+        XCTAssertNil(window.test_mainToolbarRect())
+        XCTAssertNil(window.test_optionsToolbarRect)
+        XCTAssertEqual(window.test_annotationCount, 1)
+        XCTAssertEqual(window.test_annotation(at: 0)?.kind, .rectangle)
+    }
+
+    @MainActor
+    func testTeachingPenToolbarStaysNearPointerAtBottomRightCorner() throws {
+        let frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        let window = SelectionOverlayWindow(
+            backgroundImage: solidImage(size: frame.size, color: .white),
+            configuration: .teachingPen(windowFrame: frame)
+        ) { _ in }
+        let pointer = NSPoint(x: 796, y: 4)
+
+        window.test_rightMouseDown(at: pointer)
+
+        let main = try XCTUnwrap(window.test_mainToolbarRect())
+        XCTAssertLessThan(main.maxX, pointer.x)
+        XCTAssertGreaterThan(main.minY, pointer.y)
+        XCTAssertLessThanOrEqual(pointer.x - main.maxX, 10)
+        XCTAssertLessThanOrEqual(main.minY - pointer.y, 10)
+        XCTAssertTrue(frame.insetBy(dx: 4, dy: 4).contains(main))
+    }
+
+    @MainActor
+    func testTeachingPenToolbarContainsOnlyRequestedCompactButtons() throws {
+        let frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        let window = SelectionOverlayWindow(
+            backgroundImage: solidImage(size: frame.size, color: .white),
+            configuration: .teachingPen(windowFrame: frame)
+        ) { _ in }
+        window.test_rightMouseDown(at: NSPoint(x: 360, y: 420))
+
+        let visibleButtons: [TestToolbarButton] = [
+            .pen, .rectangle,
+            .arrow, .marker,
+            .text, .number,
+            .mosaic, .eyedropper,
+            .eraser, .magnifier,
+            .copy, .save,
+        ]
+        for button in visibleButtons {
+            let rect = try XCTUnwrap(
+                window.test_mainToolbarButtonRect(for: button),
+                "\(button) should be visible"
+            )
+            XCTAssertEqual(rect.size, NSSize(width: 20, height: 20))
+        }
+
+        let hiddenButtons: [TestToolbarButton] = [
+            .undo, .redo, .cancel, .pin, .scroll, .finishEditing,
+        ]
+        for button in hiddenButtons {
+            XCTAssertNil(window.test_mainToolbarButtonRect(for: button), "\(button) should be hidden")
+        }
+        XCTAssertEqual(window.test_mainToolbarButtonRects().count, visibleButtons.count)
+    }
+
+    @MainActor
+    func testTeachingPenIconToolbarShowsTooltipsOnHover() throws {
+        let frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        let window = SelectionOverlayWindow(
+            backgroundImage: solidImage(size: frame.size, color: .white),
+            configuration: .teachingPen(windowFrame: frame)
+        ) { _ in }
+        window.test_rightMouseDown(at: NSPoint(x: 360, y: 420))
+
+        let penPoint = try XCTUnwrap(window.test_mainToolbarButtonPoint(for: .pen))
+        window.test_mouseMoved(to: penPoint)
+
+        XCTAssertEqual(window.test_hoveredTooltipText, "画笔")
+    }
+
+    @MainActor
+    func testTeachingPenEveryOptionsToolbarMatchesMainToolbarWidth() throws {
+        let frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        let activations: [(String, (SelectionOverlayWindow) -> Void)] = [
+            ("brush", { _ in }),
+            ("shape", { $0.test_activateShapeTool(.rectangle) }),
+            ("arrow", { $0.test_activateShapeTool(.arrowLine) }),
+            ("marker", { $0.test_activateShapeTool(.marker) }),
+            ("text", { $0.test_activateTextTool() }),
+            ("number", { $0.test_activateNumberTool() }),
+            ("mosaic", { $0.test_activateShapeTool(.mosaicStroke) }),
+            ("eraser", { $0.test_activateEraserTool() }),
+            ("magnifier", { $0.test_activateMagnifierTool() }),
+        ]
+
+        for (name, activate) in activations {
+            let window = SelectionOverlayWindow(
+                backgroundImage: solidImage(size: frame.size, color: .white),
+                configuration: .teachingPen(windowFrame: frame)
+            ) { _ in }
+            activate(window)
+            window.test_rightMouseDown(at: NSPoint(x: 360, y: 420))
+
+            let main = try XCTUnwrap(window.test_mainToolbarRect(), name)
+            let options = try XCTUnwrap(window.test_optionsToolbarRect, name)
+            XCTAssertEqual(options.width, main.width, name)
+            XCTAssertTrue(frame.insetBy(dx: 4, dy: 4).contains(options), name)
+        }
+    }
+
+    @MainActor
+    func testTeachingPenStrokeWidthDotsShareOneCompactRow() throws {
+        let frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        let window = SelectionOverlayWindow(
+            backgroundImage: solidImage(size: frame.size, color: .white),
+            configuration: .teachingPen(windowFrame: frame)
+        ) { _ in }
+        window.test_rightMouseDown(at: NSPoint(x: 360, y: 420))
+
+        let rects = window.test_optionsStrokeWidthRects()
+        XCTAssertEqual(rects.count, 3)
+        XCTAssertTrue(rects.allSatisfy { $0.width == 14 && $0.height == 20 })
+        XCTAssertEqual(Set(rects.map(\.midY)).count, 1)
+        XCTAssertLessThan(rects[0].maxX, rects[1].minX)
+        XCTAssertLessThan(rects[1].maxX, rects[2].minX)
+    }
+
+    @MainActor
+    func testTeachingPenShapeTextAndMagnifierControlsUseCompactRows() throws {
+        let frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        let activations: [(Int, (SelectionOverlayWindow) -> Void)] = [
+            (3, { $0.test_activateShapeTool(.rectangle) }),
+            (3, { $0.test_activateTextTool() }),
+            (2, { $0.test_activateMagnifierTool() }),
+        ]
+
+        for (expectedCount, activate) in activations {
+            let window = SelectionOverlayWindow(
+                backgroundImage: solidImage(size: frame.size, color: .white),
+                configuration: .teachingPen(windowFrame: frame)
+            ) { _ in }
+            activate(window)
+            window.test_rightMouseDown(at: NSPoint(x: 360, y: 420))
+
+            let rects = window.test_compactOptionsControlRects()
+            XCTAssertEqual(rects.count, expectedCount)
+            XCTAssertEqual(Set(rects.map(\.midY)).count, 1)
+        }
+    }
+
+    @MainActor
+    func testTeachingPenRectangleUsesSquareCornersWithoutCornerRadiusControl() throws {
+        let frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        let window = SelectionOverlayWindow(
+            backgroundImage: solidImage(size: frame.size, color: .white),
+            configuration: .teachingPen(windowFrame: frame)
+        ) { _ in }
+
+        window.test_activateShapeTool(.rectangle)
+        window.test_rightMouseDown(at: NSPoint(x: 360, y: 420))
+
+        XCTAssertFalse(window.test_hasRectangleCornerRadiusControl)
+        XCTAssertNil(window.test_cornerRadiusPanelRect)
+        XCTAssertEqual(try XCTUnwrap(window.test_currentStyle).cornerRadius, 0)
+
+        window.test_drag(
+            from: NSPoint(x: 100, y: 100),
+            to: NSPoint(x: 180, y: 160)
+        )
+
+        XCTAssertEqual(window.test_annotation(at: 0)?.style.cornerRadius, 0)
+    }
+
+    @MainActor
+    func testEnglishCornerRadiusPanelExpandsWithoutChangingChineseLayout() throws {
+        let frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        let selection = NSRect(x: 120, y: 120, width: 420, height: 300)
+        let image = solidImage(size: frame.size, color: .white)
+
+        var chineseSettings = AppSettings.default
+        chineseSettings.language = .zhHans
+        let chineseWindow = SelectionOverlayWindow(
+            backgroundImage: image,
+            settings: chineseSettings
+        ) { _ in }
+        chineseWindow.test_setLockedSelectionRect(selection)
+        chineseWindow.test_activateShapeTool(.rectangle)
+
+        var englishSettings = AppSettings.default
+        englishSettings.language = .english
+        let englishWindow = SelectionOverlayWindow(
+            backgroundImage: image,
+            settings: englishSettings
+        ) { _ in }
+        englishWindow.test_setLockedSelectionRect(selection)
+        englishWindow.test_activateShapeTool(.rectangle)
+
+        let chinesePanel = try XCTUnwrap(chineseWindow.test_cornerRadiusPanelRect)
+        let chineseTrack = try XCTUnwrap(chineseWindow.test_cornerRadiusSliderTrackRect)
+        let englishPanel = try XCTUnwrap(englishWindow.test_cornerRadiusPanelRect)
+        let englishTrack = try XCTUnwrap(englishWindow.test_cornerRadiusSliderTrackRect)
+
+        XCTAssertEqual(chinesePanel.width, 260)
+        XCTAssertEqual(chineseTrack.minX - chinesePanel.minX, 78)
+        XCTAssertGreaterThan(englishPanel.width, chinesePanel.width)
+        XCTAssertGreaterThan(
+            englishTrack.minX - englishPanel.minX,
+            chineseTrack.minX - chinesePanel.minX
+        )
+        XCTAssertEqual(englishTrack.width, chineseTrack.width, accuracy: 1)
+    }
+
+    @MainActor
+    func testTeachingPenCustomColorSwatchSpansThePaletteRow() throws {
+        let frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        let window = SelectionOverlayWindow(
+            backgroundImage: solidImage(size: frame.size, color: .white),
+            settings: .default,
+            configuration: .teachingPen(windowFrame: frame)
+        ) { _ in }
+        window.test_activateTextTool()
+        window.test_rightMouseDown(at: NSPoint(x: 360, y: 420))
+
+        let swatches = window.test_optionsPaletteColorRects()
+        let customSwatch = try XCTUnwrap(swatches.last)
+
+        XCTAssertEqual(swatches.count, AppSettings.maximumPaletteVisibleCount + 1)
+        XCTAssertTrue(swatches.dropLast().allSatisfy { $0.size == NSSize(width: 10, height: 10) })
+        XCTAssertEqual(customSwatch.width, 48)
+        XCTAssertEqual(customSwatch.height, 10)
+        XCTAssertEqual(customSwatch.minX, try XCTUnwrap(swatches.first).minX)
+    }
+
+    @MainActor
+    func testTeachingPenTextDefaultsToNoOutline() throws {
+        let frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        let window = SelectionOverlayWindow(
+            backgroundImage: solidImage(size: frame.size, color: .white),
+            configuration: .teachingPen(windowFrame: frame)
+        ) { _ in }
+
+        window.test_activateTextTool()
+
+        XCTAssertFalse(try XCTUnwrap(window.test_currentStyle).textOutlineEnabled)
+    }
+
+    @MainActor
+    func testTeachingPenFontDropdownFitsFullFontNames() throws {
+        let frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        let window = SelectionOverlayWindow(
+            backgroundImage: solidImage(size: frame.size, color: .white),
+            settings: .default,
+            configuration: .teachingPen(windowFrame: frame)
+        ) { _ in }
+        window.test_activateTextTool()
+        window.test_rightMouseDown(at: NSPoint(x: 360, y: 420))
+
+        let fontPoint = try XCTUnwrap(window.test_optionsTextFontPoint())
+        window.test_mouseDown(at: fontPoint)
+        window.test_mouseUp(at: fontPoint)
+
+        let dropdown = try XCTUnwrap(window.test_textDropdownRect)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+        ]
+        let widestLabel = window.test_textFontOptions
+            .map { SelectionToolbarState.textFontDisplayName(for: $0, language: .zhHans) }
+            .map { NSString(string: $0).size(withAttributes: attributes).width }
+            .max() ?? 0
+
+        XCTAssertGreaterThanOrEqual(dropdown.width - 24, ceil(widestLabel))
+    }
+
+    @MainActor
+    func testTeachingPenToolbarFlipsAroundEveryScreenCornerWithoutDrifting() {
+        let bounds = NSRect(x: 0, y: 0, width: 800, height: 600)
+        let size = NSSize(width: 56, height: 168)
+        let pointers = [
+            NSPoint(x: 4, y: 4),
+            NSPoint(x: 796, y: 4),
+            NSPoint(x: 4, y: 596),
+            NSPoint(x: 796, y: 596),
+        ]
+
+        for pointer in pointers {
+            let toolbar = SelectionToolbarState.contextualToolbarRect(
+                size: size,
+                pointer: pointer,
+                inside: bounds
+            )
+            XCTAssertTrue(bounds.insetBy(dx: 4, dy: 4).contains(toolbar))
+            XCTAssertLessThanOrEqual(
+                min(abs(toolbar.minX - pointer.x), abs(toolbar.maxX - pointer.x)),
+                10
+            )
+            XCTAssertLessThanOrEqual(
+                min(abs(toolbar.minY - pointer.y), abs(toolbar.maxY - pointer.y)),
+                10
+            )
+        }
+    }
+
+    func testTeachingPenToolbarStaysOnPointerScreenWithStaggeredDisplays() throws {
+        let screens = [
+            NSRect(x: 0, y: 0, width: 1440, height: 900),
+            NSRect(x: 1440, y: 300, width: 1024, height: 768),
+        ]
+        let windowFrame = screens.reduce(NSRect.null) { $0.union($1) }
+        let pointer = NSPoint(
+            x: screens[1].maxX - windowFrame.minX - 8,
+            y: screens[1].minY - windowFrame.minY + 8
+        )
+        let localScreen = try XCTUnwrap(SelectionToolbarState.localScreenBounds(
+            containing: pointer,
+            windowFrame: windowFrame,
+            screenFrames: screens
+        ))
+
+        let main = SelectionToolbarState.contextualToolbarRect(
+            size: NSSize(width: 56, height: 168),
+            pointer: pointer,
+            inside: localScreen
+        )
+        let options = SelectionToolbarState.attachedToolbarRect(
+            size: NSSize(width: 56, height: 164),
+            attachedTo: main,
+            inside: localScreen
+        )
+
+        XCTAssertTrue(localScreen.insetBy(dx: 4, dy: 4).contains(main))
+        XCTAssertTrue(localScreen.insetBy(dx: 4, dy: 4).contains(options))
+        XCTAssertLessThanOrEqual(abs(pointer.x - main.maxX), 10)
+        XCTAssertLessThanOrEqual(abs(pointer.y - main.minY), 10)
+    }
+
+    @MainActor
+    func testTeachingPenCannotZoomItsFullScreenSelection() {
+        let frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        let window = SelectionOverlayWindow(
+            backgroundImage: solidImage(size: frame.size, color: .white),
+            configuration: .teachingPen(windowFrame: frame)
+        ) { _ in }
+        let original = window.test_lockedSelectionRect
+
+        XCTAssertFalse(window.test_handleScrollWheel(at: NSPoint(x: 400, y: 300), deltaY: 10))
+        XCTAssertFalse(window.test_handleMagnify(at: NSPoint(x: 400, y: 300), magnification: 0.5))
+        XCTAssertEqual(window.test_lockedSelectionRect, original)
+    }
+
+    @MainActor
+    func testTeachingPenCopyCompletesWithFullScreenSnapshot() throws {
+        let frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        var result: CaptureSelectionResult?
+        let completion = expectation(description: "teaching pen copy")
+        let window = SelectionOverlayWindow(
+            backgroundImage: solidImage(size: frame.size, color: .white),
+            configuration: .teachingPen(windowFrame: frame)
+        ) {
+            result = $0
+            completion.fulfill()
+        }
+        window.test_rightMouseDown(at: NSPoint(x: 360, y: 420))
+        let copyPoint = try XCTUnwrap(window.test_mainToolbarButtonPoint(for: .copy))
+
+        window.test_mouseDown(at: copyPoint)
+        window.test_mouseUp(at: copyPoint)
+        wait(for: [completion], timeout: 0.5)
+
+        XCTAssertEqual(result?.action, .copy)
+        XCTAssertEqual(result?.snapshotRect, NSRect(origin: .zero, size: frame.size))
+        XCTAssertEqual(result?.screenRect.size, frame.size)
+    }
+
+    @MainActor
+    func testTeachingPenCancellationDoesNotRetainOverlay() async throws {
+        let frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        var overlay: SelectionOverlayWindow? = SelectionOverlayWindow(
+            backgroundImage: solidImage(size: frame.size, color: .white),
+            configuration: .teachingPen(windowFrame: frame)
+        ) { _ in }
+        weak var weakOverlay = overlay
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService()
+        )
+        coordinator.test_installTeachingPenOverlayWindow(try XCTUnwrap(overlay))
+
+        coordinator.test_handleSelection(nil, frozenDesktopImage: nil)
+        overlay = nil
+        await Task.yield()
+
+        XCTAssertNil(coordinator.test_overlayWindow)
+        XCTAssertNil(weakOverlay)
+        XCTAssertEqual(coordinator.test_retiredOverlayCount, 0)
+    }
+
+    @MainActor
+    func testTeachingPenFallbackCapturesWholeDesktop() async throws {
+        let frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        let desktopImage = solidImage(size: frame.size, color: .white)
+        var desktopCaptureCount = 0
+        var selectionCaptureCount = 0
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            selectionFallbackCapture: { _ in
+                selectionCaptureCount += 1
+                return desktopImage
+            },
+            desktopFallbackCapture: {
+                desktopCaptureCount += 1
+                return desktopImage
+            }
+        )
+        let overlay = SelectionOverlayWindow(
+            backgroundImage: desktopImage,
+            configuration: .teachingPen(windowFrame: frame)
+        ) { _ in }
+        coordinator.test_installTeachingPenOverlayWindow(overlay)
+        let completion = expectation(description: "teaching pen desktop fallback")
+        coordinator.captureSessionDidEnd = { completion.fulfill() }
+
+        coordinator.test_handleSelection(
+            CaptureSelectionResult(
+                screenRect: frame,
+                snapshotRect: frame,
+                annotations: [],
+                action: .copy
+            ),
+            frozenDesktopImage: nil
+        )
+        await fulfillment(of: [completion], timeout: 2)
+
+        XCTAssertEqual(desktopCaptureCount, 1)
+        XCTAssertEqual(selectionCaptureCount, 0)
+        XCTAssertEqual(coordinator.test_lastCapture?.size, desktopImage.size)
+    }
+
+    @MainActor
     func testPinnedImageEditorOverlayHidesMeasurementAndPassiveColorSampler() throws {
         let background = solidImage(size: NSSize(width: 640, height: 420), color: .white)
         let selection = NSRect(x: 120, y: 90, width: 260, height: 160)

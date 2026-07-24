@@ -29,6 +29,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             captureHandler: {
                 captureCoordinator.startCapture()
             },
+            teachingPenHandler: {
+                captureCoordinator.toggleTeachingPen()
+            },
             restorePinnedImageHandler: {
                 captureCoordinator.restoreMostRecentlyHiddenPinnedWindow()
             }

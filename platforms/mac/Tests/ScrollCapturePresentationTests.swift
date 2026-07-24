@@ -66,6 +66,27 @@ final class ScrollCapturePresentationTests: XCTestCase {
         XCTAssertLessThan(controller.test_stepGuideFrame.width, 245)
     }
 
+    func testSingleStepGuidePointerStaysCenteredOnStartButtonAfterPlacementUpdates() {
+        let controller = makeController(language: .english)
+
+        XCTAssertEqual(
+            controller.test_stepGuidePointerScreenX,
+            controller.test_startButtonScreenMidX,
+            accuracy: 0.5
+        )
+
+        controller.updatePlacement(
+            selectionFrame: NSRect(x: 80, y: 120, width: 520, height: 360),
+            visibleFrame: NSRect(x: 0, y: 0, width: 1_200, height: 800)
+        )
+
+        XCTAssertEqual(
+            controller.test_stepGuidePointerScreenX,
+            controller.test_startButtonScreenMidX,
+            accuracy: 0.5
+        )
+    }
+
     private func assertStepGuideTextFits(
         _ controller: ScrollCapturePresentationController,
         file: StaticString = #filePath,

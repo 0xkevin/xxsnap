@@ -3,12 +3,14 @@ import Carbon.HIToolbox
 
 enum HotKeyAction: String, CaseIterable {
     case capture
+    case teachingPen
     case restoreMostRecentlyHiddenPinnedImage
 
     var identifier: UInt32 {
         switch self {
         case .capture: return 1
         case .restoreMostRecentlyHiddenPinnedImage: return 2
+        case .teachingPen: return 3
         }
     }
 
@@ -16,6 +18,8 @@ enum HotKeyAction: String, CaseIterable {
         switch self {
         case .capture:
             return HotKeySettings(keyCode: UInt32(kVK_ANSI_Grave), modifiers: UInt32(cmdKey))
+        case .teachingPen:
+            return HotKeySettings(keyCode: UInt32(kVK_ANSI_2), modifiers: UInt32(cmdKey))
         case .restoreMostRecentlyHiddenPinnedImage:
             return HotKeySettings(keyCode: UInt32(kVK_ANSI_1), modifiers: UInt32(cmdKey))
         }
@@ -164,6 +168,7 @@ final class CaptureHotKeyController {
     private let settingsStore: any AppSettingsStoring
     private let registrar: any GlobalHotKeyRegistering
     private let handlers: [HotKeyAction: () -> Void]
+    private let registrationOrder: [HotKeyAction]
     private var configured: [HotKeyAction: HotKeySettings] = [:]
     private var registrations: [HotKeyAction: HotKeyRegistrationToken] = [:]
     private(set) var errors: [HotKeyAction: HotKeyConfigurationError] = [:]
@@ -173,16 +178,24 @@ final class CaptureHotKeyController {
         settingsStore: any AppSettingsStoring = SettingsStore(),
         registrar: any GlobalHotKeyRegistering = CarbonGlobalHotKeyRegistrar(),
         captureHandler: @escaping () -> Void,
+        teachingPenHandler: @escaping () -> Void,
         restorePinnedImageHandler: @escaping () -> Void
     ) {
         self.settingsStore = settingsStore
         self.registrar = registrar
         handlers = [
             .capture: captureHandler,
+            .teachingPen: teachingPenHandler,
             .restoreMostRecentlyHiddenPinnedImage: restorePinnedImageHandler
         ]
 
         let stored = settingsStore.load().hotkeys
+        let explicitlyConfiguredActions = HotKeyAction.allCases.filter {
+            stored[$0.rawValue] != nil
+        }
+        registrationOrder = explicitlyConfiguredActions + HotKeyAction.allCases.filter {
+            !explicitlyConfiguredActions.contains($0)
+        }
         for action in HotKeyAction.allCases {
             configured[action] = stored[action.rawValue] ?? action.defaultSettings
         }
@@ -239,6 +252,7 @@ final class CaptureHotKeyController {
         do {
             try persistConfiguredHotKeys()
             errors[action] = nil
+            reconcileMissingRegistrations()
             notifyStateChange()
             return .success(())
         } catch {
@@ -312,10 +326,14 @@ final class CaptureHotKeyController {
     }
 
     private func registerConfiguredHotKeys() {
-        for action in HotKeyAction.allCases {
+        for action in registrationOrder {
             let settings = configuredHotKey(for: action)
             guard HotKeyFormatter.hasSupportedModifier(settings) else {
                 errors[action] = .missingModifier
+                continue
+            }
+            guard !hasRegisteredConflict(settings, excluding: action) else {
+                errors[action] = .duplicate
                 continue
             }
             restoreRegistration(settings, action: action)
@@ -323,8 +341,37 @@ final class CaptureHotKeyController {
     }
 
     private func restoreAllRegistrations() {
-        for action in HotKeyAction.allCases {
-            restoreRegistration(configuredHotKey(for: action), action: action)
+        for action in registrationOrder {
+            let settings = configuredHotKey(for: action)
+            guard !hasRegisteredConflict(settings, excluding: action) else {
+                errors[action] = .duplicate
+                continue
+            }
+            restoreRegistration(settings, action: action)
+        }
+    }
+
+    private func reconcileMissingRegistrations() {
+        for action in registrationOrder where registrations[action] == nil {
+            let settings = configuredHotKey(for: action)
+            guard HotKeyFormatter.hasSupportedModifier(settings) else {
+                errors[action] = .missingModifier
+                continue
+            }
+            guard !hasRegisteredConflict(settings, excluding: action) else {
+                errors[action] = .duplicate
+                continue
+            }
+            restoreRegistration(settings, action: action)
+        }
+    }
+
+    private func hasRegisteredConflict(
+        _ settings: HotKeySettings,
+        excluding action: HotKeyAction
+    ) -> Bool {
+        registrations.keys.contains {
+            $0 != action && configuredHotKey(for: $0) == settings
         }
     }
 

@@ -30,6 +30,10 @@ final class StatusItemController: NSObject {
         captureCoordinator.startCapture()
     }
 
+    @objc func teachingPen() {
+        captureCoordinator.toggleTeachingPen()
+    }
+
     @objc func quit() {
         NSApplication.shared.terminate(nil)
     }
@@ -77,13 +81,16 @@ final class StatusItemController: NSObject {
         NSLog("xxsnap status button configured image=%@ length=%.0f", image == nil ? "missing" : "ok", statusItem.length)
 
         let menu = NSMenu()
-        let captureItem = NSMenuItem(title: strings.capture, action: #selector(capture), keyEquivalent: "")
-        if let registered = hotKeyController.registeredHotKey(for: .capture),
-           let equivalent = HotKeyFormatter.menuEquivalent(registered) {
-            captureItem.keyEquivalent = equivalent.0
-            captureItem.keyEquivalentModifierMask = equivalent.1
-        }
-        menu.addItem(captureItem)
+        menu.addItem(makeHotKeyMenuItem(
+            title: strings.capture,
+            action: #selector(capture),
+            hotKeyAction: .capture
+        ))
+        menu.addItem(makeHotKeyMenuItem(
+            title: strings.teachingPen,
+            action: #selector(teachingPen),
+            hotKeyAction: .teachingPen
+        ))
         menu.addItem(.separator())
         let preferencesItem = NSMenuItem(
             title: strings.preferences,
@@ -111,6 +118,20 @@ final class StatusItemController: NSObject {
         }
 
         statusItem.menu = menu
+    }
+
+    private func makeHotKeyMenuItem(
+        title: String,
+        action: Selector,
+        hotKeyAction: HotKeyAction
+    ) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        if let registered = hotKeyController.registeredHotKey(for: hotKeyAction),
+           let equivalent = HotKeyFormatter.menuEquivalent(registered) {
+            item.keyEquivalent = equivalent.0
+            item.keyEquivalentModifierMask = equivalent.1
+        }
+        return item
     }
 
     private var versionText: String {
