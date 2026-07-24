@@ -66,6 +66,10 @@ struct RecognizedTextCandidate: Equatable {
     let boundingBox: CGRect
 }
 
+protocol OCRTextRecognizing {
+    func recognizeText(in image: NSImage) async throws -> String
+}
+
 enum OCRTextRecognitionError: LocalizedError, Equatable {
     case imageConversionFailed
     case requestFailed
@@ -80,7 +84,7 @@ enum OCRTextRecognitionError: LocalizedError, Equatable {
     }
 }
 
-final class OCRTextRecognitionService {
+final class OCRTextRecognitionService: OCRTextRecognizing {
     func recognizeText(in image: NSImage) async throws -> String {
         guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
             throw OCRTextRecognitionError.imageConversionFailed

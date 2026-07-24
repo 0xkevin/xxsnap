@@ -81,6 +81,7 @@ private enum ScrollCaptureLifecyclePhase: Equatable {
 
 private enum CaptureOverlayMode {
     case region
+    case textRecognition
     case teachingPen
 }
 
@@ -126,6 +127,8 @@ final class CaptureCoordinator {
     private let longImageFallbackPresenter: @MainActor (NSImage) -> LongImageFallbackChoice
     private let longImageCopyHandler: (@MainActor (NSImage) -> Bool)?
     private let longImageSaveHandler: (@MainActor (NSImage) -> Bool)?
+    private let ocrTextRecognizer: any OCRTextRecognizing
+    private let textCopyHandler: @MainActor (String) -> Bool
     private let frontmostApplicationResolver: @MainActor () -> NSRunningApplication?
     private let applicationActivator: @MainActor (NSRunningApplication) -> Void
     private let scrollCaptureTargetDetector: any ScrollCaptureTargetDetecting
@@ -164,6 +167,8 @@ final class CaptureCoordinator {
         longImageFallbackPresenter: (@MainActor (NSImage) -> LongImageFallbackChoice)? = nil,
         longImageCopyHandler: (@MainActor (NSImage) -> Bool)? = nil,
         longImageSaveHandler: (@MainActor (NSImage) -> Bool)? = nil,
+        ocrTextRecognizer: any OCRTextRecognizing = OCRTextRecognitionService(),
+        textCopyHandler: (@MainActor (String) -> Bool)? = nil,
         frontmostApplicationResolver: @escaping @MainActor () -> NSRunningApplication? = CaptureCoordinator.refreshTargetApplication,
         applicationActivator: @escaping @MainActor (NSRunningApplication) -> Void = { application in
             application.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
@@ -222,6 +227,8 @@ final class CaptureCoordinator {
         }
         self.longImageCopyHandler = longImageCopyHandler
         self.longImageSaveHandler = longImageSaveHandler
+        self.ocrTextRecognizer = ocrTextRecognizer
+        self.textCopyHandler = textCopyHandler ?? Self.copyTextToPasteboard
         self.frontmostApplicationResolver = frontmostApplicationResolver
         self.applicationActivator = applicationActivator
         self.scrollCaptureTargetDetector = scrollCaptureTargetDetector
@@ -264,6 +271,10 @@ final class CaptureCoordinator {
 
     func startCapture() {
         startCapture(mode: .region)
+    }
+
+    func startTextRecognition() {
+        startCapture(mode: .textRecognition)
     }
 
     func toggleTeachingPen() {
@@ -336,6 +347,8 @@ final class CaptureCoordinator {
             switch mode {
             case .region:
                 configuration = .default
+            case .textRecognition:
+                configuration = .textRecognition()
             case .teachingPen:
                 configuration = .teachingPen(windowFrame: SelectionOverlayWindow.desktopFrame())
             }
@@ -945,7 +958,7 @@ final class CaptureCoordinator {
 
     private func handleSelection(_ result: CaptureSelectionResult?) {
         let completedOverlayMode = activeOverlayMode
-        if let overlayWindow, completedOverlayMode != .teachingPen {
+        if let overlayWindow, completedOverlayMode == .region {
             retiredOverlayWindows.append(overlayWindow)
         }
         overlayWindow = nil
@@ -990,6 +1003,11 @@ final class CaptureCoordinator {
                         for: completedOverlayMode,
                         screenRect: result.screenRect
                     )
+                }
+                if completedOverlayMode == .textRecognition {
+                    try await handleTextRecognition(image)
+                    self.frozenDesktopImage = nil
+                    return
                 }
                 let exportedImage = CaptureAnnotationRenderer.render(
                     image: image,
@@ -1045,6 +1063,20 @@ final class CaptureCoordinator {
                 NSLog("xxsnap capture failed: \(error.localizedDescription)")
             }
         }
+    }
+
+    private func handleTextRecognition(_ image: NSImage) async throws {
+        let text = try await ocrTextRecognizer.recognizeText(in: image)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            NSLog("xxsnap text recognition completed with empty result")
+            return
+        }
+        guard textCopyHandler(text) else {
+            NSLog("xxsnap text recognition copy failed")
+            return
+        }
+        NSLog("xxsnap text recognition copied %ld characters", text.count)
     }
 
     private func captureFallbackImage(
@@ -1132,6 +1164,11 @@ final class CaptureCoordinator {
         NSPasteboard.general.writeObjects([image])
     }
 
+    private static func copyTextToPasteboard(_ text: String) -> Bool {
+        NSPasteboard.general.clearContents()
+        return NSPasteboard.general.setString(text, forType: .string)
+    }
+
     nonisolated static func defaultCaptureFilename(date: Date = Date(), timeZone: TimeZone = .current) -> String {
         (try? FilenameTemplateRenderer().filename(
             template: PreferencesSettings.defaultFilenameTemplate,
@@ -1178,6 +1215,11 @@ extension CaptureCoordinator {
     func test_installTeachingPenOverlayWindow(_ overlay: SelectionOverlayWindow) {
         overlayWindow = overlay
         activeOverlayMode = .teachingPen
+    }
+
+    func test_installTextRecognitionOverlayWindow(_ overlay: SelectionOverlayWindow) {
+        overlayWindow = overlay
+        activeOverlayMode = .textRecognition
     }
 
     func test_requestScrollCapture(seed: ScrollCaptureSeed) {

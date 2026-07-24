@@ -29,6 +29,20 @@ private final class FakePinnedWindow: PinnedImageWindowPresenting {
     }
 }
 
+private final class FakeOCRTextRecognizer: OCRTextRecognizing {
+    let result: String
+    private(set) var images: [NSImage] = []
+
+    init(result: String) {
+        self.result = result
+    }
+
+    func recognizeText(in image: NSImage) async throws -> String {
+        images.append(image)
+        return result
+    }
+}
+
 @MainActor
 private final class FakeScrollCaptureSession: ScrollCaptureSessionRunning {
     enum Failure: Error, Equatable { case start, finish }
@@ -4417,6 +4431,29 @@ final class SelectionToolbarStateTests: XCTestCase {
             XCTAssertNil(window.test_mainToolbarButtonRect(for: button), "\(button) should be hidden")
         }
         XCTAssertEqual(window.test_mainToolbarButtonRects().count, visibleButtons.count)
+    }
+
+    @MainActor
+    func testTextRecognitionToolbarContainsOnlyCancelAndCopy() throws {
+        let image = solidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let window = SelectionOverlayWindow(
+            backgroundImage: image,
+            configuration: .textRecognition()
+        ) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 80, y: 60, width: 260, height: 180))
+
+        XCTAssertNotNil(window.test_mainToolbarButtonRect(for: .cancel))
+        XCTAssertNotNil(window.test_mainToolbarButtonRect(for: .copy))
+
+        let hiddenButtons: [TestToolbarButton] = [
+            .rectangle, .arrow, .pen, .marker, .eyedropper, .mosaic,
+            .text, .number, .magnifier, .eraser,
+            .undo, .redo, .pin, .save, .scroll, .finishEditing,
+        ]
+        for button in hiddenButtons {
+            XCTAssertNil(window.test_mainToolbarButtonRect(for: button), "\(button) should be hidden")
+        }
+        XCTAssertEqual(window.test_mainToolbarButtonRects().count, 2)
     }
 
     @MainActor
@@ -10537,6 +10574,86 @@ final class SelectionToolbarStateTests: XCTestCase {
         let exported = try XCTUnwrap(coordinator.test_lastCapture)
         XCTAssertEqual(hex(try XCTUnwrap(rgbaRenderPixel(in: exported, at: NSPoint(x: 36, y: 32)))), "#FFFFFF")
         XCTAssertEqual(hex(try XCTUnwrap(rgbaRenderPixel(in: exported, at: NSPoint(x: 16, y: 16)))), "#FF0000")
+    }
+
+    @MainActor
+    func testCaptureCoordinatorTextRecognitionCopiesRecognizedTextWithoutImageCapture() async throws {
+        let image = solidImage(size: NSSize(width: 80, height: 60), color: .white)
+        let recognizer = FakeOCRTextRecognizer(result: "  Hello\nWorld  ")
+        var copiedText: String?
+        let result = CaptureSelectionResult(
+            screenRect: NSRect(origin: .zero, size: image.size),
+            snapshotRect: NSRect(origin: .zero, size: image.size),
+            annotations: [
+                CaptureAnnotation(
+                    kind: .rectangle,
+                    rect: NSRect(x: 10, y: 10, width: 20, height: 20),
+                    style: CaptureAnnotationStyle()
+                )
+            ],
+            action: .copy
+        )
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            ocrTextRecognizer: recognizer,
+            textCopyHandler: { text in
+                copiedText = text
+                return true
+            }
+        )
+        let expectation = expectation(description: "text recognition")
+        coordinator.captureSessionDidEnd = {
+            expectation.fulfill()
+        }
+
+        coordinator.test_installTextRecognitionOverlayWindow(
+            SelectionOverlayWindow(backgroundImage: image, configuration: .textRecognition()) { _ in }
+        )
+        coordinator.test_handleSelection(result, frozenDesktopImage: image)
+        await fulfillment(of: [expectation], timeout: 2)
+
+        XCTAssertEqual(copiedText, "Hello\nWorld")
+        XCTAssertEqual(recognizer.images.count, 1)
+        XCTAssertEqual(recognizer.images.first?.size, image.size)
+        XCTAssertNil(coordinator.test_lastCapture)
+        XCTAssertEqual(coordinator.test_retiredOverlayCount, 0)
+    }
+
+    @MainActor
+    func testCaptureCoordinatorTextRecognitionEmptyResultDoesNotCopy() async throws {
+        let image = solidImage(size: NSSize(width: 80, height: 60), color: .white)
+        let recognizer = FakeOCRTextRecognizer(result: " \n ")
+        var copyCount = 0
+        let result = CaptureSelectionResult(
+            screenRect: NSRect(origin: .zero, size: image.size),
+            snapshotRect: NSRect(origin: .zero, size: image.size),
+            annotations: [],
+            action: .copy
+        )
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            ocrTextRecognizer: recognizer,
+            textCopyHandler: { _ in
+                copyCount += 1
+                return true
+            }
+        )
+        let expectation = expectation(description: "empty text recognition")
+        coordinator.captureSessionDidEnd = {
+            expectation.fulfill()
+        }
+
+        coordinator.test_installTextRecognitionOverlayWindow(
+            SelectionOverlayWindow(backgroundImage: image, configuration: .textRecognition()) { _ in }
+        )
+        coordinator.test_handleSelection(result, frozenDesktopImage: image)
+        await fulfillment(of: [expectation], timeout: 2)
+
+        XCTAssertEqual(copyCount, 0)
+        XCTAssertEqual(recognizer.images.count, 1)
+        XCTAssertNil(coordinator.test_lastCapture)
     }
 
     @MainActor

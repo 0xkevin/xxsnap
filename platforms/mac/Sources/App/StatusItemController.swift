@@ -30,6 +30,10 @@ final class StatusItemController: NSObject {
         captureCoordinator.startCapture()
     }
 
+    @objc func captureText() {
+        captureCoordinator.startTextRecognition()
+    }
+
     @objc func teachingPen() {
         captureCoordinator.toggleTeachingPen()
     }
@@ -85,6 +89,11 @@ final class StatusItemController: NSObject {
             title: strings.capture,
             action: #selector(capture),
             hotKeyAction: .capture
+        ))
+        menu.addItem(makeHotKeyMenuItem(
+            title: strings.captureText,
+            action: #selector(captureText),
+            hotKeyAction: .recognizeText
         ))
         menu.addItem(makeHotKeyMenuItem(
             title: strings.teachingPen,

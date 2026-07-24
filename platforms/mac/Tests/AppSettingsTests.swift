@@ -319,7 +319,7 @@ final class AppSettingsTests: XCTestCase {
         let registrar = FakeGlobalHotKeyRegistrar()
         let controller = makeHotKeyController(store: store, registrar: registrar)
         let replacementRestoreShortcut = HotKeySettings(
-            keyCode: HotKeyAction.restoreMostRecentlyHiddenPinnedImage.defaultSettings.keyCode + 2,
+            keyCode: UInt32(kVK_ANSI_4),
             modifiers: HotKeyAction.restoreMostRecentlyHiddenPinnedImage.defaultSettings.modifiers
         )
 
@@ -575,9 +575,9 @@ final class AppSettingsTests: XCTestCase {
         let legacyBadges = descendants(of: controller.window?.contentView, matching: NSView.self)
             .filter { $0.identifier?.rawValue == "shortcutValueBadge" }
 
-        XCTAssertEqual(recorderControls.count, 3)
-        XCTAssertEqual(recorderButtons.count, 3)
-        XCTAssertEqual(clearButtons.count, 3)
+        XCTAssertEqual(recorderControls.count, HotKeyAction.allCases.count)
+        XCTAssertEqual(recorderButtons.count, HotKeyAction.allCases.count)
+        XCTAssertEqual(clearButtons.count, HotKeyAction.allCases.count)
         XCTAssertTrue(legacyBadges.isEmpty)
         for control in recorderControls {
             XCTAssertEqual(control.frame.size, NSSize(width: 258, height: 42))
@@ -613,7 +613,7 @@ final class AppSettingsTests: XCTestCase {
 
         let rows = descendants(of: controller.window?.contentView, matching: NSStackView.self)
             .filter { $0.identifier?.rawValue == "shortcutRow" }
-        XCTAssertEqual(rows.count, 3)
+        XCTAssertEqual(rows.count, HotKeyAction.allCases.count)
         var recorderFrames: [NSRect] = []
 
         for row in rows {
@@ -708,7 +708,7 @@ final class AppSettingsTests: XCTestCase {
         controller.show(section: .shortcuts)
         let rows = descendants(of: controller.window?.contentView, matching: NSStackView.self)
             .filter { $0.identifier?.rawValue == "shortcutRow" }
-        let teachingPenControl = rows[1].arrangedSubviews.last
+        let teachingPenControl = rows[2].arrangedSubviews.last
         let recorder = try XCTUnwrap(
             descendants(of: teachingPenControl, matching: NSButton.self)
                 .first { $0.identifier?.rawValue == "shortcutRecorderButton" }
@@ -788,6 +788,17 @@ final class AppSettingsTests: XCTestCase {
         ]
 
         XCTAssertEqual(OCRTextRecognitionService.join(candidates), "Alpha\nBeta")
+    }
+
+    func testTextRecognitionOverlayConfigurationHidesScreenshotTools() {
+        let configuration = SelectionOverlayConfiguration.textRecognition()
+
+        XCTAssertFalse(configuration.showsAnnotationToolbarButtons)
+        XCTAssertTrue(configuration.hiddenMainToolbarButtons.contains(.scroll))
+        XCTAssertTrue(configuration.hiddenMainToolbarButtons.contains(.pin))
+        XCTAssertTrue(configuration.hiddenMainToolbarButtons.contains(.save))
+        XCTAssertFalse(configuration.hiddenMainToolbarButtons.contains(.copy))
+        XCTAssertFalse(configuration.hiddenMainToolbarButtons.contains(.cancel))
     }
 
     func testFeatureGateKeepsTrialFullyOpenAndRestrictsFreeCoreFeatures() {

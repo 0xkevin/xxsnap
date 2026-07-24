@@ -29,6 +29,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             captureHandler: {
                 captureCoordinator.startCapture()
             },
+            recognizeTextHandler: {
+                captureCoordinator.startTextRecognition()
+            },
             teachingPenHandler: {
                 captureCoordinator.toggleTeachingPen()
             },

@@ -29,6 +29,8 @@ enum SelectionOverlayToolbarButton: Hashable {
     case scroll
     case cancel
     case pin
+    case save
+    case copy
 }
 
 enum PinnedImageWindowCommand {
@@ -61,6 +63,7 @@ struct SelectionOverlayConfiguration {
     var initialLockedSelectionRect: NSRect?
     var isTeachingPen: Bool
     var hiddenMainToolbarButtons: Set<SelectionOverlayToolbarButton>
+    var showsAnnotationToolbarButtons: Bool
     var showsFinishEditingButton: Bool
     var allowsSelectionGeometryEditing: Bool
     var showsSelectionBorder: Bool
@@ -95,6 +98,7 @@ struct SelectionOverlayConfiguration {
         initialLockedSelectionRect: nil,
         isTeachingPen: false,
         hiddenMainToolbarButtons: [],
+        showsAnnotationToolbarButtons: true,
         showsFinishEditingButton: false,
         allowsSelectionGeometryEditing: true,
         showsSelectionBorder: true,
@@ -141,6 +145,7 @@ struct SelectionOverlayConfiguration {
             initialLockedSelectionRect: selectionRect,
             isTeachingPen: false,
             hiddenMainToolbarButtons: [.scroll, .cancel, .pin],
+            showsAnnotationToolbarButtons: true,
             showsFinishEditingButton: true,
             allowsSelectionGeometryEditing: false,
             showsSelectionBorder: false,
@@ -191,6 +196,7 @@ struct SelectionOverlayConfiguration {
             initialLockedSelectionRect: selectionRect,
             isTeachingPen: false,
             hiddenMainToolbarButtons: [.scroll, .cancel, .pin],
+            showsAnnotationToolbarButtons: true,
             showsFinishEditingButton: true,
             allowsSelectionGeometryEditing: false,
             showsSelectionBorder: false,
@@ -228,6 +234,7 @@ struct SelectionOverlayConfiguration {
             initialLockedSelectionRect: NSRect(origin: .zero, size: windowFrame.size),
             isTeachingPen: true,
             hiddenMainToolbarButtons: [.scroll, .cancel, .pin],
+            showsAnnotationToolbarButtons: true,
             showsFinishEditingButton: false,
             allowsSelectionGeometryEditing: false,
             showsSelectionBorder: false,
@@ -266,6 +273,15 @@ struct SelectionOverlayConfiguration {
         )
     }
 #endif
+
+    static func textRecognition() -> SelectionOverlayConfiguration {
+        var configuration = SelectionOverlayConfiguration.default
+        configuration.hiddenMainToolbarButtons = [.scroll, .pin, .save]
+        configuration.showsAnnotationToolbarButtons = false
+        configuration.allowsPassiveColorSampler = false
+        configuration.usesArrowCursorWhenIdle = false
+        return configuration
+    }
 }
 
 private extension NSAlert {
@@ -16100,24 +16116,31 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         if configuration.isTeachingPen {
             return Self.teachingPenToolbarButtons
         }
-        var buttons: [ToolbarButton] = [
-            .rectangle,
-            .polyline,
-            .pen,
-            .marker,
-            .eyedropper,
-            .mosaic,
-            .text,
-            .number,
-            .magnifier,
-            .eraser,
-        ]
-        if featureGate.isEnabled(.scrollCapture) {
+        var buttons: [ToolbarButton] = []
+        if configuration.showsAnnotationToolbarButtons {
+            buttons.append(contentsOf: [
+                .rectangle,
+                .polyline,
+                .pen,
+                .marker,
+                .eyedropper,
+                .mosaic,
+                .text,
+                .number,
+                .magnifier,
+                .eraser,
+            ])
+        }
+        if configuration.showsAnnotationToolbarButtons, featureGate.isEnabled(.scrollCapture) {
             buttons.append(.scroll)
         }
+        if configuration.showsAnnotationToolbarButtons {
+            buttons.append(contentsOf: [
+                .undo,
+                .redo,
+            ])
+        }
         buttons.append(contentsOf: [
-            .undo,
-            .redo,
             .cancel,
             .pin,
             .save,
@@ -16145,6 +16168,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return configuration.hiddenMainToolbarButtons.contains(.cancel)
         case .pin:
             return configuration.hiddenMainToolbarButtons.contains(.pin)
+        case .save:
+            return configuration.hiddenMainToolbarButtons.contains(.save)
+        case .copy:
+            return configuration.hiddenMainToolbarButtons.contains(.copy)
         default:
             return false
         }
