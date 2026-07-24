@@ -1,3 +1,4 @@
+import Carbon.HIToolbox
 import XCTest
 @testable import xxsnap
 
@@ -92,7 +93,9 @@ final class AppSettingsTests: XCTestCase {
         let settings = PreferencesSettings(
             filenameTemplate: "Capture {yyyyMMdd}_{HHmmss}",
             checksForUpdatesAtLaunch: false,
-            updateCheckIntervalHours: 6
+            updateCheckIntervalHours: 6,
+            disablesTextRecognitionSound: false,
+            disablesTextRecognitionSuccessNotification: false
         )
         try store.save(settings)
 
@@ -126,6 +129,8 @@ final class AppSettingsTests: XCTestCase {
             PreferencesSettings.default.checksForUpdatesAtLaunch
         )
         XCTAssertEqual(settings.updateCheckIntervalHours, 6)
+        XCTAssertTrue(settings.disablesTextRecognitionSound)
+        XCTAssertTrue(settings.disablesTextRecognitionSuccessNotification)
     }
 
     func testFilenameTemplateRendererUsesSupportedVariablesAndAddsPng() throws {
@@ -318,7 +323,7 @@ final class AppSettingsTests: XCTestCase {
         let registrar = FakeGlobalHotKeyRegistrar()
         let controller = makeHotKeyController(store: store, registrar: registrar)
         let replacementRestoreShortcut = HotKeySettings(
-            keyCode: HotKeyAction.restoreMostRecentlyHiddenPinnedImage.defaultSettings.keyCode + 2,
+            keyCode: UInt32(kVK_ANSI_4),
             modifiers: HotKeyAction.restoreMostRecentlyHiddenPinnedImage.defaultSettings.modifiers
         )
 
@@ -507,6 +512,52 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testGeneralPreferencesPersistTextRecognitionFeedbackSwitches() throws {
+        let settingsStore = FakeAppSettingsStore()
+        let preferencesStore = FakePreferencesSettingsStore()
+        let controller = PreferencesWindowController(
+            settingsStore: settingsStore,
+            preferencesSettingsStore: preferencesStore,
+            hotKeyController: makeHotKeyController(
+                store: settingsStore,
+                registrar: FakeGlobalHotKeyRegistrar()
+            ),
+            launchAtLoginManager: FakeLaunchAtLoginManager(),
+            updateChecker: FakeUpdateChecker()
+        )
+        defer {
+            controller.close()
+        }
+
+        controller.show(section: .general)
+        let labels = descendants(
+            of: controller.window?.contentView,
+            matching: NSTextField.self
+        ).map(\.stringValue)
+        XCTAssertTrue(labels.contains("禁用识别文字提示音"))
+        XCTAssertTrue(labels.contains("禁用识别文字通知"))
+
+        let switches = descendants(
+            of: controller.window?.contentView,
+            matching: NSSwitch.self
+        )
+        let soundSwitch = try XCTUnwrap(switches.first {
+            $0.identifier?.rawValue == "disableTextRecognitionSound"
+        })
+        let notificationSwitch = try XCTUnwrap(switches.first {
+            $0.identifier?.rawValue == "disableTextRecognitionSuccessNotification"
+        })
+        XCTAssertEqual(soundSwitch.state, .on)
+        XCTAssertEqual(notificationSwitch.state, .on)
+
+        soundSwitch.performClick(nil)
+        notificationSwitch.performClick(nil)
+
+        XCTAssertFalse(preferencesStore.settings.disablesTextRecognitionSound)
+        XCTAssertFalse(preferencesStore.settings.disablesTextRecognitionSuccessNotification)
+    }
+
+    @MainActor
     func testSavePreferencesUsesWideEditorAndFramedPreview() {
         let settingsStore = FakeAppSettingsStore()
         let controller = PreferencesWindowController(
@@ -574,9 +625,9 @@ final class AppSettingsTests: XCTestCase {
         let legacyBadges = descendants(of: controller.window?.contentView, matching: NSView.self)
             .filter { $0.identifier?.rawValue == "shortcutValueBadge" }
 
-        XCTAssertEqual(recorderControls.count, 3)
-        XCTAssertEqual(recorderButtons.count, 3)
-        XCTAssertEqual(clearButtons.count, 3)
+        XCTAssertEqual(recorderControls.count, HotKeyAction.allCases.count)
+        XCTAssertEqual(recorderButtons.count, HotKeyAction.allCases.count)
+        XCTAssertEqual(clearButtons.count, HotKeyAction.allCases.count)
         XCTAssertTrue(legacyBadges.isEmpty)
         for control in recorderControls {
             XCTAssertEqual(control.frame.size, NSSize(width: 258, height: 42))
@@ -612,7 +663,7 @@ final class AppSettingsTests: XCTestCase {
 
         let rows = descendants(of: controller.window?.contentView, matching: NSStackView.self)
             .filter { $0.identifier?.rawValue == "shortcutRow" }
-        XCTAssertEqual(rows.count, 3)
+        XCTAssertEqual(rows.count, HotKeyAction.allCases.count)
         var recorderFrames: [NSRect] = []
 
         for row in rows {
@@ -707,7 +758,7 @@ final class AppSettingsTests: XCTestCase {
         controller.show(section: .shortcuts)
         let rows = descendants(of: controller.window?.contentView, matching: NSStackView.self)
             .filter { $0.identifier?.rawValue == "shortcutRow" }
-        let teachingPenControl = rows[1].arrangedSubviews.last
+        let teachingPenControl = rows[2].arrangedSubviews.last
         let recorder = try XCTUnwrap(
             descendants(of: teachingPenControl, matching: NSButton.self)
                 .first { $0.identifier?.rawValue == "shortcutRecorderButton" }
@@ -753,6 +804,69 @@ final class AppSettingsTests: XCTestCase {
             strings.teachingPenShortcutDetail,
             "Start full-screen presentation annotation"
         )
+    }
+
+    func testCaptureTextStringsUseRequestedEnglishName() {
+        XCTAssertEqual(PreferencesStrings(language: .zhHans).captureText, "识别文字")
+        XCTAssertEqual(PreferencesStrings(language: .english).captureText, "Capture Text")
+        XCTAssertEqual(
+            PreferencesStrings(language: .english).captureTextShortcutDetail,
+            "Capture text from a selected screen area"
+        )
+    }
+
+    func testCaptureTextDefaultShortcutIsCommand3() {
+        XCTAssertEqual(HotKeyAction.recognizeText.defaultSettings.keyCode, UInt32(kVK_ANSI_3))
+        XCTAssertEqual(HotKeyAction.recognizeText.defaultSettings.modifiers, UInt32(cmdKey))
+    }
+
+    func testOCRJoinCandidatesSortsTopToBottomThenLeftToRight() {
+        let candidates = [
+            RecognizedTextCandidate(text: "World", boundingBox: CGRect(x: 0.45, y: 0.70, width: 0.2, height: 0.1)),
+            RecognizedTextCandidate(text: "Hello", boundingBox: CGRect(x: 0.10, y: 0.70, width: 0.2, height: 0.1)),
+            RecognizedTextCandidate(text: "Second line", boundingBox: CGRect(x: 0.10, y: 0.40, width: 0.5, height: 0.1)),
+        ]
+
+        XCTAssertEqual(OCRTextRecognitionService.join(candidates), "Hello World\nSecond line")
+    }
+
+    func testOCRJoinCandidatesTrimsEmptyTextAndWhitespace() {
+        let candidates = [
+            RecognizedTextCandidate(text: "  Alpha  ", boundingBox: CGRect(x: 0.1, y: 0.8, width: 0.2, height: 0.1)),
+            RecognizedTextCandidate(text: "   ", boundingBox: CGRect(x: 0.3, y: 0.8, width: 0.2, height: 0.1)),
+            RecognizedTextCandidate(text: "Beta", boundingBox: CGRect(x: 0.1, y: 0.5, width: 0.2, height: 0.1)),
+        ]
+
+        XCTAssertEqual(OCRTextRecognitionService.join(candidates), "Alpha\nBeta")
+    }
+
+    func testTextRecognitionOverlayConfigurationHidesScreenshotTools() throws {
+        let configuration = SelectionOverlayConfiguration.textRecognition()
+
+        XCTAssertFalse(configuration.showsAnnotationToolbarButtons)
+        XCTAssertTrue(configuration.hiddenMainToolbarButtons.contains(.scroll))
+        XCTAssertTrue(configuration.hiddenMainToolbarButtons.contains(.cancel))
+        XCTAssertTrue(configuration.hiddenMainToolbarButtons.contains(.pin))
+        XCTAssertTrue(configuration.hiddenMainToolbarButtons.contains(.save))
+        XCTAssertTrue(configuration.hiddenMainToolbarButtons.contains(.copy))
+        XCTAssertFalse(configuration.allowsSelectionGeometryEditing)
+        XCTAssertFalse(configuration.showsSelectionMeasurementControl)
+        XCTAssertEqual(configuration.outsideSelectionDimAlpha, 0)
+        let fillColor = try XCTUnwrap(configuration.selectionFillColor)
+        XCTAssertEqual(fillColor.whiteComponent, 0.70, accuracy: 0.001)
+        XCTAssertEqual(fillColor.alphaComponent, 0.28, accuracy: 0.001)
+    }
+
+    func testCorrectIconIsBundledForTextRecognitionSuccess() {
+        XCTAssertNotNil(Bundle.main.url(forResource: "correct", withExtension: "svg"))
+    }
+
+    func testFailedIconIsBundledForTextRecognitionFailure() {
+        XCTAssertNotNil(Bundle.main.url(forResource: "failed", withExtension: "svg"))
+    }
+
+    func testNotificationSoundIsBundledForTextRecognitionSuccess() {
+        XCTAssertNotNil(Bundle.main.url(forResource: "notification", withExtension: "mp3"))
     }
 
     func testFeatureGateKeepsTrialFullyOpenAndRestrictsFreeCoreFeatures() {

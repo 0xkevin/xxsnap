@@ -11,6 +11,10 @@
 		AB6000000000000000000002 /* CaptureHotKeyController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB6000000000000000000012 /* CaptureHotKeyController.swift */; };
 		AB6000000000000000000003 /* PreferencesSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB6000000000000000000013 /* PreferencesSettings.swift */; };
 		AB6000000000000000000004 /* PreferencesWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB6000000000000000000014 /* PreferencesWindowController.swift */; };
+		AB6100000000000000000001 /* OCRResultPresentationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB6100000000000000000011 /* OCRResultPresentationController.swift */; };
+		AB6100000000000000000002 /* correct.svg in Resources */ = {isa = PBXBuildFile; fileRef = AB6100000000000000000012 /* correct.svg */; };
+		AB6200000000000000000001 /* notification.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = AB6200000000000000000011 /* notification.mp3 */; };
+		AB6300000000000000000001 /* failed.svg in Resources */ = {isa = PBXBuildFile; fileRef = AB6300000000000000000011 /* failed.svg */; };
 		06D0A675DA873D0AEC83074A /* redo-disabled.svg in Resources */ = {isa = PBXBuildFile; fileRef = D28A278CFB0A71EF7C226931 /* redo-disabled.svg */; };
 		0FB0F41C5A5ABD609008810E /* CaptureControlWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24BDEB3AE00354C36614F3C1 /* CaptureControlWindowController.swift */; };
 		0FE265B997BADE94F03E511A /* WindowSelectionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7E12CD93A98EF67FC506F54 /* WindowSelectionState.swift */; };
@@ -141,6 +145,10 @@
 		AB6000000000000000000012 /* CaptureHotKeyController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureHotKeyController.swift; sourceTree = "<group>"; };
 		AB6000000000000000000013 /* PreferencesSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencesSettings.swift; sourceTree = "<group>"; };
 		AB6000000000000000000014 /* PreferencesWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencesWindowController.swift; sourceTree = "<group>"; };
+		AB6100000000000000000011 /* OCRResultPresentationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OCRResultPresentationController.swift; sourceTree = "<group>"; };
+		AB6100000000000000000012 /* correct.svg */ = {isa = PBXFileReference; path = "correct.svg"; sourceTree = "<group>"; };
+		AB6200000000000000000011 /* notification.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = Sounds/notification.mp3; sourceTree = "<group>"; };
+		AB6300000000000000000011 /* failed.svg */ = {isa = PBXFileReference; path = "failed.svg"; sourceTree = "<group>"; };
 		0209BE008E9C5F0571BE4B9F /* border-corner-rounded.svg */ = {isa = PBXFileReference; path = "border-corner-rounded.svg"; sourceTree = "<group>"; };
 		0ABE865C6E2158661014F31D /* palette-tool.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "palette-tool.png"; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4B6C /* bold.svg */ = {isa = PBXFileReference; path = "bold.svg"; sourceTree = "<group>"; };
@@ -273,6 +281,7 @@
 				AB6000000000000000000012 /* CaptureHotKeyController.swift */,
 				24BDEB3AE00354C36614F3C1 /* CaptureControlWindowController.swift */,
 				A177154367D4DF7657018B06 /* CaptureCoordinator.swift */,
+				AB6100000000000000000011 /* OCRResultPresentationController.swift */,
 				DE8CA0660F22BC823E1A8DBC /* main.swift */,
 				6F196A38351C3089668432BA /* PermissionCoordinator.swift */,
 				A177154367D4DF7657018B07 /* PinnedImageWindowController.swift */,
@@ -381,6 +390,7 @@
 				E06F5FA13C638ADE764DDA8B /* xxsnap.icns */,
 				E4F7C38789DCA5D0BBB5EEFA /* xxsnap.png */,
 				F51D15626D490752CC2922E4 /* Icons */,
+				AB6200000000000000000011 /* notification.mp3 */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -412,6 +422,8 @@
 					1F4A7C50AA4E1B2300000002 /* command.svg */,
 					746D4C73B253F54E1E56C5C6 /* copy-to-clipboard.png */,
 				16F9496957D9500C499D44CB /* copy-to-clipboard.svg */,
+				AB6100000000000000000012 /* correct.svg */,
+				AB6300000000000000000011 /* failed.svg */,
 				0EF17E8A625E11836314572B /* crop.png */,
 				A89C77B7643079BE8890E43B /* crop.svg */,
 				1F4A7C50AA4E1B2300000004 /* done.svg */,
@@ -570,6 +582,9 @@
 					1F4A7C50AA4E1B2300000001 /* command.svg in Resources */,
 					31B529E62D217D2F5B13FB85 /* copy-to-clipboard.png in Resources */,
 				C9074FF569D4610572CFE532 /* copy-to-clipboard.svg in Resources */,
+				AB6100000000000000000002 /* correct.svg in Resources */,
+				AB6300000000000000000001 /* failed.svg in Resources */,
+				AB6200000000000000000001 /* notification.mp3 in Resources */,
 				5F56CD50B9AD87B11791D4DE /* crop.png in Resources */,
 				D9FA6CC87275C43C69EE7826 /* crop.svg in Resources */,
 				1F4A7C50AA4E1B2300000003 /* done.svg in Resources */,
@@ -668,6 +683,7 @@
 				28874BF6C20345BE1676B963 /* CaptureAnnotationRenderer.swift in Sources */,
 				0FB0F41C5A5ABD609008810E /* CaptureControlWindowController.swift in Sources */,
 				5FABC128915B0C423DD63EC6 /* CaptureCoordinator.swift in Sources */,
+				AB6100000000000000000001 /* OCRResultPresentationController.swift in Sources */,
 				4A423183222F53C45C9E493F /* CaptureToolbarWindowController.swift in Sources */,
 				3255124AE9CD7B90D40C887F /* PermissionCoordinator.swift in Sources */,
 				5FABC128915B0C423DD63EC7 /* PinnedImageWindowController.swift in Sources */,

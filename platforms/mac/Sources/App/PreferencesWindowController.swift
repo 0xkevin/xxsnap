@@ -151,6 +151,29 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
         languagePopup.action = #selector(changeLanguage(_:))
         languagePopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 130).isActive = true
 
+        let preferencesSettings = preferencesSettingsStore.load()
+        let disableTextRecognitionSoundSwitch = NSSwitch()
+        disableTextRecognitionSoundSwitch.identifier = NSUserInterfaceItemIdentifier(
+            "disableTextRecognitionSound"
+        )
+        disableTextRecognitionSoundSwitch.state =
+            preferencesSettings.disablesTextRecognitionSound ? .on : .off
+        disableTextRecognitionSoundSwitch.target = self
+        disableTextRecognitionSoundSwitch.action = #selector(
+            toggleDisableTextRecognitionSound(_:)
+        )
+
+        let disableTextRecognitionSuccessNotificationSwitch = NSSwitch()
+        disableTextRecognitionSuccessNotificationSwitch.identifier = NSUserInterfaceItemIdentifier(
+            "disableTextRecognitionSuccessNotification"
+        )
+        disableTextRecognitionSuccessNotificationSwitch.state =
+            preferencesSettings.disablesTextRecognitionSuccessNotification ? .on : .off
+        disableTextRecognitionSuccessNotificationSwitch.target = self
+        disableTextRecognitionSuccessNotificationSwitch.action = #selector(
+            toggleDisableTextRecognitionSuccessNotification(_:)
+        )
+
         let page = makeStandardPage(
             rows: [
                 makeRow(
@@ -162,6 +185,16 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
                     title: strings.languageTitle,
                     detail: strings.languageDetail,
                     control: languagePopup
+                ),
+                makeRow(
+                    title: strings.disableTextRecognitionSound,
+                    detail: strings.disableTextRecognitionSoundDetail,
+                    control: disableTextRecognitionSoundSwitch
+                ),
+                makeRow(
+                    title: strings.disableTextRecognitionSuccessNotification,
+                    detail: strings.disableTextRecognitionSuccessNotificationDetail,
+                    control: disableTextRecognitionSuccessNotificationSwitch
                 )
             ]
         )
@@ -183,6 +216,11 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
             title: strings.captureShortcut,
             detail: strings.captureShortcutDetail
         )
+        let captureTextRow = makeShortcutRow(
+            action: .recognizeText,
+            title: strings.captureText,
+            detail: strings.captureTextShortcutDetail
+        )
         let teachingPenRow = makeShortcutRow(
             action: .teachingPen,
             title: strings.teachingPen,
@@ -193,7 +231,7 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
             title: strings.restorePinShortcut,
             detail: strings.restorePinShortcutDetail
         )
-        let page = makeStandardPage(rows: [captureRow, teachingPenRow, restoreRow])
+        let page = makeStandardPage(rows: [captureRow, captureTextRow, teachingPenRow, restoreRow])
 
         let resetButton = NSButton(
             title: strings.resetShortcuts,
@@ -559,6 +597,30 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
             onLanguageChanged?(settings.language)
         } catch {
             sender.selectItem(at: previous == .english ? 0 : 1)
+            presentError(strings.saveFailed)
+        }
+    }
+
+    @objc private func toggleDisableTextRecognitionSound(_ sender: NSSwitch) {
+        var settings = preferencesSettingsStore.load()
+        let previous = settings.disablesTextRecognitionSound
+        settings.disablesTextRecognitionSound = sender.state == .on
+        do {
+            try preferencesSettingsStore.save(settings)
+        } catch {
+            sender.state = previous ? .on : .off
+            presentError(strings.saveFailed)
+        }
+    }
+
+    @objc private func toggleDisableTextRecognitionSuccessNotification(_ sender: NSSwitch) {
+        var settings = preferencesSettingsStore.load()
+        let previous = settings.disablesTextRecognitionSuccessNotification
+        settings.disablesTextRecognitionSuccessNotification = sender.state == .on
+        do {
+            try preferencesSettingsStore.save(settings)
+        } catch {
+            sender.state = previous ? .on : .off
             presentError(strings.saveFailed)
         }
     }

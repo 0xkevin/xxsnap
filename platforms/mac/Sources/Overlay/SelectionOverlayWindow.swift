@@ -29,6 +29,8 @@ enum SelectionOverlayToolbarButton: Hashable {
     case scroll
     case cancel
     case pin
+    case save
+    case copy
 }
 
 enum PinnedImageWindowCommand {
@@ -61,6 +63,7 @@ struct SelectionOverlayConfiguration {
     var initialLockedSelectionRect: NSRect?
     var isTeachingPen: Bool
     var hiddenMainToolbarButtons: Set<SelectionOverlayToolbarButton>
+    var showsAnnotationToolbarButtons: Bool
     var showsFinishEditingButton: Bool
     var allowsSelectionGeometryEditing: Bool
     var showsSelectionBorder: Bool
@@ -88,6 +91,14 @@ struct SelectionOverlayConfiguration {
     var pinnedImageWindowCommandHandler: ((PinnedImageWindowCommand) -> Void)?
     var pinnedImageToolbarToggleHandler: (() -> Void)?
     var additionalKeyDownHandler: ((NSEvent) -> Bool)?
+    var showsMainToolbar: Bool = true
+    var allowsWindowSelection: Bool = true
+    var automaticSelectionAction: CaptureCompletionAction?
+    var selectionBorderColor: NSColor?
+    var selectionBorderWidth: CGFloat = 2
+    var selectionFillColor: NSColor?
+    var initialSelectionCornerRadius: CGFloat?
+    var showsBackgroundSnapshot: Bool = true
 
     static let `default` = SelectionOverlayConfiguration(
         windowFrame: nil,
@@ -95,6 +106,7 @@ struct SelectionOverlayConfiguration {
         initialLockedSelectionRect: nil,
         isTeachingPen: false,
         hiddenMainToolbarButtons: [],
+        showsAnnotationToolbarButtons: true,
         showsFinishEditingButton: false,
         allowsSelectionGeometryEditing: true,
         showsSelectionBorder: true,
@@ -141,6 +153,7 @@ struct SelectionOverlayConfiguration {
             initialLockedSelectionRect: selectionRect,
             isTeachingPen: false,
             hiddenMainToolbarButtons: [.scroll, .cancel, .pin],
+            showsAnnotationToolbarButtons: true,
             showsFinishEditingButton: true,
             allowsSelectionGeometryEditing: false,
             showsSelectionBorder: false,
@@ -191,6 +204,7 @@ struct SelectionOverlayConfiguration {
             initialLockedSelectionRect: selectionRect,
             isTeachingPen: false,
             hiddenMainToolbarButtons: [.scroll, .cancel, .pin],
+            showsAnnotationToolbarButtons: true,
             showsFinishEditingButton: true,
             allowsSelectionGeometryEditing: false,
             showsSelectionBorder: false,
@@ -228,6 +242,7 @@ struct SelectionOverlayConfiguration {
             initialLockedSelectionRect: NSRect(origin: .zero, size: windowFrame.size),
             isTeachingPen: true,
             hiddenMainToolbarButtons: [.scroll, .cancel, .pin],
+            showsAnnotationToolbarButtons: true,
             showsFinishEditingButton: false,
             allowsSelectionGeometryEditing: false,
             showsSelectionBorder: false,
@@ -266,6 +281,27 @@ struct SelectionOverlayConfiguration {
         )
     }
 #endif
+
+    static func textRecognition() -> SelectionOverlayConfiguration {
+        var configuration = SelectionOverlayConfiguration.default
+        configuration.hiddenMainToolbarButtons = [.scroll, .cancel, .pin, .save, .copy]
+        configuration.showsAnnotationToolbarButtons = false
+        configuration.showsMainToolbar = false
+        configuration.allowsWindowSelection = false
+        configuration.allowsSelectionGeometryEditing = false
+        configuration.showsSelectionMeasurementControl = false
+        configuration.allowsPassiveColorSampler = false
+        configuration.usesArrowCursorWhenIdle = false
+        configuration.outsideSelectionDimAlpha = 0
+        configuration.completesBeforeOrderingOut = true
+        configuration.automaticSelectionAction = .copy
+        configuration.selectionBorderColor = .white
+        configuration.selectionBorderWidth = 0
+        configuration.selectionFillColor = NSColor(calibratedWhite: 0.70, alpha: 0.28)
+        configuration.initialSelectionCornerRadius = 0
+        configuration.showsBackgroundSnapshot = false
+        return configuration
+    }
 }
 
 private extension NSAlert {
@@ -732,7 +768,7 @@ final class SelectionOverlayWindow: NSWindow {
 
         let overlayView = SelectionOverlayView(
             frame: NSRect(origin: .zero, size: frame.size),
-            backgroundImage: backgroundImage,
+            backgroundImage: configuration.showsBackgroundSnapshot ? backgroundImage : nil,
             settings: settings,
             featureGate: featureGate,
             configuration: configuration,
@@ -2421,6 +2457,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             self.backgroundBitmap = nil
         }
         super.init(frame: frameRect)
+        selectionCornerRadius = configuration.initialSelectionCornerRadius ?? defaultSelectionCornerRadius
         annotations = configuration.initialAnnotations
         eraserMasks = configuration.initialEraserMasks
         if let initialLockedSelectionRect = configuration.initialLockedSelectionRect {
@@ -2944,7 +2981,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         drawEditingTextCaretIfNeeded()
         drawDraftAnnotation()
         drawEraserRectanglePreview()
-        if !isPinnedImageDragInProgress
+        if configuration.showsMainToolbar
+            && !isPinnedImageDragInProgress
             && (!configuration.isTeachingPen || teachingPenToolbarAnchor != nil) {
             drawMainToolbar(for: selectionRect)
             drawOptionsToolbar(for: selectionRect)
@@ -3132,7 +3170,8 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
         switch interactionMode {
         case .selecting:
-            if let hoverRect = (hoveredWindowRect ?? displayedWindowRect)?.standardized,
+            if configuration.allowsWindowSelection,
+               let hoverRect = (hoveredWindowRect ?? displayedWindowRect)?.standardized,
                hoverRect.contains(point),
                hoverRect.width >= 8,
                hoverRect.height >= 8 {
@@ -3696,6 +3735,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 lockedSelectionRect = pendingWindowSelectionRect
                 interactionMode = .annotating
                 window?.makeFirstResponder(self)
+                if let action = configuration.automaticSelectionAction {
+                    finish(action: action)
+                    return
+                }
                 updateColorSampler(at: point)
                 NSLog("xxsnap overlay window selection locked rect=(%.0f, %.0f, %.0f, %.0f)", pendingWindowSelectionRect.minX, pendingWindowSelectionRect.minY, pendingWindowSelectionRect.width, pendingWindowSelectionRect.height)
                 invalidateCursorRectsAndRefresh(at: point)
@@ -3710,6 +3753,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             lockedSelectionRect = selectionRect
             interactionMode = .annotating
             window?.makeFirstResponder(self)
+            if let action = configuration.automaticSelectionAction {
+                finish(action: action)
+                return
+            }
             updateColorSampler(at: point)
             NSLog("xxsnap overlay selection locked rect=(%.0f, %.0f, %.0f, %.0f)", selectionRect.minX, selectionRect.minY, selectionRect.width, selectionRect.height)
         case .drawingShape:
@@ -4245,6 +4292,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             )
         }
 
+        guard configuration.allowsWindowSelection else {
+            return nil
+        }
+
         return displayedWindowRect ?? hoveredWindowRect
     }
 
@@ -4390,7 +4441,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         let previousTooltipText = hoveredTooltip?.text
         hoveredTooltip = tooltipTarget(at: point)
 
-        if interactionMode == .selecting, selectionStartPoint == nil {
+        if configuration.allowsWindowSelection,
+           interactionMode == .selecting,
+           selectionStartPoint == nil {
             if windowCandidates.isEmpty, let window {
                 windowCandidates = WindowSelectionState.currentCandidates(desktopFrame: window.frame)
             }
@@ -4401,7 +4454,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 currentProcessID: pid_t(NSRunningApplication.current.processIdentifier)
             )
             updateHoveredWindowRect(targetRect)
-        } else if interactionMode != .selecting {
+        } else {
             updateHoveredWindowRect(nil)
         }
 
@@ -11807,6 +11860,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             NSColor.black.withAlphaComponent(configuration.outsideSelectionDimAlpha).setFill()
             path.fill()
         }
+        if let selectionFillColor = configuration.selectionFillColor {
+            selectionFillColor.setFill()
+            selectionPath(in: selectionRect).fill()
+        }
     }
 
     private func drawMosaicDraftPreviewIfNeeded() {
@@ -11818,10 +11875,18 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private func drawSelectionBorder(_ rect: NSRect) {
-        selectionChromeColor.setStroke()
+        let usesDeviceHairline = configuration.selectionBorderWidth == 0
+        if usesDeviceHairline {
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current?.shouldAntialias = false
+        }
+        (configuration.selectionBorderColor ?? selectionChromeColor).setStroke()
         let border = selectionPath(in: rect)
-        border.lineWidth = 2
+        border.lineWidth = configuration.selectionBorderWidth
         border.stroke()
+        if usesDeviceHairline {
+            NSGraphicsContext.restoreGraphicsState()
+        }
     }
 
     private func selectionPath(in rect: NSRect) -> NSBezierPath {
@@ -16100,24 +16165,31 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         if configuration.isTeachingPen {
             return Self.teachingPenToolbarButtons
         }
-        var buttons: [ToolbarButton] = [
-            .rectangle,
-            .polyline,
-            .pen,
-            .marker,
-            .eyedropper,
-            .mosaic,
-            .text,
-            .number,
-            .magnifier,
-            .eraser,
-        ]
-        if featureGate.isEnabled(.scrollCapture) {
+        var buttons: [ToolbarButton] = []
+        if configuration.showsAnnotationToolbarButtons {
+            buttons.append(contentsOf: [
+                .rectangle,
+                .polyline,
+                .pen,
+                .marker,
+                .eyedropper,
+                .mosaic,
+                .text,
+                .number,
+                .magnifier,
+                .eraser,
+            ])
+        }
+        if configuration.showsAnnotationToolbarButtons, featureGate.isEnabled(.scrollCapture) {
             buttons.append(.scroll)
         }
+        if configuration.showsAnnotationToolbarButtons {
+            buttons.append(contentsOf: [
+                .undo,
+                .redo,
+            ])
+        }
         buttons.append(contentsOf: [
-            .undo,
-            .redo,
             .cancel,
             .pin,
             .save,
@@ -16145,6 +16217,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return configuration.hiddenMainToolbarButtons.contains(.cancel)
         case .pin:
             return configuration.hiddenMainToolbarButtons.contains(.pin)
+        case .save:
+            return configuration.hiddenMainToolbarButtons.contains(.save)
+        case .copy:
+            return configuration.hiddenMainToolbarButtons.contains(.copy)
         default:
             return false
         }
@@ -16242,6 +16318,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private func mainToolbarRect(for selectionRect: NSRect) -> NSRect? {
+        guard configuration.showsMainToolbar else {
+            return nil
+        }
         guard let base = baseMainToolbarRect(for: selectionRect) else {
             return nil
         }

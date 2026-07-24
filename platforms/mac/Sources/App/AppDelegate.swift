@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             permissionCoordinator: PermissionCoordinator(),
             screenCaptureService: ScreenCaptureService(),
             settingsStore: settingsStore,
+            preferencesSettingsStore: preferencesSettingsStore,
             filenameProvider: filenameProvider
         )
         self.settingsStore = settingsStore
@@ -28,6 +29,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settingsStore: settingsStore,
             captureHandler: {
                 captureCoordinator.startCapture()
+            },
+            recognizeTextHandler: {
+                captureCoordinator.startTextRecognition()
             },
             teachingPenHandler: {
                 captureCoordinator.toggleTeachingPen()
