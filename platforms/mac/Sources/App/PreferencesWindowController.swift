@@ -39,7 +39,7 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
         self.updateChecker = updateChecker
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 680, height: 280),
+            contentRect: NSRect(x: 0, y: 0, width: 680, height: 320),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -183,12 +183,17 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
             title: strings.captureShortcut,
             detail: strings.captureShortcutDetail
         )
+        let teachingPenRow = makeShortcutRow(
+            action: .teachingPen,
+            title: strings.teachingPen,
+            detail: strings.teachingPenShortcutDetail
+        )
         let restoreRow = makeShortcutRow(
             action: .restoreMostRecentlyHiddenPinnedImage,
             title: strings.restorePinShortcut,
             detail: strings.restorePinShortcutDetail
         )
-        let page = makeStandardPage(rows: [captureRow, restoreRow])
+        let page = makeStandardPage(rows: [captureRow, teachingPenRow, restoreRow])
 
         let resetButton = NSButton(
             title: strings.resetShortcuts,
@@ -254,8 +259,10 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
         ])
 
         let recorder = ShortcutRecorderButton(title: strings.record)
+        recorder.identifier = NSUserInterfaceItemIdentifier("shortcutRecorderButton")
         recorder.isEnabled = !hotKeyController.isCaptureSessionActive
         recorder.recordingTitle = strings.recording
+        recorder.widthAnchor.constraint(equalToConstant: 120).isActive = true
         recorder.onCancel = { [weak self] in
             self?.refresh()
         }
@@ -269,11 +276,14 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
         }
 
         let controls = NSStackView(views: [keyBadge, recorder])
+        controls.identifier = NSUserInterfaceItemIdentifier("shortcutControls")
         controls.orientation = .horizontal
         controls.alignment = .centerY
         controls.spacing = 8
+        controls.widthAnchor.constraint(equalToConstant: 230).isActive = true
 
         let row = makeRow(title: title, detail: detail, control: controls)
+        row.identifier = NSUserInterfaceItemIdentifier("shortcutRow")
         if let error = hotKeyController.errors[action] {
             row.toolTip = localizedHotKeyError(error)
         }
@@ -485,12 +495,14 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
     private func makeRow(title: String, detail: String?, control: NSView) -> NSView {
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = .systemFont(ofSize: 14, weight: .semibold)
+        titleLabel.alignment = .left
         titleLabel.lineBreakMode = .byWordWrapping
         titleLabel.maximumNumberOfLines = 2
 
         let labels: NSStackView
         if let detail {
             let detailLabel = secondaryLabel(detail)
+            detailLabel.alignment = .left
             detailLabel.maximumNumberOfLines = 2
             labels = NSStackView(views: [titleLabel, detailLabel])
             labels.orientation = .vertical

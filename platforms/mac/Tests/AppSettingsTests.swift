@@ -201,6 +201,75 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testTeachingPenUsesCommandTwoAndRemainsRegisteredDuringCapture() {
+        let store = FakeAppSettingsStore()
+        let registrar = FakeGlobalHotKeyRegistrar()
+        let controller = makeHotKeyController(store: store, registrar: registrar)
+
+        XCTAssertEqual(
+            HotKeyFormatter.displayString(HotKeyAction.teachingPen.defaultSettings),
+            "⌘2"
+        )
+        XCTAssertEqual(
+            controller.registeredHotKey(for: .teachingPen),
+            HotKeyAction.teachingPen.defaultSettings
+        )
+
+        controller.setCaptureSessionActive(true)
+
+        XCTAssertEqual(
+            controller.registeredHotKey(for: .teachingPen),
+            HotKeyAction.teachingPen.defaultSettings
+        )
+    }
+
+    @MainActor
+    func testTeachingPenDefaultDoesNotReplaceStoredCommandTwoShortcut() {
+        let store = FakeAppSettingsStore()
+        let storedRestoreShortcut = HotKeyAction.teachingPen.defaultSettings
+        store.settings.hotkeys = [
+            HotKeyAction.capture.rawValue: HotKeyAction.capture.defaultSettings,
+            HotKeyAction.restoreMostRecentlyHiddenPinnedImage.rawValue: storedRestoreShortcut,
+        ]
+        let registrar = FakeGlobalHotKeyRegistrar()
+        let controller = makeHotKeyController(store: store, registrar: registrar)
+
+        XCTAssertEqual(
+            controller.registeredHotKey(for: .restoreMostRecentlyHiddenPinnedImage),
+            storedRestoreShortcut
+        )
+        XCTAssertNil(controller.registeredHotKey(for: .teachingPen))
+        XCTAssertEqual(controller.errors[.teachingPen], .duplicate)
+    }
+
+    @MainActor
+    func testTeachingPenRegistersImmediatelyAfterStoredCommandTwoIsReleased() {
+        let store = FakeAppSettingsStore()
+        let storedRestoreShortcut = HotKeyAction.teachingPen.defaultSettings
+        store.settings.hotkeys = [
+            HotKeyAction.capture.rawValue: HotKeyAction.capture.defaultSettings,
+            HotKeyAction.restoreMostRecentlyHiddenPinnedImage.rawValue: storedRestoreShortcut,
+        ]
+        let registrar = FakeGlobalHotKeyRegistrar()
+        let controller = makeHotKeyController(store: store, registrar: registrar)
+        let replacementRestoreShortcut = HotKeySettings(
+            keyCode: HotKeyAction.restoreMostRecentlyHiddenPinnedImage.defaultSettings.keyCode + 2,
+            modifiers: HotKeyAction.restoreMostRecentlyHiddenPinnedImage.defaultSettings.modifiers
+        )
+
+        assertHotKeySuccess(controller.apply(
+            replacementRestoreShortcut,
+            to: .restoreMostRecentlyHiddenPinnedImage
+        ))
+
+        XCTAssertEqual(
+            controller.registeredHotKey(for: .teachingPen),
+            HotKeyAction.teachingPen.defaultSettings
+        )
+        XCTAssertNil(controller.errors[.teachingPen])
+    }
+
+    @MainActor
     func testHotKeyControllerRejectsDuplicatesWithoutChangingRegistration() {
         let store = FakeAppSettingsStore()
         let registrar = FakeGlobalHotKeyRegistrar()
@@ -324,7 +393,7 @@ final class AppSettingsTests: XCTestCase {
             ["通用", "快捷键", "保存", "更新", "关于"]
         )
         XCTAssertEqual(controller.window?.contentLayoutRect.width ?? 0, 680, accuracy: 1)
-        XCTAssertEqual(controller.window?.contentLayoutRect.height ?? 0, 280, accuracy: 1)
+        XCTAssertEqual(controller.window?.contentLayoutRect.height ?? 0, 320, accuracy: 1)
         XCTAssertFalse(controller.window?.styleMask.contains(.resizable) == true)
         for section in PreferencesSection.allCases {
             controller.show(section: section)
@@ -437,8 +506,8 @@ final class AppSettingsTests: XCTestCase {
         let values = descendants(of: controller.window?.contentView, matching: NSTextField.self).filter {
             $0.identifier?.rawValue == "shortcutValueText"
         }
-        XCTAssertEqual(badges.count, 2)
-        XCTAssertEqual(values.count, 2)
+        XCTAssertEqual(badges.count, 3)
+        XCTAssertEqual(values.count, 3)
         for (badge, value) in zip(badges, values) {
             XCTAssertEqual(badge.frame.size, NSSize(width: 102, height: 36))
             XCTAssertEqual(value.font?.pointSize, 16)
@@ -463,9 +532,93 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(baselineOffset?.intValue, -3)
     }
 
+    @MainActor
+    func testShortcutRowsAlignLabelsLeftAndControlsRight() {
+        let settingsStore = FakeAppSettingsStore()
+        let controller = PreferencesWindowController(
+            settingsStore: settingsStore,
+            preferencesSettingsStore: FakePreferencesSettingsStore(),
+            hotKeyController: makeHotKeyController(
+                store: settingsStore,
+                registrar: FakeGlobalHotKeyRegistrar()
+            ),
+            launchAtLoginManager: FakeLaunchAtLoginManager(),
+            updateChecker: FakeUpdateChecker()
+        )
+        defer {
+            controller.close()
+        }
+
+        controller.show(section: .shortcuts)
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let rows = descendants(of: controller.window?.contentView, matching: NSStackView.self)
+            .filter { $0.identifier?.rawValue == "shortcutRow" }
+        XCTAssertEqual(rows.count, 3)
+        var badgeFrames: [NSRect] = []
+        var recorderFrames: [NSRect] = []
+
+        for row in rows {
+            guard
+                let labels = row.arrangedSubviews.first as? NSStackView,
+                let controls = row.arrangedSubviews.last as? NSStackView
+            else {
+                XCTFail("Expected shortcut row labels and controls")
+                continue
+            }
+
+            XCTAssertEqual(labels.alignment, .leading)
+            for label in labels.arrangedSubviews.compactMap({ $0 as? NSTextField }) {
+                XCTAssertEqual(label.alignment, .left)
+            }
+
+            XCTAssertEqual(controls.identifier?.rawValue, "shortcutControls")
+            XCTAssertEqual(controls.frame.width, 230, accuracy: 1)
+            XCTAssertEqual(
+                controls.frame.maxX,
+                row.bounds.maxX - row.edgeInsets.right,
+                accuracy: 1
+            )
+
+            let badge = controls.arrangedSubviews.first
+            let recorder = controls.arrangedSubviews.last
+            XCTAssertEqual(badge?.frame.width ?? 0, 102, accuracy: 1)
+            if let badge {
+                badgeFrames.append(badge.frame)
+            }
+            if let recorder {
+                recorderFrames.append(recorder.frame)
+                XCTAssertEqual(
+                    recorder.alignmentRect(forFrame: recorder.frame).width,
+                    120,
+                    accuracy: 1
+                )
+            }
+        }
+
+        for frame in badgeFrames.dropFirst() {
+            XCTAssertEqual(frame.minX, badgeFrames[0].minX, accuracy: 1)
+            XCTAssertEqual(frame.maxX, badgeFrames[0].maxX, accuracy: 1)
+        }
+        for frame in recorderFrames.dropFirst() {
+            XCTAssertEqual(frame.minX, recorderFrames[0].minX, accuracy: 1)
+            XCTAssertEqual(frame.maxX, recorderFrames[0].maxX, accuracy: 1)
+        }
+    }
+
     func testPreferencesMenuUsesShortAboutTitle() {
         XCTAssertEqual(PreferencesStrings(language: .zhHans).aboutXxSnap, "关于")
         XCTAssertEqual(PreferencesStrings(language: .english).aboutXxSnap, "About")
+    }
+
+    func testPresentationPenUsesFormalEnglishName() {
+        let strings = PreferencesStrings(language: .english)
+
+        XCTAssertEqual(strings.teachingPen, "Presentation Pen")
+        XCTAssertEqual(
+            strings.teachingPenShortcutDetail,
+            "Start full-screen presentation annotation"
+        )
     }
 
     func testFeatureGateKeepsTrialFullyOpenAndRestrictsFreeCoreFeatures() {
@@ -520,6 +673,7 @@ final class AppSettingsTests: XCTestCase {
             settingsStore: store,
             registrar: registrar,
             captureHandler: {},
+            teachingPenHandler: {},
             restorePinnedImageHandler: {}
         )
     }

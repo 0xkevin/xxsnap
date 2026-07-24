@@ -186,6 +186,7 @@ struct PreferencesStrings {
 
     var appTooltip: String { isEnglish ? "XxSnap Capture" : "xxsnap 截图" }
     var capture: String { isEnglish ? "Capture" : "截图" }
+    var teachingPen: String { isEnglish ? "Presentation Pen" : "教笔" }
     var preferences: String { isEnglish ? "Preferences…" : "首选项…" }
     var checkForUpdates: String { isEnglish ? "Check for Updates…" : "检查更新…" }
     var aboutXxSnap: String { isEnglish ? "About" : "关于" }
@@ -214,6 +215,9 @@ struct PreferencesStrings {
     var captureShortcut: String { isEnglish ? "Capture" : "截图" }
     var captureShortcutDetail: String {
         isEnglish ? "Start a new region capture" : "开始一次新的区域截图"
+    }
+    var teachingPenShortcutDetail: String {
+        isEnglish ? "Start full-screen presentation annotation" : "进入全屏教笔标注模式"
     }
     var restorePinShortcut: String {
         isEnglish ? "Restore most recently hidden pin" : "恢复最近隐藏的贴图"

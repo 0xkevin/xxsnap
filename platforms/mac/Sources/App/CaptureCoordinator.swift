@@ -79,6 +79,11 @@ private enum ScrollCaptureLifecyclePhase: Equatable {
     case cancelling
 }
 
+private enum CaptureOverlayMode {
+    case region
+    case teachingPen
+}
+
 private final class CaptureLanguageSnapshot {
     var language: AppLanguage
 
@@ -101,6 +106,7 @@ final class CaptureCoordinator {
     private var captureTask: Task<Void, Never>?
     private var startTask: Task<Void, Never>?
     private var overlayWindow: SelectionOverlayWindow?
+    private var activeOverlayMode: CaptureOverlayMode?
     private var retiredOverlayWindows: [SelectionOverlayWindow] = []
     private var pinnedWindowControllers: [PinnedImageWindowPresenting] = []
     private var mostRecentlyHiddenPinnedWindow: PinnedImageWindowPresenting?
@@ -123,6 +129,8 @@ final class CaptureCoordinator {
     private let frontmostApplicationResolver: @MainActor () -> NSRunningApplication?
     private let applicationActivator: @MainActor (NSRunningApplication) -> Void
     private let scrollCaptureTargetDetector: any ScrollCaptureTargetDetecting
+    private let selectionFallbackCapture: @MainActor (NSRect) async throws -> NSImage
+    private let desktopFallbackCapture: @MainActor () async throws -> NSImage
     private var longImageEditor: (any LongImageEditorPresenting)?
     private var longImageLifecycleActive = false
     private var scrollCaptureSession: (any ScrollCaptureSessionRunning)?
@@ -160,7 +168,9 @@ final class CaptureCoordinator {
         applicationActivator: @escaping @MainActor (NSRunningApplication) -> Void = { application in
             application.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
         },
-        scrollCaptureTargetDetector: any ScrollCaptureTargetDetecting = ScrollCaptureTargetDetector()
+        scrollCaptureTargetDetector: any ScrollCaptureTargetDetecting = ScrollCaptureTargetDetector(),
+        selectionFallbackCapture: (@MainActor (NSRect) async throws -> NSImage)? = nil,
+        desktopFallbackCapture: (@MainActor () async throws -> NSImage)? = nil
     ) {
         self.permissionCoordinator = permissionCoordinator
         self.screenCaptureService = screenCaptureService
@@ -215,6 +225,12 @@ final class CaptureCoordinator {
         self.frontmostApplicationResolver = frontmostApplicationResolver
         self.applicationActivator = applicationActivator
         self.scrollCaptureTargetDetector = scrollCaptureTargetDetector
+        self.selectionFallbackCapture = selectionFallbackCapture ?? { rect in
+            try await screenCaptureService.captureImage(in: rect)
+        }
+        self.desktopFallbackCapture = desktopFallbackCapture ?? {
+            try await screenCaptureService.captureDesktopImage()
+        }
     }
 
     convenience init() {
@@ -247,7 +263,23 @@ final class CaptureCoordinator {
     }
 
     func startCapture() {
-        NSLog("xxsnap startCapture")
+        startCapture(mode: .region)
+    }
+
+    func toggleTeachingPen() {
+        if activeOverlayMode == .teachingPen {
+            if let overlayWindow {
+                overlayWindow.cancel()
+            } else {
+                startTask?.cancel()
+            }
+            return
+        }
+        startCapture(mode: .teachingPen)
+    }
+
+    private func startCapture(mode: CaptureOverlayMode) {
+        NSLog("xxsnap startCapture mode=%@", String(describing: mode))
         guard canStartCapture else {
             NSLog("xxsnap startCapture ignored because capture is already active")
             return
@@ -270,6 +302,7 @@ final class CaptureCoordinator {
         }
 
         captureTargetApplication = frontmostApplicationResolver()
+        activeOverlayMode = mode
 
         startTask = Task { @MainActor [weak self] in
             guard let self else {
@@ -277,6 +310,9 @@ final class CaptureCoordinator {
             }
             defer {
                 self.startTask = nil
+                if self.overlayWindow == nil {
+                    self.activeOverlayMode = nil
+                }
             }
             let refreshTargetApplication = self.captureTargetApplication
 
@@ -289,13 +325,25 @@ final class CaptureCoordinator {
                 backgroundImage = nil
                 frozenDesktopImage = nil
             }
+            guard !Task.isCancelled else {
+                frozenDesktopImage = nil
+                return
+            }
 
             var settings = settingsStore.load()
             settings.language = self.languageSnapshot.language
+            let configuration: SelectionOverlayConfiguration
+            switch mode {
+            case .region:
+                configuration = .default
+            case .teachingPen:
+                configuration = .teachingPen(windowFrame: SelectionOverlayWindow.desktopFrame())
+            }
             let overlayWindow = SelectionOverlayWindow(
                 backgroundImage: backgroundImage,
                 settings: settings,
                 featureGate: FeatureGate(license: settings.license),
+                configuration: configuration,
                 refreshHandler: { [weak self] in
                     guard let self else {
                         return nil
@@ -318,7 +366,9 @@ final class CaptureCoordinator {
             }
 
             self.overlayWindow = overlayWindow
-            self.installScrollCaptureCallbacks(on: overlayWindow)
+            if mode == .region {
+                self.installScrollCaptureCallbacks(on: overlayWindow)
+            }
             self.captureOverlayDidPresent?()
             overlayWindow.present()
         }
@@ -894,10 +944,12 @@ final class CaptureCoordinator {
     }
 
     private func handleSelection(_ result: CaptureSelectionResult?) {
-        if let overlayWindow {
+        let completedOverlayMode = activeOverlayMode
+        if let overlayWindow, completedOverlayMode != .teachingPen {
             retiredOverlayWindows.append(overlayWindow)
         }
         overlayWindow = nil
+        activeOverlayMode = nil
 
         guard let result, !result.screenRect.isEmpty else {
             NSLog("xxsnap selection cancelled or empty")
@@ -918,11 +970,26 @@ final class CaptureCoordinator {
 
             do {
                 let image: NSImage
-                if let frozenDesktopImage = self.frozenDesktopImage,
-                   let croppedImage = Self.crop(image: frozenDesktopImage, rect: result.snapshotRect) {
-                    image = croppedImage
+                if let frozenDesktopImage = self.frozenDesktopImage {
+                    let imageBounds = NSRect(origin: .zero, size: frozenDesktopImage.size)
+                    if result.snapshotRect.standardized == imageBounds {
+                        image = frozenDesktopImage
+                    } else if let croppedImage = Self.crop(
+                        image: frozenDesktopImage,
+                        rect: result.snapshotRect
+                    ) {
+                        image = croppedImage
+                    } else {
+                        image = try await captureFallbackImage(
+                            for: completedOverlayMode,
+                            screenRect: result.screenRect
+                        )
+                    }
                 } else {
-                    image = try await screenCaptureService.captureImage(in: result.screenRect)
+                    image = try await captureFallbackImage(
+                        for: completedOverlayMode,
+                        screenRect: result.screenRect
+                    )
                 }
                 let exportedImage = CaptureAnnotationRenderer.render(
                     image: image,
@@ -978,6 +1045,16 @@ final class CaptureCoordinator {
                 NSLog("xxsnap capture failed: \(error.localizedDescription)")
             }
         }
+    }
+
+    private func captureFallbackImage(
+        for mode: CaptureOverlayMode?,
+        screenRect: NSRect
+    ) async throws -> NSImage {
+        if mode == .teachingPen {
+            return try await desktopFallbackCapture()
+        }
+        return try await selectionFallbackCapture(screenRect)
     }
 
     static func crop(image: NSImage, rect: NSRect) -> NSImage? {
@@ -1096,6 +1173,11 @@ extension CaptureCoordinator {
     func test_installOverlayWindow(_ overlay: SelectionOverlayWindow) {
         overlayWindow = overlay
         installScrollCaptureCallbacks(on: overlay)
+    }
+
+    func test_installTeachingPenOverlayWindow(_ overlay: SelectionOverlayWindow) {
+        overlayWindow = overlay
+        activeOverlayMode = .teachingPen
     }
 
     func test_requestScrollCapture(seed: ScrollCaptureSeed) {
