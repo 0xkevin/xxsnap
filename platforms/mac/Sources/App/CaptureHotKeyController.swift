@@ -3,6 +3,7 @@ import Carbon.HIToolbox
 
 enum HotKeyAction: String, CaseIterable {
     case capture
+    case recognizeText
     case teachingPen
     case restoreMostRecentlyHiddenPinnedImage
 
@@ -11,6 +12,7 @@ enum HotKeyAction: String, CaseIterable {
         case .capture: return 1
         case .restoreMostRecentlyHiddenPinnedImage: return 2
         case .teachingPen: return 3
+        case .recognizeText: return 4
         }
     }
 
@@ -18,6 +20,8 @@ enum HotKeyAction: String, CaseIterable {
         switch self {
         case .capture:
             return HotKeySettings(keyCode: UInt32(kVK_ANSI_Grave), modifiers: UInt32(cmdKey))
+        case .recognizeText:
+            return HotKeySettings(keyCode: UInt32(kVK_ANSI_3), modifiers: UInt32(cmdKey))
         case .teachingPen:
             return HotKeySettings(keyCode: UInt32(kVK_ANSI_2), modifiers: UInt32(cmdKey))
         case .restoreMostRecentlyHiddenPinnedImage:
@@ -179,6 +183,7 @@ final class CaptureHotKeyController {
         settingsStore: any AppSettingsStoring = SettingsStore(),
         registrar: any GlobalHotKeyRegistering = CarbonGlobalHotKeyRegistrar(),
         captureHandler: @escaping () -> Void,
+        recognizeTextHandler: @escaping () -> Void = {},
         teachingPenHandler: @escaping () -> Void,
         restorePinnedImageHandler: @escaping () -> Void
     ) {
@@ -186,6 +191,7 @@ final class CaptureHotKeyController {
         self.registrar = registrar
         handlers = [
             .capture: captureHandler,
+            .recognizeText: recognizeTextHandler,
             .teachingPen: teachingPenHandler,
             .restoreMostRecentlyHiddenPinnedImage: restorePinnedImageHandler
         ]

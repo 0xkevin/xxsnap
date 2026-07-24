@@ -1,3 +1,4 @@
+import Carbon.HIToolbox
 import XCTest
 @testable import xxsnap
 
@@ -753,6 +754,20 @@ final class AppSettingsTests: XCTestCase {
             strings.teachingPenShortcutDetail,
             "Start full-screen presentation annotation"
         )
+    }
+
+    func testCaptureTextStringsUseRequestedEnglishName() {
+        XCTAssertEqual(PreferencesStrings(language: .zhHans).captureText, "识别文字")
+        XCTAssertEqual(PreferencesStrings(language: .english).captureText, "Capture Text")
+        XCTAssertEqual(
+            PreferencesStrings(language: .english).captureTextShortcutDetail,
+            "Capture text from a selected screen area"
+        )
+    }
+
+    func testCaptureTextDefaultShortcutIsCommand3() {
+        XCTAssertEqual(HotKeyAction.recognizeText.defaultSettings.keyCode, UInt32(kVK_ANSI_3))
+        XCTAssertEqual(HotKeyAction.recognizeText.defaultSettings.modifiers, UInt32(cmdKey))
     }
 
     func testFeatureGateKeepsTrialFullyOpenAndRestrictsFreeCoreFeatures() {

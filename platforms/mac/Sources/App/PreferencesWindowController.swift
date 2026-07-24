@@ -183,6 +183,11 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
             title: strings.captureShortcut,
             detail: strings.captureShortcutDetail
         )
+        let captureTextRow = makeShortcutRow(
+            action: .recognizeText,
+            title: strings.captureText,
+            detail: strings.captureTextShortcutDetail
+        )
         let teachingPenRow = makeShortcutRow(
             action: .teachingPen,
             title: strings.teachingPen,
@@ -193,7 +198,7 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
             title: strings.restorePinShortcut,
             detail: strings.restorePinShortcutDetail
         )
-        let page = makeStandardPage(rows: [captureRow, teachingPenRow, restoreRow])
+        let page = makeStandardPage(rows: [captureRow, captureTextRow, teachingPenRow, restoreRow])
 
         let resetButton = NSButton(
             title: strings.resetShortcuts,
