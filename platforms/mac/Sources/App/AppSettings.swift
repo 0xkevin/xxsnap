@@ -196,6 +196,7 @@ struct L10n {
         case longImageFinish
         case longImageClose
         case longImageEditorTitle
+        case fullScreenCaptureEditorTitle
         case longImageEditorUnavailable
         case longImageEditorUnavailableDetail
         case screenRecordingPermissionRequired
@@ -236,6 +237,7 @@ struct L10n {
         case (.zhHans, .longImageFinish): return "完成编辑"
         case (.zhHans, .longImageClose): return "关闭"
         case (.zhHans, .longImageEditorTitle): return "长截图编辑"
+        case (.zhHans, .fullScreenCaptureEditorTitle): return "全屏截图编辑"
         case (.zhHans, .longImageEditorUnavailable): return "无法打开长截图编辑器"
         case (.zhHans, .longImageEditorUnavailableDetail):
             return "完整长截图已保留。是否立即保存为 PNG？"
@@ -275,6 +277,7 @@ struct L10n {
         case (.english, .longImageFinish): return "Finish"
         case (.english, .longImageClose): return "Close"
         case (.english, .longImageEditorTitle): return "Long Capture Editor"
+        case (.english, .fullScreenCaptureEditorTitle): return "Full Screen Capture Editor"
         case (.english, .longImageEditorUnavailable): return "Unable to Open Long Capture Editor"
         case (.english, .longImageEditorUnavailableDetail):
             return "The complete long capture is preserved. Save it as PNG now?"

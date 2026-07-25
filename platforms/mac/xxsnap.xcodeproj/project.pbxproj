@@ -15,6 +15,12 @@
 		AB6100000000000000000002 /* correct.svg in Resources */ = {isa = PBXBuildFile; fileRef = AB6100000000000000000012 /* correct.svg */; };
 		AB6200000000000000000001 /* notification.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = AB6200000000000000000011 /* notification.mp3 */; };
 		AB6300000000000000000001 /* failed.svg in Resources */ = {isa = PBXBuildFile; fileRef = AB6300000000000000000011 /* failed.svg */; };
+		AB6400000000000000000001 /* FullScreenCapturePreviewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB6400000000000000000011 /* FullScreenCapturePreviewController.swift */; };
+		AB6400000000000000000002 /* fullscreencutsound.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = AB6400000000000000000012 /* fullscreencutsound.mp3 */; };
+			AB6500000000000000000001 /* alipay.jpg in Resources */ = {isa = PBXBuildFile; fileRef = AB6500000000000000000011 /* alipay.jpg */; };
+			AB6500000000000000000002 /* wechatpay.jpg in Resources */ = {isa = PBXBuildFile; fileRef = AB6500000000000000000012 /* wechatpay.jpg */; };
+			AB6600000000000000000001 /* vertical-korean.png in Resources */ = {isa = PBXBuildFile; fileRef = AB6600000000000000000011 /* vertical-korean.png */; };
+			AB6700000000000000000001 /* mixed-chinese-korean.png in Resources */ = {isa = PBXBuildFile; fileRef = AB6700000000000000000011 /* mixed-chinese-korean.png */; };
 		06D0A675DA873D0AEC83074A /* redo-disabled.svg in Resources */ = {isa = PBXBuildFile; fileRef = D28A278CFB0A71EF7C226931 /* redo-disabled.svg */; };
 		0FB0F41C5A5ABD609008810E /* CaptureControlWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24BDEB3AE00354C36614F3C1 /* CaptureControlWindowController.swift */; };
 		0FE265B997BADE94F03E511A /* WindowSelectionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7E12CD93A98EF67FC506F54 /* WindowSelectionState.swift */; };
@@ -149,6 +155,10 @@
 		AB6100000000000000000012 /* correct.svg */ = {isa = PBXFileReference; path = "correct.svg"; sourceTree = "<group>"; };
 		AB6200000000000000000011 /* notification.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = Sounds/notification.mp3; sourceTree = "<group>"; };
 		AB6300000000000000000011 /* failed.svg */ = {isa = PBXFileReference; path = "failed.svg"; sourceTree = "<group>"; };
+		AB6400000000000000000011 /* FullScreenCapturePreviewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullScreenCapturePreviewController.swift; sourceTree = "<group>"; };
+		AB6400000000000000000012 /* fullscreencutsound.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = Sounds/fullscreencutsound.mp3; sourceTree = "<group>"; };
+		AB6500000000000000000011 /* alipay.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = Donation/alipay.jpg; sourceTree = "<group>"; };
+		AB6500000000000000000012 /* wechatpay.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = Donation/wechatpay.jpg; sourceTree = "<group>"; };
 		0209BE008E9C5F0571BE4B9F /* border-corner-rounded.svg */ = {isa = PBXFileReference; path = "border-corner-rounded.svg"; sourceTree = "<group>"; };
 		0ABE865C6E2158661014F31D /* palette-tool.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "palette-tool.png"; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4B6C /* bold.svg */ = {isa = PBXFileReference; path = "bold.svg"; sourceTree = "<group>"; };
@@ -202,7 +212,9 @@
 		78A78E47207006A9C842052B /* arrow-line.svg */ = {isa = PBXFileReference; path = "arrow-line.svg"; sourceTree = "<group>"; };
 		7B73F549F3FDCF8AF73E5868 /* number-sequence.svg */ = {isa = PBXFileReference; path = "number-sequence.svg"; sourceTree = "<group>"; };
 		7C22FC10462C7CAF1A2ACA41 /* undo-disabled.svg */ = {isa = PBXFileReference; path = "undo-disabled.svg"; sourceTree = "<group>"; };
-		7E58F0FBF019037172C857FC /* AppSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettingsTests.swift; sourceTree = "<group>"; };
+			7E58F0FBF019037172C857FC /* AppSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettingsTests.swift; sourceTree = "<group>"; };
+			AB6600000000000000000011 /* vertical-korean.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Fixtures/vertical-korean.png"; sourceTree = "<group>"; };
+			AB6700000000000000000011 /* mixed-chinese-korean.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Fixtures/mixed-chinese-korean.png"; sourceTree = "<group>"; };
 		832F0777CBF6ED75895C36AF /* text-tool.svg */ = {isa = PBXFileReference; path = "text-tool.svg"; sourceTree = "<group>"; };
 		851C3F8F7298C801D1874B4C /* border-corner-square.svg */ = {isa = PBXFileReference; path = "border-corner-square.svg"; sourceTree = "<group>"; };
 		8A2205AED8C5F363A0B466E2 /* ScreenCaptureService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenCaptureService.swift; sourceTree = "<group>"; };
@@ -281,6 +293,7 @@
 				AB6000000000000000000012 /* CaptureHotKeyController.swift */,
 				24BDEB3AE00354C36614F3C1 /* CaptureControlWindowController.swift */,
 				A177154367D4DF7657018B06 /* CaptureCoordinator.swift */,
+				AB6400000000000000000011 /* FullScreenCapturePreviewController.swift */,
 				AB6100000000000000000011 /* OCRResultPresentationController.swift */,
 				DE8CA0660F22BC823E1A8DBC /* main.swift */,
 				6F196A38351C3089668432BA /* PermissionCoordinator.swift */,
@@ -359,8 +372,10 @@
 				AA5100000000000000000013 /* ScrollCaptureSessionTests.swift */,
 				AA5000000000000000000015 /* ScrollCaptureBridgeTests.swift */,
 				AA5000000000000000000016 /* ScrollCaptureTestSupport.swift */,
-				7E58F0FBF019037172C857FC /* AppSettingsTests.swift */,
-				9A119E98789DE049AE5BBF54 /* manual-capture-checklist.md */,
+					7E58F0FBF019037172C857FC /* AppSettingsTests.swift */,
+					AB6600000000000000000011 /* vertical-korean.png */,
+					AB6700000000000000000011 /* mixed-chinese-korean.png */,
+					9A119E98789DE049AE5BBF54 /* manual-capture-checklist.md */,
 				2187766CB52D346D96174E61 /* ScreenCaptureServiceTests.swift */,
 				5D09140AE83525CD00CBA67A /* SelectionToolbarStateTests.swift */,
 				3617A169724914AB97DA76C4 /* WindowSelectionStateTests.swift */,
@@ -391,6 +406,9 @@
 				E4F7C38789DCA5D0BBB5EEFA /* xxsnap.png */,
 				F51D15626D490752CC2922E4 /* Icons */,
 				AB6200000000000000000011 /* notification.mp3 */,
+				AB6400000000000000000012 /* fullscreencutsound.mp3 */,
+				AB6500000000000000000011 /* alipay.jpg */,
+				AB6500000000000000000012 /* wechatpay.jpg */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -585,6 +603,9 @@
 				AB6100000000000000000002 /* correct.svg in Resources */,
 				AB6300000000000000000001 /* failed.svg in Resources */,
 				AB6200000000000000000001 /* notification.mp3 in Resources */,
+				AB6400000000000000000002 /* fullscreencutsound.mp3 in Resources */,
+				AB6500000000000000000001 /* alipay.jpg in Resources */,
+				AB6500000000000000000002 /* wechatpay.jpg in Resources */,
 				5F56CD50B9AD87B11791D4DE /* crop.png in Resources */,
 				D9FA6CC87275C43C69EE7826 /* crop.svg in Resources */,
 				1F4A7C50AA4E1B2300000003 /* done.svg in Resources */,
@@ -654,10 +675,12 @@
 		801A698A9FED8664B84D98D4 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
-			files = (
-				63ABE3D1EE77013000AD73F0 /* manual-capture-checklist.md in Resources */,
-				A1B2C3D4E5F60718293A4B5F /* screenshot.svg in Resources */,
-			);
+				files = (
+					63ABE3D1EE77013000AD73F0 /* manual-capture-checklist.md in Resources */,
+					A1B2C3D4E5F60718293A4B5F /* screenshot.svg in Resources */,
+					AB6600000000000000000001 /* vertical-korean.png in Resources */,
+					AB6700000000000000000001 /* mixed-chinese-korean.png in Resources */,
+				);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
@@ -683,6 +706,7 @@
 				28874BF6C20345BE1676B963 /* CaptureAnnotationRenderer.swift in Sources */,
 				0FB0F41C5A5ABD609008810E /* CaptureControlWindowController.swift in Sources */,
 				5FABC128915B0C423DD63EC6 /* CaptureCoordinator.swift in Sources */,
+				AB6400000000000000000001 /* FullScreenCapturePreviewController.swift in Sources */,
 				AB6100000000000000000001 /* OCRResultPresentationController.swift in Sources */,
 				4A423183222F53C45C9E493F /* CaptureToolbarWindowController.swift in Sources */,
 				3255124AE9CD7B90D40C887F /* PermissionCoordinator.swift in Sources */,

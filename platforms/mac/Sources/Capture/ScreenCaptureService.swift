@@ -274,14 +274,12 @@ final class ScreenCaptureService: ScrollRegionCapturing {
         }
 
         let shareableContent = try await SCShareableContent.current
-        let currentProcessID = pid_t(NSRunningApplication.current.processIdentifier)
-        let excludedApplications = shareableContent.applications.filter { $0.processID == currentProcessID }
 
         let targets = displayTargets(from: shareableContent.displays)
         if targets.count == 1, let target = targets.first {
             let filter = SCContentFilter(
                 display: target.display,
-                excludingApplications: excludedApplications,
+                excludingApplications: [],
                 exceptingWindows: []
             )
             Self.includeSystemChrome(in: filter)
@@ -312,7 +310,7 @@ final class ScreenCaptureService: ScrollRegionCapturing {
         for target in targets {
             let filter = SCContentFilter(
                 display: target.display,
-                excludingApplications: excludedApplications,
+                excludingApplications: [],
                 exceptingWindows: []
             )
             Self.includeSystemChrome(in: filter)

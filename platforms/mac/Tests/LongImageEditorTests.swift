@@ -619,6 +619,60 @@ final class LongImageEditorTests: XCTestCase {
         controller.stop()
     }
 
+    func testFullScreenCaptureEditorOpensLargerAndFitsWindowHeightToImage() throws {
+        let imageSize = NSSize(width: 1_512, height: 982)
+        let controller = LongImageEditorWindowController(
+            canonicalImage: TestImageFactory.solid(size: imageSize, color: .white),
+            visibleFrame: NSRect(x: 0, y: 0, width: 1_512, height: 950),
+            initialWindowSize: NSSize(width: 1_000, height: 840)
+        )
+        let window = try XCTUnwrap(controller.window)
+        let originalWindowFrame = window.frame
+
+        controller.updateTitleStyle(.fullScreenCapture)
+
+        XCTAssertGreaterThan(window.frame.width, originalWindowFrame.width)
+        XCTAssertLessThanOrEqual(window.frame.width, originalWindowFrame.width * 1.2)
+        let documentView = try XCTUnwrap(controller.scrollView.documentView)
+        XCTAssertEqual(documentView.frame.height, controller.scrollView.contentSize.height, accuracy: 1)
+
+        controller.show()
+
+        let overlay = try XCTUnwrap(controller.test_editingOverlay)
+        XCTAssertEqual(overlay.frame.height, documentView.frame.height, accuracy: 1)
+
+        let fittedWindowFrame = window.frame
+        controller.hideEditingToolbar()
+        XCTAssertEqual(window.frame, fittedWindowFrame)
+        controller.showEditingToolbar()
+        XCTAssertEqual(window.frame, fittedWindowFrame)
+        XCTAssertEqual(controller.test_editingOverlay?.frame.height ?? 0, documentView.frame.height, accuracy: 1)
+        controller.stop()
+    }
+
+    func testFullScreenCapturePresentationDoesNotChangeLongImageEditorLayout() throws {
+        let controller = LongImageEditorWindowController(
+            canonicalImage: TestImageFactory.solid(
+                size: NSSize(width: 1_512, height: 982),
+                color: .white
+            ),
+            visibleFrame: NSRect(x: 0, y: 0, width: 1_512, height: 950),
+            initialWindowSize: NSSize(width: 1_000, height: 840),
+            titleStyle: .longCapture
+        )
+        let window = try XCTUnwrap(controller.window)
+        let originalWindowFrame = window.frame
+
+        controller.show()
+
+        let overlay = try XCTUnwrap(controller.test_editingOverlay)
+        let clipView = controller.scrollView.contentView
+        let expectedOverlayFrame = window.convertToScreen(clipView.convert(clipView.bounds, to: nil))
+        XCTAssertEqual(window.frame, originalWindowFrame)
+        XCTAssertEqual(overlay.frame, expectedOverlayFrame)
+        controller.stop()
+    }
+
     func testShiftReleaseTogglesLongImageToolbarLikePinnedImage() throws {
         let controller = makeTallController()
         controller.show()
