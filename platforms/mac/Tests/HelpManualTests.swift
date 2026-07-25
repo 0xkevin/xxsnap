@@ -3,6 +3,129 @@ import XCTest
 @testable import xxsnap
 
 final class HelpManualTests: XCTestCase {
+    func testBundledChineseManualHasCompleteChapterContent() throws {
+        let loader = HelpContentLoader(bundle: Bundle(for: HelpManualTests.self))
+        let document = try loader.load(language: .zhHans)
+
+        XCTAssertEqual(document.version, 1)
+        XCTAssertEqual(document.language, "zh-Hans")
+        XCTAssertEqual(document.windowTitle, "XxSnap 帮助")
+        XCTAssertEqual(
+            document.chapters.map(\.id),
+            ["capture", "pin", "ocr", "teaching-pen"]
+        )
+
+        let expectations: [(id: String, blocks: Int, text: [String])] = [
+            ("capture", 35, ["滚动截图", "取色", "橡皮擦"]),
+            ("pin", 16, ["恢复最近隐藏的贴图"]),
+            ("ocr", 18, ["在本机完成", "竖排文字"]),
+            ("teaching-pen", 20, ["右键", "文字识别"])
+        ]
+
+        for expectation in expectations {
+            let chapter = try XCTUnwrap(
+                document.chapters.first { $0.id == expectation.id }
+            )
+            XCTAssertGreaterThanOrEqual(
+                chapter.blocks.count,
+                expectation.blocks,
+                "\(expectation.id) 正文块数量不足"
+            )
+            for text in expectation.text {
+                XCTAssertTrue(
+                    chapter.flattenedText.contains(text),
+                    "\(expectation.id) 缺少正文：\(text)"
+                )
+            }
+            XCTAssertFalse(
+                chapter.shortcuts.isEmpty,
+                "\(expectation.id) 缺少章节快捷键"
+            )
+            XCTAssertTrue(
+                chapter.blocks.contains(where: \.isImage),
+                "\(expectation.id) 缺少图片块"
+            )
+            XCTAssertTrue(
+                chapter.blocks.contains(where: \.isFAQ),
+                "\(expectation.id) 缺少常见问题"
+            )
+        }
+    }
+
+    func testBundledChineseManualUsesRequiredImagesAndChapterDetails() throws {
+        let loader = HelpContentLoader(bundle: Bundle(for: HelpManualTests.self))
+        let document = try loader.load(language: .zhHans)
+        let expectedImages: Set<String> = [
+            "capture-region-overview",
+            "capture-selection-adjust",
+            "capture-toolbar-overview",
+            "capture-annotation-tools",
+            "capture-fullscreen-preview",
+            "capture-fullscreen-editor",
+            "capture-scroll-session",
+            "capture-long-editor",
+            "pin-overview",
+            "pin-context-menu",
+            "pin-toolbar",
+            "pin-scale-opacity",
+            "ocr-selection",
+            "ocr-success",
+            "ocr-failure",
+            "ocr-settings",
+            "teaching-pen-overview",
+            "teaching-pen-toolbar",
+            "teaching-pen-options",
+            "teaching-pen-ocr"
+        ]
+
+        XCTAssertEqual(Set(document.chapters.flatMap(\.imageNames)), expectedImages)
+
+        let capture = try XCTUnwrap(
+            document.chapters.first { $0.id == "capture" }
+        )
+        XCTAssertEqual(capture.imageNames.count, 8)
+        XCTAssertGreaterThanOrEqual(capture.faqCount, 6)
+        XCTAssertTrue(capture.hasShortcut(action: "区域截图", keys: ["⌘", "`"]))
+        XCTAssertTrue(capture.hasShortcut(action: "全屏截图", keys: ["⌘", "⇧", "1"]))
+        XCTAssertTrue(capture.hasShortcut(action: "复制", keys: ["⌘", "C"]))
+        XCTAssertTrue(capture.hasShortcut(action: "保存", keys: ["⌘", "S"]))
+        XCTAssertTrue(capture.hasShortcut(action: "贴图", keys: ["⌘", "1"]))
+        XCTAssertTrue(capture.hasShortcut(action: "撤销", keys: ["⌘", "Z"]))
+        XCTAssertTrue(capture.hasShortcut(action: "重做", keys: ["⌘", "⇧", "Z"]))
+        XCTAssertTrue(capture.hasShortcut(action: "取消", keys: ["Esc"]))
+
+        let pin = try XCTUnwrap(document.chapters.first { $0.id == "pin" })
+        XCTAssertEqual(pin.imageNames.count, 4)
+        XCTAssertGreaterThanOrEqual(pin.faqCount, 4)
+
+        let ocr = try XCTUnwrap(document.chapters.first { $0.id == "ocr" })
+        XCTAssertEqual(ocr.imageNames.count, 4)
+        XCTAssertGreaterThanOrEqual(ocr.faqCount, 5)
+
+        let teachingPen = try XCTUnwrap(
+            document.chapters.first { $0.id == "teaching-pen" }
+        )
+        XCTAssertEqual(teachingPen.imageNames.count, 4)
+        XCTAssertGreaterThanOrEqual(teachingPen.faqCount, 5)
+    }
+
+    func testEnglishManualFallsBackToBundledChineseDocument() throws {
+        let bundle = Bundle(for: HelpManualTests.self)
+        let loader = HelpContentLoader(bundle: bundle)
+
+        XCTAssertNil(
+            bundle.url(
+                forResource: "en",
+                withExtension: "json",
+                subdirectory: "Help"
+            )
+        )
+        let document = try loader.load(language: .english)
+
+        XCTAssertEqual(document.language, "zh-Hans")
+        XCTAssertEqual(document.windowTitle, "XxSnap 帮助")
+    }
+
     func testDecodeLoadsAllChaptersAndSupportedBlockTypes() throws {
         let document = try HelpContentLoader().decode(validDocumentData)
 
@@ -654,6 +777,74 @@ final class HelpManualTests: XCTestCase {
           ]
         }
         """
+}
+
+private extension HelpChapter {
+    var flattenedText: String {
+        ([title, introduction] + tableOfContents + blocks.map(\.flattenedText))
+            .joined(separator: "\n")
+    }
+
+    var imageNames: [String] {
+        blocks.compactMap(\.imageName)
+    }
+
+    var faqCount: Int {
+        blocks.reduce(0) { $0 + $1.faqCount }
+    }
+
+    func hasShortcut(action: String, keys: [String]) -> Bool {
+        shortcuts.contains(HelpShortcut(action: action, keys: keys))
+    }
+}
+
+private extension HelpContentBlock {
+    var flattenedText: String {
+        switch self {
+        case let .heading(_, text), let .paragraph(text):
+            return text
+        case let .steps(items):
+            return items.map(\.text).joined(separator: "\n")
+        case let .bullets(items):
+            return items.joined(separator: "\n")
+        case let .shortcuts(items):
+            return items.map(\.action).joined(separator: "\n")
+        case let .image(_, caption, accessibilityLabel):
+            return [caption, accessibilityLabel].joined(separator: "\n")
+        case let .note(title, text), let .warning(title, text):
+            return [title, text].joined(separator: "\n")
+        case let .faq(items):
+            return items.flatMap { [$0.question, $0.answer] }.joined(separator: "\n")
+        }
+    }
+
+    var isImage: Bool {
+        if case .image = self {
+            return true
+        }
+        return false
+    }
+
+    var isFAQ: Bool {
+        if case .faq = self {
+            return true
+        }
+        return false
+    }
+
+    var imageName: String? {
+        if case let .image(name, _, _) = self {
+            return name
+        }
+        return nil
+    }
+
+    var faqCount: Int {
+        if case let .faq(items) = self {
+            return items.count
+        }
+        return 0
+    }
 }
 
 private enum FakeHelpContentError: Error {

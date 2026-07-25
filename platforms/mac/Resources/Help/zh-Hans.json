@@ -1,0 +1,565 @@
+{
+  "version": 1,
+  "language": "zh-Hans",
+  "windowTitle": "XxSnap 帮助",
+  "chapters": [
+    {
+      "id": "capture",
+      "navigationTitle": "截图",
+      "title": "截图",
+      "introduction": "区域截图适合截取窗口的一部分，全屏截图会直接取得整个桌面，滚动截图则用来保存一屏放不下的内容。",
+      "tableOfContents": [
+        "区域截图",
+        "调整选区",
+        "标注工具",
+        "完成截图",
+        "全屏截图",
+        "滚动截图",
+        "常见问题"
+      ],
+      "shortcuts": [
+        { "action": "区域截图", "keys": ["⌘", "`"] },
+        { "action": "全屏截图", "keys": ["⌘", "⇧", "1"] },
+        { "action": "复制", "keys": ["⌘", "C"] },
+        { "action": "保存", "keys": ["⌘", "S"] },
+        { "action": "贴图", "keys": ["⌘", "1"] },
+        { "action": "撤销", "keys": ["⌘", "Z"] },
+        { "action": "重做", "keys": ["⌘", "⇧", "Z"] },
+        { "action": "取消", "keys": ["Esc"] }
+      ],
+      "blocks": [
+        { "type": "heading", "level": 2, "text": "区域截图" },
+        { "type": "paragraph", "text": "按 Command+` 后，屏幕会停在当前画面。按住鼠标拖出范围，松开后选区锁定，工具条随即出现。" },
+        {
+          "type": "steps",
+          "items": [
+            { "text": "把指针移到要截取内容的一角，按住鼠标开始拖动。", "keys": ["⌘", "`"] },
+            { "text": "拖到对角后松开。确认边界无误，再标注或直接复制。"}
+          ]
+        },
+        {
+          "type": "image",
+          "name": "capture-region-overview",
+          "caption": "区域截图锁定后，尺寸信息、选区和工具条会一起显示。",
+          "accessibilityLabel": "区域截图界面，屏幕中央有已锁定选区，下方显示标注工具条"
+        },
+        { "type": "heading", "level": 2, "text": "调整选区" },
+        { "type": "paragraph", "text": "拖动选区内部可以整体移动。拖四边或四角的控制点可改宽高；需要重新框选时，点选区外再拖一次。" },
+        {
+          "type": "bullets",
+          "items": [
+            "边界没有贴准时，先用控制点微调，不必重新启动截图。",
+            "选区太小放不下工具条时，工具条会换到较空的位置。",
+            "按 Esc 会取消本次截图，不会复制或保存任何内容。"
+          ]
+        },
+        {
+          "type": "image",
+          "name": "capture-selection-adjust",
+          "caption": "拖动边框控制点，可把选区收紧到真正需要的内容。",
+          "accessibilityLabel": "截图选区的边框和控制点，鼠标正在调整右下角"
+        },
+        { "type": "heading", "level": 2, "text": "工具条" },
+        { "type": "paragraph", "text": "工具条左侧是标注工具，右侧是撤销、重做、保存、复制和贴图。选中工具后，对应的线宽、颜色或样式选项会显示出来。" },
+        {
+          "type": "image",
+          "name": "capture-toolbar-overview",
+          "caption": "截图工具条把标注和输出操作排在同一行。",
+          "accessibilityLabel": "截图选区下方的完整工具条，包含标注、撤销、保存、复制和贴图按钮"
+        },
+        { "type": "heading", "level": 3, "text": "取色测距" },
+        { "type": "paragraph", "text": "选择取色后，把指针移到画面上查看当前像素的颜色值；按下鼠标可取用该颜色。拖动测距时会显示两点之间的水平、垂直和直线距离。" },
+        {
+          "type": "note",
+          "title": "取色时",
+          "text": "先放大观察目标边缘，再落下指针，细线和小图标附近会更好取准。"
+        },
+        { "type": "heading", "level": 3, "text": "形状" },
+        { "type": "paragraph", "text": "形状工具可画矩形或椭圆。选择形状、线宽、线型、颜色和是否填充，然后从一角拖到另一角。" },
+        {
+          "type": "note",
+          "title": "画好以后",
+          "text": "单击形状可重新选中，再拖动、缩放或调整样式。"
+        },
+        { "type": "heading", "level": 3, "text": "箭头" },
+        { "type": "paragraph", "text": "从说明文字附近拖向目标，松开后生成箭头。选项里可改线宽、实线或虚线、起点和终点样式以及颜色。" },
+        {
+          "type": "note",
+          "title": "弯曲箭头",
+          "text": "选中箭头后拖动中间控制点，可把直线改成弧线。"
+        },
+        { "type": "heading", "level": 3, "text": "画笔" },
+        { "type": "paragraph", "text": "画笔跟随指针连续落笔，适合圈画和手写。先选粗细、线型和颜色，再按住鼠标书写。" },
+        {
+          "type": "note",
+          "title": "手写小字",
+          "text": "细线更容易看清笔画；写错一笔可先撤销，不必用橡皮擦来回涂。"
+        },
+        { "type": "heading", "level": 3, "text": "荧光笔" },
+        { "type": "paragraph", "text": "荧光笔会留下半透明色带，适合压在文字后面。选择宽度和颜色后，沿着要标出的句子拖动。" },
+        {
+          "type": "note",
+          "title": "保持整齐",
+          "text": "从一行文字的左端拖到右端，松开后再画下一行。"
+        },
+        { "type": "heading", "level": 3, "text": "马赛克" },
+        { "type": "paragraph", "text": "马赛克用于遮住账号、头像或其他不想保留的内容。可用笔刷涂抹，也可拖出矩形范围，并在选项中调整颗粒和边缘样式。" },
+        {
+          "type": "warning",
+          "title": "遮挡要留余量",
+          "text": "马赛克边缘最好超过文字或头像一点，保存前放大检查四周。"
+        },
+        { "type": "heading", "level": 3, "text": "文字" },
+        { "type": "paragraph", "text": "在画面上单击后输入文字。选项可改字体、字号、粗体、斜体、描边和颜色；输入完成后按 Return 确认。" },
+        {
+          "type": "note",
+          "title": "修改文字",
+          "text": "再次选中文字即可移动或调整样式；要改内容时，进入文字编辑状态再输入。"
+        },
+        { "type": "heading", "level": 3, "text": "序号、对勾和叉号" },
+        { "type": "paragraph", "text": "标记工具可在序号、对勾和叉号之间切换。序号会按点击顺序递增，适合标步骤；对勾和叉号适合批注结果。" },
+        {
+          "type": "note",
+          "title": "放错位置",
+          "text": "先撤销刚放下的标记，再点正确位置，序号不会在画面上留下多余一项。"
+        },
+        { "type": "heading", "level": 3, "text": "放大镜" },
+        { "type": "paragraph", "text": "在需要看清的地方拖出放大镜，镜内会显示局部细节。选项可改圆形或矩形、边框粗细、倍率和颜色。" },
+        {
+          "type": "note",
+          "title": "放置位置",
+          "text": "别让放大镜盖住上下文。画好后可把它移到旁边，镜内仍指向原来的区域。"
+        },
+        { "type": "heading", "level": 3, "text": "橡皮擦" },
+        { "type": "paragraph", "text": "橡皮擦只处理本次添加的标注，不会抹掉原截图。可逐笔擦除，也可框选一片标注，清空按钮会移除全部标注。" },
+        {
+          "type": "note",
+          "title": "误删标注",
+          "text": "马上按 Command+Z 可撤销；Command+Shift+Z 会重做刚才的操作。"
+        },
+        {
+          "type": "image",
+          "name": "capture-annotation-tools",
+          "caption": "不同工具会打开各自的样式选项，颜色和线宽可随时改。",
+          "accessibilityLabel": "截图编辑器中展开的标注工具和样式选项，画面上已有形状、箭头、文字和马赛克"
+        },
+        { "type": "heading", "level": 2, "text": "完成截图" },
+        { "type": "paragraph", "text": "复制会把当前选区和标注写入剪贴板；保存会打开文件面板。贴图则把同一画面留在桌面上，方便对照。" },
+        {
+          "type": "bullets",
+          "items": [
+            "Command+C：复制当前结果并结束截图。",
+            "Command+S：选择文件名和目录后保存。",
+            "Command+1：把当前结果创建为贴图。",
+            "Command+Z 与 Command+Shift+Z：撤销或重做标注。",
+            "Esc：取消截图。"
+          ]
+        },
+        {
+          "type": "shortcuts",
+          "items": [
+            { "action": "复制", "keys": ["⌘", "C"] },
+            { "action": "保存", "keys": ["⌘", "S"] },
+            { "action": "贴图", "keys": ["⌘", "1"] },
+            { "action": "撤销", "keys": ["⌘", "Z"] },
+            { "action": "重做", "keys": ["⌘", "⇧", "Z"] },
+            { "action": "取消", "keys": ["Esc"] }
+          ]
+        },
+        { "type": "heading", "level": 2, "text": "全屏截图" },
+        { "type": "paragraph", "text": "按 Command+Shift+1 会取得整个可见桌面。先看到的是全屏预览，可直接复制、保存或进入编辑器；取消则丢弃这次结果。" },
+        {
+          "type": "image",
+          "name": "capture-fullscreen-preview",
+          "caption": "全屏预览先给出完整画面，再决定复制、保存还是编辑。",
+          "accessibilityLabel": "全屏截图预览窗口，中央显示整个桌面截图，下方有复制、保存、编辑和取消操作"
+        },
+        { "type": "paragraph", "text": "进入全屏编辑器后，标注方式和区域截图相同。完成时复制或保存整张桌面，画布上的标注会一并写入。" },
+        {
+          "type": "image",
+          "name": "capture-fullscreen-editor",
+          "caption": "全屏编辑器保留整张桌面，并提供与区域截图相同的标注工具。",
+          "accessibilityLabel": "全屏截图编辑器，桌面画面上有箭头和文字标注，下方显示完整工具条"
+        },
+        { "type": "heading", "level": 2, "text": "滚动截图" },
+        { "type": "paragraph", "text": "先做区域截图，把范围框在可滚动内容里，再点滚动截图。开始后在原窗口中缓慢向下滚动；XxSnap 会连续取帧并拼接重叠部分。" },
+        {
+          "type": "steps",
+          "items": [
+            { "text": "锁定网页、文档或列表的内容区域，避开固定不动的侧栏。"},
+            { "text": "点滚动截图，回到目标窗口，按平常速度向下滚动。"},
+            { "text": "内容到底后停止采集，检查生成的长图，再复制、保存或贴图。"}
+          ]
+        },
+        {
+          "type": "image",
+          "name": "capture-scroll-session",
+          "caption": "滚动采集时，状态提示会显示当前是否正在接收新画面。",
+          "accessibilityLabel": "滚动截图采集界面，选区覆盖网页正文并显示采集状态提示"
+        },
+        { "type": "paragraph", "text": "滚得太快、页面有大幅动画或内容边缘重复很少时，拼接可能停住。停一下，让画面稳定，再继续滚；仍不正常就结束本次采集，缩小选区后重来。" },
+        {
+          "type": "image",
+          "name": "capture-long-editor",
+          "caption": "长图生成后会在独立编辑器中打开，可继续标注并输出。",
+          "accessibilityLabel": "长图编辑器窗口，纵向长截图位于画布中央，周围有滚动区域和标注工具"
+        },
+        { "type": "heading", "level": 2, "text": "常见问题" },
+        {
+          "type": "faq",
+          "items": [
+            {
+              "question": "按快捷键没有出现截图界面？",
+              "answer": "先看菜单栏里的 XxSnap 是否正在运行，再到系统设置的屏幕录制权限中确认已允许 XxSnap。改过快捷键的话，以设置页显示的当前组合为准。"
+            },
+            {
+              "question": "选区锁定后还能改范围吗？",
+              "answer": "可以。拖动内部可移动选区，拖边框或四角控制点可改大小。"
+            },
+            {
+              "question": "截图怎么只复制，不保存文件？",
+              "answer": "锁定选区后点复制，或按 Command+C。结果会进入剪贴板，不会弹出保存面板。"
+            },
+            {
+              "question": "标注画错了怎么办？",
+              "answer": "按 Command+Z 撤销。撤销过头时按 Command+Shift+Z 重做，也可以用橡皮擦处理某一笔。"
+            },
+            {
+              "question": "滚动截图为什么提前停了？",
+              "answer": "常见原因是滚动太快、页面动画较多，或选区里缺少可用于拼接的重叠内容。让页面停稳后慢一点滚，选区尽量只保留正文。"
+            },
+            {
+              "question": "全屏截图能先看一眼再保存吗？",
+              "answer": "可以。Command+Shift+1 后先进入预览，确认无误再复制、保存或打开编辑器。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pin",
+      "navigationTitle": "贴图",
+      "title": "贴图",
+      "introduction": "贴图把截图留在桌面上。查资料、核对数字或照着图片输入时，不用反复切换窗口。",
+      "tableOfContents": [
+        "创建贴图",
+        "移动和缩放",
+        "右键菜单",
+        "继续标注",
+        "隐藏与关闭",
+        "常见问题"
+      ],
+      "shortcuts": [
+        { "action": "从截图编辑器创建贴图", "keys": ["⌘", "1"] },
+        { "action": "隐藏当前贴图", "keys": ["Esc"] },
+        { "action": "恢复最近隐藏的贴图", "keys": ["设置中的当前值"] }
+      ],
+      "blocks": [
+        { "type": "heading", "level": 2, "text": "创建贴图" },
+        { "type": "paragraph", "text": "普通区域截图锁定后，点贴图或按 Command+1。全屏预览、全屏编辑器和长图编辑器也能把当前结果做成贴图。" },
+        {
+          "type": "bullets",
+          "items": [
+            "普通截图会保留当前选区和已经画好的标注。",
+            "全屏截图贴出完整桌面画面。",
+            "滚动截图贴出生成后的整张长图。"
+          ]
+        },
+        {
+          "type": "image",
+          "name": "pin-overview",
+          "caption": "贴图浮在其他窗口上方，初始内容就是创建时的截图结果。",
+          "accessibilityLabel": "桌面上同时显示两个贴图窗口，一个是普通截图，另一个是纵向长截图"
+        },
+        { "type": "heading", "level": 2, "text": "初始位置和内容" },
+        { "type": "paragraph", "text": "区域截图创建的贴图会从原选区附近出现。大图会按当前屏幕的可用空间缩小，内容本身不会被裁掉；需要看原尺寸时可在右键菜单中重置大小。" },
+        { "type": "heading", "level": 2, "text": "移动和缩放" },
+        { "type": "paragraph", "text": "按住贴图拖动即可移动。鼠标滚轮向上放大、向下缩小；触控板双指捏合也能缩放，缩放中心跟随指针位置。" },
+        {
+          "type": "image",
+          "name": "pin-scale-opacity",
+          "caption": "贴图可单独缩放和调透明度，不会改动原截图文件。",
+          "accessibilityLabel": "一张半透明贴图正在缩放，右侧菜单列出百分之百到百分之四十的透明度"
+        },
+        { "type": "heading", "level": 2, "text": "右键菜单" },
+        { "type": "paragraph", "text": "在贴图上右键可找到完整菜单：显示工具条、复制图片、保存图片、重置大小、透明度 100%/80%/60%/40%、置顶、关闭和关闭全部贴图。复制与保存也可分别按 Command+C、Command+S。" },
+        {
+          "type": "image",
+          "name": "pin-context-menu",
+          "caption": "右键菜单集中放置复制、保存、大小、透明度、置顶和关闭操作。",
+          "accessibilityLabel": "贴图右键菜单已展开，显示工具条、复制图片、保存图片、重置大小、透明度、置顶、关闭和关闭全部贴图"
+        },
+        { "type": "heading", "level": 2, "text": "显示工具条并继续标注" },
+        { "type": "paragraph", "text": "右键选择显示工具条，或按一下 Shift，可在贴图上继续画形状、箭头、画笔、文字和其他标注。结束编辑后，新增内容会留在这张贴图里，复制和保存也会带上它们。" },
+        {
+          "type": "image",
+          "name": "pin-toolbar",
+          "caption": "贴图工具条展开后，可直接在当前图片上补充标注。",
+          "accessibilityLabel": "贴图下方显示标注工具条，图片上有刚添加的箭头和文字"
+        },
+        { "type": "heading", "level": 2, "text": "透明度和置顶" },
+        { "type": "paragraph", "text": "透明度只影响贴图窗口的显示，保存或复制时仍使用原来的不透明图像。置顶开启时贴图保持在普通窗口前面；关闭置顶后，它会按普通窗口层级排列。" },
+        { "type": "heading", "level": 2, "text": "隐藏、恢复和关闭" },
+        {
+          "type": "bullets",
+          "items": [
+            "按 Esc 隐藏当前贴图。隐藏不会销毁内容，稍后还能恢复。",
+            "恢复最近隐藏的贴图只恢复最后隐藏的那一张；快捷键以设置页当前值为准。",
+            "按 Delete 或 Backspace 会关闭当前贴图，右键关闭也一样。",
+            "关闭全部贴图会一次关掉当前仍存在的所有贴图。",
+            "可以同时放多张贴图，每张都能独立移动、缩放、改透明度和置顶。"
+          ]
+        },
+        {
+          "type": "note",
+          "title": "两个 Command+1 不是同一个场景",
+          "text": "截图编辑器中的 Command+1 用来创建贴图。恢复最近隐藏的贴图是全局快捷键，可能在设置中被改过；请以设置页的当前值为准，不要把两者当成同一个动作。"
+        },
+        { "type": "heading", "level": 2, "text": "常见问题" },
+        {
+          "type": "faq",
+          "items": [
+            {
+              "question": "贴图挡住正在输入的内容怎么办？",
+              "answer": "拖到屏幕另一侧，或用滚轮缩小。只想暂时收起时按 Esc，之后再用设置页所列快捷键恢复。"
+            },
+            {
+              "question": "为什么恢复快捷键不是 Command+1？",
+              "answer": "Command+1 在截图编辑器里负责创建贴图。恢复最近隐藏贴图属于全局动作，而且可以自定义，所以设置页显示的组合才是当前值。"
+            },
+            {
+              "question": "关闭贴图后还能恢复吗？",
+              "answer": "不能。恢复只对用 Esc 隐藏的最近一张贴图有效，关闭会结束这张贴图。"
+            },
+            {
+              "question": "怎么一次清掉所有贴图？",
+              "answer": "在任意贴图上右键，选择关闭全部贴图。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ocr",
+      "navigationTitle": "文字识别",
+      "title": "文字识别",
+      "introduction": "文字识别会读取框选区域，把结果直接复制到剪贴板。整个识别过程在本机完成，不上传截图。",
+      "tableOfContents": [
+        "开始识别",
+        "成功与失败提示",
+        "识别设置",
+        "支持的文字",
+        "在其他编辑器中使用",
+        "改善识别结果",
+        "常见问题"
+      ],
+      "shortcuts": [
+        { "action": "开始文字识别", "keys": ["⌘", "3"] },
+        { "action": "取消框选", "keys": ["Esc"] }
+      ],
+      "blocks": [
+        { "type": "heading", "level": 2, "text": "开始识别" },
+        { "type": "paragraph", "text": "按 Command+3 后框住文字，松开鼠标就会自动识别并复制。这个模式没有工具栏，也不需要再点确认按钮。" },
+        {
+          "type": "steps",
+          "items": [
+            { "text": "按 Command+3，等屏幕画面固定。", "keys": ["⌘", "3"] },
+            { "text": "从文字块的一角拖到另一角，边缘留一点空白。"},
+            { "text": "松开鼠标，看到成功提示后，直接到目标应用粘贴。"}
+          ]
+        },
+        {
+          "type": "image",
+          "name": "ocr-selection",
+          "caption": "只框住需要的文字，能减少图标和边框对识别的干扰。",
+          "accessibilityLabel": "文字识别框选界面，选区紧贴两段横排中文，画面上没有工具栏"
+        },
+        { "type": "heading", "level": 2, "text": "成功提示" },
+        { "type": "paragraph", "text": "识别成功并写入剪贴板后，会出现成功提示并播放一声提示音。提示停留约 3 秒，然后渐隐消失。" },
+        {
+          "type": "image",
+          "name": "ocr-success",
+          "caption": "成功提示出现时，识别出的文字已经在剪贴板里。",
+          "accessibilityLabel": "屏幕中央显示文字识别成功提示，说明结果已复制到剪贴板"
+        },
+        { "type": "heading", "level": 2, "text": "失败提示" },
+        { "type": "paragraph", "text": "没有识别到文字、图片读取失败或剪贴板写入失败时，会显示失败提示。它同样在约 3 秒后渐隐；失败不会播放成功提示音。" },
+        {
+          "type": "image",
+          "name": "ocr-failure",
+          "caption": "失败提示表示剪贴板里没有写入新的识别结果。",
+          "accessibilityLabel": "屏幕中央显示文字识别失败提示，提示用户重新框选"
+        },
+        { "type": "heading", "level": 2, "text": "识别设置" },
+        { "type": "paragraph", "text": "设置里的禁用识别文字提示音，只关闭成功时的声音。禁用识别文字通知会隐藏成功提示，但失败提示永远显示，免得误以为剪贴板已经更新。" },
+        {
+          "type": "image",
+          "name": "ocr-settings",
+          "caption": "声音和成功通知可分别关闭，失败提示不受这两个开关影响。",
+          "accessibilityLabel": "XxSnap 设置页，显示禁用识别文字提示音和禁用识别文字通知两个开关及说明"
+        },
+        { "type": "heading", "level": 2, "text": "支持的文字排列" },
+        { "type": "paragraph", "text": "横排文字和竖排文字都可识别，中文、英文、韩文混排也有基本支持。遇到多栏排版或文字方向来回变化时，分开框选通常更稳。" },
+        { "type": "heading", "level": 2, "text": "在其他编辑器中使用" },
+        { "type": "paragraph", "text": "区域截图编辑器、全屏截图、滚动长图和教笔里都能独立调用文字识别。它不会替你结束原来的截图或编辑任务，识别完成后可回到原画面继续处理。" },
+        { "type": "heading", "level": 2, "text": "教笔中的文字识别" },
+        { "type": "paragraph", "text": "教笔正在显示时启动 OCR，原标注仍留在屏幕上，但暂时不接收鼠标。识别结束后，教笔恢复操作，之前画的内容不会丢。" },
+        { "type": "heading", "level": 2, "text": "识别在本机完成" },
+        { "type": "paragraph", "text": "当前 OCR 在本机完成，不上传截图。识别对象仍可能含有账号、地址等私人信息，粘贴前最好扫一眼结果。" },
+        { "type": "heading", "level": 2, "text": "改善识别结果" },
+        {
+          "type": "bullets",
+          "items": [
+            "小字或低清图片：先把内容放大，再重新框选。",
+            "艺术字、手写字或强阴影：换成对比更清楚的画面，必要时分行识别。",
+            "选区里有图标、表格线和无关文字：收紧范围，但给文字边缘留少量空白。",
+            "竖排和横排混在一起：按文字方向拆成几次识别。",
+            "背景与文字颜色接近：换用原图或提高画面对比度后再试。"
+          ]
+        },
+        { "type": "heading", "level": 2, "text": "常见问题" },
+        {
+          "type": "faq",
+          "items": [
+            {
+              "question": "成功后文字在哪里？",
+              "answer": "已经复制到系统剪贴板。切到文本框或文档，按 Command+V 粘贴。"
+            },
+            {
+              "question": "为什么没有出现工具栏？",
+              "answer": "Command+3 是直接识别模式，松开选区后自动开始，所以不会显示截图标注工具栏。"
+            },
+            {
+              "question": "关掉成功通知后，失败还会提示吗？",
+              "answer": "会。该开关只隐藏成功通知，失败提示始终显示。"
+            },
+            {
+              "question": "竖排文字顺序不对怎么办？",
+              "answer": "一次只框一列或几列方向一致的文字，避开旁边的横排标题，再重新识别。"
+            },
+            {
+              "question": "截图会发到服务器吗？",
+              "answer": "不会。当前 OCR 在本机完成，不上传框选的截图。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "teaching-pen",
+      "navigationTitle": "教笔",
+      "title": "教笔",
+      "introduction": "教笔让标注直接留在当前桌面画面上，适合讲解界面或远程会议。进入后屏幕保持原色，默认工具是画笔。",
+      "tableOfContents": [
+        "进入和退出",
+        "紧凑工具栏",
+        "工具与样式",
+        "选择和修改",
+        "配合文字识别",
+        "多显示器",
+        "常见问题"
+      ],
+      "shortcuts": [
+        { "action": "进入或退出教笔", "keys": ["⌘", "2"] },
+        { "action": "呼出或隐藏工具栏", "keys": ["右键"] },
+        { "action": "删除选中标注", "keys": ["Delete"] }
+      ],
+      "blocks": [
+        { "type": "heading", "level": 2, "text": "进入和退出" },
+        { "type": "paragraph", "text": "按 Command+2 进入教笔，再按一次 Command+2 退出。教笔覆盖整个桌面但不压暗背景，进入后可直接用默认画笔书写。" },
+        {
+          "type": "image",
+          "name": "teaching-pen-overview",
+          "caption": "教笔保持桌面原色，画笔落下后标注浮在画面上。",
+          "accessibilityLabel": "教笔全屏画布覆盖原色桌面，画面上已有红色手写圈和箭头"
+        },
+        { "type": "heading", "level": 2, "text": "紧凑工具栏" },
+        { "type": "paragraph", "text": "在画布上右键会在指针旁打开紧凑工具栏。再右键一次会收起；选好工具后在画布上落笔，工具栏也会隐藏，给讲解内容让出位置。" },
+        {
+          "type": "image",
+          "name": "teaching-pen-toolbar",
+          "caption": "紧凑工具栏靠近右键位置出现，两列按钮适合临时切换工具。",
+          "accessibilityLabel": "教笔画布右键位置旁显示竖向紧凑工具栏，按钮分成两列排列"
+        },
+        { "type": "heading", "level": 3, "text": "画笔" },
+        { "type": "paragraph", "text": "画笔是默认工具。按住鼠标即可写画，选项可改三档粗细、线型和颜色。" },
+        { "type": "heading", "level": 3, "text": "形状" },
+        { "type": "paragraph", "text": "形状可画矩形或椭圆，并可切换填充。选项中还能改线宽、线型和颜色。" },
+        { "type": "heading", "level": 3, "text": "箭头" },
+        { "type": "paragraph", "text": "从起点拖到终点即可画箭头。可设置线宽、线型、两端样式和颜色，选中后还能拖中间控制点改弧度。" },
+        { "type": "heading", "level": 3, "text": "荧光笔" },
+        { "type": "paragraph", "text": "荧光笔画出半透明色带。选好宽度和颜色，沿着要讲的文字或区域拖动。" },
+        { "type": "heading", "level": 3, "text": "文字" },
+        { "type": "paragraph", "text": "单击画布后输入文字。选项可调粗体、斜体、描边、字体、字号和颜色，适合写下临时说明。" },
+        { "type": "heading", "level": 3, "text": "序号" },
+        { "type": "paragraph", "text": "序号工具也能切换成对勾或叉号。选序号后依次点击，数字会自动递增；选项里可改标记类型、大小和颜色。" },
+        { "type": "heading", "level": 3, "text": "马赛克" },
+        { "type": "paragraph", "text": "马赛克可用笔刷涂抹或画矩形遮挡。可调粗细、模式和颗粒样式，适合演示时临时盖住私人内容。" },
+        { "type": "heading", "level": 3, "text": "取色" },
+        { "type": "paragraph", "text": "把指针移到桌面画面上查看颜色值，单击即可取色。需要和界面原色保持一致时，用它比手动猜颜色准。" },
+        { "type": "heading", "level": 3, "text": "橡皮擦" },
+        { "type": "paragraph", "text": "橡皮擦可逐笔处理，也能框选一片标注。清空选项会移除教笔画布上的全部标注，但不会改动桌面内容。" },
+        { "type": "heading", "level": 3, "text": "放大镜" },
+        { "type": "paragraph", "text": "在画面上拖出局部放大区域。可选圆形或矩形、边框粗细、倍率和颜色，画好后还能移动位置。" },
+        { "type": "heading", "level": 3, "text": "复制" },
+        { "type": "paragraph", "text": "复制会取得当前完整桌面，并把教笔标注一起写入剪贴板。原来的教笔会在操作结束后退出。" },
+        { "type": "heading", "level": 3, "text": "保存" },
+        { "type": "paragraph", "text": "保存会把当前完整桌面和教笔标注写入所选文件。若取消保存面板，不会生成文件。" },
+        {
+          "type": "image",
+          "name": "teaching-pen-options",
+          "caption": "每种工具只显示相关样式，常用的粗细和颜色集中在窄面板中。",
+          "accessibilityLabel": "教笔紧凑工具栏旁展开样式面板，显示线宽、线型、箭头端点和颜色选项"
+        },
+        { "type": "heading", "level": 2, "text": "选择、移动和删除" },
+        { "type": "paragraph", "text": "单击已有标注可选中它。拖动标注主体可移动，拖控制点可缩放或调整形状；按 Delete 或 Backspace 删除当前选中项。" },
+        { "type": "heading", "level": 2, "text": "与截图功能分别使用" },
+        { "type": "paragraph", "text": "教笔、区域截图、全屏截图和文字识别是不同入口。教笔不会自动变成区域截图；要保存当前讲解画面，使用教笔工具栏里的复制或保存。" },
+        { "type": "heading", "level": 2, "text": "配合文字识别" },
+        { "type": "paragraph", "text": "教笔显示期间可独立启动文字识别。OCR 框选时，原标注保持可见，但教笔暂时不接收鼠标；识别完成后原标注恢复操作，内容不会丢。" },
+        {
+          "type": "image",
+          "name": "teaching-pen-ocr",
+          "caption": "文字识别框选期间，教笔标注仍在画面上，但暂时不能被拖动。",
+          "accessibilityLabel": "教笔画面上保留红色标注，同时显示文字识别选区和识别状态"
+        },
+        { "type": "heading", "level": 2, "text": "多显示器和退出注意" },
+        {
+          "type": "bullets",
+          "items": [
+            "教笔按整个桌面范围工作，多台显示器上的画面会保持各自原来的颜色和位置。",
+            "工具栏会尽量留在右键所在屏幕的可见范围内，靠近边角时会换到指针另一侧。",
+            "再次按 Command+2 是正常退出方式。复制或保存完成后，本次教笔也会结束。",
+            "退出前没有复制或保存的标注不会变成图片文件。"
+          ]
+        },
+        { "type": "heading", "level": 2, "text": "常见问题" },
+        {
+          "type": "faq",
+          "items": [
+            {
+              "question": "工具栏不见了，怎么找回来？",
+              "answer": "在画布空白处右键。工具栏会靠近指针出现，再右键或在画布上落笔会收起。"
+            },
+            {
+              "question": "怎么退出教笔？",
+              "answer": "再按一次 Command+2。复制或保存当前桌面后，本次教笔也会结束。"
+            },
+            {
+              "question": "文字识别时原来的标注会丢吗？",
+              "answer": "不会。OCR 期间标注保持可见，只是暂时不接收鼠标；识别结束后可以继续操作。"
+            },
+            {
+              "question": "为什么退出后找不到刚才画的内容？",
+              "answer": "教笔标注只存在于当前会话。退出前用复制或保存把桌面和标注一起留下。"
+            },
+            {
+              "question": "多显示器时工具栏会跑到别的屏幕吗？",
+              "answer": "工具栏以右键位置为准，并会调整方向，尽量完整留在当前指针所在屏幕内。"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
