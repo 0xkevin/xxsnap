@@ -120,6 +120,20 @@ final class HelpManualTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(teachingPen.faqCount, 5)
     }
 
+    func testEveryBundledHelpImageReferenceResolves() throws {
+        let loader = HelpContentLoader(bundle: Bundle(for: HelpManualTests.self))
+        let document = try loader.load(language: .zhHans)
+
+        let imageNames = document.chapters.flatMap(\.imageNames)
+        XCTAssertEqual(Set(imageNames).count, 20)
+        for name in imageNames {
+            XCTAssertNotNil(
+                loader.image(named: name, language: .zhHans),
+                name
+            )
+        }
+    }
+
     func testCaptureManualDocumentsActualEscapeAndAnnotationWorkflows() throws {
         let loader = HelpContentLoader(bundle: Bundle(for: HelpManualTests.self))
         let document = try loader.load(language: .zhHans)
