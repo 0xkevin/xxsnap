@@ -85,8 +85,8 @@ final class HelpManualTests: XCTestCase {
         )
         XCTAssertEqual(capture.imageNames.count, 8)
         XCTAssertGreaterThanOrEqual(capture.faqCount, 6)
-        XCTAssertTrue(capture.hasShortcut(action: "区域截图", keys: ["⌘", "`"]))
-        XCTAssertTrue(capture.hasShortcut(action: "全屏截图", keys: ["⌘", "⇧", "1"]))
+        XCTAssertTrue(capture.hasShortcut(action: "区域截图（默认）", keys: ["⌘", "`"]))
+        XCTAssertTrue(capture.hasShortcut(action: "全屏截图（默认）", keys: ["⌘", "⇧", "1"]))
         XCTAssertTrue(capture.hasShortcut(action: "复制", keys: ["⌘", "C"]))
         XCTAssertTrue(capture.hasShortcut(action: "保存", keys: ["⌘", "S"]))
         XCTAssertTrue(capture.hasShortcut(action: "贴图", keys: ["⌘", "1"]))
@@ -98,6 +98,12 @@ final class HelpManualTests: XCTestCase {
                 keys: ["Esc"]
             )
         )
+        let captureText = capture.flattenedText
+        XCTAssertTrue(captureText.contains("默认快捷键"))
+        XCTAssertTrue(captureText.contains("Command+`"))
+        XCTAssertTrue(captureText.contains("Command+Shift+1"))
+        XCTAssertTrue(captureText.contains("修改或禁用"))
+        XCTAssertTrue(captureText.contains("菜单或设置"))
 
         let pin = try XCTUnwrap(document.chapters.first { $0.id == "pin" })
         XCTAssertEqual(pin.imageNames.count, 4)
@@ -211,9 +217,11 @@ final class HelpManualTests: XCTestCase {
         let pinText = pin.flattenedText
 
         XCTAssertTrue(pin.hasShortcut(action: "从当前截图创建贴图", keys: ["⌘", "1"]))
-        XCTAssertTrue(pin.hasShortcut(action: "恢复最近隐藏的贴图", keys: ["⌘", "1"]))
+        XCTAssertTrue(pin.hasShortcut(action: "恢复最近隐藏的贴图（默认）", keys: ["⌘", "1"]))
         XCTAssertTrue(pinText.contains("默认快捷键是 Command+1"))
         XCTAssertTrue(pinText.contains("设置页"))
+        XCTAssertTrue(pinText.contains("修改或禁用"))
+        XCTAssertTrue(pinText.contains("菜单或设置"))
         XCTAssertTrue(pinText.contains("截图编辑上下文"))
         XCTAssertTrue(pinText.contains("创建时经过屏幕适配的初始显示尺寸"))
         XCTAssertFalse(pinText.contains("看原尺寸"))
@@ -245,6 +253,18 @@ final class HelpManualTests: XCTestCase {
         XCTAssertTrue(ocrText.contains("暂时不接收鼠标"))
         XCTAssertTrue(ocrText.contains("完成后恢复"))
         XCTAssertFalse(ocrText.contains("区域截图编辑器"))
+        XCTAssertTrue(ocrText.contains("Command+3"))
+        XCTAssertTrue(ocrText.contains("默认快捷键"))
+        XCTAssertTrue(ocrText.contains("修改或禁用"))
+        XCTAssertTrue(ocrText.contains("菜单或设置"))
+
+        for imageName in ["ocr-success", "ocr-failure"] {
+            let label = try XCTUnwrap(
+                ocr.accessibilityLabel(forImageNamed: imageName)
+            )
+            XCTAssertTrue(label.contains("屏幕中间靠下"))
+            XCTAssertFalse(label.contains("屏幕中央"))
+        }
     }
 
     func testTeachingPenManualNamesEveryAvailableTool() throws {
@@ -253,6 +273,7 @@ final class HelpManualTests: XCTestCase {
         let teachingPen = try XCTUnwrap(
             document.chapters.first { $0.id == "teaching-pen" }
         )
+        let text = teachingPen.flattenedText
 
         for tool in [
             "画笔",
@@ -269,10 +290,25 @@ final class HelpManualTests: XCTestCase {
             "保存"
         ] {
             XCTAssertTrue(
-                teachingPen.flattenedText.contains(tool),
+                text.contains(tool),
                 "教笔缺少工具说明：\(tool)"
             )
         }
+
+        XCTAssertTrue(text.contains("Command+2"))
+        XCTAssertTrue(text.contains("默认快捷键"))
+        XCTAssertTrue(text.contains("修改或禁用"))
+        XCTAssertTrue(text.contains("菜单或设置"))
+        XCTAssertTrue(text.contains("先按 Esc 退出当前工具"))
+        XCTAssertTrue(text.contains("支持后续编辑"))
+        XCTAssertTrue(text.contains("选中后移动"))
+        XCTAssertTrue(text.contains("调整大小"))
+        XCTAssertTrue(text.contains("滑动或矩形马赛克"))
+        XCTAssertTrue(text.contains("控制点调整"))
+        XCTAssertTrue(text.contains("画笔笔迹"))
+        XCTAssertTrue(text.contains("不能直接单击选中"))
+        XCTAssertTrue(text.contains("不能直接缩放"))
+        XCTAssertFalse(text.contains("单击已有标注可选中它"))
     }
 
     func testEnglishManualFallsBackToBundledChineseDocument() throws {
@@ -962,6 +998,10 @@ private extension HelpChapter {
     func hasShortcut(action: String, keys: [String]) -> Bool {
         shortcuts.contains(HelpShortcut(action: action, keys: keys))
     }
+
+    func accessibilityLabel(forImageNamed name: String) -> String? {
+        blocks.first { $0.imageName == name }?.imageAccessibilityLabel
+    }
 }
 
 private extension HelpContentBlock {
@@ -1001,6 +1041,13 @@ private extension HelpContentBlock {
     var imageName: String? {
         if case let .image(name, _, _) = self {
             return name
+        }
+        return nil
+    }
+
+    var imageAccessibilityLabel: String? {
+        if case let .image(_, _, accessibilityLabel) = self {
+            return accessibilityLabel
         }
         return nil
     }
