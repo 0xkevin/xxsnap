@@ -154,7 +154,7 @@ final class HelpManualTests: XCTestCase {
         XCTAssertFalse(text.contains("仍指向原来的区域"))
     }
 
-    func testCaptureManualDocumentsFullscreenPreviewAndScrollWorkflow() throws {
+    func testCaptureManualDocumentsFullscreenPreviewAndAutomaticScrollWorkflow() throws {
         let loader = HelpContentLoader(bundle: Bundle(for: HelpManualTests.self))
         let document = try loader.load(language: .zhHans)
         let capture = try XCTUnwrap(
@@ -171,18 +171,30 @@ final class HelpManualTests: XCTestCase {
             )
         )
 
-        XCTAssertTrue(text.contains("首次唯一且可靠的纵向移动"))
-        XCTAssertTrue(text.contains("向上或向下"))
-        XCTAssertTrue(text.contains("向下时只在初始画面下方扩展"))
-        XCTAssertTrue(text.contains("向上时只在上方扩展"))
-        XCTAssertTrue(text.contains("反向滚动只用于回看"))
-        XCTAssertTrue(text.contains("回到当前扩展端后恢复跟随"))
-        XCTAssertTrue(text.contains("只支持手动纵向滚动"))
-        XCTAssertTrue(text.contains("完成滚动截图"))
-        XCTAssertTrue(text.contains("Esc 取消滚动并返回原锁定选区"))
+        XCTAssertTrue(text.contains("辅助功能权限"))
+        XCTAssertTrue(text.contains("没有权限"))
+        XCTAssertTrue(text.contains("退出滚动截图并恢复原选区"))
+        XCTAssertTrue(text.contains("方向下拉菜单"))
+        XCTAssertTrue(text.contains("向下滚动"))
+        XCTAssertTrue(text.contains("向上滚动"))
+        XCTAssertTrue(text.contains("开始单步滚动"))
+        XCTAssertTrue(text.contains("结束滚动截图"))
+        XCTAssertTrue(text.contains("每点一次开始单步滚动"))
+        XCTAssertTrue(text.contains("XxSnap 会自动推动目标页面一段并采集"))
+        XCTAssertTrue(text.contains("第一次成功采集后，方向会锁定"))
+        XCTAssertTrue(text.contains("不能改成反向"))
+        XCTAssertTrue(text.contains("物理滚轮会被拦截"))
+        XCTAssertTrue(text.contains("预览面板不接收鼠标"))
+        XCTAssertTrue(text.contains("不能手动回看"))
+        XCTAssertTrue(text.contains("Return 或 Enter 完成，Esc 取消"))
+        XCTAssertTrue(text.contains("全局键监听依赖辅助功能权限"))
+        XCTAssertTrue(text.contains("结束滚动截图和取消按钮始终是可靠入口"))
         XCTAssertTrue(text.contains("资源上限"))
         XCTAssertTrue(text.contains("暂停继续接收"))
         XCTAssertTrue(text.contains("已接受的内容"))
+        XCTAssertFalse(text.contains("只支持手动纵向滚动"))
+        XCTAssertFalse(text.contains("反向滚动只用于回看"))
+        XCTAssertFalse(text.contains("回到当前扩展端后恢复跟随"))
     }
 
     func testPinAndOCRManualBoundariesMatchCurrentProduct() throws {
@@ -201,6 +213,14 @@ final class HelpManualTests: XCTestCase {
         XCTAssertTrue(pinText.contains("创建时经过屏幕适配的初始显示尺寸"))
         XCTAssertFalse(pinText.contains("看原尺寸"))
         XCTAssertFalse(pinText.contains("原始像素尺寸"))
+        XCTAssertTrue(pinText.contains("工具条隐藏时，按 Esc 直接隐藏贴图"))
+        XCTAssertTrue(pinText.contains("工具条显示但没有激活主工具时"))
+        XCTAssertTrue(pinText.contains("先结束编辑并隐藏工具条"))
+        XCTAssertTrue(pinText.contains("贴图仍显示"))
+        XCTAssertTrue(pinText.contains("主工具激活时"))
+        XCTAssertTrue(pinText.contains("第一次 Esc 退出当前工具"))
+        XCTAssertTrue(pinText.contains("第二次结束编辑并隐藏工具条"))
+        XCTAssertTrue(pinText.contains("第三次才隐藏贴图"))
 
         let ocr = try XCTUnwrap(
             document.chapters.first { $0.id == "ocr" }
