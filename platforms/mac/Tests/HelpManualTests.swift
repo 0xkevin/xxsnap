@@ -190,8 +190,13 @@ final class HelpManualTests: XCTestCase {
         XCTAssertTrue(text.contains("全局键监听依赖辅助功能权限"))
         XCTAssertTrue(text.contains("结束滚动截图和取消按钮始终是可靠入口"))
         XCTAssertTrue(text.contains("资源上限"))
-        XCTAssertTrue(text.contains("暂停继续接收"))
+        XCTAssertTrue(text.contains("阻塞暂停"))
+        XCTAssertTrue(text.contains("不再继续接收"))
         XCTAssertTrue(text.contains("已接受的内容"))
+        XCTAssertTrue(text.contains("页面动画或重叠不足"))
+        XCTAssertTrue(text.contains("等页面稳定后再试一步"))
+        XCTAssertTrue(text.contains("达到资源上限后不能继续单步"))
+        XCTAssertTrue(text.contains("只能完成已接受的长图或取消"))
         XCTAssertFalse(text.contains("只支持手动纵向滚动"))
         XCTAssertFalse(text.contains("反向滚动只用于回看"))
         XCTAssertFalse(text.contains("回到当前扩展端后恢复跟随"))
@@ -221,6 +226,14 @@ final class HelpManualTests: XCTestCase {
         XCTAssertTrue(pinText.contains("第一次 Esc 退出当前工具"))
         XCTAssertTrue(pinText.contains("第二次结束编辑并隐藏工具条"))
         XCTAssertTrue(pinText.contains("第三次才隐藏贴图"))
+        XCTAssertTrue(
+            pinText.contains(
+                "工具条隐藏时，Delete 或 Backspace 会关闭当前贴图"
+            )
+        )
+        XCTAssertTrue(pinText.contains("编辑工具条显示时"))
+        XCTAssertTrue(pinText.contains("可能删除当前选中的标注"))
+        XCTAssertFalse(pinText.contains("按 Delete 或 Backspace 会关闭当前贴图"))
 
         let ocr = try XCTUnwrap(
             document.chapters.first { $0.id == "ocr" }
