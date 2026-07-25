@@ -30,6 +30,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             captureHandler: {
                 captureCoordinator.startCapture()
             },
+            fullScreenCaptureHandler: {
+                captureCoordinator.startFullScreenCapture()
+            },
             recognizeTextHandler: {
                 captureCoordinator.startTextRecognition()
             },

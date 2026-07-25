@@ -3,6 +3,7 @@ import Carbon.HIToolbox
 
 enum HotKeyAction: String, CaseIterable {
     case capture
+    case fullScreenCapture
     case recognizeText
     case teachingPen
     case restoreMostRecentlyHiddenPinnedImage
@@ -13,6 +14,7 @@ enum HotKeyAction: String, CaseIterable {
         case .restoreMostRecentlyHiddenPinnedImage: return 2
         case .teachingPen: return 3
         case .recognizeText: return 4
+        case .fullScreenCapture: return 5
         }
     }
 
@@ -20,6 +22,11 @@ enum HotKeyAction: String, CaseIterable {
         switch self {
         case .capture:
             return HotKeySettings(keyCode: UInt32(kVK_ANSI_Grave), modifiers: UInt32(cmdKey))
+        case .fullScreenCapture:
+            return HotKeySettings(
+                keyCode: UInt32(kVK_ANSI_1),
+                modifiers: UInt32(cmdKey | shiftKey)
+            )
         case .recognizeText:
             return HotKeySettings(keyCode: UInt32(kVK_ANSI_3), modifiers: UInt32(cmdKey))
         case .teachingPen:
@@ -183,6 +190,7 @@ final class CaptureHotKeyController {
         settingsStore: any AppSettingsStoring = SettingsStore(),
         registrar: any GlobalHotKeyRegistering = CarbonGlobalHotKeyRegistrar(),
         captureHandler: @escaping () -> Void,
+        fullScreenCaptureHandler: @escaping () -> Void = {},
         recognizeTextHandler: @escaping () -> Void = {},
         teachingPenHandler: @escaping () -> Void,
         restorePinnedImageHandler: @escaping () -> Void
@@ -191,6 +199,7 @@ final class CaptureHotKeyController {
         self.registrar = registrar
         handlers = [
             .capture: captureHandler,
+            .fullScreenCapture: fullScreenCaptureHandler,
             .recognizeText: recognizeTextHandler,
             .teachingPen: teachingPenHandler,
             .restoreMostRecentlyHiddenPinnedImage: restorePinnedImageHandler

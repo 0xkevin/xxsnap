@@ -64,7 +64,7 @@ final class OCRResultPresentationController {
         panel.hasShadow = true
         panel.ignoresMouseEvents = true
         panel.hidesOnDeactivate = false
-        panel.level = .statusBar
+        panel.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
         panel.contentView = OCRResultView(result: result)
         panel.setFrame(frame, display: false)

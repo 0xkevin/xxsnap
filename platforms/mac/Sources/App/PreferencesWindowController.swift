@@ -5,6 +5,7 @@ enum PreferencesSection: String, CaseIterable {
     case shortcuts
     case save
     case update
+    case donation
     case about
 }
 
@@ -102,6 +103,8 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
             return makeSavePage()
         case .update:
             return makeUpdatePage()
+        case .donation:
+            return makeDonationPage()
         case .about:
             return makeAboutPage()
         }
@@ -216,6 +219,11 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
             title: strings.captureShortcut,
             detail: strings.captureShortcutDetail
         )
+        let fullScreenCaptureRow = makeShortcutRow(
+            action: .fullScreenCapture,
+            title: strings.fullScreenCapture,
+            detail: strings.fullScreenCaptureShortcutDetail
+        )
         let captureTextRow = makeShortcutRow(
             action: .recognizeText,
             title: strings.captureText,
@@ -231,7 +239,9 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
             title: strings.restorePinShortcut,
             detail: strings.restorePinShortcutDetail
         )
-        let page = makeStandardPage(rows: [captureRow, captureTextRow, teachingPenRow, restoreRow])
+        let page = makeStandardPage(
+            rows: [captureRow, fullScreenCaptureRow, captureTextRow, teachingPenRow, restoreRow]
+        )
 
         let resetButton = NSButton(
             title: strings.resetShortcuts,
@@ -439,7 +449,7 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
         let copyright = secondaryLabel(strings.copyright)
 
         let contact = NSButton(
-            title: "zfc.2012@gmail.com",
+            title: strings.contactEmail,
             target: self,
             action: #selector(openContactEmail)
         )
@@ -461,6 +471,64 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
             stack.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -32)
         ])
         return root
+    }
+
+    private func makeDonationPage() -> NSView {
+        let root = makePageRoot()
+        let message = NSTextField(labelWithString: strings.donationMessage)
+        message.font = .systemFont(ofSize: 13, weight: .regular)
+        message.alignment = .center
+        message.maximumNumberOfLines = 2
+
+        let alipay = makeDonationImageView(
+            resource: "alipay",
+            identifier: "alipayDonationImage"
+        )
+        let wechatPay = makeDonationImageView(
+            resource: "wechatpay",
+            identifier: "wechatPayDonationImage"
+        )
+        let images = NSStackView(views: [alipay, wechatPay])
+        images.orientation = .horizontal
+        images.alignment = .centerY
+        images.spacing = 24
+
+        let stack = NSStackView(views: [images, message])
+        stack.orientation = .vertical
+        stack.alignment = .centerX
+        stack.spacing = 12
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.centerXAnchor.constraint(equalTo: root.centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: root.centerYAnchor, constant: -18),
+            stack.leadingAnchor.constraint(greaterThanOrEqualTo: root.leadingAnchor, constant: 28),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -28)
+        ])
+        return root
+    }
+
+    private func makeDonationImageView(
+        resource: String,
+        identifier: String
+    ) -> NSImageView {
+        let image = Bundle.main.url(forResource: resource, withExtension: "jpg")
+            .flatMap(NSImage.init(contentsOf:))
+        let imageView = NSImageView()
+        imageView.identifier = NSUserInterfaceItemIdentifier(identifier)
+        imageView.image = image
+        imageView.imageScaling = .scaleProportionallyDown
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        imageView.heightAnchor.constraint(equalToConstant: 216).isActive = true
+        if let image, image.size.height > 0 {
+            imageView.widthAnchor.constraint(
+                equalTo: imageView.heightAnchor,
+                multiplier: image.size.width / image.size.height
+            ).isActive = true
+        } else {
+            imageView.widthAnchor.constraint(equalToConstant: 134).isActive = true
+        }
+        return imageView
     }
 
     private func makeStandardPage(rows: [NSView]) -> NSView {
@@ -792,6 +860,9 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
         case .update:
             item.label = strings.update
             item.image = NSImage(systemSymbolName: "arrow.triangle.2.circlepath", accessibilityDescription: strings.update)
+        case .donation:
+            item.label = strings.donation
+            item.image = NSImage(systemSymbolName: "cup.and.saucer", accessibilityDescription: strings.donation)
         case .about:
             item.label = strings.about
             item.image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: strings.about)

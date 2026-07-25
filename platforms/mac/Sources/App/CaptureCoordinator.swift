@@ -47,10 +47,12 @@ protocol LongImageEditorPresenting: AnyObject {
     var onClose: (() -> Void)? { get set }
     func show()
     func updateLanguage(_ language: AppLanguage)
+    func updateTitleStyle(_ style: LongImageEditorTitleStyle)
 }
 
 extension LongImageEditorPresenting {
     func updateLanguage(_ language: AppLanguage) {}
+    func updateTitleStyle(_ style: LongImageEditorTitleStyle) {}
 }
 
 extension LongImageEditorWindowController: LongImageEditorPresenting {}
@@ -99,16 +101,18 @@ final class CaptureCoordinator {
     var captureSessionDidEnd: (() -> Void)?
 
     private var lastCapture: NSImage?
-    private let permissionCoordinator: PermissionCoordinator
+    private let permissionCoordinator: any ScreenCapturePermissionCoordinating
     private let screenCaptureService: ScreenCaptureService
     private let settingsStore: SettingsStore
     private let preferencesSettingsStore: any PreferencesSettingsStoring
     private let filenameProvider: any CaptureFilenameProviding
     private let languageSnapshot: CaptureLanguageSnapshot
     private var captureTask: Task<Void, Never>?
+    private var fullScreenCaptureTask: Task<Void, Never>?
     private var startTask: Task<Void, Never>?
     private var overlayWindow: SelectionOverlayWindow?
     private var activeOverlayMode: CaptureOverlayMode?
+    private var suspendedTeachingPenOverlay: SelectionOverlayWindow?
     private var retiredOverlayWindows: [SelectionOverlayWindow] = []
     private var pinnedWindowControllers: [PinnedImageWindowPresenting] = []
     private var mostRecentlyHiddenPinnedWindow: PinnedImageWindowPresenting?
@@ -136,8 +140,13 @@ final class CaptureCoordinator {
     private let scrollCaptureTargetDetector: any ScrollCaptureTargetDetecting
     private let selectionFallbackCapture: @MainActor (NSRect) async throws -> NSImage
     private let desktopFallbackCapture: @MainActor () async throws -> NSImage
+    private let fullScreenCapturePreviewFactory: @MainActor (
+        FullScreenCapturePreviewContext
+    ) -> any FullScreenCapturePreviewPresenting
+    private let fullScreenCaptureVisibleFrameResolver: @MainActor () -> NSRect
+    private let fullScreenCaptureSoundPlayer: @MainActor () -> Void
+    private var fullScreenCapturePreview: (any FullScreenCapturePreviewPresenting)?
     private var longImageEditor: (any LongImageEditorPresenting)?
-    private var longImageLifecycleActive = false
     private var scrollCaptureSession: (any ScrollCaptureSessionRunning)?
     private var scrollCapturePresentation: (any ScrollCapturePresenting)?
     private var scrollCaptureTask: Task<Void, Never>?
@@ -149,7 +158,7 @@ final class CaptureCoordinator {
     private var captureTargetApplication: NSRunningApplication?
 
     init(
-        permissionCoordinator: PermissionCoordinator,
+        permissionCoordinator: any ScreenCapturePermissionCoordinating,
         screenCaptureService: ScreenCaptureService,
         settingsStore: SettingsStore = SettingsStore(),
         preferencesSettingsStore: any PreferencesSettingsStoring = PreferencesSettingsStore(),
@@ -179,7 +188,12 @@ final class CaptureCoordinator {
         },
         scrollCaptureTargetDetector: any ScrollCaptureTargetDetecting = ScrollCaptureTargetDetector(),
         selectionFallbackCapture: (@MainActor (NSRect) async throws -> NSImage)? = nil,
-        desktopFallbackCapture: (@MainActor () async throws -> NSImage)? = nil
+        desktopFallbackCapture: (@MainActor () async throws -> NSImage)? = nil,
+        fullScreenCapturePreviewFactory: (@MainActor (
+            FullScreenCapturePreviewContext
+        ) -> any FullScreenCapturePreviewPresenting)? = nil,
+        fullScreenCaptureVisibleFrameResolver: (@MainActor () -> NSRect)? = nil,
+        fullScreenCaptureSoundPlayer: (@MainActor () -> Void)? = nil
     ) {
         self.permissionCoordinator = permissionCoordinator
         self.screenCaptureService = screenCaptureService
@@ -244,6 +258,25 @@ final class CaptureCoordinator {
         self.desktopFallbackCapture = desktopFallbackCapture ?? {
             try await screenCaptureService.captureDesktopImage()
         }
+        self.fullScreenCapturePreviewFactory = fullScreenCapturePreviewFactory ?? {
+            FullScreenCapturePreviewController(context: $0)
+        }
+        self.fullScreenCaptureVisibleFrameResolver = fullScreenCaptureVisibleFrameResolver
+            ?? Self.currentScreenVisibleFrame
+        if let fullScreenCaptureSoundPlayer {
+            self.fullScreenCaptureSoundPlayer = fullScreenCaptureSoundPlayer
+        } else {
+            let sound = Bundle.main.url(
+                forResource: "fullscreencutsound",
+                withExtension: "mp3"
+            ).flatMap {
+                NSSound(contentsOf: $0, byReference: false)
+            }
+            self.fullScreenCaptureSoundPlayer = {
+                sound?.stop()
+                sound?.play()
+            }
+        }
     }
 
     convenience init() {
@@ -255,11 +288,14 @@ final class CaptureCoordinator {
 
     deinit {
         scrollCaptureTask?.cancel()
+        fullScreenCaptureTask?.cancel()
         let presentation = scrollCapturePresentation
         let session = scrollCaptureSession
+        let fullScreenPreview = fullScreenCapturePreview
         Task { @MainActor in
             presentation?.stop()
             _ = session?.cancel()
+            fullScreenPreview?.stop()
         }
     }
 
@@ -277,6 +313,46 @@ final class CaptureCoordinator {
 
     func startCapture() {
         startCapture(mode: .region)
+    }
+
+    func startFullScreenCapture() {
+        guard canStartCapture else {
+            NSLog("xxsnap full-screen capture ignored because capture is already active")
+            return
+        }
+        languageSnapshot.language = settingsStore.load().language
+        guard permissionCoordinator.hasScreenCapturePermission() else {
+            guard permissionCoordinator.shouldShowScreenCaptureGuidance() else { return }
+            if permissionCoordinator.requestScreenCapturePermissionOnce() {
+                showPermissionRestartAlert()
+            } else {
+                showPermissionSettingsAlert()
+            }
+            return
+        }
+
+        captureOverlayDidPresent?()
+        fullScreenCaptureTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                self.fullScreenCaptureTask = nil
+                self.captureSessionDidEnd?()
+            }
+            do {
+                let image = try await self.desktopFallbackCapture()
+                guard !Task.isCancelled else { return }
+                self.lastCapture = image
+                self.presentFullScreenCapturePreview(image)
+                self.fullScreenCaptureSoundPlayer()
+                NSLog(
+                    "xxsnap full-screen capture completed: %.0fx%.0f",
+                    image.size.width,
+                    image.size.height
+                )
+            } catch {
+                NSLog("xxsnap full-screen capture failed: \(error.localizedDescription)")
+            }
+        }
     }
 
     func startTextRecognition() {
@@ -297,7 +373,10 @@ final class CaptureCoordinator {
 
     private func startCapture(mode: CaptureOverlayMode) {
         NSLog("xxsnap startCapture mode=%@", String(describing: mode))
-        guard canStartCapture else {
+        let teachingPenToSuspend = mode == .textRecognition && canSuspendTeachingPen
+            ? overlayWindow
+            : nil
+        guard canStartCapture || teachingPenToSuspend != nil else {
             NSLog("xxsnap startCapture ignored because capture is already active")
             return
         }
@@ -319,7 +398,9 @@ final class CaptureCoordinator {
         }
 
         captureTargetApplication = frontmostApplicationResolver()
-        activeOverlayMode = mode
+        if teachingPenToSuspend == nil {
+            activeOverlayMode = mode
+        }
 
         startTask = Task { @MainActor [weak self] in
             guard let self else {
@@ -328,14 +409,16 @@ final class CaptureCoordinator {
             defer {
                 self.startTask = nil
                 if self.overlayWindow == nil {
-                    self.activeOverlayMode = nil
+                    if !self.restoreSuspendedTeachingPen() {
+                        self.activeOverlayMode = nil
+                    }
                 }
             }
             let refreshTargetApplication = self.captureTargetApplication
 
             let backgroundImage: NSImage?
             do {
-                backgroundImage = try await screenCaptureService.captureDesktopImage()
+                backgroundImage = try await desktopFallbackCapture()
                 frozenDesktopImage = backgroundImage
             } catch {
                 NSLog("xxsnap desktop snapshot failed before overlay: \(error.localizedDescription)")
@@ -345,6 +428,19 @@ final class CaptureCoordinator {
             guard !Task.isCancelled else {
                 frozenDesktopImage = nil
                 return
+            }
+
+            if let teachingPenToSuspend {
+                guard self.overlayWindow === teachingPenToSuspend,
+                      self.activeOverlayMode == .teachingPen
+                else {
+                    self.frozenDesktopImage = nil
+                    return
+                }
+                teachingPenToSuspend.ignoresMouseEvents = true
+                self.suspendedTeachingPenOverlay = teachingPenToSuspend
+                self.overlayWindow = nil
+                self.activeOverlayMode = mode
             }
 
             var settings = settingsStore.load()
@@ -396,9 +492,33 @@ final class CaptureCoordinator {
     private var canStartCapture: Bool {
         overlayWindow == nil
             && captureTask == nil
+            && fullScreenCaptureTask == nil
             && startTask == nil
-            && !longImageLifecycleActive
             && scrollCapturePhase == .idle
+    }
+
+    private var canSuspendTeachingPen: Bool {
+        activeOverlayMode == .teachingPen
+            && overlayWindow != nil
+            && suspendedTeachingPenOverlay == nil
+            && captureTask == nil
+            && fullScreenCaptureTask == nil
+            && startTask == nil
+            && scrollCapturePhase == .idle
+    }
+
+    @discardableResult
+    private func restoreSuspendedTeachingPen() -> Bool {
+        guard let teachingPen = suspendedTeachingPenOverlay else {
+            return false
+        }
+        suspendedTeachingPenOverlay = nil
+        overlayWindow = teachingPen
+        activeOverlayMode = .teachingPen
+        teachingPen.ignoresMouseEvents = false
+        teachingPen.contentView?.needsDisplay = true
+        teachingPen.present()
+        return true
     }
 
     func updateLanguage(_ language: AppLanguage) {
@@ -406,6 +526,7 @@ final class CaptureCoordinator {
         overlayWindow?.updateLanguage(language)
         scrollCapturePresentation?.updateLanguage(language)
         longImageEditor?.updateLanguage(language)
+        fullScreenCapturePreview?.updateLanguage(language)
         pinnedWindowControllers.forEach { $0.updateLanguage(language) }
 
         guard let scrollCaptureMessageKey else { return }
@@ -633,6 +754,13 @@ final class CaptureCoordinator {
             ?? rect
     }
 
+    private static func currentScreenVisibleFrame() -> NSRect {
+        let pointer = NSEvent.mouseLocation
+        return NSScreen.screens.first(where: { NSMouseInRect(pointer, $0.frame, false) })?.visibleFrame
+            ?? NSScreen.main?.visibleFrame
+            ?? SelectionOverlayWindow.visibleDesktopFrame()
+    }
+
     private func receiveScrollCaptureUpdate(
         _ update: ScrollCapturePresentationUpdate,
         generation: UInt64
@@ -749,8 +877,8 @@ final class CaptureCoordinator {
                     longImageHandoff(image, seed)
                     self.captureSessionDidEnd?()
                 } else {
-                    self.longImageLifecycleActive = true
                     self.presentLongImageEditor(image: image, seed: seed)
+                    self.captureSessionDidEnd?()
                 }
             } catch {
                 NSLog("xxsnap scroll-capture finish failed: %@", String(describing: error))
@@ -804,7 +932,11 @@ final class CaptureCoordinator {
         scrollCapturePhase = .idle
     }
 
-    private func presentLongImageEditor(image: NSImage, seed: ScrollCaptureSeed) {
+    private func presentLongImageEditor(
+        image: NSImage,
+        seed: ScrollCaptureSeed,
+        titleStyle: LongImageEditorTitleStyle = .longCapture
+    ) {
         let actions = LongImageEditorActions(
             copy: { [weak self] rendered in
                 guard let self else { return false }
@@ -827,19 +959,69 @@ final class CaptureCoordinator {
                 presentLongImageFallback(image)
                 return
             }
+            editor.updateTitleStyle(titleStyle)
             longImageEditor = editor
             let editorID = ObjectIdentifier(editor)
             editor.onClose = { [weak self] in
                 guard let self, let current = self.longImageEditor,
                       ObjectIdentifier(current) == editorID else { return }
                 self.longImageEditor = nil
-                self.longImageLifecycleActive = false
-                self.captureSessionDidEnd?()
             }
             editor.show()
         } catch {
             presentLongImageFallback(image)
         }
+    }
+
+    private func presentFullScreenCapturePreview(_ image: NSImage) {
+        fullScreenCapturePreview?.stop()
+        fullScreenCapturePreview = nil
+
+        let visibleFrame = fullScreenCaptureVisibleFrameResolver()
+        let desktopFrame = SelectionOverlayWindow.desktopFrame()
+        let seed = ScrollCaptureSeed(
+            screenRect: desktopFrame,
+            snapshotRect: NSRect(origin: .zero, size: image.size),
+            frozenImage: image,
+            annotations: [],
+            eraserMasks: []
+        )
+        let actions = FullScreenCapturePreviewActions(
+            open: { [weak self] in
+                guard let self else { return }
+                self.presentLongImageEditor(
+                    image: image,
+                    seed: seed,
+                    titleStyle: .fullScreenCapture
+                )
+            },
+            copy: { [weak self] in
+                self?.copyToPasteboard(image)
+            },
+            save: { [weak self] in
+                guard let self else { return }
+                _ = self.saveLastCapture(image)
+            },
+            pin: { [weak self] in
+                self?.presentPinnedImage(image, screenRect: visibleFrame)
+            }
+        )
+        let preview = fullScreenCapturePreviewFactory(FullScreenCapturePreviewContext(
+            image: image,
+            visibleFrame: visibleFrame,
+            language: languageSnapshot.language,
+            actions: actions
+        ))
+        let previewID = ObjectIdentifier(preview)
+        preview.onClose = { [weak self] in
+            guard let self,
+                  let current = self.fullScreenCapturePreview,
+                  ObjectIdentifier(current) == previewID
+            else { return }
+            self.fullScreenCapturePreview = nil
+        }
+        fullScreenCapturePreview = preview
+        preview.show()
     }
 
     private func presentLongImageFallback(_ image: NSImage) {
@@ -852,8 +1034,6 @@ final class CaptureCoordinator {
                 break
             }
             longImageEditor = nil
-            longImageLifecycleActive = false
-            captureSessionDidEnd?()
             return
         }
     }
@@ -973,7 +1153,9 @@ final class CaptureCoordinator {
         guard let result, !result.screenRect.isEmpty else {
             NSLog("xxsnap selection cancelled or empty")
             frozenDesktopImage = nil
-            captureSessionDidEnd?()
+            if !restoreSuspendedTeachingPen() {
+                captureSessionDidEnd?()
+            }
             return
         }
         NSLog("xxsnap handling selection annotations=%ld rect=(%.0f, %.0f, %.0f, %.0f)", result.annotations.count, result.screenRect.minX, result.screenRect.minY, result.screenRect.width, result.screenRect.height)
@@ -984,7 +1166,9 @@ final class CaptureCoordinator {
             }
             defer {
                 self.captureTask = nil
-                self.captureSessionDidEnd?()
+                if !self.restoreSuspendedTeachingPen() {
+                    self.captureSessionDidEnd?()
+                }
             }
 
             do {
@@ -1227,6 +1411,18 @@ extension CaptureCoordinator {
 
     var test_overlayWindow: SelectionOverlayWindow? {
         overlayWindow
+    }
+
+    var test_hasSuspendedTeachingPen: Bool {
+        suspendedTeachingPenOverlay != nil
+    }
+
+    var test_isTextRecognitionOverlayActive: Bool {
+        activeOverlayMode == .textRecognition && overlayWindow != nil
+    }
+
+    var test_isTeachingPenOverlayActive: Bool {
+        activeOverlayMode == .teachingPen && overlayWindow != nil
     }
 
     func test_installOverlayWindow(_ overlay: SelectionOverlayWindow) {

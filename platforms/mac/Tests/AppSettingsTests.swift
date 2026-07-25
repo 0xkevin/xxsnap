@@ -89,6 +89,10 @@ final class AppSettingsTests: XCTestCase {
         let store = PreferencesSettingsStore(userDefaults: defaults)
 
         XCTAssertEqual(store.load(), .default)
+        XCTAssertFalse(PreferencesSettings.default.disablesTextRecognitionSound)
+        XCTAssertFalse(
+            PreferencesSettings.default.disablesTextRecognitionSuccessNotification
+        )
 
         let settings = PreferencesSettings(
             filenameTemplate: "Capture {yyyyMMdd}_{HHmmss}",
@@ -129,8 +133,42 @@ final class AppSettingsTests: XCTestCase {
             PreferencesSettings.default.checksForUpdatesAtLaunch
         )
         XCTAssertEqual(settings.updateCheckIntervalHours, 6)
-        XCTAssertTrue(settings.disablesTextRecognitionSound)
-        XCTAssertTrue(settings.disablesTextRecognitionSuccessNotification)
+        XCTAssertFalse(settings.disablesTextRecognitionSound)
+        XCTAssertFalse(settings.disablesTextRecognitionSuccessNotification)
+    }
+
+    func testPreferencesSettingsMigratesOldEnabledDisableSwitchDefaultsOnce() throws {
+        let suiteName = "com.xxsnap.tests.preferences.feedback-migration.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        defaults.set(
+            Data(
+                """
+                {
+                  "filenameTemplate": "xxsnap_截图_{yyyyMMdd}_{HHmmss}",
+                  "checksForUpdatesAtLaunch": true,
+                  "updateCheckIntervalHours": 24,
+                  "disablesTextRecognitionSound": true,
+                  "disablesTextRecognitionSuccessNotification": true
+                }
+                """.utf8
+            ),
+            forKey: "preferencesSettings.v1"
+        )
+        let store = PreferencesSettingsStore(userDefaults: defaults)
+
+        var settings = store.load()
+        XCTAssertFalse(settings.disablesTextRecognitionSound)
+        XCTAssertFalse(settings.disablesTextRecognitionSuccessNotification)
+
+        settings.disablesTextRecognitionSound = true
+        settings.disablesTextRecognitionSuccessNotification = true
+        try store.save(settings)
+
+        XCTAssertTrue(store.load().disablesTextRecognitionSound)
+        XCTAssertTrue(store.load().disablesTextRecognitionSuccessNotification)
     }
 
     func testFilenameTemplateRendererUsesSupportedVariablesAndAddsPng() throws {
@@ -460,7 +498,7 @@ final class AppSettingsTests: XCTestCase {
 
         XCTAssertEqual(
             controller.window?.toolbar?.items.map(\.label),
-            ["通用", "快捷键", "保存", "更新", "关于"]
+            ["通用", "快捷键", "保存", "更新", "捐赠", "关于"]
         )
         XCTAssertEqual(controller.window?.contentLayoutRect.width ?? 0, 680, accuracy: 1)
         XCTAssertEqual(controller.window?.contentLayoutRect.height ?? 0, 320, accuracy: 1)
@@ -472,7 +510,7 @@ final class AppSettingsTests: XCTestCase {
                 controller.window?.contentView?.subviews.isEmpty ?? true,
                 "\(section.rawValue) page should not be blank"
             )
-            if section != .about {
+            if section != .about && section != .donation {
                 let root = controller.window?.contentView
                 let group = descendants(of: root, matching: NSStackView.self).first {
                     $0.identifier?.rawValue == "preferencesGroup"
@@ -500,7 +538,7 @@ final class AppSettingsTests: XCTestCase {
 
         XCTAssertEqual(
             controller.window?.toolbar?.items.map(\.label),
-            ["General", "Shortcuts", "Save", "Update", "About"]
+            ["General", "Shortcuts", "Save", "Update", "Donate", "About"]
         )
         controller.show(section: .about)
         let imageViews = descendants(
@@ -547,14 +585,14 @@ final class AppSettingsTests: XCTestCase {
         let notificationSwitch = try XCTUnwrap(switches.first {
             $0.identifier?.rawValue == "disableTextRecognitionSuccessNotification"
         })
-        XCTAssertEqual(soundSwitch.state, .on)
-        XCTAssertEqual(notificationSwitch.state, .on)
+        XCTAssertEqual(soundSwitch.state, .off)
+        XCTAssertEqual(notificationSwitch.state, .off)
 
         soundSwitch.performClick(nil)
         notificationSwitch.performClick(nil)
 
-        XCTAssertFalse(preferencesStore.settings.disablesTextRecognitionSound)
-        XCTAssertFalse(preferencesStore.settings.disablesTextRecognitionSuccessNotification)
+        XCTAssertTrue(preferencesStore.settings.disablesTextRecognitionSound)
+        XCTAssertTrue(preferencesStore.settings.disablesTextRecognitionSuccessNotification)
     }
 
     @MainActor
@@ -758,7 +796,7 @@ final class AppSettingsTests: XCTestCase {
         controller.show(section: .shortcuts)
         let rows = descendants(of: controller.window?.contentView, matching: NSStackView.self)
             .filter { $0.identifier?.rawValue == "shortcutRow" }
-        let teachingPenControl = rows[2].arrangedSubviews.last
+        let teachingPenControl = rows[3].arrangedSubviews.last
         let recorder = try XCTUnwrap(
             descendants(of: teachingPenControl, matching: NSButton.self)
                 .first { $0.identifier?.rawValue == "shortcutRecorderButton" }
@@ -791,9 +829,167 @@ final class AppSettingsTests: XCTestCase {
         )
     }
 
-    func testPreferencesMenuUsesShortAboutTitle() {
-        XCTAssertEqual(PreferencesStrings(language: .zhHans).aboutXxSnap, "关于")
-        XCTAssertEqual(PreferencesStrings(language: .english).aboutXxSnap, "About")
+    func testPreferencesMenuUsesRequestedLowerSectionTitles() {
+        let chinese = PreferencesStrings(language: .zhHans)
+        XCTAssertEqual(chinese.preferences, "偏好设置…")
+        XCTAssertEqual(chinese.checkForUpdates, "检查更新…")
+        XCTAssertEqual(chinese.supportDeveloper, "支持开发者 ☕️")
+        XCTAssertEqual(chinese.aboutXxSnap, "关于…")
+        XCTAssertEqual(chinese.quit, "退出")
+
+        let english = PreferencesStrings(language: .english)
+        XCTAssertEqual(english.preferences, "Settings...")
+        XCTAssertEqual(english.checkForUpdates, "Check for Updates…")
+        XCTAssertEqual(english.supportDeveloper, "Support the Developer ☕️")
+        XCTAssertEqual(english.aboutXxSnap, "About...")
+        XCTAssertEqual(english.quit, "Quit")
+    }
+
+    func testPreferencesWindowRetainsSettingsTitle() {
+        XCTAssertEqual(PreferencesStrings(language: .zhHans).windowTitle, "XxSnap 设置")
+        XCTAssertEqual(PreferencesStrings(language: .english).windowTitle, "XxSnap Settings")
+    }
+
+    func testDonationPageUsesRequestedEnglishMessage() {
+        XCTAssertEqual(
+            PreferencesStrings(language: .english).donationMessage,
+            "Support continued development with a donation."
+        )
+    }
+
+    @MainActor
+    func testStatusMenuLowerSectionOpensDonationAndQuits() throws {
+        let store = FakeAppSettingsStore()
+        let hotKeyController = makeHotKeyController(
+            store: store,
+            registrar: FakeGlobalHotKeyRegistrar()
+        )
+        var shownSections: [PreferencesSection] = []
+        var quitCount = 0
+        let controller = StatusItemController(
+            captureCoordinator: CaptureCoordinator(
+                permissionCoordinator: PermissionCoordinator(),
+                screenCaptureService: ScreenCaptureService()
+            ),
+            settingsStore: store,
+            hotKeyController: hotKeyController,
+            updateChecker: FakeUpdateChecker(),
+            showPreferences: { shownSections.append($0) },
+            terminationHandler: { quitCount += 1 }
+        )
+
+        let lowerItems = Array(controller.test_menuItems.suffix(5))
+        XCTAssertEqual(
+            lowerItems.map(\.title),
+            ["偏好设置…", "检查更新…", "支持开发者 ☕️", "关于…", "退出"]
+        )
+        XCTAssertFalse(lowerItems.contains(where: \.isSeparatorItem))
+
+        let supportItem = try XCTUnwrap(
+            lowerItems.first { $0.title == "支持开发者 ☕️" }
+        )
+        XCTAssertEqual(supportItem.action, #selector(StatusItemController.openDonation))
+        XCTAssertTrue(supportItem.target === controller)
+        controller.openDonation()
+        XCTAssertEqual(shownSections, [.donation])
+
+        let quitItem = try XCTUnwrap(lowerItems.first { $0.title == "退出" })
+        XCTAssertEqual(quitItem.action, #selector(StatusItemController.quit))
+        XCTAssertTrue(quitItem.target === controller)
+        controller.quit()
+        XCTAssertEqual(quitCount, 1)
+    }
+
+    @MainActor
+    func testDonationPageShowsMessageAndBothPaymentImages() throws {
+        let controller = PreferencesWindowController(
+            settingsStore: FakeAppSettingsStore(),
+            preferencesSettingsStore: FakePreferencesSettingsStore(),
+            hotKeyController: makeHotKeyController(
+                store: FakeAppSettingsStore(),
+                registrar: FakeGlobalHotKeyRegistrar()
+            ),
+            launchAtLoginManager: FakeLaunchAtLoginManager(),
+            updateChecker: FakeUpdateChecker()
+        )
+        defer { controller.close() }
+
+        controller.show(section: .donation)
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let labels = descendants(
+            of: controller.window?.contentView,
+            matching: NSTextField.self
+        )
+        let messageLabel = labels.first {
+            $0.stringValue == "如果这个软件对您有所帮助，欢迎通过捐赠支持我们持续维护与改进 ☕️"
+        }
+        XCTAssertNotNil(messageLabel)
+        XCTAssertEqual(messageLabel?.font?.pointSize ?? 0, 13, accuracy: 0.1)
+        let imageViews = descendants(
+            of: controller.window?.contentView,
+            matching: NSImageView.self
+        )
+        let alipay = imageViews.first {
+            $0.identifier?.rawValue == "alipayDonationImage"
+        }
+        let wechatPay = imageViews.first {
+            $0.identifier?.rawValue == "wechatPayDonationImage"
+        }
+        XCTAssertNotNil(alipay?.image)
+        XCTAssertNotNil(wechatPay?.image)
+        XCTAssertEqual(alipay?.frame.height ?? 0, 216, accuracy: 1)
+        XCTAssertEqual(wechatPay?.frame.height ?? 0, 216, accuracy: 1)
+
+        let stacks = descendants(
+            of: controller.window?.contentView,
+            matching: NSStackView.self
+        )
+        let donationStack = stacks.first {
+            guard let messageLabel else { return false }
+            return $0.arrangedSubviews.contains(messageLabel)
+        }
+        XCTAssertTrue(donationStack?.arrangedSubviews.last === messageLabel)
+
+        let root = controller.window?.contentView
+        let contentViews = [messageLabel, alipay, wechatPay].compactMap { $0 }
+        let contentFrame = contentViews.reduce(NSRect.null) { partial, view in
+            partial.union(view.convert(view.bounds, to: root))
+        }
+        XCTAssertGreaterThan(
+            contentFrame.midY,
+            (root?.bounds.midY ?? 0) + 8
+        )
+    }
+
+    func testDonationImagesAreBundled() {
+        XCTAssertNotNil(Bundle.main.url(forResource: "alipay", withExtension: "jpg"))
+        XCTAssertNotNil(Bundle.main.url(forResource: "wechatpay", withExtension: "jpg"))
+    }
+
+    @MainActor
+    func testAboutPageAddsFeedbackAndSupportPrefixToEmail() {
+        let store = FakeAppSettingsStore()
+        let controller = PreferencesWindowController(
+            settingsStore: store,
+            preferencesSettingsStore: FakePreferencesSettingsStore(),
+            hotKeyController: makeHotKeyController(
+                store: store,
+                registrar: FakeGlobalHotKeyRegistrar()
+            ),
+            launchAtLoginManager: FakeLaunchAtLoginManager(),
+            updateChecker: FakeUpdateChecker()
+        )
+        defer { controller.close() }
+
+        controller.show(section: .about)
+        let buttons = descendants(
+            of: controller.window?.contentView,
+            matching: NSButton.self
+        )
+        XCTAssertTrue(buttons.contains {
+            $0.title == "问题反馈或技术支持：zfc.2012@gmail.com"
+        })
     }
 
     func testPresentationPenUsesFormalEnglishName() {
@@ -820,6 +1016,41 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(HotKeyAction.recognizeText.defaultSettings.modifiers, UInt32(cmdKey))
     }
 
+    func testFullScreenCaptureStringsUseProfessionalEnglishName() {
+        XCTAssertEqual(PreferencesStrings(language: .zhHans).fullScreenCapture, "全屏截图")
+        XCTAssertEqual(PreferencesStrings(language: .english).fullScreenCapture, "Full Screen Capture")
+        XCTAssertEqual(
+            PreferencesStrings(language: .english).fullScreenCaptureShortcutDetail,
+            "Capture the entire visible desktop immediately"
+        )
+    }
+
+    func testFullScreenCaptureEditorUsesDedicatedTitle() {
+        XCTAssertEqual(
+            L10n(language: .zhHans).text(.fullScreenCaptureEditorTitle),
+            "全屏截图编辑"
+        )
+        XCTAssertEqual(
+            L10n(language: .english).text(.fullScreenCaptureEditorTitle),
+            "Full Screen Capture Editor"
+        )
+    }
+
+    func testFullScreenCaptureDefaultShortcutIsCommandShift1() {
+        XCTAssertEqual(HotKeyAction.fullScreenCapture.defaultSettings.keyCode, UInt32(kVK_ANSI_1))
+        XCTAssertEqual(
+            HotKeyAction.fullScreenCapture.defaultSettings.modifiers,
+            UInt32(cmdKey | shiftKey)
+        )
+    }
+
+    func testFullScreenCaptureSoundIsBundled() throws {
+        let url = try XCTUnwrap(
+            Bundle.main.url(forResource: "fullscreencutsound", withExtension: "mp3")
+        )
+        XCTAssertGreaterThan(try Data(contentsOf: url).count, 1_000)
+    }
+
     func testOCRJoinCandidatesSortsTopToBottomThenLeftToRight() {
         let candidates = [
             RecognizedTextCandidate(text: "World", boundingBox: CGRect(x: 0.45, y: 0.70, width: 0.2, height: 0.1)),
@@ -838,6 +1069,52 @@ final class AppSettingsTests: XCTestCase {
         ]
 
         XCTAssertEqual(OCRTextRecognitionService.join(candidates), "Alpha\nBeta")
+    }
+
+    @MainActor
+    func testOCRRecognizesVerticallyArrangedChineseText() async throws {
+        let text = "竖排文字识别"
+        let image = try makeVerticalTextImage(text)
+
+        let result = try await OCRTextRecognitionService().recognizeText(in: image)
+
+        XCTAssertEqual(
+            result.components(separatedBy: .whitespacesAndNewlines).joined(),
+            text
+        )
+    }
+
+    @MainActor
+    func testOCRRecognizesTwoVerticalKoreanColumns() async throws {
+        let url = try XCTUnwrap(
+            Bundle(for: AppSettingsTests.self).url(
+                forResource: "vertical-korean",
+                withExtension: "png"
+            )
+        )
+        let image = try XCTUnwrap(NSImage(contentsOf: url))
+
+        let result = try await OCRTextRecognitionService().recognizeText(in: image)
+
+        XCTAssertEqual(result, "조선어\n한국어")
+    }
+
+    @MainActor
+    func testOCRPreservesKoreanInsideHorizontalChineseText() async throws {
+        let url = try XCTUnwrap(
+            Bundle(for: AppSettingsTests.self).url(
+                forResource: "mixed-chinese-korean",
+                withExtension: "png"
+            )
+        )
+        let image = try XCTUnwrap(NSImage(contentsOf: url))
+
+        let result = try await OCRTextRecognitionService().recognizeText(in: image)
+
+        XCTAssertEqual(result, "韩语有十九个初声（초성）、二十一个中声（중성）以及二十七个终声（종성）。")
+        XCTAssertTrue(result.contains("초성"), "result=\(result)")
+        XCTAssertTrue(result.contains("중성"), "result=\(result)")
+        XCTAssertTrue(result.contains("종성"), "result=\(result)")
     }
 
     func testTextRecognitionOverlayConfigurationHidesScreenshotTools() throws {
@@ -958,6 +1235,35 @@ final class AppSettingsTests: XCTestCase {
         return root.subviews.flatMap { view in
             ([view as? View].compactMap { $0 }) + descendants(of: view, matching: type)
         }
+    }
+
+    @MainActor
+    private func makeVerticalTextImage(_ text: String) throws -> NSImage {
+        let characters = Array(text)
+        let size = NSSize(width: 240, height: CGFloat(characters.count) * 100 + 120)
+        let image = NSImage(size: size)
+        let font = try XCTUnwrap(NSFont(name: "PingFang SC", size: 72))
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor.black
+        ]
+
+        image.lockFocus()
+        NSColor.white.setFill()
+        NSRect(origin: .zero, size: size).fill()
+        for (index, character) in characters.enumerated() {
+            let value = String(character) as NSString
+            let glyphSize = value.size(withAttributes: attributes)
+            value.draw(
+                at: NSPoint(
+                    x: (size.width - glyphSize.width) / 2,
+                    y: size.height - 100 - CGFloat(index) * 100
+                ),
+                withAttributes: attributes
+            )
+        }
+        image.unlockFocus()
+        return image
     }
 }
 

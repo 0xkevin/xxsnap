@@ -220,6 +220,53 @@ final class ScreenCaptureServiceTests: XCTestCase {
     }
 
     @MainActor
+    func testDesktopSnapshotIncludesCurrentApplicationWindows() async throws {
+        guard NSScreen.screens.count == 1, let screen = NSScreen.main else {
+            throw XCTSkip("Current application capture regression test requires one display")
+        }
+        let windowFrame = NSRect(
+            x: screen.frame.minX + 160,
+            y: screen.frame.minY + 160,
+            width: 160,
+            height: 160
+        )
+        let window = NSWindow(
+            contentRect: windowFrame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.isOpaque = true
+        window.backgroundColor = NSColor(srgbRed: 1, green: 0, blue: 0.5, alpha: 1)
+        window.level = .screenSaver
+        window.orderFrontRegardless()
+        window.display()
+        defer {
+            window.orderOut(nil)
+        }
+
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        let snapshot = try await ScreenCaptureService().captureDesktopImage()
+        let cgImage = try XCTUnwrap(
+            snapshot.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        )
+        let scale = screen.backingScaleFactor
+        let samplePoint = NSPoint(x: windowFrame.midX, y: windowFrame.midY)
+        let color = try XCTUnwrap(
+            SelectionToolbarState.sampleColor(
+                atPixelX: Int((samplePoint.x - screen.frame.minX) * scale),
+                y: Int((screen.frame.maxY - samplePoint.y) * scale),
+                in: cgImage
+            )
+        )
+
+        XCTAssertEqual(color.redComponent, 1, accuracy: 2 / 255)
+        XCTAssertEqual(color.greenComponent, 0, accuracy: 2 / 255)
+        XCTAssertEqual(color.blueComponent, 0.5, accuracy: 2 / 255)
+    }
+
+    @MainActor
     func testDisplayContentFilterExplicitlyIncludesMenuBarWhenAvailable() async throws {
         guard #available(macOS 14.2, *) else {
             throw XCTSkip("SCContentFilter.includeMenuBar is available on macOS 14.2 and newer")

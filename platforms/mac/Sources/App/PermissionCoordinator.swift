@@ -1,6 +1,12 @@
 import CoreGraphics
 
-final class PermissionCoordinator {
+protocol ScreenCapturePermissionCoordinating: AnyObject {
+    func hasScreenCapturePermission() -> Bool
+    func shouldShowScreenCaptureGuidance() -> Bool
+    @discardableResult func requestScreenCapturePermissionOnce() -> Bool
+}
+
+final class PermissionCoordinator: ScreenCapturePermissionCoordinating {
     private static var didShowScreenCaptureGuidance = false
     private var didRequestPermission = false
 

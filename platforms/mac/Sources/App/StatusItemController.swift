@@ -7,6 +7,7 @@ final class StatusItemController: NSObject {
     private let hotKeyController: CaptureHotKeyController
     private let updateChecker: any UpdateChecking
     private let showPreferences: (PreferencesSection) -> Void
+    private let terminationHandler: @MainActor () -> Void
     private let statusItem: NSStatusItem
 
     init(
@@ -14,13 +15,17 @@ final class StatusItemController: NSObject {
         settingsStore: any AppSettingsStoring,
         hotKeyController: CaptureHotKeyController,
         updateChecker: any UpdateChecking,
-        showPreferences: @escaping (PreferencesSection) -> Void
+        showPreferences: @escaping (PreferencesSection) -> Void,
+        terminationHandler: @escaping @MainActor () -> Void = {
+            NSApplication.shared.terminate(nil)
+        }
     ) {
         self.captureCoordinator = captureCoordinator
         self.settingsStore = settingsStore
         self.hotKeyController = hotKeyController
         self.updateChecker = updateChecker
         self.showPreferences = showPreferences
+        self.terminationHandler = terminationHandler
         statusItem = NSStatusBar.system.statusItem(withLength: 92)
         super.init()
         configureStatusItem()
@@ -28,6 +33,10 @@ final class StatusItemController: NSObject {
 
     @objc func capture() {
         captureCoordinator.startCapture()
+    }
+
+    @objc func fullScreenCapture() {
+        captureCoordinator.startFullScreenCapture()
     }
 
     @objc func captureText() {
@@ -39,7 +48,7 @@ final class StatusItemController: NSObject {
     }
 
     @objc func quit() {
-        NSApplication.shared.terminate(nil)
+        terminationHandler()
     }
 
     @objc func openPreferences() {
@@ -48,6 +57,10 @@ final class StatusItemController: NSObject {
 
     @objc func openAbout() {
         showPreferences(.about)
+    }
+
+    @objc func openDonation() {
+        showPreferences(.donation)
     }
 
     @objc func checkForUpdates() {
@@ -91,6 +104,11 @@ final class StatusItemController: NSObject {
             hotKeyAction: .capture
         ))
         menu.addItem(makeHotKeyMenuItem(
+            title: strings.fullScreenCapture,
+            action: #selector(fullScreenCapture),
+            hotKeyAction: .fullScreenCapture
+        ))
+        menu.addItem(makeHotKeyMenuItem(
             title: strings.captureText,
             action: #selector(captureText),
             hotKeyAction: .recognizeText
@@ -113,11 +131,15 @@ final class StatusItemController: NSObject {
             keyEquivalent: ""
         ))
         menu.addItem(NSMenuItem(
+            title: strings.supportDeveloper,
+            action: #selector(openDonation),
+            keyEquivalent: ""
+        ))
+        menu.addItem(NSMenuItem(
             title: strings.aboutXxSnap,
             action: #selector(openAbout),
             keyEquivalent: ""
         ))
-        menu.addItem(.separator())
         let quitItem = NSMenuItem(title: strings.quit, action: #selector(quit), keyEquivalent: "q")
         quitItem.keyEquivalentModifierMask = [.command]
         menu.addItem(quitItem)
@@ -127,6 +149,10 @@ final class StatusItemController: NSObject {
         }
 
         statusItem.menu = menu
+    }
+
+    var test_menuItems: [NSMenuItem] {
+        statusItem.menu?.items ?? []
     }
 
     private func makeHotKeyMenuItem(

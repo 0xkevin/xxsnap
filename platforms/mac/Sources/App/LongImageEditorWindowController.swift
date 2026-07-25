@@ -196,9 +196,25 @@ struct LongImageEditorActions {
     static let none = Self(copy: { _ in false }, save: { _ in false }, pin: { _ in false })
 }
 
+enum LongImageEditorTitleStyle: Equatable {
+    case longCapture
+    case fullScreenCapture
+
+    var localizationKey: L10n.Key {
+        switch self {
+        case .longCapture:
+            return .longImageEditorTitle
+        case .fullScreenCapture:
+            return .fullScreenCaptureEditorTitle
+        }
+    }
+}
+
 @MainActor
 final class LongImageEditorWindowController: NSWindowController, NSWindowDelegate {
     typealias CompleteRenderer = (NSImage, [CaptureAnnotation], [EraserMask]) throws -> NSImage
+    private static let fullScreenCaptureWindowWidthScale: CGFloat = 1.15
+
     private struct PresentedContext {
         var sliceRect: NSRect
         var overlayBoundsHeight: CGFloat
@@ -210,6 +226,7 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     private let actions: LongImageEditorActions
     private let completeRenderer: CompleteRenderer
     private var language: AppLanguage
+    private var titleStyle: LongImageEditorTitleStyle
     private let applicationActivator: @MainActor () -> Void
     private var renderedRevision: NSImage?
     private var documentRevision: UInt64 = 0
@@ -230,6 +247,7 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     private var toolbarMenuItem: NSMenuItem?
     private(set) var geometry: LongImageEditorGeometry
     private let initialWindowFrame: NSRect
+    private let availableVisibleFrame: NSRect
     var onFinishEditing: ((NSImage, [CaptureAnnotation], [EraserMask]) -> Void)?
     var onClose: (() -> Void)?
 
@@ -240,7 +258,7 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     var fitWidthScale: CGFloat { geometry.fitWidthScale }
     var visibleImageRect: NSRect { geometry.visibleImageRect }
 
-    init(canonicalImage image: NSImage, annotations: [CaptureAnnotation] = [], eraserMasks: [EraserMask] = [], visibleFrame: NSRect? = NSScreen.main?.visibleFrame, initialWindowSize: NSSize? = nil, actions: LongImageEditorActions = .none, renderer: CompleteRenderer? = nil, language: AppLanguage = .zhHans, applicationActivator: @escaping @MainActor () -> Void = { NSApp.activate(ignoringOtherApps: true) }) {
+    init(canonicalImage image: NSImage, annotations: [CaptureAnnotation] = [], eraserMasks: [EraserMask] = [], visibleFrame: NSRect? = NSScreen.main?.visibleFrame, initialWindowSize: NSSize? = nil, actions: LongImageEditorActions = .none, renderer: CompleteRenderer? = nil, language: AppLanguage = .zhHans, titleStyle: LongImageEditorTitleStyle = .longCapture, applicationActivator: @escaping @MainActor () -> Void = { NSApp.activate(ignoringOtherApps: true) }) {
         let visible = visibleFrame ?? NSRect(x: 0, y: 0, width: 1_200, height: 900)
         documentState = LongImageEditorDocument(image: image, annotations: annotations, eraserMasks: eraserMasks)
         self.actions = actions
@@ -253,14 +271,16 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
             )
         }
         self.language = language
+        self.titleStyle = titleStyle
         self.applicationActivator = applicationActivator
+        availableVisibleFrame = visible
         let requested = initialWindowSize ?? NSSize(width: min(1_000, visible.width), height: min(840, visible.height))
         let size = NSSize(width: min(requested.width, visible.width), height: min(requested.height, visible.height))
         let frame = NSRect(x: visible.midX - size.width / 2, y: visible.midY - size.height / 2, width: size.width, height: size.height)
         let window = NSWindow(contentRect: frame, styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         // `visibleFrame` bounds the complete titled window, not just its content.
         window.setFrame(frame, display: false)
-        window.title = L10n(language: language).text(.longImageEditorTitle)
+        window.title = L10n(language: language).text(titleStyle.localizationKey)
         initialWindowFrame = frame
         geometry = LongImageEditorGeometry(imageSize: image.size, viewportSize: size, scrollOffset: 0)
         super.init(window: window)
@@ -268,6 +288,9 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         configureViews()
         observeScroll()
         relayout(preserving: geometry.topVisibleCenter)
+        if titleStyle == .fullScreenCapture {
+            fitFullScreenCaptureWindowToImage()
+        }
     }
     convenience init(image: NSImage, annotations: [CaptureAnnotation] = [], eraserMasks: [EraserMask] = [], visibleFrame: NSRect? = NSScreen.main?.visibleFrame, initialWindowSize: NSSize? = nil, actions: LongImageEditorActions = .none, language: AppLanguage = .zhHans) {
         self.init(canonicalImage: image, annotations: annotations, eraserMasks: eraserMasks, visibleFrame: visibleFrame, initialWindowSize: initialWindowSize, actions: actions, language: language)
@@ -299,13 +322,21 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
     func updateLanguage(_ language: AppLanguage) {
         guard self.language != language else { return }
         self.language = language
-        window?.title = L10n(language: language).text(.longImageEditorTitle)
+        window?.title = L10n(language: language).text(titleStyle.localizationKey)
         let contextMenu = makeContextMenu()
         scrollView.menu = contextMenu
         documentView.menu = contextMenu
         imageView.menu = contextMenu
         overlay?.contentView?.menu = contextMenu
         overlay?.updateLanguage(language)
+    }
+    func updateTitleStyle(_ style: LongImageEditorTitleStyle) {
+        guard titleStyle != style else { return }
+        titleStyle = style
+        window?.title = L10n(language: language).text(style.localizationKey)
+        if style == .fullScreenCapture {
+            fitFullScreenCaptureWindowToImage()
+        }
     }
     func stop() {
         guard !didStop else { return }
@@ -416,6 +447,30 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         scrollView.contentView.scroll(to: NSPoint(x: 0, y: geometry.scrollOffset * geometry.fitWidthScale))
         scrollView.reflectScrolledClipView(scrollView.contentView); updateOffset()
     }
+    private func fitFullScreenCaptureWindowToImage() {
+        guard let window,
+              documentState.image.size.width > 0,
+              documentState.image.size.height > 0
+        else { return }
+
+        var frame = window.frame
+        frame.size.width = min(
+            initialWindowFrame.width * Self.fullScreenCaptureWindowWidthScale,
+            availableVisibleFrame.width
+        )
+        frame.origin.x = availableVisibleFrame.midX - frame.width / 2
+        window.setFrame(frame, display: false)
+        relayout(preserving: geometry.topVisibleCenter)
+
+        let contentHeight = window.contentView?.bounds.height ?? frame.height
+        let windowChromeHeight = max(0, window.frame.height - contentHeight)
+        frame = window.frame
+        frame.size.height = min(documentView.frame.height + windowChromeHeight, availableVisibleFrame.height)
+        frame.origin.x = availableVisibleFrame.midX - frame.width / 2
+        frame.origin.y = availableVisibleFrame.midY - frame.height / 2
+        window.setFrame(frame, display: false)
+        relayout(preserving: geometry.topVisibleCenter)
+    }
     private func scrolled() {
         if interactionLocked {
             restoreLockedClipOrigin()
@@ -429,10 +484,23 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         let clipView = scrollView.contentView
         return window.convertToScreen(clipView.convert(clipView.bounds, to: nil))
     }
+    private func visibleImageScreenFrame() -> NSRect {
+        guard let window else { return .zero }
+        let visibleRect = documentView.visibleRect.intersection(documentView.bounds)
+        return window.convertToScreen(documentView.convert(visibleRect, to: nil))
+    }
+    private func editingOverlayScreenFrame() -> NSRect {
+        switch titleStyle {
+        case .longCapture:
+            return viewportScreenFrame()
+        case .fullScreenCapture:
+            return visibleImageScreenFrame()
+        }
+    }
     func showEditingToolbar() {
         guard overlay == nil else { refreshOverlay(); return }
         let slice = LongImageEditorDocument.visibleSlice(image: documentState.image, annotations: documentState.annotations, eraserMasks: documentState.eraserMasks, imageRect: visibleImageRect)
-        let frame = viewportScreenFrame()
+        let frame = editingOverlayScreenFrame()
         presentedAnnotationIDs = Set(documentState.annotations.map(\.id))
         presentedMaskIDs = Set(documentState.eraserMasks.map(\.id))
         let preview = CaptureAnnotationRenderer.renderVisibleLongImageSlice(
@@ -548,7 +616,7 @@ final class LongImageEditorWindowController: NSWindowController, NSWindowDelegat
         viewportRefreshCount += 1
         guard let overlay else { return }
         let slice = LongImageEditorDocument.visibleSlice(image: documentState.image, annotations: documentState.annotations, eraserMasks: documentState.eraserMasks, imageRect: visibleImageRect)
-        let frame = viewportScreenFrame()
+        let frame = editingOverlayScreenFrame()
         presentedAnnotationIDs = Set(documentState.annotations.map(\.id))
         presentedMaskIDs = Set(documentState.eraserMasks.map(\.id))
         let preview = CaptureAnnotationRenderer.renderVisibleLongImageSlice(

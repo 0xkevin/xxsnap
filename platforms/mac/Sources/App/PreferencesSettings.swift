@@ -15,16 +15,16 @@ struct PreferencesSettings: Codable, Equatable {
         filenameTemplate: defaultFilenameTemplate,
         checksForUpdatesAtLaunch: true,
         updateCheckIntervalHours: 24,
-        disablesTextRecognitionSound: true,
-        disablesTextRecognitionSuccessNotification: true
+        disablesTextRecognitionSound: false,
+        disablesTextRecognitionSuccessNotification: false
     )
 
     init(
         filenameTemplate: String,
         checksForUpdatesAtLaunch: Bool,
         updateCheckIntervalHours: Int,
-        disablesTextRecognitionSound: Bool = true,
-        disablesTextRecognitionSuccessNotification: Bool = true
+        disablesTextRecognitionSound: Bool = false,
+        disablesTextRecognitionSuccessNotification: Bool = false
     ) {
         self.filenameTemplate = filenameTemplate
         self.checksForUpdatesAtLaunch = checksForUpdatesAtLaunch
@@ -63,6 +63,8 @@ protocol PreferencesSettingsStoring: AnyObject {
 
 final class PreferencesSettingsStore: PreferencesSettingsStoring {
     private let key = "preferencesSettings.v1"
+    private let textRecognitionFeedbackDefaultsMigrationKey =
+        "preferencesSettings.textRecognitionFeedbackDefaults.v2"
     private let userDefaults: UserDefaults
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
@@ -72,14 +74,31 @@ final class PreferencesSettingsStore: PreferencesSettingsStoring {
     }
 
     func load() -> PreferencesSettings {
+        let needsFeedbackDefaultsMigration = !userDefaults.bool(
+            forKey: textRecognitionFeedbackDefaultsMigrationKey
+        )
         guard
             let data = userDefaults.data(forKey: key),
             var settings = try? decoder.decode(PreferencesSettings.self, from: data)
         else {
+            userDefaults.set(true, forKey: textRecognitionFeedbackDefaultsMigrationKey)
             return .default
         }
+        var needsSave = false
         if settings.filenameTemplate == PreferencesSettings.legacyDefaultFilenameTemplate {
             settings.filenameTemplate = PreferencesSettings.defaultFilenameTemplate
+            needsSave = true
+        }
+        if needsFeedbackDefaultsMigration {
+            if settings.disablesTextRecognitionSound,
+               settings.disablesTextRecognitionSuccessNotification {
+                settings.disablesTextRecognitionSound = false
+                settings.disablesTextRecognitionSuccessNotification = false
+                needsSave = true
+            }
+            userDefaults.set(true, forKey: textRecognitionFeedbackDefaultsMigrationKey)
+        }
+        if needsSave {
             try? save(settings)
         }
         return settings
@@ -200,25 +219,40 @@ struct PreferencesStrings {
 
     var appTooltip: String { isEnglish ? "XxSnap Capture" : "xxsnap 截图" }
     var capture: String { isEnglish ? "Capture" : "截图" }
+    var fullScreenCapture: String { isEnglish ? "Full Screen Capture" : "全屏截图" }
     var captureText: String { isEnglish ? "Capture Text" : "识别文字" }
     var teachingPen: String { isEnglish ? "Presentation Pen" : "教笔" }
-    var preferences: String { isEnglish ? "Preferences…" : "首选项…" }
+    var preferences: String { isEnglish ? "Settings..." : "偏好设置…" }
     var checkForUpdates: String { isEnglish ? "Check for Updates…" : "检查更新…" }
-    var aboutXxSnap: String { isEnglish ? "About" : "关于" }
+    var supportDeveloper: String {
+        isEnglish ? "Support the Developer ☕️" : "支持开发者 ☕️"
+    }
+    var aboutXxSnap: String { isEnglish ? "About..." : "关于…" }
     var quit: String { isEnglish ? "Quit" : "退出" }
-    var windowTitle: String { isEnglish ? "XxSnap Preferences" : "XxSnap 首选项" }
+    var windowTitle: String { isEnglish ? "XxSnap Settings" : "XxSnap 设置" }
     var general: String { isEnglish ? "General" : "通用" }
     var shortcuts: String { isEnglish ? "Shortcuts" : "快捷键" }
     var save: String { isEnglish ? "Save" : "保存" }
     var update: String { isEnglish ? "Update" : "更新" }
+    var donation: String { isEnglish ? "Donate" : "捐赠" }
     var about: String { isEnglish ? "About" : "关于" }
+    var donationMessage: String {
+        isEnglish
+            ? "Support continued development with a donation."
+            : "如果这个软件对您有所帮助，欢迎通过捐赠支持我们持续维护与改进 ☕️"
+    }
+    var contactEmail: String {
+        isEnglish
+            ? "Feedback or technical support: zfc.2012@gmail.com"
+            : "问题反馈或技术支持：zfc.2012@gmail.com"
+    }
     var launchAtLogin: String { isEnglish ? "Launch at login" : "开机自启动" }
     var launchAtLoginDetail: String {
         isEnglish ? "Run XxSnap automatically after signing in to macOS" : "登录 macOS 后自动运行 XxSnap"
     }
     var languageTitle: String { isEnglish ? "Language" : "语言" }
     var languageDetail: String {
-        isEnglish ? "Menu and preferences update immediately" : "菜单和首选项立即切换"
+        isEnglish ? "Menu and settings update immediately" : "菜单和设置立即切换"
     }
     var disableTextRecognitionSound: String {
         isEnglish ? "Disable Capture Text sound" : "禁用识别文字提示音"
@@ -244,6 +278,9 @@ struct PreferencesStrings {
     var captureShortcut: String { isEnglish ? "Capture" : "截图" }
     var captureShortcutDetail: String {
         isEnglish ? "Start a new region capture" : "开始一次新的区域截图"
+    }
+    var fullScreenCaptureShortcutDetail: String {
+        isEnglish ? "Capture the entire visible desktop immediately" : "立即截取整个可见桌面"
     }
     var captureTextShortcutDetail: String {
         isEnglish ? "Capture text from a selected screen area" : "框选屏幕区域并识别文字"

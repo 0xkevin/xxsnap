@@ -192,8 +192,47 @@ private final class FakeLongImageEditor: LongImageEditorPresenting {
     var onClose: (() -> Void)?
     var onShow: (() -> Void)?
     private(set) var showCount = 0
+    private(set) var titleStyle: LongImageEditorTitleStyle = .longCapture
     func show() { showCount += 1; onShow?() }
+    func updateTitleStyle(_ style: LongImageEditorTitleStyle) { titleStyle = style }
     func simulateClose() { onClose?() }
+}
+
+@MainActor
+private final class FakeFullScreenCapturePreview: FullScreenCapturePreviewPresenting {
+    var onClose: (() -> Void)?
+    private(set) var showCount = 0
+    private(set) var stopCount = 0
+
+    func show() {
+        showCount += 1
+    }
+
+    func stop() {
+        stopCount += 1
+    }
+
+    func updateLanguage(_ language: AppLanguage) {}
+}
+
+private final class FakeScreenCapturePermissionCoordinator: ScreenCapturePermissionCoordinating {
+    let isAllowed: Bool
+
+    init(isAllowed: Bool = true) {
+        self.isAllowed = isAllowed
+    }
+
+    func hasScreenCapturePermission() -> Bool {
+        isAllowed
+    }
+
+    func shouldShowScreenCaptureGuidance() -> Bool {
+        !isAllowed
+    }
+
+    func requestScreenCapturePermissionOnce() -> Bool {
+        false
+    }
 }
 
 @MainActor
@@ -227,6 +266,123 @@ private final class ResourceLimitCoordinatorMonitor: ScrollActivityMonitoring {
 }
 
 final class SelectionToolbarStateTests: XCTestCase {
+    @MainActor
+    func testFullScreenCapturePreviewUsesBottomRightPlacement() {
+        let visibleFrame = NSRect(x: 100, y: 80, width: 1_200, height: 800)
+        let frame = FullScreenCapturePreviewController.previewFrame(
+            imageSize: NSSize(width: 1_920, height: 1_080),
+            visibleFrame: visibleFrame
+        )
+
+        XCTAssertEqual(frame.maxX, visibleFrame.maxX - 20, accuracy: 0.001)
+        XCTAssertEqual(frame.minY, visibleFrame.minY + 20, accuracy: 0.001)
+        XCTAssertLessThanOrEqual(frame.width, 320)
+        XCTAssertLessThanOrEqual(frame.height, 220)
+        XCTAssertEqual(frame.width / frame.height, 1_920.0 / 1_080.0, accuracy: 0.001)
+    }
+
+    @MainActor
+    func testFullScreenCapturePreviewMatchesLongImageContextMenuAndOpensFromClick() {
+        var openCount = 0
+        let controller = FullScreenCapturePreviewController(
+            context: FullScreenCapturePreviewContext(
+                image: solidImage(size: NSSize(width: 1_920, height: 1_080), color: .white),
+                visibleFrame: NSRect(x: 0, y: 0, width: 1_200, height: 800),
+                language: .zhHans,
+                actions: FullScreenCapturePreviewActions(
+                    open: { openCount += 1 },
+                    copy: {},
+                    save: {},
+                    pin: {}
+                )
+            )
+        )
+
+        XCTAssertEqual(
+            controller.test_contextMenuTitles,
+            ["显示工具条 (⇧)", nil, "贴图", "复制图片", "保存图片", nil, "关闭"]
+        )
+        controller.test_triggerOpen()
+        XCTAssertEqual(openCount, 1)
+    }
+
+    @MainActor
+    func testFullScreenCaptureSuccessShowsPreviewThenPlaysSoundWithoutOverlay() async {
+        let image = solidImage(size: NSSize(width: 1_920, height: 1_080), color: .systemBlue)
+        let preview = FakeFullScreenCapturePreview()
+        let editor = FakeLongImageEditor()
+        var capturedContext: FullScreenCapturePreviewContext?
+        var soundCount = 0
+        var sessionEndCount = 0
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: FakeScreenCapturePermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            longImageEditorFactory: { _, _, _ in editor },
+            desktopFallbackCapture: {
+                image
+            },
+            fullScreenCapturePreviewFactory: { context in
+                capturedContext = context
+                return preview
+            },
+            fullScreenCaptureSoundPlayer: {
+                XCTAssertEqual(preview.showCount, 1)
+                soundCount += 1
+            }
+        )
+        coordinator.captureSessionDidEnd = {
+            sessionEndCount += 1
+        }
+
+        coordinator.startFullScreenCapture()
+        for _ in 0..<100 where sessionEndCount == 0 {
+            await Task.yield()
+        }
+
+        XCTAssertTrue(capturedContext?.image === image)
+        XCTAssertEqual(preview.showCount, 1)
+        XCTAssertEqual(soundCount, 1)
+        XCTAssertEqual(sessionEndCount, 1)
+        XCTAssertNil(coordinator.test_overlayWindow)
+        XCTAssertTrue(coordinator.test_lastCapture === image)
+
+        capturedContext?.actions.open()
+        XCTAssertEqual(editor.titleStyle, .fullScreenCapture)
+        XCTAssertEqual(editor.showCount, 1)
+        XCTAssertTrue(coordinator.test_canStartCapture)
+    }
+
+    @MainActor
+    func testFullScreenCaptureFailureDoesNotShowPreviewOrPlaySound() async {
+        let preview = FakeFullScreenCapturePreview()
+        var soundCount = 0
+        var sessionEndCount = 0
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: FakeScreenCapturePermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            desktopFallbackCapture: {
+                throw FakeScrollCaptureSession.Failure.finish
+            },
+            fullScreenCapturePreviewFactory: { _ in preview },
+            fullScreenCaptureSoundPlayer: {
+                soundCount += 1
+            }
+        )
+        coordinator.captureSessionDidEnd = {
+            sessionEndCount += 1
+        }
+
+        coordinator.startFullScreenCapture()
+        for _ in 0..<100 where sessionEndCount == 0 {
+            await Task.yield()
+        }
+
+        XCTAssertEqual(preview.showCount, 0)
+        XCTAssertEqual(soundCount, 0)
+        XCTAssertEqual(sessionEndCount, 1)
+        XCTAssertNil(coordinator.test_lastCapture)
+    }
+
     func testOpenCaptureToolbarUpdatesTooltipsWhenLanguageChanges() throws {
         var settings = AppSettings.default
         settings.language = .zhHans
@@ -10705,6 +10861,104 @@ final class SelectionToolbarStateTests: XCTestCase {
     }
 
     @MainActor
+    func testTextRecognitionTemporarilySuspendsAndRestoresTeachingPen() async throws {
+        let resultPanelIdentifier = NSUserInterfaceItemIdentifier("xxsnap.ocr-copy-success")
+        NSApp.windows
+            .filter { $0.identifier == resultPanelIdentifier }
+            .forEach { $0.orderOut(nil) }
+        let image = solidImage(size: NSSize(width: 320, height: 200), color: .white)
+        let recognizer = FakeOCRTextRecognizer(result: "Teaching pen text")
+        var copiedText: String?
+        var sessionEndCount = 0
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: FakeScreenCapturePermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            ocrTextRecognizer: recognizer,
+            textCopyHandler: {
+                copiedText = $0
+                return true
+            },
+            desktopFallbackCapture: { image }
+        )
+        coordinator.captureSessionDidEnd = {
+            sessionEndCount += 1
+        }
+        let teachingPen = SelectionOverlayWindow(
+            backgroundImage: image,
+            configuration: .teachingPen(
+                windowFrame: NSRect(origin: .zero, size: image.size)
+            )
+        ) { _ in }
+        var annotationStyle = CaptureAnnotationStyle()
+        annotationStyle.strokeColor = .systemRed
+        annotationStyle.fillEnabled = true
+        annotationStyle.fillColor = .systemRed
+        let annotation = CaptureAnnotation(
+            kind: .rectangle,
+            rect: NSRect(x: 40, y: 40, width: 80, height: 60),
+            style: annotationStyle
+        )
+        teachingPen.test_setAnnotations([annotation])
+        teachingPen.present()
+        let annotationCenter = NSPoint(x: annotation.rect.midX, y: annotation.rect.midY)
+        let beforeOCRImage = try XCTUnwrap(teachingPen.test_renderedOverlayImage())
+        let beforeOCRPixel = try XCTUnwrap(
+            rgbaRenderPixel(in: beforeOCRImage, at: annotationCenter)
+        )
+        coordinator.test_installTeachingPenOverlayWindow(teachingPen)
+
+        coordinator.startTextRecognition()
+        for _ in 0..<100 where !coordinator.test_hasSuspendedTeachingPen {
+            await Task.yield()
+        }
+
+        XCTAssertTrue(coordinator.test_hasSuspendedTeachingPen)
+        XCTAssertTrue(coordinator.test_isTextRecognitionOverlayActive)
+        XCTAssertFalse(coordinator.test_overlayWindow === teachingPen)
+        XCTAssertTrue(teachingPen.isVisible)
+        XCTAssertTrue(teachingPen.ignoresMouseEvents)
+        XCTAssertNil(coordinator.test_overlayWindow?.test_backgroundImage)
+
+        coordinator.test_handleSelection(
+            CaptureSelectionResult(
+                screenRect: NSRect(origin: .zero, size: image.size),
+                snapshotRect: NSRect(origin: .zero, size: image.size),
+                annotations: [],
+                eraserMasks: [],
+                action: .copy
+            ),
+            frozenDesktopImage: image
+        )
+        for _ in 0..<100 where copiedText == nil || !coordinator.test_isTeachingPenOverlayActive {
+            await Task.yield()
+        }
+
+        XCTAssertEqual(copiedText, "Teaching pen text")
+        XCTAssertTrue(coordinator.test_overlayWindow === teachingPen)
+        XCTAssertTrue(coordinator.test_isTeachingPenOverlayActive)
+        XCTAssertFalse(coordinator.test_hasSuspendedTeachingPen)
+        XCTAssertTrue(teachingPen.isVisible)
+        XCTAssertFalse(teachingPen.ignoresMouseEvents)
+        XCTAssertEqual(teachingPen.test_annotationCount, 1)
+        XCTAssertEqual(teachingPen.test_annotation(at: 0)?.id, annotation.id)
+        let afterOCRImage = try XCTUnwrap(teachingPen.test_renderedOverlayImage())
+        let afterOCRPixel = try XCTUnwrap(
+            rgbaRenderPixel(in: afterOCRImage, at: annotationCenter)
+        )
+        XCTAssertEqual(afterOCRPixel.red, beforeOCRPixel.red)
+        XCTAssertEqual(afterOCRPixel.green, beforeOCRPixel.green)
+        XCTAssertEqual(afterOCRPixel.blue, beforeOCRPixel.blue)
+        XCTAssertEqual(afterOCRPixel.alpha, beforeOCRPixel.alpha)
+        XCTAssertEqual(sessionEndCount, 0)
+        let resultPanel = try XCTUnwrap(
+            NSApp.windows.first { $0.identifier == resultPanelIdentifier }
+        )
+        XCTAssertGreaterThan(resultPanel.level.rawValue, teachingPen.level.rawValue)
+        resultPanel.orderOut(nil)
+        teachingPen.orderOut(nil)
+    }
+
+    @MainActor
     func testCaptureCoordinatorTextRecognitionEmptyResultDoesNotCopy() async throws {
         let panelIdentifier = NSUserInterfaceItemIdentifier("xxsnap.ocr-copy-success")
         NSApp.windows
@@ -11836,7 +12090,7 @@ final class SelectionToolbarStateTests: XCTestCase {
     }
 
     @MainActor
-    func testCaptureCoordinatorFinishShowsRetainedEditorAndEndsOnlyWhenEditorCloses() async throws {
+    func testCaptureCoordinatorFinishEndsCaptureBeforeRetainedEditorCloses() async throws {
         let seed = scrollCaptureSeedForCoordinatorTests()
         let session = FakeScrollCaptureSession(seed: seed)
         let presentation = FakeScrollCapturePresentation()
@@ -11847,11 +12101,16 @@ final class SelectionToolbarStateTests: XCTestCase {
         var copiedImages: [NSImage] = []
         var savedImages: [NSImage] = []
         var pinnedWindow: FakePinnedWindow?
+        let fullScreenImage = solidImage(
+            size: NSSize(width: 1_920, height: 1_080),
+            color: .systemBlue
+        )
+        let fullScreenPreview = FakeFullScreenCapturePreview()
         var endCount = 0
         var coordinator: CaptureCoordinator!
         editor.onShow = {
             XCTAssertTrue(coordinator.test_isScrollCapturePhaseIdle)
-            XCTAssertFalse(coordinator.test_canStartCapture)
+            XCTAssertTrue(coordinator.test_canStartCapture)
         }
         coordinator = CaptureCoordinator(
             permissionCoordinator: PermissionCoordinator(),
@@ -11869,7 +12128,7 @@ final class SelectionToolbarStateTests: XCTestCase {
             },
             longImageEditorFactory: { image, seed, actions in
                 XCTAssertTrue(coordinator.test_isScrollCapturePhaseIdle)
-                XCTAssertFalse(coordinator.test_canStartCapture)
+                XCTAssertTrue(coordinator.test_canStartCapture)
                 capturedImage = image
                 capturedSeed = seed
                 capturedActions = actions
@@ -11877,7 +12136,10 @@ final class SelectionToolbarStateTests: XCTestCase {
             },
             longImageCopyHandler: { copiedImages.append($0); return true },
             longImageSaveHandler: { savedImages.append($0); return true },
-            scrollCaptureTargetDetector: FakeScrollCaptureTargetDetector()
+            scrollCaptureTargetDetector: FakeScrollCaptureTargetDetector(),
+            desktopFallbackCapture: { fullScreenImage },
+            fullScreenCapturePreviewFactory: { _ in fullScreenPreview },
+            fullScreenCaptureSoundPlayer: {}
         )
         coordinator.captureSessionDidEnd = {
             endCount += 1
@@ -11894,9 +12156,9 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(capturedSeed?.annotations.map(\.id), seed.annotations.map(\.id))
         XCTAssertEqual(editor.showCount, 1)
         XCTAssertTrue(coordinator.test_lastCapture === session.finishedImage)
-        XCTAssertEqual(endCount, 0)
+        XCTAssertEqual(endCount, 1)
         XCTAssertTrue(coordinator.test_hasLongImageEditor)
-        XCTAssertFalse(coordinator.test_canStartCapture)
+        XCTAssertTrue(coordinator.test_canStartCapture)
 
         let rendered = CaptureAnnotationRenderer.renderLongImage(
             image: solidImage(size: NSSize(width: 80, height: 500), color: .white),
@@ -11911,8 +12173,16 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertTrue(pinnedWindow?.image === rendered)
         XCTAssertEqual(pinnedWindow?.showCount, 1)
 
+        coordinator.startFullScreenCapture()
+        for _ in 0..<100 where fullScreenPreview.showCount == 0 {
+            await Task.yield()
+        }
+        XCTAssertEqual(fullScreenPreview.showCount, 1)
+        XCTAssertTrue(coordinator.test_lastCapture === fullScreenImage)
+        XCTAssertEqual(endCount, 2)
+
         editor.simulateClose()
-        XCTAssertEqual(endCount, 1)
+        XCTAssertEqual(endCount, 2)
         XCTAssertFalse(coordinator.test_hasLongImageEditor)
         XCTAssertTrue(coordinator.test_canStartCapture)
     }
@@ -12006,7 +12276,7 @@ final class SelectionToolbarStateTests: XCTestCase {
             longImageEditorFactory: { _, _, _ in throw FakeScrollCaptureSession.Failure.finish },
             longImageFallbackPresenter: { image in
                 XCTAssertTrue(coordinator.test_isScrollCapturePhaseIdle)
-                XCTAssertFalse(coordinator.test_canStartCapture)
+                XCTAssertTrue(coordinator.test_canStartCapture)
                 fallbackImage = image
                 return fallbackChoices.removeFirst()
             },
