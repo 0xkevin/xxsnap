@@ -92,7 +92,12 @@ final class HelpManualTests: XCTestCase {
         XCTAssertTrue(capture.hasShortcut(action: "贴图", keys: ["⌘", "1"]))
         XCTAssertTrue(capture.hasShortcut(action: "撤销", keys: ["⌘", "Z"]))
         XCTAssertTrue(capture.hasShortcut(action: "重做", keys: ["⌘", "⇧", "Z"]))
-        XCTAssertTrue(capture.hasShortcut(action: "取消", keys: ["Esc"]))
+        XCTAssertTrue(
+            capture.hasShortcut(
+                action: "退出当前工具 / 取消截图",
+                keys: ["Esc"]
+            )
+        )
 
         let pin = try XCTUnwrap(document.chapters.first { $0.id == "pin" })
         XCTAssertEqual(pin.imageNames.count, 4)
@@ -107,6 +112,134 @@ final class HelpManualTests: XCTestCase {
         )
         XCTAssertEqual(teachingPen.imageNames.count, 4)
         XCTAssertGreaterThanOrEqual(teachingPen.faqCount, 5)
+    }
+
+    func testCaptureManualDocumentsActualEscapeAndAnnotationWorkflows() throws {
+        let loader = HelpContentLoader(bundle: Bundle(for: HelpManualTests.self))
+        let document = try loader.load(language: .zhHans)
+        let capture = try XCTUnwrap(
+            document.chapters.first { $0.id == "capture" }
+        )
+        let text = capture.flattenedText
+
+        XCTAssertTrue(text.contains("第一次按 Esc 退出当前工具"))
+        XCTAssertTrue(text.contains("再按一次 Esc 取消截图"))
+        XCTAssertTrue(text.contains("按 C 复制"))
+        XCTAssertTrue(text.contains("第一次点击确定测距起点"))
+        XCTAssertTrue(text.contains("第二次点击确定终点"))
+        XCTAssertTrue(text.contains("Shift"))
+        XCTAssertTrue(text.contains("HEX"))
+        XCTAssertTrue(text.contains("RGB"))
+        XCTAssertTrue(text.contains("水平、垂直或 45 度"))
+
+        for option in [
+            "滑动打码",
+            "矩形打码",
+            "高斯模糊",
+            "像素马赛克",
+            "强度",
+            "笔刷大小"
+        ] {
+            XCTAssertTrue(text.contains(option), "马赛克缺少选项：\(option)")
+        }
+        XCTAssertFalse(text.contains("边缘样式"))
+
+        XCTAssertTrue(text.contains("Return 用来换行"))
+        XCTAssertTrue(text.contains("点击文字框外"))
+        XCTAssertTrue(text.contains("切换工具"))
+        XCTAssertTrue(text.contains("复制、保存或贴图"))
+
+        XCTAssertTrue(text.contains("移动后按新位置重新采样原始截图"))
+        XCTAssertTrue(text.contains("不会放大后来添加的标注"))
+        XCTAssertFalse(text.contains("仍指向原来的区域"))
+    }
+
+    func testCaptureManualDocumentsFullscreenPreviewAndScrollWorkflow() throws {
+        let loader = HelpContentLoader(bundle: Bundle(for: HelpManualTests.self))
+        let document = try loader.load(language: .zhHans)
+        let capture = try XCTUnwrap(
+            document.chapters.first { $0.id == "capture" }
+        )
+        let text = capture.flattenedText
+
+        XCTAssertTrue(text.contains("右下角缩略图"))
+        XCTAssertTrue(text.contains("单击缩略图"))
+        XCTAssertTrue(text.contains("预览窗没有底部按钮"))
+        XCTAssertTrue(
+            text.contains(
+                "右键菜单提供显示工具条、贴图、复制图片、保存图片和关闭"
+            )
+        )
+
+        XCTAssertTrue(text.contains("首次唯一且可靠的纵向移动"))
+        XCTAssertTrue(text.contains("向上或向下"))
+        XCTAssertTrue(text.contains("向下时只在初始画面下方扩展"))
+        XCTAssertTrue(text.contains("向上时只在上方扩展"))
+        XCTAssertTrue(text.contains("反向滚动只用于回看"))
+        XCTAssertTrue(text.contains("回到当前扩展端后恢复跟随"))
+        XCTAssertTrue(text.contains("只支持手动纵向滚动"))
+        XCTAssertTrue(text.contains("完成滚动截图"))
+        XCTAssertTrue(text.contains("Esc 取消滚动并返回原锁定选区"))
+        XCTAssertTrue(text.contains("资源上限"))
+        XCTAssertTrue(text.contains("暂停继续接收"))
+        XCTAssertTrue(text.contains("已接受的内容"))
+    }
+
+    func testPinAndOCRManualBoundariesMatchCurrentProduct() throws {
+        let loader = HelpContentLoader(bundle: Bundle(for: HelpManualTests.self))
+        let document = try loader.load(language: .zhHans)
+        let pin = try XCTUnwrap(
+            document.chapters.first { $0.id == "pin" }
+        )
+        let pinText = pin.flattenedText
+
+        XCTAssertTrue(pin.hasShortcut(action: "从当前截图创建贴图", keys: ["⌘", "1"]))
+        XCTAssertTrue(pin.hasShortcut(action: "恢复最近隐藏的贴图", keys: ["⌘", "1"]))
+        XCTAssertTrue(pinText.contains("默认快捷键是 Command+1"))
+        XCTAssertTrue(pinText.contains("设置页"))
+        XCTAssertTrue(pinText.contains("截图编辑上下文"))
+        XCTAssertTrue(pinText.contains("创建时经过屏幕适配的初始显示尺寸"))
+        XCTAssertFalse(pinText.contains("看原尺寸"))
+        XCTAssertFalse(pinText.contains("原始像素尺寸"))
+
+        let ocr = try XCTUnwrap(
+            document.chapters.first { $0.id == "ocr" }
+        )
+        let ocrText = ocr.flattenedText
+        XCTAssertTrue(ocrText.contains("长截图编辑器"))
+        XCTAssertTrue(ocrText.contains("全屏截图编辑器"))
+        XCTAssertTrue(ocrText.contains("教笔"))
+        XCTAssertTrue(ocrText.contains("暂时不接收鼠标"))
+        XCTAssertTrue(ocrText.contains("完成后恢复"))
+        XCTAssertFalse(ocrText.contains("区域截图编辑器"))
+    }
+
+    func testTeachingPenManualNamesEveryAvailableTool() throws {
+        let loader = HelpContentLoader(bundle: Bundle(for: HelpManualTests.self))
+        let document = try loader.load(language: .zhHans)
+        let teachingPen = try XCTUnwrap(
+            document.chapters.first { $0.id == "teaching-pen" }
+        )
+
+        for tool in [
+            "画笔",
+            "形状",
+            "箭头",
+            "荧光笔",
+            "文字",
+            "序号",
+            "马赛克",
+            "取色",
+            "橡皮擦",
+            "放大镜",
+            "复制",
+            "保存"
+        ] {
+            XCTAssertTrue(
+                teachingPen.flattenedText.contains(tool),
+                "教笔缺少工具说明：\(tool)"
+            )
+        }
     }
 
     func testEnglishManualFallsBackToBundledChineseDocument() throws {
