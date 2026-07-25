@@ -30,6 +30,7 @@ final class HelpWindowController: NSWindowController, NSWindowDelegate {
         if window == nil {
             buildWindow()
         }
+        reloadContent()
         NSApp.activate(ignoringOtherApps: true)
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
@@ -53,9 +54,6 @@ final class HelpWindowController: NSWindowController, NSWindowDelegate {
 
     func test_setScrollOffset(_ offset: CGFloat) {
         contentView?.scrollOffset = offset
-        if let selectedChapterID {
-            scrollOffsets[selectedChapterID] = max(0, offset)
-        }
     }
 
     func test_selectChapter(_ chapterID: String) {
@@ -63,8 +61,7 @@ final class HelpWindowController: NSWindowController, NSWindowDelegate {
     }
 
     var test_scrollOffset: CGFloat {
-        guard let selectedChapterID else { return 0 }
-        return scrollOffsets[selectedChapterID] ?? contentView?.scrollOffset ?? 0
+        contentView?.scrollOffset ?? 0
     }
 
     func test_clickFirstImage() {
@@ -90,8 +87,6 @@ final class HelpWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func buildWindow() {
-        language = settingsStore.load().language
-
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 980, height: 700),
             styleMask: [
@@ -120,6 +115,15 @@ final class HelpWindowController: NSWindowController, NSWindowDelegate {
             self?.showImagePreview(image: image, caption: caption)
         }
         contentView = helpContentView
+    }
+
+    private func reloadContent() {
+        guard let window, let contentView else { return }
+
+        language = settingsStore.load().language
+        scrollOffsets.removeAll()
+        imagePreviewController?.dismiss()
+        imagePreviewController = nil
 
         do {
             let document = try contentLoader.load(language: language)
@@ -128,13 +132,14 @@ final class HelpWindowController: NSWindowController, NSWindowDelegate {
             selectedChapterID = chapters.contains { $0.id == "capture" }
                 ? "capture"
                 : chapters.first?.id
-            window.contentView = makeSplitContent(helpContentView)
+            window.contentView = makeSplitContent(contentView)
             renderSelectedChapter()
         } catch {
             chapters = []
             selectedChapterID = nil
-            window.contentView = makeSplitContent(helpContentView)
-            helpContentView.renderError("帮助内容暂时无法打开")
+            window.title = "XxSnap 帮助"
+            window.contentView = makeSplitContent(contentView)
+            contentView.renderError("帮助内容暂时无法打开")
         }
     }
 

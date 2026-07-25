@@ -9,8 +9,6 @@ final class HelpContentView: NSView {
     private let documentView = HelpFlippedView()
     private let contentStack = NSStackView()
     private var firstImageButton: HelpImageButton?
-    private var trackedScrollOffset: CGFloat = 0
-    private var isApplyingScrollOffset = false
 
     private(set) var test_visibleTexts: [String] = []
     private(set) var test_visibleImageCount = 0
@@ -25,20 +23,22 @@ final class HelpContentView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    deinit {
-        NotificationCenter.default.removeObserver(self)
-    }
-
     var scrollOffset: CGFloat {
-        get { trackedScrollOffset }
+        get { max(0, scrollView.contentView.bounds.origin.y) }
         set {
-            trackedScrollOffset = max(0, newValue)
-            isApplyingScrollOffset = true
-            scrollView.contentView.scroll(
-                to: NSPoint(x: 0, y: trackedScrollOffset)
+            layoutSubtreeIfNeeded()
+            scrollView.layoutSubtreeIfNeeded()
+            documentView.layoutSubtreeIfNeeded()
+            let clipView = scrollView.contentView
+            let proposedBounds = NSRect(
+                x: clipView.bounds.origin.x,
+                y: max(0, newValue),
+                width: clipView.bounds.width,
+                height: clipView.bounds.height
             )
-            scrollView.reflectScrolledClipView(scrollView.contentView)
-            isApplyingScrollOffset = false
+            let constrainedBounds = clipView.constrainBoundsRect(proposedBounds)
+            clipView.scroll(to: constrainedBounds.origin)
+            scrollView.reflectScrolledClipView(clipView)
         }
     }
 
@@ -149,12 +149,6 @@ final class HelpContentView: NSView {
             readableWidthConstraint
         ])
 
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(clipViewBoundsDidChange),
-            name: NSView.boundsDidChangeNotification,
-            object: scrollView.contentView
-        )
     }
 
     private func resetContent() {
@@ -474,11 +468,6 @@ final class HelpContentView: NSView {
         test_visibleTexts.append(text)
     }
 
-    @objc
-    private func clipViewBoundsDidChange() {
-        guard !isApplyingScrollOffset else { return }
-        trackedScrollOffset = max(0, scrollView.contentView.bounds.origin.y)
-    }
 }
 
 private final class HelpFlippedView: NSView {

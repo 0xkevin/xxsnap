@@ -67,6 +67,73 @@ final class HelpManualTests: XCTestCase {
     }
 
     @MainActor
+    func testShowReloadsCurrentLanguageWhileReusingWindow() throws {
+        let chineseDocument = try sampleDocument()
+        let englishDocument = document(
+            basedOn: chineseDocument,
+            language: "en",
+            windowTitle: "XxSnap Help",
+            captureTitle: "Capture screenshots"
+        )
+        let loader = FakeHelpContentLoader(
+            loadHandler: { language, _ in
+                language == .english ? englishDocument : chineseDocument
+            }
+        )
+        let settingsStore = FakeHelpAppSettingsStore()
+        let controller = HelpWindowController(
+            settingsStore: settingsStore,
+            contentLoader: loader
+        )
+        defer { controller.close() }
+
+        controller.show()
+        let firstWindow = try XCTUnwrap(controller.window)
+        XCTAssertEqual(firstWindow.title, "XxSnap 帮助")
+        XCTAssertTrue(controller.test_visibleTexts.contains("区域截图"))
+
+        var settings = settingsStore.load()
+        settings.language = .english
+        try settingsStore.save(settings)
+        controller.show()
+
+        XCTAssertTrue(controller.window === firstWindow)
+        XCTAssertEqual(controller.window?.title, "XxSnap Help")
+        XCTAssertTrue(
+            controller.test_visibleTexts.contains("Capture screenshots")
+        )
+        XCTAssertEqual(loader.loadedLanguages, [.zhHans, .english])
+    }
+
+    @MainActor
+    func testShowRetriesAfterLoaderFailureAndRecoversInSameWindow() throws {
+        let expectedDocument = try sampleDocument()
+        let loader = FakeHelpContentLoader(
+            loadHandler: { _, callCount in
+                if callCount == 1 {
+                    throw FakeHelpContentError.failed
+                }
+                return expectedDocument
+            }
+        )
+        let controller = makeController(loader: loader)
+        defer { controller.close() }
+
+        controller.show()
+        let firstWindow = try XCTUnwrap(controller.window)
+        XCTAssertTrue(
+            controller.test_visibleTexts.contains("帮助内容暂时无法打开")
+        )
+
+        controller.show()
+
+        XCTAssertTrue(controller.window === firstWindow)
+        XCTAssertEqual(controller.window?.title, "XxSnap 帮助")
+        XCTAssertTrue(controller.test_visibleTexts.contains("区域截图"))
+        XCTAssertEqual(loader.loadCallCount, 2)
+    }
+
+    @MainActor
     func testCaptureChapterRendersAllSupportedBlocksAndLoadedImage() throws {
         let loader = FakeHelpContentLoader(
             document: try sampleDocument(),
@@ -105,18 +172,38 @@ final class HelpManualTests: XCTestCase {
 
     @MainActor
     func testChapterSwitchRestoresSessionScrollOffsets() throws {
-        let controller = makeController()
+        let controller = makeController(
+            loader: FakeHelpContentLoader(document: try tallDocument())
+        )
         defer { controller.close() }
         controller.show()
 
         controller.test_setScrollOffset(240)
+        let captureOffset = controller.test_scrollOffset
+        XCTAssertEqual(captureOffset, 240, accuracy: 1)
         controller.test_selectChapter("pin")
         controller.test_setScrollOffset(90)
+        let pinOffset = controller.test_scrollOffset
+        XCTAssertEqual(pinOffset, 90, accuracy: 1)
         controller.test_selectChapter("capture")
-        XCTAssertEqual(controller.test_scrollOffset, 240, accuracy: 1)
+        XCTAssertEqual(controller.test_scrollOffset, captureOffset, accuracy: 1)
 
         controller.test_selectChapter("pin")
-        XCTAssertEqual(controller.test_scrollOffset, 90, accuracy: 1)
+        XCTAssertEqual(controller.test_scrollOffset, pinOffset, accuracy: 1)
+    }
+
+    @MainActor
+    func testScrollOffsetReportsClipViewClampedPosition() throws {
+        let controller = makeController(
+            loader: FakeHelpContentLoader(document: try tallDocument())
+        )
+        defer { controller.close() }
+        controller.show()
+
+        controller.test_setScrollOffset(10_000)
+
+        XCTAssertGreaterThan(controller.test_scrollOffset, 0)
+        XCTAssertLessThan(controller.test_scrollOffset, 10_000)
     }
 
     @MainActor
@@ -241,6 +328,59 @@ final class HelpManualTests: XCTestCase {
         try HelpContentLoader().decode(validDocumentData)
     }
 
+    private func tallDocument() throws -> HelpDocument {
+        let source = try sampleDocument()
+        let filler = (1...80).map {
+            HelpContentBlock.paragraph("用于滚动位置测试的正文段落 \($0)。")
+        }
+        let chapters = source.chapters.map { chapter in
+            guard chapter.id == "capture" || chapter.id == "pin" else {
+                return chapter
+            }
+            return HelpChapter(
+                id: chapter.id,
+                navigationTitle: chapter.navigationTitle,
+                title: chapter.title,
+                introduction: chapter.introduction,
+                tableOfContents: chapter.tableOfContents,
+                shortcuts: chapter.shortcuts,
+                blocks: chapter.blocks + filler
+            )
+        }
+        return HelpDocument(
+            version: source.version,
+            language: source.language,
+            windowTitle: source.windowTitle,
+            chapters: chapters
+        )
+    }
+
+    private func document(
+        basedOn source: HelpDocument,
+        language: String,
+        windowTitle: String,
+        captureTitle: String
+    ) -> HelpDocument {
+        let chapters = source.chapters.map { chapter in
+            guard chapter.id == "capture" else { return chapter }
+            return HelpChapter(
+                id: chapter.id,
+                navigationTitle: chapter.navigationTitle,
+                title: captureTitle,
+                introduction: chapter.introduction,
+                tableOfContents: chapter.tableOfContents,
+                shortcuts: chapter.shortcuts,
+                blocks: chapter.blocks
+            )
+        }
+        return HelpDocument(
+            version: source.version,
+            language: language,
+            windowTitle: windowTitle,
+            chapters: chapters
+        )
+    }
+
     @MainActor
     private func solidImage() -> NSImage {
         let image = NSImage(size: NSSize(width: 640, height: 360))
@@ -356,21 +496,35 @@ private enum FakeHelpContentError: Error {
 }
 
 private final class FakeHelpContentLoader: HelpContentLoading {
+    typealias LoadHandler = (AppLanguage, Int) throws -> HelpDocument
+
     private let document: HelpDocument?
     private let images: [String: NSImage]
     private let error: Error?
+    private let loadHandler: LoadHandler?
+
+    private(set) var loadedLanguages: [AppLanguage] = []
+    var loadCallCount: Int {
+        loadedLanguages.count
+    }
 
     init(
         document: HelpDocument? = nil,
         images: [String: NSImage] = [:],
-        error: Error? = nil
+        error: Error? = nil,
+        loadHandler: LoadHandler? = nil
     ) {
         self.document = document
         self.images = images
         self.error = error
+        self.loadHandler = loadHandler
     }
 
     func load(language: AppLanguage) throws -> HelpDocument {
+        loadedLanguages.append(language)
+        if let loadHandler {
+            return try loadHandler(language, loadCallCount)
+        }
         if let error {
             throw error
         }
