@@ -6,13 +6,16 @@ final class HelpImagePreviewController: NSWindowController, NSWindowDelegate {
 
     private let image: NSImage
     private let caption: String
+    private let imageAccessibilityLabel: String
     private weak var parentWindow: NSWindow?
+    private weak var previewImageView: NSImageView?
     private var didNotifyDismiss = false
     private var isDismissing = false
 
-    init(image: NSImage, caption: String) {
+    init(image: NSImage, caption: String, accessibilityLabel: String) {
         self.image = image
         self.caption = caption
+        imageAccessibilityLabel = accessibilityLabel
         super.init(window: nil)
     }
 
@@ -45,6 +48,14 @@ final class HelpImagePreviewController: NSWindowController, NSWindowDelegate {
 
     override func cancelOperation(_ sender: Any?) {
         dismiss()
+    }
+
+    var test_imageAccessibilityLabel: String? {
+        previewImageView?.accessibilityLabel()
+    }
+
+    func test_clickCloseButton() {
+        window?.standardWindowButton(.closeButton)?.performClick(nil)
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -129,7 +140,8 @@ final class HelpImagePreviewController: NSWindowController, NSWindowDelegate {
         imageView.onClick = { [weak self] in
             self?.dismiss()
         }
-        imageView.setAccessibilityLabel(caption)
+        imageView.setAccessibilityLabel(imageAccessibilityLabel)
+        previewImageView = imageView
 
         let captionLabel = NSTextField(wrappingLabelWithString: caption)
         captionLabel.translatesAutoresizingMaskIntoConstraints = false

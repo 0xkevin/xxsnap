@@ -134,6 +134,70 @@ final class HelpManualTests: XCTestCase {
     }
 
     @MainActor
+    func testRepeatedShowPreservesOpenSessionAndCloseStartsFreshSession() throws {
+        let controller = makeController(
+            loader: FakeHelpContentLoader(document: try tallDocument())
+        )
+        defer { controller.close() }
+        controller.show()
+        let firstWindow = try XCTUnwrap(controller.window)
+
+        controller.test_setScrollOffset(240)
+        let captureOffset = controller.test_scrollOffset
+        XCTAssertEqual(captureOffset, 240, accuracy: 1)
+        controller.test_clickNavigationButton("pin")
+        controller.test_setScrollOffset(90)
+        let pinOffset = controller.test_scrollOffset
+        XCTAssertEqual(pinOffset, 90, accuracy: 1)
+
+        controller.show()
+
+        XCTAssertTrue(controller.window === firstWindow)
+        XCTAssertEqual(controller.test_selectedChapterID, "pin")
+        XCTAssertEqual(controller.test_scrollOffset, pinOffset, accuracy: 1)
+        controller.test_clickNavigationButton("capture")
+        XCTAssertEqual(controller.test_scrollOffset, captureOffset, accuracy: 1)
+
+        firstWindow.close()
+        controller.show()
+
+        XCTAssertTrue(controller.window === firstWindow)
+        XCTAssertEqual(controller.test_selectedChapterID, "capture")
+        XCTAssertEqual(controller.test_scrollOffset, 0, accuracy: 1)
+    }
+
+    @MainActor
+    func testFailedReloadKeepsOpenSessionStateForNextRetry() throws {
+        let document = try tallDocument()
+        let loader = FakeHelpContentLoader(
+            loadHandler: { _, callCount in
+                if callCount == 2 {
+                    throw FakeHelpContentError.failed
+                }
+                return document
+            }
+        )
+        let controller = makeController(loader: loader)
+        defer { controller.close() }
+        controller.show()
+
+        controller.test_clickNavigationButton("pin")
+        controller.test_setScrollOffset(90)
+        let pinOffset = controller.test_scrollOffset
+
+        controller.show()
+        XCTAssertTrue(
+            controller.test_visibleTexts.contains("帮助内容暂时无法打开")
+        )
+
+        controller.show()
+
+        XCTAssertEqual(controller.test_selectedChapterID, "pin")
+        XCTAssertEqual(controller.test_scrollOffset, pinOffset, accuracy: 1)
+        XCTAssertEqual(loader.loadCallCount, 3)
+    }
+
+    @MainActor
     func testCaptureChapterRendersAllSupportedBlocksAndLoadedImage() throws {
         let loader = FakeHelpContentLoader(
             document: try sampleDocument(),
@@ -181,15 +245,37 @@ final class HelpManualTests: XCTestCase {
         controller.test_setScrollOffset(240)
         let captureOffset = controller.test_scrollOffset
         XCTAssertEqual(captureOffset, 240, accuracy: 1)
-        controller.test_selectChapter("pin")
+        controller.test_clickNavigationButton("pin")
         controller.test_setScrollOffset(90)
         let pinOffset = controller.test_scrollOffset
         XCTAssertEqual(pinOffset, 90, accuracy: 1)
-        controller.test_selectChapter("capture")
+        controller.test_clickNavigationButton("capture")
         XCTAssertEqual(controller.test_scrollOffset, captureOffset, accuracy: 1)
 
-        controller.test_selectChapter("pin")
+        controller.test_clickNavigationButton("pin")
         XCTAssertEqual(controller.test_scrollOffset, pinOffset, accuracy: 1)
+    }
+
+    @MainActor
+    func testClickingSelectedNavigationButtonKeepsSelectionAndBody() throws {
+        let controller = makeController()
+        defer { controller.close() }
+        controller.show()
+
+        controller.test_clickNavigationButton("pin")
+        XCTAssertEqual(controller.test_selectedChapterID, "pin")
+        XCTAssertEqual(controller.test_navigationButtonState("pin"), .on)
+        XCTAssertTrue(
+            controller.test_visibleTexts.contains("让参考内容保持可见。")
+        )
+
+        controller.test_clickNavigationButton("pin")
+
+        XCTAssertEqual(controller.test_selectedChapterID, "pin")
+        XCTAssertEqual(controller.test_navigationButtonState("pin"), .on)
+        XCTAssertTrue(
+            controller.test_visibleTexts.contains("让参考内容保持可见。")
+        )
     }
 
     @MainActor
@@ -207,7 +293,7 @@ final class HelpManualTests: XCTestCase {
     }
 
     @MainActor
-    func testClickingImageOpensAndDismissesPreview() throws {
+    func testImagePreviewPropagatesAccessibilityAndDismissesThroughActions() throws {
         let loader = FakeHelpContentLoader(
             document: try sampleDocument(),
             images: ["capture-overview": solidImage()]
@@ -218,9 +304,31 @@ final class HelpManualTests: XCTestCase {
 
         controller.test_clickFirstImage()
         XCTAssertTrue(controller.test_isImagePreviewVisible)
+        XCTAssertEqual(
+            controller.test_imagePreviewAccessibilityLabel,
+            "已锁定区域的截图选区"
+        )
+        XCTAssertEqual(controller.window?.childWindows?.count, 1)
+        XCTAssertEqual(controller.test_imagePreviewDismissCount, 0)
 
-        controller.test_dismissImagePreview()
+        controller.test_cancelImagePreview()
         XCTAssertFalse(controller.test_isImagePreviewVisible)
+        XCTAssertEqual(controller.window?.childWindows?.count, 0)
+        XCTAssertEqual(controller.test_imagePreviewDismissCount, 1)
+        controller.test_cancelImagePreview()
+        XCTAssertEqual(controller.test_imagePreviewDismissCount, 1)
+
+        controller.test_clickFirstImage()
+        XCTAssertTrue(controller.test_isImagePreviewVisible)
+        XCTAssertEqual(controller.window?.childWindows?.count, 1)
+
+        controller.test_clickImagePreviewCloseButton()
+
+        XCTAssertFalse(controller.test_isImagePreviewVisible)
+        XCTAssertEqual(controller.window?.childWindows?.count, 0)
+        XCTAssertEqual(controller.test_imagePreviewDismissCount, 2)
+        controller.test_clickImagePreviewCloseButton()
+        XCTAssertEqual(controller.test_imagePreviewDismissCount, 2)
     }
 
     @MainActor

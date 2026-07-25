@@ -2,7 +2,7 @@ import AppKit
 
 @MainActor
 final class HelpContentView: NSView {
-    var onImageSelected: ((NSImage, String) -> Void)?
+    var onImageSelected: ((NSImage, String, String) -> Void)?
 
     private let imageLoader: (String) -> NSImage?
     private let scrollView = NSScrollView()
@@ -346,11 +346,14 @@ final class HelpContentView: NSView {
         let stack = verticalGroup(spacing: 8)
 
         if let image = imageLoader(name), image.size.width > 0, image.size.height > 0 {
-            let button = HelpImageButton(image: image, caption: caption)
-            button.onSelect = { [weak self] image, caption in
-                self?.onImageSelected?(image, caption)
+            let button = HelpImageButton(
+                image: image,
+                caption: caption,
+                accessibilityLabel: accessibilityLabel
+            )
+            button.onSelect = { [weak self] image, caption, accessibilityLabel in
+                self?.onImageSelected?(image, caption, accessibilityLabel)
             }
-            button.setAccessibilityLabel(accessibilityLabel)
             stack.addArrangedSubview(button)
             button.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
             button.heightAnchor.constraint(
@@ -478,11 +481,13 @@ private final class HelpFlippedView: NSView {
 private final class HelpImageButton: NSButton {
     let previewImage: NSImage
     let caption: String
-    var onSelect: ((NSImage, String) -> Void)?
+    let imageAccessibilityLabel: String
+    var onSelect: ((NSImage, String, String) -> Void)?
 
-    init(image: NSImage, caption: String) {
+    init(image: NSImage, caption: String, accessibilityLabel: String) {
         previewImage = image
         self.caption = caption
+        imageAccessibilityLabel = accessibilityLabel
         super.init(frame: .zero)
         self.image = image
         imagePosition = .imageOnly
@@ -492,6 +497,7 @@ private final class HelpImageButton: NSButton {
         target = self
         action = #selector(selectImage)
         translatesAutoresizingMaskIntoConstraints = false
+        setAccessibilityLabel(accessibilityLabel)
     }
 
     required init?(coder: NSCoder) {
@@ -500,6 +506,6 @@ private final class HelpImageButton: NSButton {
 
     @objc
     private func selectImage() {
-        onSelect?(previewImage, caption)
+        onSelect?(previewImage, caption, imageAccessibilityLabel)
     }
 }

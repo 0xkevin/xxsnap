@@ -12,6 +12,9 @@ final class HelpWindowController: NSWindowController, NSWindowDelegate {
     private var navigationButtons: [String: NSButton] = [:]
     private var contentView: HelpContentView?
     private var imagePreviewController: HelpImagePreviewController?
+    private var isSessionActive = false
+    private var isShowingError = false
+    private var imagePreviewDismissCount = 0
 
     init(
         settingsStore: any AppSettingsStoring,
@@ -30,10 +33,16 @@ final class HelpWindowController: NSWindowController, NSWindowDelegate {
         if window == nil {
             buildWindow()
         }
+        if isSessionActive {
+            saveCurrentScrollOffset()
+        } else {
+            resetSession()
+        }
         reloadContent()
         NSApp.activate(ignoringOtherApps: true)
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
+        isSessionActive = true
     }
 
     var test_navigationTitles: [String] {
@@ -56,8 +65,14 @@ final class HelpWindowController: NSWindowController, NSWindowDelegate {
         contentView?.scrollOffset = offset
     }
 
-    func test_selectChapter(_ chapterID: String) {
-        selectChapter(chapterID)
+    func test_clickNavigationButton(_ chapterID: String) {
+        navigationButtons[chapterID]?.performClick(nil)
+    }
+
+    func test_navigationButtonState(
+        _ chapterID: String
+    ) -> NSControl.StateValue {
+        navigationButtons[chapterID]?.state ?? .off
     }
 
     var test_scrollOffset: CGFloat {
@@ -76,13 +91,27 @@ final class HelpWindowController: NSWindowController, NSWindowDelegate {
         imagePreviewController?.dismiss()
     }
 
+    var test_imagePreviewAccessibilityLabel: String? {
+        imagePreviewController?.test_imageAccessibilityLabel
+    }
+
+    var test_imagePreviewDismissCount: Int {
+        imagePreviewDismissCount
+    }
+
+    func test_cancelImagePreview() {
+        imagePreviewController?.cancelOperation(nil)
+    }
+
+    func test_clickImagePreviewCloseButton() {
+        imagePreviewController?.test_clickCloseButton()
+    }
+
     func windowWillClose(_ notification: Notification) {
         imagePreviewController?.dismiss()
         imagePreviewController = nil
-
-        guard chapters.contains(where: { $0.id == "capture" }) else { return }
-        selectedChapterID = "capture"
-        renderSelectedChapter()
+        isSessionActive = false
+        resetSession()
         updateNavigationSelection()
     }
 
@@ -111,8 +140,13 @@ final class HelpWindowController: NSWindowController, NSWindowDelegate {
             guard let self else { return nil }
             return self.contentLoader.image(named: name, language: self.language)
         }
-        helpContentView.onImageSelected = { [weak self] image, caption in
-            self?.showImagePreview(image: image, caption: caption)
+        helpContentView.onImageSelected = {
+            [weak self] image, caption, accessibilityLabel in
+            self?.showImagePreview(
+                image: image,
+                caption: caption,
+                accessibilityLabel: accessibilityLabel
+            )
         }
         contentView = helpContentView
     }
@@ -121,7 +155,6 @@ final class HelpWindowController: NSWindowController, NSWindowDelegate {
         guard let window, let contentView else { return }
 
         language = settingsStore.load().language
-        scrollOffsets.removeAll()
         imagePreviewController?.dismiss()
         imagePreviewController = nil
 
@@ -129,17 +162,20 @@ final class HelpWindowController: NSWindowController, NSWindowDelegate {
             let document = try contentLoader.load(language: language)
             chapters = document.chapters
             window.title = document.windowTitle
-            selectedChapterID = chapters.contains { $0.id == "capture" }
-                ? "capture"
-                : chapters.first?.id
+            if !chapters.contains(where: { $0.id == selectedChapterID }) {
+                selectedChapterID = chapters.contains { $0.id == "capture" }
+                    ? "capture"
+                    : chapters.first?.id
+            }
             window.contentView = makeSplitContent(contentView)
+            isShowingError = false
             renderSelectedChapter()
         } catch {
-            chapters = []
-            selectedChapterID = nil
             window.title = "XxSnap 帮助"
             window.contentView = makeSplitContent(contentView)
             contentView.renderError("帮助内容暂时无法打开")
+            isShowingError = true
+            navigationButtons.values.forEach { $0.isEnabled = false }
         }
     }
 
@@ -228,11 +264,12 @@ final class HelpWindowController: NSWindowController, NSWindowDelegate {
 
     private func selectChapter(_ chapterID: String) {
         guard chapters.contains(where: { $0.id == chapterID }) else { return }
-        guard chapterID != selectedChapterID else { return }
-
-        if let oldChapterID = selectedChapterID, let contentView {
-            scrollOffsets[oldChapterID] = contentView.scrollOffset
+        guard chapterID != selectedChapterID else {
+            updateNavigationSelection()
+            return
         }
+
+        saveCurrentScrollOffset()
         selectedChapterID = chapterID
         renderSelectedChapter()
         updateNavigationSelection()
@@ -256,18 +293,42 @@ final class HelpWindowController: NSWindowController, NSWindowDelegate {
         }
     }
 
-    private func showImagePreview(image: NSImage, caption: String) {
+    private func saveCurrentScrollOffset() {
+        guard
+            !isShowingError,
+            let selectedChapterID,
+            chapters.contains(where: { $0.id == selectedChapterID }),
+            let contentView
+        else {
+            return
+        }
+        scrollOffsets[selectedChapterID] = contentView.scrollOffset
+    }
+
+    private func resetSession() {
+        scrollOffsets.removeAll()
+        selectedChapterID = nil
+        isShowingError = false
+    }
+
+    private func showImagePreview(
+        image: NSImage,
+        caption: String,
+        accessibilityLabel: String
+    ) {
         guard let window else { return }
         imagePreviewController?.dismiss()
 
         let previewController = HelpImagePreviewController(
             image: image,
-            caption: caption
+            caption: caption,
+            accessibilityLabel: accessibilityLabel
         )
         previewController.onDismiss = { [weak self, weak previewController] in
             guard let self, self.imagePreviewController === previewController else {
                 return
             }
+            self.imagePreviewDismissCount += 1
             self.imagePreviewController = nil
         }
         imagePreviewController = previewController
