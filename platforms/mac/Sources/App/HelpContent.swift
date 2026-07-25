@@ -192,7 +192,9 @@ struct HelpContentLoader: HelpContentLoading {
 
         var chapterIDs = Set<String>()
         for chapter in document.chapters {
-            guard !chapter.id.isEmpty else {
+            guard !chapter.id.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            ).isEmpty else {
                 throw HelpContentError.emptyChapterID
             }
             guard chapterIDs.insert(chapter.id).inserted else {

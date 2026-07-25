@@ -80,6 +80,28 @@ final class HelpManualTests: XCTestCase {
         }
     }
 
+    func testDecodeRejectsEmptyChapterID() {
+        let json = validDocumentJSON.replacingOccurrences(
+            of: #""id": "capture""#,
+            with: #""id": """#
+        )
+
+        XCTAssertThrowsError(try HelpContentLoader().decode(Data(json.utf8))) {
+            XCTAssertEqual($0 as? HelpContentError, .emptyChapterID)
+        }
+    }
+
+    func testDecodeRejectsWhitespaceOnlyChapterID() {
+        let json = validDocumentJSON.replacingOccurrences(
+            of: #""id": "capture""#,
+            with: #""id": " \n\t""#
+        )
+
+        XCTAssertThrowsError(try HelpContentLoader().decode(Data(json.utf8))) {
+            XCTAssertEqual($0 as? HelpContentError, .emptyChapterID)
+        }
+    }
+
     func testDecodeRejectsUnknownBlockType() {
         let json = validDocumentJSON.replacingOccurrences(
             of: #""type": "paragraph""#,
