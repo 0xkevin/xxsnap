@@ -227,6 +227,18 @@ struct PreferencesStrings {
     var supportDeveloper: String {
         isEnglish ? "Support the Developer ☕️" : "支持开发者 ☕️"
     }
+    var help: String { isEnglish ? "Help..." : "帮助…" }
+    var helpWindowTitle: String { isEnglish ? "XxSnap Help" : "XxSnap 帮助" }
+    var helpLoadFailed: String {
+        isEnglish
+            ? "Help content is temporarily unavailable."
+            : "帮助内容暂时无法打开"
+    }
+    var helpImageUnavailable: String {
+        isEnglish
+            ? "The image is temporarily unavailable."
+            : "图片暂时无法显示"
+    }
     var aboutXxSnap: String { isEnglish ? "About..." : "关于…" }
     var quit: String { isEnglish ? "Quit" : "退出" }
     var windowTitle: String { isEnglish ? "XxSnap Settings" : "XxSnap 设置" }

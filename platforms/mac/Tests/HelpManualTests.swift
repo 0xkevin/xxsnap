@@ -67,6 +67,25 @@ final class HelpManualTests: XCTestCase {
     }
 
     @MainActor
+    func testShowUsesSettingsLanguageForWindowChrome() throws {
+        let englishDocument = document(
+            basedOn: try sampleDocument(),
+            language: "en",
+            windowTitle: "Ignored document title",
+            captureTitle: "Capture screenshots"
+        )
+        let controller = makeController(
+            language: .english,
+            loader: FakeHelpContentLoader(document: englishDocument)
+        )
+        defer { controller.close() }
+
+        controller.show()
+
+        XCTAssertEqual(controller.window?.title, "XxSnap Help")
+    }
+
+    @MainActor
     func testShowReloadsCurrentLanguageWhileReusingWindow() throws {
         let chineseDocument = try sampleDocument()
         let englishDocument = document(
@@ -235,6 +254,23 @@ final class HelpManualTests: XCTestCase {
     }
 
     @MainActor
+    func testMissingImageUsesSettingsLanguageForFallback() throws {
+        let controller = makeController(
+            language: .english,
+            loader: FakeHelpContentLoader(document: try sampleDocument())
+        )
+        defer { controller.close() }
+
+        controller.show()
+
+        XCTAssertTrue(
+            controller.test_visibleTexts.contains(
+                "The image is temporarily unavailable."
+            )
+        )
+    }
+
+    @MainActor
     func testChapterSwitchRestoresSessionScrollOffsets() throws {
         let controller = makeController(
             loader: FakeHelpContentLoader(document: try tallDocument())
@@ -346,6 +382,24 @@ final class HelpManualTests: XCTestCase {
         XCTAssertNotNil(controller.window)
     }
 
+    @MainActor
+    func testLoaderFailureUsesSettingsLanguageForWindowChrome() {
+        let controller = makeController(
+            language: .english,
+            loader: FakeHelpContentLoader(error: FakeHelpContentError.failed)
+        )
+        defer { controller.close() }
+
+        controller.show()
+
+        XCTAssertEqual(controller.window?.title, "XxSnap Help")
+        XCTAssertTrue(
+            controller.test_visibleTexts.contains(
+                "Help content is temporarily unavailable."
+            )
+        )
+    }
+
     func testDecodeRejectsDuplicateChapterID() {
         let json = validDocumentJSON.replacingOccurrences(
             of: #""id": "pin""#,
@@ -422,10 +476,13 @@ final class HelpManualTests: XCTestCase {
 
     @MainActor
     private func makeController(
+        language: AppLanguage = .zhHans,
         loader: FakeHelpContentLoader? = nil
     ) -> HelpWindowController {
-        HelpWindowController(
-            settingsStore: FakeHelpAppSettingsStore(),
+        var settings = AppSettings.default
+        settings.language = language
+        return HelpWindowController(
+            settingsStore: FakeHelpAppSettingsStore(settings: settings),
             contentLoader: loader ?? FakeHelpContentLoader(
                 document: try! sampleDocument()
             )

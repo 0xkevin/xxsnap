@@ -3,6 +3,7 @@ import AppKit
 @MainActor
 final class HelpContentView: NSView {
     var onImageSelected: ((NSImage, String, String) -> Void)?
+    var imageUnavailableText: String
 
     private let imageLoader: (String) -> NSImage?
     private let scrollView = NSScrollView()
@@ -13,7 +14,11 @@ final class HelpContentView: NSView {
     private(set) var test_visibleTexts: [String] = []
     private(set) var test_visibleImageCount = 0
 
-    init(imageLoader: @escaping (String) -> NSImage?) {
+    init(
+        imageUnavailableText: String,
+        imageLoader: @escaping (String) -> NSImage?
+    ) {
+        self.imageUnavailableText = imageUnavailableText
         self.imageLoader = imageLoader
         super.init(frame: .zero)
         configureLayout()
@@ -364,13 +369,13 @@ final class HelpContentView: NSView {
             test_visibleImageCount += 1
         } else {
             let fallback = makeWrappingLabel(
-                "图片暂时无法显示",
+                imageUnavailableText,
                 color: .secondaryLabelColor
             )
             fallback.alignment = .center
             stack.addArrangedSubview(fallback)
             fallback.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-            record("图片暂时无法显示")
+            record(imageUnavailableText)
         }
 
         let captionLabel = makeWrappingLabel(

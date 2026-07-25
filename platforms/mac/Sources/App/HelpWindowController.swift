@@ -116,6 +116,7 @@ final class HelpWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func buildWindow() {
+        let strings = PreferencesStrings(language: settingsStore.load().language)
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 980, height: 700),
             styleMask: [
@@ -127,7 +128,7 @@ final class HelpWindowController: NSWindowController, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "XxSnap 帮助"
+        window.title = strings.helpWindowTitle
         window.minSize = NSSize(width: 760, height: 540)
         window.isReleasedWhenClosed = false
         window.backgroundColor = .windowBackgroundColor
@@ -136,7 +137,9 @@ final class HelpWindowController: NSWindowController, NSWindowDelegate {
         window.center()
         self.window = window
 
-        let helpContentView = HelpContentView { [weak self] name in
+        let helpContentView = HelpContentView(
+            imageUnavailableText: strings.helpImageUnavailable
+        ) { [weak self] name in
             guard let self else { return nil }
             return self.contentLoader.image(named: name, language: self.language)
         }
@@ -155,13 +158,15 @@ final class HelpWindowController: NSWindowController, NSWindowDelegate {
         guard let window, let contentView else { return }
 
         language = settingsStore.load().language
+        let strings = PreferencesStrings(language: language)
+        contentView.imageUnavailableText = strings.helpImageUnavailable
         imagePreviewController?.dismiss()
         imagePreviewController = nil
 
         do {
             let document = try contentLoader.load(language: language)
             chapters = document.chapters
-            window.title = document.windowTitle
+            window.title = strings.helpWindowTitle
             if !chapters.contains(where: { $0.id == selectedChapterID }) {
                 selectedChapterID = chapters.contains { $0.id == "capture" }
                     ? "capture"
@@ -171,9 +176,9 @@ final class HelpWindowController: NSWindowController, NSWindowDelegate {
             isShowingError = false
             renderSelectedChapter()
         } catch {
-            window.title = "XxSnap 帮助"
+            window.title = strings.helpWindowTitle
             window.contentView = makeSplitContent(contentView)
-            contentView.renderError("帮助内容暂时无法打开")
+            contentView.renderError(strings.helpLoadFailed)
             isShowingError = true
             navigationButtons.values.forEach { $0.isEnabled = false }
         }
