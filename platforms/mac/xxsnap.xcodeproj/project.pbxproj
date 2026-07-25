@@ -19,6 +19,9 @@
 		AB6400000000000000000002 /* fullscreencutsound.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = AB6400000000000000000012 /* fullscreencutsound.mp3 */; };
 		AB6800000000000000000001 /* HelpManualTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB6800000000000000000011 /* HelpManualTests.swift */; };
 		AB6800000000000000000002 /* HelpContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB6800000000000000000012 /* HelpContent.swift */; };
+		AB6900000000000000000001 /* HelpContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB6900000000000000000011 /* HelpContentView.swift */; };
+		AB6900000000000000000002 /* HelpImagePreviewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB6900000000000000000012 /* HelpImagePreviewController.swift */; };
+		AB6900000000000000000003 /* HelpWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB6900000000000000000013 /* HelpWindowController.swift */; };
 			AB6500000000000000000001 /* alipay.jpg in Resources */ = {isa = PBXBuildFile; fileRef = AB6500000000000000000011 /* alipay.jpg */; };
 			AB6500000000000000000002 /* wechatpay.jpg in Resources */ = {isa = PBXBuildFile; fileRef = AB6500000000000000000012 /* wechatpay.jpg */; };
 			AB6600000000000000000001 /* vertical-korean.png in Resources */ = {isa = PBXBuildFile; fileRef = AB6600000000000000000011 /* vertical-korean.png */; };
@@ -161,6 +164,9 @@
 		AB6400000000000000000012 /* fullscreencutsound.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = Sounds/fullscreencutsound.mp3; sourceTree = "<group>"; };
 		AB6800000000000000000011 /* HelpManualTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpManualTests.swift; sourceTree = "<group>"; };
 		AB6800000000000000000012 /* HelpContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpContent.swift; sourceTree = "<group>"; };
+		AB6900000000000000000011 /* HelpContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpContentView.swift; sourceTree = "<group>"; };
+		AB6900000000000000000012 /* HelpImagePreviewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpImagePreviewController.swift; sourceTree = "<group>"; };
+		AB6900000000000000000013 /* HelpWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpWindowController.swift; sourceTree = "<group>"; };
 		AB6500000000000000000011 /* alipay.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = Donation/alipay.jpg; sourceTree = "<group>"; };
 		AB6500000000000000000012 /* wechatpay.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = Donation/wechatpay.jpg; sourceTree = "<group>"; };
 		0209BE008E9C5F0571BE4B9F /* border-corner-rounded.svg */ = {isa = PBXFileReference; path = "border-corner-rounded.svg"; sourceTree = "<group>"; };
@@ -293,6 +299,9 @@
 				F7D7DA546BB3234545506458 /* AppDelegate.swift */,
 				AB6000000000000000000011 /* AppServices.swift */,
 				AB6800000000000000000012 /* HelpContent.swift */,
+				AB6900000000000000000011 /* HelpContentView.swift */,
+				AB6900000000000000000012 /* HelpImagePreviewController.swift */,
+				AB6900000000000000000013 /* HelpWindowController.swift */,
 				AA5300000000000000000012 /* LongImageEditorWindowController.swift */,
 				24BFA4790A577CD9B35EBC9C /* AppSettings.swift */,
 				AB6000000000000000000012 /* CaptureHotKeyController.swift */,
@@ -715,6 +724,9 @@
 				AB6400000000000000000001 /* FullScreenCapturePreviewController.swift in Sources */,
 				AB6100000000000000000001 /* OCRResultPresentationController.swift in Sources */,
 				AB6800000000000000000002 /* HelpContent.swift in Sources */,
+				AB6900000000000000000001 /* HelpContentView.swift in Sources */,
+				AB6900000000000000000002 /* HelpImagePreviewController.swift in Sources */,
+				AB6900000000000000000003 /* HelpWindowController.swift in Sources */,
 				4A423183222F53C45C9E493F /* CaptureToolbarWindowController.swift in Sources */,
 				3255124AE9CD7B90D40C887F /* PermissionCoordinator.swift in Sources */,
 				5FABC128915B0C423DD63EC7 /* PinnedImageWindowController.swift in Sources */,

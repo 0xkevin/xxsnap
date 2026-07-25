@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import xxsnap
 
@@ -15,26 +16,27 @@ final class HelpManualTests: XCTestCase {
         XCTAssertEqual(
             capture.blocks,
             [
-                .heading(level: 2, text: "Capture"),
-                .paragraph("Choose a capture mode."),
+                .heading(level: 2, text: "开始区域截图"),
+                .paragraph("选择一种截图方式。"),
                 .steps([
-                    HelpStep(text: "Press the shortcut.", keys: ["⌘", "`"]),
-                    HelpStep(text: "Select an area.", keys: nil)
+                    HelpStep(text: "按下截图快捷键。", keys: ["⌘", "`"]),
+                    HelpStep(text: "按住鼠标并拖动，松开后锁定选区。", keys: nil)
                 ]),
-                .bullets(["Window capture", "Area capture"]),
+                .bullets(["窗口截图", "区域截图"]),
                 .shortcuts([
-                    HelpShortcut(action: "Capture", keys: ["⌘", "`"])
+                    HelpShortcut(action: "截图", keys: ["⌘", "`"])
                 ]),
                 .image(
                     name: "capture-overview",
-                    caption: "Capture overlay",
-                    accessibilityLabel: "Capture overlay with a selected area"
+                    caption: "截图选区示例",
+                    accessibilityLabel: "已锁定区域的截图选区"
                 ),
-                .note(title: "Tip", text: "Press Escape to cancel."),
+                .note(title: "提示", text: "按 Esc 可以取消截图。"),
+                .warning(title: "注意", text: "截图前请确认没有敏感信息。"),
                 .faq([
                     HelpFAQItem(
-                        question: "Can I cancel?",
-                        answer: "Yes, press Escape."
+                        question: "怎么取消？",
+                        answer: "按 Esc 即可取消。"
                     )
                 ])
             ]
@@ -45,8 +47,108 @@ final class HelpManualTests: XCTestCase {
         )
         XCTAssertEqual(
             teachingPen.blocks,
-            [.warning(title: "Privacy", text: "Avoid revealing sensitive data.")]
+            [.warning(title: "隐私", text: "演示时请避免展示敏感信息。")]
         )
+    }
+
+    @MainActor
+    func testShowBuildsHelpWindowWithDefaultCaptureChapter() throws {
+        let controller = makeController()
+        defer { controller.close() }
+
+        controller.show()
+
+        XCTAssertEqual(controller.window?.title, "XxSnap 帮助")
+        XCTAssertEqual(
+            controller.test_navigationTitles,
+            ["截图", "贴图", "文字识别", "教笔"]
+        )
+        XCTAssertEqual(controller.test_selectedChapterID, "capture")
+    }
+
+    @MainActor
+    func testCaptureChapterRendersAllSupportedBlocksAndLoadedImage() throws {
+        let loader = FakeHelpContentLoader(
+            document: try sampleDocument(),
+            images: ["capture-overview": solidImage()]
+        )
+        let controller = makeController(loader: loader)
+        defer { controller.close() }
+
+        controller.show()
+
+        XCTAssertEqual(controller.test_visibleImageCount, 1)
+        XCTAssertTrue(controller.test_visibleTexts.contains("区域截图"))
+        XCTAssertTrue(
+            controller.test_visibleTexts.contains(
+                "按住鼠标并拖动，松开后锁定选区。"
+            )
+        )
+        XCTAssertTrue(controller.test_visibleTexts.contains("怎么取消？"))
+    }
+
+    @MainActor
+    func testMissingImageShowsFallbackAndCaptionWithoutDroppingBody() throws {
+        let controller = makeController(
+            loader: FakeHelpContentLoader(document: try sampleDocument())
+        )
+        defer { controller.close() }
+
+        controller.show()
+
+        XCTAssertEqual(controller.test_visibleImageCount, 0)
+        XCTAssertTrue(controller.test_visibleTexts.contains("图片暂时无法显示"))
+        XCTAssertTrue(controller.test_visibleTexts.contains("截图选区示例"))
+        XCTAssertTrue(controller.test_visibleTexts.contains("选择一种截图方式。"))
+        XCTAssertTrue(controller.test_visibleTexts.contains("怎么取消？"))
+    }
+
+    @MainActor
+    func testChapterSwitchRestoresSessionScrollOffsets() throws {
+        let controller = makeController()
+        defer { controller.close() }
+        controller.show()
+
+        controller.test_setScrollOffset(240)
+        controller.test_selectChapter("pin")
+        controller.test_setScrollOffset(90)
+        controller.test_selectChapter("capture")
+        XCTAssertEqual(controller.test_scrollOffset, 240, accuracy: 1)
+
+        controller.test_selectChapter("pin")
+        XCTAssertEqual(controller.test_scrollOffset, 90, accuracy: 1)
+    }
+
+    @MainActor
+    func testClickingImageOpensAndDismissesPreview() throws {
+        let loader = FakeHelpContentLoader(
+            document: try sampleDocument(),
+            images: ["capture-overview": solidImage()]
+        )
+        let controller = makeController(loader: loader)
+        defer { controller.close() }
+        controller.show()
+
+        controller.test_clickFirstImage()
+        XCTAssertTrue(controller.test_isImagePreviewVisible)
+
+        controller.test_dismissImagePreview()
+        XCTAssertFalse(controller.test_isImagePreviewVisible)
+    }
+
+    @MainActor
+    func testLoaderFailureShowsErrorPage() {
+        let controller = makeController(
+            loader: FakeHelpContentLoader(error: FakeHelpContentError.failed)
+        )
+        defer { controller.close() }
+
+        controller.show()
+
+        XCTAssertTrue(
+            controller.test_visibleTexts.contains("帮助内容暂时无法打开")
+        )
+        XCTAssertNotNil(controller.window)
     }
 
     func testDecodeRejectsDuplicateChapterID() {
@@ -123,58 +225,89 @@ final class HelpManualTests: XCTestCase {
         Self.validDocumentJSON
     }
 
+    @MainActor
+    private func makeController(
+        loader: FakeHelpContentLoader? = nil
+    ) -> HelpWindowController {
+        HelpWindowController(
+            settingsStore: FakeHelpAppSettingsStore(),
+            contentLoader: loader ?? FakeHelpContentLoader(
+                document: try! sampleDocument()
+            )
+        )
+    }
+
+    private func sampleDocument() throws -> HelpDocument {
+        try HelpContentLoader().decode(validDocumentData)
+    }
+
+    @MainActor
+    private func solidImage() -> NSImage {
+        let image = NSImage(size: NSSize(width: 640, height: 360))
+        image.lockFocus()
+        NSColor.systemBlue.setFill()
+        NSRect(x: 0, y: 0, width: 640, height: 360).fill()
+        image.unlockFocus()
+        return image
+    }
+
     private static let validDocumentJSON = """
         {
           "version": 1,
-          "language": "en",
-          "windowTitle": "XxSnap Help",
+          "language": "zh-Hans",
+          "windowTitle": "XxSnap 帮助",
           "chapters": [
             {
               "id": "capture",
-              "navigationTitle": "Capture",
-              "title": "Capture screenshots",
-              "introduction": "Capture any part of the screen.",
-              "tableOfContents": ["Start capture"],
+              "navigationTitle": "截图",
+              "title": "区域截图",
+              "introduction": "截取屏幕任意区域。",
+              "tableOfContents": ["开始截图"],
               "shortcuts": [
-                { "action": "Capture", "keys": ["⌘", "`"] }
+                { "action": "截图", "keys": ["⌘", "`"] }
               ],
               "blocks": [
-                { "type": "heading", "level": 2, "text": "Capture" },
-                { "type": "paragraph", "text": "Choose a capture mode." },
+                { "type": "heading", "level": 2, "text": "开始区域截图" },
+                { "type": "paragraph", "text": "选择一种截图方式。" },
                 {
                   "type": "steps",
                   "items": [
-                    { "text": "Press the shortcut.", "keys": ["⌘", "`"] },
-                    { "text": "Select an area." }
+                    { "text": "按下截图快捷键。", "keys": ["⌘", "`"] },
+                    { "text": "按住鼠标并拖动，松开后锁定选区。" }
                   ]
                 },
                 {
                   "type": "bullets",
-                  "items": ["Window capture", "Area capture"]
+                  "items": ["窗口截图", "区域截图"]
                 },
                 {
                   "type": "shortcuts",
                   "items": [
-                    { "action": "Capture", "keys": ["⌘", "`"] }
+                    { "action": "截图", "keys": ["⌘", "`"] }
                   ]
                 },
                 {
                   "type": "image",
                   "name": "capture-overview",
-                  "caption": "Capture overlay",
-                  "accessibilityLabel": "Capture overlay with a selected area"
+                  "caption": "截图选区示例",
+                  "accessibilityLabel": "已锁定区域的截图选区"
                 },
                 {
                   "type": "note",
-                  "title": "Tip",
-                  "text": "Press Escape to cancel."
+                  "title": "提示",
+                  "text": "按 Esc 可以取消截图。"
+                },
+                {
+                  "type": "warning",
+                  "title": "注意",
+                  "text": "截图前请确认没有敏感信息。"
                 },
                 {
                   "type": "faq",
                   "items": [
                     {
-                      "question": "Can I cancel?",
-                      "answer": "Yes, press Escape."
+                      "question": "怎么取消？",
+                      "answer": "按 Esc 即可取消。"
                     }
                   ]
                 }
@@ -182,38 +315,85 @@ final class HelpManualTests: XCTestCase {
             },
             {
               "id": "pin",
-              "navigationTitle": "Pin",
-              "title": "Pin screenshots",
-              "introduction": "Keep references visible.",
+              "navigationTitle": "贴图",
+              "title": "贴图",
+              "introduction": "让参考内容保持可见。",
               "tableOfContents": [],
               "shortcuts": [],
               "blocks": []
             },
             {
               "id": "ocr",
-              "navigationTitle": "OCR",
-              "title": "Recognize text",
-              "introduction": "Extract text from screenshots.",
+              "navigationTitle": "文字识别",
+              "title": "文字识别",
+              "introduction": "提取截图中的文字。",
               "tableOfContents": [],
               "shortcuts": [],
               "blocks": []
             },
             {
               "id": "teaching-pen",
-              "navigationTitle": "Teaching Pen",
-              "title": "Present clearly",
-              "introduction": "Draw while presenting.",
+              "navigationTitle": "教笔",
+              "title": "教笔",
+              "introduction": "演示时直接在屏幕上绘制。",
               "tableOfContents": [],
               "shortcuts": [],
               "blocks": [
                 {
                   "type": "warning",
-                  "title": "Privacy",
-                  "text": "Avoid revealing sensitive data."
+                  "title": "隐私",
+                  "text": "演示时请避免展示敏感信息。"
                 }
               ]
             }
           ]
         }
         """
+}
+
+private enum FakeHelpContentError: Error {
+    case failed
+}
+
+private final class FakeHelpContentLoader: HelpContentLoading {
+    private let document: HelpDocument?
+    private let images: [String: NSImage]
+    private let error: Error?
+
+    init(
+        document: HelpDocument? = nil,
+        images: [String: NSImage] = [:],
+        error: Error? = nil
+    ) {
+        self.document = document
+        self.images = images
+        self.error = error
+    }
+
+    func load(language: AppLanguage) throws -> HelpDocument {
+        if let error {
+            throw error
+        }
+        return try XCTUnwrap(document)
+    }
+
+    func image(named name: String, language: AppLanguage) -> NSImage? {
+        images[name]
+    }
+}
+
+private final class FakeHelpAppSettingsStore: AppSettingsStoring {
+    private var settings: AppSettings
+
+    init(settings: AppSettings = .default) {
+        self.settings = settings
+    }
+
+    func load() -> AppSettings {
+        settings
+    }
+
+    func save(_ settings: AppSettings) throws {
+        self.settings = settings
+    }
 }
