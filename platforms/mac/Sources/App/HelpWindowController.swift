@@ -110,6 +110,7 @@ final class HelpWindowController: NSWindowController, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         imagePreviewController?.dismiss()
         imagePreviewController = nil
+        contentView?.clear()
         isSessionActive = false
         resetSession()
         updateNavigationSelection()
@@ -197,6 +198,7 @@ final class HelpWindowController: NSWindowController, NSWindowDelegate {
         navigationStack.orientation = .vertical
         navigationStack.alignment = .leading
         navigationStack.spacing = 6
+        navigationStack.setAccessibilityRole(.radioGroup)
 
         navigationButtons = [:]
         for chapter in chapters {
@@ -206,7 +208,8 @@ final class HelpWindowController: NSWindowController, NSWindowDelegate {
                 action: #selector(selectNavigationButton(_:))
             )
             button.identifier = NSUserInterfaceItemIdentifier(chapter.id)
-            button.setButtonType(.toggle)
+            button.setButtonType(.radio)
+            button.setAccessibilityRole(.radioButton)
             button.bezelStyle = .recessed
             button.alignment = .left
             button.font = .systemFont(ofSize: 14, weight: .medium)
@@ -294,7 +297,10 @@ final class HelpWindowController: NSWindowController, NSWindowDelegate {
 
     private func updateNavigationSelection() {
         for (chapterID, button) in navigationButtons {
-            button.state = chapterID == selectedChapterID ? .on : .off
+            let isSelected = chapterID == selectedChapterID
+            button.state = isSelected ? .on : .off
+            button.setAccessibilityValue(isSelected ? 1 : 0)
+            button.setAccessibilitySelected(isSelected)
         }
     }
 

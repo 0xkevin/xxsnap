@@ -406,6 +406,69 @@ final class HelpManualTests: XCTestCase {
     }
 
     @MainActor
+    func testSidebarUsesRadioGroupAccessibilitySemantics() throws {
+        let controller = makeController()
+        defer { controller.close() }
+
+        controller.show()
+
+        let root = try XCTUnwrap(controller.window?.contentView)
+        let buttons = descendantViews(of: NSButton.self, in: root)
+            .filter { ["截图", "贴图", "文字识别", "教笔"].contains($0.title) }
+
+        XCTAssertEqual(buttons.count, 4)
+        XCTAssertTrue(
+            buttons.allSatisfy { $0.accessibilityRole() == .radioButton }
+        )
+        XCTAssertEqual(buttons.first?.superview?.accessibilityRole(), .radioGroup)
+        XCTAssertEqual(buttons.filter { $0.state == .on }.map(\.title), ["截图"])
+        for button in buttons {
+            XCTAssertEqual(
+                button.accessibilityValue() as? Int,
+                button.title == "截图" ? 1 : 0,
+                button.title
+            )
+            XCTAssertEqual(
+                button.isAccessibilitySelected(),
+                button.title == "截图",
+                button.title
+            )
+        }
+    }
+
+    @MainActor
+    func testRenderedHelpTitlesExposeHeadingAccessibilityRole() throws {
+        let controller = makeController()
+        defer { controller.close() }
+
+        controller.show()
+
+        let root = try XCTUnwrap(controller.window?.contentView)
+        let labels = descendantViews(of: NSTextField.self, in: root)
+        let expectedLevels = [
+            "区域截图": 1,
+            "目录": 2,
+            "快捷键": 2,
+            "开始区域截图": 2
+        ]
+        for (title, level) in expectedLevels {
+            let label = try XCTUnwrap(labels.first { $0.stringValue == title })
+            XCTAssertEqual(
+                label.accessibilityRole()?.rawValue,
+                "AXHeading",
+                title
+            )
+            XCTAssertEqual(
+                label.accessibilityAttributeValue(
+                    NSAccessibility.Attribute(rawValue: "AXHeadingLevel")
+                ) as? Int,
+                level,
+                title
+            )
+        }
+    }
+
+    @MainActor
     func testShowUsesSettingsLanguageForWindowChrome() throws {
         let englishDocument = document(
             basedOn: try sampleDocument(),
@@ -577,6 +640,69 @@ final class HelpManualTests: XCTestCase {
     }
 
     @MainActor
+    func testBodyUsesThumbnailAndReloadsOriginalOnlyWhenPreviewOpens() throws {
+        let original = solidImage(size: NSSize(width: 2400, height: 1350))
+        let loader = FakeHelpContentLoader(
+            document: try sampleDocument(),
+            images: ["capture-overview": original]
+        )
+        let controller = makeController(loader: loader)
+        defer { controller.close() }
+
+        controller.show()
+
+        let root = try XCTUnwrap(controller.window?.contentView)
+        let bodyImage = try XCTUnwrap(
+            descendantViews(of: NSButton.self, in: root)
+                .compactMap(\.image)
+                .first
+        )
+        XCTAssertFalse(bodyImage === original)
+        XCTAssertLessThanOrEqual(max(bodyImage.size.width, bodyImage.size.height), 1_440)
+        XCTAssertEqual(loader.imageRequests.map(\.name), ["capture-overview"])
+
+        controller.test_clickFirstImage()
+
+        XCTAssertTrue(controller.test_isImagePreviewVisible)
+        XCTAssertEqual(
+            loader.imageRequests.map(\.name),
+            ["capture-overview", "capture-overview"]
+        )
+    }
+
+    @MainActor
+    func testClosingClearsThumbnailsAndReopeningReloadsThem() throws {
+        let loader = FakeHelpContentLoader(
+            document: try sampleDocument(),
+            images: [
+                "capture-overview": solidImage(
+                    size: NSSize(width: 2400, height: 1350)
+                )
+            ]
+        )
+        let controller = makeController(loader: loader)
+        defer { controller.close() }
+
+        controller.show()
+        let firstWindow = try XCTUnwrap(controller.window)
+        XCTAssertEqual(controller.test_visibleImageCount, 1)
+        XCTAssertEqual(loader.imageRequests.count, 1)
+
+        firstWindow.close()
+
+        XCTAssertEqual(controller.test_visibleImageCount, 0)
+
+        controller.show()
+        XCTAssertTrue(controller.window === firstWindow)
+        XCTAssertEqual(controller.test_visibleImageCount, 1)
+        XCTAssertEqual(loader.imageRequests.count, 2)
+
+        controller.test_clickFirstImage()
+        XCTAssertTrue(controller.test_isImagePreviewVisible)
+        XCTAssertEqual(loader.imageRequests.count, 3)
+    }
+
+    @MainActor
     func testMissingImageShowsFallbackAndCaptionWithoutDroppingBody() throws {
         let controller = makeController(
             loader: FakeHelpContentLoader(document: try sampleDocument())
@@ -704,6 +830,40 @@ final class HelpManualTests: XCTestCase {
         XCTAssertEqual(controller.test_imagePreviewDismissCount, 2)
         controller.test_clickImagePreviewCloseButton()
         XCTAssertEqual(controller.test_imagePreviewDismissCount, 2)
+    }
+
+    @MainActor
+    func testImagePreviewEscapeKeyDownEventClosesPreview() throws {
+        let loader = FakeHelpContentLoader(
+            document: try sampleDocument(),
+            images: ["capture-overview": solidImage()]
+        )
+        let controller = makeController(loader: loader)
+        defer { controller.close() }
+        controller.show()
+        controller.test_clickFirstImage()
+
+        let previewWindow = try XCTUnwrap(controller.window?.childWindows?.first)
+        let escape = try XCTUnwrap(
+            NSEvent.keyEvent(
+                with: .keyDown,
+                location: .zero,
+                modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: previewWindow.windowNumber,
+                context: nil,
+                characters: "\u{1B}",
+                charactersIgnoringModifiers: "\u{1B}",
+                isARepeat: false,
+                keyCode: 53
+            )
+        )
+
+        previewWindow.sendEvent(escape)
+
+        XCTAssertFalse(controller.test_isImagePreviewVisible)
+        XCTAssertEqual(controller.window?.childWindows?.count, 0)
+        XCTAssertEqual(controller.test_imagePreviewDismissCount, 1)
     }
 
     @MainActor
@@ -886,13 +1046,30 @@ final class HelpManualTests: XCTestCase {
     }
 
     @MainActor
-    private func solidImage() -> NSImage {
-        let image = NSImage(size: NSSize(width: 640, height: 360))
+    private func solidImage(
+        size: NSSize = NSSize(width: 640, height: 360)
+    ) -> NSImage {
+        let image = NSImage(size: size)
         image.lockFocus()
         NSColor.systemBlue.setFill()
-        NSRect(x: 0, y: 0, width: 640, height: 360).fill()
+        NSRect(origin: .zero, size: size).fill()
         image.unlockFocus()
         return image
+    }
+
+    @MainActor
+    private func descendantViews<T: NSView>(
+        of type: T.Type,
+        in root: NSView
+    ) -> [T] {
+        var matches: [T] = []
+        if let match = root as? T {
+            matches.append(match)
+        }
+        for subview in root.subviews {
+            matches.append(contentsOf: descendantViews(of: type, in: subview))
+        }
+        return matches
     }
 
     private static let validDocumentJSON = """
@@ -1087,6 +1264,7 @@ private final class FakeHelpContentLoader: HelpContentLoading {
     private let loadHandler: LoadHandler?
 
     private(set) var loadedLanguages: [AppLanguage] = []
+    private(set) var imageRequests: [(name: String, language: AppLanguage)] = []
     var loadCallCount: Int {
         loadedLanguages.count
     }
@@ -1115,7 +1293,8 @@ private final class FakeHelpContentLoader: HelpContentLoading {
     }
 
     func image(named name: String, language: AppLanguage) -> NSImage? {
-        images[name]
+        imageRequests.append((name, language))
+        return images[name]
     }
 }
 

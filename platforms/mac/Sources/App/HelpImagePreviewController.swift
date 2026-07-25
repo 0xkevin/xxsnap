@@ -50,6 +50,14 @@ final class HelpImagePreviewController: NSWindowController, NSWindowDelegate {
         dismiss()
     }
 
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 || event.charactersIgnoringModifiers == "\u{1B}" {
+            dismiss()
+            return
+        }
+        super.keyDown(with: event)
+    }
+
     var test_imageAccessibilityLabel: String? {
         previewImageView?.accessibilityLabel()
     }

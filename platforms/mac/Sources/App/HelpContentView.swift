@@ -5,6 +5,8 @@ final class HelpContentView: NSView {
     var onImageSelected: ((NSImage, String, String) -> Void)?
     var imageUnavailableText: String
 
+    private static let thumbnailMaximumDimension: CGFloat = 1_440
+
     private let imageLoader: (String) -> NSImage?
     private let scrollView = NSScrollView()
     private let documentView = HelpFlippedView()
@@ -53,7 +55,8 @@ final class HelpContentView: NSView {
         addText(
             chapter.title,
             font: .systemFont(ofSize: 28, weight: .bold),
-            color: .labelColor
+            color: .labelColor,
+            headingLevel: 1
         )
         addText(
             chapter.introduction,
@@ -86,6 +89,11 @@ final class HelpContentView: NSView {
             color: .labelColor
         )
         finishRendering()
+    }
+
+    func clear() {
+        resetContent()
+        needsLayout = true
     }
 
     func test_clickFirstImage() {
@@ -179,7 +187,8 @@ final class HelpContentView: NSView {
             addText(
                 text,
                 font: .systemFont(ofSize: size, weight: .semibold),
-                color: .labelColor
+                color: .labelColor,
+                headingLevel: max(2, level)
             )
         case .paragraph(let text):
             addBodyText(text)
@@ -214,7 +223,8 @@ final class HelpContentView: NSView {
         addText(
             text,
             font: .systemFont(ofSize: 17, weight: .semibold),
-            color: .labelColor
+            color: .labelColor,
+            headingLevel: 2
         )
     }
 
@@ -229,9 +239,15 @@ final class HelpContentView: NSView {
     private func addText(
         _ text: String,
         font: NSFont,
-        color: NSColor
+        color: NSColor,
+        headingLevel: Int? = nil
     ) {
-        let label = makeWrappingLabel(text, font: font, color: color)
+        let label = makeWrappingLabel(
+            text,
+            font: font,
+            color: color,
+            headingLevel: headingLevel
+        )
         addArrangedFullWidth(label)
         record(text)
     }
@@ -245,9 +261,18 @@ final class HelpContentView: NSView {
     private func makeWrappingLabel(
         _ text: String,
         font: NSFont = .systemFont(ofSize: 14),
-        color: NSColor = .labelColor
+        color: NSColor = .labelColor,
+        headingLevel: Int? = nil
     ) -> NSTextField {
-        let label = NSTextField(wrappingLabelWithString: text)
+        let label: NSTextField
+        if let headingLevel {
+            label = HelpHeadingTextField(
+                string: text,
+                headingLevel: headingLevel
+            )
+        } else {
+            label = NSTextField(wrappingLabelWithString: text)
+        }
         label.font = font
         label.textColor = color
         label.maximumNumberOfLines = 0
@@ -350,20 +375,37 @@ final class HelpContentView: NSView {
     ) -> NSView {
         let stack = verticalGroup(spacing: 8)
 
-        if let image = imageLoader(name), image.size.width > 0, image.size.height > 0 {
+        if
+            let image = imageLoader(name),
+            let thumbnail = makeThumbnail(from: image)
+        {
             let button = HelpImageButton(
-                image: image,
+                thumbnail: thumbnail,
+                imageName: name,
                 caption: caption,
                 accessibilityLabel: accessibilityLabel
             )
-            button.onSelect = { [weak self] image, caption, accessibilityLabel in
-                self?.onImageSelected?(image, caption, accessibilityLabel)
+            button.onSelect = {
+                [weak self] imageName, caption, accessibilityLabel in
+                guard
+                    let self,
+                    let fullImage = self.imageLoader(imageName),
+                    fullImage.size.width > 0,
+                    fullImage.size.height > 0
+                else {
+                    return
+                }
+                self.onImageSelected?(
+                    fullImage,
+                    caption,
+                    accessibilityLabel
+                )
             }
             stack.addArrangedSubview(button)
             button.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
             button.heightAnchor.constraint(
                 equalTo: button.widthAnchor,
-                multiplier: image.size.height / image.size.width
+                multiplier: thumbnail.size.height / thumbnail.size.width
             ).isActive = true
             firstImageButton = firstImageButton ?? button
             test_visibleImageCount += 1
@@ -388,6 +430,58 @@ final class HelpContentView: NSView {
         captionLabel.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         record(caption)
         return stack
+    }
+
+    private func makeThumbnail(from source: NSImage) -> NSImage? {
+        let sourceSize = source.size
+        guard sourceSize.width > 0, sourceSize.height > 0 else {
+            return nil
+        }
+
+        let scale = min(
+            1,
+            Self.thumbnailMaximumDimension / max(
+                sourceSize.width,
+                sourceSize.height
+            )
+        )
+        let thumbnailSize = NSSize(
+            width: max(1, floor(sourceSize.width * scale)),
+            height: max(1, floor(sourceSize.height * scale))
+        )
+        guard let representation = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(thumbnailSize.width),
+            pixelsHigh: Int(thumbnailSize.height),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            return nil
+        }
+        representation.size = thumbnailSize
+
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        guard let context = NSGraphicsContext(bitmapImageRep: representation) else {
+            return nil
+        }
+        NSGraphicsContext.current = context
+        context.imageInterpolation = .high
+        source.draw(
+            in: NSRect(origin: .zero, size: thumbnailSize),
+            from: NSRect(origin: .zero, size: sourceSize),
+            operation: .copy,
+            fraction: 1
+        )
+
+        let thumbnail = NSImage(size: thumbnailSize)
+        thumbnail.addRepresentation(representation)
+        return thumbnail
     }
 
     private func makeBand(
@@ -482,19 +576,69 @@ private final class HelpFlippedView: NSView {
     override var isFlipped: Bool { true }
 }
 
+private final class HelpHeadingTextField: NSTextField {
+    private let headingLevel: Int
+
+    init(string: String, headingLevel: Int) {
+        self.headingLevel = headingLevel
+        super.init(frame: .zero)
+        stringValue = string
+        isEditable = false
+        isSelectable = false
+        isBezeled = false
+        drawsBackground = false
+        lineBreakMode = .byWordWrapping
+        usesSingleLineMode = false
+        cell?.wraps = true
+        setAccessibilityRole(
+            NSAccessibility.Role(rawValue: "AXHeading")
+        )
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func accessibilityAttributeNames() -> [NSAccessibility.Attribute] {
+        let headingLevelAttribute = NSAccessibility.Attribute(
+            rawValue: "AXHeadingLevel"
+        )
+        var attributes = super.accessibilityAttributeNames()
+        if !attributes.contains(headingLevelAttribute) {
+            attributes.append(headingLevelAttribute)
+        }
+        return attributes
+    }
+
+    override func accessibilityAttributeValue(
+        _ attribute: NSAccessibility.Attribute
+    ) -> Any? {
+        if attribute.rawValue == "AXHeadingLevel" {
+            return headingLevel
+        }
+        return super.accessibilityAttributeValue(attribute)
+    }
+
+}
+
 @MainActor
 private final class HelpImageButton: NSButton {
-    let previewImage: NSImage
+    let imageName: String
     let caption: String
     let imageAccessibilityLabel: String
-    var onSelect: ((NSImage, String, String) -> Void)?
+    var onSelect: ((String, String, String) -> Void)?
 
-    init(image: NSImage, caption: String, accessibilityLabel: String) {
-        previewImage = image
+    init(
+        thumbnail: NSImage,
+        imageName: String,
+        caption: String,
+        accessibilityLabel: String
+    ) {
+        self.imageName = imageName
         self.caption = caption
         imageAccessibilityLabel = accessibilityLabel
         super.init(frame: .zero)
-        self.image = image
+        image = thumbnail
         imagePosition = .imageOnly
         imageScaling = .scaleProportionallyUpOrDown
         isBordered = false
@@ -511,6 +655,6 @@ private final class HelpImageButton: NSButton {
 
     @objc
     private func selectImage() {
-        onSelect?(previewImage, caption, imageAccessibilityLabel)
+        onSelect?(imageName, caption, imageAccessibilityLabel)
     }
 }
