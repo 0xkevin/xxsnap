@@ -446,6 +446,34 @@ final class HelpManualTests: XCTestCase {
         let pinButton = try XCTUnwrap(
             buttons.first { $0.identifier?.rawValue == "pin" }
         )
+        let navigationGroup = try XCTUnwrap(
+            captureButton.superview?.superview
+        )
+        let indicatorViews = descendantViews(of: NSView.self, in: root)
+            .filter { $0.identifier?.rawValue.hasSuffix("-indicator") == true }
+        let captureIndicatorView = try XCTUnwrap(
+            indicatorViews.first {
+                $0.identifier?.rawValue == "capture-indicator"
+            }
+        )
+        let pinIndicatorView = try XCTUnwrap(
+            indicatorViews.first {
+                $0.identifier?.rawValue == "pin-indicator"
+            }
+        )
+        let selectedAttribute = NSAccessibility.Attribute.selected
+        let selectedChildrenAttribute = NSAccessibility.Attribute
+            .selectedChildren
+        let valueAttribute = NSAccessibility.Attribute.value
+        let selectedChildIDs: () -> [String] = {
+            let selectedChildren = navigationGroup
+                .accessibilityAttributeValue(
+                    selectedChildrenAttribute
+                ) as? [NSButton]
+            return selectedChildren?
+                .compactMap { $0.identifier?.rawValue }
+                .sorted() ?? []
+        }
         let fontWeight: (NSButton) throws -> Int = { button in
             NSFontManager.shared.weight(of: try XCTUnwrap(button.font))
         }
@@ -462,8 +490,14 @@ final class HelpManualTests: XCTestCase {
         }
 
         XCTAssertEqual(buttons.count, 4)
+        XCTAssertEqual(indicatorViews.count, 4)
         XCTAssertTrue(
             buttons.allSatisfy { $0.accessibilityRole() == .button }
+        )
+        XCTAssertEqual(navigationGroup.accessibilityRole(), .group)
+        XCTAssertTrue(
+            navigationGroup.accessibilityAttributeNames()
+                .contains(selectedChildrenAttribute)
         )
         for button in buttons {
             let cell = try XCTUnwrap(button.cell as? NSButtonCell)
@@ -489,11 +523,20 @@ final class HelpManualTests: XCTestCase {
                 }
                 ancestor = view.superview
             }
+            XCTAssertTrue(
+                button.accessibilityAttributeNames().contains(selectedAttribute),
+                button.title
+            )
+            XCTAssertFalse(
+                button.accessibilityAttributeValue(valueAttribute) is NSNumber,
+                "\(button.title) must not expose numeric AXValue"
+            )
         }
         XCTAssertEqual(
             controller.test_selectedNavigationIndicators,
             ["capture"]
         )
+        XCTAssertEqual(selectedChildIDs(), ["capture"])
         let captureIndicator: (
             isPositionedLeftOfButton: Bool,
             width: CGFloat,
@@ -505,16 +548,48 @@ final class HelpManualTests: XCTestCase {
         XCTAssertTrue(captureIndicator.isPositionedLeftOfButton)
         XCTAssertEqual(captureIndicator.width, 3, accuracy: 0.01)
         XCTAssertGreaterThan(captureIndicator.height, captureIndicator.width)
+        XCTAssertFalse(captureIndicatorView.isHidden)
+        XCTAssertTrue(pinIndicatorView.isHidden)
+        let captureIndicatorFrame = captureIndicatorView.convert(
+            captureIndicatorView.bounds,
+            to: root
+        )
+        let captureButtonFrame = captureButton.convert(
+            captureButton.bounds,
+            to: root
+        )
+        XCTAssertLessThanOrEqual(
+            captureIndicatorFrame.maxX,
+            captureButtonFrame.minX
+        )
         assertColor(
             captureIndicator.color,
             matches: .controlAccentColor,
             appearance: root.effectiveAppearance,
             message: "capture indicator"
         )
+        assertColor(
+            try XCTUnwrap(
+                captureIndicatorView.layer?.backgroundColor.flatMap(
+                    NSColor.init(cgColor:)
+                )
+            ),
+            matches: .controlAccentColor,
+            appearance: root.effectiveAppearance,
+            message: "capture indicator layer"
+        )
         XCTAssertNil(controller.test_navigationIndicator(for: "pin"))
         XCTAssertEqual(
             buttons.filter { $0.isAccessibilitySelected() }.map(\.title),
             ["截图"]
+        )
+        XCTAssertEqual(
+            captureButton.accessibilityAttributeValue(selectedAttribute) as? Bool,
+            true
+        )
+        XCTAssertEqual(
+            pinButton.accessibilityAttributeValue(selectedAttribute) as? Bool,
+            false
         )
         for button in buttons {
             let expectedWeight: NSFont.Weight = button === captureButton
@@ -530,6 +605,7 @@ final class HelpManualTests: XCTestCase {
         controller.test_clickNavigationButton("pin")
 
         XCTAssertEqual(controller.test_selectedNavigationIndicators, ["pin"])
+        XCTAssertEqual(selectedChildIDs(), ["pin"])
         let pinIndicator: (
             isPositionedLeftOfButton: Bool,
             width: CGFloat,
@@ -541,16 +617,42 @@ final class HelpManualTests: XCTestCase {
         XCTAssertTrue(pinIndicator.isPositionedLeftOfButton)
         XCTAssertEqual(pinIndicator.width, 3, accuracy: 0.01)
         XCTAssertGreaterThan(pinIndicator.height, pinIndicator.width)
+        XCTAssertTrue(captureIndicatorView.isHidden)
+        XCTAssertFalse(pinIndicatorView.isHidden)
+        let pinIndicatorFrame = pinIndicatorView.convert(
+            pinIndicatorView.bounds,
+            to: root
+        )
+        let pinButtonFrame = pinButton.convert(pinButton.bounds, to: root)
+        XCTAssertLessThanOrEqual(pinIndicatorFrame.maxX, pinButtonFrame.minX)
         assertColor(
             pinIndicator.color,
             matches: .controlAccentColor,
             appearance: root.effectiveAppearance,
             message: "pin indicator"
         )
+        assertColor(
+            try XCTUnwrap(
+                pinIndicatorView.layer?.backgroundColor.flatMap(
+                    NSColor.init(cgColor:)
+                )
+            ),
+            matches: .controlAccentColor,
+            appearance: root.effectiveAppearance,
+            message: "pin indicator layer"
+        )
         XCTAssertNil(controller.test_navigationIndicator(for: "capture"))
         XCTAssertEqual(
             buttons.filter { $0.isAccessibilitySelected() }.map(\.title),
             ["贴图"]
+        )
+        XCTAssertEqual(
+            captureButton.accessibilityAttributeValue(selectedAttribute) as? Bool,
+            false
+        )
+        XCTAssertEqual(
+            pinButton.accessibilityAttributeValue(selectedAttribute) as? Bool,
+            true
         )
         for button in buttons {
             let expectedWeight: NSFont.Weight = button === pinButton
@@ -560,6 +662,65 @@ final class HelpManualTests: XCTestCase {
                 try fontWeight(button),
                 try referenceFontWeight(button, expectedWeight),
                 button.title
+            )
+        }
+    }
+
+    @MainActor
+    func testSidebarAndIndicatorFollowEffectiveAppearanceChanges() throws {
+        let controller = makeController()
+        defer { controller.close() }
+
+        controller.show()
+
+        let window = try XCTUnwrap(controller.window)
+        let root = try XCTUnwrap(window.contentView)
+        root.layoutSubtreeIfNeeded()
+        let sidebar = try XCTUnwrap(
+            root.subviews.first {
+                !($0 is NSBox) && !($0 is HelpContentView)
+            }
+        )
+        let captureIndicator = try XCTUnwrap(
+            descendantViews(of: NSView.self, in: sidebar).first {
+                $0.identifier?.rawValue == "capture-indicator"
+            }
+        )
+
+        for appearanceName: NSAppearance.Name in [.aqua, .darkAqua] {
+            let appearance = try XCTUnwrap(
+                NSAppearance(named: appearanceName)
+            )
+            window.appearance = appearance
+            root.layoutSubtreeIfNeeded()
+            sidebar.viewDidChangeEffectiveAppearance()
+            root.layoutSubtreeIfNeeded()
+
+            XCTAssertEqual(
+                sidebar.effectiveAppearance.bestMatch(
+                    from: [.aqua, .darkAqua]
+                ),
+                appearanceName
+            )
+            assertColor(
+                try XCTUnwrap(
+                    sidebar.layer?.backgroundColor.flatMap(
+                        NSColor.init(cgColor:)
+                    )
+                ),
+                matches: .windowBackgroundColor,
+                appearance: sidebar.effectiveAppearance,
+                message: "\(appearanceName.rawValue) sidebar"
+            )
+            assertColor(
+                try XCTUnwrap(
+                    captureIndicator.layer?.backgroundColor.flatMap(
+                        NSColor.init(cgColor:)
+                    )
+                ),
+                matches: .controlAccentColor,
+                appearance: captureIndicator.effectiveAppearance,
+                message: "\(appearanceName.rawValue) indicator"
             )
         }
     }
@@ -582,6 +743,16 @@ final class HelpManualTests: XCTestCase {
         let appearance = try XCTUnwrap(
             controller.window?.contentView?.effectiveAppearance
         )
+        let helpContentView = try XCTUnwrap(
+            descendantViews(
+                of: HelpContentView.self,
+                in: try XCTUnwrap(controller.window?.contentView)
+            ).first
+        )
+        let expectedAppearance: NSAppearance.Name = NSWorkspace.shared
+            .accessibilityDisplayShouldIncreaseContrast
+            ? .accessibilityHighContrastAqua
+            : .aqua
 
         assertColor(
             try XCTUnwrap(state.helpContentLayerColor),
@@ -614,6 +785,87 @@ final class HelpManualTests: XCTestCase {
             matches: .white,
             appearance: appearance,
             message: "documentView layer"
+        )
+        XCTAssertEqual(helpContentView.appearance?.name, expectedAppearance)
+    }
+
+    @MainActor
+    func testSystemAppearanceRefreshUpdatesReusedHelpWindow() async throws {
+        let controller = makeController()
+        defer { controller.close() }
+
+        controller.show()
+        let originalWindow = try XCTUnwrap(controller.window)
+        controller.show()
+
+        XCTAssertTrue(controller.window === originalWindow)
+
+        controller.test_applySystemAppearance(
+            increaseContrast: true,
+            accentColor: .systemRed
+        )
+
+        XCTAssertEqual(
+            controller.test_contentAppearanceName,
+            .accessibilityHighContrastAqua
+        )
+        assertColor(
+            try XCTUnwrap(
+                controller.test_navigationIndicator(for: "capture")
+            ).color,
+            matches: .systemRed,
+            appearance: originalWindow.effectiveAppearance,
+            message: "refreshed high-contrast indicator"
+        )
+
+        controller.test_applySystemAppearance(
+            increaseContrast: false,
+            accentColor: .systemGreen
+        )
+
+        XCTAssertEqual(controller.test_contentAppearanceName, .aqua)
+        assertColor(
+            try XCTUnwrap(
+                controller.test_navigationIndicator(for: "capture")
+            ).color,
+            matches: .systemGreen,
+            appearance: originalWindow.effectiveAppearance,
+            message: "refreshed Aqua indicator"
+        )
+
+        let refreshExpectation = expectation(
+            description: "system color notification refreshes on main thread"
+        )
+        controller.test_onNextSystemAppearanceRefresh = { isMainThread in
+            XCTAssertTrue(isMainThread)
+            refreshExpectation.fulfill()
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            XCTAssertFalse(Thread.isMainThread)
+            NotificationCenter.default.post(
+                name: NSColor.systemColorsDidChangeNotification,
+                object: nil
+            )
+        }
+
+        await fulfillment(of: [refreshExpectation], timeout: 2)
+
+        let expectedAppearance: NSAppearance.Name = NSWorkspace.shared
+            .accessibilityDisplayShouldIncreaseContrast
+            ? .accessibilityHighContrastAqua
+            : .aqua
+        XCTAssertEqual(
+            controller.test_contentAppearanceName,
+            expectedAppearance
+        )
+        assertColor(
+            try XCTUnwrap(
+                controller.test_navigationIndicator(for: "capture")
+            ).color,
+            matches: .controlAccentColor,
+            appearance: originalWindow.effectiveAppearance,
+            message: "notification-refreshed indicator"
         )
     }
 

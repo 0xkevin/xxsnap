@@ -12,9 +12,28 @@ final class HelpContentView: NSView {
     private let documentView = HelpFlippedView()
     private let contentStack = NSStackView()
     private var firstImageButton: HelpImageButton?
+    private(set) var appliedAppearanceName: NSAppearance.Name = .aqua
 
     private(set) var test_visibleTexts: [String] = []
     private(set) var test_visibleImageCount = 0
+
+    var test_backgroundState: (
+        helpContentLayerColor: NSColor?,
+        scrollViewDrawsBackground: Bool,
+        scrollViewBackgroundColor: NSColor,
+        clipViewDrawsBackground: Bool,
+        clipViewBackgroundColor: NSColor,
+        documentViewLayerColor: NSColor?
+    ) {
+        (
+            layer?.backgroundColor.flatMap(NSColor.init(cgColor:)),
+            scrollView.drawsBackground,
+            scrollView.backgroundColor,
+            scrollView.contentView.drawsBackground,
+            scrollView.contentView.backgroundColor,
+            documentView.layer?.backgroundColor.flatMap(NSColor.init(cgColor:))
+        )
+    }
 
     init(
         imageUnavailableText: String,
@@ -100,16 +119,35 @@ final class HelpContentView: NSView {
         firstImageButton?.performClick(nil)
     }
 
+    func applySystemAppearance(
+        increaseContrast: Bool = NSWorkspace.shared
+            .accessibilityDisplayShouldIncreaseContrast
+    ) {
+        let appearanceName: NSAppearance.Name = increaseContrast
+            ? .accessibilityHighContrastAqua
+            : .aqua
+        appliedAppearanceName = appearanceName
+        appearance = NSAppearance(named: appearanceName)
+    }
+
     private func configureLayout() {
         translatesAutoresizingMaskIntoConstraints = false
+        applySystemAppearance()
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.white.cgColor
 
         scrollView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.drawsBackground = false
+        scrollView.drawsBackground = true
+        scrollView.backgroundColor = .white
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
         scrollView.contentView.postsBoundsChangedNotifications = true
+        scrollView.contentView.drawsBackground = true
+        scrollView.contentView.backgroundColor = .white
 
         documentView.translatesAutoresizingMaskIntoConstraints = false
+        documentView.wantsLayer = true
+        documentView.layer?.backgroundColor = NSColor.white.cgColor
         contentStack.translatesAutoresizingMaskIntoConstraints = false
         contentStack.orientation = .vertical
         contentStack.alignment = .leading
