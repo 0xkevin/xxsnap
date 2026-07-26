@@ -14,6 +14,7 @@ final class HelpWindowController: NSWindowController, NSWindowDelegate {
     private var imagePreviewController: HelpImagePreviewController?
     private var isSessionActive = false
     private var isShowingError = false
+    private var hasBuiltWindow = false
     private var imagePreviewDismissCount = 0
 
     init(
@@ -30,7 +31,7 @@ final class HelpWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func show() {
-        if window == nil {
+        if !hasBuiltWindow {
             buildWindow()
         }
         if isSessionActive {
@@ -40,7 +41,6 @@ final class HelpWindowController: NSWindowController, NSWindowDelegate {
         }
         reloadContent()
         NSApp.activate(ignoringOtherApps: true)
-        showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         isSessionActive = true
     }
@@ -130,13 +130,14 @@ final class HelpWindowController: NSWindowController, NSWindowDelegate {
             defer: false
         )
         window.title = strings.helpWindowTitle
-        window.minSize = NSSize(width: 760, height: 540)
+        window.contentMinSize = NSSize(width: 760, height: 512)
         window.isReleasedWhenClosed = false
         window.backgroundColor = .windowBackgroundColor
         window.animationBehavior = .documentWindow
         window.delegate = self
         window.center()
         self.window = window
+        hasBuiltWindow = true
 
         let helpContentView = HelpContentView(
             imageUnavailableText: strings.helpImageUnavailable
@@ -186,7 +187,14 @@ final class HelpWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func makeSplitContent(_ helpContentView: HelpContentView) -> NSView {
-        let root = NSView()
+        let rootFrame = window?.contentLayoutRect
+            ?? NSRect(x: 0, y: 0, width: 980, height: 700)
+        let root = NSView(frame: rootFrame)
+        root.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            root.widthAnchor.constraint(greaterThanOrEqualToConstant: 760),
+            root.heightAnchor.constraint(greaterThanOrEqualToConstant: 512)
+        ])
 
         let sidebar = NSView()
         sidebar.translatesAutoresizingMaskIntoConstraints = false

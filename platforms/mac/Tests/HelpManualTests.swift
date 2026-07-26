@@ -342,6 +342,31 @@ final class HelpManualTests: XCTestCase {
         XCTAssertEqual(document.windowTitle, "XxSnap 帮助")
     }
 
+    @MainActor
+    func testBundledEnglishHelpWindowShowsSidebarAndBody() throws {
+        var settings = AppSettings.default
+        settings.language = .english
+        let settingsStore = FakeHelpAppSettingsStore(settings: settings)
+        let controller = HelpWindowController(
+            settingsStore: settingsStore,
+            contentLoader: HelpContentLoader(bundle: .main)
+        )
+        defer { controller.close() }
+
+        controller.show()
+
+        XCTAssertEqual(controller.window?.title, "XxSnap Help")
+        XCTAssertEqual(
+            controller.test_navigationTitles,
+            ["截图", "贴图", "文字识别", "教笔"]
+        )
+        XCTAssertTrue(controller.test_visibleTexts.contains("区域截图"))
+        XCTAssertEqual(controller.window?.contentMinSize.width, 760)
+        XCTAssertEqual(controller.window?.contentMinSize.height, 512)
+        XCTAssertGreaterThan(controller.window?.frame.height ?? 0, 500)
+        XCTAssertGreaterThan(controller.window?.contentView?.frame.height ?? 0, 500)
+    }
+
     func testDecodeLoadsAllChaptersAndSupportedBlockTypes() throws {
         let document = try HelpContentLoader().decode(validDocumentData)
 
