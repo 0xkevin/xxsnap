@@ -431,7 +431,7 @@ final class HelpManualTests: XCTestCase {
     }
 
     @MainActor
-    func testSidebarUsesRadioGroupAccessibilitySemantics() throws {
+    func testSidebarUsesBorderlessButtonsWithAccentSelection() throws {
         let controller = makeController()
         defer { controller.close() }
 
@@ -440,25 +440,181 @@ final class HelpManualTests: XCTestCase {
         let root = try XCTUnwrap(controller.window?.contentView)
         let buttons = descendantViews(of: NSButton.self, in: root)
             .filter { ["截图", "贴图", "文字识别", "教笔"].contains($0.title) }
+        let captureButton = try XCTUnwrap(
+            buttons.first { $0.identifier?.rawValue == "capture" }
+        )
+        let pinButton = try XCTUnwrap(
+            buttons.first { $0.identifier?.rawValue == "pin" }
+        )
+        let fontWeight: (NSButton) throws -> Int = { button in
+            NSFontManager.shared.weight(of: try XCTUnwrap(button.font))
+        }
+        let referenceFontWeight: (
+            NSButton,
+            NSFont.Weight
+        ) throws -> Int = { button, weight in
+            let pointSize = try XCTUnwrap(button.font).pointSize
+            let referenceFont = NSFont.systemFont(
+                ofSize: pointSize,
+                weight: weight
+            )
+            return NSFontManager.shared.weight(of: referenceFont)
+        }
 
         XCTAssertEqual(buttons.count, 4)
         XCTAssertTrue(
-            buttons.allSatisfy { $0.accessibilityRole() == .radioButton }
+            buttons.allSatisfy { $0.accessibilityRole() == .button }
         )
-        XCTAssertEqual(buttons.first?.superview?.accessibilityRole(), .radioGroup)
-        XCTAssertEqual(buttons.filter { $0.state == .on }.map(\.title), ["截图"])
         for button in buttons {
+            let cell = try XCTUnwrap(button.cell as? NSButtonCell)
+            XCTAssertFalse(button.isBordered, button.title)
+            XCTAssertNil(button.image, button.title)
+            XCTAssertEqual(button.imagePosition, .noImage, button.title)
+            XCTAssertEqual(cell.showsStateBy, [], button.title)
             XCTAssertEqual(
-                button.accessibilityValue() as? Int,
-                button.title == "截图" ? 1 : 0,
+                cell.highlightsBy,
+                .contentsCellMask,
                 button.title
             )
+
+            var ancestor: NSView? = button.superview
+            while let view = ancestor {
+                XCTAssertNotEqual(
+                    view.accessibilityRole(),
+                    .radioGroup,
+                    "\(button.title) ancestor: \(type(of: view))"
+                )
+                if view === root {
+                    break
+                }
+                ancestor = view.superview
+            }
+        }
+        XCTAssertEqual(
+            controller.test_selectedNavigationIndicators,
+            ["capture"]
+        )
+        let captureIndicator: (
+            isPositionedLeftOfButton: Bool,
+            width: CGFloat,
+            height: CGFloat,
+            color: NSColor
+        ) = try XCTUnwrap(
+            controller.test_navigationIndicator(for: "capture")
+        )
+        XCTAssertTrue(captureIndicator.isPositionedLeftOfButton)
+        XCTAssertEqual(captureIndicator.width, 3, accuracy: 0.01)
+        XCTAssertGreaterThan(captureIndicator.height, captureIndicator.width)
+        assertColor(
+            captureIndicator.color,
+            matches: .controlAccentColor,
+            appearance: root.effectiveAppearance,
+            message: "capture indicator"
+        )
+        XCTAssertNil(controller.test_navigationIndicator(for: "pin"))
+        XCTAssertEqual(
+            buttons.filter { $0.isAccessibilitySelected() }.map(\.title),
+            ["截图"]
+        )
+        for button in buttons {
+            let expectedWeight: NSFont.Weight = button === captureButton
+                ? .semibold
+                : .regular
             XCTAssertEqual(
-                button.isAccessibilitySelected(),
-                button.title == "截图",
+                try fontWeight(button),
+                try referenceFontWeight(button, expectedWeight),
                 button.title
             )
         }
+
+        controller.test_clickNavigationButton("pin")
+
+        XCTAssertEqual(controller.test_selectedNavigationIndicators, ["pin"])
+        let pinIndicator: (
+            isPositionedLeftOfButton: Bool,
+            width: CGFloat,
+            height: CGFloat,
+            color: NSColor
+        ) = try XCTUnwrap(
+            controller.test_navigationIndicator(for: "pin")
+        )
+        XCTAssertTrue(pinIndicator.isPositionedLeftOfButton)
+        XCTAssertEqual(pinIndicator.width, 3, accuracy: 0.01)
+        XCTAssertGreaterThan(pinIndicator.height, pinIndicator.width)
+        assertColor(
+            pinIndicator.color,
+            matches: .controlAccentColor,
+            appearance: root.effectiveAppearance,
+            message: "pin indicator"
+        )
+        XCTAssertNil(controller.test_navigationIndicator(for: "capture"))
+        XCTAssertEqual(
+            buttons.filter { $0.isAccessibilitySelected() }.map(\.title),
+            ["贴图"]
+        )
+        for button in buttons {
+            let expectedWeight: NSFont.Weight = button === pinButton
+                ? .semibold
+                : .regular
+            XCTAssertEqual(
+                try fontWeight(button),
+                try referenceFontWeight(button, expectedWeight),
+                button.title
+            )
+        }
+    }
+
+    @MainActor
+    func testHelpReadingAreaUsesSolidWhiteBackground() throws {
+        let controller = makeController()
+        defer { controller.close() }
+
+        controller.show()
+
+        let state: (
+            helpContentLayerColor: NSColor?,
+            scrollViewDrawsBackground: Bool,
+            scrollViewBackgroundColor: NSColor,
+            clipViewDrawsBackground: Bool,
+            clipViewBackgroundColor: NSColor,
+            documentViewLayerColor: NSColor?
+        ) = controller.test_contentBackgroundState
+        let appearance = try XCTUnwrap(
+            controller.window?.contentView?.effectiveAppearance
+        )
+
+        assertColor(
+            try XCTUnwrap(state.helpContentLayerColor),
+            matches: .white,
+            appearance: appearance,
+            message: "HelpContentView layer"
+        )
+        XCTAssertTrue(
+            state.scrollViewDrawsBackground,
+            "NSScrollView must draw its white background"
+        )
+        assertColor(
+            state.scrollViewBackgroundColor,
+            matches: .white,
+            appearance: appearance,
+            message: "NSScrollView"
+        )
+        XCTAssertTrue(
+            state.clipViewDrawsBackground,
+            "NSClipView must draw its white background"
+        )
+        assertColor(
+            state.clipViewBackgroundColor,
+            matches: .white,
+            appearance: appearance,
+            message: "NSClipView"
+        )
+        assertColor(
+            try XCTUnwrap(state.documentViewLayerColor),
+            matches: .white,
+            appearance: appearance,
+            message: "documentView layer"
+        )
     }
 
     @MainActor
@@ -1095,6 +1251,88 @@ final class HelpManualTests: XCTestCase {
             matches.append(contentsOf: descendantViews(of: type, in: subview))
         }
         return matches
+    }
+
+    @MainActor
+    private func assertColor(
+        _ actual: NSColor,
+        matches expected: NSColor,
+        appearance: NSAppearance,
+        accuracy: CGFloat = 0.001,
+        message: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        typealias RGBA = (
+            red: CGFloat,
+            green: CGFloat,
+            blue: CGFloat,
+            alpha: CGFloat
+        )
+
+        func components(of color: NSColor) -> RGBA? {
+            guard let converted = color.usingColorSpace(.extendedSRGB) else {
+                return nil
+            }
+            return (
+                converted.redComponent,
+                converted.greenComponent,
+                converted.blueComponent,
+                converted.alphaComponent
+            )
+        }
+
+        var actualComponents: RGBA?
+        var expectedComponents: RGBA?
+        appearance.performAsCurrentDrawingAppearance {
+            actualComponents = components(of: actual)
+            expectedComponents = components(of: expected)
+        }
+
+        guard
+            let actualComponents,
+            let expectedComponents
+        else {
+            XCTFail(
+                "\(message) could not be resolved in extended sRGB",
+                file: file,
+                line: line
+            )
+            return
+        }
+
+        XCTAssertEqual(
+            actualComponents.red,
+            expectedComponents.red,
+            accuracy: accuracy,
+            "\(message) red",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            actualComponents.green,
+            expectedComponents.green,
+            accuracy: accuracy,
+            "\(message) green",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            actualComponents.blue,
+            expectedComponents.blue,
+            accuracy: accuracy,
+            "\(message) blue",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            actualComponents.alpha,
+            expectedComponents.alpha,
+            accuracy: accuracy,
+            "\(message) alpha",
+            file: file,
+            line: line
+        )
     }
 
     private static let validDocumentJSON = """
