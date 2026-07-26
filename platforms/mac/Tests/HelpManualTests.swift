@@ -350,6 +350,24 @@ final class HelpManualTests: XCTestCase {
         )
     }
 
+    func testBundledEnglishManualHasLocalizedImageForEveryReference() throws {
+        let bundle = Bundle(for: HelpManualTests.self)
+        let document = try HelpContentLoader(bundle: bundle).load(
+            language: .english
+        )
+
+        for imageName in document.chapters.flatMap(\.imageNames) {
+            XCTAssertNotNil(
+                bundle.url(
+                    forResource: imageName,
+                    withExtension: "png",
+                    subdirectory: "Help/Images/en"
+                ),
+                "Missing localized English help image: \(imageName)"
+            )
+        }
+    }
+
     func testEnglishManualUsesRuntimeProductTerminology() throws {
         let loader = HelpContentLoader(bundle: Bundle(for: HelpManualTests.self))
         let document = try loader.load(language: .english)
