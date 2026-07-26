@@ -7,6 +7,7 @@ final class StatusItemController: NSObject {
     private let hotKeyController: CaptureHotKeyController
     private let updateChecker: any UpdateChecking
     private let showPreferences: (PreferencesSection) -> Void
+    private let showHelp: @MainActor () -> Void
     private let terminationHandler: @MainActor () -> Void
     private let statusItem: NSStatusItem
 
@@ -16,6 +17,7 @@ final class StatusItemController: NSObject {
         hotKeyController: CaptureHotKeyController,
         updateChecker: any UpdateChecking,
         showPreferences: @escaping (PreferencesSection) -> Void,
+        showHelp: @escaping @MainActor () -> Void,
         terminationHandler: @escaping @MainActor () -> Void = {
             NSApplication.shared.terminate(nil)
         }
@@ -25,6 +27,7 @@ final class StatusItemController: NSObject {
         self.hotKeyController = hotKeyController
         self.updateChecker = updateChecker
         self.showPreferences = showPreferences
+        self.showHelp = showHelp
         self.terminationHandler = terminationHandler
         statusItem = NSStatusBar.system.statusItem(withLength: 92)
         super.init()
@@ -61,6 +64,10 @@ final class StatusItemController: NSObject {
 
     @objc func openDonation() {
         showPreferences(.donation)
+    }
+
+    @objc func openHelp() {
+        showHelp()
     }
 
     @objc func checkForUpdates() {
@@ -133,6 +140,11 @@ final class StatusItemController: NSObject {
         menu.addItem(NSMenuItem(
             title: strings.supportDeveloper,
             action: #selector(openDonation),
+            keyEquivalent: ""
+        ))
+        menu.addItem(NSMenuItem(
+            title: strings.help,
+            action: #selector(openHelp),
             keyEquivalent: ""
         ))
         menu.addItem(NSMenuItem(

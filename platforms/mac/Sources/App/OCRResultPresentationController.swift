@@ -7,6 +7,12 @@ final class OCRResultPresentationController {
         case failure
     }
 
+    fileprivate struct Copy {
+        let title: String
+        let detail: String?
+        let accessibilityLabel: String
+    }
+
     private static let panelSize = NSSize(width: 176, height: 124)
     private static let displayDuration: TimeInterval = 3
     private static let fadeDuration: TimeInterval = 0.35
@@ -14,10 +20,22 @@ final class OCRResultPresentationController {
 
     private var panel: NSPanel?
     private var fadeWorkItem: DispatchWorkItem?
+    private let languageProvider: () -> AppLanguage
     private let successSoundPlayer: (() -> Void)?
     private let successSound: NSSound?
 
-    init(successSoundPlayer: (() -> Void)? = nil) {
+    convenience init(successSoundPlayer: (() -> Void)? = nil) {
+        self.init(
+            languageProvider: { .zhHans },
+            successSoundPlayer: successSoundPlayer
+        )
+    }
+
+    init(
+        languageProvider: @escaping () -> AppLanguage,
+        successSoundPlayer: (() -> Void)? = nil
+    ) {
+        self.languageProvider = languageProvider
         self.successSoundPlayer = successSoundPlayer
         if successSoundPlayer == nil,
            let url = Bundle.main.url(forResource: "notification", withExtension: "mp3") {
@@ -66,7 +84,10 @@ final class OCRResultPresentationController {
         panel.hidesOnDeactivate = false
         panel.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
-        panel.contentView = OCRResultView(result: result)
+        panel.contentView = OCRResultView(
+            result: result,
+            copy: Self.copy(for: result, language: languageProvider())
+        )
         panel.setFrame(frame, display: false)
         panel.alphaValue = 1
         panel.orderFrontRegardless()
@@ -115,6 +136,35 @@ final class OCRResultPresentationController {
             height: panelSize.height
         )
     }
+
+    private static func copy(for result: Result, language: AppLanguage) -> Copy {
+        switch (language, result) {
+        case (.zhHans, .success):
+            return Copy(
+                title: "识别成功",
+                detail: "已复制到剪切板",
+                accessibilityLabel: "识别成功\n已复制到剪切板"
+            )
+        case (.zhHans, .failure):
+            return Copy(
+                title: "识别失败",
+                detail: nil,
+                accessibilityLabel: "识别失败"
+            )
+        case (.english, .success):
+            return Copy(
+                title: "Recognition Successful",
+                detail: "Copied to Clipboard",
+                accessibilityLabel: "Recognition Successful\nCopied to Clipboard"
+            )
+        case (.english, .failure):
+            return Copy(
+                title: "Recognition Failed",
+                detail: nil,
+                accessibilityLabel: "Recognition Failed"
+            )
+        }
+    }
 }
 
 private extension NSRect {
@@ -125,7 +175,10 @@ private extension NSRect {
 
 @MainActor
 private final class OCRResultView: NSView {
-    init(result: OCRResultPresentationController.Result) {
+    init(
+        result: OCRResultPresentationController.Result,
+        copy: OCRResultPresentationController.Copy
+    ) {
         super.init(frame: NSRect(origin: .zero, size: NSSize(width: 176, height: 124)))
         wantsLayer = true
         layer?.backgroundColor = NSColor(calibratedWhite: 0.98, alpha: 0.96).cgColor
@@ -145,7 +198,7 @@ private final class OCRResultView: NSView {
             iconView.heightAnchor.constraint(equalToConstant: 30),
         ])
 
-        let title = NSTextField(labelWithString: result == .success ? "识别成功" : "识别失败")
+        let title = NSTextField(labelWithString: copy.title)
         title.font = .systemFont(ofSize: 16, weight: .semibold)
         title.textColor = .labelColor
         title.alignment = .center
@@ -158,16 +211,14 @@ private final class OCRResultView: NSView {
         contentStack.addArrangedSubview(iconView)
         contentStack.addArrangedSubview(title)
 
-        if result == .success {
-            let detail = NSTextField(labelWithString: "已复制到剪切板")
+        if let detailCopy = copy.detail {
+            let detail = NSTextField(labelWithString: detailCopy)
             detail.font = .systemFont(ofSize: 13)
             detail.textColor = .secondaryLabelColor
             detail.alignment = .center
             contentStack.addArrangedSubview(detail)
-            setAccessibilityLabel("识别成功\n已复制到剪切板")
-        } else {
-            setAccessibilityLabel("识别失败")
         }
+        setAccessibilityLabel(copy.accessibilityLabel)
 
         addSubview(contentStack)
         NSLayoutConstraint.activate([

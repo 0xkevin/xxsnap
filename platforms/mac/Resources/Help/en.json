@@ -1,0 +1,592 @@
+{
+  "version": 1,
+  "language": "en",
+  "windowTitle": "XxSnap Help",
+  "chapters": [
+    {
+      "id": "capture",
+      "navigationTitle": "Capture",
+      "title": "Capture",
+      "introduction": "Use Region Capture for part of a window, Full Screen Capture for everything visible on the desktop, and Scroll Capture for content that does not fit on one screen.",
+      "tableOfContents": [
+        "Region Capture",
+        "Adjust the Selection",
+        "Annotation Tools",
+        "Finish a Capture",
+        "Full Screen Capture",
+        "Scroll Capture",
+        "Common Questions"
+      ],
+      "shortcuts": [
+        { "action": "Capture (Region Capture, default)", "keys": ["⌘", "`"] },
+        { "action": "Full Screen Capture (default)", "keys": ["⌘", "⇧", "1"] },
+        { "action": "Copy", "keys": ["⌘", "C"] },
+        { "action": "Save", "keys": ["⌘", "S"] },
+        { "action": "Pin", "keys": ["⌘", "1"] },
+        { "action": "Undo", "keys": ["⌘", "Z"] },
+        { "action": "Redo", "keys": ["⌘", "⇧", "Z"] },
+        { "action": "Exit the current tool / Cancel capture", "keys": ["Esc"] }
+      ],
+      "blocks": [
+        { "type": "heading", "level": 2, "text": "Region Capture" },
+        { "type": "paragraph", "text": "Choose Capture from the menu or press its current shortcut. The default is Command+`. The screen freezes on the current frame. Drag to select an area and release the mouse to lock it; the toolbar then appears. You can change or disable the default shortcuts for Region Capture and Full Screen Capture in Settings. Check the menu or Settings for the current keys." },
+        {
+          "type": "steps",
+          "items": [
+            { "text": "Move the pointer to one corner of the content you want, then hold the mouse button and start dragging.", "keys": ["⌘", "`"] },
+            { "text": "Release at the opposite corner. Check the edges, then annotate the image or copy it right away."}
+          ]
+        },
+        {
+          "type": "image",
+          "name": "capture-region-overview",
+          "caption": "After a Region Capture is locked, its dimensions, selection border, and toolbar appear together.",
+          "accessibilityLabel": "Region Capture screen with a locked selection in the center and the annotation toolbar below"
+        },
+        { "type": "heading", "level": 2, "text": "Adjust the Selection" },
+        { "type": "paragraph", "text": "Drag inside the selection to move it. Drag an edge or corner handle to change its width or height. To start over, click outside the selection and drag again." },
+        {
+          "type": "bullets",
+          "items": [
+            "If an edge is slightly off, use a handle to fine-tune it instead of starting a new capture.",
+            "When the selection is too small for the toolbar, the toolbar moves to an area with more room.",
+            "If an annotation tool is active, press Esc once to leave that tool and press Esc again to cancel the capture."
+          ]
+        },
+        {
+          "type": "image",
+          "name": "capture-selection-adjust",
+          "caption": "Drag a border handle to tighten the selection around the content you actually need.",
+          "accessibilityLabel": "Capture selection border and handles while the lower-right corner is being adjusted"
+        },
+        { "type": "heading", "level": 2, "text": "Toolbar" },
+        { "type": "paragraph", "text": "Annotation tools are on the left. Undo, Redo, Save, Copy, and Pin are on the right. Choose a tool to see its line width, color, and style options." },
+        {
+          "type": "image",
+          "name": "capture-toolbar-overview",
+          "caption": "The capture toolbar keeps annotation and output actions in one row.",
+          "accessibilityLabel": "Complete toolbar below a capture selection with annotation, undo, save, copy, and pin buttons"
+        },
+        { "type": "heading", "level": 3, "text": "Color Picker and Distance" },
+        { "type": "paragraph", "text": "Choose the color picker to read the color under the pointer. Press C to copy the current color. Press Shift to switch the display and copied value between HEX and RGB." },
+        {
+          "type": "note",
+          "title": "Measure a distance",
+          "text": "Click once to set the start point, release, move the pointer, and click again to set the end point. Hold Shift while moving or setting the end point to snap the line to the nearest horizontal, vertical, or 45-degree direction."
+        },
+        { "type": "heading", "level": 3, "text": "Shapes" },
+        { "type": "paragraph", "text": "The shape tool draws rectangles and ellipses. Choose the shape, line width, line style, color, and fill setting, then drag from one corner to the other." },
+        {
+          "type": "note",
+          "title": "After drawing",
+          "text": "Click a shape to select it again, then move it, resize it, or change its style."
+        },
+        { "type": "heading", "level": 3, "text": "Arrows" },
+        { "type": "paragraph", "text": "Start near the label or note, then drag toward the item it refers to. Release to place the arrow. Options let you change the width, solid or dashed style, start and end caps, and color." },
+        {
+          "type": "note",
+          "title": "Curve an arrow",
+          "text": "Select the arrow and drag its middle handle to bend a straight line into a curve."
+        },
+        { "type": "heading", "level": 3, "text": "Pen" },
+        { "type": "paragraph", "text": "The Pen tool follows the pointer continuously, making it useful for circling items and handwriting. Choose a width, line style, and color, then hold the mouse button while drawing." },
+        {
+          "type": "note",
+          "title": "Write small text",
+          "text": "Thin strokes keep small handwriting readable. If one stroke is wrong, Undo is usually cleaner than rubbing over it with the eraser."
+        },
+        { "type": "heading", "level": 3, "text": "Highlighter" },
+        { "type": "paragraph", "text": "The highlighter adds a translucent band over the image. Choose a width and color, then drag along the sentence or area you want to emphasize." },
+        {
+          "type": "note",
+          "title": "Keep lines neat",
+          "text": "Drag from the start of one line of text to the end, release, and then mark the next line."
+        },
+        { "type": "heading", "level": 3, "text": "Redact" },
+        { "type": "paragraph", "text": "Use Redact to obscure account names, faces, or anything else you do not want to keep. Choose a freehand or rectangular redaction area, then apply Gaussian blur or pixelation. You can also adjust the strength and freehand brush size." },
+        {
+          "type": "warning",
+          "title": "Cover a little extra",
+          "text": "Extend the redaction area slightly past the text or face. Zoom in and check every edge before saving."
+        },
+        { "type": "heading", "level": 3, "text": "Text" },
+        { "type": "paragraph", "text": "Click the image and start typing. Options include font, size, bold, italic, outline, and color. Return starts a new line. Clicking outside the text box, switching tools, or using an output action such as Copy, Save, or Pin commits nonempty text." },
+        {
+          "type": "note",
+          "title": "Edit text",
+          "text": "Select text again to move it or change its style. Enter text editing mode when you need to change the words."
+        },
+        { "type": "heading", "level": 3, "text": "Numbers, Check Marks, and Crosses" },
+        { "type": "paragraph", "text": "The marker tool switches between numbered markers, check marks, and crosses. Numbers increase with each click and work well for steps. Check marks and crosses are useful for marking results." },
+        {
+          "type": "note",
+          "title": "Placed in the wrong spot",
+          "text": "Undo the marker you just placed, then click the correct position. This avoids leaving an extra number in the image."
+        },
+        { "type": "heading", "level": 3, "text": "Magnifier" },
+        { "type": "paragraph", "text": "Drag out a magnifier where you need a closer look. Choose a circle or rectangle, border width, zoom level, and color." },
+        {
+          "type": "note",
+          "title": "Choose the right position",
+          "text": "When you move the magnifier, it samples the original capture at its new position. It does not magnify annotations added later. Leave some surrounding context so the detail is easy to understand."
+        },
+        { "type": "heading", "level": 3, "text": "Eraser" },
+        { "type": "paragraph", "text": "The eraser only removes annotations added during this capture; it never erases the original image. Remove one stroke at a time, drag around several annotations, or use Clear All to remove them all." },
+        {
+          "type": "note",
+          "title": "Removed something by mistake",
+          "text": "Press Command+Z right away to undo. Command+Shift+Z reapplies the action."
+        },
+        {
+          "type": "image",
+          "name": "capture-annotation-tools",
+          "caption": "Each tool opens its own style options, and you can change colors and line widths at any time.",
+          "accessibilityLabel": "Capture editor with annotation tools and style options open, showing shapes, arrows, text, and redaction areas"
+        },
+        { "type": "heading", "level": 2, "text": "Finish a Capture" },
+        { "type": "paragraph", "text": "Copy puts the current selection and its annotations on the clipboard. Save opens a file panel. Pin keeps the same image on the desktop for reference." },
+        {
+          "type": "bullets",
+          "items": [
+            "Command+C: Copy the current result and finish the capture.",
+            "Command+S: Choose a file name and folder, then save.",
+            "Command+1: Create a Pin from the current result.",
+            "Command+Z and Command+Shift+Z: Undo or redo an annotation.",
+            "Esc: Leave the active annotation tool first, then press it again to cancel the capture."
+          ]
+        },
+        {
+          "type": "shortcuts",
+          "items": [
+            { "action": "Copy", "keys": ["⌘", "C"] },
+            { "action": "Save", "keys": ["⌘", "S"] },
+            { "action": "Pin", "keys": ["⌘", "1"] },
+            { "action": "Undo", "keys": ["⌘", "Z"] },
+            { "action": "Redo", "keys": ["⌘", "⇧", "Z"] },
+            { "action": "Exit the current tool / Cancel capture", "keys": ["Esc"] }
+          ]
+        },
+        { "type": "heading", "level": 2, "text": "Full Screen Capture" },
+        { "type": "paragraph", "text": "Choose Full Screen Capture from the menu or press its current shortcut, which is Command+Shift+1 by default. XxSnap captures the entire visible desktop. A thumbnail first appears in the lower-right corner, and the preview has no buttons along the bottom. Click the thumbnail to open the Full Screen Capture editor. Right-click it for Show Toolbar, Pin, Copy Image, Save Image, and Close." },
+        {
+          "type": "image",
+          "name": "capture-fullscreen-preview",
+          "caption": "After a Full Screen Capture, the lower-right thumbnail previews the entire desktop.",
+          "accessibilityLabel": "Full Screen Capture thumbnail in the lower-right corner; click to open the editor or right-click for more actions"
+        },
+        { "type": "paragraph", "text": "The Full Screen Capture editor uses the same annotation tools as Region Capture. Copying or saving includes the whole desktop and every annotation on the canvas." },
+        {
+          "type": "image",
+          "name": "capture-fullscreen-editor",
+          "caption": "The Full Screen Capture editor keeps the whole desktop and provides the same annotation tools as Region Capture.",
+          "accessibilityLabel": "Full Screen Capture editor showing the desktop with arrow and text annotations and the complete toolbar below"
+        },
+        { "type": "heading", "level": 2, "text": "Scroll Capture" },
+        { "type": "paragraph", "text": "Start with Region Capture, place the selection inside scrollable content, and choose Scroll Capture. XxSnap first asks for Accessibility permission because automatic scrolling, blocking the physical scroll wheel, and global key handling all depend on it. Without permission, macOS asks you to allow access, this Scroll Capture ends, and the original selection returns." },
+        {
+          "type": "steps",
+          "items": [
+            { "text": "Select the content area of a webpage, document, or list, leaving out any fixed sidebar."},
+            { "text": "Choose Scroll Down or Scroll Up from the direction menu."},
+            { "text": "Click Start Scroll Step to let XxSnap move the target page and capture the next section. Wait for the button to become available before starting another step."}
+          ]
+        },
+        { "type": "heading", "level": 3, "text": "Direction Lock" },
+        { "type": "paragraph", "text": "After the first successful step, the direction locks and the direction menu becomes unavailable. Every later step continues in the same direction; you cannot reverse it." },
+        {
+          "type": "bullets",
+          "items": [
+            "XxSnap blocks your physical scroll wheel during capture. Do not scroll the target page yourself.",
+            "Move one step at a time. Check that the preview joins correctly before starting the next step.",
+            "At the end of the page, the Start button becomes unavailable. You can then finish the Scroll Capture."
+          ]
+        },
+        {
+          "type": "image",
+          "name": "capture-scroll-session",
+          "caption": "The step-by-step scrolling panel lets you choose a direction, capture the next section, or finish at any time.",
+          "accessibilityLabel": "Scroll Capture screen with a direction menu, Start Scroll Step and Finish Scroll Capture buttons, and a preview of the accepted long image"
+        },
+        { "type": "heading", "level": 3, "text": "Capture Preview" },
+        { "type": "paragraph", "text": "The preview does not accept mouse input. It only shows the complete accepted image and a position marker, so you cannot browse it manually. After each step, check that the new section joined where you expected." },
+        { "type": "heading", "level": 3, "text": "Finish or Cancel" },
+        { "type": "paragraph", "text": "The Finish Scroll Capture and Cancel buttons in the toolbar are always reliable. Return or Enter finishes, and Esc cancels, but these global keys require Accessibility permission. If a key does nothing, click the button instead. Cancel returns to the original locked selection with the capture and annotations from before scrolling." },
+        { "type": "heading", "level": 3, "text": "Pauses and Resource Limits" },
+        { "type": "paragraph", "text": "Page animation or too little overlap can pause stitching. Wait for the page to settle and try one more step. If no new content appears, finish the image you have, or cancel, make the selection smaller, and try again." },
+        { "type": "paragraph", "text": "When XxSnap reaches the resource limit, it pauses the capture and stops accepting new frames. Everything already captured is kept. Finish with the current image or cancel." },
+        {
+          "type": "image",
+          "name": "capture-long-editor",
+          "caption": "When the long image is ready, it opens in a separate editor where you can annotate and export it.",
+          "accessibilityLabel": "Long Capture Editor with a vertical scrolling capture centered on the canvas, surrounded by scrolling and annotation controls"
+        },
+        { "type": "heading", "level": 2, "text": "Common Questions" },
+        {
+          "type": "faq",
+          "items": [
+            {
+              "question": "Why does the capture screen not appear when I press the shortcut?",
+              "answer": "First check that XxSnap is running in the menu bar. Then open the Screen Recording section of System Settings and make sure XxSnap is allowed. If the shortcut is disabled in Settings, start the capture from the menu."
+            },
+            {
+              "question": "Can I change the area after locking the selection?",
+              "answer": "Yes. Drag inside to move the selection, or drag an edge or corner handle to resize it."
+            },
+            {
+              "question": "How do I copy a capture without saving a file?",
+              "answer": "After locking the selection, click Copy or press Command+C. The result goes to the clipboard without opening a save panel."
+            },
+            {
+              "question": "What should I do if I draw the wrong annotation?",
+              "answer": "Press Command+Z to undo. If you undo too far, press Command+Shift+Z to redo, or use the eraser on a particular stroke."
+            },
+            {
+              "question": "Why does Scroll Capture quit as soon as it starts?",
+              "answer": "Allow XxSnap in the Accessibility section of System Settings. Without this permission, XxSnap cannot block the physical scroll wheel or move the page automatically, so Scroll Capture ends and restores the original selection."
+            },
+            {
+              "question": "Why do Return, Enter, or Esc sometimes do nothing?",
+              "answer": "These keys use a global listener that also needs Accessibility permission. The Finish Scroll Capture and Cancel buttons do not depend on global keys and are the most reliable controls."
+            },
+            {
+              "question": "Can I preview a Full Screen Capture before saving it?",
+              "answer": "Yes. Start Full Screen Capture from the menu or its current shortcut, which is Command+Shift+1 by default. The result opens in a preview first, so you can check it before copying, saving, or opening the editor."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pin",
+      "navigationTitle": "Pin",
+      "title": "Pin",
+      "introduction": "Pin keeps a captured image on your desktop. It is handy when you are checking figures, reading a reference, or transcribing from an image and do not want to switch windows repeatedly.",
+      "tableOfContents": [
+        "Create a Pin",
+        "Move and Scale",
+        "Right-Click Menu",
+        "Keep Annotating",
+        "Hide and Close",
+        "Common Questions"
+      ],
+      "shortcuts": [
+        { "action": "Create a Pin from the current capture", "keys": ["⌘", "1"] },
+        { "action": "Exit tool / Finish editing / Hide Pin", "keys": ["Esc"] },
+        { "action": "Restore most recently hidden pin (default)", "keys": ["⌘", "1"] }
+      ],
+      "blocks": [
+        { "type": "heading", "level": 2, "text": "Create a Pin" },
+        { "type": "paragraph", "text": "After locking a Region Capture, click Pin or press Command+1. You can also make a Pin from the current result in a full-screen preview, the Full Screen Capture editor, or the Long Capture Editor." },
+        {
+          "type": "bullets",
+          "items": [
+            "A Region Capture keeps the current selection and all annotations already on it.",
+            "A Full Screen Capture pins the complete desktop.",
+            "A Scroll Capture pins the finished long image."
+          ]
+        },
+        {
+          "type": "image",
+          "name": "pin-overview",
+          "caption": "Pins float above other windows and initially show the capture exactly as it was created.",
+          "accessibilityLabel": "Desktop with two Pin windows, one showing a Region Capture and one showing a vertical long image"
+        },
+        { "type": "heading", "level": 2, "text": "Initial Position and Content" },
+        { "type": "paragraph", "text": "A Pin created from Region Capture appears near the original selection. Large images are scaled down to fit the available space on the current screen, but their content is not cropped. Choose Reset Size from the right-click menu to return to the screen-fitted size used when the Pin was created." },
+        { "type": "heading", "level": 2, "text": "Move and Scale" },
+        { "type": "paragraph", "text": "Hold and drag a Pin to move it. Scroll up to enlarge it or down to shrink it. A two-finger pinch on a trackpad also scales the Pin around the pointer." },
+        {
+          "type": "image",
+          "name": "pin-scale-opacity",
+          "caption": "Each Pin can be scaled and made translucent without changing the original captured image.",
+          "accessibilityLabel": "A translucent Pin being scaled beside a menu with opacity choices from 100 percent to 40 percent"
+        },
+        { "type": "heading", "level": 2, "text": "Right-Click Menu" },
+        { "type": "paragraph", "text": "Right-click a Pin for the full menu: Show Toolbar, Copy Image, Save Image, Reset Size, 100%/80%/60%/40% opacity, Always on Top, Close, and Close All Pins. You can also press Command+C to copy or Command+S to save." },
+        {
+          "type": "image",
+          "name": "pin-context-menu",
+          "caption": "The right-click menu groups copy, save, size, opacity, always-on-top, and close actions.",
+          "accessibilityLabel": "Open Pin menu showing Show Toolbar, Copy Image, Save Image, Reset Size, Opacity, Always on Top, Close, and Close All Pins"
+        },
+        { "type": "heading", "level": 2, "text": "Show the Toolbar and Keep Annotating" },
+        { "type": "paragraph", "text": "Choose Show Toolbar from the right-click menu, or press Shift once, to add shapes, arrows, pen strokes, text, and other annotations to the Pin. New annotations remain part of that Pin after you finish editing and are included when you copy or save it." },
+        {
+          "type": "image",
+          "name": "pin-toolbar",
+          "caption": "With the Pin toolbar open, you can add annotations directly to the current image.",
+          "accessibilityLabel": "Annotation toolbar below a Pin with a newly added arrow and text on the image"
+        },
+        { "type": "heading", "level": 2, "text": "Opacity and Always on Top" },
+        { "type": "paragraph", "text": "Opacity only changes how the Pin window looks on screen. Copy and Save still use the original opaque image. With Always on Top enabled, the Pin stays above normal windows. Turn it off to return the Pin to the usual window level." },
+        { "type": "heading", "level": 2, "text": "Hide, Restore, and Close" },
+        {
+          "type": "bullets",
+          "items": [
+            "When the toolbar is hidden, Esc hides the Pin immediately. Hiding keeps its content so you can restore it later.",
+            "When the toolbar is visible but no main tool is active, Esc first ends editing and hides the toolbar. The Pin stays visible.",
+            "When a main tool is active, the first Esc leaves the tool, the second ends editing and hides the toolbar, and the third hides the Pin.",
+            "Restore most recently hidden pin brings back only the last Pin you hid. Command+1 is the default shortcut. View, change, or disable the shortcut in Settings. If you disable it, hidden Pins cannot be restored.",
+            "When the toolbar is hidden, Delete or Backspace closes the current Pin. Close in the right-click menu does the same thing.",
+            "While the editing toolbar is visible, Delete or Backspace may remove the selected annotation. Do not rely on those keys as fixed close shortcuts.",
+            "Close All Pins closes every Pin that still exists.",
+            "You can keep several Pins open. Each one can be moved, scaled, given its own opacity, and kept on top independently."
+          ]
+        },
+        {
+          "type": "note",
+          "title": "Command+1 has two separate uses",
+          "text": "During capture editing, Command+1 creates a Pin from the current result. Outside the capture flow, Command+1 is also the default shortcut for restoring the most recently hidden Pin. Open Settings to view, change, or disable the restore shortcut. When it is disabled, there is no command available to restore a hidden Pin."
+        },
+        { "type": "heading", "level": 2, "text": "Common Questions" },
+        {
+          "type": "faq",
+          "items": [
+            {
+              "question": "What can I do if a Pin covers the place where I am typing?",
+              "answer": "Drag it to another part of the screen or scroll to make it smaller. If the toolbar is hidden, Esc hides the Pin immediately. If you are editing, press Esc to leave the active tool and editing state first."
+            },
+            {
+              "question": "Why does one press of Esc not hide the Pin?",
+              "answer": "Esc handles the current editing state first. If a main tool is active, press it three times: leave the tool, finish editing and hide the toolbar, then hide the Pin. If the toolbar is visible with no active tool, press it twice. If the toolbar is already hidden, press it once."
+            },
+            {
+              "question": "Why do creating and restoring a Pin both use Command+1?",
+              "answer": "They apply in different places. Command+1 creates a Pin while you are editing a capture. Outside capture editing, it is the default shortcut for restoring the most recently hidden Pin. Settings shows the current restore shortcut and lets you change or disable it."
+            },
+            {
+              "question": "Can I restore a Pin after closing it?",
+              "answer": "No. Restore only works for the most recent Pin hidden with Esc. Closing ends that Pin."
+            },
+            {
+              "question": "How do I remove every Pin at once?",
+              "answer": "Right-click any Pin and choose Close All Pins."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ocr",
+      "navigationTitle": "Capture Text",
+      "title": "Capture Text",
+      "introduction": "Capture Text reads the selected area and copies the result straight to the clipboard. Recognition happens entirely on your Mac, and the image is never uploaded.",
+      "tableOfContents": [
+        "Start Capture Text",
+        "Success and Failure Messages",
+        "Capture Text Settings",
+        "Supported Text",
+        "Use It While Editing",
+        "Improve Recognition",
+        "Common Questions"
+      ],
+      "shortcuts": [
+        { "action": "Start Capture Text (default)", "keys": ["⌘", "3"] },
+        { "action": "Cancel selection", "keys": ["Esc"] }
+      ],
+      "blocks": [
+        { "type": "heading", "level": 2, "text": "Start Capture Text" },
+        { "type": "paragraph", "text": "Command+3 is the default shortcut for Capture Text. You can change or disable it in Settings; check the menu or Settings for the current keys. Start it from the menu or press the current shortcut, then drag around the text. Recognition and copying begin automatically when you release the mouse. There is no toolbar and no extra confirmation button." },
+        {
+          "type": "steps",
+          "items": [
+            { "text": "Choose Capture Text from the menu or press its current shortcut, which is Command+3 by default, and wait for the screen to freeze.", "keys": ["⌘", "3"] },
+            { "text": "Drag from one corner of the text block to the opposite corner, leaving a small margin around the letters."},
+            { "text": "Release the mouse. When the success message appears, switch to the destination app and paste."}
+          ]
+        },
+        {
+          "type": "image",
+          "name": "ocr-selection",
+          "caption": "Select only the text you need to reduce interference from icons and borders.",
+          "accessibilityLabel": "Capture Text selection tightly surrounding two lines of horizontal text with no toolbar on screen"
+        },
+        { "type": "heading", "level": 2, "text": "Success Message" },
+        { "type": "paragraph", "text": "After recognition succeeds and the text reaches the clipboard, XxSnap shows a success message and plays a sound. The message stays for about three seconds, then fades out." },
+        {
+          "type": "image",
+          "name": "ocr-success",
+          "caption": "When the success message appears, the recognized text is already on the clipboard.",
+          "accessibilityLabel": "Capture Text success message near the lower middle of the screen saying that the result was copied to the clipboard"
+        },
+        { "type": "heading", "level": 2, "text": "Failure Message" },
+        { "type": "paragraph", "text": "A failure message appears if no text was found, the image could not be read, or the clipboard could not be updated. It also fades after about three seconds. Failures do not play the success sound." },
+        {
+          "type": "image",
+          "name": "ocr-failure",
+          "caption": "A failure message means that no new recognition result was added to the clipboard.",
+          "accessibilityLabel": "Capture Text failure message near the lower middle of the screen asking the user to select the text again"
+        },
+        { "type": "heading", "level": 2, "text": "Capture Text Settings" },
+        { "type": "paragraph", "text": "Disable Capture Text sound in Settings only turns off the sound after a successful recognition. Disable Capture Text notification hides the success message. Failure messages always remain visible so you do not mistake an unchanged clipboard for a new result." },
+        {
+          "type": "image",
+          "name": "ocr-settings",
+          "caption": "The sound and success message can be disabled separately. Failure messages are not affected by either setting.",
+          "accessibilityLabel": "XxSnap Settings showing the Disable Capture Text sound and Disable Capture Text notification switches and their descriptions"
+        },
+        { "type": "heading", "level": 2, "text": "Supported Text Layouts" },
+        { "type": "paragraph", "text": "Capture Text handles both horizontal and vertical text, with basic support for mixed Chinese, English, and Korean. For multiple columns or changing text directions, separate selections usually give better results." },
+        { "type": "heading", "level": 2, "text": "Use It While Editing" },
+        { "type": "paragraph", "text": "Capture Text can run independently while the Long Capture Editor, Full Screen Capture editor, or Presentation Pen is open. It does not end the task you were already working on. When recognition finishes, return to the previous screen and keep going." },
+        { "type": "heading", "level": 2, "text": "Capture Text with Presentation Pen" },
+        { "type": "paragraph", "text": "If Presentation Pen is visible when Capture Text starts, your existing annotations stay on screen, but Presentation Pen temporarily stops accepting mouse input. When recognition finishes, the previous interaction state returns and your drawings remain intact." },
+        { "type": "heading", "level": 2, "text": "Recognition Stays on Your Mac" },
+        { "type": "paragraph", "text": "The current OCR runs locally and does not upload the selected image. Recognized content can still include private information such as accounts or addresses, so take a quick look at the result before pasting." },
+        { "type": "heading", "level": 2, "text": "Improve Recognition" },
+        {
+          "type": "bullets",
+          "items": [
+            "Small text or a low-resolution image: Enlarge the content before selecting it again.",
+            "Decorative fonts, handwriting, or heavy shadows: Use a clearer, higher-contrast image and recognize one line at a time when needed.",
+            "Icons, table lines, or unrelated text inside the selection: Tighten the area, but keep a small margin around the letters.",
+            "Vertical and horizontal text mixed together: Make separate selections for each text direction.",
+            "Similar text and background colors: Use the original image or increase its contrast before trying again."
+          ]
+        },
+        { "type": "heading", "level": 2, "text": "Common Questions" },
+        {
+          "type": "faq",
+          "items": [
+            {
+              "question": "Where is the text after recognition succeeds?",
+              "answer": "It is already on the system clipboard. Switch to a text field or document and press Command+V to paste it."
+            },
+            {
+              "question": "Why is there no toolbar?",
+              "answer": "Capture Text is a direct recognition mode. It starts as soon as you release the selection, so the capture annotation toolbar never appears. The default shortcut is Command+3. If you changed it, use the current keys; if it is disabled, start from the menu."
+            },
+            {
+              "question": "Will a failure still appear if I turn off success notifications?",
+              "answer": "Yes. That setting only hides success notifications. Failure messages always appear."
+            },
+            {
+              "question": "What should I do if vertical text comes out in the wrong order?",
+              "answer": "Select one column, or a few columns that run in the same direction, and leave out nearby horizontal headings. Then try again."
+            },
+            {
+              "question": "Is the selected image sent to a server?",
+              "answer": "No. The current OCR runs on your Mac and never uploads the selected image."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "teaching-pen",
+      "navigationTitle": "Presentation Pen",
+      "title": "Presentation Pen",
+      "introduction": "Presentation Pen places annotations directly over the current desktop, which is useful for explaining an interface or presenting in a remote meeting. The screen keeps its original colors, and Pen is the default tool.",
+      "tableOfContents": [
+        "Enter and Exit",
+        "Compact Toolbar",
+        "Tools and Styles",
+        "Select and Edit",
+        "Use with Capture Text",
+        "Multiple Displays",
+        "Common Questions"
+      ],
+      "shortcuts": [
+        { "action": "Enter or exit Presentation Pen (default)", "keys": ["⌘", "2"] },
+        { "action": "Show or hide the toolbar", "keys": ["Right-click"] },
+        { "action": "Delete the selected annotation", "keys": ["Delete"] }
+      ],
+      "blocks": [
+        { "type": "heading", "level": 2, "text": "Enter and Exit" },
+        { "type": "paragraph", "text": "Command+2 is the default shortcut for entering or exiting Presentation Pen. You can change or disable it in Settings; check the menu or Settings for the current keys. Start from the menu or press the current shortcut. Presentation Pen covers the desktop without dimming it. Draw immediately with the default Pen tool, then use the menu or current shortcut again to exit." },
+        {
+          "type": "image",
+          "name": "teaching-pen-overview",
+          "caption": "Presentation Pen keeps the desktop at its original brightness while annotations float above it.",
+          "accessibilityLabel": "Full-screen Presentation Pen canvas over the original desktop with a red handwritten circle and arrow"
+        },
+        { "type": "heading", "level": 2, "text": "Compact Toolbar" },
+        { "type": "paragraph", "text": "Right-click the canvas to open the compact toolbar beside the pointer. Right-click again to hide it. After choosing a tool, start drawing on the canvas and the toolbar hides automatically." },
+        {
+          "type": "image",
+          "name": "teaching-pen-toolbar",
+          "caption": "The compact toolbar appears near the right-click position, with two columns of buttons for quick tool changes.",
+          "accessibilityLabel": "Vertical compact toolbar in two columns beside the right-click position on the Presentation Pen canvas"
+        },
+        { "type": "heading", "level": 3, "text": "Pen" },
+        { "type": "paragraph", "text": "Pen is the default tool. Hold the mouse button to draw or write. Options include three widths, line styles, and colors." },
+        { "type": "heading", "level": 3, "text": "Shapes" },
+        { "type": "paragraph", "text": "Draw a rectangle or ellipse and choose whether it is filled. You can also change the line width, style, and color." },
+        { "type": "heading", "level": 3, "text": "Arrows" },
+        { "type": "paragraph", "text": "Drag from the arrow's tail toward the item you want to highlight. Set its line width, style, end caps, and color. Select the arrow and drag its middle handle to adjust the curve." },
+        { "type": "heading", "level": 3, "text": "Highlighter" },
+        { "type": "paragraph", "text": "The highlighter draws a translucent band. Choose a width and color, then drag over the text or area you are discussing." },
+        { "type": "heading", "level": 3, "text": "Text" },
+        { "type": "paragraph", "text": "Click the canvas and type. Return starts a new line. Clicking outside the text box or switching tools commits nonempty text. Options include bold, italic, outline, font, size, and color." },
+        { "type": "heading", "level": 3, "text": "Numbered Markers" },
+        { "type": "paragraph", "text": "The marker tool can also use check marks or crosses. With numbered markers selected, each click adds the next number. Options let you change the marker type, size, and color." },
+        { "type": "heading", "level": 3, "text": "Redact" },
+        { "type": "paragraph", "text": "Redact covers a freehand or rectangular redaction area with Gaussian blur or pixelation. You can also adjust the strength and freehand brush size." },
+        { "type": "heading", "level": 3, "text": "Color Picker" },
+        { "type": "paragraph", "text": "Move the pointer over the desktop to update the color value. Press C to copy the current color and Shift to switch between HEX and RGB. Click twice to set the start and end points for a distance measurement." },
+        { "type": "heading", "level": 3, "text": "Eraser" },
+        { "type": "paragraph", "text": "The eraser removes individual strokes or a selected group of annotations. Clear All removes every annotation from the Presentation Pen canvas without changing the desktop underneath." },
+        { "type": "heading", "level": 3, "text": "Magnifier" },
+        { "type": "paragraph", "text": "Drag out an area to magnify part of the screen. Choose a circle or rectangle, border width, zoom level, and color. Moving it samples the original desktop at the new position and does not include annotations added later." },
+        { "type": "heading", "level": 3, "text": "Copy" },
+        { "type": "paragraph", "text": "Copy captures the complete current desktop with all Presentation Pen annotations and puts it on the clipboard. Presentation Pen exits when the operation finishes." },
+        { "type": "heading", "level": 3, "text": "Save" },
+        { "type": "paragraph", "text": "Save writes the complete current desktop and all Presentation Pen annotations to the file you choose. Canceling the save panel does not create a file." },
+        {
+          "type": "image",
+          "name": "teaching-pen-options",
+          "caption": "Each tool shows only its relevant styles, with common widths and colors grouped in a narrow panel.",
+          "accessibilityLabel": "Style panel beside the Presentation Pen toolbar showing line width, line style, arrow ends, and color options"
+        },
+        { "type": "heading", "level": 2, "text": "Select, Move, and Delete" },
+        { "type": "paragraph", "text": "If a main tool is still active, press Esc first to leave it. Shapes, arrows, highlighter marks, text, numbered markers, freehand or rectangular redaction regions, and magnifiers can be selected and moved later. Drag handles to resize shapes, text, numbered markers, rectangular redaction regions, and magnifiers. Arrows and highlighter marks have their own adjustment handles. Pen strokes cannot be selected by clicking or resized directly. Press Delete or Backspace to remove the selected item." },
+        { "type": "heading", "level": 2, "text": "Separate from Capture" },
+        { "type": "paragraph", "text": "Presentation Pen, Region Capture, Full Screen Capture, and Capture Text are separate features. Presentation Pen never turns into Region Capture automatically. To keep the screen you are presenting, use Copy or Save in the Presentation Pen toolbar." },
+        { "type": "heading", "level": 2, "text": "Use with Capture Text" },
+        { "type": "paragraph", "text": "You can start Capture Text independently while Presentation Pen is visible. During the OCR selection, existing annotations remain visible, but Presentation Pen temporarily stops accepting mouse input. When recognition finishes, the annotations become interactive again and none of their content is lost." },
+        {
+          "type": "image",
+          "name": "teaching-pen-ocr",
+          "caption": "Presentation Pen annotations remain visible during a Capture Text selection, but cannot be moved until recognition finishes.",
+          "accessibilityLabel": "Red Presentation Pen annotations remaining on screen beside a Capture Text selection and recognition status"
+        },
+        { "type": "heading", "level": 2, "text": "Multiple Displays and Exiting" },
+        {
+          "type": "bullets",
+          "items": [
+            "Presentation Pen works across the entire desktop. Each display keeps its original colors and position.",
+            "The toolbar stays within the visible area of the display where you right-click. Near an edge, it opens on the other side of the pointer.",
+            "Use the menu or current shortcut again to exit normally. The default shortcut is Command+2. Copying or saving also ends the current Presentation Pen session.",
+            "Annotations that you do not copy or save before exiting are not turned into an image file."
+          ]
+        },
+        { "type": "heading", "level": 2, "text": "Common Questions" },
+        {
+          "type": "faq",
+          "items": [
+            {
+              "question": "How do I bring back the toolbar?",
+              "answer": "Right-click an empty part of the canvas. The toolbar appears near the pointer. Right-click again or start drawing to hide it."
+            },
+            {
+              "question": "How do I exit Presentation Pen?",
+              "answer": "Use the menu or current shortcut again. The default is Command+2. If you changed it, use the current keys; if it is disabled, exit from the menu. Copying or saving the current desktop also ends the session."
+            },
+            {
+              "question": "Will my annotations disappear while I use Capture Text?",
+              "answer": "No. They remain visible during OCR but temporarily stop accepting mouse input. You can continue working with them after recognition ends."
+            },
+            {
+              "question": "Why are my drawings gone after I exit?",
+              "answer": "Presentation Pen annotations only exist for the current session. Use Copy or Save before exiting to keep the desktop and your annotations together."
+            },
+            {
+              "question": "Can the toolbar jump to another display?",
+              "answer": "The toolbar follows the right-click position and changes direction as needed to stay fully visible on the display under the pointer."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

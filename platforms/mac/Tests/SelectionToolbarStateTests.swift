@@ -10959,6 +10959,119 @@ final class SelectionToolbarStateTests: XCTestCase {
     }
 
     @MainActor
+    func testCaptureCoordinatorUsesCurrentEnglishLanguageForTextRecognitionSuccessPanel() async throws {
+        let panelIdentifier = NSUserInterfaceItemIdentifier("xxsnap.ocr-copy-success")
+        NSApp.windows
+            .filter { $0.identifier == panelIdentifier }
+            .forEach { $0.close() }
+
+        let suiteName = "com.xxsnap.tests.ocr-success-language.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        let settingsStore = SettingsStore(userDefaults: defaults)
+        var settings = AppSettings.default
+        settings.language = .zhHans
+        try settingsStore.save(settings)
+
+        let preferencesStore = FakeOCRPreferencesSettingsStore()
+        preferencesStore.settings.disablesTextRecognitionSound = true
+        preferencesStore.settings.disablesTextRecognitionSuccessNotification = false
+        let image = solidImage(size: NSSize(width: 80, height: 60), color: .white)
+        let result = CaptureSelectionResult(
+            screenRect: NSRect(origin: .zero, size: image.size),
+            snapshotRect: NSRect(origin: .zero, size: image.size),
+            annotations: [],
+            action: .copy
+        )
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            settingsStore: settingsStore,
+            preferencesSettingsStore: preferencesStore,
+            ocrTextRecognizer: FakeOCRTextRecognizer(result: "Hello"),
+            textCopyHandler: { _ in true }
+        )
+        coordinator.updateLanguage(.english)
+        let completion = expectation(description: "English text recognition success")
+        coordinator.captureSessionDidEnd = {
+            completion.fulfill()
+        }
+
+        coordinator.test_installTextRecognitionOverlayWindow(
+            SelectionOverlayWindow(backgroundImage: image, configuration: .textRecognition()) { _ in }
+        )
+        coordinator.test_handleSelection(result, frozenDesktopImage: image)
+        await fulfillment(of: [completion], timeout: 2)
+
+        let panel = try XCTUnwrap(NSApp.windows.first { $0.identifier == panelIdentifier })
+        XCTAssertTrue(panel.isVisible)
+        XCTAssertEqual(
+            textFieldStrings(in: try XCTUnwrap(panel.contentView)),
+            ["Recognition Successful", "Copied to Clipboard"]
+        )
+        XCTAssertEqual(
+            panel.contentView?.accessibilityLabel(),
+            "Recognition Successful\nCopied to Clipboard"
+        )
+        panel.orderOut(nil)
+    }
+
+    @MainActor
+    func testCaptureCoordinatorUsesCurrentEnglishLanguageForTextRecognitionFailurePanel() async throws {
+        let panelIdentifier = NSUserInterfaceItemIdentifier("xxsnap.ocr-copy-success")
+        NSApp.windows
+            .filter { $0.identifier == panelIdentifier }
+            .forEach { $0.close() }
+
+        let suiteName = "com.xxsnap.tests.ocr-failure-language.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        let settingsStore = SettingsStore(userDefaults: defaults)
+        var settings = AppSettings.default
+        settings.language = .zhHans
+        try settingsStore.save(settings)
+
+        let image = solidImage(size: NSSize(width: 80, height: 60), color: .white)
+        let result = CaptureSelectionResult(
+            screenRect: NSRect(origin: .zero, size: image.size),
+            snapshotRect: NSRect(origin: .zero, size: image.size),
+            annotations: [],
+            action: .copy
+        )
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            settingsStore: settingsStore,
+            ocrTextRecognizer: FakeOCRTextRecognizer(result: " "),
+            textCopyHandler: { _ in true }
+        )
+        coordinator.updateLanguage(.english)
+        let completion = expectation(description: "English text recognition failure")
+        coordinator.captureSessionDidEnd = {
+            completion.fulfill()
+        }
+
+        coordinator.test_installTextRecognitionOverlayWindow(
+            SelectionOverlayWindow(backgroundImage: image, configuration: .textRecognition()) { _ in }
+        )
+        coordinator.test_handleSelection(result, frozenDesktopImage: image)
+        await fulfillment(of: [completion], timeout: 2)
+
+        let panel = try XCTUnwrap(NSApp.windows.first { $0.identifier == panelIdentifier })
+        XCTAssertTrue(panel.isVisible)
+        XCTAssertEqual(
+            textFieldStrings(in: try XCTUnwrap(panel.contentView)),
+            ["Recognition Failed"]
+        )
+        XCTAssertEqual(panel.contentView?.accessibilityLabel(), "Recognition Failed")
+        panel.orderOut(nil)
+    }
+
+    @MainActor
     func testCaptureCoordinatorTextRecognitionEmptyResultDoesNotCopy() async throws {
         let panelIdentifier = NSUserInterfaceItemIdentifier("xxsnap.ocr-copy-success")
         NSApp.windows
@@ -11166,6 +11279,16 @@ final class SelectionToolbarStateTests: XCTestCase {
             .filter { $0.identifier == panelIdentifier }
             .forEach { $0.close() }
 
+        let suiteName = "com.xxsnap.tests.ocr-failure-zh.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        let settingsStore = SettingsStore(userDefaults: defaults)
+        var settings = AppSettings.default
+        settings.language = .zhHans
+        try settingsStore.save(settings)
+
         let preferencesStore = FakeOCRPreferencesSettingsStore()
         preferencesStore.settings.disablesTextRecognitionSound = true
         preferencesStore.settings.disablesTextRecognitionSuccessNotification = true
@@ -11179,6 +11302,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         let coordinator = CaptureCoordinator(
             permissionCoordinator: PermissionCoordinator(),
             screenCaptureService: ScreenCaptureService(),
+            settingsStore: settingsStore,
             preferencesSettingsStore: preferencesStore,
             ocrTextRecognizer: FakeOCRTextRecognizer(result: " "),
             textCopyHandler: { _ in true }
@@ -18099,5 +18223,10 @@ final class SelectionToolbarStateTests: XCTestCase {
             total += abs(Int(lhsBytes[index + 3]) - Int(rhsBytes[index + 3]))
         }
         return Double(total) / Double(lhsBytes.count / 4)
+    }
+
+    private func textFieldStrings(in view: NSView) -> [String] {
+        let ownString = (view as? NSTextField).map(\.stringValue)
+        return ownString.map { [$0] } ?? view.subviews.flatMap(textFieldStrings(in:))
     }
 }

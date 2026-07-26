@@ -5,6 +5,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItemController: StatusItemController?
     private var hotKeyController: CaptureHotKeyController?
     private var preferencesWindowController: PreferencesWindowController?
+    private var helpWindowController: HelpWindowController?
     private var settingsStore: SettingsStore?
     private var preferencesSettingsStore: PreferencesSettingsStore?
 
@@ -25,6 +26,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.settingsStore = settingsStore
         self.preferencesSettingsStore = preferencesSettingsStore
         self.captureCoordinator = captureCoordinator
+        let helpWindowController = HelpWindowController(settingsStore: settingsStore)
+        self.helpWindowController = helpWindowController
         let hotKeyController = CaptureHotKeyController(
             settingsStore: settingsStore,
             captureHandler: {
@@ -59,6 +62,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             updateChecker: updateChecker,
             showPreferences: { [weak preferencesWindowController] section in
                 preferencesWindowController?.show(section: section)
+            },
+            showHelp: { [weak helpWindowController] in
+                helpWindowController?.show()
             }
         )
         self.statusItemController = statusItemController

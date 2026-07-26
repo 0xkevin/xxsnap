@@ -834,6 +834,10 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(chinese.preferences, "偏好设置…")
         XCTAssertEqual(chinese.checkForUpdates, "检查更新…")
         XCTAssertEqual(chinese.supportDeveloper, "支持开发者 ☕️")
+        XCTAssertEqual(chinese.help, "帮助…")
+        XCTAssertEqual(chinese.helpWindowTitle, "XxSnap 帮助")
+        XCTAssertEqual(chinese.helpLoadFailed, "帮助内容暂时无法打开")
+        XCTAssertEqual(chinese.helpImageUnavailable, "图片暂时无法显示")
         XCTAssertEqual(chinese.aboutXxSnap, "关于…")
         XCTAssertEqual(chinese.quit, "退出")
 
@@ -841,6 +845,16 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(english.preferences, "Settings...")
         XCTAssertEqual(english.checkForUpdates, "Check for Updates…")
         XCTAssertEqual(english.supportDeveloper, "Support the Developer ☕️")
+        XCTAssertEqual(english.help, "Help...")
+        XCTAssertEqual(english.helpWindowTitle, "XxSnap Help")
+        XCTAssertEqual(
+            english.helpLoadFailed,
+            "Help content is temporarily unavailable."
+        )
+        XCTAssertEqual(
+            english.helpImageUnavailable,
+            "The image is temporarily unavailable."
+        )
         XCTAssertEqual(english.aboutXxSnap, "About...")
         XCTAssertEqual(english.quit, "Quit")
     }
@@ -865,6 +879,7 @@ final class AppSettingsTests: XCTestCase {
             registrar: FakeGlobalHotKeyRegistrar()
         )
         var shownSections: [PreferencesSection] = []
+        var showHelpCount = 0
         var quitCount = 0
         let controller = StatusItemController(
             captureCoordinator: CaptureCoordinator(
@@ -875,13 +890,14 @@ final class AppSettingsTests: XCTestCase {
             hotKeyController: hotKeyController,
             updateChecker: FakeUpdateChecker(),
             showPreferences: { shownSections.append($0) },
+            showHelp: { showHelpCount += 1 },
             terminationHandler: { quitCount += 1 }
         )
 
-        let lowerItems = Array(controller.test_menuItems.suffix(5))
+        let lowerItems = Array(controller.test_menuItems.suffix(6))
         XCTAssertEqual(
             lowerItems.map(\.title),
-            ["偏好设置…", "检查更新…", "支持开发者 ☕️", "关于…", "退出"]
+            ["偏好设置…", "检查更新…", "支持开发者 ☕️", "帮助…", "关于…", "退出"]
         )
         XCTAssertFalse(lowerItems.contains(where: \.isSeparatorItem))
 
@@ -892,6 +908,12 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertTrue(supportItem.target === controller)
         controller.openDonation()
         XCTAssertEqual(shownSections, [.donation])
+
+        let helpItem = try XCTUnwrap(lowerItems.first { $0.title == "帮助…" })
+        XCTAssertEqual(helpItem.action, #selector(StatusItemController.openHelp))
+        XCTAssertTrue(helpItem.target === controller)
+        controller.openHelp()
+        XCTAssertEqual(showHelpCount, 1)
 
         let quitItem = try XCTUnwrap(lowerItems.first { $0.title == "退出" })
         XCTAssertEqual(quitItem.action, #selector(StatusItemController.quit))
