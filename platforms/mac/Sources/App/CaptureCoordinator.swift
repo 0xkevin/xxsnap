@@ -248,7 +248,9 @@ final class CaptureCoordinator {
         self.longImageSaveHandler = longImageSaveHandler
         self.ocrTextRecognizer = ocrTextRecognizer
         self.textCopyHandler = textCopyHandler ?? Self.copyTextToPasteboard
-        self.ocrResultPresenter = ocrResultPresenter ?? OCRResultPresentationController()
+        self.ocrResultPresenter = ocrResultPresenter ?? OCRResultPresentationController(
+            languageProvider: { languageSnapshot.language }
+        )
         self.frontmostApplicationResolver = frontmostApplicationResolver
         self.applicationActivator = applicationActivator
         self.scrollCaptureTargetDetector = scrollCaptureTargetDetector

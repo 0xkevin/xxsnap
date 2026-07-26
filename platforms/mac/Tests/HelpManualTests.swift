@@ -352,12 +352,13 @@ final class HelpManualTests: XCTestCase {
 
     func testBundledEnglishManualHasLocalizedImageForEveryReference() throws {
         let bundle = Bundle(for: HelpManualTests.self)
-        let document = try HelpContentLoader(bundle: bundle).load(
+        let loader = HelpContentLoader(bundle: bundle)
+        let document = try loader.load(
             language: .english
         )
 
         for imageName in document.chapters.flatMap(\.imageNames) {
-            XCTAssertNotNil(
+            let englishURL = try XCTUnwrap(
                 bundle.url(
                     forResource: imageName,
                     withExtension: "png",
@@ -365,7 +366,44 @@ final class HelpManualTests: XCTestCase {
                 ),
                 "Missing localized English help image: \(imageName)"
             )
+            let chineseURL = try XCTUnwrap(
+                bundle.url(
+                    forResource: imageName,
+                    withExtension: "png",
+                    subdirectory: "Help/Images/zh-Hans"
+                )
+            )
+            let englishImage = try XCTUnwrap(NSImage(contentsOf: englishURL))
+            let chineseImage = try XCTUnwrap(NSImage(contentsOf: chineseURL))
+
+            XCTAssertEqual(
+                englishImage.size,
+                chineseImage.size,
+                "Localized image dimensions differ: \(imageName)"
+            )
+            XCTAssertNotNil(
+                loader.image(named: imageName, language: .english),
+                "English loader did not resolve: \(imageName)"
+            )
         }
+
+        let loadedSuccess = try XCTUnwrap(
+            loader.image(named: "ocr-success", language: .english)
+        )
+        let englishSuccessURL = try XCTUnwrap(
+            bundle.url(
+                forResource: "ocr-success",
+                withExtension: "png",
+                subdirectory: "Help/Images/en"
+            )
+        )
+        let englishSuccess = try XCTUnwrap(
+            NSImage(contentsOf: englishSuccessURL)
+        )
+        XCTAssertEqual(
+            loadedSuccess.tiffRepresentation,
+            englishSuccess.tiffRepresentation
+        )
     }
 
     func testEnglishManualUsesRuntimeProductTerminology() throws {
