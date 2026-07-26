@@ -325,11 +325,11 @@ final class HelpManualTests: XCTestCase {
         XCTAssertFalse(text.contains("单击已有标注可选中它"))
     }
 
-    func testEnglishManualFallsBackToBundledChineseDocument() throws {
+    func testBundledEnglishManualLoadsEnglishDocument() throws {
         let bundle = Bundle(for: HelpManualTests.self)
         let loader = HelpContentLoader(bundle: bundle)
 
-        XCTAssertNil(
+        XCTAssertNotNil(
             bundle.url(
                 forResource: "en",
                 withExtension: "json",
@@ -338,8 +338,130 @@ final class HelpManualTests: XCTestCase {
         )
         let document = try loader.load(language: .english)
 
-        XCTAssertEqual(document.language, "zh-Hans")
-        XCTAssertEqual(document.windowTitle, "XxSnap 帮助")
+        XCTAssertEqual(document.language, "en")
+        XCTAssertEqual(document.windowTitle, "XxSnap Help")
+        XCTAssertEqual(
+            document.chapters.map(\.navigationTitle),
+            ["Capture", "Pin", "Capture Text", "Presentation Pen"]
+        )
+        XCTAssertTrue(
+            document.chapters.first?.flattenedText.contains("Region Capture")
+                == true
+        )
+    }
+
+    func testEnglishManualUsesRuntimeProductTerminology() throws {
+        let loader = HelpContentLoader(bundle: Bundle(for: HelpManualTests.self))
+        let document = try loader.load(language: .english)
+        let visibleText = (
+            [document.windowTitle]
+                + document.chapters.flatMap(\.visibleStrings)
+        ).joined(separator: "\n")
+        let headings = document.chapters.flatMap { chapter in
+            chapter.blocks.compactMap(\.headingText)
+        }
+
+        XCTAssertEqual(
+            document.chapters.map(\.navigationTitle),
+            ["Capture", "Pin", "Capture Text", "Presentation Pen"]
+        )
+        XCTAssertTrue(visibleText.contains("Choose Capture from the menu"))
+        XCTAssertFalse(
+            visibleText.contains("Choose Region Capture from the menu")
+        )
+        XCTAssertFalse(visibleText.contains("restore the Pin from the menu"))
+        XCTAssertTrue(visibleText.contains("Long Capture Editor"))
+        XCTAssertTrue(visibleText.contains("Disable Capture Text sound"))
+        XCTAssertTrue(visibleText.contains("Disable Capture Text notification"))
+        XCTAssertFalse(visibleText.contains("Disable Capture Text Sound"))
+        XCTAssertFalse(visibleText.contains("Disable Capture Text Notification"))
+        XCTAssertFalse(visibleText.contains("Teaching Pen"))
+        XCTAssertTrue(visibleText.contains("Start Scroll Step"))
+        XCTAssertTrue(headings.contains("Pen"))
+        XCTAssertTrue(headings.contains("Redact"))
+        XCTAssertTrue(visibleText.contains("Clear All"))
+        XCTAssertTrue(
+            visibleText.contains("Restore most recently hidden pin")
+        )
+        XCTAssertFalse(visibleText.contains("Start One Step"))
+        XCTAssertFalse(headings.contains("Pencil"))
+        XCTAssertFalse(headings.contains("Mosaic"))
+        XCTAssertFalse(visibleText.contains("Restore Recent Hidden Pin"))
+    }
+
+    func testEnglishManualMirrorsChineseStructureAndContainsNoChineseText() throws {
+        let loader = HelpContentLoader(bundle: Bundle(for: HelpManualTests.self))
+        let chinese = try loader.load(language: .zhHans)
+        let english = try loader.load(language: .english)
+
+        XCTAssertEqual(english.chapters.map(\.id), chinese.chapters.map(\.id))
+        XCTAssertEqual(english.chapters.count, chinese.chapters.count)
+
+        for (chineseChapter, englishChapter) in zip(
+            chinese.chapters,
+            english.chapters
+        ) {
+            XCTAssertEqual(englishChapter.id, chineseChapter.id)
+            XCTAssertEqual(
+                englishChapter.blocks.map(\.structureKind),
+                chineseChapter.blocks.map(\.structureKind),
+                "\(englishChapter.id) block structure differs"
+            )
+            XCTAssertEqual(
+                englishChapter.shortcuts.count,
+                chineseChapter.shortcuts.count,
+                "\(englishChapter.id) shortcut entry count differs"
+            )
+            let chineseKeySequences = chineseChapter.allShortcutKeySequences
+            let englishKeySequences = englishChapter.allShortcutKeySequences
+            XCTAssertEqual(
+                englishKeySequences.count,
+                chineseKeySequences.count,
+                "\(englishChapter.id) shortcut key sequence count differs"
+            )
+            for (chineseKeys, englishKeys) in zip(
+                chineseKeySequences,
+                englishKeySequences
+            ) {
+                XCTAssertTrue(
+                    shortcutKeysMatch(
+                        chinese: chineseKeys,
+                        english: englishKeys
+                    ),
+                    "\(englishChapter.id) shortcut keys differ: "
+                        + "\(chineseKeys) / \(englishKeys)"
+                )
+            }
+            XCTAssertEqual(
+                englishChapter.tableOfContents.count,
+                chineseChapter.tableOfContents.count,
+                "\(englishChapter.id) table of contents count differs"
+            )
+            XCTAssertEqual(
+                englishChapter.imageNames,
+                chineseChapter.imageNames,
+                "\(englishChapter.id) image order differs"
+            )
+        }
+
+        var visibleEnglishText = [english.windowTitle]
+        for chapter in english.chapters {
+            visibleEnglishText.append(contentsOf: chapter.visibleStrings)
+        }
+        for text in visibleEnglishText {
+            XCTAssertFalse(
+                text.containsCommonChineseCharacter,
+                "English manual contains Chinese text: \(text)"
+            )
+        }
+    }
+
+    private func shortcutKeysMatch(
+        chinese: [String],
+        english: [String]
+    ) -> Bool {
+        chinese == english
+            || (chinese == ["右键"] && english == ["Right-click"])
     }
 
     @MainActor
@@ -358,9 +480,14 @@ final class HelpManualTests: XCTestCase {
         XCTAssertEqual(controller.window?.title, "XxSnap Help")
         XCTAssertEqual(
             controller.test_navigationTitles,
-            ["截图", "贴图", "文字识别", "教笔"]
+            ["Capture", "Pin", "Capture Text", "Presentation Pen"]
         )
-        XCTAssertTrue(controller.test_visibleTexts.contains("区域截图"))
+        XCTAssertTrue(controller.test_visibleTexts.contains("Region Capture"))
+        XCTAssertTrue(
+            controller.test_visibleTexts.contains {
+                $0.localizedCaseInsensitiveContains("drag to select")
+            }
+        )
         XCTAssertEqual(controller.window?.contentMinSize.width, 760)
         XCTAssertEqual(controller.window?.contentMinSize.height, 512)
         XCTAssertGreaterThan(controller.window?.frame.height ?? 0, 500)
@@ -1697,6 +1824,21 @@ private extension HelpChapter {
         blocks.compactMap(\.imageName)
     }
 
+    var visibleStrings: [String] {
+        [
+            navigationTitle,
+            title,
+            introduction
+        ]
+            + tableOfContents
+            + shortcuts.flatMap { [$0.action] + $0.keys }
+            + blocks.flatMap(\.visibleStrings)
+    }
+
+    var allShortcutKeySequences: [[String]] {
+        shortcuts.map(\.keys) + blocks.flatMap(\.shortcutKeySequences)
+    }
+
     var faqCount: Int {
         blocks.reduce(0) { $0 + $1.faqCount }
     }
@@ -1711,6 +1853,29 @@ private extension HelpChapter {
 }
 
 private extension HelpContentBlock {
+    var structureKind: String {
+        switch self {
+        case let .heading(level, _):
+            return "heading:\(level)"
+        case .paragraph:
+            return "paragraph"
+        case let .steps(items):
+            return "steps:\(items.count)"
+        case let .bullets(items):
+            return "bullets:\(items.count)"
+        case let .shortcuts(items):
+            return "shortcuts:\(items.count)"
+        case .image:
+            return "image"
+        case .note:
+            return "note"
+        case .warning:
+            return "warning"
+        case let .faq(items):
+            return "faq:\(items.count)"
+        }
+    }
+
     var flattenedText: String {
         switch self {
         case let .heading(_, text), let .paragraph(text):
@@ -1727,6 +1892,43 @@ private extension HelpContentBlock {
             return [title, text].joined(separator: "\n")
         case let .faq(items):
             return items.flatMap { [$0.question, $0.answer] }.joined(separator: "\n")
+        }
+    }
+
+    var headingText: String? {
+        if case let .heading(_, text) = self {
+            return text
+        }
+        return nil
+    }
+
+    var visibleStrings: [String] {
+        switch self {
+        case let .heading(_, text), let .paragraph(text):
+            return [text]
+        case let .steps(items):
+            return items.flatMap { [$0.text] + ($0.keys ?? []) }
+        case let .bullets(items):
+            return items
+        case let .shortcuts(items):
+            return items.flatMap { [$0.action] + $0.keys }
+        case let .image(_, caption, accessibilityLabel):
+            return [caption, accessibilityLabel]
+        case let .note(title, text), let .warning(title, text):
+            return [title, text]
+        case let .faq(items):
+            return items.flatMap { [$0.question, $0.answer] }
+        }
+    }
+
+    var shortcutKeySequences: [[String]] {
+        switch self {
+        case let .steps(items):
+            return items.compactMap(\.keys)
+        case let .shortcuts(items):
+            return items.map(\.keys)
+        default:
+            return []
         }
     }
 
@@ -1763,6 +1965,15 @@ private extension HelpContentBlock {
             return items.count
         }
         return 0
+    }
+}
+
+private extension String {
+    var containsCommonChineseCharacter: Bool {
+        unicodeScalars.contains { scalar in
+            (0x3400...0x4DBF).contains(scalar.value)
+                || (0x4E00...0x9FFF).contains(scalar.value)
+        }
     }
 }
 
