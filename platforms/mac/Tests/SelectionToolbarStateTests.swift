@@ -6038,6 +6038,22 @@ final class SelectionToolbarStateTests: XCTestCase {
         }
     }
 
+    func testDiagonalResizeCursorFallbacksUseCenteredCustomImages() throws {
+        let topLeft = NSCursor.xxsnapFrameResize(position: .topLeft, prefersSystemCursor: false)
+        let topRight = NSCursor.xxsnapFrameResize(position: .topRight, prefersSystemCursor: false)
+        let bottomLeft = NSCursor.xxsnapFrameResize(position: .bottomLeft, prefersSystemCursor: false)
+        let bottomRight = NSCursor.xxsnapFrameResize(position: .bottomRight, prefersSystemCursor: false)
+
+        for cursor in [topLeft, topRight, bottomLeft, bottomRight] {
+            XCTAssertEqual(cursor.image.size, NSSize(width: 24, height: 24))
+            XCTAssertEqual(cursor.hotSpot, NSPoint(x: 12, y: 12))
+        }
+
+        XCTAssertEqual(try rgbaBytes(in: topLeft.image), try rgbaBytes(in: bottomRight.image))
+        XCTAssertEqual(try rgbaBytes(in: topRight.image), try rgbaBytes(in: bottomLeft.image))
+        XCTAssertNotEqual(try rgbaBytes(in: topLeft.image), try rgbaBytes(in: topRight.image))
+    }
+
     func testMarkerPreviewRemainsVisibleOnBlackBackgroundWithBlackMarkerColor() throws {
         let image = solidImage(size: NSSize(width: 500, height: 400), color: .black)
         let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
