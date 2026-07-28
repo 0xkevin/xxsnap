@@ -12,7 +12,7 @@ final class HelpManualTests: XCTestCase {
         XCTAssertEqual(document.windowTitle, "XxSnap 帮助")
         XCTAssertEqual(
             document.chapters.map(\.id),
-            ["capture", "pin", "ocr", "teaching-pen"]
+            ["capture", "pin", "ocr", "teaching-pen", "report-issue"]
         )
 
         let expectations: [(id: String, blocks: Int, text: [String])] = [
@@ -342,7 +342,7 @@ final class HelpManualTests: XCTestCase {
         XCTAssertEqual(document.windowTitle, "XxSnap Help")
         XCTAssertEqual(
             document.chapters.map(\.navigationTitle),
-            ["Capture", "Pin", "Capture Text", "Presentation Pen"]
+            ["Capture", "Pin", "Capture Text", "Presentation Pen", "Report Issue"]
         )
         XCTAssertTrue(
             document.chapters.first?.flattenedText.contains("Region Capture")
@@ -419,7 +419,7 @@ final class HelpManualTests: XCTestCase {
 
         XCTAssertEqual(
             document.chapters.map(\.navigationTitle),
-            ["Capture", "Pin", "Capture Text", "Presentation Pen"]
+            ["Capture", "Pin", "Capture Text", "Presentation Pen", "Report Issue"]
         )
         XCTAssertTrue(visibleText.contains("Choose Capture from the menu"))
         XCTAssertFalse(
@@ -536,7 +536,7 @@ final class HelpManualTests: XCTestCase {
         XCTAssertEqual(controller.window?.title, "XxSnap Help")
         XCTAssertEqual(
             controller.test_navigationTitles,
-            ["Capture", "Pin", "Capture Text", "Presentation Pen"]
+            ["Capture", "Pin", "Capture Text", "Presentation Pen", "Report Issue"]
         )
         XCTAssertTrue(controller.test_visibleTexts.contains("Region Capture"))
         XCTAssertTrue(
@@ -548,6 +548,34 @@ final class HelpManualTests: XCTestCase {
         XCTAssertEqual(controller.window?.contentMinSize.height, 512)
         XCTAssertGreaterThan(controller.window?.frame.height ?? 0, 500)
         XCTAssertGreaterThan(controller.window?.contentView?.frame.height ?? 0, 500)
+    }
+
+    func testBundledHelpProvidesBilingualIssueReportingInstructions() throws {
+        let loader = HelpContentLoader(bundle: Bundle(for: HelpManualTests.self))
+
+        let chinese = try loader.load(language: .zhHans)
+        let chineseReport = try XCTUnwrap(
+            chinese.chapters.first { $0.id == "report-issue" }
+        )
+        XCTAssertEqual(chineseReport.navigationTitle, "问题反馈")
+        XCTAssertTrue(chineseReport.visibleStrings.contains("zfc.2012@gmail.com"))
+        XCTAssertTrue(
+            chineseReport.visibleStrings.contains {
+                $0.contains("导出诊断日志")
+            }
+        )
+
+        let english = try loader.load(language: .english)
+        let englishReport = try XCTUnwrap(
+            english.chapters.first { $0.id == "report-issue" }
+        )
+        XCTAssertEqual(englishReport.navigationTitle, "Report Issue")
+        XCTAssertTrue(englishReport.visibleStrings.contains("zfc.2012@gmail.com"))
+        XCTAssertTrue(
+            englishReport.visibleStrings.contains {
+                $0.localizedCaseInsensitiveContains("Export Diagnostic Logs")
+            }
+        )
     }
 
     func testDecodeLoadsAllChaptersAndSupportedBlockTypes() throws {

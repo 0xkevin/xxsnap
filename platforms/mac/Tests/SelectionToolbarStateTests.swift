@@ -11007,6 +11007,7 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         let panel = try XCTUnwrap(NSApp.windows.first { $0.identifier == panelIdentifier })
         XCTAssertTrue(panel.isVisible)
+        XCTAssertEqual(panel.frame.size, NSSize(width: 248, height: 132))
         XCTAssertEqual(
             textFieldStrings(in: try XCTUnwrap(panel.contentView)),
             ["Recognition Successful", "Copied to Clipboard"]
@@ -11063,6 +11064,7 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         let panel = try XCTUnwrap(NSApp.windows.first { $0.identifier == panelIdentifier })
         XCTAssertTrue(panel.isVisible)
+        XCTAssertEqual(panel.frame.size, NSSize(width: 248, height: 132))
         XCTAssertEqual(
             textFieldStrings(in: try XCTUnwrap(panel.contentView)),
             ["Recognition Failed"]

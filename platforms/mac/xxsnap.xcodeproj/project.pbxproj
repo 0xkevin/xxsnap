@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		AC7000000000000000000001 /* DiagnosticLoggingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC7000000000000000000011 /* DiagnosticLoggingTests.swift */; };
+		AC7000000000000000000002 /* DiagnosticLogStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC7000000000000000000012 /* DiagnosticLogStore.swift */; };
+		AC7000000000000000000003 /* DiagnosticBundleExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC7000000000000000000013 /* DiagnosticBundleExporter.swift */; };
+		AC7000000000000000000004 /* DiagnosticSupportController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC7000000000000000000014 /* DiagnosticSupportController.swift */; };
 		AB6000000000000000000001 /* AppServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB6000000000000000000011 /* AppServices.swift */; };
 		AB6000000000000000000002 /* CaptureHotKeyController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB6000000000000000000012 /* CaptureHotKeyController.swift */; };
 		AB6000000000000000000003 /* PreferencesSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB6000000000000000000013 /* PreferencesSettings.swift */; };
@@ -154,6 +158,10 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		AC7000000000000000000011 /* DiagnosticLoggingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticLoggingTests.swift; sourceTree = "<group>"; };
+		AC7000000000000000000012 /* DiagnosticLogStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticLogStore.swift; sourceTree = "<group>"; };
+		AC7000000000000000000013 /* DiagnosticBundleExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticBundleExporter.swift; sourceTree = "<group>"; };
+		AC7000000000000000000014 /* DiagnosticSupportController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticSupportController.swift; sourceTree = "<group>"; };
 		AB6000000000000000000011 /* AppServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppServices.swift; sourceTree = "<group>"; };
 		AB6000000000000000000012 /* CaptureHotKeyController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureHotKeyController.swift; sourceTree = "<group>"; };
 		AB6000000000000000000013 /* PreferencesSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencesSettings.swift; sourceTree = "<group>"; };
@@ -330,6 +338,16 @@
 			path = Capture;
 			sourceTree = "<group>";
 		};
+		AC7000000000000000000020 /* Diagnostics */ = {
+			isa = PBXGroup;
+			children = (
+				AC7000000000000000000012 /* DiagnosticLogStore.swift */,
+				AC7000000000000000000013 /* DiagnosticBundleExporter.swift */,
+				AC7000000000000000000014 /* DiagnosticSupportController.swift */,
+			);
+			path = Diagnostics;
+			sourceTree = "<group>";
+		};
 		AA5100000000000000000020 /* ScrollCapture */ = {
 			isa = PBXGroup;
 			children = (
@@ -383,6 +401,7 @@
 		E47B99274545910C8159BABC /* Tests */ = {
 			isa = PBXGroup;
 			children = (
+				AC7000000000000000000011 /* DiagnosticLoggingTests.swift */,
 				AB6800000000000000000011 /* HelpManualTests.swift */,
 				AA5400000000000000000012 /* ScrollCaptureTargetDetectorTests.swift */,
 				AA5300000000000000000011 /* LongImageEditorTests.swift */,
@@ -408,6 +427,7 @@
 				08569F3CA22B1505B2B6A859 /* App */,
 				CB036B39FCDFD3D592520941 /* Bridge */,
 				449F8A7986C90F759D3D40EE /* Capture */,
+				AC7000000000000000000020 /* Diagnostics */,
 				AA5100000000000000000020 /* ScrollCapture */,
 				F37C448F1A3EA306B87B3856 /* Overlay */,
 				B352A921EAE1E9FC40E01640 /* Toolbar */,
@@ -711,6 +731,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AC7000000000000000000002 /* DiagnosticLogStore.swift in Sources */,
+				AC7000000000000000000003 /* DiagnosticBundleExporter.swift in Sources */,
+				AC7000000000000000000004 /* DiagnosticSupportController.swift in Sources */,
 				AA5400000000000000000001 /* ScrollCaptureTargetDetector.swift in Sources */,
 				AA5300000000000000000002 /* LongImageEditorWindowController.swift in Sources */,
 				AA5200000000000000000001 /* ScrollCapturePresentationController.swift in Sources */,
@@ -752,6 +775,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AC7000000000000000000001 /* DiagnosticLoggingTests.swift in Sources */,
 				AB6800000000000000000001 /* HelpManualTests.swift in Sources */,
 				AA5400000000000000000002 /* ScrollCaptureTargetDetectorTests.swift in Sources */,
 				AA5300000000000000000001 /* LongImageEditorTests.swift in Sources */,

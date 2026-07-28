@@ -6,11 +6,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKeyController: CaptureHotKeyController?
     private var preferencesWindowController: PreferencesWindowController?
     private var helpWindowController: HelpWindowController?
+    private var diagnosticSupportController: DiagnosticSupportController?
     private var settingsStore: SettingsStore?
     private var preferencesSettingsStore: PreferencesSettingsStore?
+    private let diagnosticLogStore = DiagnosticLogStore.shared
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSLog("xxsnap applicationDidFinishLaunching")
+        diagnosticLogStore.performMaintenance()
+        let appInfo = DiagnosticApplicationInfo.current()
+        diagnosticLogStore.record(
+            category: .application,
+            level: .info,
+            event: "application_started",
+            metadata: [
+                "app_build": appInfo.build,
+                "app_version": appInfo.version,
+            ]
+        )
         ProcessInfo.processInfo.disableAutomaticTermination("xxsnap menu bar app stays available for capture")
         let settingsStore = SettingsStore()
         let preferencesSettingsStore = PreferencesSettingsStore()
@@ -21,7 +34,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             screenCaptureService: ScreenCaptureService(),
             settingsStore: settingsStore,
             preferencesSettingsStore: preferencesSettingsStore,
-            filenameProvider: filenameProvider
+            filenameProvider: filenameProvider,
+            diagnosticLogger: diagnosticLogStore
         )
         self.settingsStore = settingsStore
         self.preferencesSettingsStore = preferencesSettingsStore
@@ -55,6 +69,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             updateChecker: updateChecker
         )
         self.preferencesWindowController = preferencesWindowController
+        let diagnosticSupportController = DiagnosticSupportController(
+            logStore: diagnosticLogStore,
+            exporter: DiagnosticBundleExporter(logStore: diagnosticLogStore),
+            settingsStore: settingsStore
+        )
+        self.diagnosticSupportController = diagnosticSupportController
         let statusItemController = StatusItemController(
             captureCoordinator: captureCoordinator,
             settingsStore: settingsStore,
@@ -65,6 +85,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             },
             showHelp: { [weak helpWindowController] in
                 helpWindowController?.show()
+            },
+            exportDiagnostics: { [weak diagnosticSupportController] in
+                diagnosticSupportController?.exportDiagnostics()
             }
         )
         self.statusItemController = statusItemController
@@ -98,5 +121,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         NSLog("xxsnap applicationWillTerminate")
+        diagnosticLogStore.record(
+            category: .application,
+            level: .info,
+            event: "application_will_terminate"
+        )
+        diagnosticLogStore.flush()
     }
 }

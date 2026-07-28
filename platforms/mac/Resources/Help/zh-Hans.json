@@ -587,6 +587,32 @@
           ]
         }
       ]
+    },
+    {
+      "id": "report-issue",
+      "navigationTitle": "问题反馈",
+      "title": "问题反馈",
+      "introduction": "如果 XxSnap 出现异常，请导出诊断日志并通过邮件反馈。诊断日志包含截图、滚动截图、文字识别、教笔等功能的运行记录，但不包含实际截图图片、识别文字、剪贴板内容、网址或文件路径。",
+      "tableOfContents": [],
+      "shortcuts": [],
+      "blocks": [
+        {
+          "type": "steps",
+          "items": [
+            {
+              "text": "在 XxSnap 菜单栏中点击“导出诊断日志…”，选择位置保存 ZIP 文件。"
+            },
+            {
+              "text": "发送邮件到 zfc.2012@gmail.com，附上诊断日志 ZIP，并说明问题现象和复现步骤。"
+            }
+          ]
+        },
+        {
+          "type": "note",
+          "title": "反馈邮箱",
+          "text": "zfc.2012@gmail.com"
+        }
+      ]
     }
   ]
 }

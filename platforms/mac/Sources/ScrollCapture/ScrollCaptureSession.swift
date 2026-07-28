@@ -307,6 +307,7 @@ final class ScrollCaptureSession {
     private let clock: any ScrollCaptureClock
     private let activityMonitor: any ScrollActivityMonitoring
     private let stepController: (any ScrollCaptureStepControlling)?
+    private let diagnosticLogger: any DiagnosticLogging
     private let presentation: @MainActor (ScrollCapturePresentationUpdate) -> Void
     private let samplingInterval: Duration
     private var samplingTask: Task<Void, Never>?
@@ -327,6 +328,7 @@ final class ScrollCaptureSession {
     private var performedStepCount = 0
     private var reachedStepBoundary = false
     private var lastStepCandidateImage: NSImage?
+    private var diagnosticSession: DiagnosticCaptureSession?
 
     init(
         seed: ScrollCaptureSeed,
@@ -336,6 +338,7 @@ final class ScrollCaptureSession {
         activityMonitor: any ScrollActivityMonitoring,
         stepController: (any ScrollCaptureStepControlling)? = nil,
         samplingInterval: Duration = .milliseconds(180),
+        diagnosticLogger: any DiagnosticLogging = NoopDiagnosticLogger.shared,
         presentation: @escaping @MainActor (ScrollCapturePresentationUpdate) -> Void
     ) {
         self.seed = seed
@@ -345,6 +348,7 @@ final class ScrollCaptureSession {
         self.activityMonitor = activityMonitor
         self.stepController = stepController
         self.samplingInterval = samplingInterval
+        self.diagnosticLogger = diagnosticLogger
         self.presentation = presentation
     }
 
@@ -352,6 +356,19 @@ final class ScrollCaptureSession {
         guard state == .idle else { throw ScrollCaptureSessionError.invalidState(state) }
         let operationGeneration = generation
         guard setState(.preparing, operationGeneration: operationGeneration) else { return }
+        let diagnosticSession = diagnosticLogger.beginScrollCaptureSession()
+        self.diagnosticSession = diagnosticSession
+        diagnosticLogger.record(
+            category: .scrollCapture,
+            level: .info,
+            event: "scroll_session_started",
+            metadata: [
+                "capture_mode": stepController == nil ? "activity_sampling" : "automatic_step",
+                "detailed": diagnosticSession.isDetailed ? "true" : "false",
+                "viewport_height": String(format: "%.1f", seed.screenRect.height),
+                "viewport_width": String(format: "%.1f", seed.screenRect.width),
+            ]
+        )
         do {
             guard let stitcher else { throw ScrollCaptureSessionError.invalidState(state) }
             let update = try await stitcher.append(seed.frozenImage)
@@ -398,6 +415,11 @@ final class ScrollCaptureSession {
             guard generation == operationGeneration, state == .preparing else { return }
             disarmSampling()
             _ = setState(.paused(.captureFailure), operationGeneration: operationGeneration)
+            endDiagnosticSession(
+                event: "scroll_session_start_failed",
+                level: .error,
+                metadata: ["error_type": String(describing: type(of: error))]
+            )
             throw error
         }
     }
@@ -434,6 +456,17 @@ final class ScrollCaptureSession {
 
         do {
             let distance = Self.stepDistance(forViewportHeight: seed.screenRect.height)
+            diagnosticLogger.record(
+                category: .scrollCapture,
+                level: .debug,
+                event: "scroll_step_requested",
+                metadata: [
+                    "direction": String(describing: effectiveDirection),
+                    "distance": String(format: "%.1f", distance),
+                    "step_number": String(performedStepCount),
+                ],
+                detail: .detailed
+            )
             let scrollPoints = Self.stepScrollPoints(in: seed.screenRect)
             let boundaryDirection = lockedContentDirection ?? effectiveDirection
             let boundaryStates = scrollPoints.map {
@@ -455,6 +488,7 @@ final class ScrollCaptureSession {
                     if let acceptedDirection = lastAcceptedStepContentDirection {
                         lockedContentDirection = acceptedDirection
                     }
+                    recordStepCompleted(outcome: boundaryOutcome)
                     return
                 }
                 if boundaryOutcome != .terminal {
@@ -467,6 +501,7 @@ final class ScrollCaptureSession {
                     "xxsnap scroll-capture %@ boundary confirmed by accessibility",
                     effectiveDirection == .up ? "top" : "bottom"
                 )
+                recordStepCompleted(outcome: boundaryOutcome)
                 return
             }
 
@@ -748,9 +783,16 @@ final class ScrollCaptureSession {
                 consecutiveNoMovementSteps,
                 reachedStepBoundary ? "true" : "false"
             )
+            recordStepCompleted(outcome: outcome)
         } catch {
             guard generation == operationGeneration, state == .capturing else { throw error }
             _ = setState(.paused(.captureFailure), operationGeneration: operationGeneration)
+            diagnosticLogger.record(
+                category: .scrollCapture,
+                level: .error,
+                event: "scroll_step_failed",
+                metadata: ["error_type": String(describing: type(of: error))]
+            )
             throw error
         }
     }
@@ -792,6 +834,7 @@ final class ScrollCaptureSession {
                 update.appendedHeight,
                 update.outputHeight
             )
+            recordStitchResult(update, source: "step")
             guard emit(
                 .append(update),
                 operationGeneration: operationGeneration,
@@ -936,12 +979,26 @@ final class ScrollCaptureSession {
             guard setState(.finished, operationGeneration: operationGeneration) else {
                 throw ScrollCaptureSessionError.operationCancelled
             }
+            endDiagnosticSession(
+                event: "scroll_session_finished",
+                level: .info,
+                metadata: [
+                    "final_height": String(format: "%.1f", image.size.height),
+                    "final_width": String(format: "%.1f", image.size.width),
+                ]
+            )
             return image
         } catch {
             guard generation == operationGeneration, state == .finishing else { throw error }
             if setState(.paused(.captureFailure), operationGeneration: operationGeneration) {
                 if stepController == nil { startActivityMonitor() }
             }
+            diagnosticLogger.record(
+                category: .scrollCapture,
+                level: .error,
+                event: "scroll_session_finish_failed",
+                metadata: ["error_type": String(describing: type(of: error))]
+            )
             throw error
         }
     }
@@ -956,6 +1013,10 @@ final class ScrollCaptureSession {
         stepController?.stop()
         stitcher = nil
         _ = setState(.cancelled, operationGeneration: operationGeneration)
+        endDiagnosticSession(
+            event: "scroll_session_cancelled",
+            level: .info
+        )
         return seed
     }
 
@@ -1011,6 +1072,7 @@ final class ScrollCaptureSession {
                 update.confidence,
                 update.appendedHeight
             )
+            recordStitchResult(update, source: "sampling")
             let appendState = state
             guard emit(
                 .append(update),
@@ -1024,7 +1086,63 @@ final class ScrollCaptureSession {
             guard state == .capturing else { return }
             disarmSampling()
             _ = setState(.paused(.captureFailure), operationGeneration: tickGeneration)
+            diagnosticLogger.record(
+                category: .scrollCapture,
+                level: .error,
+                event: "scroll_sampling_failed",
+                metadata: ["error_type": String(describing: type(of: error))]
+            )
         }
+    }
+
+    private func recordStitchResult(
+        _ update: ScrollCaptureAppendUpdate,
+        source: String
+    ) {
+        diagnosticLogger.record(
+            category: .scrollCapture,
+            level: .debug,
+            event: "scroll_stitch_result",
+            metadata: [
+                "appended_height": String(update.appendedHeight),
+                "confidence": String(format: "%.3f", update.confidence),
+                "direction": String(describing: update.direction),
+                "kind": String(describing: update.kind),
+                "output_height": String(update.outputHeight),
+                "source": source,
+            ],
+            detail: .detailed
+        )
+    }
+
+    private func recordStepCompleted(outcome: StepCandidateOutcome) {
+        diagnosticLogger.record(
+            category: .scrollCapture,
+            level: reachedStepBoundary ? .warning : .info,
+            event: "scroll_step_completed",
+            metadata: [
+                "boundary": reachedStepBoundary ? "true" : "false",
+                "no_movement_count": String(consecutiveNoMovementSteps),
+                "outcome": String(describing: outcome),
+                "step_number": String(performedStepCount),
+            ]
+        )
+    }
+
+    private func endDiagnosticSession(
+        event: String,
+        level: DiagnosticLogLevel,
+        metadata: [String: String] = [:]
+    ) {
+        guard let diagnosticSession else { return }
+        diagnosticLogger.record(
+            category: .scrollCapture,
+            level: level,
+            event: event,
+            metadata: metadata
+        )
+        diagnosticLogger.endScrollCaptureSession(diagnosticSession)
+        self.diagnosticSession = nil
     }
 
     private func handle(

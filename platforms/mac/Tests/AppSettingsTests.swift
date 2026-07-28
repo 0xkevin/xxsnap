@@ -835,6 +835,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(chinese.checkForUpdates, "检查更新…")
         XCTAssertEqual(chinese.supportDeveloper, "支持开发者 ☕️")
         XCTAssertEqual(chinese.help, "帮助…")
+        XCTAssertEqual(chinese.exportDiagnostics, "导出诊断日志…")
         XCTAssertEqual(chinese.helpWindowTitle, "XxSnap 帮助")
         XCTAssertEqual(chinese.helpLoadFailed, "帮助内容暂时无法打开")
         XCTAssertEqual(chinese.helpImageUnavailable, "图片暂时无法显示")
@@ -846,6 +847,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(english.checkForUpdates, "Check for Updates…")
         XCTAssertEqual(english.supportDeveloper, "Support the Developer ☕️")
         XCTAssertEqual(english.help, "Help...")
+        XCTAssertEqual(english.exportDiagnostics, "Export Diagnostic Logs…")
         XCTAssertEqual(english.helpWindowTitle, "XxSnap Help")
         XCTAssertEqual(
             english.helpLoadFailed,
@@ -880,6 +882,7 @@ final class AppSettingsTests: XCTestCase {
         )
         var shownSections: [PreferencesSection] = []
         var showHelpCount = 0
+        var exportDiagnosticsCount = 0
         var quitCount = 0
         let controller = StatusItemController(
             captureCoordinator: CaptureCoordinator(
@@ -891,13 +894,22 @@ final class AppSettingsTests: XCTestCase {
             updateChecker: FakeUpdateChecker(),
             showPreferences: { shownSections.append($0) },
             showHelp: { showHelpCount += 1 },
+            exportDiagnostics: { exportDiagnosticsCount += 1 },
             terminationHandler: { quitCount += 1 }
         )
 
-        let lowerItems = Array(controller.test_menuItems.suffix(6))
+        let lowerItems = Array(controller.test_menuItems.suffix(7))
         XCTAssertEqual(
             lowerItems.map(\.title),
-            ["偏好设置…", "检查更新…", "支持开发者 ☕️", "帮助…", "关于…", "退出"]
+            [
+                "偏好设置…",
+                "检查更新…",
+                "支持开发者 ☕️",
+                "帮助…",
+                "导出诊断日志…",
+                "关于…",
+                "退出"
+            ]
         )
         XCTAssertFalse(lowerItems.contains(where: \.isSeparatorItem))
 
@@ -914,6 +926,24 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertTrue(helpItem.target === controller)
         controller.openHelp()
         XCTAssertEqual(showHelpCount, 1)
+
+        XCTAssertFalse(
+            controller.test_menuItems.contains {
+                $0.title == "为下一次滚动截图开启诊断"
+                    || $0.title == "Enable Diagnostics for Next Scroll Capture"
+            }
+        )
+
+        let exportDiagnosticsItem = try XCTUnwrap(
+            lowerItems.first { $0.title == "导出诊断日志…" }
+        )
+        XCTAssertEqual(
+            exportDiagnosticsItem.action,
+            #selector(StatusItemController.exportDiagnostics)
+        )
+        XCTAssertTrue(exportDiagnosticsItem.target === controller)
+        controller.exportDiagnostics()
+        XCTAssertEqual(exportDiagnosticsCount, 1)
 
         let quitItem = try XCTUnwrap(lowerItems.first { $0.title == "退出" })
         XCTAssertEqual(quitItem.action, #selector(StatusItemController.quit))
@@ -1011,6 +1041,34 @@ final class AppSettingsTests: XCTestCase {
         )
         XCTAssertTrue(buttons.contains {
             $0.title == "问题反馈或技术支持：zfc.2012@gmail.com"
+        })
+    }
+
+    @MainActor
+    func testAboutPageUsesReportIssuePrefixForEnglishEmail() {
+        let store = FakeAppSettingsStore()
+        var settings = AppSettings.default
+        settings.language = .english
+        try? store.save(settings)
+        let controller = PreferencesWindowController(
+            settingsStore: store,
+            preferencesSettingsStore: FakePreferencesSettingsStore(),
+            hotKeyController: makeHotKeyController(
+                store: store,
+                registrar: FakeGlobalHotKeyRegistrar()
+            ),
+            launchAtLoginManager: FakeLaunchAtLoginManager(),
+            updateChecker: FakeUpdateChecker()
+        )
+        defer { controller.close() }
+
+        controller.show(section: .about)
+        let buttons = descendants(
+            of: controller.window?.contentView,
+            matching: NSButton.self
+        )
+        XCTAssertTrue(buttons.contains {
+            $0.title == "Report Issue: zfc.2012@gmail.com"
         })
     }
 
