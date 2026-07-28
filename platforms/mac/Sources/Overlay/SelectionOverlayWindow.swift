@@ -318,6 +318,13 @@ private extension NSAlert {
 }
 
 extension NSCursor {
+    enum XxSnapFrameResizePosition {
+        case topLeft
+        case topRight
+        case bottomLeft
+        case bottomRight
+    }
+
     static func xxsnapBrushRotationHandle(angle: CGFloat) -> NSCursor {
         let size = NSSize(width: 24, height: 24)
         let hotSpot = brushRotationHandleCenter
@@ -488,10 +495,45 @@ extension NSCursor {
     static let xxsnapMoveLight: NSCursor = moveCursor(foreground: .white, outline: NSColor.black.withAlphaComponent(0.75))
     static let xxsnapResizeLeftRightLight: NSCursor = resizeCursor(angle: 0, foreground: .white)
     static let xxsnapResizeUpDownLight: NSCursor = resizeCursor(angle: .pi / 2, foreground: .white)
+    static let xxsnapResizeTopLeft: NSCursor = resizeCursor(angle: -.pi / 4, foreground: .black, drawsOutline: false)
+    static let xxsnapResizeTopRight: NSCursor = resizeCursor(angle: .pi / 4, foreground: .black, drawsOutline: false)
+    static let xxsnapResizeBottomLeft: NSCursor = resizeCursor(angle: .pi / 4, foreground: .black, drawsOutline: false)
+    static let xxsnapResizeBottomRight: NSCursor = resizeCursor(angle: -.pi / 4, foreground: .black, drawsOutline: false)
     static let xxsnapResizeTopLeftLight: NSCursor = resizeCursor(angle: -.pi / 4, foreground: .white, drawsOutline: false)
     static let xxsnapResizeTopRightLight: NSCursor = resizeCursor(angle: .pi / 4, foreground: .white, drawsOutline: false)
     static let xxsnapResizeBottomLeftLight: NSCursor = resizeCursor(angle: .pi / 4, foreground: .white, drawsOutline: false)
     static let xxsnapResizeBottomRightLight: NSCursor = resizeCursor(angle: -.pi / 4, foreground: .white, drawsOutline: false)
+
+    static func xxsnapFrameResize(
+        position: XxSnapFrameResizePosition,
+        prefersSystemCursor: Bool = true
+    ) -> NSCursor {
+        if prefersSystemCursor {
+            if #available(macOS 15.0, *) {
+                switch position {
+                case .topLeft:
+                    return NSCursor.frameResize(position: .topLeft, directions: .all)
+                case .topRight:
+                    return NSCursor.frameResize(position: .topRight, directions: .all)
+                case .bottomLeft:
+                    return NSCursor.frameResize(position: .bottomLeft, directions: .all)
+                case .bottomRight:
+                    return NSCursor.frameResize(position: .bottomRight, directions: .all)
+                }
+            }
+        }
+
+        switch position {
+        case .topLeft:
+            return xxsnapResizeTopLeft
+        case .topRight:
+            return xxsnapResizeTopRight
+        case .bottomLeft:
+            return xxsnapResizeBottomLeft
+        case .bottomRight:
+            return xxsnapResizeBottomRight
+        }
+    }
 
     private static func moveCursor(foreground: NSColor, outline: NSColor) -> NSCursor {
         let size = NSSize(width: 28, height: 28)
@@ -4234,19 +4276,19 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         case .resizeUpDownLight:
             return NSCursor.xxsnapResizeUpDownLight
         case .resizeTopLeft:
-            return NSCursor.frameResize(position: .topLeft, directions: .all)
+            return NSCursor.xxsnapFrameResize(position: .topLeft)
         case .resizeTopLeftLight:
             return NSCursor.xxsnapResizeTopLeftLight
         case .resizeTopRight:
-            return NSCursor.frameResize(position: .topRight, directions: .all)
+            return NSCursor.xxsnapFrameResize(position: .topRight)
         case .resizeTopRightLight:
             return NSCursor.xxsnapResizeTopRightLight
         case .resizeBottomLeft:
-            return NSCursor.frameResize(position: .bottomLeft, directions: .all)
+            return NSCursor.xxsnapFrameResize(position: .bottomLeft)
         case .resizeBottomLeftLight:
             return NSCursor.xxsnapResizeBottomLeftLight
         case .resizeBottomRight:
-            return NSCursor.frameResize(position: .bottomRight, directions: .all)
+            return NSCursor.xxsnapFrameResize(position: .bottomRight)
         case .resizeBottomRightLight:
             return NSCursor.xxsnapResizeBottomRightLight
         case .rotationHandle:

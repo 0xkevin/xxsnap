@@ -6,6 +6,8 @@ xxsnap is the native-shell screenshot and annotation rewrite formerly known as S
 - native macOS shell
 - future native Windows shell
 
+The native macOS app supports macOS 14.0 or newer.
+
 The legacy Qt project remains in `../snipory` as a migration reference.
 
 Current status:
