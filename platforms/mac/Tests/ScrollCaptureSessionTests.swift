@@ -4,6 +4,54 @@ import XCTest
 
 @MainActor
 final class ScrollCaptureSessionTests: XCTestCase {
+    func testSessionRecordsDiagnosticLifecycleAndStepEvidence() async throws {
+        let logger = RecordingDiagnosticLogger()
+        let controller = FakeStepController()
+        let engine = FakeStitcher(
+            results: [.acceptedInitial, .acceptedAppend],
+            directions: [.unknown, .down]
+        )
+        let session = makeSession(
+            engine: engine,
+            stepController: controller,
+            diagnosticLogger: logger
+        )
+
+        try await session.start()
+        try await session.performStep(direction: .down)
+        _ = try await session.finish()
+
+        XCTAssertEqual(logger.beginSessionCount, 1)
+        XCTAssertEqual(logger.endSessionCount, 1)
+        XCTAssertEqual(
+            logger.events.map(\.event),
+            [
+                "scroll_session_started",
+                "scroll_step_requested",
+                "scroll_stitch_result",
+                "scroll_step_completed",
+                "scroll_session_finished",
+            ]
+        )
+        XCTAssertTrue(logger.events[2].metadata.keys.contains("appended_height"))
+        XCTAssertFalse(logger.events[2].metadata.keys.contains("image"))
+    }
+
+    func testSessionEndsDiagnosticLifecycleWhenCancelled() async throws {
+        let logger = RecordingDiagnosticLogger()
+        let session = makeSession(
+            engine: FakeStitcher(results: [.acceptedInitial]),
+            diagnosticLogger: logger
+        )
+        try await session.start()
+
+        _ = session.cancel()
+
+        XCTAssertEqual(logger.beginSessionCount, 1)
+        XCTAssertEqual(logger.endSessionCount, 1)
+        XCTAssertEqual(logger.events.last?.event, "scroll_session_cancelled")
+    }
+
     func testAutomaticStepDistanceUsesFortyPercentBelowSixHundredPoints() {
         XCTAssertEqual(
             ScrollCaptureSession.stepDistance(forViewportHeight: 599),
@@ -2036,6 +2084,7 @@ final class ScrollCaptureSessionTests: XCTestCase {
         stepController: (any ScrollCaptureStepControlling)? = nil,
         presentation: PresentationRecorder? = nil,
         presentationHandler: (@MainActor (ScrollCapturePresentationUpdate) -> Void)? = nil,
+        diagnosticLogger: any DiagnosticLogging = RecordingDiagnosticLogger(),
         screenRect: NSRect = NSRect(x: 100, y: 200, width: 80, height: 60)
     ) -> ScrollCaptureSession {
         let presentation = presentation ?? PresentationRecorder()
@@ -2052,6 +2101,7 @@ final class ScrollCaptureSessionTests: XCTestCase {
             clock: clock ?? FakeClock(),
             activityMonitor: monitor ?? FakeActivityMonitor(),
             stepController: stepController,
+            diagnosticLogger: diagnosticLogger,
             presentation: {
                 presentation.record($0)
                 presentationHandler?($0)
@@ -2061,6 +2111,37 @@ final class ScrollCaptureSessionTests: XCTestCase {
 }
 
 private enum TestError: Error { case failed }
+
+private final class RecordingDiagnosticLogger: DiagnosticLogging {
+    struct Event {
+        let event: String
+        let metadata: [String: String]
+        let detail: DiagnosticLogDetail
+    }
+
+    private(set) var beginSessionCount = 0
+    private(set) var endSessionCount = 0
+    private(set) var events: [Event] = []
+
+    func record(
+        category: DiagnosticLogCategory,
+        level: DiagnosticLogLevel,
+        event: String,
+        metadata: [String: String],
+        detail: DiagnosticLogDetail
+    ) {
+        events.append(Event(event: event, metadata: metadata, detail: detail))
+    }
+
+    func beginScrollCaptureSession() -> DiagnosticCaptureSession {
+        beginSessionCount += 1
+        return DiagnosticCaptureSession(id: UUID(), startedAt: Date(), isDetailed: true)
+    }
+
+    func endScrollCaptureSession(_ session: DiagnosticCaptureSession) {
+        endSessionCount += 1
+    }
+}
 
 @MainActor
 private final class FakeStepController: ScrollCaptureStepControlling {

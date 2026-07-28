@@ -8,6 +8,7 @@ final class StatusItemController: NSObject {
     private let updateChecker: any UpdateChecking
     private let showPreferences: (PreferencesSection) -> Void
     private let showHelp: @MainActor () -> Void
+    private let exportDiagnosticsHandler: @MainActor () -> Void
     private let terminationHandler: @MainActor () -> Void
     private let statusItem: NSStatusItem
 
@@ -18,6 +19,7 @@ final class StatusItemController: NSObject {
         updateChecker: any UpdateChecking,
         showPreferences: @escaping (PreferencesSection) -> Void,
         showHelp: @escaping @MainActor () -> Void,
+        exportDiagnostics: @escaping @MainActor () -> Void = {},
         terminationHandler: @escaping @MainActor () -> Void = {
             NSApplication.shared.terminate(nil)
         }
@@ -28,6 +30,7 @@ final class StatusItemController: NSObject {
         self.updateChecker = updateChecker
         self.showPreferences = showPreferences
         self.showHelp = showHelp
+        self.exportDiagnosticsHandler = exportDiagnostics
         self.terminationHandler = terminationHandler
         statusItem = NSStatusBar.system.statusItem(withLength: 92)
         super.init()
@@ -68,6 +71,10 @@ final class StatusItemController: NSObject {
 
     @objc func openHelp() {
         showHelp()
+    }
+
+    @objc func exportDiagnostics() {
+        exportDiagnosticsHandler()
     }
 
     @objc func checkForUpdates() {
@@ -145,6 +152,11 @@ final class StatusItemController: NSObject {
         menu.addItem(NSMenuItem(
             title: strings.help,
             action: #selector(openHelp),
+            keyEquivalent: ""
+        ))
+        menu.addItem(NSMenuItem(
+            title: strings.exportDiagnostics,
+            action: #selector(exportDiagnostics),
             keyEquivalent: ""
         ))
         menu.addItem(NSMenuItem(

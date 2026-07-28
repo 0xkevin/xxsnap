@@ -145,6 +145,7 @@ final class CaptureCoordinator {
     ) -> any FullScreenCapturePreviewPresenting
     private let fullScreenCaptureVisibleFrameResolver: @MainActor () -> NSRect
     private let fullScreenCaptureSoundPlayer: @MainActor () -> Void
+    private let diagnosticLogger: any DiagnosticLogging
     private var fullScreenCapturePreview: (any FullScreenCapturePreviewPresenting)?
     private var longImageEditor: (any LongImageEditorPresenting)?
     private var scrollCaptureSession: (any ScrollCaptureSessionRunning)?
@@ -193,7 +194,8 @@ final class CaptureCoordinator {
             FullScreenCapturePreviewContext
         ) -> any FullScreenCapturePreviewPresenting)? = nil,
         fullScreenCaptureVisibleFrameResolver: (@MainActor () -> NSRect)? = nil,
-        fullScreenCaptureSoundPlayer: (@MainActor () -> Void)? = nil
+        fullScreenCaptureSoundPlayer: (@MainActor () -> Void)? = nil,
+        diagnosticLogger: any DiagnosticLogging = NoopDiagnosticLogger.shared
     ) {
         self.permissionCoordinator = permissionCoordinator
         self.screenCaptureService = screenCaptureService
@@ -226,6 +228,7 @@ final class CaptureCoordinator {
                         seed.targetApplicationProcessIdentifier
                     }
                 ),
+                diagnosticLogger: diagnosticLogger,
                 presentation: update
             )
         }
@@ -265,6 +268,7 @@ final class CaptureCoordinator {
         }
         self.fullScreenCaptureVisibleFrameResolver = fullScreenCaptureVisibleFrameResolver
             ?? Self.currentScreenVisibleFrame
+        self.diagnosticLogger = diagnosticLogger
         if let fullScreenCaptureSoundPlayer {
             self.fullScreenCaptureSoundPlayer = fullScreenCaptureSoundPlayer
         } else {
@@ -318,12 +322,27 @@ final class CaptureCoordinator {
     }
 
     func startFullScreenCapture() {
+        diagnosticLogger.record(
+            category: .capture,
+            level: .info,
+            event: "full_screen_capture_requested"
+        )
         guard canStartCapture else {
             NSLog("xxsnap full-screen capture ignored because capture is already active")
+            diagnosticLogger.record(
+                category: .capture,
+                level: .warning,
+                event: "full_screen_capture_ignored_busy"
+            )
             return
         }
         languageSnapshot.language = settingsStore.load().language
         guard permissionCoordinator.hasScreenCapturePermission() else {
+            diagnosticLogger.record(
+                category: .capture,
+                level: .warning,
+                event: "full_screen_capture_permission_missing"
+            )
             guard permissionCoordinator.shouldShowScreenCaptureGuidance() else { return }
             if permissionCoordinator.requestScreenCapturePermissionOnce() {
                 showPermissionRestartAlert()
@@ -334,6 +353,11 @@ final class CaptureCoordinator {
         }
 
         captureOverlayDidPresent?()
+        diagnosticLogger.record(
+            category: .capture,
+            level: .info,
+            event: "full_screen_capture_started"
+        )
         fullScreenCaptureTask = Task { @MainActor [weak self] in
             guard let self else { return }
             defer {
@@ -346,12 +370,24 @@ final class CaptureCoordinator {
                 self.lastCapture = image
                 self.presentFullScreenCapturePreview(image)
                 self.fullScreenCaptureSoundPlayer()
+                self.diagnosticLogger.record(
+                    category: .capture,
+                    level: .info,
+                    event: "full_screen_capture_completed",
+                    metadata: Self.sizeMetadata(image.size)
+                )
                 NSLog(
                     "xxsnap full-screen capture completed: %.0fx%.0f",
                     image.size.width,
                     image.size.height
                 )
             } catch {
+                self.diagnosticLogger.record(
+                    category: .capture,
+                    level: .error,
+                    event: "full_screen_capture_failed",
+                    metadata: ["error_type": String(describing: type(of: error))]
+                )
                 NSLog("xxsnap full-screen capture failed: \(error.localizedDescription)")
             }
         }
@@ -363,6 +399,11 @@ final class CaptureCoordinator {
 
     func toggleTeachingPen() {
         if activeOverlayMode == .teachingPen {
+            diagnosticLogger.record(
+                category: .teachingPen,
+                level: .info,
+                event: "teaching_pen_exit_requested"
+            )
             if let overlayWindow {
                 overlayWindow.cancel()
             } else {
@@ -375,17 +416,32 @@ final class CaptureCoordinator {
 
     private func startCapture(mode: CaptureOverlayMode) {
         NSLog("xxsnap startCapture mode=%@", String(describing: mode))
+        diagnosticLogger.record(
+            category: diagnosticCategory(for: mode),
+            level: .info,
+            event: diagnosticRequestEvent(for: mode)
+        )
         let teachingPenToSuspend = mode == .textRecognition && canSuspendTeachingPen
             ? overlayWindow
             : nil
         guard canStartCapture || teachingPenToSuspend != nil else {
             NSLog("xxsnap startCapture ignored because capture is already active")
+            diagnosticLogger.record(
+                category: diagnosticCategory(for: mode),
+                level: .warning,
+                event: diagnosticEventPrefix(for: mode) + "_ignored_busy"
+            )
             return
         }
 
         languageSnapshot.language = settingsStore.load().language
         if !permissionCoordinator.hasScreenCapturePermission() {
             NSLog("xxsnap missing screen capture permission")
+            diagnosticLogger.record(
+                category: diagnosticCategory(for: mode),
+                level: .warning,
+                event: diagnosticEventPrefix(for: mode) + "_permission_missing"
+            )
             guard permissionCoordinator.shouldShowScreenCaptureGuidance() else {
                 NSLog("xxsnap suppressing repeated screen capture permission alert")
                 return
@@ -422,8 +478,20 @@ final class CaptureCoordinator {
             do {
                 backgroundImage = try await desktopFallbackCapture()
                 frozenDesktopImage = backgroundImage
+                diagnosticLogger.record(
+                    category: diagnosticCategory(for: mode),
+                    level: .debug,
+                    event: diagnosticEventPrefix(for: mode) + "_desktop_snapshot_ready",
+                    metadata: backgroundImage.map { Self.sizeMetadata($0.size) } ?? [:]
+                )
             } catch {
                 NSLog("xxsnap desktop snapshot failed before overlay: \(error.localizedDescription)")
+                diagnosticLogger.record(
+                    category: diagnosticCategory(for: mode),
+                    level: .error,
+                    event: diagnosticEventPrefix(for: mode) + "_desktop_snapshot_failed",
+                    metadata: ["error_type": String(describing: type(of: error))]
+                )
                 backgroundImage = nil
                 frozenDesktopImage = nil
             }
@@ -488,7 +556,40 @@ final class CaptureCoordinator {
             }
             self.captureOverlayDidPresent?()
             overlayWindow.present()
+            self.diagnosticLogger.record(
+                category: self.diagnosticCategory(for: mode),
+                level: .info,
+                event: self.diagnosticEventPrefix(for: mode) + "_overlay_presented"
+            )
         }
+    }
+
+    private func diagnosticCategory(
+        for mode: CaptureOverlayMode
+    ) -> DiagnosticLogCategory {
+        switch mode {
+        case .region:
+            return .capture
+        case .textRecognition:
+            return .textRecognition
+        case .teachingPen:
+            return .teachingPen
+        }
+    }
+
+    private func diagnosticEventPrefix(for mode: CaptureOverlayMode) -> String {
+        switch mode {
+        case .region:
+            return "region_capture"
+        case .textRecognition:
+            return "text_recognition"
+        case .teachingPen:
+            return "teaching_pen"
+        }
+    }
+
+    private func diagnosticRequestEvent(for mode: CaptureOverlayMode) -> String {
+        diagnosticEventPrefix(for: mode) + "_requested"
     }
 
     private var canStartCapture: Bool {
@@ -761,6 +862,13 @@ final class CaptureCoordinator {
         return NSScreen.screens.first(where: { NSMouseInRect(pointer, $0.frame, false) })?.visibleFrame
             ?? NSScreen.main?.visibleFrame
             ?? SelectionOverlayWindow.visibleDesktopFrame()
+    }
+
+    private static func sizeMetadata(_ size: NSSize) -> [String: String] {
+        [
+            "width": String(Int(size.width.rounded())),
+            "height": String(Int(size.height.rounded())),
+        ]
     }
 
     private func receiveScrollCaptureUpdate(
@@ -1146,6 +1254,9 @@ final class CaptureCoordinator {
 
     private func handleSelection(_ result: CaptureSelectionResult?) {
         let completedOverlayMode = activeOverlayMode
+        let completedCategory = completedOverlayMode.map(diagnosticCategory(for:)) ?? .capture
+        let completedEventPrefix = completedOverlayMode.map(diagnosticEventPrefix(for:))
+            ?? "region_capture"
         if let overlayWindow, completedOverlayMode == .region {
             retiredOverlayWindows.append(overlayWindow)
         }
@@ -1154,6 +1265,11 @@ final class CaptureCoordinator {
 
         guard let result, !result.screenRect.isEmpty else {
             NSLog("xxsnap selection cancelled or empty")
+            diagnosticLogger.record(
+                category: completedCategory,
+                level: .info,
+                event: completedEventPrefix + "_cancelled"
+            )
             frozenDesktopImage = nil
             if !restoreSuspendedTeachingPen() {
                 captureSessionDidEnd?()
@@ -1161,6 +1277,17 @@ final class CaptureCoordinator {
             return
         }
         NSLog("xxsnap handling selection annotations=%ld rect=(%.0f, %.0f, %.0f, %.0f)", result.annotations.count, result.screenRect.minX, result.screenRect.minY, result.screenRect.width, result.screenRect.height)
+        diagnosticLogger.record(
+            category: completedCategory,
+            level: .info,
+            event: completedEventPrefix + "_selection_completed",
+            metadata: [
+                "action": String(describing: result.action),
+                "annotation_count": String(result.annotations.count),
+                "width": String(Int(result.screenRect.width.rounded())),
+                "height": String(Int(result.screenRect.height.rounded())),
+            ]
+        )
 
         captureTask = Task { @MainActor [weak self] in
             guard let self else {
@@ -1197,6 +1324,11 @@ final class CaptureCoordinator {
                     )
                 }
                 if completedOverlayMode == .textRecognition {
+                    self.diagnosticLogger.record(
+                        category: .textRecognition,
+                        level: .info,
+                        event: "text_recognition_started"
+                    )
                     await handleTextRecognition(image, screenRect: result.screenRect)
                     self.frozenDesktopImage = nil
                     return
@@ -1211,9 +1343,19 @@ final class CaptureCoordinator {
                 switch result.action {
                 case .copy:
                     copyToPasteboard(exportedImage)
+                    self.diagnosticLogger.record(
+                        category: completedCategory,
+                        level: .info,
+                        event: completedEventPrefix + "_copied"
+                    )
                 case .save:
                     if !saveLastCapture(exportedImage) {
                         NSLog("xxsnap save was cancelled or failed")
+                        self.diagnosticLogger.record(
+                            category: completedCategory,
+                            level: .warning,
+                            event: completedEventPrefix + "_save_not_completed"
+                        )
                     }
                 case .pin:
                     let controller = pinnedWindowFactory(exportedImage, result.screenRect)
@@ -1242,9 +1384,21 @@ final class CaptureCoordinator {
                         }
                     }
                     controller.show()
+                    self.diagnosticLogger.record(
+                        category: .pin,
+                        level: .info,
+                        event: "pinned_capture_presented",
+                        metadata: Self.sizeMetadata(exportedImage.size)
+                    )
                 case .finishEditing:
                     break
                 }
+                self.diagnosticLogger.record(
+                    category: completedCategory,
+                    level: .info,
+                    event: completedEventPrefix + "_completed",
+                    metadata: Self.sizeMetadata(exportedImage.size)
+                )
                 NSLog(
                     "xxsnap capture completed: %.0fx%.0f",
                     exportedImage.size.width,
@@ -1255,6 +1409,12 @@ final class CaptureCoordinator {
                 if completedOverlayMode == .textRecognition {
                     self.ocrResultPresenter.showFailure(near: result.screenRect)
                 }
+                self.diagnosticLogger.record(
+                    category: completedCategory,
+                    level: .error,
+                    event: completedEventPrefix + "_failed",
+                    metadata: ["error_type": String(describing: type(of: error))]
+                )
                 NSLog("xxsnap capture failed: \(error.localizedDescription)")
             }
         }
@@ -1266,11 +1426,21 @@ final class CaptureCoordinator {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else {
                 ocrResultPresenter.showFailure(near: screenRect)
+                diagnosticLogger.record(
+                    category: .textRecognition,
+                    level: .warning,
+                    event: "text_recognition_empty_result"
+                )
                 NSLog("xxsnap text recognition completed with empty result")
                 return
             }
             guard textCopyHandler(text) else {
                 ocrResultPresenter.showFailure(near: screenRect)
+                diagnosticLogger.record(
+                    category: .textRecognition,
+                    level: .error,
+                    event: "text_recognition_copy_failed"
+                )
                 NSLog("xxsnap text recognition copy failed")
                 return
             }
@@ -1280,9 +1450,21 @@ final class CaptureCoordinator {
                 playsSound: !preferences.disablesTextRecognitionSound,
                 showsNotification: !preferences.disablesTextRecognitionSuccessNotification
             )
+            diagnosticLogger.record(
+                category: .textRecognition,
+                level: .info,
+                event: "text_recognition_completed",
+                metadata: ["character_count": String(text.count)]
+            )
             NSLog("xxsnap text recognition copied %ld characters", text.count)
         } catch {
             ocrResultPresenter.showFailure(near: screenRect)
+            diagnosticLogger.record(
+                category: .textRecognition,
+                level: .error,
+                event: "text_recognition_failed",
+                metadata: ["error_type": String(describing: type(of: error))]
+            )
             NSLog("xxsnap text recognition failed: \(error.localizedDescription)")
         }
     }
@@ -1337,6 +1519,11 @@ final class CaptureCoordinator {
             let imageToSave = image ?? lastCapture,
             let cgImage = imageToSave.cgImage(forProposedRect: nil, context: nil, hints: nil)
         else {
+            diagnosticLogger.record(
+                category: .capture,
+                level: .error,
+                event: "capture_save_source_unavailable"
+            )
             return false
         }
 
@@ -1347,6 +1534,11 @@ final class CaptureCoordinator {
 
         NSApp.activate(ignoringOtherApps: true)
         guard savePanel.runModal() == .OK, let destinationURL = savePanel.url else {
+            diagnosticLogger.record(
+                category: .capture,
+                level: .info,
+                event: "capture_save_cancelled"
+            )
             return false
         }
 
@@ -1356,6 +1548,11 @@ final class CaptureCoordinator {
             1,
             nil
         ) else {
+            diagnosticLogger.record(
+                category: .capture,
+                level: .error,
+                event: "capture_save_destination_unavailable"
+            )
             return false
         }
         CGImageDestinationAddImage(destination, cgImage, nil)
@@ -1363,6 +1560,18 @@ final class CaptureCoordinator {
         if !didSave {
             try? FileManager.default.removeItem(at: destinationURL)
             NSLog("xxsnap save failed: ImageIO could not encode PNG")
+            diagnosticLogger.record(
+                category: .capture,
+                level: .error,
+                event: "capture_save_failed"
+            )
+        } else {
+            diagnosticLogger.record(
+                category: .capture,
+                level: .info,
+                event: "capture_save_completed",
+                metadata: Self.sizeMetadata(imageToSave.size)
+            )
         }
         return didSave
     }

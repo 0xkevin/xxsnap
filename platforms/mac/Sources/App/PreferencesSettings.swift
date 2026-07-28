@@ -228,6 +228,28 @@ struct PreferencesStrings {
         isEnglish ? "Support the Developer ☕️" : "支持开发者 ☕️"
     }
     var help: String { isEnglish ? "Help..." : "帮助…" }
+    var exportDiagnostics: String {
+        isEnglish ? "Export Diagnostic Logs…" : "导出诊断日志…"
+    }
+    var diagnosticExportPanelTitle: String {
+        isEnglish ? "Export Diagnostic Logs" : "导出诊断日志"
+    }
+    var diagnosticExportSucceededTitle: String {
+        isEnglish ? "Diagnostic Logs Exported" : "诊断日志已导出"
+    }
+    var diagnosticExportSucceededMessage: String {
+        isEnglish
+            ? "The diagnostic archive is ready to send to support."
+            : "诊断压缩包已生成，可以发送给技术支持。"
+    }
+    var diagnosticExportFailedTitle: String {
+        isEnglish ? "Unable to Export Diagnostic Logs" : "无法导出诊断日志"
+    }
+    var diagnosticExportFailedMessage: String {
+        isEnglish
+            ? "Please choose another location and try again."
+            : "请选择其他位置后重试。"
+    }
     var helpWindowTitle: String { isEnglish ? "XxSnap Help" : "XxSnap 帮助" }
     var helpLoadFailed: String {
         isEnglish
@@ -255,7 +277,7 @@ struct PreferencesStrings {
     }
     var contactEmail: String {
         isEnglish
-            ? "Feedback or technical support: zfc.2012@gmail.com"
+            ? "Report Issue: zfc.2012@gmail.com"
             : "问题反馈或技术支持：zfc.2012@gmail.com"
     }
     var launchAtLogin: String { isEnglish ? "Launch at login" : "开机自启动" }

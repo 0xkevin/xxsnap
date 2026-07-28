@@ -13,7 +13,8 @@ final class OCRResultPresentationController {
         let accessibilityLabel: String
     }
 
-    private static let panelSize = NSSize(width: 176, height: 124)
+    private static let chinesePanelSize = NSSize(width: 176, height: 124)
+    private static let englishPanelSize = NSSize(width: 248, height: 132)
     private static let displayDuration: TimeInterval = 3
     private static let fadeDuration: TimeInterval = 0.35
     private static let panelIdentifier = NSUserInterfaceItemIdentifier("xxsnap.ocr-copy-success")
@@ -69,7 +70,10 @@ final class OCRResultPresentationController {
         let visibleFrame = targetScreen(for: screenRect)?.visibleFrame
             ?? NSScreen.main?.visibleFrame
             ?? SelectionOverlayWindow.visibleDesktopFrame()
-        let frame = Self.panelFrame(in: visibleFrame)
+        let language = languageProvider()
+        let copy = Self.copy(for: result, language: language)
+        let panelSize = Self.panelSize(for: language)
+        let frame = Self.panelFrame(in: visibleFrame, size: panelSize)
         let panel = NSPanel(
             contentRect: frame,
             styleMask: [.borderless, .nonactivatingPanel],
@@ -86,7 +90,8 @@ final class OCRResultPresentationController {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
         panel.contentView = OCRResultView(
             result: result,
-            copy: Self.copy(for: result, language: languageProvider())
+            copy: copy,
+            size: panelSize
         )
         panel.setFrame(frame, display: false)
         panel.alphaValue = 1
@@ -128,12 +133,16 @@ final class OCRResultPresentationController {
         }
     }
 
-    private static func panelFrame(in visibleFrame: NSRect) -> NSRect {
+    private static func panelSize(for language: AppLanguage) -> NSSize {
+        language == .english ? englishPanelSize : chinesePanelSize
+    }
+
+    private static func panelFrame(in visibleFrame: NSRect, size: NSSize) -> NSRect {
         NSRect(
-            x: visibleFrame.midX - panelSize.width / 2,
-            y: visibleFrame.minY + visibleFrame.height * 0.28 - panelSize.height / 2,
-            width: panelSize.width,
-            height: panelSize.height
+            x: visibleFrame.midX - size.width / 2,
+            y: visibleFrame.minY + visibleFrame.height * 0.28 - size.height / 2,
+            width: size.width,
+            height: size.height
         )
     }
 
@@ -177,9 +186,10 @@ private extension NSRect {
 private final class OCRResultView: NSView {
     init(
         result: OCRResultPresentationController.Result,
-        copy: OCRResultPresentationController.Copy
+        copy: OCRResultPresentationController.Copy,
+        size: NSSize
     ) {
-        super.init(frame: NSRect(origin: .zero, size: NSSize(width: 176, height: 124)))
+        super.init(frame: NSRect(origin: .zero, size: size))
         wantsLayer = true
         layer?.backgroundColor = NSColor(calibratedWhite: 0.98, alpha: 0.96).cgColor
         layer?.cornerRadius = 12
@@ -224,6 +234,8 @@ private final class OCRResultView: NSView {
         NSLayoutConstraint.activate([
             contentStack.centerXAnchor.constraint(equalTo: centerXAnchor),
             contentStack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            contentStack.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 20),
+            contentStack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -20),
         ])
     }
 

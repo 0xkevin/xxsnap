@@ -587,6 +587,32 @@
           ]
         }
       ]
+    },
+    {
+      "id": "report-issue",
+      "navigationTitle": "Report Issue",
+      "title": "Report Issue",
+      "introduction": "If XxSnap is not working correctly, export the diagnostic logs and report the issue by email. The archive contains operational records for screenshots, scrolling capture, Capture Text, Presentation Pen, and related features. It does not contain captured images, recognized text, clipboard contents, URLs, or file paths.",
+      "tableOfContents": [],
+      "shortcuts": [],
+      "blocks": [
+        {
+          "type": "steps",
+          "items": [
+            {
+              "text": "Choose “Export Diagnostic Logs…” from the XxSnap menu bar and save the ZIP file."
+            },
+            {
+              "text": "Email zfc.2012@gmail.com, attach the diagnostic ZIP, and describe what happened and how to reproduce it."
+            }
+          ]
+        },
+        {
+          "type": "note",
+          "title": "Support Email",
+          "text": "zfc.2012@gmail.com"
+        }
+      ]
     }
   ]
 }
