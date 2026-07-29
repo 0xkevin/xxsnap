@@ -217,6 +217,54 @@ final class xxsnapMacTests: XCTestCase {
         )
     }
 
+    func testAnnotationRendererDrawsChineseTextAcrossFullAnnotationHeight() throws {
+        let image = try makeBitmapImage(
+            pointSize: NSSize(width: 360, height: 180),
+            pixelWidth: 360,
+            pixelHeight: 180,
+            fill: .white
+        )
+        var style = CaptureAnnotationStyle()
+        style.strokeColor = .systemRed
+        style.textSize = 72
+
+        let size = CaptureAnnotationRenderer.textAnnotationSize(
+            text: "重点内容",
+            style: style
+        )
+        let rect = NSRect(origin: NSPoint(x: 24, y: 36), size: size)
+        let annotation = CaptureAnnotation(
+            kind: .text,
+            rect: rect,
+            style: style,
+            text: "重点内容"
+        )
+
+        let rendered = CaptureAnnotationRenderer.render(
+            image: image,
+            annotations: [annotation]
+        )
+        let lowerHalf = NSRect(
+            x: rect.minX,
+            y: rect.minY,
+            width: rect.width,
+            height: rect.height / 2
+        )
+        let upperHalf = NSRect(
+            x: rect.minX,
+            y: rect.midY,
+            width: rect.width,
+            height: rect.height / 2
+        )
+
+        XCTAssertTrue(
+            try containsRedDominantOpaquePixel(in: rendered, within: lowerHalf)
+        )
+        XCTAssertTrue(
+            try containsRedDominantOpaquePixel(in: rendered, within: upperHalf)
+        )
+    }
+
     func testNumberSequenceRendererDrawsNumberCircle() throws {
         var style = CaptureAnnotationStyle()
         style.strokeColor = NSColor(srgbRed: 1, green: 0, blue: 0, alpha: 1)
