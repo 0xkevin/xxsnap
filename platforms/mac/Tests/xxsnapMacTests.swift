@@ -265,6 +265,91 @@ final class xxsnapMacTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testRefreshHelpCaptureResourcesWhenRequested() throws {
+        guard let outputRoot = ProcessInfo.processInfo.environment["XXSNAP_HELP_CAPTURE_OUTPUT"] else {
+            throw XCTSkip("Set XXSNAP_HELP_CAPTURE_OUTPUT to refresh the help captures")
+        }
+
+        let canvasSize = NSSize(width: 1_340, height: 814)
+        let languages: [AppLanguage] = [.zhHans, .english]
+
+        for language in languages {
+            var settings = AppSettings.default
+            settings.language = language
+            let directoryName = language == .zhHans ? "zh-Hans" : "en"
+            let outputDirectory = URL(fileURLWithPath: outputRoot)
+                .appendingPathComponent(directoryName, isDirectory: true)
+            try FileManager.default.createDirectory(
+                at: outputDirectory,
+                withIntermediateDirectories: true
+            )
+
+            let annotationBackdrop = try makeHelpCaptureBackdrop(
+                size: canvasSize,
+                language: language,
+                scrollContent: false
+            )
+            var annotationConfiguration = SelectionOverlayConfiguration.default
+            annotationConfiguration.windowFrame = NSRect(origin: .zero, size: canvasSize)
+            annotationConfiguration.usesWindowBoundsForLayout = true
+            let annotationWindow = SelectionOverlayWindow(
+                backgroundImage: annotationBackdrop,
+                settings: settings,
+                configuration: annotationConfiguration
+            ) { _ in }
+            let annotationSelection = NSRect(x: 70, y: 160, width: 1_200, height: 540)
+            annotationWindow.test_setLockedSelectionRect(annotationSelection)
+            annotationWindow.test_setAnnotations(
+                helpCaptureAnnotations(language: language)
+            )
+            annotationWindow.test_activateTextTool()
+            annotationWindow.test_selectTextSize(8)
+
+            let annotationImage = try renderHelpCapture(
+                window: annotationWindow,
+                backdrop: annotationBackdrop
+            )
+            try save(
+                image: annotationImage,
+                to: outputDirectory
+                    .appendingPathComponent("capture-annotation-tools.png")
+                    .path
+            )
+
+            let scrollBackdrop = try makeHelpCaptureBackdrop(
+                size: canvasSize,
+                language: language,
+                scrollContent: true
+            )
+            var scrollConfiguration = SelectionOverlayConfiguration.default
+            scrollConfiguration.windowFrame = NSRect(origin: .zero, size: canvasSize)
+            scrollConfiguration.usesWindowBoundsForLayout = true
+            let scrollWindow = SelectionOverlayWindow(
+                backgroundImage: scrollBackdrop,
+                settings: settings,
+                configuration: scrollConfiguration
+            ) { _ in }
+            scrollWindow.onScrollCaptureRequested = { _ in }
+            scrollWindow.test_setLockedSelectionRect(
+                NSRect(x: 70, y: 150, width: 920, height: 560)
+            )
+            scrollWindow.test_beginScrollCapture()
+            scrollWindow.setScrollCaptureOutputHeight(4_320)
+
+            let scrollImage = try renderHelpCapture(
+                window: scrollWindow,
+                backdrop: scrollBackdrop
+            )
+            try save(
+                image: scrollImage,
+                to: outputDirectory
+                    .appendingPathComponent("capture-scroll-session.png")
+                    .path
+            )
+        }
+    }
+
     func testNumberSequenceRendererDrawsNumberCircle() throws {
         var style = CaptureAnnotationStyle()
         style.strokeColor = NSColor(srgbRed: 1, green: 0, blue: 0, alpha: 1)
@@ -1473,6 +1558,253 @@ final class xxsnapMacTests: XCTestCase {
         context.fill(CGRect(x: 0, y: 0, width: pixelWidth, height: pixelHeight))
         let cgImage = try XCTUnwrap(context.makeImage())
         return NSImage(cgImage: cgImage, size: pointSize)
+    }
+
+    private func helpCaptureAnnotations(language: AppLanguage) -> [CaptureAnnotation] {
+        var rectangleStyle = CaptureAnnotationStyle()
+        rectangleStyle.strokeColor = NSColor(srgbRed: 1, green: 0.16, blue: 0.14, alpha: 1)
+        rectangleStyle.strokeWidth = 5
+
+        var arrowStyle = CaptureAnnotationStyle()
+        arrowStyle.strokeColor = NSColor(srgbRed: 0.03, green: 0.43, blue: 1, alpha: 1)
+        arrowStyle.strokeWidth = 5
+        let arrowLine = CaptureArrowLine(
+            start: NSPoint(x: 345, y: 315),
+            end: NSPoint(x: 545, y: 430),
+            control: NSPoint(x: 455, y: 350),
+            startArrowType: .none,
+            endArrowType: .solidArrow
+        )
+
+        var brushStyle = CaptureAnnotationStyle()
+        brushStyle.strokeColor = NSColor(srgbRed: 0.68, green: 0.27, blue: 0.9, alpha: 1)
+        brushStyle.strokeWidth = 7
+        let brushPath = CaptureBrushPath(points: [
+            NSPoint(x: 640, y: 330),
+            NSPoint(x: 700, y: 405),
+            NSPoint(x: 760, y: 325),
+            NSPoint(x: 830, y: 395),
+        ])
+
+        var markerStyle = CaptureAnnotationStyle()
+        markerStyle.strokeColor = NSColor(srgbRed: 1, green: 0.8, blue: 0.16, alpha: 1)
+        markerStyle.strokeWidth = 18
+        let markerLine = CaptureMarkerLine(
+            start: NSPoint(x: 925, y: 350),
+            end: NSPoint(x: 1_105, y: 350)
+        )
+
+        var textStyle = CaptureAnnotationStyle()
+        textStyle.strokeColor = NSColor(srgbRed: 1, green: 0.16, blue: 0.14, alpha: 1)
+        textStyle.textSize = 8
+        textStyle.textFontFamily = nil
+        let text = language == .zhHans ? "重点内容" : "Key details"
+        let textRect = NSRect(
+            origin: NSPoint(x: 100, y: 105),
+            size: CaptureAnnotationRenderer.textAnnotationSize(
+                text: text,
+                style: textStyle
+            )
+        )
+
+        var numberStyle = CaptureAnnotationStyle()
+        numberStyle.strokeColor = NSColor(srgbRed: 1, green: 0.16, blue: 0.14, alpha: 1)
+        numberStyle.textSize = 30
+        let numberRect = CaptureAnnotationRenderer.numberMarkRect(
+            centeredAt: NSPoint(x: 425, y: 125),
+            fontSize: numberStyle.textSize
+        )
+
+        var mosaicStyle = CaptureAnnotationStyle()
+        mosaicStyle.strokeWidth = 0
+
+        var magnifierStyle = CaptureAnnotationStyle()
+        magnifierStyle.strokeColor = NSColor(srgbRed: 0.03, green: 0.43, blue: 1, alpha: 1)
+        magnifierStyle.strokeWidth = 4
+
+        return [
+            CaptureAnnotation(
+                kind: .rectangle,
+                rect: NSRect(x: 80, y: 300, width: 180, height: 120),
+                style: rectangleStyle
+            ),
+            CaptureAnnotation(
+                kind: .arrowLine,
+                rect: arrowLine.boundingRect,
+                style: arrowStyle,
+                arrowLine: arrowLine
+            ),
+            CaptureAnnotation(
+                kind: .brush,
+                rect: brushPath.boundingRect,
+                style: brushStyle,
+                brushPath: brushPath
+            ),
+            CaptureAnnotation(
+                kind: .marker,
+                rect: markerLine.boundingRect,
+                style: markerStyle,
+                markerLine: markerLine
+            ),
+            CaptureAnnotation(
+                kind: .text,
+                rect: textRect,
+                style: textStyle,
+                text: text
+            ),
+            CaptureAnnotation(
+                kind: .numberSequence,
+                rect: numberRect,
+                style: numberStyle,
+                numberMarkType: .number,
+                numberSequenceIndex: 1
+            ),
+            CaptureAnnotation(
+                kind: .mosaicRectangle,
+                rect: NSRect(x: 560, y: 82, width: 210, height: 84),
+                style: mosaicStyle,
+                mosaicRedaction: CaptureMosaicRedaction(type: .pixelMosaic, value: 8)
+            ),
+            CaptureAnnotation(
+                kind: .magnifier,
+                rect: NSRect(x: 900, y: 55, width: 150, height: 150),
+                style: magnifierStyle,
+                magnifierShape: .circle,
+                magnifierZoom: 2
+            ),
+        ]
+    }
+
+    private func makeHelpCaptureBackdrop(
+        size: NSSize,
+        language: AppLanguage,
+        scrollContent: Bool
+    ) throws -> NSImage {
+        try makeRetinaHelpImage(size: size) {
+            NSColor.white.setFill()
+            NSRect(origin: .zero, size: size).fill()
+
+            let titleAttributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 25, weight: .semibold),
+                .foregroundColor: NSColor(srgbRed: 0.08, green: 0.12, blue: 0.2, alpha: 1),
+            ]
+            let detailAttributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 14, weight: .medium),
+                .foregroundColor: NSColor(srgbRed: 0.25, green: 0.32, blue: 0.44, alpha: 1),
+            ]
+
+            if scrollContent {
+                let labels = language == .zhHans
+                    ? ["滚动截图内容 8", "滚动截图内容 7", "滚动截图内容 6", "滚动截图内容 5"]
+                    : ["Scroll capture 8", "Scroll capture 7", "Scroll capture 6", "Scroll capture 5"]
+                for (index, label) in labels.enumerated() {
+                    let y = size.height - 250 - CGFloat(index) * 165
+                    let card = NSRect(x: 125, y: y, width: 760, height: 112)
+                    let fill = index.isMultiple(of: 2)
+                        ? NSColor(srgbRed: 0.93, green: 0.97, blue: 1, alpha: 1)
+                        : NSColor(srgbRed: 0.95, green: 0.99, blue: 0.96, alpha: 1)
+                    fill.setFill()
+                    NSBezierPath(roundedRect: card, xRadius: 14, yRadius: 14).fill()
+                    NSString(string: label).draw(
+                        at: NSPoint(x: card.minX + 34, y: card.midY - 13),
+                        withAttributes: titleAttributes
+                    )
+                }
+
+                let preview = NSRect(x: 1_035, y: 90, width: 245, height: 630)
+                NSColor(srgbRed: 0.96, green: 0.97, blue: 0.99, alpha: 1).setFill()
+                NSBezierPath(roundedRect: preview, xRadius: 12, yRadius: 12).fill()
+                NSString(string: language == .zhHans ? "长截图预览" : "Long capture preview").draw(
+                    at: NSPoint(x: preview.minX + 34, y: preview.maxY - 55),
+                    withAttributes: detailAttributes
+                )
+                for index in 0..<5 {
+                    let miniCard = NSRect(
+                        x: preview.minX + 28,
+                        y: preview.maxY - 145 - CGFloat(index) * 98,
+                        width: preview.width - 56,
+                        height: 68
+                    )
+                    (
+                        index.isMultiple(of: 2)
+                            ? NSColor(srgbRed: 0.9, green: 0.95, blue: 1, alpha: 1)
+                            : NSColor(srgbRed: 0.92, green: 0.98, blue: 0.94, alpha: 1)
+                    ).setFill()
+                    NSBezierPath(roundedRect: miniCard, xRadius: 8, yRadius: 8).fill()
+                }
+            } else {
+                NSString(
+                    string: language == .zhHans
+                        ? "矩形、箭头、画笔、荧光笔、文字、序号、马赛克和放大镜"
+                        : "Rectangle, arrow, brush, marker, text, number, mosaic and magnifier"
+                ).draw(
+                    at: NSPoint(x: 100, y: size.height - 148),
+                    withAttributes: detailAttributes
+                )
+
+                let mosaicSource = NSRect(x: 620, y: 240, width: 220, height: 90)
+                NSColor(srgbRed: 0.2, green: 0.24, blue: 0.31, alpha: 1).setFill()
+                NSBezierPath(roundedRect: mosaicSource, xRadius: 10, yRadius: 10).fill()
+                NSString(string: "1234 5678").draw(
+                    at: NSPoint(x: mosaicSource.minX + 42, y: mosaicSource.midY - 12),
+                    withAttributes: [
+                        .font: NSFont.monospacedDigitSystemFont(ofSize: 24, weight: .semibold),
+                        .foregroundColor: NSColor.white,
+                    ]
+                )
+            }
+        }
+    }
+
+    private func renderHelpCapture(
+        window: SelectionOverlayWindow,
+        backdrop: NSImage
+    ) throws -> NSImage {
+        let overlayView = try XCTUnwrap(window.contentView)
+        overlayView.layoutSubtreeIfNeeded()
+        let overlayImage = try renderRetinaHelpView(overlayView)
+        return try makeRetinaHelpImage(size: overlayView.bounds.size) {
+            backdrop.draw(in: overlayView.bounds)
+            overlayImage.draw(in: overlayView.bounds)
+        }
+    }
+
+    private func renderRetinaHelpView(_ view: NSView) throws -> NSImage {
+        try makeRetinaHelpImage(size: view.bounds.size) {
+            view.draw(view.bounds)
+        }
+    }
+
+    private func makeRetinaHelpImage(
+        size: NSSize,
+        draw: () -> Void
+    ) throws -> NSImage {
+        let bitmap = try XCTUnwrap(
+            NSBitmapImageRep(
+                bitmapDataPlanes: nil,
+                pixelsWide: Int(size.width * 2),
+                pixelsHigh: Int(size.height * 2),
+                bitsPerSample: 8,
+                samplesPerPixel: 4,
+                hasAlpha: true,
+                isPlanar: false,
+                colorSpaceName: .deviceRGB,
+                bytesPerRow: 0,
+                bitsPerPixel: 0
+            )
+        )
+        bitmap.size = size
+        let context = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: bitmap))
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        draw()
+        context.flushGraphics()
+        NSGraphicsContext.restoreGraphicsState()
+
+        let image = NSImage(size: size)
+        image.addRepresentation(bitmap)
+        return image
     }
 
     private func makeBitmapImageWithBlackTextStripe() throws -> NSImage {
