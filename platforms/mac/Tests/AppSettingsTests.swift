@@ -93,6 +93,8 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertFalse(
             PreferencesSettings.default.disablesTextRecognitionSuccessNotification
         )
+        XCTAssertTrue(PreferencesSettings.default.showsShortcutFeedback)
+        XCTAssertTrue(PreferencesSettings.default.showsSystemShortcutFeedback)
 
         let settings = PreferencesSettings(
             filenameTemplate: "Capture {yyyyMMdd}_{HHmmss}",
@@ -135,6 +137,8 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.updateCheckIntervalHours, 6)
         XCTAssertFalse(settings.disablesTextRecognitionSound)
         XCTAssertFalse(settings.disablesTextRecognitionSuccessNotification)
+        XCTAssertTrue(settings.showsShortcutFeedback)
+        XCTAssertTrue(settings.showsSystemShortcutFeedback)
     }
 
     func testPreferencesSettingsMigratesOldEnabledDisableSwitchDefaultsOnce() throws {
@@ -332,6 +336,33 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testGlobalHotKeyShowsFeedbackBeforeRunningExistingAction() async {
+        let store = FakeAppSettingsStore()
+        let registrar = FakeGlobalHotKeyRegistrar()
+        var events: [String] = []
+        let controller = CaptureHotKeyController(
+            settingsStore: store,
+            registrar: registrar,
+            captureHandler: {
+                events.append("action")
+            },
+            hotKeyFeedbackHandler: { settings in
+                events.append("feedback:\(HotKeyFormatter.displayString(settings))")
+            },
+            teachingPenHandler: {},
+            restorePinnedImageHandler: {}
+        )
+
+        registrar.onHotKeyPressed?(.capture)
+        for _ in 0..<10 where events.count < 2 {
+            await Task.yield()
+        }
+
+        XCTAssertEqual(events, ["feedback:⌘`", "action"])
+        _ = controller
+    }
+
+    @MainActor
     func testTeachingPenDefaultDoesNotReplaceStoredCommandTwoShortcut() {
         let store = FakeAppSettingsStore()
         let storedRestoreShortcut = HotKeyAction.teachingPen.defaultSettings
@@ -501,11 +532,17 @@ final class AppSettingsTests: XCTestCase {
             ["通用", "快捷键", "保存", "更新", "捐赠", "关于"]
         )
         XCTAssertEqual(controller.window?.contentLayoutRect.width ?? 0, 680, accuracy: 1)
-        XCTAssertEqual(controller.window?.contentLayoutRect.height ?? 0, 320, accuracy: 1)
+        XCTAssertEqual(controller.window?.contentLayoutRect.height ?? 0, 480, accuracy: 1)
         XCTAssertFalse(controller.window?.styleMask.contains(.resizable) == true)
         for section in PreferencesSection.allCases {
             controller.show(section: section)
             controller.window?.contentView?.layoutSubtreeIfNeeded()
+            XCTAssertEqual(
+                controller.window?.contentLayoutRect.height ?? 0,
+                480,
+                accuracy: 1,
+                "\(section.rawValue) should keep the settings window height stable"
+            )
             XCTAssertFalse(
                 controller.window?.contentView?.subviews.isEmpty ?? true,
                 "\(section.rawValue) page should not be blank"
@@ -677,6 +714,351 @@ final class AppSettingsTests: XCTestCase {
             })
         )
         XCTAssertTrue(clearButtons.allSatisfy { !$0.isHidden })
+    }
+
+    @MainActor
+    func testGeneralPreferencesEnableShortcutFeedbackByDefaultAndPersistChanges() throws {
+        let settingsStore = FakeAppSettingsStore()
+        let preferencesStore = FakePreferencesSettingsStore()
+        let systemShortcutMonitor = FakeSystemShortcutMonitor()
+        let controller = PreferencesWindowController(
+            settingsStore: settingsStore,
+            preferencesSettingsStore: preferencesStore,
+            hotKeyController: makeHotKeyController(
+                store: settingsStore,
+                registrar: FakeGlobalHotKeyRegistrar()
+            ),
+            launchAtLoginManager: FakeLaunchAtLoginManager(),
+            updateChecker: FakeUpdateChecker(),
+            systemShortcutMonitor: systemShortcutMonitor
+        )
+        defer {
+            controller.close()
+        }
+
+        controller.show(section: .general)
+        let feedbackSwitch = try XCTUnwrap(
+            descendants(
+                of: controller.window?.contentView,
+                matching: NSSwitch.self
+            ).first {
+                $0.identifier?.rawValue == "showShortcutFeedback"
+            }
+        )
+
+        XCTAssertEqual(feedbackSwitch.state, .on)
+        let systemFeedbackSwitch = try XCTUnwrap(
+            descendants(
+                of: controller.window?.contentView,
+                matching: NSSwitch.self
+            ).first {
+                $0.identifier?.rawValue == "showSystemShortcutFeedback"
+            }
+        )
+        XCTAssertEqual(systemFeedbackSwitch.state, .on)
+
+        feedbackSwitch.performClick(nil)
+
+        XCTAssertFalse(preferencesStore.settings.showsShortcutFeedback)
+
+        systemFeedbackSwitch.performClick(nil)
+
+        XCTAssertFalse(preferencesStore.settings.showsSystemShortcutFeedback)
+        XCTAssertEqual(systemShortcutMonitor.refreshCount, 1)
+    }
+
+    @MainActor
+    func testShortcutDisplaySettingsMoveToGeneralAndAlignRight() throws {
+        let settingsStore = FakeAppSettingsStore()
+        let preferencesStore = FakePreferencesSettingsStore()
+        let controller = PreferencesWindowController(
+            settingsStore: settingsStore,
+            preferencesSettingsStore: preferencesStore,
+            hotKeyController: makeHotKeyController(
+                store: settingsStore,
+                registrar: FakeGlobalHotKeyRegistrar()
+            ),
+            launchAtLoginManager: FakeLaunchAtLoginManager(),
+            updateChecker: FakeUpdateChecker()
+        )
+        defer { controller.close() }
+
+        controller.show(section: .shortcuts)
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(
+            controller.window?.contentLayoutRect.height ?? 0,
+            480,
+            accuracy: 1
+        )
+        let actionGroup = try XCTUnwrap(
+            descendants(
+                of: controller.window?.contentView,
+                matching: NSStackView.self
+            ).first { $0.identifier?.rawValue == "preferencesGroup" }
+        )
+        XCTAssertEqual(
+            actionGroup.arrangedSubviews.filter {
+                $0.identifier?.rawValue == "shortcutRow"
+            }.count,
+            HotKeyAction.allCases.count
+        )
+        XCTAssertTrue(
+            descendants(
+                of: controller.window?.contentView,
+                matching: NSSwitch.self
+            ).filter {
+                ["showShortcutFeedback", "showSystemShortcutFeedback"].contains(
+                    $0.identifier?.rawValue
+                )
+            }.isEmpty
+        )
+
+        controller.show(section: .general)
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let root = try XCTUnwrap(controller.window?.contentView)
+        let generalGroup = try XCTUnwrap(
+            descendants(of: root, matching: NSStackView.self).first {
+                $0.identifier?.rawValue == "preferencesGroup"
+            }
+        )
+        let feedbackSwitches = descendants(of: root, matching: NSSwitch.self).filter {
+            ["showShortcutFeedback", "showSystemShortcutFeedback"].contains(
+                $0.identifier?.rawValue
+            )
+        }
+        XCTAssertEqual(feedbackSwitches.count, 2)
+        let groupFrame = generalGroup.convert(generalGroup.bounds, to: root)
+        let switchRightEdges = feedbackSwitches.map {
+            $0.convert($0.bounds, to: root).maxX
+        }
+        XCTAssertEqual(switchRightEdges[0], switchRightEdges[1], accuracy: 1)
+        XCTAssertGreaterThan(switchRightEdges[0], groupFrame.maxX - 18)
+        XCTAssertLessThan(switchRightEdges[0], groupFrame.maxX)
+
+        let chineseLabels = descendants(of: root, matching: NSTextField.self).map(\.stringValue)
+        XCTAssertTrue(chineseLabels.contains("显示 XxSnap 快捷键"))
+        XCTAssertTrue(chineseLabels.contains("显示其他应用快捷键"))
+
+        settingsStore.settings.language = .english
+        controller.refresh()
+        controller.show(section: .general)
+        let englishLabels = descendants(
+            of: controller.window?.contentView,
+            matching: NSTextField.self
+        ).map(\.stringValue)
+        XCTAssertTrue(englishLabels.contains("Show XxSnap shortcuts"))
+        XCTAssertTrue(englishLabels.contains("Show shortcuts from other apps"))
+    }
+
+    @MainActor
+    func testGeneralSystemShortcutPermissionKeepsSwitchAtRightEdge() throws {
+        let settingsStore = FakeAppSettingsStore()
+        let preferencesStore = FakePreferencesSettingsStore()
+        preferencesStore.settings.showsSystemShortcutFeedback = true
+        let controller = PreferencesWindowController(
+            settingsStore: settingsStore,
+            preferencesSettingsStore: preferencesStore,
+            hotKeyController: makeHotKeyController(
+                store: settingsStore,
+                registrar: FakeGlobalHotKeyRegistrar()
+            ),
+            launchAtLoginManager: FakeLaunchAtLoginManager(),
+            updateChecker: FakeUpdateChecker(),
+            systemShortcutMonitor: FakeSystemShortcutMonitor()
+        )
+        defer { controller.close() }
+
+        controller.show(section: .general)
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let root = try XCTUnwrap(controller.window?.contentView)
+        let group = try XCTUnwrap(
+            descendants(of: root, matching: NSStackView.self).first {
+                $0.identifier?.rawValue == "preferencesGroup"
+            }
+        )
+        let feedbackSwitch = try XCTUnwrap(
+            descendants(of: root, matching: NSSwitch.self).first {
+                $0.identifier?.rawValue == "showSystemShortcutFeedback"
+            }
+        )
+        let permissionButton = try XCTUnwrap(
+            descendants(of: root, matching: NSButton.self).first {
+                $0.title == "打开输入监控"
+            }
+        )
+        let groupFrame = group.convert(group.bounds, to: root)
+        let switchFrame = feedbackSwitch.convert(feedbackSwitch.bounds, to: root)
+        let buttonFrame = permissionButton.convert(permissionButton.bounds, to: root)
+
+        XCTAssertGreaterThan(switchFrame.maxX, groupFrame.maxX - 18)
+        XCTAssertLessThan(switchFrame.maxX, groupFrame.maxX)
+        XCTAssertLessThanOrEqual(buttonFrame.maxX, switchFrame.minX)
+    }
+
+    @MainActor
+    func testSystemShortcutMonitorRequiresSettingAndPermission() {
+        let store = FakePreferencesSettingsStore()
+        let source = FakeGlobalKeyEventSource()
+        let permission = FakeSystemShortcutPermissionProvider()
+        let monitor = SystemShortcutMonitor(
+            settingsStore: store,
+            eventSource: source,
+            permissionProvider: permission
+        )
+
+        monitor.refresh()
+        XCTAssertFalse(source.isRunning)
+
+        store.settings.showsSystemShortcutFeedback = true
+        monitor.refresh()
+        XCTAssertFalse(source.isRunning)
+
+        permission.isGranted = true
+        monitor.refresh()
+        XCTAssertTrue(source.isRunning)
+
+        store.settings.showsSystemShortcutFeedback = false
+        monitor.refresh()
+        XCTAssertFalse(source.isRunning)
+    }
+
+    @MainActor
+    func testSystemShortcutMonitorFiltersTypingRepeatsAndOwnShortcuts() throws {
+        let store = FakePreferencesSettingsStore()
+        store.settings.showsSystemShortcutFeedback = true
+        let source = FakeGlobalKeyEventSource()
+        let permission = FakeSystemShortcutPermissionProvider()
+        permission.isGranted = true
+        let ownShortcut = HotKeyAction.capture.defaultSettings
+        var received: [HotKeySettings] = []
+        let monitor = SystemShortcutMonitor(
+            settingsStore: store,
+            eventSource: source,
+            permissionProvider: permission,
+            shouldIgnore: { $0 == ownShortcut }
+        )
+        monitor.onShortcutPressed = { received.append($0) }
+        monitor.refresh()
+
+        source.send(try makeKeyEvent(keyCode: UInt16(kVK_ANSI_A)))
+        source.send(try makeKeyEvent(
+            keyCode: UInt16(kVK_ANSI_A),
+            modifiers: [.shift]
+        ))
+        source.send(try makeKeyEvent(
+            keyCode: UInt16(kVK_ANSI_C),
+            modifiers: [.command]
+        ))
+        source.send(try makeKeyEvent(keyCode: UInt16(kVK_Escape)))
+        source.send(try makeKeyEvent(keyCode: UInt16(kVK_F5)))
+        source.send(try makeKeyEvent(
+            keyCode: UInt16(kVK_ANSI_C),
+            modifiers: [.command],
+            isARepeat: true
+        ))
+        source.send(try makeKeyEvent(
+            keyCode: UInt16(ownShortcut.keyCode),
+            modifiers: [.command]
+        ))
+
+        XCTAssertEqual(
+            received.map(HotKeyFormatter.displayString),
+            ["⌘C", "Esc", "F5"]
+        )
+    }
+
+    @MainActor
+    func testSystemShortcutFeedbackUsesItsOwnSetting() throws {
+        let store = FakePreferencesSettingsStore()
+        store.settings.showsShortcutFeedback = false
+        store.settings.showsSystemShortcutFeedback = true
+        let controller = ShortcutFeedbackPresentationController(
+            settingsStore: store,
+            visibleFrameProvider: {
+                NSRect(x: 0, y: 0, width: 1_200, height: 800)
+            }
+        )
+        defer { controller.hide() }
+
+        controller.showSystemShortcut(
+            HotKeySettings(keyCode: UInt32(kVK_ANSI_C), modifiers: UInt32(cmdKey))
+        )
+
+        XCTAssertNotNil(controller.panel)
+        XCTAssertEqual(
+            (controller.panel?.contentView as? ShortcutFeedbackBubbleView)?.shortcutText,
+            "⌘C"
+        )
+    }
+
+    @MainActor
+    func testShortcutFeedbackBubbleUsesCurrentScreenBottomRightAndSlowFade() throws {
+        let store = FakePreferencesSettingsStore()
+        let visibleFrame = NSRect(x: 120, y: 80, width: 1_440, height: 900)
+        let controller = ShortcutFeedbackPresentationController(
+            settingsStore: store,
+            visibleFrameProvider: { visibleFrame }
+        )
+        defer {
+            controller.hide()
+        }
+
+        controller.show(HotKeyAction.recognizeText.defaultSettings)
+
+        let panel = try XCTUnwrap(controller.panel)
+        let bubble = try XCTUnwrap(panel.contentView as? ShortcutFeedbackBubbleView)
+        XCTAssertEqual(bubble.shortcutText, "⌘3")
+        XCTAssertEqual(panel.frame.maxX, visibleFrame.maxX - 28, accuracy: 0.5)
+        XCTAssertEqual(panel.frame.minY, visibleFrame.minY + 28, accuracy: 0.5)
+        XCTAssertTrue(panel.ignoresMouseEvents)
+        XCTAssertEqual(panel.sharingType, .none)
+        XCTAssertEqual(ShortcutFeedbackPresentationController.holdDuration, 3)
+        XCTAssertGreaterThanOrEqual(
+            ShortcutFeedbackPresentationController.fadeDuration,
+            0.8
+        )
+        XCTAssertGreaterThan(
+            bubble.triangleTip.x,
+            bubble.bubbleBodyRect.maxX
+        )
+        XCTAssertEqual(
+            bubble.triangleTip.y,
+            bubble.bubbleBodyRect.midY,
+            accuracy: 0.5
+        )
+    }
+
+    @MainActor
+    func testShortcutFeedbackRespectsDisabledSettingAndReusesOnePanel() throws {
+        let store = FakePreferencesSettingsStore()
+        let controller = ShortcutFeedbackPresentationController(
+            settingsStore: store,
+            visibleFrameProvider: {
+                NSRect(x: 0, y: 0, width: 1_200, height: 800)
+            }
+        )
+        defer {
+            controller.hide()
+        }
+
+        controller.show(HotKeyAction.capture.defaultSettings)
+        let firstPanel = try XCTUnwrap(controller.panel)
+
+        controller.show(HotKeyAction.fullScreenCapture.defaultSettings)
+
+        XCTAssertTrue(controller.panel === firstPanel)
+        XCTAssertEqual(
+            (firstPanel.contentView as? ShortcutFeedbackBubbleView)?.shortcutText,
+            "⇧⌘1"
+        )
+
+        store.settings.showsShortcutFeedback = false
+        controller.show(HotKeyAction.recognizeText.defaultSettings)
+
+        XCTAssertNil(controller.panel)
     }
 
     @MainActor
@@ -899,6 +1281,8 @@ final class AppSettingsTests: XCTestCase {
         )
 
         let lowerItems = Array(controller.test_menuItems.suffix(7))
+        XCTAssertEqual(controller.test_statusItemLength, NSStatusItem.squareLength)
+        XCTAssertTrue(controller.test_statusButtonIsEnabled)
         XCTAssertEqual(
             lowerItems.map(\.title),
             [
@@ -990,8 +1374,8 @@ final class AppSettingsTests: XCTestCase {
         }
         XCTAssertNotNil(alipay?.image)
         XCTAssertNotNil(wechatPay?.image)
-        XCTAssertEqual(alipay?.frame.height ?? 0, 216, accuracy: 1)
-        XCTAssertEqual(wechatPay?.frame.height ?? 0, 216, accuracy: 1)
+        XCTAssertEqual(alipay?.frame.height ?? 0, 300, accuracy: 1)
+        XCTAssertEqual(wechatPay?.frame.height ?? 0, 300, accuracy: 1)
 
         let stacks = descendants(
             of: controller.window?.contentView,
@@ -1008,6 +1392,7 @@ final class AppSettingsTests: XCTestCase {
         let contentFrame = contentViews.reduce(NSRect.null) { partial, view in
             partial.union(view.convert(view.bounds, to: root))
         }
+        XCTAssertGreaterThan(contentFrame.width, 440)
         XCTAssertGreaterThan(
             contentFrame.midY,
             (root?.bounds.midY ?? 0) + 8
@@ -1070,6 +1455,17 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertTrue(buttons.contains {
             $0.title == "Report Issue: zfc.2012@gmail.com"
         })
+    }
+
+    func testAboutPageUsesCorrectXxsoftsDomainInBothLanguages() {
+        XCTAssertEqual(
+            PreferencesStrings(language: .zhHans).copyright,
+            "版权所有 © 2026 xxsofts.com"
+        )
+        XCTAssertEqual(
+            PreferencesStrings(language: .english).copyright,
+            "Copyright © 2026 xxsofts.com"
+        )
     }
 
     func testPresentationPenUsesFormalEnglishName() {
@@ -1283,6 +1679,25 @@ final class AppSettingsTests: XCTestCase {
         )
     }
 
+    private func makeKeyEvent(
+        keyCode: UInt16,
+        modifiers: NSEvent.ModifierFlags = [],
+        isARepeat: Bool = false
+    ) throws -> NSEvent {
+        try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: modifiers,
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "",
+            charactersIgnoringModifiers: "",
+            isARepeat: isARepeat,
+            keyCode: keyCode
+        ))
+    }
+
     private func assertHotKeySuccess(
         _ result: Result<Void, HotKeyConfigurationError>,
         file: StaticString = #filePath,
@@ -1406,6 +1821,70 @@ private final class FakeGlobalHotKeyRegistrar: GlobalHotKeyRegistering {
             return
         }
         registered[action] = nil
+    }
+}
+
+@MainActor
+private final class FakeGlobalKeyEventSource: GlobalKeyEventSourcing {
+    var onKeyDown: ((NSEvent) -> Void)?
+    private(set) var isRunning = false
+
+    func start() {
+        isRunning = true
+    }
+
+    func stop() {
+        isRunning = false
+    }
+
+    func send(_ event: NSEvent) {
+        guard isRunning else { return }
+        onKeyDown?(event)
+    }
+}
+
+@MainActor
+private final class FakeSystemShortcutPermissionProvider:
+    SystemShortcutPermissionProviding {
+    var isGranted = false
+    private(set) var requestCount = 0
+    private(set) var openSettingsCount = 0
+
+    func request() -> Bool {
+        requestCount += 1
+        return isGranted
+    }
+
+    func openSystemSettings() {
+        openSettingsCount += 1
+    }
+}
+
+@MainActor
+private final class FakeSystemShortcutMonitor: SystemShortcutMonitoring {
+    var hasPermission = false
+    var isMonitoring = false
+    private(set) var requestCount = 0
+    private(set) var refreshCount = 0
+    private(set) var stopCount = 0
+    private(set) var openSettingsCount = 0
+
+    func requestPermission() -> Bool {
+        requestCount += 1
+        return hasPermission
+    }
+
+    func refresh() {
+        refreshCount += 1
+    }
+
+    func stop() {
+        stopCount += 1
+        isMonitoring = false
+    }
+
+    func openSystemSettings() {
+        openSettingsCount += 1
     }
 }
 

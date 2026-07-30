@@ -99,6 +99,7 @@ private final class CaptureLanguageSnapshot {
 final class CaptureCoordinator {
     var captureOverlayDidPresent: (() -> Void)?
     var captureSessionDidEnd: (() -> Void)?
+    var shortcutFeedbackDidRequest: ((NSEvent) -> Void)?
 
     private var lastCapture: NSImage?
     private let permissionCoordinator: any ScreenCapturePermissionCoordinating
@@ -515,7 +516,7 @@ final class CaptureCoordinator {
 
             var settings = settingsStore.load()
             settings.language = self.languageSnapshot.language
-            let configuration: SelectionOverlayConfiguration
+            var configuration: SelectionOverlayConfiguration
             switch mode {
             case .region:
                 configuration = .default
@@ -523,6 +524,9 @@ final class CaptureCoordinator {
                 configuration = .textRecognition()
             case .teachingPen:
                 configuration = .teachingPen(windowFrame: SelectionOverlayWindow.desktopFrame())
+            }
+            configuration.shortcutFeedbackHandler = { [weak self] event in
+                self?.shortcutFeedbackDidRequest?(event)
             }
             let overlayWindow = SelectionOverlayWindow(
                 backgroundImage: backgroundImage,

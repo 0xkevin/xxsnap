@@ -4,6 +4,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var captureCoordinator: CaptureCoordinator?
     private var statusItemController: StatusItemController?
     private var hotKeyController: CaptureHotKeyController?
+    private var shortcutFeedbackPresentationController: ShortcutFeedbackPresentationController?
+    private var systemShortcutMonitor: SystemShortcutMonitor?
     private var preferencesWindowController: PreferencesWindowController?
     private var helpWindowController: HelpWindowController?
     private var diagnosticSupportController: DiagnosticSupportController?
@@ -42,6 +44,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.captureCoordinator = captureCoordinator
         let helpWindowController = HelpWindowController(settingsStore: settingsStore)
         self.helpWindowController = helpWindowController
+        let shortcutFeedbackPresentationController = ShortcutFeedbackPresentationController(
+            settingsStore: preferencesSettingsStore
+        )
+        self.shortcutFeedbackPresentationController = shortcutFeedbackPresentationController
+        captureCoordinator.shortcutFeedbackDidRequest = {
+            [weak shortcutFeedbackPresentationController] event in
+            shortcutFeedbackPresentationController?.show(
+                HotKeyFormatter.settings(from: event)
+            )
+        }
         let hotKeyController = CaptureHotKeyController(
             settingsStore: settingsStore,
             captureHandler: {
@@ -53,6 +65,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             recognizeTextHandler: {
                 captureCoordinator.startTextRecognition()
             },
+            hotKeyFeedbackHandler: { [weak shortcutFeedbackPresentationController] settings in
+                shortcutFeedbackPresentationController?.show(settings)
+            },
             teachingPenHandler: {
                 captureCoordinator.toggleTeachingPen()
             },
@@ -61,12 +76,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         )
         self.hotKeyController = hotKeyController
+        let systemShortcutMonitor = SystemShortcutMonitor(
+            settingsStore: preferencesSettingsStore,
+            shouldIgnore: { [weak hotKeyController] settings in
+                hotKeyController?.isRegistered(settings) == true
+            }
+        )
+        systemShortcutMonitor.onShortcutPressed = {
+            [weak shortcutFeedbackPresentationController] settings in
+            shortcutFeedbackPresentationController?.showSystemShortcut(settings)
+        }
+        systemShortcutMonitor.refresh()
+        self.systemShortcutMonitor = systemShortcutMonitor
         let preferencesWindowController = PreferencesWindowController(
             settingsStore: settingsStore,
             preferencesSettingsStore: preferencesSettingsStore,
             hotKeyController: hotKeyController,
             launchAtLoginManager: LaunchAtLoginManager(),
-            updateChecker: updateChecker
+            updateChecker: updateChecker,
+            systemShortcutMonitor: systemShortcutMonitor
         )
         self.preferencesWindowController = preferencesWindowController
         let diagnosticSupportController = DiagnosticSupportController(
@@ -115,12 +143,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         false
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        systemShortcutMonitor?.refresh()
+        preferencesWindowController?.refresh()
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         return .terminateNow
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         NSLog("xxsnap applicationWillTerminate")
+        systemShortcutMonitor?.stop()
         diagnosticLogStore.record(
             category: .application,
             level: .info,

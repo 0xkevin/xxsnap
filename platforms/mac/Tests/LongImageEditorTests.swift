@@ -210,6 +210,74 @@ final class LongImageEditorTests: XCTestCase {
         controller.stop()
     }
 
+    func testChangingSelectedRectangleColorSynchronizesLongImageImmediately() throws {
+        let controller = makeTallController()
+        controller.show()
+        controller.showEditingToolbar()
+        let overlay = try XCTUnwrap(controller.test_editingOverlay)
+
+        overlay.test_activateShapeTool(.rectangle)
+        overlay.test_drag(from: NSPoint(x: 80, y: 120), to: NSPoint(x: 180, y: 220))
+        let colorPoint = try XCTUnwrap(overlay.test_optionsPaletteColorPoint(at: 8))
+        overlay.test_mouseDown(at: colorPoint)
+        overlay.test_mouseUp(at: colorPoint)
+
+        let overlayColor = try XCTUnwrap(overlay.test_annotation(at: 0)).style.strokeColor
+        let documentColor = try XCTUnwrap(controller.test_fullAnnotations.first).style.strokeColor
+        XCTAssertEqual(
+            SelectionToolbarState.colorSamplerHexString(for: documentColor),
+            SelectionToolbarState.colorSamplerHexString(for: overlayColor)
+        )
+        controller.stop()
+    }
+
+    func testChangingSelectedRectangleShapeSynchronizesLongImageImmediately() throws {
+        let controller = LongImageEditorWindowController(
+            canonicalImage: TestImageFactory.solid(
+                size: NSSize(width: 1_000, height: 8_000),
+                color: .white
+            ),
+            visibleFrame: NSRect(x: 0, y: 0, width: 1_920, height: 2_160),
+            initialWindowSize: NSSize(width: 1_000, height: 840)
+        )
+        controller.show()
+        controller.showEditingToolbar()
+        let overlay = try XCTUnwrap(controller.test_editingOverlay)
+
+        overlay.test_activateShapeTool(.rectangle)
+        overlay.test_drag(from: NSPoint(x: 80, y: 120), to: NSPoint(x: 180, y: 220))
+        let colorPoint = try XCTUnwrap(overlay.test_optionsPaletteColorPoint(at: 8))
+        overlay.test_mouseDown(at: colorPoint)
+        overlay.test_mouseUp(at: colorPoint)
+        XCTAssertEqual(
+            SelectionToolbarState.colorSamplerHexString(
+                for: try XCTUnwrap(overlay.test_annotation(at: 0)).style.strokeColor
+            ),
+            "#3C53D7"
+        )
+
+        let ellipseButton = try XCTUnwrap(overlay.test_compactOptionsControlRects().last)
+        let ellipsePoint = NSPoint(x: ellipseButton.midX, y: ellipseButton.midY)
+        overlay.test_mouseDown(at: ellipsePoint)
+        overlay.test_mouseUp(at: ellipsePoint)
+
+        XCTAssertEqual(overlay.test_annotation(at: 0)?.kind, .ellipse)
+        XCTAssertEqual(controller.test_fullAnnotations.first?.kind, .ellipse)
+        XCTAssertEqual(
+            SelectionToolbarState.colorSamplerHexString(
+                for: try XCTUnwrap(overlay.test_annotation(at: 0)).style.strokeColor
+            ),
+            "#3C53D7"
+        )
+        XCTAssertEqual(
+            SelectionToolbarState.colorSamplerHexString(
+                for: try XCTUnwrap(controller.test_fullAnnotations.first).style.strokeColor
+            ),
+            "#3C53D7"
+        )
+        controller.stop()
+    }
+
     func testVisibleSliceFiltersAndTranslatesWithoutChangingOrderOrIDs() {
         let style = CaptureAnnotationStyle()
         let first = CaptureAnnotation(kind: .rectangle, rect: NSRect(x: 10, y: 20, width: 30, height: 30), style: style)

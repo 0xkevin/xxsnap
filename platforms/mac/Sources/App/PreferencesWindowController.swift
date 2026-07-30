@@ -18,6 +18,7 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
     private let hotKeyController: CaptureHotKeyController
     private let launchAtLoginManager: any LaunchAtLoginManaging
     private let updateChecker: any UpdateChecking
+    private let systemShortcutMonitor: (any SystemShortcutMonitoring)?
     private let filenameRenderer = FilenameTemplateRenderer()
 
     private var selectedSection: PreferencesSection = .general
@@ -31,16 +32,18 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
         preferencesSettingsStore: any PreferencesSettingsStoring,
         hotKeyController: CaptureHotKeyController,
         launchAtLoginManager: any LaunchAtLoginManaging,
-        updateChecker: any UpdateChecking
+        updateChecker: any UpdateChecking,
+        systemShortcutMonitor: (any SystemShortcutMonitoring)? = nil
     ) {
         self.settingsStore = settingsStore
         self.preferencesSettingsStore = preferencesSettingsStore
         self.hotKeyController = hotKeyController
         self.launchAtLoginManager = launchAtLoginManager
         self.updateChecker = updateChecker
+        self.systemShortcutMonitor = systemShortcutMonitor
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 680, height: 320),
+            contentRect: NSRect(x: 0, y: 0, width: 680, height: 480),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -177,6 +180,53 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
             toggleDisableTextRecognitionSuccessNotification(_:)
         )
 
+        let shortcutFeedbackSwitch = NSSwitch()
+        shortcutFeedbackSwitch.identifier = NSUserInterfaceItemIdentifier(
+            "showShortcutFeedback"
+        )
+        shortcutFeedbackSwitch.state = preferencesSettings.showsShortcutFeedback ? .on : .off
+        shortcutFeedbackSwitch.target = self
+        shortcutFeedbackSwitch.action = #selector(toggleShortcutFeedback(_:))
+        shortcutFeedbackSwitch.toolTip = strings.showShortcutFeedbackDetail
+
+        let systemShortcutFeedbackSwitch = NSSwitch()
+        systemShortcutFeedbackSwitch.identifier = NSUserInterfaceItemIdentifier(
+            "showSystemShortcutFeedback"
+        )
+        systemShortcutFeedbackSwitch.state =
+            preferencesSettings.showsSystemShortcutFeedback ? .on : .off
+        systemShortcutFeedbackSwitch.target = self
+        systemShortcutFeedbackSwitch.action = #selector(
+            toggleSystemShortcutFeedback(_:)
+        )
+        systemShortcutFeedbackSwitch.toolTip = strings.showSystemShortcutFeedbackDetail
+
+        let systemShortcutFeedbackControl: NSView
+        if preferencesSettings.showsSystemShortcutFeedback,
+           let systemShortcutMonitor,
+           !systemShortcutMonitor.hasPermission {
+            let permissionButton = NSButton(
+                title: strings.openInputMonitoringSettings,
+                target: self,
+                action: #selector(openInputMonitoringSettings)
+            )
+            permissionButton.bezelStyle = .rounded
+            permissionButton.controlSize = .small
+            permissionButton.toolTip = strings.inputMonitoringPermissionRequired
+            let controls = NSStackView(
+                views: [permissionButton, systemShortcutFeedbackSwitch]
+            )
+            controls.orientation = .horizontal
+            controls.alignment = .centerY
+            controls.spacing = 8
+            systemShortcutFeedbackSwitch.trailingAnchor.constraint(
+                equalTo: controls.trailingAnchor
+            ).isActive = true
+            systemShortcutFeedbackControl = controls
+        } else {
+            systemShortcutFeedbackControl = systemShortcutFeedbackSwitch
+        }
+
         let page = makeStandardPage(
             rows: [
                 makeRow(
@@ -198,6 +248,16 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
                     title: strings.disableTextRecognitionSuccessNotification,
                     detail: strings.disableTextRecognitionSuccessNotificationDetail,
                     control: disableTextRecognitionSuccessNotificationSwitch
+                ),
+                makeRow(
+                    title: strings.showShortcutFeedback,
+                    detail: strings.showShortcutFeedbackDetail,
+                    control: shortcutFeedbackSwitch
+                ),
+                makeRow(
+                    title: strings.showSystemShortcutFeedback,
+                    detail: strings.showSystemShortcutFeedbackDetail,
+                    control: systemShortcutFeedbackControl
                 )
             ]
         )
@@ -239,7 +299,7 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
             title: strings.restorePinShortcut,
             detail: strings.restorePinShortcutDetail
         )
-        let page = makeStandardPage(
+        let shortcutGroup = makePreferencesGroup(
             rows: [captureRow, fullScreenCaptureRow, captureTextRow, teachingPenRow, restoreRow]
         )
 
@@ -251,18 +311,40 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
         resetButton.bezelStyle = .rounded
         resetButton.isEnabled = !hotKeyController.isCaptureSessionActive
 
-        let footerViews: [NSView]
+        let footerLeadingView: NSView
         if hotKeyController.isCaptureSessionActive {
-            footerViews = [secondaryLabel(strings.captureInProgress), resetButton]
+            footerLeadingView = secondaryLabel(strings.captureInProgress)
         } else {
-            footerViews = [NSView(), resetButton]
+            footerLeadingView = NSView()
         }
-        let footer = NSStackView(views: footerViews)
+        let footer = NSStackView(views: [footerLeadingView, resetButton])
         footer.orientation = .horizontal
         footer.alignment = .centerY
         footer.distribution = .fill
-        addFooter(footer, to: page)
-        return page
+
+        let stack = NSStackView(
+            views: [
+                shortcutGroup,
+                footer
+            ]
+        )
+        stack.identifier = NSUserInterfaceItemIdentifier("shortcutsPageStack")
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 14
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        shortcutGroup.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        footer.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+
+        let root = makePageRoot()
+        root.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 28),
+            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 34),
+            stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -34),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -24)
+        ])
+        return root
     }
 
     private func makeShortcutRow(
@@ -519,7 +601,7 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
         imageView.image = image
         imageView.imageScaling = .scaleProportionallyDown
         imageView.translatesAutoresizingMaskIntoConstraints = false
-        imageView.heightAnchor.constraint(equalToConstant: 216).isActive = true
+        imageView.heightAnchor.constraint(equalToConstant: 300).isActive = true
         if let image, image.size.height > 0 {
             imageView.widthAnchor.constraint(
                 equalTo: imageView.heightAnchor,
@@ -533,9 +615,31 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
 
     private func makeStandardPage(rows: [NSView]) -> NSView {
         let root = makePageRoot()
+        let group = makePreferencesGroup(rows: rows)
 
+        let stack = NSStackView(views: [group])
+        stack.identifier = NSUserInterfaceItemIdentifier("pageStack")
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 16
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 28),
+            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 34),
+            stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -34),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -24),
+            group.widthAnchor.constraint(equalTo: stack.widthAnchor)
+        ])
+        return root
+    }
+
+    private func makePreferencesGroup(
+        rows: [NSView],
+        identifier: String = "preferencesGroup"
+    ) -> NSStackView {
         let group = NSStackView()
-        group.identifier = NSUserInterfaceItemIdentifier("preferencesGroup")
+        group.identifier = NSUserInterfaceItemIdentifier(identifier)
         group.orientation = .vertical
         group.alignment = .leading
         group.spacing = 0
@@ -554,22 +658,7 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
         group.layer?.borderWidth = 1
         group.layer?.cornerRadius = 8
         group.layer?.masksToBounds = true
-
-        let stack = NSStackView(views: [group])
-        stack.identifier = NSUserInterfaceItemIdentifier("pageStack")
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 16
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        root.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 28),
-            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 34),
-            stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -34),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -24),
-            group.widthAnchor.constraint(equalTo: stack.widthAnchor)
-        ])
-        return root
+        return group
     }
 
     private func makeRow(title: String, detail: String?, control: NSView) -> NSView {
@@ -691,6 +780,40 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
             sender.state = previous ? .on : .off
             presentError(strings.saveFailed)
         }
+    }
+
+    @objc private func toggleShortcutFeedback(_ sender: NSSwitch) {
+        var settings = preferencesSettingsStore.load()
+        let previous = settings.showsShortcutFeedback
+        settings.showsShortcutFeedback = sender.state == .on
+        do {
+            try preferencesSettingsStore.save(settings)
+        } catch {
+            sender.state = previous ? .on : .off
+            presentError(strings.saveFailed)
+        }
+    }
+
+    @objc private func toggleSystemShortcutFeedback(_ sender: NSSwitch) {
+        var settings = preferencesSettingsStore.load()
+        let previous = settings.showsSystemShortcutFeedback
+        settings.showsSystemShortcutFeedback = sender.state == .on
+        do {
+            try preferencesSettingsStore.save(settings)
+            if settings.showsSystemShortcutFeedback {
+                _ = systemShortcutMonitor?.requestPermission()
+            } else {
+                systemShortcutMonitor?.refresh()
+            }
+            refresh()
+        } catch {
+            sender.state = previous ? .on : .off
+            presentError(strings.saveFailed)
+        }
+    }
+
+    @objc private func openInputMonitoringSettings() {
+        systemShortcutMonitor?.openSystemSettings()
     }
 
     @objc private func resetShortcuts() {

@@ -16,6 +16,8 @@
 		AB6000000000000000000003 /* PreferencesSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB6000000000000000000013 /* PreferencesSettings.swift */; };
 		AB6000000000000000000004 /* PreferencesWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB6000000000000000000014 /* PreferencesWindowController.swift */; };
 		AB6100000000000000000001 /* OCRResultPresentationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB6100000000000000000011 /* OCRResultPresentationController.swift */; };
+		AB7100000000000000000001 /* ShortcutFeedbackPresentationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB7100000000000000000011 /* ShortcutFeedbackPresentationController.swift */; };
+		AB7200000000000000000001 /* SystemShortcutMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB7200000000000000000011 /* SystemShortcutMonitor.swift */; };
 		AB6100000000000000000002 /* correct.svg in Resources */ = {isa = PBXBuildFile; fileRef = AB6100000000000000000012 /* correct.svg */; };
 		AB6200000000000000000001 /* notification.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = AB6200000000000000000011 /* notification.mp3 */; };
 		AB6300000000000000000001 /* failed.svg in Resources */ = {isa = PBXBuildFile; fileRef = AB6300000000000000000011 /* failed.svg */; };
@@ -167,6 +169,8 @@
 		AB6000000000000000000013 /* PreferencesSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencesSettings.swift; sourceTree = "<group>"; };
 		AB6000000000000000000014 /* PreferencesWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencesWindowController.swift; sourceTree = "<group>"; };
 		AB6100000000000000000011 /* OCRResultPresentationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OCRResultPresentationController.swift; sourceTree = "<group>"; };
+		AB7100000000000000000011 /* ShortcutFeedbackPresentationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutFeedbackPresentationController.swift; sourceTree = "<group>"; };
+		AB7200000000000000000011 /* SystemShortcutMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemShortcutMonitor.swift; sourceTree = "<group>"; };
 		AB6100000000000000000012 /* correct.svg */ = {isa = PBXFileReference; path = "correct.svg"; sourceTree = "<group>"; };
 		AB6200000000000000000011 /* notification.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = Sounds/notification.mp3; sourceTree = "<group>"; };
 		AB6300000000000000000011 /* failed.svg */ = {isa = PBXFileReference; path = "failed.svg"; sourceTree = "<group>"; };
@@ -320,6 +324,8 @@
 				A177154367D4DF7657018B06 /* CaptureCoordinator.swift */,
 				AB6400000000000000000011 /* FullScreenCapturePreviewController.swift */,
 				AB6100000000000000000011 /* OCRResultPresentationController.swift */,
+				AB7100000000000000000011 /* ShortcutFeedbackPresentationController.swift */,
+				AB7200000000000000000011 /* SystemShortcutMonitor.swift */,
 				DE8CA0660F22BC823E1A8DBC /* main.swift */,
 				6F196A38351C3089668432BA /* PermissionCoordinator.swift */,
 				A177154367D4DF7657018B07 /* PinnedImageWindowController.swift */,
@@ -752,6 +758,8 @@
 				5FABC128915B0C423DD63EC6 /* CaptureCoordinator.swift in Sources */,
 				AB6400000000000000000001 /* FullScreenCapturePreviewController.swift in Sources */,
 				AB6100000000000000000001 /* OCRResultPresentationController.swift in Sources */,
+				AB7100000000000000000001 /* ShortcutFeedbackPresentationController.swift in Sources */,
+				AB7200000000000000000001 /* SystemShortcutMonitor.swift in Sources */,
 				AB6800000000000000000002 /* HelpContent.swift in Sources */,
 				AB6900000000000000000001 /* HelpContentView.swift in Sources */,
 				AB6900000000000000000002 /* HelpImagePreviewController.swift in Sources */,

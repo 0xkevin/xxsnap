@@ -99,6 +99,7 @@ struct SelectionOverlayConfiguration {
     var selectionFillColor: NSColor?
     var initialSelectionCornerRadius: CGFloat?
     var showsBackgroundSnapshot: Bool = true
+    var shortcutFeedbackHandler: ((NSEvent) -> Void)?
 
     static let `default` = SelectionOverlayConfiguration(
         windowFrame: nil,
@@ -4008,6 +4009,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             ) == true
         }) {
             if isToolbarButtonEnabled(button) {
+                configuration.shortcutFeedbackHandler?(event)
                 perform(button)
             }
             return true
@@ -6974,6 +6976,12 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         clearPendingTextEdit()
         closeTextDropdown()
         closeMagnifierZoomDropdown()
+        let preservesPrimaryShapeColor =
+            isShapeToolActive &&
+            (currentShapeKind == .rectangle || currentShapeKind == .ellipse) &&
+            (shape == .rectangle || shape == .ellipse)
+        let previousStrokeColor = currentStyle.strokeColor
+        let previousFillColor = currentStyle.fillColor
         rememberCurrentStyleForActiveTool()
         isEraserToolActive = false
         clearEraserRectangleState()
@@ -7016,6 +7024,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 currentStyle: nonMarkerStyle,
                 paletteColors: colors
             )
+            if preservesPrimaryShapeColor {
+                currentStyle.strokeColor = previousStrokeColor
+                currentStyle.fillColor = previousFillColor
+            }
             if !allowsRectangleCornerRadius {
                 currentStyle.cornerRadius = 0
                 showsCornerRadiusPanel = false
@@ -10170,6 +10182,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
         clearRedoAnnotationHistory()
         needsDisplay = true
+        configuration.annotationHistoryChanged?()
     }
 
     private func applyCurrentMagnifierSettingsToSelectedAnnotation() {

@@ -140,7 +140,7 @@ final class OCRResultPresentationController {
     private static func panelFrame(in visibleFrame: NSRect, size: NSSize) -> NSRect {
         NSRect(
             x: visibleFrame.midX - size.width / 2,
-            y: visibleFrame.minY + visibleFrame.height * 0.28 - size.height / 2,
+            y: visibleFrame.minY + 100,
             width: size.width,
             height: size.height
         )

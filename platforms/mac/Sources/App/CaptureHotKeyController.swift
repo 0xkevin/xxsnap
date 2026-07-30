@@ -179,6 +179,7 @@ final class CaptureHotKeyController {
     private let settingsStore: any AppSettingsStoring
     private let registrar: any GlobalHotKeyRegistering
     private let handlers: [HotKeyAction: () -> Void]
+    private let hotKeyFeedbackHandler: (HotKeySettings) -> Void
     private let registrationOrder: [HotKeyAction]
     private var configured: [HotKeyAction: HotKeySettings] = [:]
     private var disabledActions: Set<HotKeyAction> = []
@@ -192,11 +193,13 @@ final class CaptureHotKeyController {
         captureHandler: @escaping () -> Void,
         fullScreenCaptureHandler: @escaping () -> Void = {},
         recognizeTextHandler: @escaping () -> Void = {},
+        hotKeyFeedbackHandler: @escaping (HotKeySettings) -> Void = { _ in },
         teachingPenHandler: @escaping () -> Void,
         restorePinnedImageHandler: @escaping () -> Void
     ) {
         self.settingsStore = settingsStore
         self.registrar = registrar
+        self.hotKeyFeedbackHandler = hotKeyFeedbackHandler
         handlers = [
             .capture: captureHandler,
             .fullScreenCapture: fullScreenCaptureHandler,
@@ -219,7 +222,9 @@ final class CaptureHotKeyController {
         }
         registrar.onHotKeyPressed = { [weak self] action in
             Task { @MainActor in
-                self?.handlers[action]?()
+                guard let self else { return }
+                self.hotKeyFeedbackHandler(self.configuredHotKey(for: action))
+                self.handlers[action]?()
             }
         }
         registerConfiguredHotKeys()
@@ -231,6 +236,12 @@ final class CaptureHotKeyController {
 
     func registeredHotKey(for action: HotKeyAction) -> HotKeySettings? {
         registrations[action] == nil ? nil : configuredHotKey(for: action)
+    }
+
+    func isRegistered(_ settings: HotKeySettings) -> Bool {
+        HotKeyAction.allCases.contains {
+            registeredHotKey(for: $0) == settings
+        }
     }
 
     func isHotKeyEnabled(for action: HotKeyAction) -> Bool {
@@ -498,6 +509,7 @@ struct HotKeyFormatter {
         UInt32(kVK_ANSI_Period): ".", UInt32(kVK_ANSI_Slash): "/",
         UInt32(kVK_Space): "Space", UInt32(kVK_Return): "Return",
         UInt32(kVK_Tab): "Tab", UInt32(kVK_Delete): "Delete",
+        UInt32(kVK_Escape): "Esc",
         UInt32(kVK_ForwardDelete): "Forward Delete",
         UInt32(kVK_LeftArrow): "←", UInt32(kVK_RightArrow): "→",
         UInt32(kVK_UpArrow): "↑", UInt32(kVK_DownArrow): "↓",
@@ -532,6 +544,14 @@ struct HotKeyFormatter {
         return settings.modifiers & supported != 0
     }
 
+    static func isDisplayableSystemShortcut(_ settings: HotKeySettings) -> Bool {
+        let meaningfulModifiers = UInt32(cmdKey | optionKey | controlKey)
+        if settings.modifiers & meaningfulModifiers != 0 {
+            return true
+        }
+        return standaloneSystemKeyCodes.contains(settings.keyCode)
+    }
+
     static func settings(from event: NSEvent) -> HotKeySettings {
         var modifiers: UInt32 = 0
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
@@ -559,6 +579,13 @@ struct HotKeyFormatter {
         if settings.modifiers & UInt32(shiftKey) != 0 { flags.insert(.shift) }
         return (key, flags)
     }
+
+    private static let standaloneSystemKeyCodes: Set<UInt32> = [
+        UInt32(kVK_Escape),
+        UInt32(kVK_F1), UInt32(kVK_F2), UInt32(kVK_F3), UInt32(kVK_F4),
+        UInt32(kVK_F5), UInt32(kVK_F6), UInt32(kVK_F7), UInt32(kVK_F8),
+        UInt32(kVK_F9), UInt32(kVK_F10), UInt32(kVK_F11), UInt32(kVK_F12)
+    ]
 }
 
 private func fourCharacterCode(_ string: String) -> FourCharCode {

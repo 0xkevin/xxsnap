@@ -3162,8 +3162,16 @@ final class SelectionToolbarStateTests: XCTestCase {
 
     func testCommandOneCompletesSelectionAsPin() {
         var result: CaptureSelectionResult?
+        var feedback: HotKeySettings?
         let expectation = expectation(description: "pin shortcut")
-        let window = SelectionOverlayWindow(backgroundImage: nil) { selectionResult in
+        var configuration = SelectionOverlayConfiguration.default
+        configuration.shortcutFeedbackHandler = { event in
+            feedback = HotKeyFormatter.settings(from: event)
+        }
+        let window = SelectionOverlayWindow(
+            backgroundImage: nil,
+            configuration: configuration
+        ) { selectionResult in
             result = selectionResult
             expectation.fulfill()
         }
@@ -3173,6 +3181,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         wait(for: [expectation], timeout: 0.5)
 
         XCTAssertEqual(result?.action, .pin)
+        XCTAssertEqual(feedback.map(HotKeyFormatter.displayString), "⌘1")
     }
 
     func testToolbarToolShortcutsSelectMatchingButtonForLowercaseAndShiftUppercase() {
@@ -5090,6 +5099,40 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_mouseUp(at: eyedropperPoint)
         window.test_updateColorSampler(at: NSPoint(x: selection.midX, y: selection.midY))
         XCTAssertNotNil(window.test_sampledColorHex)
+    }
+
+    @MainActor
+    func testPinnedImageEditorPreservesColorWhenSwitchingRectangleToEllipse() throws {
+        let background = solidImage(size: NSSize(width: 1_000, height: 800), color: .white)
+        let selection = NSRect(x: 100, y: 100, width: 800, height: 600)
+        let window = SelectionOverlayWindow(
+            backgroundImage: background,
+            configuration: .pinnedImageEditor(selectionRect: selection)
+        ) { _ in }
+
+        window.test_activateShapeTool(.rectangle)
+        window.test_drag(from: NSPoint(x: 300, y: 300), to: NSPoint(x: 460, y: 440))
+        let bluePoint = try XCTUnwrap(window.test_optionsPaletteColorPoint(at: 8))
+        window.test_mouseDown(at: bluePoint)
+        window.test_mouseUp(at: bluePoint)
+
+        let ellipseButton = try XCTUnwrap(window.test_compactOptionsControlRects().last)
+        let ellipsePoint = NSPoint(x: ellipseButton.midX, y: ellipseButton.midY)
+        window.test_mouseDown(at: ellipsePoint)
+        window.test_mouseUp(at: ellipsePoint)
+
+        let annotation = try XCTUnwrap(window.test_annotation(at: 0))
+        XCTAssertEqual(annotation.kind, .ellipse)
+        XCTAssertEqual(
+            SelectionToolbarState.colorSamplerHexString(for: annotation.style.strokeColor),
+            "#3C53D7"
+        )
+        XCTAssertEqual(
+            SelectionToolbarState.colorSamplerHexString(
+                for: try XCTUnwrap(window.test_currentStyle).strokeColor
+            ),
+            "#3C53D7"
+        )
     }
 
     @MainActor
@@ -11141,7 +11184,7 @@ final class SelectionToolbarStateTests: XCTestCase {
     }
 
     @MainActor
-    func testCaptureCoordinatorShowsLowerCenterCopySuccessPanelForThreeSeconds() async throws {
+    func testCaptureCoordinatorShowsCopySuccessPanelOneHundredPointsAboveDockForThreeSeconds() async throws {
         let panelIdentifier = NSUserInterfaceItemIdentifier("xxsnap.ocr-copy-success")
         NSApp.windows
             .filter { $0.identifier == panelIdentifier }
@@ -11185,8 +11228,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertTrue(panel.isVisible)
         XCTAssertEqual(panel.frame.size, NSSize(width: 176, height: 124))
         XCTAssertEqual(panel.frame.midX, visibleFrame.midX, accuracy: 1)
-        XCTAssertGreaterThan(panel.frame.midY, visibleFrame.minY + visibleFrame.height * 0.20)
-        XCTAssertLessThan(panel.frame.midY, visibleFrame.minY + visibleFrame.height * 0.45)
+        XCTAssertEqual(panel.frame.minY, visibleFrame.minY + 100, accuracy: 1)
         XCTAssertEqual(panel.contentView?.accessibilityLabel(), "识别成功\n已复制到剪切板")
         XCTAssertEqual(successSoundCount, 1)
 
@@ -11337,7 +11379,10 @@ final class SelectionToolbarStateTests: XCTestCase {
         await fulfillment(of: [completion], timeout: 2)
 
         let panel = try XCTUnwrap(NSApp.windows.first { $0.identifier == panelIdentifier })
+        let screen = NSScreen.screens.first { $0.frame.intersects(result.screenRect) } ?? NSScreen.main
+        let visibleFrame = try XCTUnwrap(screen?.visibleFrame)
         XCTAssertTrue(panel.isVisible)
+        XCTAssertEqual(panel.frame.minY, visibleFrame.minY + 100, accuracy: 1)
         XCTAssertEqual(panel.contentView?.accessibilityLabel(), "识别失败")
         panel.orderOut(nil)
     }

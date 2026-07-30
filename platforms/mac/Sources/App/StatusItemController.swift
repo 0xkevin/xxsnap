@@ -32,7 +32,7 @@ final class StatusItemController: NSObject {
         self.showHelp = showHelp
         self.exportDiagnosticsHandler = exportDiagnostics
         self.terminationHandler = terminationHandler
-        statusItem = NSStatusBar.system.statusItem(withLength: 92)
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         super.init()
         configureStatusItem()
     }
@@ -177,6 +177,14 @@ final class StatusItemController: NSObject {
 
     var test_menuItems: [NSMenuItem] {
         statusItem.menu?.items ?? []
+    }
+
+    var test_statusItemLength: CGFloat {
+        statusItem.length
+    }
+
+    var test_statusButtonIsEnabled: Bool {
+        statusItem.button?.isEnabled == true
     }
 
     private func makeHotKeyMenuItem(

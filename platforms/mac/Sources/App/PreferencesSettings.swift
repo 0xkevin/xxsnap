@@ -10,13 +10,17 @@ struct PreferencesSettings: Codable, Equatable {
     var updateCheckIntervalHours: Int
     var disablesTextRecognitionSound: Bool
     var disablesTextRecognitionSuccessNotification: Bool
+    var showsShortcutFeedback: Bool
+    var showsSystemShortcutFeedback: Bool
 
     static let `default` = PreferencesSettings(
         filenameTemplate: defaultFilenameTemplate,
         checksForUpdatesAtLaunch: true,
         updateCheckIntervalHours: 24,
         disablesTextRecognitionSound: false,
-        disablesTextRecognitionSuccessNotification: false
+        disablesTextRecognitionSuccessNotification: false,
+        showsShortcutFeedback: true,
+        showsSystemShortcutFeedback: true
     )
 
     init(
@@ -24,13 +28,17 @@ struct PreferencesSettings: Codable, Equatable {
         checksForUpdatesAtLaunch: Bool,
         updateCheckIntervalHours: Int,
         disablesTextRecognitionSound: Bool = false,
-        disablesTextRecognitionSuccessNotification: Bool = false
+        disablesTextRecognitionSuccessNotification: Bool = false,
+        showsShortcutFeedback: Bool = true,
+        showsSystemShortcutFeedback: Bool = true
     ) {
         self.filenameTemplate = filenameTemplate
         self.checksForUpdatesAtLaunch = checksForUpdatesAtLaunch
         self.updateCheckIntervalHours = Self.normalizedUpdateInterval(updateCheckIntervalHours)
         self.disablesTextRecognitionSound = disablesTextRecognitionSound
         self.disablesTextRecognitionSuccessNotification = disablesTextRecognitionSuccessNotification
+        self.showsShortcutFeedback = showsShortcutFeedback
+        self.showsSystemShortcutFeedback = showsSystemShortcutFeedback
     }
 
     init(from decoder: Decoder) throws {
@@ -49,6 +57,12 @@ struct PreferencesSettings: Codable, Equatable {
         disablesTextRecognitionSuccessNotification =
             (try? container.decode(Bool.self, forKey: .disablesTextRecognitionSuccessNotification))
             ?? defaults.disablesTextRecognitionSuccessNotification
+        showsShortcutFeedback =
+            (try? container.decode(Bool.self, forKey: .showsShortcutFeedback))
+            ?? defaults.showsShortcutFeedback
+        showsSystemShortcutFeedback =
+            (try? container.decode(Bool.self, forKey: .showsSystemShortcutFeedback))
+            ?? defaults.showsSystemShortcutFeedback
     }
 
     private static func normalizedUpdateInterval(_ value: Int) -> Int {
@@ -302,6 +316,30 @@ struct PreferencesStrings {
             ? "Hide successful recognition notifications; failures are always shown"
             : "不显示识别成功提示，识别失败仍会正常提示"
     }
+    var showShortcutFeedback: String {
+        isEnglish ? "Show XxSnap shortcuts" : "显示 XxSnap 快捷键"
+    }
+    var showShortcutFeedbackDetail: String {
+        isEnglish
+            ? "Show XxSnap shortcuts in the lower-right corner of the current screen"
+            : "按 XxSnap 快捷键时，在当前屏幕右下角显示按键组合"
+    }
+    var showSystemShortcutFeedback: String {
+        isEnglish ? "Show shortcuts from other apps" : "显示其他应用快捷键"
+    }
+    var showSystemShortcutFeedbackDetail: String {
+        isEnglish
+            ? "Shows combinations with ⌘, ⌃, or ⌥, plus Esc and function keys; normal typing is never recorded"
+            : "显示包含 ⌘、⌃、⌥ 的组合键，以及 Esc 和功能键，不记录普通输入"
+    }
+    var inputMonitoringPermissionRequired: String {
+        isEnglish
+            ? "Allow XxSnap in Input Monitoring to use this option"
+            : "需要在“输入监控”中允许 XxSnap"
+    }
+    var openInputMonitoringSettings: String {
+        isEnglish ? "Open Input Monitoring" : "打开输入监控"
+    }
     var needsApproval: String {
         isEnglish ? "Allow XxSnap in System Settings to finish enabling this option." : "需要在系统设置中允许 XxSnap。"
     }
@@ -357,7 +395,7 @@ struct PreferencesStrings {
     var upToDate: String { isEnglish ? "You're up to date" : "已是最新版本" }
     var hourSuffix: String { isEnglish ? "hours" : "小时" }
     var version: String { isEnglish ? "Version" : "版本" }
-    var copyright: String { isEnglish ? "Copyright © 2026 xxsoft.com" : "版权所有 © 2026 xxsoft.com" }
+    var copyright: String { isEnglish ? "Copyright © 2026 xxsofts.com" : "版权所有 © 2026 xxsofts.com" }
     var saveFailed: String { isEnglish ? "The setting could not be saved." : "设置保存失败。" }
     var errorTitle: String { isEnglish ? "XxSnap Error" : "XxSnap 错误" }
 
