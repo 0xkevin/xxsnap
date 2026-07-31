@@ -3235,6 +3235,140 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(feedback.map(HotKeyFormatter.displayString), "F1")
     }
 
+    func testCommandSpaceCompletesSelectionAsPinWhenConfigured() throws {
+        var result: CaptureSelectionResult?
+        let expectation = expectation(description: "command-space pin shortcut")
+        var configuration = SelectionOverlayConfiguration.default
+        configuration.pinToolbarShortcut = try XCTUnwrap(
+            HotKeyFormatter.toolbarShortcut(
+                from: HotKeySettings(
+                    keyCode: UInt32(kVK_Space),
+                    modifiers: UInt32(cmdKey)
+                )
+            )
+        )
+        let window = SelectionOverlayWindow(
+            backgroundImage: nil,
+            configuration: configuration
+        ) { selectionResult in
+            result = selectionResult
+            expectation.fulfill()
+        }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+
+        window.test_keyDown(
+            keyCode: UInt16(kVK_Space),
+            charactersIgnoringModifiers: " ",
+            modifierFlags: [.command]
+        )
+        wait(for: [expectation], timeout: 0.5)
+
+        XCTAssertEqual(result?.action, .pin)
+    }
+
+    func testOptionLeftArrowCompletesSelectionAsPinWhenConfigured() throws {
+        var result: CaptureSelectionResult?
+        let expectation = expectation(description: "option-left-arrow pin shortcut")
+        var configuration = SelectionOverlayConfiguration.default
+        configuration.pinToolbarShortcut = try XCTUnwrap(
+            HotKeyFormatter.toolbarShortcut(
+                from: HotKeySettings(
+                    keyCode: UInt32(kVK_LeftArrow),
+                    modifiers: UInt32(optionKey)
+                )
+            )
+        )
+        let window = SelectionOverlayWindow(
+            backgroundImage: nil,
+            configuration: configuration
+        ) { selectionResult in
+            result = selectionResult
+            expectation.fulfill()
+        }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+
+        window.test_keyDown(
+            keyCode: UInt16(kVK_LeftArrow),
+            charactersIgnoringModifiers: String(UnicodeScalar(NSLeftArrowFunctionKey)!),
+            modifierFlags: [.option]
+        )
+        wait(for: [expectation], timeout: 0.5)
+
+        XCTAssertEqual(result?.action, .pin)
+    }
+
+    func testCommandDeletePinsInsteadOfDeletingSelectedAnnotationWhenConfigured() throws {
+        var result: CaptureSelectionResult?
+        let expectation = expectation(description: "command-delete pin shortcut")
+        var configuration = SelectionOverlayConfiguration.default
+        configuration.completesBeforeOrderingOut = true
+        configuration.pinToolbarShortcut = try XCTUnwrap(
+            HotKeyFormatter.toolbarShortcut(
+                from: HotKeySettings(
+                    keyCode: UInt32(kVK_Delete),
+                    modifiers: UInt32(cmdKey)
+                )
+            )
+        )
+        let window = SelectionOverlayWindow(
+            backgroundImage: nil,
+            configuration: configuration
+        ) { selectionResult in
+            result = selectionResult
+            expectation.fulfill()
+        }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+        window.test_setAnnotations([
+            CaptureAnnotation(
+                kind: .rectangle,
+                rect: NSRect(x: 40, y: 50, width: 90, height: 70),
+                style: CaptureAnnotationStyle()
+            )
+        ])
+        window.test_selectAnnotation(at: 0)
+
+        window.test_keyDown(
+            keyCode: UInt16(kVK_Delete),
+            charactersIgnoringModifiers: "\u{8}",
+            modifierFlags: [.command]
+        )
+        wait(for: [expectation], timeout: 0.5)
+
+        XCTAssertEqual(result?.action, .pin)
+        XCTAssertEqual(result?.annotations.count, 1)
+    }
+
+    func testConfiguredPinShortcutUsesKeyCodeInsteadOfEventCharacters() throws {
+        var result: CaptureSelectionResult?
+        let expectation = expectation(description: "layout-independent pin shortcut")
+        var configuration = SelectionOverlayConfiguration.default
+        configuration.pinToolbarShortcut = try XCTUnwrap(
+            HotKeyFormatter.toolbarShortcut(
+                from: HotKeySettings(
+                    keyCode: UInt32(kVK_ANSI_Q),
+                    modifiers: UInt32(cmdKey)
+                )
+            )
+        )
+        let window = SelectionOverlayWindow(
+            backgroundImage: nil,
+            configuration: configuration
+        ) { selectionResult in
+            result = selectionResult
+            expectation.fulfill()
+        }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+
+        window.test_keyDown(
+            keyCode: UInt16(kVK_ANSI_Q),
+            charactersIgnoringModifiers: "not-q-on-current-layout",
+            modifierFlags: [.command]
+        )
+        wait(for: [expectation], timeout: 0.5)
+
+        XCTAssertEqual(result?.action, .pin)
+    }
+
     func testCommandOneDoesNotPinWhenPinShortcutIsCleared() {
         let expectation = expectation(description: "cleared pin shortcut does not complete")
         expectation.isInverted = true
@@ -17031,6 +17165,67 @@ final class SelectionToolbarStateTests: XCTestCase {
         )
         XCTAssertEqual(defaultPin.key, "1")
         XCTAssertEqual(defaultPin.modifiers, [.command])
+    }
+
+    func testDynamicToolbarShortcutsSupportSpecialKeysAndMatchByKeyCode() throws {
+        let commandSpace = try XCTUnwrap(
+            HotKeyFormatter.toolbarShortcut(
+                from: HotKeySettings(
+                    keyCode: UInt32(kVK_Space),
+                    modifiers: UInt32(cmdKey)
+                )
+            )
+        )
+        XCTAssertEqual(commandSpace.keyCode, UInt32(kVK_Space))
+        XCTAssertEqual(commandSpace.iconName, "command")
+        XCTAssertEqual(commandSpace.displayText, "Space")
+        XCTAssertTrue(
+            commandSpace.matches(
+                charactersIgnoringModifiers: "unrelated-layout-character",
+                keyCode: UInt16(kVK_Space),
+                modifierFlags: [.command]
+            )
+        )
+        XCTAssertFalse(
+            commandSpace.matches(
+                charactersIgnoringModifiers: " ",
+                keyCode: UInt16(kVK_Return),
+                modifierFlags: [.command]
+            )
+        )
+
+        let optionLeftArrow = try XCTUnwrap(
+            HotKeyFormatter.toolbarShortcut(
+                from: HotKeySettings(
+                    keyCode: UInt32(kVK_LeftArrow),
+                    modifiers: UInt32(optionKey)
+                )
+            )
+        )
+        XCTAssertEqual(optionLeftArrow.keyCode, UInt32(kVK_LeftArrow))
+        XCTAssertEqual(optionLeftArrow.displayText, "⌥←")
+    }
+
+    func testEscapeWithAnyRelevantModifierIsAlwaysACancelConflict() {
+        let modifiers = [
+            UInt32(cmdKey),
+            UInt32(optionKey),
+            UInt32(shiftKey),
+            UInt32(controlKey),
+            UInt32(cmdKey | optionKey | shiftKey | controlKey),
+        ]
+
+        for modifier in modifiers {
+            XCTAssertEqual(
+                SelectionToolbarState.fixedShortcutConflict(
+                    for: HotKeySettings(
+                        keyCode: UInt32(kVK_Escape),
+                        modifiers: modifier
+                    )
+                ),
+                .cancel
+            )
+        }
     }
 
     func testFixedToolbarShortcutConflictUsesActualToolbarMatchingRules() {

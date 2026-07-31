@@ -1185,11 +1185,6 @@ private final class ShortcutRecorderButton: NSButton {
     }
 
     private func record(_ event: NSEvent) {
-        if event.keyCode == 53 {
-            finishRecording()
-            onCancel?()
-            return
-        }
         let settings = HotKeyFormatter.settings(from: event)
         finishRecording()
         onRecorded?(settings)

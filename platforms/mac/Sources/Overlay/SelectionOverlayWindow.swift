@@ -3976,6 +3976,14 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return true
         }
         cancelPinnedImageToolbarShiftShortcut()
+        if event.keyCode == 53 {
+            return cancelActiveToolForEscape()
+        }
+
+        if handlePinToolbarShortcut(event) {
+            return true
+        }
+
         if shouldPassKeyDownToTextEditor(event) {
             NSLog(
                 "xxsnap text keyDown passThrough keyCode=%hu charsLength=%ld",
@@ -3983,10 +3991,6 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 event.characters?.count ?? 0
             )
             return false
-        }
-
-        if event.keyCode == 53 {
-            return cancelActiveToolForEscape()
         }
 
         if let command = PinnedImageWindowCommand(event: event),
@@ -4014,6 +4018,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         if let button = shortcutToolbarButtons().first(where: { button in
             toolbarShortcut(for: tooltipIdentifier(for: button))?.matches(
                 charactersIgnoringModifiers: event.charactersIgnoringModifiers,
+                keyCode: event.keyCode,
                 modifierFlags: event.modifierFlags
             ) == true
         }) {
@@ -4037,6 +4042,27 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
 
         return false
+    }
+
+    private func handlePinToolbarShortcut(_ event: NSEvent) -> Bool {
+        guard
+            let button = shortcutToolbarButtons().first(where: {
+                tooltipIdentifier(for: $0) == "pin"
+            }),
+            toolbarShortcut(for: "pin")?.matches(
+                charactersIgnoringModifiers: event.charactersIgnoringModifiers,
+                keyCode: event.keyCode,
+                modifierFlags: event.modifierFlags
+            ) == true
+        else {
+            return false
+        }
+
+        if isToolbarButtonEnabled(button) {
+            configuration.shortcutFeedbackHandler?(event)
+            perform(button)
+        }
+        return true
     }
 
     private func toolbarShortcut(

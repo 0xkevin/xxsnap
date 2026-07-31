@@ -601,9 +601,7 @@ struct HotKeyFormatter {
     static func toolbarShortcut(
         from settings: HotKeySettings
     ) -> SelectionToolbarState.ToolbarShortcut? {
-        guard let key = eventCharacters(for: settings.keyCode) else {
-            return nil
-        }
+        let key = eventCharacters(for: settings.keyCode) ?? ""
         let modifiers = eventModifierFlags(from: settings.modifiers)
         let commandOnly = modifiers == .command
         return SelectionToolbarState.ToolbarShortcut(
@@ -612,7 +610,8 @@ struct HotKeyFormatter {
             iconName: commandOnly ? "command" : nil,
             displayText: commandOnly
                 ? (keyNames[settings.keyCode] ?? key.uppercased())
-                : displayString(settings)
+                : displayString(settings),
+            keyCode: settings.keyCode
         )
     }
 

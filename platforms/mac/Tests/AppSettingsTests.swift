@@ -361,6 +361,33 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testHotKeyControllerRejectsCommandEscapeWithoutChangingState() {
+        let store = FakeAppSettingsStore()
+        let registrar = FakeGlobalHotKeyRegistrar()
+        let controller = makeHotKeyController(store: store, registrar: registrar)
+        let originalConfigured = controller.configuredHotKey(for: .capture)
+        let originalRegistered = controller.registeredHotKey(for: .capture)
+        let originalRegistrations = registrar.registered
+        let originalSettings = store.settings
+
+        assertHotKeyFailure(
+            controller.apply(
+                HotKeySettings(
+                    keyCode: UInt32(kVK_Escape),
+                    modifiers: UInt32(cmdKey)
+                ),
+                to: .capture
+            ),
+            equals: .fixedToolbarConflict(.cancel)
+        )
+
+        XCTAssertEqual(controller.configuredHotKey(for: .capture), originalConfigured)
+        XCTAssertEqual(controller.registeredHotKey(for: .capture), originalRegistered)
+        XCTAssertEqual(registrar.registered, originalRegistrations)
+        XCTAssertEqual(store.settings, originalSettings)
+    }
+
+    @MainActor
     func testHotKeyControllerDisablesAndReenablesIndividualShortcut() {
         let store = FakeAppSettingsStore()
         let registrar = FakeGlobalHotKeyRegistrar()
@@ -1576,6 +1603,62 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(registrar.registered, originalRegistrations)
         XCTAssertEqual(settingsStore.settings, originalSettings)
         XCTAssertTrue(hotKeyController.isHotKeyEnabled(for: .capture))
+    }
+
+    @MainActor
+    func testShortcutRecorderRejectsEscapeWithNamedFixedConflict() throws {
+        let settingsStore = FakeAppSettingsStore()
+        let registrar = FakeGlobalHotKeyRegistrar()
+        let hotKeyController = makeHotKeyController(
+            store: settingsStore,
+            registrar: registrar
+        )
+        let controller = PreferencesWindowController(
+            settingsStore: settingsStore,
+            preferencesSettingsStore: FakePreferencesSettingsStore(),
+            hotKeyController: hotKeyController,
+            launchAtLoginManager: FakeLaunchAtLoginManager(),
+            updateChecker: FakeUpdateChecker()
+        )
+        defer {
+            controller.window?.sheets.forEach { controller.window?.endSheet($0) }
+            controller.close()
+        }
+        let originalCapture = hotKeyController.configuredHotKey(for: .capture)
+        let originalRegistrations = registrar.registered
+        let originalSettings = settingsStore.settings
+
+        controller.show(section: .shortcuts)
+        let recorder = try captureShortcutRecorder(in: controller)
+        recorder.performClick(nil)
+        let event = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: recorder.window?.windowNumber ?? 0,
+            context: nil,
+            characters: "\u{1b}",
+            charactersIgnoringModifiers: "\u{1b}",
+            isARepeat: false,
+            keyCode: UInt16(kVK_Escape)
+        ))
+
+        XCTAssertTrue(recorder.performKeyEquivalent(with: event))
+        XCTAssertTrue(waitUntil { controller.window?.sheets.count == 1 })
+        let sheet = try XCTUnwrap(controller.window?.sheets.first)
+        let sheetText = descendants(of: sheet.contentView, matching: NSTextField.self)
+            .map(\.stringValue)
+            .joined(separator: " ")
+        XCTAssertTrue(sheetText.contains("与“取消 / 完成编辑”快捷键冲突"))
+        XCTAssertEqual(hotKeyController.configuredHotKey(for: .capture), originalCapture)
+        XCTAssertEqual(registrar.registered, originalRegistrations)
+        XCTAssertEqual(settingsStore.settings, originalSettings)
+
+        let buttons = descendants(of: sheet.contentView, matching: NSButton.self)
+        XCTAssertEqual(buttons.count, 1)
+        buttons.first?.performClick(nil)
+        XCTAssertTrue(waitUntil { controller.window?.sheets.isEmpty == true })
     }
 
     func testPreferencesMenuUsesRequestedLowerSectionTitles() {

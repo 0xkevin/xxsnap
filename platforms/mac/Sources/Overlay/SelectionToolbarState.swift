@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 
 enum FixedToolbarShortcut: String, Equatable, CaseIterable {
     case rectangle
@@ -25,16 +26,37 @@ enum SelectionToolbarState {
         let modifiers: NSEvent.ModifierFlags
         let iconName: String?
         let displayText: String
+        let keyCode: UInt32?
+
+        init(
+            key: String,
+            modifiers: NSEvent.ModifierFlags,
+            iconName: String?,
+            displayText: String,
+            keyCode: UInt32? = nil
+        ) {
+            self.key = key
+            self.modifiers = modifiers
+            self.iconName = iconName
+            self.displayText = displayText
+            self.keyCode = keyCode
+        }
 
         func matches(
             charactersIgnoringModifiers: String?,
+            keyCode eventKeyCode: UInt16? = nil,
             modifierFlags: NSEvent.ModifierFlags
         ) -> Bool {
+            let relevantModifiers = modifierFlags.intersection([.command, .control, .option, .shift])
+            if let keyCode {
+                return eventKeyCode.map(UInt32.init) == keyCode
+                    && relevantModifiers == modifiers
+            }
+
             guard charactersIgnoringModifiers?.lowercased() == key.lowercased() else {
                 return false
             }
 
-            let relevantModifiers = modifierFlags.intersection([.command, .control, .option, .shift])
             let isPlainLetter = modifiers.isEmpty && key.count == 1 && key.first?.isLetter == true
             if isPlainLetter {
                 return relevantModifiers.intersection([.command, .control, .option]).isEmpty
@@ -47,7 +69,8 @@ enum SelectionToolbarState {
         key: "1",
         modifiers: .command,
         iconName: "command",
-        displayText: "1"
+        displayText: "1",
+        keyCode: UInt32(kVK_ANSI_1)
     )
 
     private static let toolbarShortcuts: [String: ToolbarShortcut] = {
@@ -345,6 +368,9 @@ enum SelectionToolbarState {
     }
 
     static func fixedShortcutConflict(for settings: HotKeySettings) -> FixedToolbarShortcut? {
+        if settings.keyCode == UInt32(kVK_Escape) {
+            return .cancel
+        }
         guard let candidate = HotKeyFormatter.toolbarShortcut(from: settings) else {
             return nil
         }
