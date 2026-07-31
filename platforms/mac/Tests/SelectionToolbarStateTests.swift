@@ -14929,7 +14929,7 @@ final class SelectionToolbarStateTests: XCTestCase {
     func testMarkerToolSelectionDoesNotChangeBrushDefaults() {
         XCTAssertEqual(SelectionToolbarState.strokeWidthValues(for: .brush), [3, 5, 7])
         XCTAssertEqual(
-            SelectionToolbarState.strokePatternOptions(canUsePremiumStrokePatterns: true, mode: .brush).map(\.pattern),
+            SelectionToolbarState.strokePatternOptions(mode: .brush).map(\.pattern),
             [.solid, .dashLong, .dashNarrow, .dashLongShort]
         )
     }
@@ -16412,22 +16412,18 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertLessThan(compactPaletteWidth, fullPaletteWidth)
     }
 
-    func testStrokePatternOptionsReserveSketchLinesForPremiumAccess() {
-        let freeOptions = SelectionToolbarState.strokePatternOptions(canUsePremiumStrokePatterns: false)
+    func testStrokePatternOptionsKeepEveryLineStyleFree() {
+        let freeOptions = SelectionToolbarState.strokePatternOptions()
 
         XCTAssertEqual(
             freeOptions.map(\.pattern),
             [.solid, .dashLong, .dashNarrow, .dashLongShort, .sketchSolid, .sketchDashed]
         )
         XCTAssertTrue(freeOptions.allSatisfy(\.isEnabled))
-
-        let premiumOptions = SelectionToolbarState.strokePatternOptions(canUsePremiumStrokePatterns: true)
-        XCTAssertTrue(premiumOptions.allSatisfy(\.isEnabled))
     }
 
     func testBrushStrokePatternOptionsHideSketchLines() {
         let options = SelectionToolbarState.strokePatternOptions(
-            canUsePremiumStrokePatterns: true,
             mode: .brush
         )
 
@@ -16436,7 +16432,6 @@ final class SelectionToolbarStateTests: XCTestCase {
 
     func testMarkerStrokePatternOptionsOnlyUseSolidLine() {
         let options = SelectionToolbarState.strokePatternOptions(
-            canUsePremiumStrokePatterns: true,
             mode: .marker
         )
 
@@ -16445,11 +16440,9 @@ final class SelectionToolbarStateTests: XCTestCase {
 
     func testShapeAndArrowStrokePatternOptionsKeepSketchLines() {
         let shapeOptions = SelectionToolbarState.strokePatternOptions(
-            canUsePremiumStrokePatterns: true,
             mode: .shape
         )
         let arrowOptions = SelectionToolbarState.strokePatternOptions(
-            canUsePremiumStrokePatterns: true,
             mode: .arrowLine
         )
 
@@ -16458,7 +16451,7 @@ final class SelectionToolbarStateTests: XCTestCase {
     }
 
     func testStrokeMenuHitTargetSelectsEveryMenuItem() {
-        let itemCount = SelectionToolbarState.strokePatternOptions(canUsePremiumStrokePatterns: true).count
+        let itemCount = SelectionToolbarState.strokePatternOptions().count
         let menu = NSRect(x: 120, y: 80, width: 102, height: CGFloat(itemCount) * 24 + 8)
 
         for (index, rect) in SelectionToolbarState.strokeStyleMenuItemRects(in: menu, itemCount: itemCount).enumerated() {

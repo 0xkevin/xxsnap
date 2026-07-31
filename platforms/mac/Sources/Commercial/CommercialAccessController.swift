@@ -32,6 +32,60 @@ enum CommercialAccessControllerError: Error, Equatable {
     case network
 }
 
+@MainActor
+protocol CommercialAccessProviding: AnyObject {
+    var state: CommercialAccessState { get }
+    var snapshot: CommercialAccessSnapshot { get }
+    var onStateChange: ((CommercialAccessState) -> Void)? { get set }
+    func requestPurchase(for feature: CommercialFeature)
+}
+
+struct CommercialAccessSnapshot: Equatable {
+    let state: CommercialAccessState
+    let availableFeatures: Set<CommercialFeature>
+    let proBadgedFeatures: Set<CommercialFeature>
+
+    func canUse(_ feature: CommercialFeature) -> Bool {
+        availableFeatures.contains(feature)
+    }
+
+    func showsProBadge(for feature: CommercialFeature) -> Bool {
+        proBadgedFeatures.contains(feature)
+    }
+}
+
+@MainActor
+final class UnrestrictedCommercialAccess: CommercialAccessProviding {
+    static let shared = UnrestrictedCommercialAccess()
+    let state: CommercialAccessState = .allFree
+    let snapshot = CommercialAccessSnapshot(
+        state: .allFree,
+        availableFeatures: Set(CommercialFeature.allCases),
+        proBadgedFeatures: []
+    )
+    var onStateChange: ((CommercialAccessState) -> Void)?
+
+    private init() {}
+
+    func requestPurchase(for feature: CommercialFeature) {}
+}
+
+@MainActor
+final class UnavailableCommercialAccess: CommercialAccessProviding {
+    let state: CommercialAccessState = .free(reason: .policyUnavailable)
+    let snapshot = CommercialAccessSnapshot(
+        state: .free(reason: .policyUnavailable),
+        availableFeatures: [],
+        proBadgedFeatures: []
+    )
+    var onStateChange: ((CommercialAccessState) -> Void)?
+    var purchaseRequestHandler: ((CommercialFeature) -> Void)?
+
+    func requestPurchase(for feature: CommercialFeature) {
+        purchaseRequestHandler?(feature)
+    }
+}
+
 protocol CommercialTimeProviding: AnyObject {
     var now: Date { get }
     var currentUptime: TimeInterval { get }
@@ -127,11 +181,19 @@ private actor CommercialDeviceWorker {
 }
 
 @MainActor
-final class CommercialAccessController {
+final class CommercialAccessController: CommercialAccessProviding {
+    private struct PresentationState: Equatable {
+        let accessState: CommercialAccessState
+        let proBadges: Set<CommercialFeature>
+    }
+
     private static let graceInterval: TimeInterval = 14 * 24 * 60 * 60
 
     private(set) var state: CommercialAccessState = .free(reason: .policyUnavailable)
-    var onStateChange: ((CommercialAccessState) -> Void)?
+    var onStateChange: ((CommercialAccessState) -> Void)? {
+        didSet { lastNotifiedPresentation = nil }
+    }
+    var purchaseRequestHandler: ((CommercialFeature) -> Void)?
 
     private let worker: CommercialCredentialWorker
     private let verifier: CommercialSignatureVerifier
@@ -153,6 +215,7 @@ final class CommercialAccessController {
     private var terminalMarker: CommercialTerminalMarker?
     private var pendingTerminalAccess: CommercialAccessRecord?
     private(set) var hasPendingTerminalCleanup = false
+    private var lastNotifiedPresentation: PresentationState?
 
     init(
         store: CommercialCredentialStoring,
@@ -222,6 +285,26 @@ final class CommercialAccessController {
         }
     }
 
+    func showsProBadge(for feature: CommercialFeature) -> Bool {
+        guard case .free = state,
+              let policy,
+              policy.mode == .paid
+        else { return false }
+        return policy.features[feature]
+    }
+
+    var snapshot: CommercialAccessSnapshot {
+        CommercialAccessSnapshot(
+            state: state,
+            availableFeatures: Set(CommercialFeature.allCases.filter { canUse($0) }),
+            proBadgedFeatures: Set(CommercialFeature.allCases.filter { showsProBadge(for: $0) })
+        )
+    }
+
+    func requestPurchase(for feature: CommercialFeature) {
+        purchaseRequestHandler?(feature)
+    }
+
     func refresh() async {
         let token = beginOperation()
         if terminalDenyActive, hasPendingTerminalCleanup {
@@ -239,6 +322,7 @@ final class CommercialAccessController {
         await loadLocalState(token: token)
         guard isCurrent(token) else { return }
         resolveState()
+        notifyPresentationIfNeeded()
 
         do {
             let envelope = try await client.fetchPolicy(locale: locale)
@@ -248,6 +332,7 @@ final class CommercialAccessController {
             guard isCurrent(token) else { return }
             policy = verified
             resolveState()
+            notifyPresentationIfNeeded()
             guard verified.mode == .paid else { return }
 
             if let accessEnvelope, entitlement?.access == .pro {
@@ -684,7 +769,18 @@ final class CommercialAccessController {
     private func setState(_ newState: CommercialAccessState) {
         guard state != newState else { return }
         state = newState
-        onStateChange?(newState)
+        notifyPresentationIfNeeded()
+    }
+
+    private func notifyPresentationIfNeeded() {
+        guard let onStateChange else { return }
+        let snapshot = PresentationState(
+            accessState: state,
+            proBadges: self.snapshot.proBadgedFeatures
+        )
+        guard snapshot != lastNotifiedPresentation else { return }
+        lastNotifiedPresentation = snapshot
+        onStateChange(state)
     }
 
     private func sanitized(_ error: Error) -> CommercialAccessControllerError {

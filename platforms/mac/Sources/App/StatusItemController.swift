@@ -11,6 +11,7 @@ final class StatusItemController: NSObject {
     private let exportDiagnosticsHandler: @MainActor () -> Void
     private let terminationHandler: @MainActor () -> Void
     private let statusItem: NSStatusItem
+    private let commercialAccess: any CommercialAccessProviding
 
     init(
         captureCoordinator: CaptureCoordinator,
@@ -20,6 +21,7 @@ final class StatusItemController: NSObject {
         showPreferences: @escaping (PreferencesSection) -> Void,
         showHelp: @escaping @MainActor () -> Void,
         exportDiagnostics: @escaping @MainActor () -> Void = {},
+        commercialAccess: (any CommercialAccessProviding)? = nil,
         terminationHandler: @escaping @MainActor () -> Void = {
             NSApplication.shared.terminate(nil)
         }
@@ -31,6 +33,7 @@ final class StatusItemController: NSObject {
         self.showPreferences = showPreferences
         self.showHelp = showHelp
         self.exportDiagnosticsHandler = exportDiagnostics
+        self.commercialAccess = commercialAccess ?? UnrestrictedCommercialAccess.shared
         self.terminationHandler = terminationHandler
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         super.init()
@@ -123,12 +126,12 @@ final class StatusItemController: NSObject {
             hotKeyAction: .fullScreenCapture
         ))
         menu.addItem(makeHotKeyMenuItem(
-            title: strings.captureText,
+            title: commercialTitle(strings.captureText, feature: .ocr),
             action: #selector(captureText),
             hotKeyAction: .recognizeText
         ))
         menu.addItem(makeHotKeyMenuItem(
-            title: strings.teachingPen,
+            title: commercialTitle(strings.teachingPen, feature: .teachingPen),
             action: #selector(teachingPen),
             hotKeyAction: .teachingPen
         ))
@@ -199,6 +202,10 @@ final class StatusItemController: NSObject {
             item.keyEquivalentModifierMask = equivalent.1
         }
         return item
+    }
+
+    private func commercialTitle(_ title: String, feature: CommercialFeature) -> String {
+        commercialAccess.snapshot.showsProBadge(for: feature) ? "\(title)  PRO" : title
     }
 
     private var versionText: String {

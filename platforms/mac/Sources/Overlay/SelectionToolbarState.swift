@@ -290,7 +290,6 @@ enum SelectionToolbarState {
 
     struct StrokePatternOption: Equatable {
         var pattern: CaptureStrokePattern
-        var requiresPremiumAccess: Bool
         var isEnabled: Bool
     }
 
@@ -537,7 +536,6 @@ enum SelectionToolbarState {
     }
 
     static func strokePatternOptions(
-        canUsePremiumStrokePatterns: Bool,
         mode: OptionsToolbarMode = .shape
     ) -> [StrokePatternOption] {
         let patterns: [CaptureStrokePattern]
@@ -553,7 +551,6 @@ enum SelectionToolbarState {
         return patterns.map { pattern in
             StrokePatternOption(
                 pattern: pattern,
-                requiresPremiumAccess: pattern.requiresPremiumAccess,
                 isEnabled: true
             )
         }

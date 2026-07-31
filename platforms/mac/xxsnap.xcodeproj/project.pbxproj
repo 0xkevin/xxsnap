@@ -109,6 +109,7 @@
 		A43BB570B51F8FD3E4C6735D /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE8CA0660F22BC823E1A8DBC /* main.swift */; };
 		A49722A989A84A2892845DC2 /* redo-enabled.svg in Resources */ = {isa = PBXBuildFile; fileRef = 75DD0587E7E08F196C25304A /* redo-enabled.svg */; };
 		A5011A154EE9AB313F2B270F /* scroll-screen2.svg in Resources */ = {isa = PBXBuildFile; fileRef = 1E83A62B5F5AE43348DB6E2D /* scroll-screen2.svg */; };
+		A540567128E85E4F4E2A85E2 /* CommercialFeatureEntryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB2642D551FF67C58DBEF2B1 /* CommercialFeatureEntryTests.swift */; };
 		A657086C18172DECFDE33F90 /* commercial-policy-bootstrap.json in Resources */ = {isa = PBXBuildFile; fileRef = D79466A247570DD4DF46969E /* commercial-policy-bootstrap.json */; };
 		AA53BBD89427C216C929DE0D /* bold.svg in Resources */ = {isa = PBXBuildFile; fileRef = F1BB17D8F2583289C2819684 /* bold.svg */; };
 		ABFC9B3608DC949683592A08 /* screenshot.svg in Resources */ = {isa = PBXBuildFile; fileRef = BD820CEB320D6266C3032BBD /* screenshot.svg */; };
@@ -289,6 +290,7 @@
 		C9A0A38543BAB3631C0C930B /* ScrollCapturePresentationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollCapturePresentationController.swift; sourceTree = "<group>"; };
 		CAA03D0ECBC1DBC9BD9D2E86 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		CAAA7381EA68F4F3697426DC /* refresh.svg */ = {isa = PBXFileReference; path = refresh.svg; sourceTree = "<group>"; };
+		CB2642D551FF67C58DBEF2B1 /* CommercialFeatureEntryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommercialFeatureEntryTests.swift; sourceTree = "<group>"; };
 		CB99BC81E0DE791D15922EE9 /* refresh-left-svgrepo-com.svg */ = {isa = PBXFileReference; path = "refresh-left-svgrepo-com.svg"; sourceTree = "<group>"; };
 		CE931250563980B3056AED56 /* SelectionToolbarState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectionToolbarState.swift; sourceTree = "<group>"; };
 		CF7C4168F9C52FDD21D6C27C /* CommercialPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommercialPolicyTests.swift; sourceTree = "<group>"; };
@@ -485,6 +487,7 @@
 				7E58F0FBF019037172C857FC /* AppSettingsTests.swift */,
 				7C4919377BCC3AB0F5C0602A /* CommercialAccessControllerTests.swift */,
 				9971E375C61716AD5E804AB1 /* CommercialCredentialStoreTests.swift */,
+				CB2642D551FF67C58DBEF2B1 /* CommercialFeatureEntryTests.swift */,
 				CF7C4168F9C52FDD21D6C27C /* CommercialPolicyTests.swift */,
 				FCF420422449874A63EA003A /* DiagnosticLoggingTests.swift */,
 				3A3E369A87E8E375F27125CD /* HelpManualTests.swift */,
@@ -902,6 +905,7 @@
 				F8365189DAE642AC6E7A2BA5 /* AppSettingsTests.swift in Sources */,
 				E7DD4142D94657722C9D65FA /* CommercialAccessControllerTests.swift in Sources */,
 				A15F3C468CCCDDCE14F9A090 /* CommercialCredentialStoreTests.swift in Sources */,
+				A540567128E85E4F4E2A85E2 /* CommercialFeatureEntryTests.swift in Sources */,
 				2A80C70063969E7234CF93F8 /* CommercialPolicyTests.swift in Sources */,
 				D489ABD4FE40373447CCDBA2 /* DiagnosticLoggingTests.swift in Sources */,
 				E0BE7F7373BD96557F440D98 /* HelpManualTests.swift in Sources */,

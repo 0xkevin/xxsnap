@@ -147,6 +147,7 @@ final class CaptureCoordinator {
     private let fullScreenCaptureVisibleFrameResolver: @MainActor () -> NSRect
     private let fullScreenCaptureSoundPlayer: @MainActor () -> Void
     private let diagnosticLogger: any DiagnosticLogging
+    private let commercialAccess: any CommercialAccessProviding
     private var fullScreenCapturePreview: (any FullScreenCapturePreviewPresenting)?
     private var longImageEditor: (any LongImageEditorPresenting)?
     private var scrollCaptureSession: (any ScrollCaptureSessionRunning)?
@@ -196,7 +197,8 @@ final class CaptureCoordinator {
         ) -> any FullScreenCapturePreviewPresenting)? = nil,
         fullScreenCaptureVisibleFrameResolver: (@MainActor () -> NSRect)? = nil,
         fullScreenCaptureSoundPlayer: (@MainActor () -> Void)? = nil,
-        diagnosticLogger: any DiagnosticLogging = NoopDiagnosticLogger.shared
+        diagnosticLogger: any DiagnosticLogging = NoopDiagnosticLogger.shared,
+        commercialAccess: (any CommercialAccessProviding)? = nil
     ) {
         self.permissionCoordinator = permissionCoordinator
         self.screenCaptureService = screenCaptureService
@@ -270,6 +272,7 @@ final class CaptureCoordinator {
         self.fullScreenCaptureVisibleFrameResolver = fullScreenCaptureVisibleFrameResolver
             ?? Self.currentScreenVisibleFrame
         self.diagnosticLogger = diagnosticLogger
+        self.commercialAccess = commercialAccess ?? UnrestrictedCommercialAccess.shared
         if let fullScreenCaptureSoundPlayer {
             self.fullScreenCaptureSoundPlayer = fullScreenCaptureSoundPlayer
         } else {
@@ -395,6 +398,10 @@ final class CaptureCoordinator {
     }
 
     func startTextRecognition() {
+        guard commercialAccess.snapshot.canUse(.ocr) else {
+            commercialAccess.requestPurchase(for: .ocr)
+            return
+        }
         startCapture(mode: .textRecognition)
     }
 
@@ -410,6 +417,10 @@ final class CaptureCoordinator {
             } else {
                 startTask?.cancel()
             }
+            return
+        }
+        guard commercialAccess.snapshot.canUse(.teachingPen) else {
+            commercialAccess.requestPurchase(for: .teachingPen)
             return
         }
         startCapture(mode: .teachingPen)
@@ -532,7 +543,7 @@ final class CaptureCoordinator {
             let overlayWindow = SelectionOverlayWindow(
                 backgroundImage: backgroundImage,
                 settings: settings,
-                featureGate: FeatureGate(license: settings.license),
+                commercialAccess: commercialAccess,
                 configuration: configuration,
                 refreshHandler: { [weak self] in
                     guard let self else {
@@ -645,6 +656,10 @@ final class CaptureCoordinator {
         scrollCapturePresentation?.setWarning(message)
     }
 
+    func commercialAccessDidChange() {
+        overlayWindow?.commercialAccessDidChange()
+    }
+
     private static var defaultScrollCaptureMaximumAcceptedBytes: UInt {
         // Keep enough headroom for final-image materialization while allowing long captures
         // to scale with the host instead of stopping at the old fixed 512 MiB ceiling.
@@ -688,6 +703,10 @@ final class CaptureCoordinator {
     }
 
     private func requestScrollCapture(seed: ScrollCaptureSeed) {
+        guard commercialAccess.snapshot.canUse(.scrollCapture) else {
+            commercialAccess.requestPurchase(for: .scrollCapture)
+            return
+        }
         guard scrollCapturePhase == .idle,
               scrollCaptureSession == nil,
               scrollCapturePresentation == nil,

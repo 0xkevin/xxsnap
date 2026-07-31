@@ -786,12 +786,13 @@ final class SelectionOverlayWindow: NSWindow {
     init(
         backgroundImage: NSImage?,
         settings: AppSettings = .default,
-        featureGate: FeatureGate = FeatureGate(license: LicenseState()),
+        commercialAccess: (any CommercialAccessProviding)? = nil,
         configuration: SelectionOverlayConfiguration = .default,
         refreshHandler: (() async throws -> NSImage?)? = nil,
         selectionHandler: @escaping (CaptureSelectionResult?) -> Void
     ) {
         let frame = configuration.windowFrame ?? Self.desktopFrame()
+        let commercialAccess = commercialAccess ?? UnrestrictedCommercialAccess.shared
 
         self.selectionHandler = selectionHandler
         self.configuration = configuration
@@ -815,7 +816,7 @@ final class SelectionOverlayWindow: NSWindow {
             frame: NSRect(origin: .zero, size: frame.size),
             backgroundImage: configuration.showsBackgroundSnapshot ? backgroundImage : nil,
             settings: settings,
-            featureGate: featureGate,
+            commercialAccess: commercialAccess,
             configuration: configuration,
             refreshHandler: refreshHandler
         )
@@ -866,6 +867,10 @@ final class SelectionOverlayWindow: NSWindow {
             self.makeKeyAndOrderFront(nil)
             self.makeFirstResponder(self.contentView)
         }
+    }
+
+    func commercialAccessDidChange() {
+        contentView?.needsDisplay = true
     }
 
     func cancel() {
@@ -1140,6 +1145,10 @@ final class SelectionOverlayWindow: NSWindow {
 
     func test_toolbarButtonIsEnabled(_ button: TestToolbarButton) -> Bool {
         (contentView as? SelectionOverlayView)?.test_toolbarButtonIsEnabled(button) ?? false
+    }
+
+    func test_showsProBadge(for button: TestToolbarButton) -> Bool {
+        (contentView as? SelectionOverlayView)?.test_showsProBadge(for: button) ?? false
     }
 
     func test_tooltipText(for button: TestToolbarButton) -> String? {
@@ -2463,7 +2472,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         formatter.usesGroupingSeparator = true
         return formatter
     }()
-    private let featureGate: FeatureGate
+    private let commercialAccess: any CommercialAccessProviding
     private let configuration: SelectionOverlayConfiguration
     private let refreshHandler: (() async throws -> NSImage?)?
     private let colorSamplerSize = NSSize(width: 184, height: 188)
@@ -2484,7 +2493,6 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     private static let defaultTextSize: CGFloat = 8
     private var strokePatternOptions: [SelectionToolbarState.StrokePatternOption] {
         SelectionToolbarState.strokePatternOptions(
-            canUsePremiumStrokePatterns: featureGate.isEnabled(.sketchStrokePatterns),
             mode: optionsToolbarMode
         )
     }
@@ -2493,13 +2501,13 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         frame frameRect: NSRect,
         backgroundImage: NSImage?,
         settings: AppSettings,
-        featureGate: FeatureGate,
+        commercialAccess: any CommercialAccessProviding,
         configuration: SelectionOverlayConfiguration,
         refreshHandler: (() async throws -> NSImage?)?
     ) {
         self.backgroundImage = backgroundImage
         self.settings = settings
-        self.featureGate = featureGate
+        self.commercialAccess = commercialAccess
         self.configuration = configuration
         self.suppressedAnnotationIDs = configuration.suppressedAnnotationIDs
         self.refreshHandler = refreshHandler
@@ -6673,6 +6681,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         case .pin:
             finish(action: .pin)
         case .scroll:
+            guard commercialAccess.snapshot.canUse(.scrollCapture) else {
+                commercialAccess.requestPurchase(for: .scrollCapture)
+                break
+            }
             beginScrollCapture()
         case .finishEditing:
             finish(action: .finishEditing)
@@ -7583,6 +7595,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         guard let point = test_mainToolbarButtonPoint(for: button),
               let toolbarButton = toolbarButton(at: point) else { return false }
         return isToolbarButtonEnabled(toolbarButton)
+    }
+
+    func test_showsProBadge(for button: TestToolbarButton) -> Bool {
+        button == .scroll && commercialAccess.snapshot.showsProBadge(for: .scrollCapture)
     }
 
     func test_tooltipText(for button: TestToolbarButton) -> String? {
@@ -14135,8 +14151,27 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             } else {
                 drawToolbarButton(rect, symbol: symbolName(for: button, enabled: enabled), selected: buttonMatchesCurrentTool(button), enabled: enabled)
             }
+            if button == .scroll, commercialAccess.snapshot.showsProBadge(for: .scrollCapture) {
+                drawCommercialProBadge(in: rect)
+            }
         }
         drawMainToolbarDragHandle(mainToolbarDragHandleRect(in: toolbar), enabled: true)
+    }
+
+    private func drawCommercialProBadge(in buttonRect: NSRect) {
+        let badge = NSRect(x: buttonRect.maxX - 13, y: buttonRect.maxY - 7, width: 14, height: 7)
+        NSColor.systemOrange.setFill()
+        NSBezierPath(roundedRect: badge, xRadius: 2, yRadius: 2).fill()
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 4.5, weight: .bold),
+            .foregroundColor: NSColor.white,
+        ]
+        let text = "PRO" as NSString
+        let size = text.size(withAttributes: attributes)
+        text.draw(
+            at: NSPoint(x: badge.midX - size.width / 2, y: badge.midY - size.height / 2),
+            withAttributes: attributes
+        )
     }
 
     private func drawTeachingPenToolbarButton(
@@ -14183,11 +14218,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         var separators: [(ToolbarButton, ToolbarButton)] = [
             (.redo, .cancel),
         ]
-        if featureGate.isEnabled(.scrollCapture) {
-            separators.insert(contentsOf: [(.eraser, .scroll), (.scroll, .undo)], at: 0)
-        } else {
-            separators.insert((.eraser, .undo), at: 0)
-        }
+        separators.insert(contentsOf: [(.eraser, .scroll), (.scroll, .undo)], at: 0)
 
         NSColor.tertiaryLabelColor.withAlphaComponent(0.5).setFill()
 
@@ -16339,7 +16370,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
                 .eraser,
             ])
         }
-        if configuration.showsAnnotationToolbarButtons, featureGate.isEnabled(.scrollCapture) {
+        if configuration.showsAnnotationToolbarButtons {
             buttons.append(.scroll)
         }
         if configuration.showsAnnotationToolbarButtons {

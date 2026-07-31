@@ -16,13 +16,73 @@ final class CommercialAccessControllerTests: XCTestCase {
 
             await controller.refresh()
 
-            XCTAssertEqual(controller.canUse(.ocr), expectedAllowed, "age=\(age), state=\(controller.state)")
+            for feature in CommercialFeature.allCases {
+                XCTAssertEqual(
+                    controller.canUse(feature),
+                    expectedAllowed,
+                    "feature=\(feature), age=\(age), state=\(controller.state)"
+                )
+            }
             if age <= 14 {
                 guard case .allFreeGrace = controller.state else { return XCTFail("expected grace") }
             } else {
                 guard case .free = controller.state else { return XCTFail("expected free") }
             }
         }
+    }
+
+    func testProBadgesAppearOnlyForPaidFreeStateAndPurchaseUsesCallback() async throws {
+        let allFree = try Fixture(now: now)
+        allFree.store.policy = try allFree.policy(
+            mode: .allFree,
+            expiresAt: now.addingTimeInterval(.day)
+        )
+        allFree.client.fetchResult = .failure(URLError(.notConnectedToInternet))
+        let allFreeController = allFree.controller()
+        await allFreeController.refresh()
+        XCTAssertFalse(allFreeController.showsProBadge(for: .scrollCapture))
+        XCTAssertFalse(allFreeController.showsProBadge(for: .ocr))
+        XCTAssertFalse(allFreeController.showsProBadge(for: .teachingPen))
+
+        let paid = try Fixture(now: now)
+        paid.store.policy = try paid.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        paid.client.fetchResult = .failure(URLError(.notConnectedToInternet))
+        let paidController = paid.controller()
+        await paidController.refresh()
+        guard case .free = paidController.state else { return XCTFail("expected paid free state") }
+        XCTAssertTrue(paidController.showsProBadge(for: .scrollCapture))
+        XCTAssertTrue(paidController.showsProBadge(for: .ocr))
+        XCTAssertTrue(paidController.showsProBadge(for: .teachingPen))
+
+        var purchaseRequests: [CommercialFeature] = []
+        paidController.purchaseRequestHandler = { purchaseRequests.append($0) }
+        paidController.requestPurchase(for: .ocr)
+        XCTAssertEqual(purchaseRequests, [.ocr])
+    }
+
+    func testPaidPolicyFeatureChangesNotifyEvenWhenAccessStateStaysFree() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.store.policy = try fixture.policy(
+            mode: .paid,
+            expiresAt: now.addingTimeInterval(.day)
+        )
+        fixture.client.fetchResult = .success(try fixture.policy(
+            mode: .paid,
+            expiresAt: now.addingTimeInterval(.day),
+            paidFeatures: [.ocr]
+        ))
+        let controller = fixture.controller()
+        var snapshots: [Set<CommercialFeature>] = []
+        controller.onStateChange = { _ in
+            snapshots.append(Set(CommercialFeature.allCases.filter {
+                controller.showsProBadge(for: $0)
+            }))
+        }
+
+        await controller.refresh()
+
+        XCTAssertEqual(snapshots, [Set(CommercialFeature.allCases), [.ocr]])
+        guard case .free = controller.state else { return XCTFail("state must stay free") }
     }
 
     func testUsesBootstrapOnlyWhenPolicyCacheIsAbsent() async throws {
@@ -735,8 +795,14 @@ private final class Fixture {
         )
     }
 
-    func policy(mode: CommercialMode, expiresAt: Date) throws -> SignedEnvelope {
+    func policy(
+        mode: CommercialMode,
+        expiresAt: Date,
+        paidFeatures: Set<CommercialFeature>? = nil
+    ) throws -> SignedEnvelope {
         let effective = min(clock.now.addingTimeInterval(-.day), expiresAt.addingTimeInterval(-30 * .day))
+        let paidFeatures = paidFeatures
+            ?? (mode == .paid ? Set(CommercialFeature.allCases) : [])
         let object: [String: Any] = [
             "schemaVersion": 1, "policyId": "00000000-0000-0000-0000-000000000001",
             "mode": mode.rawValue, "billingReady": mode == .paid,
@@ -744,9 +810,9 @@ private final class Fixture {
             "trialDays": 14, "updateMonths": 12, "deviceLimit": 3,
             "minimumSafeVersion": "1.0.0",
             "features": [
-                "scroll_capture": mode == .paid,
-                "ocr": mode == .paid,
-                "teaching_pen": mode == .paid,
+                "scroll_capture": paidFeatures.contains(.scrollCapture),
+                "ocr": paidFeatures.contains(.ocr),
+                "teaching_pen": paidFeatures.contains(.teachingPen),
             ],
             "purchase": ["regularPriceCny": 68, "launchPriceCny": 48, "renewalPriceCny": 34,
                          "zhCNURL": "https://xxsnap.xxsofts.com/zh-CN/buy", "enURL": "https://xxsnap.xxsofts.com/en/buy"],

@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var diagnosticSupportController: DiagnosticSupportController?
     private var settingsStore: SettingsStore?
     private var preferencesSettingsStore: PreferencesSettingsStore?
+    private var commercialAccess: (any CommercialAccessProviding)?
     private let diagnosticLogStore = DiagnosticLogStore.shared
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -31,17 +32,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let preferencesSettingsStore = PreferencesSettingsStore()
         let filenameProvider = CaptureFilenameProvider(settingsStore: preferencesSettingsStore)
         let updateChecker = PlaceholderUpdateChecker()
+        let commercialController = try? CommercialAccessController()
+        let commercialAccess: any CommercialAccessProviding = commercialController
+            ?? UnavailableCommercialAccess()
         let captureCoordinator = CaptureCoordinator(
             permissionCoordinator: PermissionCoordinator(),
             screenCaptureService: ScreenCaptureService(),
             settingsStore: settingsStore,
             preferencesSettingsStore: preferencesSettingsStore,
             filenameProvider: filenameProvider,
-            diagnosticLogger: diagnosticLogStore
+            diagnosticLogger: diagnosticLogStore,
+            commercialAccess: commercialAccess
         )
         self.settingsStore = settingsStore
         self.preferencesSettingsStore = preferencesSettingsStore
         self.captureCoordinator = captureCoordinator
+        self.commercialAccess = commercialAccess
         let helpWindowController = HelpWindowController(settingsStore: settingsStore)
         self.helpWindowController = helpWindowController
         let shortcutFeedbackPresentationController = ShortcutFeedbackPresentationController(
@@ -116,9 +122,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             },
             exportDiagnostics: { [weak diagnosticSupportController] in
                 diagnosticSupportController?.exportDiagnostics()
-            }
+            },
+            commercialAccess: commercialAccess
         )
         self.statusItemController = statusItemController
+
+        commercialAccess.onStateChange = {
+            [weak captureCoordinator, weak statusItemController] _ in
+            captureCoordinator?.commercialAccessDidChange()
+            statusItemController?.refresh()
+        }
+        if let commercialController {
+            Task { @MainActor [weak commercialController] in
+                await commercialController?.refresh()
+            }
+        }
 
         preferencesWindowController.onLanguageChanged = { [weak captureCoordinator, weak statusItemController, weak preferencesWindowController] language in
             captureCoordinator?.updateLanguage(language)

@@ -1012,15 +1012,6 @@ enum CaptureStrokePattern: Int, CaseIterable {
         }
     }
 
-    var requiresPremiumAccess: Bool {
-        switch self {
-        case .sketchSolid, .sketchDashed:
-            return true
-        case .solid, .dashLong, .dashNarrow, .dashLongShort:
-            return false
-        }
-    }
-
     var isSketch: Bool {
         switch self {
         case .sketchSolid, .sketchDashed:

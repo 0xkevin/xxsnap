@@ -23,7 +23,6 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertNil(settings.interfaceFont)
         XCTAssertTrue(settings.hotkeys.isEmpty)
         XCTAssertTrue(settings.disabledHotkeys.isEmpty)
-        XCTAssertEqual(settings.license.plan, .trial)
     }
 
     func testCaptureCoordinatorResolvesConfiguredPinFunctionKey() throws {
@@ -2115,16 +2114,29 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertNotNil(Bundle.main.url(forResource: "notification", withExtension: "mp3"))
     }
 
-    func testFeatureGateKeepsTrialFullyOpenAndRestrictsFreeCoreFeatures() {
-        XCTAssertTrue(FeatureGate(license: LicenseState(plan: .trial)).isEnabled(.scrollCapture))
-        XCTAssertTrue(FeatureGate(license: LicenseState(plan: .trial)).isEnabled(.ocr))
-        XCTAssertTrue(FeatureGate(license: LicenseState(plan: .trial)).isEnabled(.sketchStrokePatterns))
-        XCTAssertTrue(FeatureGate(license: LicenseState(plan: .free)).isEnabled(.customPalette))
-        XCTAssertFalse(FeatureGate(license: LicenseState(plan: .free)).isEnabled(.scrollCapture))
-        XCTAssertFalse(FeatureGate(license: LicenseState(plan: .free)).isEnabled(.ocr))
-        XCTAssertFalse(FeatureGate(license: LicenseState(plan: .free)).isEnabled(.sketchStrokePatterns))
-        XCTAssertTrue(FeatureGate(license: LicenseState(plan: .pro)).isEnabled(.scrollCapture))
-        XCTAssertTrue(FeatureGate(license: LicenseState(plan: .pro)).isEnabled(.sketchStrokePatterns))
+    func testSettingsStoreIgnoresLegacyLicenseWithoutChangingOtherSettings() {
+        let data = Data(
+            """
+            {
+              "language": "english",
+              "paletteVisibleCount": 8,
+              "interfaceFont": {"familyName":"Menlo","pointSize":14,"weight":0.4},
+              "hotkeys": {"capture":{"keyCode":122,"modifiers":0}},
+              "disabledHotkeys": ["teachingPen"],
+              "license": {"plan":"pro"}
+            }
+            """.utf8
+        )
+
+        let settings = try? JSONDecoder().decode(AppSettings.self, from: data)
+
+        XCTAssertEqual(settings?.language, .english)
+        XCTAssertEqual(settings?.paletteVisibleCount, 8)
+        XCTAssertEqual(settings?.interfaceFont?.familyName, "Menlo")
+        XCTAssertEqual(settings?.hotkeys["capture"]?.keyCode, 122)
+        XCTAssertEqual(settings?.disabledHotkeys, ["teachingPen"])
+        let encoded = settings.flatMap { try? JSONEncoder().encode($0) }
+        XCTAssertFalse(String(data: encoded ?? Data(), encoding: .utf8)?.contains("license") == true)
     }
 
     func testL10nDefaultsToChineseAndSupportsEnglish() {

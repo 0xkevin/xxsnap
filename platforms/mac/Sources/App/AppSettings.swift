@@ -5,20 +5,6 @@ enum AppLanguage: String, Codable, Equatable {
     case english
 }
 
-enum LicensePlan: String, Codable, Equatable {
-    case trial
-    case free
-    case pro
-}
-
-struct LicenseState: Codable, Equatable {
-    var plan: LicensePlan
-
-    init(plan: LicensePlan = .trial) {
-        self.plan = plan
-    }
-}
-
 struct InterfaceFontSettings: Codable, Equatable {
     var familyName: String
     var pointSize: Double
@@ -38,7 +24,6 @@ struct AppSettings: Codable, Equatable {
     var interfaceFont: InterfaceFontSettings?
     var hotkeys: [String: HotKeySettings]
     var disabledHotkeys: Set<String>
-    var license: LicenseState
 
     var paletteVisibleCount: Int {
         didSet {
@@ -52,8 +37,7 @@ struct AppSettings: Codable, Equatable {
             paletteVisibleCount: maximumPaletteVisibleCount,
             interfaceFont: nil,
             hotkeys: [:],
-            disabledHotkeys: [],
-            license: LicenseState(plan: .trial)
+            disabledHotkeys: []
         )
     }
 
@@ -62,15 +46,13 @@ struct AppSettings: Codable, Equatable {
         paletteVisibleCount: Int,
         interfaceFont: InterfaceFontSettings?,
         hotkeys: [String: HotKeySettings],
-        disabledHotkeys: Set<String> = [],
-        license: LicenseState
+        disabledHotkeys: Set<String> = []
     ) {
         self.language = language
         self.paletteVisibleCount = Self.clampedPaletteVisibleCount(paletteVisibleCount)
         self.interfaceFont = interfaceFont
         self.hotkeys = hotkeys
         self.disabledHotkeys = disabledHotkeys
-        self.license = license
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -78,7 +60,6 @@ struct AppSettings: Codable, Equatable {
         case interfaceFont
         case hotkeys
         case disabledHotkeys
-        case license
         case paletteVisibleCount
     }
 
@@ -99,8 +80,6 @@ struct AppSettings: Codable, Equatable {
             Set<String>.self,
             forKey: .disabledHotkeys
         ) ?? defaults.disabledHotkeys
-        license = try container.decodeIfPresent(LicenseState.self, forKey: .license)
-            ?? defaults.license
         let decodedPaletteCount = try container.decodeIfPresent(
             Int.self,
             forKey: .paletteVisibleCount
@@ -114,7 +93,6 @@ struct AppSettings: Codable, Equatable {
         try container.encodeIfPresent(interfaceFont, forKey: .interfaceFont)
         try container.encode(hotkeys, forKey: .hotkeys)
         try container.encode(disabledHotkeys, forKey: .disabledHotkeys)
-        try container.encode(license, forKey: .license)
         try container.encode(paletteVisibleCount, forKey: .paletteVisibleCount)
     }
 
@@ -151,33 +129,6 @@ final class SettingsStore: AppSettingsStoring {
     func save(_ settings: AppSettings) throws {
         let data = try encoder.encode(settings)
         userDefaults.set(data, forKey: key)
-    }
-}
-
-enum Feature: String, Codable, Equatable {
-    case scrollCapture
-    case ocr
-    case customPalette
-    case customFont
-    case customHotkeys
-    case sketchStrokePatterns
-}
-
-struct FeatureGate {
-    var license: LicenseState
-
-    func isEnabled(_ feature: Feature) -> Bool {
-        switch license.plan {
-        case .trial, .pro:
-            return true
-        case .free:
-            switch feature {
-            case .scrollCapture, .ocr, .sketchStrokePatterns:
-                return false
-            case .customPalette, .customFont, .customHotkeys:
-                return true
-            }
-        }
     }
 }
 
