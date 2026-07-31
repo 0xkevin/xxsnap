@@ -30,6 +30,8 @@ enum CommercialAccessControllerError: Error, Equatable {
     case invalidCredential
     case storage
     case network
+    case activationRejected
+    case deviceLimit
 }
 
 @MainActor
@@ -37,7 +39,12 @@ protocol CommercialAccessProviding: AnyObject {
     var state: CommercialAccessState { get }
     var snapshot: CommercialAccessSnapshot { get }
     var onStateChange: ((CommercialAccessState) -> Void)? { get set }
+    var presentationPolicy: CommercialPolicy? { get }
     func requestPurchase(for feature: CommercialFeature)
+}
+
+extension CommercialAccessProviding {
+    var presentationPolicy: CommercialPolicy? { nil }
 }
 
 @MainActor
@@ -198,6 +205,9 @@ final class CommercialAccessController: CommercialAccessRefreshing {
     var onStateChange: ((CommercialAccessState) -> Void)? {
         didSet { lastNotifiedPresentation = nil }
     }
+    var onPresentationChange: (() -> Void)? {
+        didSet { lastNotifiedPolicy = nil }
+    }
     var purchaseRequestHandler: ((CommercialFeature) -> Void)?
 
     private let worker: CommercialCredentialWorker
@@ -211,6 +221,7 @@ final class CommercialAccessController: CommercialAccessRefreshing {
     private let bootstrapEnvelope: () throws -> SignedEnvelope?
 
     private var policy: CommercialPolicy?
+    var presentationPolicy: CommercialPolicy? { policy }
     private var accessEnvelope: SignedEnvelope?
     private var entitlement: EntitlementPayload?
     private var timeAnchor: CommercialTimeAnchor?
@@ -221,6 +232,7 @@ final class CommercialAccessController: CommercialAccessRefreshing {
     private var pendingTerminalAccess: CommercialAccessRecord?
     private(set) var hasPendingTerminalCleanup = false
     private var lastNotifiedPresentation: PresentationState?
+    private var lastNotifiedPolicy: CommercialPolicy?
 
     init(
         store: CommercialCredentialStoring,
@@ -778,19 +790,31 @@ final class CommercialAccessController: CommercialAccessRefreshing {
     }
 
     private func notifyPresentationIfNeeded() {
-        guard let onStateChange else { return }
         let snapshot = PresentationState(
             accessState: state,
             proBadges: self.snapshot.proBadgedFeatures
         )
-        guard snapshot != lastNotifiedPresentation else { return }
-        lastNotifiedPresentation = snapshot
-        onStateChange(state)
+        if let onStateChange, snapshot != lastNotifiedPresentation {
+            lastNotifiedPresentation = snapshot
+            onStateChange(state)
+        }
+        if let onPresentationChange, policy != lastNotifiedPolicy {
+            lastNotifiedPolicy = policy
+            onPresentationChange()
+        }
     }
 
     private func sanitized(_ error: Error) -> CommercialAccessControllerError {
         if error is CommercialAccessControllerError {
             return error as! CommercialAccessControllerError
+        }
+        if case let CommercialPolicyClientError.server(_, detail) = error {
+            switch detail.code {
+            case "device_limit_reached": return .deviceLimit
+            case "license_not_found", "license_not_active", "license_refunded", "license_revoked":
+                return .activationRejected
+            default: break
+            }
         }
         return .network
     }

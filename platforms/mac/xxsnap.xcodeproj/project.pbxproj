@@ -74,6 +74,7 @@
 		679004F13CEF6A23888328F7 /* HelpContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8BA2E89E33EE05DDBA90326 /* HelpContentView.swift */; };
 		6941D40E459A086383AA836D /* cancel-capture.png in Resources */ = {isa = PBXBuildFile; fileRef = A49BB4756C571CD2E8B2066E /* cancel-capture.png */; };
 		69E7B1DF4FCFF3714F4ABD06 /* redo-disabled.png in Resources */ = {isa = PBXBuildFile; fileRef = C387A2F55410F1188A070E11 /* redo-disabled.png */; };
+		6A96207D457F17A5200616A7 /* CommercialWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97A1C65AD9B951F8B1035A91 /* CommercialWindowController.swift */; };
 		6B0232D4CE98DCF266F3AFAE /* zoom-in-tool.png in Resources */ = {isa = PBXBuildFile; fileRef = B4908F7F6EB1434EA21DA6C4 /* zoom-in-tool.png */; };
 		6BBCFA1AA4FA3F5B9DDF82FB /* SnapshotExportBridge.mm in Sources */ = {isa = PBXBuildFile; fileRef = D4F7C165A6D2E913BC3F8E0D /* SnapshotExportBridge.mm */; };
 		6C9E4ECAB24F90400F7FA518 /* ScrollCaptureTargetDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE92468A4EDF1E94CCEC85EF /* ScrollCaptureTargetDetectorTests.swift */; };
@@ -99,6 +100,7 @@
 		92F6E38660876DEACA421E80 /* aspect-ratio.svg in Resources */ = {isa = PBXBuildFile; fileRef = B688FE29B0B0CC9BDBAB45B2 /* aspect-ratio.svg */; };
 		93FF7877283A3F6F6F6031B8 /* undo-disabled.png in Resources */ = {isa = PBXBuildFile; fileRef = 38AFFB5955898C995A84FFAA /* undo-disabled.png */; };
 		9425994BDDA3431D99130570 /* SystemShortcutMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA85F42BD235F2B3AC78E550 /* SystemShortcutMonitor.swift */; };
+		95CC91269F4E8CBE187975D5 /* CommercialPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCD2C0FF90B860AF639AA328 /* CommercialPresentationTests.swift */; };
 		965113C6C60129112B49CA65 /* stop-circle.svg in Resources */ = {isa = PBXBuildFile; fileRef = BD704B03D7D2768491F522D2 /* stop-circle.svg */; };
 		9DB0D5DA2DBD644683C032BC /* text-tool.png in Resources */ = {isa = PBXBuildFile; fileRef = 1FE4C4C27283A5FAF4CBCC58 /* text-tool.png */; };
 		9EAA0E837327CCEF23F9B42C /* refresh-svgrepo-com.svg in Resources */ = {isa = PBXBuildFile; fileRef = 736E4E8D3BB0A9B63B1C7E12 /* refresh-svgrepo-com.svg */; };
@@ -250,6 +252,7 @@
 		9381E644823646F0488892C2 /* settings-more.svg */ = {isa = PBXFileReference; path = "settings-more.svg"; sourceTree = "<group>"; };
 		95CF3AB1FE953C69432B3834 /* PreferencesSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencesSettings.swift; sourceTree = "<group>"; };
 		95FB5FC844E7D04225DF9701 /* xxsnapMacTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = xxsnapMacTests.swift; sourceTree = "<group>"; };
+		97A1C65AD9B951F8B1035A91 /* CommercialWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommercialWindowController.swift; sourceTree = "<group>"; };
 		9971E375C61716AD5E804AB1 /* CommercialCredentialStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommercialCredentialStoreTests.swift; sourceTree = "<group>"; };
 		9A119E98789DE049AE5BBF54 /* manual-capture-checklist.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "manual-capture-checklist.md"; sourceTree = "<group>"; };
 		9A98FE556582ECA9DC75EEAB /* cancel-capture.svg */ = {isa = PBXFileReference; path = "cancel-capture.svg"; sourceTree = "<group>"; };
@@ -303,6 +306,7 @@
 		DB0753FB16E984A9D3A9EC65 /* highlighter-tool.svg */ = {isa = PBXFileReference; path = "highlighter-tool.svg"; sourceTree = "<group>"; };
 		DBA5E6EEB22147D2D8EF0C92 /* DiagnosticSupportController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticSupportController.swift; sourceTree = "<group>"; };
 		DC1FDF0F005ABFB27AD3D76B /* undo-enabled.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "undo-enabled.png"; sourceTree = "<group>"; };
+		DCD2C0FF90B860AF639AA328 /* CommercialPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommercialPresentationTests.swift; sourceTree = "<group>"; };
 		DD043AE9A9AE4F89D4FDBCB2 /* pin-to-screen.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "pin-to-screen.png"; sourceTree = "<group>"; };
 		DD6320A53870D172750D4810 /* LongImageEditorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LongImageEditorTests.swift; sourceTree = "<group>"; };
 		DDEADF04C25FD6C8A3892E82 /* arrow.svg */ = {isa = PBXFileReference; path = arrow.svg; sourceTree = "<group>"; };
@@ -338,6 +342,7 @@
 				24BDEB3AE00354C36614F3C1 /* CaptureControlWindowController.swift */,
 				A177154367D4DF7657018B06 /* CaptureCoordinator.swift */,
 				64CF6829557DB6ED95D5DE7F /* CaptureHotKeyController.swift */,
+				97A1C65AD9B951F8B1035A91 /* CommercialWindowController.swift */,
 				1D09AEDCBEAF266BB26A1645 /* FullScreenCapturePreviewController.swift */,
 				A9B0B6076E8D2E3890917553 /* HelpContent.swift */,
 				B8BA2E89E33EE05DDBA90326 /* HelpContentView.swift */,
@@ -489,6 +494,7 @@
 				9971E375C61716AD5E804AB1 /* CommercialCredentialStoreTests.swift */,
 				CB2642D551FF67C58DBEF2B1 /* CommercialFeatureEntryTests.swift */,
 				CF7C4168F9C52FDD21D6C27C /* CommercialPolicyTests.swift */,
+				DCD2C0FF90B860AF639AA328 /* CommercialPresentationTests.swift */,
 				FCF420422449874A63EA003A /* DiagnosticLoggingTests.swift */,
 				3A3E369A87E8E375F27125CD /* HelpManualTests.swift */,
 				DD6320A53870D172750D4810 /* LongImageEditorTests.swift */,
@@ -864,6 +870,7 @@
 				8995EB75BB34DE9C01D7451E /* CommercialModels.swift in Sources */,
 				74A195E36288D6424BD1D8DC /* CommercialPolicyClient.swift in Sources */,
 				00EA5C2401799FFFB066E37F /* CommercialSignatureVerifier.swift in Sources */,
+				6A96207D457F17A5200616A7 /* CommercialWindowController.swift in Sources */,
 				FFE67C4FB446B52BE3867BA7 /* DiagnosticBundleExporter.swift in Sources */,
 				645883519F4048474A3AA60A /* DiagnosticLogStore.swift in Sources */,
 				CCADF1C12AE0363FE4DE6B4C /* DiagnosticSupportController.swift in Sources */,
@@ -907,6 +914,7 @@
 				A15F3C468CCCDDCE14F9A090 /* CommercialCredentialStoreTests.swift in Sources */,
 				A540567128E85E4F4E2A85E2 /* CommercialFeatureEntryTests.swift in Sources */,
 				2A80C70063969E7234CF93F8 /* CommercialPolicyTests.swift in Sources */,
+				95CC91269F4E8CBE187975D5 /* CommercialPresentationTests.swift in Sources */,
 				D489ABD4FE40373447CCDBA2 /* DiagnosticLoggingTests.swift in Sources */,
 				E0BE7F7373BD96557F440D98 /* HelpManualTests.swift in Sources */,
 				B44A5633FCA4FD4A5E38B1BA /* LongImageEditorTests.swift in Sources */,

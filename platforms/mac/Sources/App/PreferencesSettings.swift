@@ -282,6 +282,7 @@ struct PreferencesStrings {
     var shortcuts: String { isEnglish ? "Shortcuts" : "快捷键" }
     var save: String { isEnglish ? "Save" : "保存" }
     var update: String { isEnglish ? "Update" : "更新" }
+    var commercial: String { isEnglish ? "License & Purchase" : "授权与购买" }
     var donation: String { isEnglish ? "Donate" : "捐赠" }
     var about: String { isEnglish ? "About" : "关于" }
     var donationMessage: String {

@@ -450,6 +450,28 @@ final class CommercialAccessControllerTests: XCTestCase {
         XCTAssertNil(fixture.marker.reason)
     }
 
+    func testPresentationExposesOnlyVerifiedPolicyAndMapsStableActivationFailures() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        fixture.client.fetchResult = .failure(URLError(.timedOut))
+        let controller = fixture.controller()
+        await controller.refresh()
+        XCTAssertEqual(controller.presentationPolicy?.mode, .paid)
+
+        for (code, expected) in [
+            ("device_limit_reached", CommercialAccessControllerError.deviceLimit),
+            ("license_not_found", CommercialAccessControllerError.activationRejected),
+        ] {
+            fixture.client.activateResult = .failure(fixture.serverError(code))
+            do {
+                try await controller.activate(email: "person@example.com", code: "XXSNAP-ABCD-2345-WXYZ-6789")
+                XCTFail("expected \(code)")
+            } catch {
+                XCTAssertEqual(error as? CommercialAccessControllerError, expected)
+            }
+        }
+    }
+
     func testMarkerCannotBeClearedByMismatchedMissingOrTrialNonce() async throws {
         for scenario in ["mismatch", "missing", "trial"] {
             let fixture = try Fixture(now: now)
@@ -641,6 +663,26 @@ final class CommercialAccessControllerTests: XCTestCase {
         XCTAssertEqual(states, [.allFree])
     }
 
+    func testPresentationCallbackFiresWhenSignedPolicyCopyChangesWithoutAccessStateChange() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        fixture.client.fetchResult = .success(
+            try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day), updateMonths: 24)
+        )
+        let controller = fixture.controller()
+        var stateCallbackCount = 0
+        var presentationCallbackCount = 0
+        controller.onStateChange = { _ in stateCallbackCount += 1 }
+        controller.onPresentationChange = { presentationCallbackCount += 1 }
+
+        await controller.refresh()
+
+        XCTAssertEqual(controller.state, .free(reason: .trialUnavailable))
+        XCTAssertEqual(controller.presentationPolicy?.updateMonths, 24)
+        XCTAssertEqual(stateCallbackCount, 1)
+        XCTAssertEqual(presentationCallbackCount, 2)
+    }
+
     func testLateRefreshResponseCannotOverwriteNewerActivation() async throws {
         let fixture = try Fixture(now: now)
         fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
@@ -798,7 +840,8 @@ private final class Fixture {
     func policy(
         mode: CommercialMode,
         expiresAt: Date,
-        paidFeatures: Set<CommercialFeature>? = nil
+        paidFeatures: Set<CommercialFeature>? = nil,
+        updateMonths: Int = 12
     ) throws -> SignedEnvelope {
         let effective = min(clock.now.addingTimeInterval(-.day), expiresAt.addingTimeInterval(-30 * .day))
         let paidFeatures = paidFeatures
@@ -807,7 +850,7 @@ private final class Fixture {
             "schemaVersion": 1, "policyId": "00000000-0000-0000-0000-000000000001",
             "mode": mode.rawValue, "billingReady": mode == .paid,
             "effectiveAt": iso(effective), "expiresAt": iso(expiresAt),
-            "trialDays": 14, "updateMonths": 12, "deviceLimit": 3,
+            "trialDays": 14, "updateMonths": updateMonths, "deviceLimit": 3,
             "minimumSafeVersion": "1.0.0",
             "features": [
                 "scroll_capture": paidFeatures.contains(.scrollCapture),

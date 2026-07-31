@@ -1,12 +1,30 @@
 import AppKit
 
-enum PreferencesSection: String, CaseIterable {
+enum PreferencesSection: String {
     case general
     case shortcuts
     case save
     case update
+    case commercial
     case donation
     case about
+
+    static let allCases: [PreferencesSection] = [.general, .shortcuts, .save, .update, .donation, .about]
+
+    static func visibleSections(for presentation: CommercialPresentationModel) -> [PreferencesSection] {
+        var sections = allCases
+        if presentation.showsPreferencesSection {
+            sections.insert(.commercial, at: 4)
+        }
+        return sections
+    }
+
+    static func safeSelection(
+        _ selection: PreferencesSection,
+        visible: [PreferencesSection]
+    ) -> PreferencesSection {
+        visible.contains(selection) ? selection : .general
+    }
 }
 
 @MainActor
@@ -19,6 +37,9 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
     private let launchAtLoginManager: any LaunchAtLoginManaging
     private let updateChecker: any UpdateChecking
     private let systemShortcutMonitor: (any SystemShortcutMonitoring)?
+    private let commercialAccess: any CommercialAccessProviding
+    private let commercialActions: (any CommercialLicenseActing)?
+    private var commercialPageController: CommercialPreferencesViewController?
     private let filenameRenderer = FilenameTemplateRenderer()
 
     private var selectedSection: PreferencesSection = .general
@@ -33,7 +54,9 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
         hotKeyController: CaptureHotKeyController,
         launchAtLoginManager: any LaunchAtLoginManaging,
         updateChecker: any UpdateChecking,
-        systemShortcutMonitor: (any SystemShortcutMonitoring)? = nil
+        systemShortcutMonitor: (any SystemShortcutMonitoring)? = nil,
+        commercialAccess: (any CommercialAccessProviding)? = nil,
+        commercialActions: (any CommercialLicenseActing)? = nil
     ) {
         self.settingsStore = settingsStore
         self.preferencesSettingsStore = preferencesSettingsStore
@@ -41,6 +64,9 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
         self.launchAtLoginManager = launchAtLoginManager
         self.updateChecker = updateChecker
         self.systemShortcutMonitor = systemShortcutMonitor
+        let access = commercialAccess ?? UnrestrictedCommercialAccess.shared
+        self.commercialAccess = access
+        self.commercialActions = commercialActions ?? (access as? any CommercialLicenseActing)
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 680, height: 480),
@@ -62,7 +88,7 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
     }
 
     func show(section: PreferencesSection = .general) {
-        selectedSection = section
+        selectedSection = PreferencesSection.safeSelection(section, visible: visibleSections)
         rebuildContent()
         window?.toolbar?.selectedItemIdentifier = toolbarIdentifier(for: section)
         NSApp.activate(ignoringOtherApps: true)
@@ -70,13 +96,46 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
         window?.makeKeyAndOrderFront(nil)
     }
 
+    func showCommercialPurchaseIfAvailable() {
+        guard visibleSections.contains(.commercial) else { return }
+        show(section: .commercial)
+    }
+
     func refresh() {
+        selectedSection = PreferencesSection.safeSelection(selectedSection, visible: visibleSections)
         configureToolbar()
+        rebuildContent()
+    }
+
+    func commercialAccessDidChange() {
+        let previous = selectedSection
+        selectedSection = PreferencesSection.safeSelection(previous, visible: visibleSections)
+        configureToolbar()
+        if previous == .commercial || selectedSection != previous {
+            rebuildContent()
+        }
+    }
+
+    func languageDidChange() {
+        configureToolbar()
+        guard selectedSection == .commercial else { return }
         rebuildContent()
     }
 
     private var strings: PreferencesStrings {
         PreferencesStrings(language: settingsStore.load().language)
+    }
+
+    private var commercialPresentation: CommercialPresentationModel {
+        CommercialPresentationModel(
+            state: commercialAccess.state,
+            language: settingsStore.load().language,
+            policy: commercialAccess.presentationPolicy
+        )
+    }
+
+    private var visibleSections: [PreferencesSection] {
+        PreferencesSection.visibleSections(for: commercialPresentation)
     }
 
     private func configureToolbar() {
@@ -106,6 +165,15 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
             return makeSavePage()
         case .update:
             return makeUpdatePage()
+        case .commercial:
+            guard let commercialActions else { return NSView() }
+            let controller = CommercialPreferencesViewController(
+                access: commercialAccess,
+                actions: commercialActions,
+                language: settingsStore.load().language
+            )
+            commercialPageController = controller
+            return controller.view
         case .donation:
             return makeDonationPage()
         case .about:
@@ -991,7 +1059,7 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
     }
 
     private func section(for identifier: NSToolbarItem.Identifier) -> PreferencesSection? {
-        PreferencesSection.allCases.first(where: { toolbarIdentifier(for: $0) == identifier })
+        visibleSections.first(where: { toolbarIdentifier(for: $0) == identifier })
     }
 
     @objc private func selectToolbarItem(_ sender: NSToolbarItem) {
@@ -1001,7 +1069,7 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        PreferencesSection.allCases.map(toolbarIdentifier(for:))
+        visibleSections.map(toolbarIdentifier(for:))
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -1034,6 +1102,9 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
         case .update:
             item.label = strings.update
             item.image = NSImage(systemSymbolName: "arrow.triangle.2.circlepath", accessibilityDescription: strings.update)
+        case .commercial:
+            item.label = strings.commercial
+            item.image = NSImage(systemSymbolName: "key", accessibilityDescription: strings.commercial)
         case .donation:
             item.label = strings.donation
             item.image = NSImage(systemSymbolName: "cup.and.saucer", accessibilityDescription: strings.donation)

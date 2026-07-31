@@ -176,9 +176,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             hotKeyController: hotKeyController,
             launchAtLoginManager: LaunchAtLoginManager(),
             updateChecker: updateChecker,
-            systemShortcutMonitor: systemShortcutMonitor
+            systemShortcutMonitor: systemShortcutMonitor,
+            commercialAccess: commercialAccess,
+            commercialActions: commercialAccess as? any CommercialLicenseActing
         )
         self.preferencesWindowController = preferencesWindowController
+        let purchaseRequest: (CommercialFeature) -> Void = { [weak preferencesWindowController] _ in
+            Task { @MainActor in
+                preferencesWindowController?.showCommercialPurchaseIfAvailable()
+            }
+        }
+        if let controller = commercialAccess as? CommercialAccessController {
+            controller.purchaseRequestHandler = purchaseRequest
+        } else if let unavailable = commercialAccess as? UnavailableCommercialAccess {
+            unavailable.purchaseRequestHandler = purchaseRequest
+        }
         let diagnosticSupportController = DiagnosticSupportController(
             logStore: diagnosticLogStore,
             exporter: DiagnosticBundleExporter(logStore: diagnosticLogStore),
@@ -204,9 +216,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.statusItemController = statusItemController
 
         commercialAccess.onStateChange = {
-            [weak captureCoordinator, weak statusItemController] _ in
+            [weak captureCoordinator, weak statusItemController, weak preferencesWindowController] _ in
             captureCoordinator?.commercialAccessDidChange()
             statusItemController?.refresh()
+            preferencesWindowController?.commercialAccessDidChange()
+        }
+        if let controller = commercialAccess as? CommercialAccessController {
+            controller.onPresentationChange = { [weak preferencesWindowController] in
+                preferencesWindowController?.commercialAccessDidChange()
+            }
         }
         Task { @MainActor in
             await commercialDependencies.refresh()
@@ -215,7 +233,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         preferencesWindowController.onLanguageChanged = { [weak captureCoordinator, weak statusItemController, weak preferencesWindowController] language in
             captureCoordinator?.updateLanguage(language)
             statusItemController?.refresh()
-            preferencesWindowController?.refresh()
+            preferencesWindowController?.languageDidChange()
         }
         hotKeyController.onStateChange = { [weak statusItemController, weak preferencesWindowController] in
             statusItemController?.refresh()
