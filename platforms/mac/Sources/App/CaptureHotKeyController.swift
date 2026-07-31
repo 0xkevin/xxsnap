@@ -186,6 +186,7 @@ final class CaptureHotKeyController {
     private let registrar: any GlobalHotKeyRegistering
     private let handlers: [HotKeyAction: () -> Void]
     private let hotKeyFeedbackHandler: (HotKeySettings) -> Void
+    private let keyCodeCharacterResolver: (UInt32) -> String?
     private let registrationOrder: [HotKeyAction]
     private var configured: [HotKeyAction: HotKeySettings] = [:]
     private var disabledActions: Set<HotKeyAction> = []
@@ -196,6 +197,8 @@ final class CaptureHotKeyController {
     init(
         settingsStore: any AppSettingsStoring = SettingsStore(),
         registrar: any GlobalHotKeyRegistering = CarbonGlobalHotKeyRegistrar(),
+        keyCodeCharacterResolver: @escaping (UInt32) -> String? =
+            KeyboardLayoutCharacterResolver.charactersIgnoringModifiers(for:),
         captureHandler: @escaping () -> Void,
         fullScreenCaptureHandler: @escaping () -> Void = {},
         recognizeTextHandler: @escaping () -> Void = {},
@@ -206,6 +209,7 @@ final class CaptureHotKeyController {
         self.settingsStore = settingsStore
         self.registrar = registrar
         self.hotKeyFeedbackHandler = hotKeyFeedbackHandler
+        self.keyCodeCharacterResolver = keyCodeCharacterResolver
         handlers = [
             .capture: captureHandler,
             .fullScreenCapture: fullScreenCaptureHandler,
@@ -262,7 +266,10 @@ final class CaptureHotKeyController {
         guard !isCaptureSessionActive else {
             return .failure(.captureInProgress)
         }
-        if let conflict = SelectionToolbarState.fixedShortcutConflict(for: settings) {
+        if let conflict = SelectionToolbarState.fixedShortcutConflict(
+            for: settings,
+            keyCodeCharacterResolver: keyCodeCharacterResolver
+        ) {
             return .failure(.fixedToolbarConflict(conflict))
         }
         guard HotKeyFormatter.isValidGlobalShortcut(settings) else {
@@ -465,7 +472,10 @@ final class CaptureHotKeyController {
         _ settings: HotKeySettings,
         action: HotKeyAction
     ) {
-        if let conflict = SelectionToolbarState.fixedShortcutConflict(for: settings) {
+        if let conflict = SelectionToolbarState.fixedShortcutConflict(
+            for: settings,
+            keyCodeCharacterResolver: keyCodeCharacterResolver
+        ) {
             errors[action] = .fixedToolbarConflict(conflict)
             return
         }
@@ -690,7 +700,7 @@ struct HotKeyFormatter {
         return keyName.lowercased()
     }
 
-    private static func eventModifierFlags(from modifiers: UInt32) -> NSEvent.ModifierFlags {
+    static func eventModifierFlags(from modifiers: UInt32) -> NSEvent.ModifierFlags {
         var flags: NSEvent.ModifierFlags = []
         if modifiers & UInt32(cmdKey) != 0 { flags.insert(.command) }
         if modifiers & UInt32(optionKey) != 0 { flags.insert(.option) }

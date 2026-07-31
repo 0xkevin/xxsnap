@@ -2166,6 +2166,23 @@ final class AppSettingsTests: XCTestCase {
         CaptureHotKeyController(
             settingsStore: store,
             registrar: registrar,
+            keyCodeCharacterResolver: { keyCode in
+                [
+                    UInt32(kVK_ANSI_S): "s",
+                    UInt32(kVK_ANSI_A): "a",
+                    UInt32(kVK_ANSI_B): "b",
+                    UInt32(kVK_ANSI_H): "h",
+                    UInt32(kVK_ANSI_P): "p",
+                    UInt32(kVK_ANSI_M): "m",
+                    UInt32(kVK_ANSI_T): "t",
+                    UInt32(kVK_ANSI_N): "n",
+                    UInt32(kVK_ANSI_G): "g",
+                    UInt32(kVK_ANSI_E): "e",
+                    UInt32(kVK_ANSI_R): "r",
+                    UInt32(kVK_ANSI_Z): "z",
+                    UInt32(kVK_ANSI_C): "c",
+                ][keyCode]
+            },
             captureHandler: {},
             teachingPenHandler: {},
             restorePinnedImageHandler: {}

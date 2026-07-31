@@ -4016,7 +4016,11 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
 
         if let button = shortcutToolbarButtons().first(where: { button in
-            toolbarShortcut(for: tooltipIdentifier(for: button))?.matches(
+            let identifier = tooltipIdentifier(for: button)
+            guard identifier != "pin" else {
+                return false
+            }
+            return toolbarShortcut(for: identifier)?.matches(
                 charactersIgnoringModifiers: event.charactersIgnoringModifiers,
                 keyCode: event.keyCode,
                 modifierFlags: event.modifierFlags
@@ -4045,6 +4049,12 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     }
 
     private func handlePinToolbarShortcut(_ event: NSEvent) -> Bool {
+        guard SelectionToolbarState.fixedShortcut(
+            matchingCharactersIgnoringModifiers: event.charactersIgnoringModifiers,
+            modifierFlags: event.modifierFlags
+        ) == nil else {
+            return false
+        }
         guard
             let button = shortcutToolbarButtons().first(where: {
                 tooltipIdentifier(for: $0) == "pin"

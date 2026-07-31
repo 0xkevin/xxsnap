@@ -3369,6 +3369,46 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(result?.action, .pin)
     }
 
+    func testFixedToolbarShortcutWinsOverConfiguredPinAfterKeyboardLayoutChanges() throws {
+        var result: CaptureSelectionResult?
+        var shortcutSeenByFeedback: FixedToolbarShortcut?
+        let expectation = expectation(description: "fixed save shortcut")
+        var configuration = SelectionOverlayConfiguration.default
+        configuration.completesBeforeOrderingOut = true
+        configuration.shortcutFeedbackHandler = { event in
+            shortcutSeenByFeedback = SelectionToolbarState.fixedShortcut(
+                matchingCharactersIgnoringModifiers: event.charactersIgnoringModifiers,
+                modifierFlags: event.modifierFlags
+            )
+        }
+        configuration.pinToolbarShortcut = try XCTUnwrap(
+            HotKeyFormatter.toolbarShortcut(
+                from: HotKeySettings(
+                    keyCode: UInt32(kVK_ANSI_Q),
+                    modifiers: UInt32(cmdKey)
+                )
+            )
+        )
+        let window = SelectionOverlayWindow(
+            backgroundImage: nil,
+            configuration: configuration
+        ) { selectionResult in
+            result = selectionResult
+            expectation.fulfill()
+        }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+
+        window.test_keyDown(
+            keyCode: UInt16(kVK_ANSI_Q),
+            charactersIgnoringModifiers: "s",
+            modifierFlags: [.command]
+        )
+        wait(for: [expectation], timeout: 0.5)
+
+        XCTAssertEqual(result?.action, .save)
+        XCTAssertEqual(shortcutSeenByFeedback, .save)
+    }
+
     func testCommandOneDoesNotPinWhenPinShortcutIsCleared() {
         let expectation = expectation(description: "cleared pin shortcut does not complete")
         expectation.isInverted = true
@@ -17168,6 +17208,41 @@ final class SelectionToolbarStateTests: XCTestCase {
     }
 
     func testDynamicToolbarShortcutsSupportSpecialKeysAndMatchByKeyCode() throws {
+        let specialKeyCodes = [
+            kVK_Space,
+            kVK_Return,
+            kVK_Tab,
+            kVK_Delete,
+            kVK_ForwardDelete,
+            kVK_LeftArrow,
+            kVK_RightArrow,
+            kVK_UpArrow,
+            kVK_DownArrow,
+            kVK_Home,
+            kVK_End,
+            kVK_PageUp,
+            kVK_PageDown,
+        ].map(UInt32.init)
+
+        for keyCode in specialKeyCodes {
+            let shortcut = try XCTUnwrap(
+                HotKeyFormatter.toolbarShortcut(
+                    from: HotKeySettings(
+                        keyCode: keyCode,
+                        modifiers: UInt32(cmdKey)
+                    )
+                )
+            )
+            XCTAssertEqual(shortcut.keyCode, keyCode)
+            XCTAssertTrue(
+                shortcut.matches(
+                    charactersIgnoringModifiers: "unrelated-layout-character",
+                    keyCode: UInt16(keyCode),
+                    modifierFlags: [.command]
+                )
+            )
+        }
+
         let commandSpace = try XCTUnwrap(
             HotKeyFormatter.toolbarShortcut(
                 from: HotKeySettings(
@@ -17179,13 +17254,6 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(commandSpace.keyCode, UInt32(kVK_Space))
         XCTAssertEqual(commandSpace.iconName, "command")
         XCTAssertEqual(commandSpace.displayText, "Space")
-        XCTAssertTrue(
-            commandSpace.matches(
-                charactersIgnoringModifiers: "unrelated-layout-character",
-                keyCode: UInt16(kVK_Space),
-                modifierFlags: [.command]
-            )
-        )
         XCTAssertFalse(
             commandSpace.matches(
                 charactersIgnoringModifiers: " ",
@@ -17228,13 +17296,49 @@ final class SelectionToolbarStateTests: XCTestCase {
         }
     }
 
+    func testFixedToolbarShortcutConflictUsesInjectedKeyboardLayoutCharacters() {
+        XCTAssertEqual(
+            SelectionToolbarState.fixedShortcutConflict(
+                for: HotKeySettings(
+                    keyCode: UInt32(kVK_ANSI_Q),
+                    modifiers: UInt32(cmdKey)
+                ),
+                keyCodeCharacterResolver: { keyCode in
+                    XCTAssertEqual(keyCode, UInt32(kVK_ANSI_Q))
+                    return "s"
+                }
+            ),
+            .save
+        )
+        XCTAssertNil(
+            SelectionToolbarState.fixedShortcutConflict(
+                for: HotKeySettings(
+                    keyCode: UInt32(kVK_ANSI_S),
+                    modifiers: UInt32(cmdKey)
+                ),
+                keyCodeCharacterResolver: { keyCode in
+                    XCTAssertEqual(keyCode, UInt32(kVK_ANSI_S))
+                    return "o"
+                }
+            )
+        )
+    }
+
     func testFixedToolbarShortcutConflictUsesActualToolbarMatchingRules() {
+        let resolver: (UInt32) -> String? = { keyCode in
+            [
+                UInt32(kVK_ANSI_S): "s",
+                UInt32(kVK_ANSI_Z): "z",
+                UInt32(kVK_ANSI_1): "1",
+            ][keyCode]
+        }
         XCTAssertEqual(
             SelectionToolbarState.fixedShortcutConflict(
                 for: HotKeySettings(
                     keyCode: UInt32(kVK_ANSI_S),
                     modifiers: UInt32(shiftKey)
-                )
+                ),
+                keyCodeCharacterResolver: resolver
             ),
             .rectangle
         )
@@ -17243,19 +17347,22 @@ final class SelectionToolbarStateTests: XCTestCase {
                 for: HotKeySettings(
                     keyCode: UInt32(kVK_ANSI_Z),
                     modifiers: UInt32(cmdKey | shiftKey)
-                )
+                ),
+                keyCodeCharacterResolver: resolver
             ),
             .redo
         )
         XCTAssertEqual(
             SelectionToolbarState.fixedShortcutConflict(
-                for: HotKeySettings(keyCode: UInt32(kVK_Escape), modifiers: 0)
+                for: HotKeySettings(keyCode: UInt32(kVK_Escape), modifiers: 0),
+                keyCodeCharacterResolver: resolver
             ),
             .cancel
         )
         XCTAssertNil(
             SelectionToolbarState.fixedShortcutConflict(
-                for: HotKeySettings(keyCode: UInt32(kVK_F1), modifiers: 0)
+                for: HotKeySettings(keyCode: UInt32(kVK_F1), modifiers: 0),
+                keyCodeCharacterResolver: resolver
             )
         )
         XCTAssertNil(
@@ -17263,7 +17370,8 @@ final class SelectionToolbarStateTests: XCTestCase {
                 for: HotKeySettings(
                     keyCode: UInt32(kVK_ANSI_1),
                     modifiers: UInt32(cmdKey)
-                )
+                ),
+                keyCodeCharacterResolver: resolver
             )
         )
     }

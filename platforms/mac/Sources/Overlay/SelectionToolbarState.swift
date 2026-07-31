@@ -1,6 +1,53 @@
 import AppKit
 import Carbon.HIToolbox
 
+enum KeyboardLayoutCharacterResolver {
+    static func charactersIgnoringModifiers(for keyCode: UInt32) -> String? {
+        guard
+            keyCode <= UInt32(UInt16.max),
+            let inputSource = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
+            let property = TISGetInputSourceProperty(
+                inputSource,
+                kTISPropertyUnicodeKeyLayoutData
+            )
+        else {
+            return nil
+        }
+
+        let data = Unmanaged<CFData>.fromOpaque(property).takeUnretainedValue()
+        guard let bytes = CFDataGetBytePtr(data) else {
+            return nil
+        }
+
+        var deadKeyState: UInt32 = 0
+        var characters = [UniChar](repeating: 0, count: 8)
+        var characterCount = 0
+        let status = characters.withUnsafeMutableBufferPointer { buffer in
+            bytes.withMemoryRebound(
+                to: UCKeyboardLayout.self,
+                capacity: 1
+            ) { keyboardLayout in
+                UCKeyTranslate(
+                    keyboardLayout,
+                    UInt16(keyCode),
+                    UInt16(kUCKeyActionDown),
+                    0,
+                    UInt32(LMGetKbdType()),
+                    UInt32(kUCKeyTranslateNoDeadKeysBit),
+                    &deadKeyState,
+                    buffer.count,
+                    &characterCount,
+                    buffer.baseAddress
+                )
+            }
+        }
+        guard status == noErr, characterCount > 0 else {
+            return nil
+        }
+        return String(utf16CodeUnits: characters, count: characterCount)
+    }
+}
+
 enum FixedToolbarShortcut: String, Equatable, CaseIterable {
     case rectangle
     case polyline
@@ -367,17 +414,30 @@ enum SelectionToolbarState {
         return toolbarShortcuts[identifier]
     }
 
-    static func fixedShortcutConflict(for settings: HotKeySettings) -> FixedToolbarShortcut? {
+    static func fixedShortcutConflict(
+        for settings: HotKeySettings,
+        keyCodeCharacterResolver: (UInt32) -> String? =
+            KeyboardLayoutCharacterResolver.charactersIgnoringModifiers(for:)
+    ) -> FixedToolbarShortcut? {
         if settings.keyCode == UInt32(kVK_Escape) {
             return .cancel
         }
-        guard let candidate = HotKeyFormatter.toolbarShortcut(from: settings) else {
-            return nil
-        }
+        let characters = keyCodeCharacterResolver(settings.keyCode)
+        let modifiers = HotKeyFormatter.eventModifierFlags(from: settings.modifiers)
+        return fixedShortcut(
+            matchingCharactersIgnoringModifiers: characters,
+            modifierFlags: modifiers
+        )
+    }
+
+    static func fixedShortcut(
+        matchingCharactersIgnoringModifiers characters: String?,
+        modifierFlags: NSEvent.ModifierFlags
+    ) -> FixedToolbarShortcut? {
         return FixedToolbarShortcut.allCases.first { shortcut in
             toolbarShortcuts[shortcut.rawValue]?.matches(
-                charactersIgnoringModifiers: candidate.key,
-                modifierFlags: candidate.modifiers
+                charactersIgnoringModifiers: characters,
+                modifierFlags: modifierFlags
             ) == true
         }
     }
