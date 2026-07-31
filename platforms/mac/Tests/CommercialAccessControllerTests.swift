@@ -273,6 +273,25 @@ final class CommercialAccessControllerTests: XCTestCase {
         XCTAssertTrue(controller.hasPendingTerminalCleanup)
     }
 
+    func testTerminalMarkerReadFailureIsConservativeButAllFreeStillWins() async throws {
+        let paid = try Fixture(now: now)
+        paid.store.policy = try paid.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        paid.store.access = try paid.entitlement(access: .pro, maximumBuildNumber: 100)
+        paid.marker.loadError = CommercialTerminalMarkerStoreError.corruptData
+        paid.client.fetchResult = .failure(URLError(.timedOut))
+        let paidController = paid.controller()
+        await paidController.refresh()
+        XCTAssertEqual(paidController.state, .free(reason: .serverDenied))
+
+        let allFree = try Fixture(now: now)
+        allFree.store.policy = try allFree.policy(mode: .allFree, expiresAt: now.addingTimeInterval(.day))
+        allFree.marker.loadError = CommercialTerminalMarkerStoreError.corruptData
+        allFree.client.fetchResult = .failure(URLError(.timedOut))
+        let allFreeController = allFree.controller()
+        await allFreeController.refresh()
+        XCTAssertEqual(allFreeController.state, .allFree)
+    }
+
     func testTombstoneWriteAndFallbackDeleteFailureIsObservableFailClosedAndRetryable() async throws {
         let fixture = try Fixture(now: now)
         fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
@@ -289,12 +308,96 @@ final class CommercialAccessControllerTests: XCTestCase {
         XCTAssertTrue(controller.hasPendingTerminalCleanup)
         XCTAssertNotNil(fixture.store.access, "failed fallback must be treated as pending, not silently lost")
 
-        fixture.store.deleteAccessError = nil
         fixture.client.fetchResult = .failure(URLError(.timedOut))
+        let restartedWhileStorageFails = fixture.controller()
+        await restartedWhileStorageFails.refresh()
+        XCTAssertEqual(restartedWhileStorageFails.state, .free(reason: .serverDenied))
+        XCTAssertFalse(restartedWhileStorageFails.canUse(.ocr))
+
+        fixture.store.deleteAccessError = nil
         await controller.refresh()
         XCTAssertFalse(controller.hasPendingTerminalCleanup)
         XCTAssertNil(fixture.store.access)
         XCTAssertEqual(controller.state, .free(reason: .serverDenied))
+    }
+
+    func testMarkerWriteFailureKeepsKeychainTombstoneAcrossRestartUntilMarkerRecovers() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        fixture.store.access = try fixture.entitlement(access: .pro, maximumBuildNumber: 100)
+        fixture.marker.saveError = CommercialTerminalMarkerStoreError.persistenceFailed
+        fixture.client.fetchResult = .success(try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day)))
+        fixture.client.validateResult = .failure(fixture.serverError("license_revoked"))
+        let controller = fixture.controller()
+
+        await controller.refresh()
+
+        XCTAssertEqual(controller.state, .free(reason: .serverDenied))
+        XCTAssertTrue(fixture.store.isTerminalTombstone)
+        XCTAssertTrue(controller.hasPendingTerminalCleanup)
+
+        fixture.client.fetchResult = .failure(URLError(.timedOut))
+        let restarted = fixture.controller()
+        await restarted.refresh()
+        XCTAssertEqual(restarted.state, .free(reason: .serverDenied))
+        XCTAssertTrue(fixture.store.isTerminalTombstone)
+
+        fixture.marker.saveError = nil
+        await restarted.refresh()
+        XCTAssertEqual(restarted.state, .free(reason: .serverDenied))
+        XCTAssertNil(fixture.store.access)
+        XCTAssertEqual(fixture.marker.reason, .revoked)
+    }
+
+    func testSuccessfulActivationClearsMarkerSafelyAndRetriesClearAcrossRestart() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        fixture.marker.reason = .revoked
+        fixture.client.fetchResult = .failure(URLError(.timedOut))
+        fixture.client.activateResult = .success(try fixture.entitlement(access: .pro, maximumBuildNumber: 100))
+        let controller = fixture.controller()
+        await controller.refresh()
+        XCTAssertEqual(controller.state, .free(reason: .serverDenied))
+
+        fixture.marker.deleteError = CommercialTerminalMarkerStoreError.persistenceFailed
+        do {
+            try await controller.activate(email: "person@example.com", code: "PRIVATE")
+            XCTFail("marker clear failure must stay fail-closed")
+        } catch {
+            XCTAssertEqual(error as? CommercialAccessControllerError, .storage)
+        }
+        XCTAssertEqual(controller.state, .free(reason: .serverDenied))
+        XCTAssertNotNil(fixture.marker.reason)
+
+        let restarted = fixture.controller()
+        await restarted.refresh()
+        XCTAssertEqual(restarted.state, .free(reason: .serverDenied))
+
+        fixture.marker.deleteError = nil
+        await restarted.refresh()
+        guard case .pro = restarted.state else { return XCTFail("saved activation should recover after marker clears") }
+        XCTAssertNil(fixture.marker.reason)
+    }
+
+    func testMarkerCannotBeClearedByNonProAccessRecordFlag() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        fixture.marker.reason = .revoked
+        let trial = try fixture.entitlement(access: .trial, expiresAt: now.addingTimeInterval(.day))
+        try fixture.store.saveAccessRecord(
+            .active(
+                envelope: trial,
+                anchor: CommercialTimeAnchor(issuedAt: now, systemUptime: 1_000),
+                clearsTerminalMarker: true
+            )
+        )
+        fixture.client.fetchResult = .failure(URLError(.timedOut))
+        let controller = fixture.controller()
+
+        await controller.refresh()
+
+        XCTAssertEqual(controller.state, .free(reason: .serverDenied))
+        XCTAssertEqual(fixture.marker.reason, .revoked)
     }
 
     func testDeactivateCleanupFailureLeavesPersistentFreeTombstoneAcrossRestart() async throws {
@@ -380,6 +483,7 @@ private final class Fixture {
     let store = MemoryCommercialStore()
     let client = FakeCommercialClient()
     let device = FakeCommercialDevice()
+    let marker = MemoryTerminalMarkerStore()
     let clock: MutableCommercialClock
     let buildNumber: Int
     var bootstrap: SignedEnvelope?
@@ -392,6 +496,7 @@ private final class Fixture {
     @MainActor func controller() -> CommercialAccessController {
         CommercialAccessController(
             store: store,
+            markerStore: marker,
             verifier: CommercialSignatureVerifier(publicKeys: ["test": privateKey.publicKey]),
             client: client,
             device: device,
@@ -462,6 +567,28 @@ private final class Fixture {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter.string(from: date)
+    }
+}
+
+private final class MemoryTerminalMarkerStore: CommercialTerminalMarkerStoring {
+    var reason: CommercialTerminalReason?
+    var loadError: Error?
+    var saveError: Error?
+    var deleteError: Error?
+
+    func loadTerminalMarker() throws -> CommercialTerminalReason? {
+        if let loadError { throw loadError }
+        return reason
+    }
+
+    func saveTerminalMarker(_ reason: CommercialTerminalReason) throws {
+        if let saveError { throw saveError }
+        self.reason = reason
+    }
+
+    func deleteTerminalMarker() throws {
+        if let deleteError { throw deleteError }
+        reason = nil
     }
 }
 

@@ -121,6 +121,25 @@ final class CommercialCredentialStoreTests: XCTestCase {
         XCTAssertEqual(keychain.updatedAccounts, ["access"])
     }
 
+    func testTerminalMarkerPersistsOnlyNonSensitiveVersionAndReason() throws {
+        let suite = "com.xxsnap.tests.terminal-marker.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = CommercialTerminalMarkerStore(userDefaults: defaults)
+
+        try store.saveTerminalMarker(.revoked)
+
+        XCTAssertEqual(try store.loadTerminalMarker(), .revoked)
+        let domain = try XCTUnwrap(defaults.persistentDomain(forName: suite))
+        let data = try XCTUnwrap(domain.values.compactMap { $0 as? Data }.first)
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(Set(payload.keys), ["schemaVersion", "reason"])
+        XCTAssertEqual(payload["schemaVersion"] as? Int, 1)
+        XCTAssertEqual(payload["reason"] as? String, "revoked")
+        try store.deleteTerminalMarker()
+        XCTAssertNil(try store.loadTerminalMarker())
+    }
+
     func testDeviceIdentityProducesStableLowercaseHashAndTruncatesDisplayName() throws {
         let identity = CommercialDeviceIdentity(
             platformUUIDProvider: { "ABCDEF12-3456-7890-ABCD-EF1234567890" },

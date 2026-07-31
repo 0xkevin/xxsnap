@@ -44,14 +44,25 @@ final class SystemCommercialClock: CommercialTimeProviding {
 
 private actor CommercialCredentialWorker {
     private let store: CommercialCredentialStoring
+    private let markerStore: CommercialTerminalMarkerStoring
 
-    init(store: CommercialCredentialStoring) { self.store = store }
+    init(store: CommercialCredentialStoring, markerStore: CommercialTerminalMarkerStoring) {
+        self.store = store
+        self.markerStore = markerStore
+    }
 
     func loadPolicy() throws -> SignedEnvelope? { try store.loadPolicyEnvelope() }
     func savePolicy(_ envelope: SignedEnvelope) throws { try store.savePolicyEnvelope(envelope) }
     func loadAccess() throws -> CommercialAccessRecord? { try store.loadAccessRecord() }
     func saveAccess(_ record: CommercialAccessRecord) throws { try store.saveAccessRecord(record) }
     func deleteAccess() throws { try store.deleteAccessRecord() }
+    func loadTerminalMarker() throws -> CommercialTerminalReason? {
+        try markerStore.loadTerminalMarker()
+    }
+    func saveTerminalMarker(_ reason: CommercialTerminalReason) throws {
+        try markerStore.saveTerminalMarker(reason)
+    }
+    func deleteTerminalMarker() throws { try markerStore.deleteTerminalMarker() }
 }
 
 private actor CommercialDeviceWorker {
@@ -85,10 +96,12 @@ final class CommercialAccessController {
     private var generation = 0
     private var trialRequestAttempted = false
     private var terminalDenyActive = false
+    private var terminalReason: CommercialTerminalReason = .revoked
     private(set) var hasPendingTerminalCleanup = false
 
     init(
         store: CommercialCredentialStoring,
+        markerStore: CommercialTerminalMarkerStoring,
         verifier: CommercialSignatureVerifier,
         client: CommercialPolicyFetching,
         device: CommercialDeviceIdentifying,
@@ -98,7 +111,7 @@ final class CommercialAccessController {
         clock: CommercialTimeProviding = SystemCommercialClock(),
         bootstrapEnvelope: @escaping () throws -> SignedEnvelope?
     ) {
-        worker = CommercialCredentialWorker(store: store)
+        worker = CommercialCredentialWorker(store: store, markerStore: markerStore)
         self.verifier = verifier
         self.client = client
         deviceWorker = CommercialDeviceWorker(device: device)
@@ -116,6 +129,7 @@ final class CommercialAccessController {
         let buildNumber = Int(bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "") ?? 0
         self.init(
             store: CommercialCredentialStore(),
+            markerStore: CommercialTerminalMarkerStore(),
             verifier: verifier,
             client: client,
             device: CommercialDeviceIdentity(),
@@ -152,6 +166,7 @@ final class CommercialAccessController {
         let token = beginOperation()
         if terminalDenyActive, hasPendingTerminalCleanup {
             do {
+                try await worker.saveTerminalMarker(terminalReason)
                 try await worker.deleteAccess()
                 hasPendingTerminalCleanup = false
             } catch {
@@ -201,13 +216,22 @@ final class CommercialAccessController {
         guard isCurrent(token) else { return }
         let payload = try verifiedEntitlement(envelope, expectedDeviceHash: identity.deviceHash)
         guard payload.access == .pro else { throw CommercialAccessControllerError.invalidCredential }
-        do { try await persistAccess(envelope, payload: payload) }
+        do {
+            try await persistAccess(envelope, payload: payload, clearsTerminalMarker: true)
+        }
         catch { throw CommercialAccessControllerError.storage }
         guard isCurrent(token) else { return }
         accessEnvelope = envelope
         entitlement = payload
-        terminalDenyActive = false
-        hasPendingTerminalCleanup = false
+        do {
+            try await worker.deleteTerminalMarker()
+            terminalDenyActive = false
+            hasPendingTerminalCleanup = false
+        } catch {
+            terminalDenyActive = true
+            setState(.free(reason: .serverDenied))
+            throw CommercialAccessControllerError.storage
+        }
         resolveState()
     }
 
@@ -270,13 +294,26 @@ final class CommercialAccessController {
         }
 
         do {
+            if let marker = try await worker.loadTerminalMarker() {
+                terminalDenyActive = true
+                terminalReason = marker
+            }
+        } catch {
+            // A corrupt or temporarily unreadable deny marker is itself a reason
+            // to fail closed until an explicit activation can clear it.
+            terminalDenyActive = true
+        }
+
+        do {
             let cachedAccess = try await worker.loadAccess()
             guard isCurrent(token) else { return }
             if cachedAccess?.status == .terminal {
                 terminalDenyActive = true
+                terminalReason = cachedAccess?.terminalReason ?? terminalReason
                 clearLocalAccess()
                 setState(.free(reason: .serverDenied))
                 do {
+                    try await worker.saveTerminalMarker(terminalReason)
                     try await worker.deleteAccess()
                     hasPendingTerminalCleanup = false
                 } catch {
@@ -285,8 +322,24 @@ final class CommercialAccessController {
                 return
             }
             if terminalDenyActive {
-                clearLocalAccess()
-                return
+                if let cachedAccess,
+                   cachedAccess.status == .active,
+                   cachedAccess.clearsTerminalMarker,
+                   await validMarkerClearingAccess(cachedAccess)
+                {
+                    do {
+                        try await worker.deleteTerminalMarker()
+                        terminalDenyActive = false
+                        hasPendingTerminalCleanup = false
+                    } catch {
+                        clearLocalAccess()
+                        setState(.free(reason: .serverDenied))
+                        return
+                    }
+                } else {
+                    clearLocalAccess()
+                    return
+                }
             }
             accessEnvelope = cachedAccess?.envelope
             entitlement = try cachedAccess?.envelope.map(verifier.verifyEntitlement)
@@ -321,7 +374,7 @@ final class CommercialAccessController {
             )
             guard isCurrent(token) else { return }
             let payload = try verifiedEntitlement(refreshed, expectedDeviceHash: identity.deviceHash)
-            try await persistAccess(refreshed, payload: payload)
+            try await persistAccess(refreshed, payload: payload, clearsTerminalMarker: false)
             guard isCurrent(token) else { return }
             accessEnvelope = refreshed
             entitlement = payload
@@ -343,7 +396,7 @@ final class CommercialAccessController {
             guard isCurrent(token) else { return }
             let payload = try verifiedEntitlement(envelope, expectedDeviceHash: identity.deviceHash)
             guard payload.access == .trial else { return }
-            try await persistAccess(envelope, payload: payload)
+            try await persistAccess(envelope, payload: payload, clearsTerminalMarker: false)
             guard isCurrent(token) else { return }
             accessEnvelope = envelope
             entitlement = payload
@@ -454,37 +507,66 @@ final class CommercialAccessController {
         return payload
     }
 
-    private func persistAccess(_ envelope: SignedEnvelope, payload: EntitlementPayload) async throws {
+    private func validMarkerClearingAccess(_ record: CommercialAccessRecord) async -> Bool {
+        guard let envelope = record.envelope,
+              let hash = try? await deviceWorker.hash(),
+              let payload = try? verifiedEntitlement(envelope, expectedDeviceHash: hash)
+        else { return false }
+        return payload.access == .pro
+    }
+
+    private func persistAccess(
+        _ envelope: SignedEnvelope,
+        payload: EntitlementPayload,
+        clearsTerminalMarker: Bool
+    ) async throws {
         let anchor = CommercialTimeAnchor(issuedAt: payload.issuedAt, systemUptime: clock.currentUptime)
-        try await worker.saveAccess(.active(envelope: envelope, anchor: anchor))
+        try await worker.saveAccess(
+            .active(
+                envelope: envelope,
+                anchor: anchor,
+                clearsTerminalMarker: clearsTerminalMarker
+            )
+        )
         timeAnchor = anchor
     }
 
     private func applyTerminal(_ reason: CommercialTerminalReason, token: Int) async throws {
         guard isCurrent(token) else { return }
+        terminalDenyActive = true
+        terminalReason = reason
+        clearLocalAccess()
+        setState(.free(reason: .serverDenied))
+
+        let markerSaved: Bool
+        do {
+            try await worker.saveTerminalMarker(reason)
+            markerSaved = true
+        } catch {
+            markerSaved = false
+        }
+
         do {
             try await worker.saveAccess(.terminal(reason))
         } catch {
-            // If the atomic deny write itself is unavailable, removing the old
-            // credential is the only safe fallback.
+            // If the atomic Keychain deny write itself is unavailable, removing
+            // the old credential is the safe fallback. The independent marker
+            // still protects restarts when available.
             do { try await worker.deleteAccess() }
             catch {
-                terminalDenyActive = true
                 hasPendingTerminalCleanup = true
-                clearLocalAccess()
-                setState(.free(reason: .serverDenied))
                 throw CommercialAccessControllerError.storage
             }
-            terminalDenyActive = true
             hasPendingTerminalCleanup = false
-            clearLocalAccess()
-            setState(.free(reason: .serverDenied))
             throw CommercialAccessControllerError.storage
         }
         guard isCurrent(token) else { return }
-        terminalDenyActive = true
-        clearLocalAccess()
-        setState(.free(reason: .serverDenied))
+        guard markerSaved else {
+            // Keep the Keychain tombstone until the independent marker can be
+            // persisted; deleting it now would make a restart ambiguous.
+            hasPendingTerminalCleanup = true
+            throw CommercialAccessControllerError.storage
+        }
         do {
             try await worker.deleteAccess()
             hasPendingTerminalCleanup = false
