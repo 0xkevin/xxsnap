@@ -1,10 +1,5 @@
 import AppKit
 
-enum CommercialPresentationNotice: Equatable {
-    case network
-    case storage
-}
-
 struct CommercialPresentationModel: Equatable {
     let state: CommercialAccessState
     let language: AppLanguage
@@ -73,8 +68,9 @@ struct CommercialPresentationModel: Equatable {
     }
 
     var policyCopyText: String? {
-        guard case .free = state, let copy = policy?.copy else { return nil }
-        return isEnglish ? copy.en.proRequired : copy.zhCN.proRequired
+        guard case let .free(reason) = state, let copy = policy?.copy else { return nil }
+        let localized = isEnglish ? copy.en : copy.zhCN
+        return reason == .trialUnavailable ? localized.trialUnavailable : localized.proRequired
     }
 
     var priceText: String? {
@@ -100,11 +96,27 @@ struct CommercialPresentationModel: Equatable {
 
     var deviceUsage: String? {
         guard case let .pro(entitlement) = state,
-              let active = entitlement.payload.activeDevices
+              let active = entitlement.payload.activeDevices,
+              let limit = policy?.deviceLimit
         else { return nil }
-        let limit = entitlement.payload.deviceLimit
         return isEnglish ? "Devices \(active)/\(limit)" : "设备 \(active)/\(limit)"
     }
+
+    var purchaseButtonTitle: String { isEnglish ? "Purchase XxSnap Pro" : "购买 XxSnap Pro" }
+    var activationButtonTitle: String { isEnglish ? "Activate" : "激活" }
+    var deactivationButtonTitle: String {
+        isEnglish ? "Deactivate This Mac…" : "停用本机…"
+    }
+    var deactivationConfirmationTitle: String {
+        isEnglish ? "Deactivate This Mac?" : "确认停用本机？"
+    }
+    var deactivationConfirmationDetail: String {
+        isEnglish
+            ? "Pro access will be removed from this Mac."
+            : "停用后，本机将不再保留 Pro 权限。"
+    }
+    var deactivationConfirmButtonTitle: String { isEnglish ? "Deactivate" : "停用" }
+    var cancelButtonTitle: String { isEnglish ? "Cancel" : "取消" }
 
     var updatesThrough: String? {
         guard case let .pro(entitlement) = state,
@@ -130,6 +142,8 @@ struct CommercialPresentationModel: Equatable {
         switch (notice, isEnglish) {
         case (.network, true): return "The server is temporarily unavailable. Your current access is unchanged."
         case (.network, false): return "暂时无法连接服务器，当前授权不受影响。"
+        case (.server, true): return "The server is temporarily unavailable. Your current access is unchanged."
+        case (.server, false): return "服务器暂时不可用，当前授权不受影响。"
         case (.storage, true): return "Your license could not be updated. Your current access is unchanged."
         case (.storage, false): return "授权信息暂时无法更新，当前权限保持不变。"
         }
@@ -228,54 +242,103 @@ extension CommercialAccessController: CommercialLicenseActing {}
 enum CommercialSubmissionResult: Equatable {
     case success
     case failure(CommercialActionError)
-    case ignored
+}
+
+enum CommercialOperationKind: Equatable {
+    case activation
+    case deactivation
+}
+
+enum CommercialOperationState: Equatable {
+    case idle
+    case submitting(CommercialOperationKind)
+    case result(CommercialSubmissionResult)
 }
 
 @MainActor
-final class CommercialActionCoordinator {
-    private(set) var isSubmitting = false
-    private var generation = 0
+final class CommercialOperationCoordinator {
+    private(set) var state: CommercialOperationState = .idle {
+        didSet { observer?(state) }
+    }
+    private var observer: ((CommercialOperationState) -> Void)?
+    private var operationTask: Task<Void, Never>?
 
-    func invalidatePendingPresentation() {
-        generation += 1
-        isSubmitting = false
+    var isSubmitting: Bool {
+        if case .submitting = state { return true }
+        return false
+    }
+
+    var result: CommercialSubmissionResult? {
+        guard case let .result(value) = state else { return nil }
+        return value
+    }
+
+    func setObserver(_ observer: @escaping (CommercialOperationState) -> Void) {
+        self.observer = observer
+        observer(state)
     }
 
     func activate(
         _ form: ActivationFormValue,
         using actions: any CommercialLicenseActing
-    ) async -> CommercialSubmissionResult {
-        guard !isSubmitting else { return .ignored }
-        guard form.isValidEmail else { return .failure(.invalidEmail) }
-        guard form.isValidCode else { return .failure(.invalidCode) }
-        return await perform { try await actions.activate(email: form.email, code: form.code) }
+    ) -> Bool {
+        guard !isSubmitting else { return false }
+        guard form.isValidEmail else {
+            state = .result(.failure(.invalidEmail))
+            return false
+        }
+        guard form.isValidCode else {
+            state = .result(.failure(.invalidCode))
+            return false
+        }
+        state = .submitting(.activation)
+        operationTask = Task { [weak self] in
+            let result = await Self.perform {
+                try await actions.activate(email: form.email, code: form.code)
+            }
+            self?.finish(result)
+        }
+        return true
     }
 
     func deactivate(
+        confirm: @escaping @MainActor () async -> Bool,
         using actions: any CommercialLicenseActing
-    ) async -> CommercialSubmissionResult {
-        guard !isSubmitting else { return .ignored }
-        return await perform { try await actions.deactivateCurrentDevice() }
+    ) -> Bool {
+        guard !isSubmitting else { return false }
+        state = .submitting(.deactivation)
+        operationTask = Task { [weak self] in
+            guard await confirm() else {
+                self?.finishCancellation()
+                return
+            }
+            let result = await Self.perform { try await actions.deactivateCurrentDevice() }
+            self?.finish(result)
+        }
+        return true
     }
 
-    private func perform(
+    private static func perform(
         _ operation: () async throws -> Void
     ) async -> CommercialSubmissionResult {
-        isSubmitting = true
-        generation += 1
-        let token = generation
-        let result: CommercialSubmissionResult
         do {
             try await operation()
-            result = .success
+            return .success
         } catch let error as CommercialAccessControllerError {
-            result = .failure(Self.map(error))
+            return .failure(map(error))
         } catch {
-            result = .failure(.network)
+            return .failure(.network)
         }
-        guard token == generation else { return .ignored }
-        isSubmitting = false
-        return result
+    }
+
+    private func finish(_ result: CommercialSubmissionResult) {
+        operationTask = nil
+        state = .result(result)
+    }
+
+    private func finishCancellation() {
+        operationTask = nil
+        state = .idle
     }
 
     private static func map(_ error: CommercialAccessControllerError) -> CommercialActionError {
@@ -290,13 +353,13 @@ final class CommercialActionCoordinator {
 
 @MainActor
 final class CommercialPreferencesViewController: NSViewController {
-    typealias DeactivationConfirmation = @MainActor (NSWindow?, AppLanguage) async -> Bool
+    typealias DeactivationConfirmation = @MainActor (NSWindow?, CommercialPresentationModel) async -> Bool
 
     private let access: any CommercialAccessProviding
     private let actions: any CommercialLicenseActing
     private let urlOpener: any CommercialURLOpening
     private let confirmDeactivation: DeactivationConfirmation
-    private let actionCoordinator = CommercialActionCoordinator()
+    private let operationCoordinator: CommercialOperationCoordinator
     private var language: AppLanguage
     private var emailField: NSTextField?
     private var codeField: NSSecureTextField?
@@ -308,12 +371,14 @@ final class CommercialPreferencesViewController: NSViewController {
         access: any CommercialAccessProviding,
         actions: any CommercialLicenseActing,
         language: AppLanguage,
+        operationCoordinator: CommercialOperationCoordinator,
         urlOpener: any CommercialURLOpening = NSWorkspace.shared,
         confirmDeactivation: @escaping DeactivationConfirmation = CommercialPreferencesViewController.defaultConfirmation
     ) {
         self.access = access
         self.actions = actions
         self.language = language
+        self.operationCoordinator = operationCoordinator
         self.urlOpener = urlOpener
         self.confirmDeactivation = confirmDeactivation
         super.init(nibName: nil, bundle: nil)
@@ -325,7 +390,7 @@ final class CommercialPreferencesViewController: NSViewController {
         let root = NSView()
         root.translatesAutoresizingMaskIntoConstraints = false
         view = root
-        render()
+        operationCoordinator.setObserver { [weak self] _ in self?.render() }
     }
 
     func update(language: AppLanguage) {
@@ -337,7 +402,8 @@ final class CommercialPreferencesViewController: NSViewController {
         CommercialPresentationModel(
             state: access.state,
             language: language,
-            policy: access.presentationPolicy
+            policy: access.presentationPolicy,
+            notice: access.presentationNotice
         )
     }
 
@@ -371,7 +437,7 @@ final class CommercialPreferencesViewController: NSViewController {
             if let devices = model.deviceUsage { stack.addArrangedSubview(label(devices)) }
             if let updates = model.updatesThrough { stack.addArrangedSubview(label(updates)) }
             let deactivate = NSButton(
-                title: language == .english ? "Deactivate This Mac…" : "停用本机…",
+                title: model.deactivationButtonTitle,
                 target: self,
                 action: #selector(deactivateDevice)
             )
@@ -381,7 +447,7 @@ final class CommercialPreferencesViewController: NSViewController {
             stack.addArrangedSubview(deactivate)
         } else {
             let purchase = NSButton(
-                title: language == .english ? "Purchase XxSnap Pro" : "购买 XxSnap Pro",
+                title: model.purchaseButtonTitle,
                 target: self,
                 action: #selector(openPurchase)
             )
@@ -403,7 +469,7 @@ final class CommercialPreferencesViewController: NSViewController {
                 stack.addArrangedSubview(field)
             }
             let activation = NSButton(
-                title: language == .english ? "Activate" : "激活",
+                title: model.activationButtonTitle,
                 target: self,
                 action: #selector(activateLicense)
             )
@@ -421,7 +487,13 @@ final class CommercialPreferencesViewController: NSViewController {
             stack.addArrangedSubview(row)
         }
 
-        if let notice {
+        let operationNotice: CommercialActionError?
+        if case let .failure(error)? = operationCoordinator.result {
+            operationNotice = error
+        } else {
+            operationNotice = nil
+        }
+        if let notice = notice ?? operationNotice {
             let error = label(notice.message(language: language), wrapping: true)
             error.textColor = .systemRed
             error.setAccessibilityRole(.staticText)
@@ -437,6 +509,7 @@ final class CommercialPreferencesViewController: NSViewController {
             stack.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -34),
             stack.topAnchor.constraint(equalTo: view.topAnchor, constant: 30),
         ])
+        setSubmitting(operationCoordinator.isSubmitting)
     }
 
     @objc private func openPurchase() {
@@ -450,37 +523,18 @@ final class CommercialPreferencesViewController: NSViewController {
             email: emailField?.stringValue ?? "",
             code: codeField?.stringValue ?? ""
         )
-        setSubmitting(true)
-        Task { [weak self] in
-            guard let self else { return }
-            let result = await actionCoordinator.activate(form, using: actions)
-            handle(result)
-        }
+        _ = operationCoordinator.activate(form, using: actions)
     }
 
     @objc private func deactivateDevice() {
-        setSubmitting(true)
-        Task { [weak self] in
-            guard let self else { return }
-            guard await confirmDeactivation(view.window, language) else {
-                setSubmitting(false)
-                return
-            }
-            let result = await actionCoordinator.deactivate(using: actions)
-            handle(result)
-        }
-    }
-
-    private func handle(_ result: CommercialSubmissionResult) {
-        switch result {
-        case .success:
-            render()
-        case let .failure(error):
-            setSubmitting(false)
-            render(notice: error)
-        case .ignored:
-            setSubmitting(actionCoordinator.isSubmitting)
-        }
+        let window = view.window
+        let presentation = model
+        _ = operationCoordinator.deactivate(
+            confirm: { [confirmDeactivation] in
+                await confirmDeactivation(window, presentation)
+            },
+            using: actions
+        )
     }
 
     private func setSubmitting(_ value: Bool) {
@@ -504,16 +558,14 @@ final class CommercialPreferencesViewController: NSViewController {
 
     private static func defaultConfirmation(
         window: NSWindow?,
-        language: AppLanguage
+        model: CommercialPresentationModel
     ) async -> Bool {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = language == .english ? "Deactivate This Mac?" : "确认停用本机？"
-        alert.informativeText = language == .english
-            ? "Pro access will be removed from this Mac."
-            : "停用后，本机将不再保留 Pro 权限。"
-        alert.addButton(withTitle: language == .english ? "Deactivate" : "停用")
-        alert.addButton(withTitle: language == .english ? "Cancel" : "取消")
+        alert.messageText = model.deactivationConfirmationTitle
+        alert.informativeText = model.deactivationConfirmationDetail
+        alert.addButton(withTitle: model.deactivationConfirmButtonTitle)
+        alert.addButton(withTitle: model.cancelButtonTitle)
         if let window {
             return await withCheckedContinuation { continuation in
                 alert.beginSheetModal(for: window) { continuation.resume(returning: $0 == .alertFirstButtonReturn) }

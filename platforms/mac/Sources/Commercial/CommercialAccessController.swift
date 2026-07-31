@@ -12,6 +12,12 @@ enum CommercialFreeReason: Equatable {
     case serverDenied
 }
 
+enum CommercialPresentationNotice: Equatable {
+    case network
+    case server
+    case storage
+}
+
 struct CommercialEntitlement: Equatable {
     let payload: EntitlementPayload
 }
@@ -40,11 +46,13 @@ protocol CommercialAccessProviding: AnyObject {
     var snapshot: CommercialAccessSnapshot { get }
     var onStateChange: ((CommercialAccessState) -> Void)? { get set }
     var presentationPolicy: CommercialPolicy? { get }
+    var presentationNotice: CommercialPresentationNotice? { get }
     func requestPurchase(for feature: CommercialFeature)
 }
 
 extension CommercialAccessProviding {
     var presentationPolicy: CommercialPolicy? { nil }
+    var presentationNotice: CommercialPresentationNotice? { nil }
 }
 
 @MainActor
@@ -199,6 +207,11 @@ final class CommercialAccessController: CommercialAccessRefreshing {
         let proBadges: Set<CommercialFeature>
     }
 
+    private struct PresentationDetails: Equatable {
+        let policy: CommercialPolicy?
+        let notice: CommercialPresentationNotice?
+    }
+
     private static let graceInterval: TimeInterval = 14 * 24 * 60 * 60
 
     private(set) var state: CommercialAccessState = .free(reason: .policyUnavailable)
@@ -206,7 +219,7 @@ final class CommercialAccessController: CommercialAccessRefreshing {
         didSet { lastNotifiedPresentation = nil }
     }
     var onPresentationChange: (() -> Void)? {
-        didSet { lastNotifiedPolicy = nil }
+        didSet { lastNotifiedDetails = nil }
     }
     var purchaseRequestHandler: ((CommercialFeature) -> Void)?
 
@@ -222,6 +235,7 @@ final class CommercialAccessController: CommercialAccessRefreshing {
 
     private var policy: CommercialPolicy?
     var presentationPolicy: CommercialPolicy? { policy }
+    private(set) var presentationNotice: CommercialPresentationNotice?
     private var accessEnvelope: SignedEnvelope?
     private var entitlement: EntitlementPayload?
     private var timeAnchor: CommercialTimeAnchor?
@@ -232,7 +246,7 @@ final class CommercialAccessController: CommercialAccessRefreshing {
     private var pendingTerminalAccess: CommercialAccessRecord?
     private(set) var hasPendingTerminalCleanup = false
     private var lastNotifiedPresentation: PresentationState?
-    private var lastNotifiedPolicy: CommercialPolicy?
+    private var lastNotifiedDetails: PresentationDetails?
 
     init(
         store: CommercialCredentialStoring,
@@ -348,6 +362,7 @@ final class CommercialAccessController: CommercialAccessRefreshing {
             try await worker.savePolicy(envelope)
             guard isCurrent(token) else { return }
             policy = verified
+            presentationNotice = nil
             resolveState()
             notifyPresentationIfNeeded()
             guard verified.mode == .paid else { return }
@@ -362,6 +377,9 @@ final class CommercialAccessController: CommercialAccessRefreshing {
             }
         } catch {
             // Local signed access remains authoritative during transport outages.
+            guard isCurrent(token) else { return }
+            presentationNotice = Self.notice(for: error)
+            notifyPresentationIfNeeded()
         }
     }
 
@@ -574,7 +592,12 @@ final class CommercialAccessController: CommercialAccessRefreshing {
                   snapshot.access?.status == .active,
                   snapshot.access?.envelope == envelope
             else { return }
-        } catch { return }
+        } catch {
+            guard isCurrent(token) else { return }
+            presentationNotice = .storage
+            notifyPresentationIfNeeded()
+            return
+        }
         do {
             let identity = try await clientIdentity()
             let refreshed = try await client.validate(
@@ -599,9 +622,14 @@ final class CommercialAccessController: CommercialAccessRefreshing {
             timeAnchor = anchor
             resolveState()
         } catch {
-            guard isCurrent(token), Self.isTerminal(error) else { return }
-            let reason = Self.terminalReason(error) ?? .revoked
-            _ = try? await applyTerminal(reason, token: token, expected: snapshot)
+            guard isCurrent(token) else { return }
+            if Self.isTerminal(error) {
+                let reason = Self.terminalReason(error) ?? .revoked
+                _ = try? await applyTerminal(reason, token: token, expected: snapshot)
+            } else {
+                presentationNotice = Self.notice(for: error)
+                notifyPresentationIfNeeded()
+            }
         }
     }
 
@@ -610,7 +638,12 @@ final class CommercialAccessController: CommercialAccessRefreshing {
         do {
             snapshot = try await worker.snapshot()
             guard snapshot.marker == nil else { return }
-        } catch { return }
+        } catch {
+            guard isCurrent(token) else { return }
+            presentationNotice = .storage
+            notifyPresentationIfNeeded()
+            return
+        }
         do {
             let identity = try await clientIdentity()
             let envelope = try await client.startTrial(
@@ -638,6 +671,9 @@ final class CommercialAccessController: CommercialAccessRefreshing {
             resolveState()
         } catch {
             // A trial is server-owned and one-time. Keep the deterministic free state.
+            guard isCurrent(token) else { return }
+            presentationNotice = Self.notice(for: error)
+            notifyPresentationIfNeeded()
         }
     }
 
@@ -798,10 +834,18 @@ final class CommercialAccessController: CommercialAccessRefreshing {
             lastNotifiedPresentation = snapshot
             onStateChange(state)
         }
-        if let onPresentationChange, policy != lastNotifiedPolicy {
-            lastNotifiedPolicy = policy
+        let details = PresentationDetails(policy: policy, notice: presentationNotice)
+        if let onPresentationChange, details != lastNotifiedDetails {
+            lastNotifiedDetails = details
             onPresentationChange()
         }
+    }
+
+    private static func notice(for error: Error) -> CommercialPresentationNotice {
+        if error is CommercialCredentialStoreError { return .storage }
+        if error is URLError { return .network }
+        if case CommercialPolicyClientError.transport = error { return .network }
+        return .server
     }
 
     private func sanitized(_ error: Error) -> CommercialAccessControllerError {

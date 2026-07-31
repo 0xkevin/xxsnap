@@ -39,6 +39,7 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
     private let systemShortcutMonitor: (any SystemShortcutMonitoring)?
     private let commercialAccess: any CommercialAccessProviding
     private let commercialActions: (any CommercialLicenseActing)?
+    private let commercialOperationCoordinator = CommercialOperationCoordinator()
     private var commercialPageController: CommercialPreferencesViewController?
     private let filenameRenderer = FilenameTemplateRenderer()
 
@@ -130,7 +131,8 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
         CommercialPresentationModel(
             state: commercialAccess.state,
             language: settingsStore.load().language,
-            policy: commercialAccess.presentationPolicy
+            policy: commercialAccess.presentationPolicy,
+            notice: commercialAccess.presentationNotice
         )
     }
 
@@ -170,7 +172,8 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
             let controller = CommercialPreferencesViewController(
                 access: commercialAccess,
                 actions: commercialActions,
-                language: settingsStore.load().language
+                language: settingsStore.load().language,
+                operationCoordinator: commercialOperationCoordinator
             )
             commercialPageController = controller
             return controller.view

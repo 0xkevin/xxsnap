@@ -679,8 +679,64 @@ final class CommercialAccessControllerTests: XCTestCase {
 
         XCTAssertEqual(controller.state, .free(reason: .trialUnavailable))
         XCTAssertEqual(controller.presentationPolicy?.updateMonths, 24)
+        XCTAssertEqual(controller.presentationNotice, .network)
         XCTAssertEqual(stateCallbackCount, 1)
-        XCTAssertEqual(presentationCallbackCount, 2)
+        XCTAssertEqual(presentationCallbackCount, 3)
+    }
+
+    func testRefreshFailurePublishesStableNoticeWithoutChangingAccessStateCallback() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        let cachedAccess = try fixture.entitlement(access: .pro, maximumBuildNumber: 100)
+        fixture.store.access = cachedAccess
+        fixture.client.fetchResult = .failure(URLError(.timedOut))
+        let controller = fixture.controller()
+        var states: [CommercialAccessState] = []
+        var presentationChanges = 0
+        controller.onStateChange = { states.append($0) }
+        controller.onPresentationChange = { presentationChanges += 1 }
+
+        await controller.refresh()
+
+        guard case .pro = controller.state else { return XCTFail("network failure must retain Pro") }
+        XCTAssertEqual(controller.presentationNotice, .network)
+        XCTAssertEqual(states.count, 1)
+        XCTAssertGreaterThanOrEqual(presentationChanges, 1)
+
+        fixture.client.fetchResult = .success(
+            try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        )
+        fixture.client.validateResult = .success(cachedAccess)
+        await controller.refresh()
+        XCTAssertNil(controller.presentationNotice)
+        XCTAssertEqual(states.count, 1, "notice changes must not masquerade as access-state changes")
+    }
+
+    func testValidationNetworkFailureKeepsProAndPublishesNotice() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        fixture.store.access = try fixture.entitlement(access: .pro, maximumBuildNumber: 100)
+        fixture.client.fetchResult = .success(
+            try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        )
+        fixture.client.validateResult = .failure(URLError(.timedOut))
+        let controller = fixture.controller()
+
+        await controller.refresh()
+
+        guard case .pro = controller.state else { return XCTFail("validation outage must retain Pro") }
+        XCTAssertEqual(controller.presentationNotice, .network)
+    }
+
+    func testRefreshServerFailureUsesStableServerNotice() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        fixture.client.fetchResult = .failure(fixture.serverError("temporary_backend_detail"))
+        let controller = fixture.controller()
+
+        await controller.refresh()
+
+        XCTAssertEqual(controller.presentationNotice, .server)
     }
 
     func testLateRefreshResponseCannotOverwriteNewerActivation() async throws {
