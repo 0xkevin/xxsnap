@@ -162,6 +162,40 @@ final class CommercialPolicyTests: XCTestCase {
         )
     }
 
+    func testVerifierRejectsNegativeOptionalEntitlementCounters() throws {
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let verifier = CommercialSignatureVerifier(publicKeys: ["entitlement-test": privateKey.publicKey])
+        let base: [String: Any] = [
+            "schemaVersion": 1,
+            "credentialId": "00000000-0000-0000-0000-000000000010",
+            "licenseId": NSNull(),
+            "deviceHash": String(repeating: "a", count: 64),
+            "access": "pro",
+            "appVersion": "1.2.3",
+            "buildNumber": 42,
+            "issuedAt": "2026-08-01T08:00:00Z",
+            "expiresAt": NSNull(),
+            "purchasedAt": NSNull(),
+            "updatesThrough": NSNull(),
+            "maximumBuildNumber": NSNull(),
+            "emailMasked": NSNull(),
+            "activeDevices": NSNull(),
+            "deviceLimit": 3,
+        ]
+
+        for override in [["maximumBuildNumber": -1], ["activeDevices": -1]] {
+            XCTAssertThrowsError(
+                try verifier.verifyEntitlement(
+                    signedEnvelope(
+                        object: base.merging(override) { _, new in new },
+                        privateKey: privateKey,
+                        keyId: "entitlement-test"
+                    )
+                )
+            ) { XCTAssertEqual($0 as? CommercialVerificationError, .invalidPayload) }
+        }
+    }
+
     func testBootstrapAcceptsValidPolicyAndRejectsExpiryAndReleaseGraceBoundary() throws {
         let verifier = CommercialSignatureVerifier(publicKeys: ["fixed-test-key": testPublicKey])
         let loader = CommercialPolicyBootstrapLoader(verifier: verifier)
@@ -176,6 +210,70 @@ final class CommercialPolicyTests: XCTestCase {
         }
     }
 
+    func testReleaseBootstrapRequiresEmergencyFreePolicyAtBuildDate() throws {
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let loader = CommercialPolicyBootstrapLoader(
+            verifier: CommercialSignatureVerifier(publicKeys: ["fixed-test-key": privateKey.publicKey])
+        )
+        let buildDate = instant("2026-08-01T00:00:00Z")
+
+        func load(_ overrides: [String: Any], now: Date = instant("2026-08-01T00:00:00Z")) throws -> CommercialPolicy {
+            try loader.load(
+                data: encoded(signedPolicy(overrides: overrides, privateKey: privateKey)),
+                now: now,
+                validation: .release(buildDate: buildDate)
+            )
+        }
+
+        XCTAssertNoThrow(try load([
+            "effectiveAt": "2026-08-01T00:00:00Z",
+            "expiresAt": "2026-08-31T00:00:00Z",
+        ]))
+        XCTAssertThrowsError(try load(["mode": "paid"])) {
+            XCTAssertEqual($0 as? CommercialBootstrapError, .releasePolicyMustBeAllFree)
+        }
+        XCTAssertThrowsError(try load(["billingReady": true])) {
+            XCTAssertEqual($0 as? CommercialBootstrapError, .releaseBillingMustBeDisabled)
+        }
+        XCTAssertThrowsError(try load(
+            [
+                "effectiveAt": "2026-08-01T00:00:01Z",
+                "expiresAt": "2026-08-31T00:00:01Z",
+            ],
+            now: instant("2026-08-01T00:00:01Z")
+        )) {
+            XCTAssertEqual($0 as? CommercialBootstrapError, .releaseEffectiveAfterBuild)
+        }
+    }
+
+    func testReleaseBootstrapUsesStrictFourteenDayAndInclusiveThirtyDayBoundaries() throws {
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let loader = CommercialPolicyBootstrapLoader(
+            verifier: CommercialSignatureVerifier(publicKeys: ["fixed-test-key": privateKey.publicKey])
+        )
+        let buildDate = instant("2026-08-01T00:00:00Z")
+
+        func load(expiresAt: String) throws -> CommercialPolicy {
+            try loader.load(
+                data: encoded(signedPolicy(overrides: [
+                    "effectiveAt": "2026-08-01T00:00:00Z",
+                    "expiresAt": expiresAt,
+                ], privateKey: privateKey)),
+                now: buildDate,
+                validation: .release(buildDate: buildDate)
+            )
+        }
+
+        XCTAssertThrowsError(try load(expiresAt: "2026-08-15T00:00:00Z")) {
+            XCTAssertEqual($0 as? CommercialBootstrapError, .insufficientReleaseGrace)
+        }
+        XCTAssertNoThrow(try load(expiresAt: "2026-08-15T00:00:01Z"))
+        XCTAssertNoThrow(try load(expiresAt: "2026-08-31T00:00:00Z"))
+        XCTAssertThrowsError(try load(expiresAt: "2026-08-31T00:00:01Z")) {
+            XCTAssertEqual($0 as? CommercialVerificationError, .windowTooLong)
+        }
+    }
+
     func testInfoContainsPinnedOriginAndSigningKeyDictionary() throws {
         let infoURL = sourceRoot.appendingPathComponent("platforms/mac/Resources/Info.plist")
         let infoData = try Data(contentsOf: infoURL)
@@ -185,8 +283,63 @@ final class CommercialPolicyTests: XCTestCase {
 
         XCTAssertEqual(info["XXCommercialAPIOrigin"] as? String, "https://download.xxsofts.com")
         let keys = try XCTUnwrap(info["XXCommercialSigningPublicKeys"] as? [String: String])
-        XCTAssertEqual(keys.keys.sorted(), ["commercial-ed25519-2026-01"])
+        XCTAssertEqual(
+            keys.keys.sorted(),
+            ["commercial-ed25519-2025-01", "commercial-ed25519-2026-01"]
+        )
         XCTAssertFalse(try XCTUnwrap(keys["commercial-ed25519-2026-01"]).isEmpty)
+        XCTAssertFalse(try XCTUnwrap(keys["commercial-ed25519-2025-01"]).isEmpty)
+    }
+
+    func testVerifierSupportsOldAndNewSigningKeysDuringRotation() throws {
+        let oldKey = Curve25519.Signing.PrivateKey()
+        let newKey = Curve25519.Signing.PrivateKey()
+        let verifier = CommercialSignatureVerifier(publicKeys: [
+            "commercial-ed25519-2025-01": oldKey.publicKey,
+            "commercial-ed25519-2026-01": newKey.publicKey,
+        ])
+
+        for (keyId, privateKey) in [
+            ("commercial-ed25519-2025-01", oldKey),
+            ("commercial-ed25519-2026-01", newKey),
+        ] {
+            let envelope = try signedEnvelope(
+                object: policyObject(),
+                privateKey: privateKey,
+                keyId: keyId
+            )
+            XCTAssertEqual(
+                try verifier.verifyPolicy(envelope, at: instant("2026-08-01T00:00:00Z")).mode,
+                .allFree
+            )
+        }
+    }
+
+    func testDebugBundleLoadsBothRotationKeys() throws {
+        let verifier = try CommercialSignatureVerifier(bundle: .main)
+        let currentEnvelopeData = try Data(
+            contentsOf: sourceRoot.appendingPathComponent(
+                "platforms/mac/Resources/Commercial/commercial-policy-bootstrap.json"
+            )
+        )
+        let currentEnvelope = try CommercialJSON.decoder.decode(
+            SignedEnvelope.self,
+            from: currentEnvelopeData
+        )
+        let oldEnvelope = SignedEnvelope(
+            keyId: "commercial-ed25519-2025-01",
+            payload: goldenEnvelope.payload,
+            signature: goldenEnvelope.signature
+        )
+
+        XCTAssertEqual(
+            try verifier.verifyPolicy(currentEnvelope, at: instant("2026-08-01T00:00:00Z")).mode,
+            .allFree
+        )
+        XCTAssertEqual(
+            try verifier.verifyPolicy(oldEnvelope, at: instant("2026-08-01T00:00:00Z")).mode,
+            .allFree
+        )
     }
 
     func testCommittedBootstrapIsActuallySignedByBackendDevelopmentKeyAndBounded() throws {
@@ -216,7 +369,7 @@ final class CommercialPolicyTests: XCTestCase {
 
     func testNetworkMethodsUseExactPathsMethodsHeadersTimeoutAndCamelCaseBodies() async throws {
         let client = try makeClient { request in
-            XCTAssertEqual(request.cachePolicy, .reloadIgnoringLocalAndRemoteCacheData)
+            XCTAssertEqual(request.cachePolicy, .reloadIgnoringLocalCacheData)
             XCTAssertEqual(request.value(forHTTPHeaderField: "Cache-Control"), "no-cache")
             XCTAssertEqual(request.timeoutInterval, 15)
             switch request.url?.path {
@@ -287,6 +440,61 @@ final class CommercialPolicyTests: XCTestCase {
         }
     }
 
+    func testRedirectDelegateAllowsOnlyPinnedHTTPSOriginFor307And308() throws {
+        let delegate = CommercialSessionDelegate()
+        let task = URLSession.shared.dataTask(
+            with: URL(string: "https://download.xxsofts.com/api/v1/commercial/policy")!
+        )
+
+        func redirectDecision(for request: URLRequest, status: Int) throws -> URLRequest? {
+            let response = try XCTUnwrap(
+                HTTPURLResponse(
+                    url: task.originalRequest!.url!,
+                    statusCode: status,
+                    httpVersion: nil,
+                    headerFields: nil
+                )
+            )
+            var invoked = false
+            var redirected: URLRequest?
+            delegate.urlSession(
+                .shared,
+                task: task,
+                willPerformHTTPRedirection: response,
+                newRequest: request
+            ) {
+                invoked = true
+                redirected = $0
+            }
+            XCTAssertTrue(invoked)
+            return redirected
+        }
+
+        for status in [307, 308] {
+            var sameOrigin = URLRequest(
+                url: URL(string: "https://download.xxsofts.com/api/v1/commercial/licenses/activate")!
+            )
+            sameOrigin.httpMethod = "POST"
+            sameOrigin.httpBody = Data("activationCode=secret".utf8)
+            let allowed = try XCTUnwrap(
+                redirectDecision(for: sameOrigin, status: status)
+            )
+            XCTAssertEqual(allowed.httpBody, sameOrigin.httpBody)
+
+            for target in [
+                "http://download.xxsofts.com/steal",
+                "https://evil.example/steal",
+                "https://evil.example:443/steal",
+                "https://download.xxsofts.com:444/steal",
+                "https://user@download.xxsofts.com/steal",
+            ] {
+                var secret = sameOrigin
+                secret.url = URL(string: target)!
+                XCTAssertNil(try redirectDecision(for: secret, status: status))
+            }
+        }
+    }
+
     func testClientMapsMalformedSuccessAndStable422And409ErrorEnvelopes() async throws {
         let malformed = try makeClient { request in
             (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data("{}".utf8))
@@ -341,6 +549,27 @@ final class CommercialPolicyTests: XCTestCase {
         let payload = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys, .withoutEscapingSlashes])
         return SignedEnvelope(
             keyId: "fixed-test-key",
+            payload: payload.base64EncodedString(),
+            signature: try privateKey.signature(for: payload).base64EncodedString()
+        )
+    }
+
+    private func policyObject() throws -> [String: Any] {
+        let raw = try XCTUnwrap(Data(base64Encoded: goldenEnvelope.payload))
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: raw) as? [String: Any])
+    }
+
+    private func signedEnvelope(
+        object: [String: Any],
+        privateKey: Curve25519.Signing.PrivateKey,
+        keyId: String
+    ) throws -> SignedEnvelope {
+        let payload = try JSONSerialization.data(
+            withJSONObject: object,
+            options: [.sortedKeys, .withoutEscapingSlashes]
+        )
+        return SignedEnvelope(
+            keyId: keyId,
             payload: payload.base64EncodedString(),
             signature: try privateKey.signature(for: payload).base64EncodedString()
         )

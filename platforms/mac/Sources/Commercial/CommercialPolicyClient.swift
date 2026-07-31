@@ -24,6 +24,7 @@ final class CommercialPolicyClient: CommercialPolicyFetching {
     private let session: URLSession
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+    private let redirectDelegate = CommercialSessionDelegate()
 
     init(origin: URL, session: URLSession) throws {
         guard Self.isAllowed(origin: origin) else {
@@ -113,7 +114,7 @@ final class CommercialPolicyClient: CommercialPolicyFetching {
         guard let url = components.url else { throw CommercialPolicyClientError.invalidOrigin }
         var request = URLRequest(
             url: url,
-            cachePolicy: .reloadIgnoringLocalAndRemoteCacheData,
+            cachePolicy: .reloadIgnoringLocalCacheData,
             timeoutInterval: Self.timeout
         )
         request.httpMethod = method
@@ -129,7 +130,7 @@ final class CommercialPolicyClient: CommercialPolicyFetching {
 
     private func perform(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         do {
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await session.data(for: request, delegate: redirectDelegate)
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw CommercialPolicyClientError.malformedResponse
             }
@@ -160,5 +161,30 @@ final class CommercialPolicyClient: CommercialPolicyFetching {
             && (components.path.isEmpty || components.path == "/")
             && components.query == nil
             && components.fragment == nil
+    }
+}
+
+final class CommercialSessionDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func redirectedRequest(_ request: URLRequest, statusCode: Int) -> URLRequest? {
+        guard (300..<400).contains(statusCode),
+              let url = request.url,
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.scheme == "https",
+              components.host == "download.xxsofts.com",
+              components.user == nil,
+              components.password == nil,
+              (components.port == nil || components.port == 443)
+        else { return nil }
+        return request
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(redirectedRequest(request, statusCode: response.statusCode))
     }
 }

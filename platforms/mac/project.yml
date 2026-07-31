@@ -55,30 +55,25 @@ targets:
         CODE_SIGN_IDENTITY: "xxsnap Local Dev"
       configs:
         Debug:
-          XX_COMMERCIAL_SIGNING_PUBLIC_KEY: "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w="
+          XX_COMMERCIAL_SIGNING_PUBLIC_KEY_2025_01: "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo="
+          XX_COMMERCIAL_SIGNING_PUBLIC_KEY_2026_01: "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w="
         Release:
-          XX_COMMERCIAL_SIGNING_PUBLIC_KEY: "$(XX_COMMERCIAL_PRODUCTION_SIGNING_PUBLIC_KEY)"
-    preBuildScripts:
+          XX_COMMERCIAL_SIGNING_PUBLIC_KEY_2025_01: "$(XX_COMMERCIAL_PRODUCTION_SIGNING_PUBLIC_KEY_2025_01)"
+          XX_COMMERCIAL_SIGNING_PUBLIC_KEY_2026_01: "$(XX_COMMERCIAL_PRODUCTION_SIGNING_PUBLIC_KEY_2026_01)"
+    postBuildScripts:
       - name: Validate Commercial Release Inputs
         basedOnDependencyAnalysis: false
         script: |
           if [ "$CONFIGURATION" != "Release" ]; then
             exit 0
           fi
-          if [ -z "${XX_COMMERCIAL_SIGNING_PUBLIC_KEY:-}" ]; then
-            echo "error: Release requires XX_COMMERCIAL_PRODUCTION_SIGNING_PUBLIC_KEY"
-            exit 1
-          fi
-          if [ "$XX_COMMERCIAL_SIGNING_PUBLIC_KEY" = "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=" ]; then
-            echo "error: Release cannot use the Debug/test commercial signing public key"
-            exit 1
-          fi
-          BOOTSTRAP="$SRCROOT/Resources/Commercial/commercial-policy-bootstrap.json"
-          if [ ! -f "$BOOTSTRAP" ]; then
+          BUILT_INFO="$TARGET_BUILD_DIR/$INFOPLIST_PATH"
+          BOOTSTRAP="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/commercial-policy-bootstrap.json"
+          if [ ! -f "$BUILT_INFO" ] || [ ! -f "$BOOTSTRAP" ]; then
             echo "error: Release commercial policy bootstrap is missing"
             exit 1
           fi
-          /usr/bin/xcrun --sdk macosx swift - "$BOOTSTRAP" "$XX_COMMERCIAL_SIGNING_PUBLIC_KEY" <<'SWIFT'
+          /usr/bin/xcrun --sdk macosx swift - "$BUILT_INFO" "$BOOTSTRAP" <<'SWIFT'
           import CryptoKit
           import Foundation
 
@@ -112,32 +107,57 @@ targets:
 
           let arguments = CommandLine.arguments
           guard arguments.count == 3 else { fail("Release commercial validation arguments are missing") }
-          let envelopeData = try Data(contentsOf: URL(fileURLWithPath: arguments[1]))
+          let infoData = try Data(contentsOf: URL(fileURLWithPath: arguments[1]))
+          let envelopeData = try Data(contentsOf: URL(fileURLWithPath: arguments[2]))
+          guard let info = try PropertyListSerialization.propertyList(from: infoData, format: nil) as? [String: Any],
+                let publicKeys = info["XXCommercialSigningPublicKeys"] as? [String: String] else {
+              fail("Release commercial signing public-key dictionary is missing")
+          }
           guard let envelope = try JSONSerialization.jsonObject(with: envelopeData) as? [String: Any],
                 Set(envelope.keys) == Set(["keyId", "payload", "signature"]),
-                envelope["keyId"] as? String == "commercial-ed25519-2026-01" else {
-              fail("Release commercial envelope is malformed or uses an unexpected key")
+                let keyId = envelope["keyId"] as? String,
+                !keyId.isEmpty,
+                keyId.count <= 128,
+                let encodedPublicKey = publicKeys[keyId],
+                !encodedPublicKey.isEmpty else {
+              fail("Release commercial envelope is malformed or its keyId has no public key")
           }
-          let publicKeyData = canonicalBase64(arguments[2], field: "public key")
+          let publicKeyData = canonicalBase64(encodedPublicKey, field: "public key")
           let payload = canonicalBase64(envelope["payload"], field: "payload")
           let signature = canonicalBase64(envelope["signature"], field: "signature")
+          let debugKeys = Set([
+              "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
+              "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+          ])
+          guard !debugKeys.contains(encodedPublicKey) else {
+              fail("Release cannot use a Debug/test commercial signing public key")
+          }
           guard publicKeyData.count == 32, signature.count == 64,
                 let publicKey = try? Curve25519.Signing.PublicKey(rawRepresentation: publicKeyData),
                 publicKey.isValidSignature(signature, for: payload) else {
               fail("Release commercial bootstrap signature verification failed")
           }
           guard let policy = try JSONSerialization.jsonObject(with: payload) as? [String: Any],
-                policy["schemaVersion"] as? Int == 1 else {
+                policy["schemaVersion"] as? Int == 1,
+                policy["mode"] as? String == "all_free",
+                policy["billingReady"] as? Bool == false else {
               fail("Release commercial bootstrap payload is malformed")
           }
           let effectiveAt = utcDate(policy["effectiveAt"], field: "effectiveAt")
           let expiresAt = utcDate(policy["expiresAt"], field: "expiresAt")
+          let buildDate = Date()
           guard effectiveAt < expiresAt,
                 expiresAt.timeIntervalSince(effectiveAt) <= 30 * 24 * 60 * 60 else {
               fail("Release commercial bootstrap window exceeds 30 days")
           }
-          guard Date().addingTimeInterval(14 * 24 * 60 * 60) < expiresAt else {
+          guard effectiveAt <= buildDate else {
+              fail("Release commercial bootstrap is not effective at build time")
+          }
+          guard buildDate.addingTimeInterval(14 * 24 * 60 * 60) < expiresAt else {
               fail("Release commercial bootstrap has less than 14 days of validity")
+          }
+          guard expiresAt <= buildDate.addingTimeInterval(30 * 24 * 60 * 60) else {
+              fail("Release commercial bootstrap expires more than 30 days after build time")
           }
           SWIFT
   xxsnapTests:

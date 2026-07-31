@@ -77,6 +77,8 @@ final class CommercialSignatureVerifier {
               !entitlement.appVersion.isEmpty,
               entitlement.appVersion.count <= 32,
               entitlement.buildNumber >= 0,
+              entitlement.maximumBuildNumber.map({ $0 >= 0 }) ?? true,
+              entitlement.activeDevices.map({ $0 >= 0 }) ?? true,
               (1...10).contains(entitlement.deviceLimit)
         else { throw CommercialVerificationError.invalidPayload }
         return entitlement
@@ -157,7 +159,11 @@ enum CommercialBootstrapValidation: Equatable {
 
 enum CommercialBootstrapError: Error, Equatable {
     case missingFile
+    case releasePolicyMustBeAllFree
+    case releaseBillingMustBeDisabled
+    case releaseEffectiveAfterBuild
     case insufficientReleaseGrace
+    case releaseExpiryTooDistant
 }
 
 struct CommercialPolicyBootstrapLoader {
@@ -179,9 +185,22 @@ struct CommercialPolicyBootstrapLoader {
             throw CommercialVerificationError.invalidPayload
         }
         let policy = try verifier.verifyPolicy(envelope, at: now)
-        if case let .release(buildDate) = validation,
-           buildDate.addingTimeInterval(14 * 24 * 60 * 60) >= policy.expiresAt {
-            throw CommercialBootstrapError.insufficientReleaseGrace
+        if case let .release(buildDate) = validation {
+            guard policy.mode == .allFree else {
+                throw CommercialBootstrapError.releasePolicyMustBeAllFree
+            }
+            guard !policy.billingReady else {
+                throw CommercialBootstrapError.releaseBillingMustBeDisabled
+            }
+            guard policy.effectiveAt <= buildDate else {
+                throw CommercialBootstrapError.releaseEffectiveAfterBuild
+            }
+            guard buildDate.addingTimeInterval(14 * 24 * 60 * 60) < policy.expiresAt else {
+                throw CommercialBootstrapError.insufficientReleaseGrace
+            }
+            guard policy.expiresAt <= buildDate.addingTimeInterval(30 * 24 * 60 * 60) else {
+                throw CommercialBootstrapError.releaseExpiryTooDistant
+            }
         }
         return policy
     }
