@@ -5,6 +5,8 @@ settings:
   base:
     SWIFT_VERSION: 5.0
     MACOSX_DEPLOYMENT_TARGET: 14.0
+    CLANG_CXX_LANGUAGE_STANDARD: c++20
+    HEADER_SEARCH_PATHS: "$(PROJECT_DIR)/../../core/include"
     GENERATE_INFOPLIST_FILE: YES
     CURRENT_PROJECT_VERSION: 1
     MARKETING_VERSION: 1.0.0
@@ -14,11 +16,25 @@ targets:
     platform: macOS
     sources:
       - Sources
+      - path: ../../core/src/scroll/FrameFingerprint.cpp
+        group: Core/Scroll
+      - path: ../../core/src/scroll/VerticalOverlapMatcher.cpp
+        group: Core/Scroll
+        compilerFlags: "-O2"
+      - path: ../../core/src/scroll/ScrollStitchSession.cpp
+        group: Core/Scroll
+        compilerFlags: "-O2"
       - path: Resources/Info.plist
         buildPhase: none
       - Resources/Assets.xcassets
       - Resources/xxsnap.png
       - Resources/xxsnap.icns
+      - path: Resources/Commercial
+      - path: Resources/Help
+        type: folder
+        buildPhase: resources
+      - path: Resources/Donation
+      - path: Resources/Sounds
       - path: Resources/Icons
         excludes:
           - xxsnap.png
@@ -37,6 +53,93 @@ targets:
         CODE_SIGNING_ALLOWED: YES
         CODE_SIGNING_REQUIRED: YES
         CODE_SIGN_IDENTITY: "xxsnap Local Dev"
+      configs:
+        Debug:
+          XX_COMMERCIAL_SIGNING_PUBLIC_KEY: "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w="
+        Release:
+          XX_COMMERCIAL_SIGNING_PUBLIC_KEY: "$(XX_COMMERCIAL_PRODUCTION_SIGNING_PUBLIC_KEY)"
+    preBuildScripts:
+      - name: Validate Commercial Release Inputs
+        basedOnDependencyAnalysis: false
+        script: |
+          if [ "$CONFIGURATION" != "Release" ]; then
+            exit 0
+          fi
+          if [ -z "${XX_COMMERCIAL_SIGNING_PUBLIC_KEY:-}" ]; then
+            echo "error: Release requires XX_COMMERCIAL_PRODUCTION_SIGNING_PUBLIC_KEY"
+            exit 1
+          fi
+          if [ "$XX_COMMERCIAL_SIGNING_PUBLIC_KEY" = "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=" ]; then
+            echo "error: Release cannot use the Debug/test commercial signing public key"
+            exit 1
+          fi
+          BOOTSTRAP="$SRCROOT/Resources/Commercial/commercial-policy-bootstrap.json"
+          if [ ! -f "$BOOTSTRAP" ]; then
+            echo "error: Release commercial policy bootstrap is missing"
+            exit 1
+          fi
+          /usr/bin/xcrun --sdk macosx swift - "$BOOTSTRAP" "$XX_COMMERCIAL_SIGNING_PUBLIC_KEY" <<'SWIFT'
+          import CryptoKit
+          import Foundation
+
+          func fail(_ message: String) -> Never {
+              FileHandle.standardError.write(Data("error: \(message)\n".utf8))
+              exit(1)
+          }
+
+          func canonicalBase64(_ value: Any?, field: String) -> Data {
+              guard let value = value as? String,
+                    let data = Data(base64Encoded: value),
+                    data.base64EncodedString() == value else {
+                  fail("Release commercial \(field) is not canonical Base64")
+              }
+              return data
+          }
+
+          func utcDate(_ value: Any?, field: String) -> Date {
+              guard let value = value as? String, value.hasSuffix("Z") else {
+                  fail("Release commercial \(field) is not a UTC ISO8601 date")
+              }
+              let formatter = ISO8601DateFormatter()
+              formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+              if let date = formatter.date(from: value) { return date }
+              formatter.formatOptions = [.withInternetDateTime]
+              guard let date = formatter.date(from: value) else {
+                  fail("Release commercial \(field) is not a UTC ISO8601 date")
+              }
+              return date
+          }
+
+          let arguments = CommandLine.arguments
+          guard arguments.count == 3 else { fail("Release commercial validation arguments are missing") }
+          let envelopeData = try Data(contentsOf: URL(fileURLWithPath: arguments[1]))
+          guard let envelope = try JSONSerialization.jsonObject(with: envelopeData) as? [String: Any],
+                Set(envelope.keys) == Set(["keyId", "payload", "signature"]),
+                envelope["keyId"] as? String == "commercial-ed25519-2026-01" else {
+              fail("Release commercial envelope is malformed or uses an unexpected key")
+          }
+          let publicKeyData = canonicalBase64(arguments[2], field: "public key")
+          let payload = canonicalBase64(envelope["payload"], field: "payload")
+          let signature = canonicalBase64(envelope["signature"], field: "signature")
+          guard publicKeyData.count == 32, signature.count == 64,
+                let publicKey = try? Curve25519.Signing.PublicKey(rawRepresentation: publicKeyData),
+                publicKey.isValidSignature(signature, for: payload) else {
+              fail("Release commercial bootstrap signature verification failed")
+          }
+          guard let policy = try JSONSerialization.jsonObject(with: payload) as? [String: Any],
+                policy["schemaVersion"] as? Int == 1 else {
+              fail("Release commercial bootstrap payload is malformed")
+          }
+          let effectiveAt = utcDate(policy["effectiveAt"], field: "effectiveAt")
+          let expiresAt = utcDate(policy["expiresAt"], field: "expiresAt")
+          guard effectiveAt < expiresAt,
+                expiresAt.timeIntervalSince(effectiveAt) <= 30 * 24 * 60 * 60 else {
+              fail("Release commercial bootstrap window exceeds 30 days")
+          }
+          guard Date().addingTimeInterval(14 * 24 * 60 * 60) < expiresAt else {
+              fail("Release commercial bootstrap has less than 14 days of validity")
+          }
+          SWIFT
   xxsnapTests:
     type: bundle.unit-test
     platform: macOS

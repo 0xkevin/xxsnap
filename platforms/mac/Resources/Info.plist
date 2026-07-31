@@ -28,5 +28,12 @@
 	<true/>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>XXCommercialAPIOrigin</key>
+	<string>https://download.xxsofts.com</string>
+	<key>XXCommercialSigningPublicKeys</key>
+	<dict>
+		<key>commercial-ed25519-2026-01</key>
+		<string>$(XX_COMMERCIAL_SIGNING_PUBLIC_KEY)</string>
+	</dict>
 </dict>
 </plist>
