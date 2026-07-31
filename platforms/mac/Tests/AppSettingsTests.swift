@@ -276,6 +276,35 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testHotKeyControllerAcceptsStandaloneFunctionKeys() {
+        for keyCode in [kVK_F1, kVK_F12] {
+            let store = FakeAppSettingsStore()
+            let registrar = FakeGlobalHotKeyRegistrar()
+            let controller = makeHotKeyController(store: store, registrar: registrar)
+            let shortcut = HotKeySettings(keyCode: UInt32(keyCode), modifiers: 0)
+
+            assertHotKeySuccess(controller.apply(shortcut, to: .capture))
+            XCTAssertEqual(controller.registeredHotKey(for: .capture), shortcut)
+            XCTAssertEqual(store.settings.hotkeys[HotKeyAction.capture.rawValue], shortcut)
+        }
+    }
+
+    @MainActor
+    func testHotKeyControllerStillRejectsStandaloneOrdinaryKeys() {
+        for keyCode in [kVK_ANSI_A, kVK_ANSI_1] {
+            let store = FakeAppSettingsStore()
+            let registrar = FakeGlobalHotKeyRegistrar()
+            let controller = makeHotKeyController(store: store, registrar: registrar)
+            let shortcut = HotKeySettings(keyCode: UInt32(keyCode), modifiers: 0)
+
+            assertHotKeyFailure(
+                controller.apply(shortcut, to: .capture),
+                equals: .missingModifier
+            )
+        }
+    }
+
+    @MainActor
     func testHotKeyControllerDisablesAndReenablesIndividualShortcut() {
         let store = FakeAppSettingsStore()
         let registrar = FakeGlobalHotKeyRegistrar()

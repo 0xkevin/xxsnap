@@ -255,7 +255,7 @@ final class CaptureHotKeyController {
         guard !isCaptureSessionActive else {
             return .failure(.captureInProgress)
         }
-        guard HotKeyFormatter.hasSupportedModifier(settings) else {
+        guard HotKeyFormatter.isValidGlobalShortcut(settings) else {
             return .failure(.missingModifier)
         }
         guard !configured.contains(where: {
@@ -404,7 +404,7 @@ final class CaptureHotKeyController {
     private func registerConfiguredHotKeys() {
         for action in registrationOrder where !disabledActions.contains(action) {
             let settings = configuredHotKey(for: action)
-            guard HotKeyFormatter.hasSupportedModifier(settings) else {
+            guard HotKeyFormatter.isValidGlobalShortcut(settings) else {
                 errors[action] = .missingModifier
                 continue
             }
@@ -431,7 +431,7 @@ final class CaptureHotKeyController {
         for action in registrationOrder
             where registrations[action] == nil && !disabledActions.contains(action) {
             let settings = configuredHotKey(for: action)
-            guard HotKeyFormatter.hasSupportedModifier(settings) else {
+            guard HotKeyFormatter.isValidGlobalShortcut(settings) else {
                 errors[action] = .missingModifier
                 continue
             }
@@ -544,6 +544,11 @@ struct HotKeyFormatter {
         return settings.modifiers & supported != 0
     }
 
+    static func isValidGlobalShortcut(_ settings: HotKeySettings) -> Bool {
+        hasSupportedModifier(settings)
+            || standaloneFunctionKeyCodes.contains(settings.keyCode)
+    }
+
     static func isDisplayableSystemShortcut(_ settings: HotKeySettings) -> Bool {
         let meaningfulModifiers = UInt32(cmdKey | optionKey | controlKey)
         if settings.modifiers & meaningfulModifiers != 0 {
@@ -580,12 +585,14 @@ struct HotKeyFormatter {
         return (key, flags)
     }
 
-    private static let standaloneSystemKeyCodes: Set<UInt32> = [
-        UInt32(kVK_Escape),
+    private static let standaloneFunctionKeyCodes: Set<UInt32> = [
         UInt32(kVK_F1), UInt32(kVK_F2), UInt32(kVK_F3), UInt32(kVK_F4),
         UInt32(kVK_F5), UInt32(kVK_F6), UInt32(kVK_F7), UInt32(kVK_F8),
         UInt32(kVK_F9), UInt32(kVK_F10), UInt32(kVK_F11), UInt32(kVK_F12)
     ]
+
+    private static let standaloneSystemKeyCodes =
+        standaloneFunctionKeyCodes.union([UInt32(kVK_Escape)])
 }
 
 private func fourCharacterCode(_ string: String) -> FourCharCode {
