@@ -113,26 +113,38 @@ targets:
                 let publicKeys = info["XXCommercialSigningPublicKeys"] as? [String: String] else {
               fail("Release commercial signing public-key dictionary is missing")
           }
+          let debugKeys = Set([
+              "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
+              "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+          ])
+          var validatedPublicKeys: [String: Data] = [:]
+          for (keyId, encodedPublicKey) in publicKeys {
+              if encodedPublicKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                  continue
+              }
+              let publicKeyData = canonicalBase64(encodedPublicKey, field: "public key")
+              guard publicKeyData.count == 32 else {
+                  fail("Release commercial public key must be 32 bytes")
+              }
+              guard !debugKeys.contains(encodedPublicKey) else {
+                  fail("Release cannot use a Debug/test commercial signing public key")
+              }
+              validatedPublicKeys[keyId] = publicKeyData
+          }
+          guard !validatedPublicKeys.isEmpty else {
+              fail("Release commercial signing public-key dictionary has no configured keys")
+          }
           guard let envelope = try JSONSerialization.jsonObject(with: envelopeData) as? [String: Any],
                 Set(envelope.keys) == Set(["keyId", "payload", "signature"]),
                 let keyId = envelope["keyId"] as? String,
                 !keyId.isEmpty,
                 keyId.count <= 128,
-                let encodedPublicKey = publicKeys[keyId],
-                !encodedPublicKey.isEmpty else {
+                let publicKeyData = validatedPublicKeys[keyId] else {
               fail("Release commercial envelope is malformed or its keyId has no public key")
           }
-          let publicKeyData = canonicalBase64(encodedPublicKey, field: "public key")
           let payload = canonicalBase64(envelope["payload"], field: "payload")
           let signature = canonicalBase64(envelope["signature"], field: "signature")
-          let debugKeys = Set([
-              "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
-              "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
-          ])
-          guard !debugKeys.contains(encodedPublicKey) else {
-              fail("Release cannot use a Debug/test commercial signing public key")
-          }
-          guard publicKeyData.count == 32, signature.count == 64,
+          guard signature.count == 64,
                 let publicKey = try? Curve25519.Signing.PublicKey(rawRepresentation: publicKeyData),
                 publicKey.isValidSignature(signature, for: payload) else {
               fail("Release commercial bootstrap signature verification failed")

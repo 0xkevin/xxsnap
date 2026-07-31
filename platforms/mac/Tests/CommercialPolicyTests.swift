@@ -342,6 +342,53 @@ final class CommercialPolicyTests: XCTestCase {
         )
     }
 
+    func testBundleVerifierIgnoresWhitespaceSigningKeyPlaceholders() throws {
+        let bundle = try commercialBundle(publicKeys: [
+            "commercial-ed25519-2025-01": " \n\t",
+            "commercial-ed25519-2026-01": testPublicKey.rawRepresentation.base64EncodedString(),
+        ])
+        let currentEnvelope = SignedEnvelope(
+            keyId: "commercial-ed25519-2026-01",
+            payload: goldenEnvelope.payload,
+            signature: goldenEnvelope.signature
+        )
+
+        let verifier = try CommercialSignatureVerifier(bundle: bundle)
+
+        XCTAssertEqual(
+            try verifier.verifyPolicy(currentEnvelope, at: instant("2026-08-01T00:00:00Z")).mode,
+            .allFree
+        )
+    }
+
+    func testBundleVerifierRejectsAllWhitespaceSigningKeyPlaceholders() throws {
+        let bundle = try commercialBundle(publicKeys: [
+            "commercial-ed25519-2025-01": "",
+            "commercial-ed25519-2026-01": " \n\t",
+        ])
+
+        XCTAssertThrowsError(try CommercialSignatureVerifier(bundle: bundle)) {
+            XCTAssertEqual($0 as? CommercialVerificationError, .invalidPayload)
+        }
+    }
+
+    func testBundleVerifierRejectsNonemptyMalformedSigningKeyPlaceholders() throws {
+        let cases: [(String, CommercialVerificationError)] = [
+            ("not Base64", .noncanonicalBase64("publicKey")),
+            (Data(repeating: 0, count: 31).base64EncodedString(), .invalidPayload),
+        ]
+        for (malformed, expectedError) in cases {
+            let bundle = try commercialBundle(publicKeys: [
+                "fixed-test-key": testPublicKey.rawRepresentation.base64EncodedString(),
+                "commercial-ed25519-2026-01": malformed,
+            ])
+
+            XCTAssertThrowsError(try CommercialSignatureVerifier(bundle: bundle)) {
+                XCTAssertEqual($0 as? CommercialVerificationError, expectedError)
+            }
+        }
+    }
+
     func testCommittedBootstrapIsActuallySignedByBackendDevelopmentKeyAndBounded() throws {
         let resource = sourceRoot.appendingPathComponent(
             "platforms/mac/Resources/Commercial/commercial-policy-bootstrap.json"
@@ -537,6 +584,23 @@ final class CommercialPolicyTests: XCTestCase {
     private func verifiedGoldenPolicy() throws -> CommercialPolicy {
         try CommercialSignatureVerifier(publicKeys: ["fixed-test-key": testPublicKey])
             .verifyPolicy(goldenEnvelope, at: instant("2026-08-01T00:00:00Z"))
+    }
+
+    private func commercialBundle(publicKeys: [String: String]) throws -> Bundle {
+        let bundleURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("bundle")
+        let contentsURL = bundleURL.appendingPathComponent("Contents", isDirectory: true)
+        try FileManager.default.createDirectory(at: contentsURL, withIntermediateDirectories: true)
+        let info: [String: Any] = [
+            "CFBundleIdentifier": "com.xxsofts.xxsnap.tests.\(UUID().uuidString)",
+            "CFBundlePackageType": "BNDL",
+            "XXCommercialSigningPublicKeys": publicKeys,
+        ]
+        let data = try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+        try data.write(to: contentsURL.appendingPathComponent("Info.plist"))
+        addTeardownBlock { try? FileManager.default.removeItem(at: bundleURL) }
+        return try XCTUnwrap(Bundle(url: bundleURL))
     }
 
     private func signedPolicy(

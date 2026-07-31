@@ -30,10 +30,14 @@ final class CommercialSignatureVerifier {
         }
         var keys: [String: Curve25519.Signing.PublicKey] = [:]
         for (keyId, encoded) in values {
+            if encoded.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                continue
+            }
             let raw = try Self.canonicalBase64(encoded, field: "publicKey")
             guard raw.count == 32 else { throw CommercialVerificationError.invalidPayload }
             keys[keyId] = try Curve25519.Signing.PublicKey(rawRepresentation: raw)
         }
+        guard !keys.isEmpty else { throw CommercialVerificationError.invalidPayload }
         self.init(publicKeys: keys)
     }
 
