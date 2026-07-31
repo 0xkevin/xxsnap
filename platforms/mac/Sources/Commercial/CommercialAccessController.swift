@@ -59,6 +59,9 @@ private actor CommercialCredentialWorker {
     func loadTerminalMarker() throws -> CommercialTerminalMarker? {
         try markerStore.loadTerminalMarker()
     }
+    func prepareClearanceMarker() throws -> CommercialTerminalMarker? {
+        try markerStore.prepareClearanceMarker()
+    }
     func saveTerminalMarker(_ marker: CommercialTerminalMarker) throws {
         try markerStore.saveTerminalMarker(marker)
     }
@@ -206,8 +209,13 @@ final class CommercialAccessController {
     func activate(email: String, code: String) async throws {
         let token = beginOperation()
         let expectedMarker: CommercialTerminalMarker?
-        do { expectedMarker = try await worker.loadTerminalMarker() }
+        do { expectedMarker = try await worker.prepareClearanceMarker() }
         catch { throw CommercialAccessControllerError.storage }
+        if let expectedMarker {
+            terminalDenyActive = true
+            terminalMarker = expectedMarker
+            resolveState()
+        }
         let identity = try await clientIdentity()
         let deviceName = await deviceWorker.name()
         let request = CommercialLicenseActivateRequest(

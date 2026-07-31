@@ -11,6 +11,7 @@ protocol CommercialCredentialStoring: AnyObject {
 
 protocol CommercialTerminalMarkerStoring: AnyObject {
     func loadTerminalMarker() throws -> CommercialTerminalMarker?
+    func prepareClearanceMarker() throws -> CommercialTerminalMarker?
     func saveTerminalMarker(_ marker: CommercialTerminalMarker) throws
     func compareAndDeleteTerminalMarker(expectedNonce: UUID?) throws -> Bool
 }
@@ -180,9 +181,23 @@ final class CommercialTerminalMarkerStore: CommercialTerminalMarkerStoring {
         return try loadUnlocked()
     }
 
+    func prepareClearanceMarker() throws -> CommercialTerminalMarker? {
+        Self.lock.lock()
+        defer { Self.lock.unlock() }
+        guard defaults.data(forKey: Self.key) != nil else { return nil }
+        if let marker = try? loadUnlocked() { return marker }
+        let marker = CommercialTerminalMarker(reason: .revoked)
+        try saveUnlocked(marker)
+        return marker
+    }
+
     func saveTerminalMarker(_ marker: CommercialTerminalMarker) throws {
         Self.lock.lock()
         defer { Self.lock.unlock() }
+        try saveUnlocked(marker)
+    }
+
+    private func saveUnlocked(_ marker: CommercialTerminalMarker) throws {
         let data = try JSONEncoder().encode(
             Payload(schemaVersion: 1, reason: marker.reason, nonce: marker.nonce)
         )

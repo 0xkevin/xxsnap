@@ -445,6 +445,91 @@ final class CommercialAccessControllerTests: XCTestCase {
         XCTAssertEqual(fixture.store.accessRecord?.clearsTerminalMarkerNonce, original.nonce)
     }
 
+    func testCorruptMarkerIsNormalizedBeforeFailedActivationAndRemainsDenied() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        fixture.store.access = try fixture.entitlement(access: .pro, maximumBuildNumber: 100)
+        fixture.client.fetchResult = .failure(URLError(.notConnectedToInternet))
+        fixture.client.activateResult = .failure(URLError(.notConnectedToInternet))
+        let controller = fixture.controller()
+        await controller.refresh()
+        guard case .pro = controller.state else { return XCTFail("precondition requires cached Pro") }
+        fixture.marker.loadError = CommercialTerminalMarkerStoreError.corruptData
+
+        do {
+            try await controller.activate(email: "person@example.com", code: "PRIVATE")
+            XCTFail("network failure must be sanitized")
+        } catch {
+            XCTAssertEqual(error as? CommercialAccessControllerError, .network)
+        }
+
+        XCTAssertEqual(fixture.client.activateCalls, 1)
+        XCTAssertNil(fixture.marker.loadError)
+        XCTAssertNotNil(fixture.marker.storedMarker)
+        XCTAssertEqual(controller.state, .free(reason: .serverDenied))
+    }
+
+    func testValidProActivationNormalizesAndClearsCorruptMarkerAcrossRestart() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        fixture.marker.loadError = CommercialTerminalMarkerStoreError.corruptData
+        fixture.client.fetchResult = .failure(URLError(.notConnectedToInternet))
+        fixture.client.activateResult = .success(try fixture.entitlement(access: .pro, maximumBuildNumber: 100))
+        let controller = fixture.controller()
+        await controller.refresh()
+
+        try await controller.activate(email: "person@example.com", code: "PRIVATE")
+
+        guard case .pro = controller.state else { return XCTFail("valid Pro must recover") }
+        XCTAssertNil(fixture.marker.storedMarker)
+        let restarted = fixture.controller()
+        await restarted.refresh()
+        guard case .pro = restarted.state else { return XCTFail("saved Pro must survive restart") }
+    }
+
+    func testNewTerminalMarkerAfterCorruptNormalizationCannotBeClearedByOldNonce() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        fixture.marker.loadError = CommercialTerminalMarkerStoreError.corruptData
+        let replacement = CommercialTerminalMarker(reason: .refunded)
+        fixture.client.activateResult = .success(try fixture.entitlement(access: .pro, maximumBuildNumber: 100))
+        fixture.marker.onCompareAndDelete = { [weak markerStore = fixture.marker] _ in
+            markerStore?.storedMarker = replacement
+        }
+        let controller = fixture.controller()
+
+        do {
+            try await controller.activate(email: "person@example.com", code: "PRIVATE")
+            XCTFail("new terminal marker must win")
+        } catch {
+            XCTAssertEqual(error as? CommercialAccessControllerError, .storage)
+        }
+
+        XCTAssertEqual(fixture.marker.storedMarker, replacement)
+        XCTAssertEqual(controller.state, .free(reason: .serverDenied))
+    }
+
+    func testTrialActivationCannotClearNormalizedCorruptMarker() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        fixture.marker.loadError = CommercialTerminalMarkerStoreError.corruptData
+        fixture.client.activateResult = .success(
+            try fixture.entitlement(access: .trial, expiresAt: now.addingTimeInterval(.day))
+        )
+        let controller = fixture.controller()
+
+        do {
+            try await controller.activate(email: "person@example.com", code: "PRIVATE")
+            XCTFail("trial is not an activation clearance")
+        } catch {
+            XCTAssertEqual(error as? CommercialAccessControllerError, .invalidCredential)
+        }
+
+        XCTAssertNil(fixture.marker.loadError)
+        XCTAssertNotNil(fixture.marker.storedMarker)
+        XCTAssertNil(fixture.store.access)
+    }
+
     func testDeactivateCleanupFailureLeavesPersistentFreeTombstoneAcrossRestart() async throws {
         let fixture = try Fixture(now: now)
         fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
@@ -631,6 +716,17 @@ private final class MemoryTerminalMarkerStore: CommercialTerminalMarkerStoring {
         return storedMarker
     }
 
+    func prepareClearanceMarker() throws -> CommercialTerminalMarker? {
+        if loadError as? CommercialTerminalMarkerStoreError == .corruptData {
+            let marker = CommercialTerminalMarker(reason: .revoked)
+            storedMarker = marker
+            loadError = nil
+            return marker
+        }
+        if let loadError { throw loadError }
+        return storedMarker
+    }
+
     func saveTerminalMarker(_ marker: CommercialTerminalMarker) throws {
         if let saveError { throw saveError }
         storedMarker = marker
@@ -707,6 +803,7 @@ private final class FakeCommercialClient: CommercialPolicyFetching {
     var trialCalls = 0
     var fetchCalls = 0
     var validateCalls = 0
+    var activateCalls = 0
     var lastActivation: CommercialLicenseActivateRequest?
     var lastDeactivation: CommercialLicenseDeactivateRequest?
     var suspendValidation = false
@@ -720,7 +817,7 @@ private final class FakeCommercialClient: CommercialPolicyFetching {
         trialCalls += 1; return try trialResult.get()
     }
     func activate(_ request: CommercialLicenseActivateRequest, locale: CommercialLocale) async throws -> SignedEnvelope {
-        lastActivation = request; return try activateResult.get()
+        activateCalls += 1; lastActivation = request; return try activateResult.get()
     }
     func validate(_ request: CommercialLicenseValidateRequest, locale: CommercialLocale) async throws -> SignedEnvelope {
         validateCalls += 1

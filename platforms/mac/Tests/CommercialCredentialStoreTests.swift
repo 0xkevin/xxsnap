@@ -129,9 +129,11 @@ final class CommercialCredentialStoreTests: XCTestCase {
         let nonce = UUID(uuidString: "12345678-1234-4234-9234-1234567890AB")!
         let marker = CommercialTerminalMarker(reason: .revoked, nonce: nonce)
 
+        XCTAssertNil(try store.prepareClearanceMarker())
         try store.saveTerminalMarker(marker)
 
         XCTAssertEqual(try store.loadTerminalMarker(), marker)
+        XCTAssertEqual(try store.prepareClearanceMarker(), marker)
         let domain = try XCTUnwrap(defaults.persistentDomain(forName: suite))
         let data = try XCTUnwrap(domain.values.compactMap { $0 as? Data }.first)
         let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
@@ -143,6 +145,24 @@ final class CommercialCredentialStoreTests: XCTestCase {
         XCTAssertEqual(try store.loadTerminalMarker(), marker)
         XCTAssertTrue(try store.compareAndDeleteTerminalMarker(expectedNonce: nonce))
         XCTAssertNil(try store.loadTerminalMarker())
+    }
+
+    func testPreparingCorruptTerminalMarkerNormalizesItWithFreshNonSensitiveNonce() throws {
+        let suite = "com.xxsnap.tests.corrupt-terminal-marker.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(Data("damaged".utf8), forKey: "commercial.terminal-deny.v1")
+        XCTAssertTrue(defaults.synchronize())
+        let store = CommercialTerminalMarkerStore(userDefaults: defaults)
+
+        let marker = try store.prepareClearanceMarker()
+
+        XCTAssertEqual(marker?.reason, .revoked)
+        XCTAssertEqual(try store.loadTerminalMarker(), marker)
+        let domain = try XCTUnwrap(defaults.persistentDomain(forName: suite))
+        let data = try XCTUnwrap(domain["commercial.terminal-deny.v1"] as? Data)
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(Set(payload.keys), ["schemaVersion", "reason", "nonce"])
     }
 
     func testDeviceIdentityProducesStableLowercaseHashAndTruncatesDisplayName() throws {
