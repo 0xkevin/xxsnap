@@ -38,6 +38,13 @@ enum CommercialAccessControllerError: Error, Equatable {
     case network
     case activationRejected
     case deviceLimit
+    case credentialBindingInvalid
+    case deviceDeactivated
+    case buildNotEntitled
+    case licenseRevoked
+    case licenseRefunded
+    case trialAlreadyUsed
+    case trialUnavailable
 }
 
 @MainActor
@@ -387,7 +394,10 @@ final class CommercialAccessController: CommercialAccessRefreshing {
         let token = beginOperation()
         let snapshot: CommercialCredentialMutationSnapshot
         do { snapshot = try await worker.snapshot(prepareClearance: true) }
-        catch { throw CommercialAccessControllerError.storage }
+        catch {
+            publishNotice(.storage, token: token)
+            throw CommercialAccessControllerError.storage
+        }
         let expectedMarker = snapshot.marker
         if let expectedMarker {
             terminalDenyActive = true
@@ -404,10 +414,21 @@ final class CommercialAccessController: CommercialAccessRefreshing {
         )
         let envelope: SignedEnvelope
         do { envelope = try await client.activate(request, locale: locale) }
-        catch { throw sanitized(error) }
+        catch {
+            publishNotice(Self.notice(for: error), token: token)
+            throw sanitized(error)
+        }
         guard isCurrent(token) else { return }
-        let payload = try verifiedEntitlement(envelope, expectedDeviceHash: identity.deviceHash)
-        guard payload.access == .pro else { throw CommercialAccessControllerError.invalidCredential }
+        let payload: EntitlementPayload
+        do { payload = try verifiedEntitlement(envelope, expectedDeviceHash: identity.deviceHash) }
+        catch {
+            publishNotice(.server, token: token)
+            throw error
+        }
+        guard payload.access == .pro else {
+            publishNotice(.server, token: token)
+            throw CommercialAccessControllerError.invalidCredential
+        }
         let anchor = CommercialTimeAnchor(
             issuedAt: payload.issuedAt,
             systemUptime: clock.currentUptime
@@ -425,11 +446,15 @@ final class CommercialAccessController: CommercialAccessRefreshing {
                 clearingMarkerNonce: expectedMarker?.nonce
             )
         }
-        catch { throw CommercialAccessControllerError.storage }
+        catch {
+            publishNotice(.storage, token: token)
+            throw CommercialAccessControllerError.storage
+        }
         guard isCurrent(token) else { return }
         guard committed else {
             await loadLocalState(token: token)
             resolveState()
+            publishNotice(.storage, token: token)
             throw CommercialAccessControllerError.storage
         }
         accessEnvelope = envelope
@@ -439,14 +464,19 @@ final class CommercialAccessController: CommercialAccessRefreshing {
         terminalMarker = nil
         pendingTerminalAccess = nil
         hasPendingTerminalCleanup = false
+        presentationNotice = nil
         resolveState()
+        notifyPresentationIfNeeded()
     }
 
     func deactivateCurrentDevice() async throws {
         let token = beginOperation()
         let snapshot: CommercialCredentialMutationSnapshot
         do { snapshot = try await worker.snapshot() }
-        catch { throw CommercialAccessControllerError.storage }
+        catch {
+            publishNotice(.storage, token: token)
+            throw CommercialAccessControllerError.storage
+        }
         let envelope = snapshot.access?.envelope
         guard let envelope else {
             throw CommercialAccessControllerError.noCredential
@@ -470,17 +500,32 @@ final class CommercialAccessController: CommercialAccessRefreshing {
         } catch {
             if Self.isTerminal(error) {
                 let reason = Self.terminalReason(error) ?? .deviceDeactivated
-                guard try await applyTerminal(reason, token: token, expected: snapshot) else {
-                    throw CommercialAccessControllerError.storage
+                presentationNotice = nil
+                do {
+                    guard try await applyTerminal(reason, token: token, expected: snapshot) else {
+                        throw CommercialAccessControllerError.storage
+                    }
+                } catch {
+                    publishNotice(.storage, token: token)
+                    throw error
                 }
+                notifyPresentationIfNeeded()
                 return
             }
+            publishNotice(Self.notice(for: error), token: token)
             throw sanitized(error)
         }
         guard isCurrent(token) else { return }
-        guard try await applyTerminal(.deviceDeactivated, token: token, expected: snapshot) else {
-            throw CommercialAccessControllerError.storage
+        presentationNotice = nil
+        do {
+            guard try await applyTerminal(.deviceDeactivated, token: token, expected: snapshot) else {
+                throw CommercialAccessControllerError.storage
+            }
+        } catch {
+            publishNotice(.storage, token: token)
+            throw error
         }
+        notifyPresentationIfNeeded()
     }
 
     private func loadLocalState(token: Int) async {
@@ -845,7 +890,20 @@ final class CommercialAccessController: CommercialAccessRefreshing {
         if error is CommercialCredentialStoreError { return .storage }
         if error is URLError { return .network }
         if case CommercialPolicyClientError.transport = error { return .network }
+        if let error = error as? CommercialAccessControllerError {
+            switch error {
+            case .storage: return .storage
+            case .network, .identityUnavailable: return .network
+            default: return .server
+            }
+        }
         return .server
+    }
+
+    private func publishNotice(_ notice: CommercialPresentationNotice, token: Int) {
+        guard isCurrent(token) else { return }
+        presentationNotice = notice
+        notifyPresentationIfNeeded()
     }
 
     private func sanitized(_ error: Error) -> CommercialAccessControllerError {
@@ -855,8 +913,15 @@ final class CommercialAccessController: CommercialAccessRefreshing {
         if case let CommercialPolicyClientError.server(_, detail) = error {
             switch detail.code {
             case "device_limit_reached": return .deviceLimit
-            case "license_not_found", "license_not_active", "license_refunded", "license_revoked":
-                return .activationRejected
+            case "activation_invalid": return .activationRejected
+            case "credential_invalid": return .invalidCredential
+            case "credential_binding_invalid": return .credentialBindingInvalid
+            case "device_deactivated": return .deviceDeactivated
+            case "build_not_entitled": return .buildNotEntitled
+            case "license_revoked": return .licenseRevoked
+            case "license_refunded": return .licenseRefunded
+            case "trial_already_used": return .trialAlreadyUsed
+            case "trial_unavailable": return .trialUnavailable
             default: break
             }
         }

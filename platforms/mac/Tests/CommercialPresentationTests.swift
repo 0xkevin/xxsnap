@@ -177,14 +177,25 @@ final class CommercialPresentationTests: XCTestCase {
             (.invalidEmail, "请输入有效的邮箱地址。", "Enter a valid email address."),
             (.invalidCode, "激活码格式不正确。", "The activation code format is invalid."),
             (.activationRejected, "授权激活失败。", "The license could not be activated."),
+            (.credentialInvalid, "授权凭证无效，请重新激活。", "The license credential is invalid. Activate again."),
+            (.credentialBindingInvalid, "授权凭证与本机不匹配。", "The license credential does not belong to this Mac."),
+            (.deviceDeactivated, "本机已被停用，请重新激活。", "This Mac has been deactivated. Activate again."),
+            (.buildNotEntitled, "当前版本不在授权更新范围内。", "This app version is not covered by the license."),
+            (.licenseRevoked, "授权已被撤销。", "The license has been revoked."),
+            (.licenseRefunded, "授权已退款。", "The license has been refunded."),
+            (.trialAlreadyUsed, "本机已使用过试用资格。", "This Mac has already used its trial."),
+            (.trialUnavailable, "当前无法开始试用。", "A trial is not currently available."),
             (.deviceLimit, "设备数量已达上限，请管理设备后重试。", "The device limit has been reached. Manage devices and try again."),
             (.network, "暂时无法连接，请稍后重试。", "Unable to connect. Try again later."),
             (.storage, "授权信息无法保存，当前权限保持不变。", "The license could not be saved. Your current access is unchanged."),
+            (.deactivationCleanupPending, "本机已停用，本地清理将自动重试。", "This Mac is deactivated. Local cleanup will retry automatically."),
             (.invalidPurchaseURL, "购买链接暂时不可用。", "The purchase link is temporarily unavailable."),
         ]
         for (error, chinese, english) in pairs {
             XCTAssertEqual(error.message(language: .zhHans), chinese)
             XCTAssertEqual(error.message(language: .english), english)
+            XCTAssertFalse(chinese.contains("_"))
+            XCTAssertFalse(english.contains("_"))
         }
     }
 
@@ -234,10 +245,30 @@ final class CommercialPresentationTests: XCTestCase {
         defer { controller.close() }
         XCTAssertTrue(controller.window?.toolbar?.items.map(\.label).contains("授权与购买") == true)
 
+        controller.show(section: .general)
+        let chineseGeneral = try XCTUnwrap(controller.window?.contentView)
+        XCTAssertTrue(
+            descendants(of: chineseGeneral, type: NSTextField.self)
+                .contains(where: { $0.stringValue == "开机自启动" })
+        )
+        settings.settings.language = .english
+        controller.languageDidChange()
+        let englishGeneral = try XCTUnwrap(controller.window?.contentView)
+        XCTAssertFalse(englishGeneral === chineseGeneral)
+        XCTAssertTrue(
+            descendants(of: englishGeneral, type: NSTextField.self)
+                .contains(where: { $0.stringValue == "Launch at login" })
+        )
+
         controller.show(section: .save)
+        let editedSavePage = controller.window?.contentView
+        access.presentationNotice = .network
+        controller.commercialAccessDidChange()
+        XCTAssertTrue(controller.window?.contentView === editedSavePage)
         access.state = .allFree
         access.presentationPolicy = try makePolicy(mode: "all_free")
         controller.commercialAccessDidChange()
+        XCTAssertTrue(controller.window?.contentView === editedSavePage)
         XCTAssertTrue(controller.window?.toolbar?.selectedItemIdentifier?.rawValue.hasSuffix(".save") == true)
         XCTAssertFalse(controller.window?.toolbar?.items.map(\.label).contains("授权与购买") == true)
         controller.showCommercialPurchaseIfAvailable()
@@ -320,6 +351,51 @@ final class CommercialPresentationTests: XCTestCase {
         XCTAssertTrue(coordinator.deactivate(confirm: { true }, using: actions))
         await waitUntil { !coordinator.isSubmitting }
         XCTAssertEqual(coordinator.result, .failure(.storage))
+    }
+
+    @MainActor
+    func testDeactivationCleanupFailureUsesOperationAndLatestSnapshot() async {
+        let access = PresentationCommercialAccess(
+            state: .pro(CommercialEntitlement(payload: try! makeEntitlement())),
+            policy: try! makePolicy()
+        )
+        access.presentationNotice = .storage
+        access.deactivationError = .storage
+        access.stateAfterDeactivationFailure = .free(reason: .serverDenied)
+        let coordinator = CommercialOperationCoordinator()
+
+        XCTAssertTrue(coordinator.deactivate(confirm: { true }, using: access))
+        await waitUntil { !coordinator.isSubmitting }
+
+        XCTAssertEqual(coordinator.result, .failure(.deactivationCleanupPending))
+        for (language, expected) in [
+            (AppLanguage.zhHans, "本机已停用，本地清理将自动重试。"),
+            (.english, "This Mac is deactivated. Local cleanup will retry automatically."),
+        ] {
+            let page = CommercialPreferencesViewController(
+                access: access,
+                actions: access,
+                language: language,
+                operationCoordinator: coordinator
+            )
+            XCTAssertTrue(
+                descendants(of: page.view, type: NSTextField.self)
+                    .contains(where: { $0.stringValue == expected })
+            )
+            XCTAssertFalse(
+                descendants(of: page.view, type: NSTextField.self)
+                    .contains(where: { $0.stringValue.contains("权限保持不变") || $0.stringValue.contains("access is unchanged") })
+            )
+        }
+
+        access.activationError = .storage
+        let activationCoordinator = CommercialOperationCoordinator()
+        XCTAssertTrue(activationCoordinator.activate(
+            ActivationFormValue(email: "user@example.com", code: "XXSNAP-ABCD-2345-WXYZ-6789"),
+            using: access
+        ))
+        await waitUntil { !activationCoordinator.isSubmitting }
+        XCTAssertEqual(activationCoordinator.result, .failure(.storage))
     }
 
     @MainActor
@@ -465,6 +541,9 @@ private final class PresentationCommercialAccess: CommercialAccessProviding, Com
     var presentationPolicy: CommercialPolicy?
     var presentationNotice: CommercialPresentationNotice?
     var onStateChange: ((CommercialAccessState) -> Void)?
+    var activationError: CommercialAccessControllerError?
+    var deactivationError: CommercialAccessControllerError?
+    var stateAfterDeactivationFailure: CommercialAccessState?
     init(state: CommercialAccessState, policy: CommercialPolicy?) {
         self.state = state
         presentationPolicy = policy
@@ -473,8 +552,13 @@ private final class PresentationCommercialAccess: CommercialAccessProviding, Com
         CommercialAccessSnapshot(state: state, availableFeatures: [], proBadgedFeatures: [])
     }
     func requestPurchase(for feature: CommercialFeature) {}
-    func activate(email: String, code: String) async throws {}
-    func deactivateCurrentDevice() async throws {}
+    func activate(email: String, code: String) async throws {
+        if let activationError { throw activationError }
+    }
+    func deactivateCurrentDevice() async throws {
+        if let stateAfterDeactivationFailure { state = stateAfterDeactivationFailure }
+        if let deactivationError { throw deactivationError }
+    }
 }
 
 private final class PresentationSettingsStore: AppSettingsStoring {

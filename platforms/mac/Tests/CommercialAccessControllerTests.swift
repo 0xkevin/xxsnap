@@ -458,10 +458,19 @@ final class CommercialAccessControllerTests: XCTestCase {
         await controller.refresh()
         XCTAssertEqual(controller.presentationPolicy?.mode, .paid)
 
-        for (code, expected) in [
+        let mappings: [(String, CommercialAccessControllerError)] = [
+            ("activation_invalid", .activationRejected),
             ("device_limit_reached", CommercialAccessControllerError.deviceLimit),
-            ("license_not_found", CommercialAccessControllerError.activationRejected),
-        ] {
+            ("license_refunded", .licenseRefunded),
+            ("license_revoked", .licenseRevoked),
+            ("device_deactivated", .deviceDeactivated),
+            ("build_not_entitled", .buildNotEntitled),
+            ("credential_invalid", .invalidCredential),
+            ("credential_binding_invalid", .credentialBindingInvalid),
+            ("trial_already_used", .trialAlreadyUsed),
+            ("trial_unavailable", .trialUnavailable),
+        ]
+        for (code, expected) in mappings {
             fixture.client.activateResult = .failure(fixture.serverError(code))
             do {
                 try await controller.activate(email: "person@example.com", code: "XXSNAP-ABCD-2345-WXYZ-6789")
@@ -469,7 +478,90 @@ final class CommercialAccessControllerTests: XCTestCase {
             } catch {
                 XCTAssertEqual(error as? CommercialAccessControllerError, expected)
             }
+            XCTAssertEqual(controller.presentationNotice, .server)
         }
+    }
+
+    func testSuccessfulActivationClearsOfflineNoticeWithOnlySemanticStateChange() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        fixture.client.fetchResult = .failure(URLError(.timedOut))
+        let controller = fixture.controller()
+        await controller.refresh()
+        XCTAssertEqual(controller.presentationNotice, .network)
+
+        fixture.client.activateResult = .success(
+            try fixture.entitlement(access: .pro, maximumBuildNumber: 100)
+        )
+        var stateChanges: [CommercialAccessState] = []
+        var presentationChanges = 0
+        controller.onStateChange = { stateChanges.append($0) }
+        controller.onPresentationChange = { presentationChanges += 1 }
+
+        try await controller.activate(
+            email: "person@example.com",
+            code: "XXSNAP-ABCD-2345-WXYZ-6789"
+        )
+
+        XCTAssertNil(controller.presentationNotice)
+        guard case .pro = controller.state else { return XCTFail("activation must grant Pro") }
+        XCTAssertEqual(stateChanges.count, 1)
+        XCTAssertEqual(presentationChanges, 1)
+    }
+
+    func testSuccessfulDeactivationClearsOfflineNoticeWithOnlySemanticStateChange() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        fixture.store.access = try fixture.entitlement(access: .pro, maximumBuildNumber: 100)
+        fixture.client.fetchResult = .failure(URLError(.timedOut))
+        let controller = fixture.controller()
+        await controller.refresh()
+        XCTAssertEqual(controller.presentationNotice, .network)
+
+        var stateChanges: [CommercialAccessState] = []
+        var presentationChanges = 0
+        controller.onStateChange = { stateChanges.append($0) }
+        controller.onPresentationChange = { presentationChanges += 1 }
+
+        try await controller.deactivateCurrentDevice()
+
+        XCTAssertNil(controller.presentationNotice)
+        XCTAssertEqual(controller.state, .free(reason: .serverDenied))
+        XCTAssertEqual(stateChanges, [.free(reason: .serverDenied)])
+        XCTAssertEqual(presentationChanges, 1)
+    }
+
+    func testFailedActivationAndDeactivationUpdateStableNoticeWithoutChangingAccess() async throws {
+        let activation = try Fixture(now: now)
+        activation.store.policy = try activation.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        activation.client.activateResult = .failure(URLError(.notConnectedToInternet))
+        let activationController = activation.controller()
+        do {
+            try await activationController.activate(
+                email: "person@example.com",
+                code: "XXSNAP-ABCD-2345-WXYZ-6789"
+            )
+            XCTFail("network activation must fail")
+        } catch {
+            XCTAssertEqual(error as? CommercialAccessControllerError, .network)
+        }
+        XCTAssertEqual(activationController.presentationNotice, .network)
+
+        let deactivation = try Fixture(now: now)
+        deactivation.store.policy = try deactivation.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        deactivation.store.access = try deactivation.entitlement(access: .pro, maximumBuildNumber: 100)
+        deactivation.client.fetchResult = .failure(URLError(.timedOut))
+        let deactivationController = deactivation.controller()
+        await deactivationController.refresh()
+        deactivation.client.deactivateResult = .failure(deactivation.serverError("temporary_backend_detail"))
+        do {
+            try await deactivationController.deactivateCurrentDevice()
+            XCTFail("server deactivation must fail")
+        } catch {
+            XCTAssertEqual(error as? CommercialAccessControllerError, .network)
+        }
+        guard case .pro = deactivationController.state else { return XCTFail("failed deactivation must preserve Pro") }
+        XCTAssertEqual(deactivationController.presentationNotice, .server)
     }
 
     func testMarkerCannotBeClearedByMismatchedMissingOrTrialNonce() async throws {
@@ -611,6 +703,7 @@ final class CommercialAccessControllerTests: XCTestCase {
         XCTAssertNil(fixture.marker.loadError)
         XCTAssertNotNil(fixture.marker.storedMarker)
         XCTAssertNil(fixture.store.access)
+        XCTAssertEqual(controller.presentationNotice, .server)
     }
 
     func testDeactivateCleanupFailureLeavesPersistentFreeTombstoneAcrossRestart() async throws {

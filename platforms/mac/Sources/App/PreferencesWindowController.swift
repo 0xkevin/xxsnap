@@ -119,7 +119,7 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
 
     func languageDidChange() {
         configureToolbar()
-        guard selectedSection == .commercial else { return }
+        guard selectedSection == .general || selectedSection == .commercial else { return }
         rebuildContent()
     }
 

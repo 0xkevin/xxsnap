@@ -181,9 +181,18 @@ enum CommercialActionError: Equatable {
     case invalidEmail
     case invalidCode
     case activationRejected
+    case credentialInvalid
+    case credentialBindingInvalid
+    case deviceDeactivated
+    case buildNotEntitled
+    case licenseRevoked
+    case licenseRefunded
+    case trialAlreadyUsed
+    case trialUnavailable
     case deviceLimit
     case network
     case storage
+    case deactivationCleanupPending
     case invalidPurchaseURL
 
     func message(language: AppLanguage) -> String {
@@ -192,9 +201,18 @@ enum CommercialActionError: Equatable {
         case .invalidEmail: return english ? "Enter a valid email address." : "请输入有效的邮箱地址。"
         case .invalidCode: return english ? "The activation code format is invalid." : "激活码格式不正确。"
         case .activationRejected: return english ? "The license could not be activated." : "授权激活失败。"
+        case .credentialInvalid: return english ? "The license credential is invalid. Activate again." : "授权凭证无效，请重新激活。"
+        case .credentialBindingInvalid: return english ? "The license credential does not belong to this Mac." : "授权凭证与本机不匹配。"
+        case .deviceDeactivated: return english ? "This Mac has been deactivated. Activate again." : "本机已被停用，请重新激活。"
+        case .buildNotEntitled: return english ? "This app version is not covered by the license." : "当前版本不在授权更新范围内。"
+        case .licenseRevoked: return english ? "The license has been revoked." : "授权已被撤销。"
+        case .licenseRefunded: return english ? "The license has been refunded." : "授权已退款。"
+        case .trialAlreadyUsed: return english ? "This Mac has already used its trial." : "本机已使用过试用资格。"
+        case .trialUnavailable: return english ? "A trial is not currently available." : "当前无法开始试用。"
         case .deviceLimit: return english ? "The device limit has been reached. Manage devices and try again." : "设备数量已达上限，请管理设备后重试。"
         case .network: return english ? "Unable to connect. Try again later." : "暂时无法连接，请稍后重试。"
         case .storage: return english ? "The license could not be saved. Your current access is unchanged." : "授权信息无法保存，当前权限保持不变。"
+        case .deactivationCleanupPending: return english ? "This Mac is deactivated. Local cleanup will retry automatically." : "本机已停用，本地清理将自动重试。"
         case .invalidPurchaseURL: return english ? "The purchase link is temporarily unavailable." : "购买链接暂时不可用。"
         }
     }
@@ -293,7 +311,7 @@ final class CommercialOperationCoordinator {
         }
         state = .submitting(.activation)
         operationTask = Task { [weak self] in
-            let result = await Self.perform {
+            let result = await Self.perform(kind: .activation, actions: actions) {
                 try await actions.activate(email: form.email, code: form.code)
             }
             self?.finish(result)
@@ -312,19 +330,30 @@ final class CommercialOperationCoordinator {
                 self?.finishCancellation()
                 return
             }
-            let result = await Self.perform { try await actions.deactivateCurrentDevice() }
+            let result = await Self.perform(kind: .deactivation, actions: actions) {
+                try await actions.deactivateCurrentDevice()
+            }
             self?.finish(result)
         }
         return true
     }
 
     private static func perform(
+        kind: CommercialOperationKind,
+        actions: any CommercialLicenseActing,
         _ operation: () async throws -> Void
     ) async -> CommercialSubmissionResult {
         do {
             try await operation()
             return .success
         } catch let error as CommercialAccessControllerError {
+            if error == .storage,
+               kind == .deactivation,
+               let access = actions as? any CommercialAccessProviding,
+               access.snapshot.state == .free(reason: .serverDenied)
+            {
+                return .failure(.deactivationCleanupPending)
+            }
             return .failure(map(error))
         } catch {
             return .failure(.network)
@@ -345,7 +374,15 @@ final class CommercialOperationCoordinator {
         switch error {
         case .storage: return .storage
         case .deviceLimit: return .deviceLimit
-        case .activationRejected, .invalidCredential, .noCredential: return .activationRejected
+        case .activationRejected, .noCredential: return .activationRejected
+        case .invalidCredential: return .credentialInvalid
+        case .credentialBindingInvalid: return .credentialBindingInvalid
+        case .deviceDeactivated: return .deviceDeactivated
+        case .buildNotEntitled: return .buildNotEntitled
+        case .licenseRevoked: return .licenseRevoked
+        case .licenseRefunded: return .licenseRefunded
+        case .trialAlreadyUsed: return .trialAlreadyUsed
+        case .trialUnavailable: return .trialUnavailable
         case .network, .identityUnavailable: return .network
         }
     }
@@ -493,7 +530,7 @@ final class CommercialPreferencesViewController: NSViewController {
         } else {
             operationNotice = nil
         }
-        if let notice = notice ?? operationNotice {
+        if let notice = operationNotice ?? notice {
             let error = label(notice.message(language: language), wrapping: true)
             error.textColor = .systemRed
             error.setAccessibilityRole(.staticText)
