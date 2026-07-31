@@ -121,22 +121,27 @@ final class CommercialCredentialStoreTests: XCTestCase {
         XCTAssertEqual(keychain.updatedAccounts, ["access"])
     }
 
-    func testTerminalMarkerPersistsOnlyNonSensitiveVersionAndReason() throws {
+    func testTerminalMarkerPersistsOnlyNonSensitiveVersionReasonAndNonce() throws {
         let suite = "com.xxsnap.tests.terminal-marker.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = CommercialTerminalMarkerStore(userDefaults: defaults)
+        let nonce = UUID(uuidString: "12345678-1234-4234-9234-1234567890AB")!
+        let marker = CommercialTerminalMarker(reason: .revoked, nonce: nonce)
 
-        try store.saveTerminalMarker(.revoked)
+        try store.saveTerminalMarker(marker)
 
-        XCTAssertEqual(try store.loadTerminalMarker(), .revoked)
+        XCTAssertEqual(try store.loadTerminalMarker(), marker)
         let domain = try XCTUnwrap(defaults.persistentDomain(forName: suite))
         let data = try XCTUnwrap(domain.values.compactMap { $0 as? Data }.first)
         let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        XCTAssertEqual(Set(payload.keys), ["schemaVersion", "reason"])
+        XCTAssertEqual(Set(payload.keys), ["schemaVersion", "reason", "nonce"])
         XCTAssertEqual(payload["schemaVersion"] as? Int, 1)
         XCTAssertEqual(payload["reason"] as? String, "revoked")
-        try store.deleteTerminalMarker()
+        XCTAssertEqual((payload["nonce"] as? String)?.lowercased(), nonce.uuidString.lowercased())
+        XCTAssertFalse(try store.compareAndDeleteTerminalMarker(expectedNonce: UUID()))
+        XCTAssertEqual(try store.loadTerminalMarker(), marker)
+        XCTAssertTrue(try store.compareAndDeleteTerminalMarker(expectedNonce: nonce))
         XCTAssertNil(try store.loadTerminalMarker())
     }
 

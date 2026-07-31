@@ -56,13 +56,15 @@ private actor CommercialCredentialWorker {
     func loadAccess() throws -> CommercialAccessRecord? { try store.loadAccessRecord() }
     func saveAccess(_ record: CommercialAccessRecord) throws { try store.saveAccessRecord(record) }
     func deleteAccess() throws { try store.deleteAccessRecord() }
-    func loadTerminalMarker() throws -> CommercialTerminalReason? {
+    func loadTerminalMarker() throws -> CommercialTerminalMarker? {
         try markerStore.loadTerminalMarker()
     }
-    func saveTerminalMarker(_ reason: CommercialTerminalReason) throws {
-        try markerStore.saveTerminalMarker(reason)
+    func saveTerminalMarker(_ marker: CommercialTerminalMarker) throws {
+        try markerStore.saveTerminalMarker(marker)
     }
-    func deleteTerminalMarker() throws { try markerStore.deleteTerminalMarker() }
+    func compareAndDeleteTerminalMarker(expectedNonce: UUID?) throws -> Bool {
+        try markerStore.compareAndDeleteTerminalMarker(expectedNonce: expectedNonce)
+    }
 }
 
 private actor CommercialDeviceWorker {
@@ -96,7 +98,7 @@ final class CommercialAccessController {
     private var generation = 0
     private var trialRequestAttempted = false
     private var terminalDenyActive = false
-    private var terminalReason: CommercialTerminalReason = .revoked
+    private var terminalMarker: CommercialTerminalMarker?
     private(set) var hasPendingTerminalCleanup = false
 
     init(
@@ -166,7 +168,8 @@ final class CommercialAccessController {
         let token = beginOperation()
         if terminalDenyActive, hasPendingTerminalCleanup {
             do {
-                try await worker.saveTerminalMarker(terminalReason)
+                guard let terminalMarker else { throw CommercialAccessControllerError.storage }
+                try await worker.saveTerminalMarker(terminalMarker)
                 try await worker.deleteAccess()
                 hasPendingTerminalCleanup = false
             } catch {
@@ -202,6 +205,9 @@ final class CommercialAccessController {
 
     func activate(email: String, code: String) async throws {
         let token = beginOperation()
+        let expectedMarker: CommercialTerminalMarker?
+        do { expectedMarker = try await worker.loadTerminalMarker() }
+        catch { throw CommercialAccessControllerError.storage }
         let identity = try await clientIdentity()
         let deviceName = await deviceWorker.name()
         let request = CommercialLicenseActivateRequest(
@@ -217,15 +223,24 @@ final class CommercialAccessController {
         let payload = try verifiedEntitlement(envelope, expectedDeviceHash: identity.deviceHash)
         guard payload.access == .pro else { throw CommercialAccessControllerError.invalidCredential }
         do {
-            try await persistAccess(envelope, payload: payload, clearsTerminalMarker: true)
+            try await persistAccess(
+                envelope,
+                payload: payload,
+                clearsTerminalMarkerNonce: expectedMarker?.nonce
+            )
         }
         catch { throw CommercialAccessControllerError.storage }
         guard isCurrent(token) else { return }
         accessEnvelope = envelope
         entitlement = payload
         do {
-            try await worker.deleteTerminalMarker()
+            guard try await worker.compareAndDeleteTerminalMarker(
+                expectedNonce: expectedMarker?.nonce
+            ) else {
+                throw CommercialAccessControllerError.storage
+            }
             terminalDenyActive = false
+            terminalMarker = nil
             hasPendingTerminalCleanup = false
         } catch {
             terminalDenyActive = true
@@ -296,7 +311,7 @@ final class CommercialAccessController {
         do {
             if let marker = try await worker.loadTerminalMarker() {
                 terminalDenyActive = true
-                terminalReason = marker
+                terminalMarker = marker
             }
         } catch {
             // A corrupt or temporarily unreadable deny marker is itself a reason
@@ -309,11 +324,14 @@ final class CommercialAccessController {
             guard isCurrent(token) else { return }
             if cachedAccess?.status == .terminal {
                 terminalDenyActive = true
-                terminalReason = cachedAccess?.terminalReason ?? terminalReason
+                let marker = terminalMarker ?? CommercialTerminalMarker(
+                    reason: cachedAccess?.terminalReason ?? .revoked
+                )
+                terminalMarker = marker
                 clearLocalAccess()
                 setState(.free(reason: .serverDenied))
                 do {
-                    try await worker.saveTerminalMarker(terminalReason)
+                    try await worker.saveTerminalMarker(marker)
                     try await worker.deleteAccess()
                     hasPendingTerminalCleanup = false
                 } catch {
@@ -324,12 +342,17 @@ final class CommercialAccessController {
             if terminalDenyActive {
                 if let cachedAccess,
                    cachedAccess.status == .active,
-                   cachedAccess.clearsTerminalMarker,
+                   cachedAccess.clearsTerminalMarkerNonce == terminalMarker?.nonce,
                    await validMarkerClearingAccess(cachedAccess)
                 {
                     do {
-                        try await worker.deleteTerminalMarker()
+                        guard try await worker.compareAndDeleteTerminalMarker(
+                            expectedNonce: cachedAccess.clearsTerminalMarkerNonce
+                        ) else {
+                            throw CommercialAccessControllerError.storage
+                        }
                         terminalDenyActive = false
+                        terminalMarker = nil
                         hasPendingTerminalCleanup = false
                     } catch {
                         clearLocalAccess()
@@ -374,7 +397,7 @@ final class CommercialAccessController {
             )
             guard isCurrent(token) else { return }
             let payload = try verifiedEntitlement(refreshed, expectedDeviceHash: identity.deviceHash)
-            try await persistAccess(refreshed, payload: payload, clearsTerminalMarker: false)
+            try await persistAccess(refreshed, payload: payload, clearsTerminalMarkerNonce: nil)
             guard isCurrent(token) else { return }
             accessEnvelope = refreshed
             entitlement = payload
@@ -396,7 +419,7 @@ final class CommercialAccessController {
             guard isCurrent(token) else { return }
             let payload = try verifiedEntitlement(envelope, expectedDeviceHash: identity.deviceHash)
             guard payload.access == .trial else { return }
-            try await persistAccess(envelope, payload: payload, clearsTerminalMarker: false)
+            try await persistAccess(envelope, payload: payload, clearsTerminalMarkerNonce: nil)
             guard isCurrent(token) else { return }
             accessEnvelope = envelope
             entitlement = payload
@@ -518,14 +541,14 @@ final class CommercialAccessController {
     private func persistAccess(
         _ envelope: SignedEnvelope,
         payload: EntitlementPayload,
-        clearsTerminalMarker: Bool
+        clearsTerminalMarkerNonce: UUID?
     ) async throws {
         let anchor = CommercialTimeAnchor(issuedAt: payload.issuedAt, systemUptime: clock.currentUptime)
         try await worker.saveAccess(
             .active(
                 envelope: envelope,
                 anchor: anchor,
-                clearsTerminalMarker: clearsTerminalMarker
+                clearsTerminalMarkerNonce: clearsTerminalMarkerNonce
             )
         )
         timeAnchor = anchor
@@ -534,13 +557,14 @@ final class CommercialAccessController {
     private func applyTerminal(_ reason: CommercialTerminalReason, token: Int) async throws {
         guard isCurrent(token) else { return }
         terminalDenyActive = true
-        terminalReason = reason
+        let marker = CommercialTerminalMarker(reason: reason)
+        terminalMarker = marker
         clearLocalAccess()
         setState(.free(reason: .serverDenied))
 
         let markerSaved: Bool
         do {
-            try await worker.saveTerminalMarker(reason)
+            try await worker.saveTerminalMarker(marker)
             markerSaved = true
         } catch {
             markerSaved = false

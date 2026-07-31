@@ -295,7 +295,14 @@ final class CommercialAccessControllerTests: XCTestCase {
     func testTombstoneWriteAndFallbackDeleteFailureIsObservableFailClosedAndRetryable() async throws {
         let fixture = try Fixture(now: now)
         fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
-        fixture.store.access = try fixture.entitlement(access: .pro, maximumBuildNumber: 100)
+        let oldNonce = UUID()
+        try fixture.store.saveAccessRecord(
+            .active(
+                envelope: try fixture.entitlement(access: .pro, maximumBuildNumber: 100),
+                anchor: nil,
+                clearsTerminalMarkerNonce: oldNonce
+            )
+        )
         fixture.client.fetchResult = .success(try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day)))
         fixture.client.validateResult = .failure(fixture.serverError("license_refunded"))
         fixture.store.saveAccessError = CommercialCredentialStoreError.keychain(errSecInteractionNotAllowed)
@@ -307,6 +314,7 @@ final class CommercialAccessControllerTests: XCTestCase {
         XCTAssertEqual(controller.state, .free(reason: .serverDenied))
         XCTAssertTrue(controller.hasPendingTerminalCleanup)
         XCTAssertNotNil(fixture.store.access, "failed fallback must be treated as pending, not silently lost")
+        XCTAssertNotEqual(fixture.marker.storedMarker?.nonce, oldNonce)
 
         fixture.client.fetchResult = .failure(URLError(.timedOut))
         let restartedWhileStorageFails = fixture.controller()
@@ -352,7 +360,8 @@ final class CommercialAccessControllerTests: XCTestCase {
     func testSuccessfulActivationClearsMarkerSafelyAndRetriesClearAcrossRestart() async throws {
         let fixture = try Fixture(now: now)
         fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
-        fixture.marker.reason = .revoked
+        let marker = CommercialTerminalMarker(reason: .revoked)
+        fixture.marker.storedMarker = marker
         fixture.client.fetchResult = .failure(URLError(.timedOut))
         fixture.client.activateResult = .success(try fixture.entitlement(access: .pro, maximumBuildNumber: 100))
         let controller = fixture.controller()
@@ -368,6 +377,7 @@ final class CommercialAccessControllerTests: XCTestCase {
         }
         XCTAssertEqual(controller.state, .free(reason: .serverDenied))
         XCTAssertNotNil(fixture.marker.reason)
+        XCTAssertEqual(fixture.store.accessRecord?.clearsTerminalMarkerNonce, marker.nonce)
 
         let restarted = fixture.controller()
         await restarted.refresh()
@@ -379,25 +389,60 @@ final class CommercialAccessControllerTests: XCTestCase {
         XCTAssertNil(fixture.marker.reason)
     }
 
-    func testMarkerCannotBeClearedByNonProAccessRecordFlag() async throws {
+    func testMarkerCannotBeClearedByMismatchedMissingOrTrialNonce() async throws {
+        for scenario in ["mismatch", "missing", "trial"] {
+            let fixture = try Fixture(now: now)
+            fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+            let marker = CommercialTerminalMarker(reason: .revoked)
+            fixture.marker.storedMarker = marker
+            let access: CommercialAccessKind = scenario == "trial" ? .trial : .pro
+            let envelope = try fixture.entitlement(
+                access: access,
+                expiresAt: access == .trial ? now.addingTimeInterval(.day) : nil,
+                maximumBuildNumber: access == .pro ? 100 : nil
+            )
+            let clearingNonce: UUID? = scenario == "missing"
+                ? nil
+                : (scenario == "mismatch" ? UUID() : marker.nonce)
+            try fixture.store.saveAccessRecord(
+                .active(
+                    envelope: envelope,
+                    anchor: CommercialTimeAnchor(issuedAt: now, systemUptime: 1_000),
+                    clearsTerminalMarkerNonce: clearingNonce
+                )
+            )
+            fixture.client.fetchResult = .failure(URLError(.timedOut))
+            let controller = fixture.controller()
+
+            await controller.refresh()
+
+            XCTAssertEqual(controller.state, .free(reason: .serverDenied), scenario)
+            XCTAssertEqual(fixture.marker.storedMarker, marker, scenario)
+        }
+    }
+
+    func testActivationCannotDeleteMarkerReplacedDuringCompareAndClear() async throws {
         let fixture = try Fixture(now: now)
         fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
-        fixture.marker.reason = .revoked
-        let trial = try fixture.entitlement(access: .trial, expiresAt: now.addingTimeInterval(.day))
-        try fixture.store.saveAccessRecord(
-            .active(
-                envelope: trial,
-                anchor: CommercialTimeAnchor(issuedAt: now, systemUptime: 1_000),
-                clearsTerminalMarker: true
-            )
-        )
-        fixture.client.fetchResult = .failure(URLError(.timedOut))
+        let original = CommercialTerminalMarker(reason: .revoked)
+        let replacement = CommercialTerminalMarker(reason: .refunded)
+        fixture.marker.storedMarker = original
+        fixture.client.activateResult = .success(try fixture.entitlement(access: .pro, maximumBuildNumber: 100))
+        fixture.marker.onCompareAndDelete = { [weak markerStore = fixture.marker] _ in
+            markerStore?.storedMarker = replacement
+        }
         let controller = fixture.controller()
 
-        await controller.refresh()
+        do {
+            try await controller.activate(email: "person@example.com", code: "PRIVATE")
+            XCTFail("replacement marker must keep access denied")
+        } catch {
+            XCTAssertEqual(error as? CommercialAccessControllerError, .storage)
+        }
 
         XCTAssertEqual(controller.state, .free(reason: .serverDenied))
-        XCTAssertEqual(fixture.marker.reason, .revoked)
+        XCTAssertEqual(fixture.marker.storedMarker, replacement)
+        XCTAssertEqual(fixture.store.accessRecord?.clearsTerminalMarkerNonce, original.nonce)
     }
 
     func testDeactivateCleanupFailureLeavesPersistentFreeTombstoneAcrossRestart() async throws {
@@ -571,24 +616,34 @@ private final class Fixture {
 }
 
 private final class MemoryTerminalMarkerStore: CommercialTerminalMarkerStoring {
-    var reason: CommercialTerminalReason?
+    var storedMarker: CommercialTerminalMarker?
+    var reason: CommercialTerminalReason? {
+        get { storedMarker?.reason }
+        set { storedMarker = newValue.map { CommercialTerminalMarker(reason: $0) } }
+    }
     var loadError: Error?
     var saveError: Error?
     var deleteError: Error?
+    var onCompareAndDelete: ((UUID?) -> Void)?
 
-    func loadTerminalMarker() throws -> CommercialTerminalReason? {
+    func loadTerminalMarker() throws -> CommercialTerminalMarker? {
         if let loadError { throw loadError }
-        return reason
+        return storedMarker
     }
 
-    func saveTerminalMarker(_ reason: CommercialTerminalReason) throws {
+    func saveTerminalMarker(_ marker: CommercialTerminalMarker) throws {
         if let saveError { throw saveError }
-        self.reason = reason
+        storedMarker = marker
     }
 
-    func deleteTerminalMarker() throws {
+    func compareAndDeleteTerminalMarker(expectedNonce: UUID?) throws -> Bool {
         if let deleteError { throw deleteError }
-        reason = nil
+        if let loadError { throw loadError }
+        onCompareAndDelete?(expectedNonce)
+        onCompareAndDelete = nil
+        guard storedMarker?.nonce == expectedNonce else { return false }
+        storedMarker = nil
+        return true
     }
 }
 
@@ -613,6 +668,7 @@ private final class MemoryCommercialStore: CommercialCredentialStoring {
     var deleteAccessError: Error?
     var saveAccessError: Error?
     var isTerminalTombstone: Bool { record?.status == .terminal }
+    var accessRecord: CommercialAccessRecord? { record }
     func loadPolicyEnvelope() throws -> SignedEnvelope? { policy }
     func savePolicyEnvelope(_ envelope: SignedEnvelope) throws { policy = envelope }
     func loadAccessRecord() throws -> CommercialAccessRecord? {

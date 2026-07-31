@@ -10,9 +10,9 @@ protocol CommercialCredentialStoring: AnyObject {
 }
 
 protocol CommercialTerminalMarkerStoring: AnyObject {
-    func loadTerminalMarker() throws -> CommercialTerminalReason?
-    func saveTerminalMarker(_ reason: CommercialTerminalReason) throws
-    func deleteTerminalMarker() throws
+    func loadTerminalMarker() throws -> CommercialTerminalMarker?
+    func saveTerminalMarker(_ marker: CommercialTerminalMarker) throws
+    func compareAndDeleteTerminalMarker(expectedNonce: UUID?) throws -> Bool
 }
 
 struct CommercialTimeAnchor: Codable, Equatable {
@@ -55,6 +55,16 @@ enum CommercialTerminalReason: String, Codable, Equatable {
     case deviceDeactivated = "device_deactivated"
 }
 
+struct CommercialTerminalMarker: Codable, Equatable {
+    let reason: CommercialTerminalReason
+    let nonce: UUID
+
+    init(reason: CommercialTerminalReason, nonce: UUID = UUID()) {
+        self.reason = reason
+        self.nonce = nonce
+    }
+}
+
 struct CommercialAccessRecord: Codable, Equatable {
     enum Status: String, Codable { case active, terminal }
 
@@ -62,23 +72,23 @@ struct CommercialAccessRecord: Codable, Equatable {
     let envelope: SignedEnvelope?
     let anchor: CommercialTimeAnchor?
     let terminalReason: CommercialTerminalReason?
-    let clearsTerminalMarker: Bool
+    let clearsTerminalMarkerNonce: UUID?
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, status, envelope, anchor, terminalReason, clearsTerminalMarker
+        case schemaVersion, status, envelope, anchor, terminalReason, clearsTerminalMarkerNonce
     }
 
     static func active(
         envelope: SignedEnvelope,
         anchor: CommercialTimeAnchor?,
-        clearsTerminalMarker: Bool = false
+        clearsTerminalMarkerNonce: UUID? = nil
     ) -> Self {
         Self(
             status: .active,
             envelope: envelope,
             anchor: anchor,
             terminalReason: nil,
-            clearsTerminalMarker: clearsTerminalMarker
+            clearsTerminalMarkerNonce: clearsTerminalMarkerNonce
         )
     }
 
@@ -88,7 +98,7 @@ struct CommercialAccessRecord: Codable, Equatable {
             envelope: nil,
             anchor: nil,
             terminalReason: reason,
-            clearsTerminalMarker: false
+            clearsTerminalMarkerNonce: nil
         )
     }
 
@@ -97,13 +107,13 @@ struct CommercialAccessRecord: Codable, Equatable {
         envelope: SignedEnvelope?,
         anchor: CommercialTimeAnchor?,
         terminalReason: CommercialTerminalReason?,
-        clearsTerminalMarker: Bool
+        clearsTerminalMarkerNonce: UUID?
     ) {
         self.status = status
         self.envelope = envelope
         self.anchor = anchor
         self.terminalReason = terminalReason
-        self.clearsTerminalMarker = clearsTerminalMarker
+        self.clearsTerminalMarkerNonce = clearsTerminalMarkerNonce
     }
 
     init(from decoder: Decoder) throws {
@@ -120,9 +130,9 @@ struct CommercialAccessRecord: Codable, Equatable {
         // A damaged monotonic-time anchor must not make a valid paid envelope unreadable.
         anchor = try? container.decodeIfPresent(CommercialTimeAnchor.self, forKey: .anchor)
         terminalReason = try container.decodeIfPresent(CommercialTerminalReason.self, forKey: .terminalReason)
-        clearsTerminalMarker = try container.decodeIfPresent(Bool.self, forKey: .clearsTerminalMarker) ?? false
+        clearsTerminalMarkerNonce = try container.decodeIfPresent(UUID.self, forKey: .clearsTerminalMarkerNonce)
         guard (status == .active && envelope != nil && terminalReason == nil)
-                || (status == .terminal && envelope == nil && terminalReason != nil && !clearsTerminalMarker)
+                || (status == .terminal && envelope == nil && terminalReason != nil && clearsTerminalMarkerNonce == nil)
         else {
             throw DecodingError.dataCorruptedError(
                 forKey: .status,
@@ -139,7 +149,7 @@ struct CommercialAccessRecord: Codable, Equatable {
         try container.encodeIfPresent(envelope, forKey: .envelope)
         try container.encodeIfPresent(anchor, forKey: .anchor)
         try container.encodeIfPresent(terminalReason, forKey: .terminalReason)
-        try container.encode(clearsTerminalMarker, forKey: .clearsTerminalMarker)
+        try container.encodeIfPresent(clearsTerminalMarkerNonce, forKey: .clearsTerminalMarkerNonce)
     }
 }
 
@@ -150,10 +160,12 @@ enum CommercialTerminalMarkerStoreError: Error, Equatable {
 
 final class CommercialTerminalMarkerStore: CommercialTerminalMarkerStoring {
     private static let key = "commercial.terminal-deny.v1"
+    private static let lock = NSLock()
 
     private struct Payload: Codable {
         let schemaVersion: Int
         let reason: CommercialTerminalReason
+        let nonce: UUID
     }
 
     private let defaults: UserDefaults
@@ -162,27 +174,44 @@ final class CommercialTerminalMarkerStore: CommercialTerminalMarkerStoring {
         defaults = userDefaults
     }
 
-    func loadTerminalMarker() throws -> CommercialTerminalReason? {
-        guard let data = defaults.data(forKey: Self.key) else { return nil }
-        guard let payload = try? JSONDecoder().decode(Payload.self, from: data),
-              payload.schemaVersion == 1
-        else { throw CommercialTerminalMarkerStoreError.corruptData }
-        return payload.reason
+    func loadTerminalMarker() throws -> CommercialTerminalMarker? {
+        Self.lock.lock()
+        defer { Self.lock.unlock() }
+        return try loadUnlocked()
     }
 
-    func saveTerminalMarker(_ reason: CommercialTerminalReason) throws {
-        let data = try JSONEncoder().encode(Payload(schemaVersion: 1, reason: reason))
+    func saveTerminalMarker(_ marker: CommercialTerminalMarker) throws {
+        Self.lock.lock()
+        defer { Self.lock.unlock() }
+        let data = try JSONEncoder().encode(
+            Payload(schemaVersion: 1, reason: marker.reason, nonce: marker.nonce)
+        )
         defaults.set(data, forKey: Self.key)
         guard defaults.synchronize() else {
             throw CommercialTerminalMarkerStoreError.persistenceFailed
         }
     }
 
-    func deleteTerminalMarker() throws {
-        defaults.removeObject(forKey: Self.key)
+    func compareAndDeleteTerminalMarker(expectedNonce: UUID?) throws -> Bool {
+        Self.lock.lock()
+        defer { Self.lock.unlock() }
+        let current = try loadUnlocked()
+        guard current?.nonce == expectedNonce else { return false }
+        if current != nil {
+            defaults.removeObject(forKey: Self.key)
+        }
         guard defaults.synchronize() else {
             throw CommercialTerminalMarkerStoreError.persistenceFailed
         }
+        return true
+    }
+
+    private func loadUnlocked() throws -> CommercialTerminalMarker? {
+        guard let data = defaults.data(forKey: Self.key) else { return nil }
+        guard let payload = try? JSONDecoder().decode(Payload.self, from: data),
+              payload.schemaVersion == 1
+        else { throw CommercialTerminalMarkerStoreError.corruptData }
+        return CommercialTerminalMarker(reason: payload.reason, nonce: payload.nonce)
     }
 }
 
