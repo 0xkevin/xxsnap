@@ -1,4 +1,5 @@
 import CryptoKit
+import Security
 import XCTest
 @testable import xxsnap
 
@@ -116,6 +117,44 @@ final class CommercialAccessControllerTests: XCTestCase {
         guard case .pro = paidController.state else { return XCTFail("paid must fail open") }
     }
 
+    func testMissingOrCorruptAnchorFailsOpenForPaidButRequiresValidationForTrial() async throws {
+        for corrupt in [false, true] {
+            let paid = try Fixture(now: now)
+            paid.store.policy = try paid.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+            paid.store.access = try paid.entitlement(access: .pro, maximumBuildNumber: 100)
+            paid.store.anchor = nil
+            paid.store.simulatesCorruptAnchor = corrupt
+            paid.client.fetchResult = .failure(URLError(.timedOut))
+            let paidController = paid.controller()
+            await paidController.refresh()
+            guard case .pro = paidController.state else { return XCTFail("paid anchor corrupt=\(corrupt) must fail open") }
+
+            let trial = try Fixture(now: now)
+            trial.store.policy = try trial.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+            trial.store.access = try trial.entitlement(access: .trial, expiresAt: now.addingTimeInterval(.day))
+            trial.store.anchor = nil
+            trial.store.simulatesCorruptAnchor = corrupt
+            trial.client.fetchResult = .failure(URLError(.timedOut))
+            let trialController = trial.controller()
+            await trialController.refresh()
+            XCTAssertEqual(trialController.state, .free(reason: .clockRequiresValidation))
+        }
+    }
+
+    func testTrialCredentialNeverCallsPaidValidationEndpoint() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        fixture.store.access = try fixture.entitlement(access: .trial, expiresAt: now.addingTimeInterval(.day))
+        fixture.store.anchor = CommercialTimeAnchor(issuedAt: now, systemUptime: 1_000)
+        fixture.client.fetchResult = .success(try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day)))
+        let controller = fixture.controller()
+
+        await controller.refresh()
+
+        XCTAssertEqual(fixture.client.validateCalls, 0)
+        guard case .trial = controller.state else { return XCTFail("trial should remain local") }
+    }
+
     func testPaidPolicyWithoutCredentialAttemptsTrialOnlyOnce() async throws {
         let fixture = try Fixture(now: now)
         fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
@@ -195,6 +234,89 @@ final class CommercialAccessControllerTests: XCTestCase {
         await controller.refresh()
         XCTAssertNotNil(fixture.store.access)
         guard case .pro = controller.state else { return XCTFail("network failure must retain pro") }
+    }
+
+    func testTerminalTombstonePreventsProRecoveryWhenCleanupDeleteFailsAndAfterRestart() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        fixture.store.access = try fixture.entitlement(access: .pro, maximumBuildNumber: 100)
+        fixture.client.fetchResult = .success(try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day)))
+        fixture.client.validateResult = .failure(fixture.serverError("license_revoked"))
+        fixture.store.deleteAccessError = CommercialCredentialStoreError.keychain(errSecInteractionNotAllowed)
+        let controller = fixture.controller()
+
+        await controller.refresh()
+
+        XCTAssertEqual(controller.state, .free(reason: .serverDenied))
+        XCTAssertTrue(fixture.store.isTerminalTombstone)
+        XCTAssertTrue(controller.hasPendingTerminalCleanup)
+
+        fixture.client.fetchResult = .failure(URLError(.timedOut))
+        let restarted = fixture.controller()
+        await restarted.refresh()
+        XCTAssertEqual(restarted.state, .free(reason: .serverDenied))
+        XCTAssertFalse(restarted.canUse(.ocr))
+    }
+
+    func testAllFreePolicyStillWinsWhileTerminalTombstoneAwaitsCleanup() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.store.policy = try fixture.policy(mode: .allFree, expiresAt: now.addingTimeInterval(.day))
+        try fixture.store.saveAccessRecord(.terminal(.revoked))
+        fixture.store.deleteAccessError = CommercialCredentialStoreError.keychain(errSecInteractionNotAllowed)
+        fixture.client.fetchResult = .failure(URLError(.timedOut))
+        let controller = fixture.controller()
+
+        await controller.refresh()
+
+        XCTAssertEqual(controller.state, .allFree)
+        XCTAssertTrue(controller.canUse(.ocr))
+        XCTAssertTrue(controller.hasPendingTerminalCleanup)
+    }
+
+    func testTombstoneWriteAndFallbackDeleteFailureIsObservableFailClosedAndRetryable() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        fixture.store.access = try fixture.entitlement(access: .pro, maximumBuildNumber: 100)
+        fixture.client.fetchResult = .success(try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day)))
+        fixture.client.validateResult = .failure(fixture.serverError("license_refunded"))
+        fixture.store.saveAccessError = CommercialCredentialStoreError.keychain(errSecInteractionNotAllowed)
+        fixture.store.deleteAccessError = CommercialCredentialStoreError.keychain(errSecInteractionNotAllowed)
+        let controller = fixture.controller()
+
+        await controller.refresh()
+
+        XCTAssertEqual(controller.state, .free(reason: .serverDenied))
+        XCTAssertTrue(controller.hasPendingTerminalCleanup)
+        XCTAssertNotNil(fixture.store.access, "failed fallback must be treated as pending, not silently lost")
+
+        fixture.store.deleteAccessError = nil
+        fixture.client.fetchResult = .failure(URLError(.timedOut))
+        await controller.refresh()
+        XCTAssertFalse(controller.hasPendingTerminalCleanup)
+        XCTAssertNil(fixture.store.access)
+        XCTAssertEqual(controller.state, .free(reason: .serverDenied))
+    }
+
+    func testDeactivateCleanupFailureLeavesPersistentFreeTombstoneAcrossRestart() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        fixture.store.access = try fixture.entitlement(access: .pro, maximumBuildNumber: 100)
+        fixture.store.deleteAccessError = CommercialCredentialStoreError.keychain(errSecInteractionNotAllowed)
+        let controller = fixture.controller()
+        await controller.refresh()
+
+        do {
+            try await controller.deactivateCurrentDevice()
+            XCTFail("cleanup failure must be reported")
+        } catch {
+            XCTAssertEqual(error as? CommercialAccessControllerError, .storage)
+        }
+        XCTAssertEqual(controller.state, .free(reason: .serverDenied))
+        XCTAssertTrue(fixture.store.isTerminalTombstone)
+
+        let restarted = fixture.controller()
+        await restarted.refresh()
+        XCTAssertEqual(restarted.state, .free(reason: .serverDenied))
     }
 
     func testActivateAndDeactivateVerifyStoreAndUseAnonymousIdentity() async throws {
@@ -345,15 +467,39 @@ private final class Fixture {
 
 private final class MemoryCommercialStore: CommercialCredentialStoring {
     var policy: SignedEnvelope?
-    var access: SignedEnvelope?
-    var anchor: CommercialTimeAnchor?
+    private var record: CommercialAccessRecord?
+    var access: SignedEnvelope? {
+        get { record?.status == .active ? record?.envelope : nil }
+        set {
+            record = newValue.map { .active(envelope: $0, anchor: anchor) }
+        }
+    }
+    var anchor: CommercialTimeAnchor? {
+        get { record?.anchor }
+        set {
+            if let envelope = record?.envelope {
+                record = .active(envelope: envelope, anchor: newValue)
+            }
+        }
+    }
+    var simulatesCorruptAnchor = false
+    var deleteAccessError: Error?
+    var saveAccessError: Error?
+    var isTerminalTombstone: Bool { record?.status == .terminal }
     func loadPolicyEnvelope() throws -> SignedEnvelope? { policy }
     func savePolicyEnvelope(_ envelope: SignedEnvelope) throws { policy = envelope }
-    func loadAccessEnvelope() throws -> SignedEnvelope? { access }
-    func saveAccessEnvelope(_ envelope: SignedEnvelope) throws { access = envelope }
-    func deleteAccessEnvelope() throws { access = nil; anchor = nil }
-    func loadTimeAnchor() throws -> CommercialTimeAnchor? { anchor }
-    func saveTimeAnchor(_ value: CommercialTimeAnchor) throws { anchor = value }
+    func loadAccessRecord() throws -> CommercialAccessRecord? {
+        guard simulatesCorruptAnchor, let envelope = record?.envelope else { return record }
+        return .active(envelope: envelope, anchor: nil)
+    }
+    func saveAccessRecord(_ value: CommercialAccessRecord) throws {
+        if let saveAccessError { throw saveAccessError }
+        record = value
+    }
+    func deleteAccessRecord() throws {
+        if let deleteAccessError { throw deleteAccessError }
+        record = nil
+    }
 }
 
 private final class FakeCommercialDevice: CommercialDeviceIdentifying {
@@ -377,6 +523,7 @@ private final class FakeCommercialClient: CommercialPolicyFetching {
     var deactivateResult: Result<Void, Error> = .success(())
     var trialCalls = 0
     var fetchCalls = 0
+    var validateCalls = 0
     var lastActivation: CommercialLicenseActivateRequest?
     var lastDeactivation: CommercialLicenseDeactivateRequest?
     var suspendValidation = false
@@ -393,6 +540,7 @@ private final class FakeCommercialClient: CommercialPolicyFetching {
         lastActivation = request; return try activateResult.get()
     }
     func validate(_ request: CommercialLicenseValidateRequest, locale: CommercialLocale) async throws -> SignedEnvelope {
+        validateCalls += 1
         if suspendValidation {
             return try await withCheckedThrowingContinuation { continuation in
                 validateContinuation = continuation

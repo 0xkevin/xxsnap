@@ -4,11 +4,9 @@ import Security
 protocol CommercialCredentialStoring: AnyObject {
     func loadPolicyEnvelope() throws -> SignedEnvelope?
     func savePolicyEnvelope(_ envelope: SignedEnvelope) throws
-    func loadAccessEnvelope() throws -> SignedEnvelope?
-    func saveAccessEnvelope(_ envelope: SignedEnvelope) throws
-    func deleteAccessEnvelope() throws
-    func loadTimeAnchor() throws -> CommercialTimeAnchor?
-    func saveTimeAnchor(_ value: CommercialTimeAnchor) throws
+    func loadAccessRecord() throws -> CommercialAccessRecord?
+    func saveAccessRecord(_ record: CommercialAccessRecord) throws
+    func deleteAccessRecord() throws
 }
 
 struct CommercialTimeAnchor: Codable, Equatable {
@@ -42,6 +40,79 @@ struct CommercialTimeAnchor: Codable, Equatable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(CommercialJSON.string(issuedAt), forKey: .issuedAt)
         try container.encode(systemUptime, forKey: .systemUptime)
+    }
+}
+
+enum CommercialTerminalReason: String, Codable, Equatable {
+    case refunded
+    case revoked
+    case deviceDeactivated = "device_deactivated"
+}
+
+struct CommercialAccessRecord: Codable, Equatable {
+    enum Status: String, Codable { case active, terminal }
+
+    let status: Status
+    let envelope: SignedEnvelope?
+    let anchor: CommercialTimeAnchor?
+    let terminalReason: CommercialTerminalReason?
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, status, envelope, anchor, terminalReason
+    }
+
+    static func active(envelope: SignedEnvelope, anchor: CommercialTimeAnchor?) -> Self {
+        Self(status: .active, envelope: envelope, anchor: anchor, terminalReason: nil)
+    }
+
+    static func terminal(_ reason: CommercialTerminalReason) -> Self {
+        Self(status: .terminal, envelope: nil, anchor: nil, terminalReason: reason)
+    }
+
+    private init(
+        status: Status,
+        envelope: SignedEnvelope?,
+        anchor: CommercialTimeAnchor?,
+        terminalReason: CommercialTerminalReason?
+    ) {
+        self.status = status
+        self.envelope = envelope
+        self.anchor = anchor
+        self.terminalReason = terminalReason
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        guard try container.decode(Int.self, forKey: .schemaVersion) == 1 else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .schemaVersion,
+                in: container,
+                debugDescription: "Unsupported access-record schema"
+            )
+        }
+        status = try container.decode(Status.self, forKey: .status)
+        envelope = try container.decodeIfPresent(SignedEnvelope.self, forKey: .envelope)
+        // A damaged monotonic-time anchor must not make a valid paid envelope unreadable.
+        anchor = try? container.decodeIfPresent(CommercialTimeAnchor.self, forKey: .anchor)
+        terminalReason = try container.decodeIfPresent(CommercialTerminalReason.self, forKey: .terminalReason)
+        guard (status == .active && envelope != nil && terminalReason == nil)
+                || (status == .terminal && envelope == nil && terminalReason != nil)
+        else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .status,
+                in: container,
+                debugDescription: "Inconsistent access record"
+            )
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(1, forKey: .schemaVersion)
+        try container.encode(status, forKey: .status)
+        try container.encodeIfPresent(envelope, forKey: .envelope)
+        try container.encodeIfPresent(anchor, forKey: .anchor)
+        try container.encodeIfPresent(terminalReason, forKey: .terminalReason)
     }
 }
 
@@ -102,7 +173,6 @@ final class CommercialCredentialStore: CommercialCredentialStoring {
     private enum Account {
         static let policy = "policy"
         static let access = "access"
-        static let timeAnchor = "time-anchor"
     }
 
     private let keychain: CommercialKeychainAccessing
@@ -121,25 +191,29 @@ final class CommercialCredentialStore: CommercialCredentialStoring {
         try save(envelope, account: Account.policy)
     }
 
-    func loadAccessEnvelope() throws -> SignedEnvelope? {
-        try load(SignedEnvelope.self, account: Account.access)
+    func loadAccessRecord() throws -> CommercialAccessRecord? {
+        let (status, data) = keychain.copy(service: Self.service, account: Account.access)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess else { throw CommercialCredentialStoreError.keychain(status) }
+        guard let data else { throw CommercialCredentialStoreError.corruptData }
+        if let record = try? decoder.decode(CommercialAccessRecord.self, from: data) {
+            return record
+        }
+        // Commercial storage has not shipped yet. Accept the development-build raw
+        // envelope once; paid stays fail-open, while a legacy trial must revalidate
+        // because its separately stored anchor was not atomic.
+        if let legacyEnvelope = try? decoder.decode(SignedEnvelope.self, from: data) {
+            return .active(envelope: legacyEnvelope, anchor: nil)
+        }
+        throw CommercialCredentialStoreError.corruptData
     }
 
-    func saveAccessEnvelope(_ envelope: SignedEnvelope) throws {
-        try save(envelope, account: Account.access)
+    func saveAccessRecord(_ record: CommercialAccessRecord) throws {
+        try save(record, account: Account.access)
     }
 
-    func deleteAccessEnvelope() throws {
+    func deleteAccessRecord() throws {
         try delete(account: Account.access)
-        try delete(account: Account.timeAnchor)
-    }
-
-    func loadTimeAnchor() throws -> CommercialTimeAnchor? {
-        try load(CommercialTimeAnchor.self, account: Account.timeAnchor)
-    }
-
-    func saveTimeAnchor(_ value: CommercialTimeAnchor) throws {
-        try save(value, account: Account.timeAnchor)
     }
 
     private func load<Value: Decodable>(_ type: Value.Type, account: String) throws -> Value? {

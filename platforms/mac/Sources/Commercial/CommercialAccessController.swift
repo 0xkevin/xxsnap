@@ -9,6 +9,7 @@ enum CommercialFreeReason: Equatable {
     case trialExpired
     case buildNotEligible
     case clockRequiresValidation
+    case serverDenied
 }
 
 struct CommercialEntitlement: Equatable {
@@ -48,13 +49,9 @@ private actor CommercialCredentialWorker {
 
     func loadPolicy() throws -> SignedEnvelope? { try store.loadPolicyEnvelope() }
     func savePolicy(_ envelope: SignedEnvelope) throws { try store.savePolicyEnvelope(envelope) }
-    func loadAccess() throws -> SignedEnvelope? { try store.loadAccessEnvelope() }
-    func saveAccess(_ envelope: SignedEnvelope, anchor: CommercialTimeAnchor) throws {
-        try store.saveAccessEnvelope(envelope)
-        try store.saveTimeAnchor(anchor)
-    }
-    func deleteAccess() throws { try store.deleteAccessEnvelope() }
-    func loadAnchor() throws -> CommercialTimeAnchor? { try store.loadTimeAnchor() }
+    func loadAccess() throws -> CommercialAccessRecord? { try store.loadAccessRecord() }
+    func saveAccess(_ record: CommercialAccessRecord) throws { try store.saveAccessRecord(record) }
+    func deleteAccess() throws { try store.deleteAccessRecord() }
 }
 
 private actor CommercialDeviceWorker {
@@ -87,6 +84,8 @@ final class CommercialAccessController {
     private var timeAnchor: CommercialTimeAnchor?
     private var generation = 0
     private var trialRequestAttempted = false
+    private var terminalDenyActive = false
+    private(set) var hasPendingTerminalCleanup = false
 
     init(
         store: CommercialCredentialStoring,
@@ -140,9 +139,9 @@ final class CommercialAccessController {
         switch state {
         case .allFree, .allFreeGrace, .trial, .pro:
             return true
-        case let .free(reason):
+        case .free:
             guard let policy else { return false }
-            if policy.mode == .allFree, reason == .policyExpired {
+            if policy.mode == .allFree {
                 return false
             }
             return !policy.features[feature]
@@ -151,6 +150,14 @@ final class CommercialAccessController {
 
     func refresh() async {
         let token = beginOperation()
+        if terminalDenyActive, hasPendingTerminalCleanup {
+            do {
+                try await worker.deleteAccess()
+                hasPendingTerminalCleanup = false
+            } catch {
+                hasPendingTerminalCleanup = true
+            }
+        }
         await loadLocalState(token: token)
         guard isCurrent(token) else { return }
         resolveState()
@@ -165,9 +172,11 @@ final class CommercialAccessController {
             resolveState()
             guard verified.mode == .paid else { return }
 
-            if let accessEnvelope {
+            if let accessEnvelope, entitlement?.access == .pro {
                 await validateCachedAccess(accessEnvelope, token: token)
-            } else if !trialRequestAttempted {
+            } else if entitlement?.access == .trial {
+                return
+            } else if !terminalDenyActive, !trialRequestAttempted {
                 trialRequestAttempted = true
                 await requestTrial(token: token)
             }
@@ -197,6 +206,8 @@ final class CommercialAccessController {
         guard isCurrent(token) else { return }
         accessEnvelope = envelope
         entitlement = payload
+        terminalDenyActive = false
+        hasPendingTerminalCleanup = false
         resolveState()
     }
 
@@ -206,7 +217,7 @@ final class CommercialAccessController {
         if let accessEnvelope {
             envelope = accessEnvelope
         } else {
-            envelope = try? await worker.loadAccess()
+            envelope = try? await worker.loadAccess()?.envelope
         }
         guard let envelope else {
             throw CommercialAccessControllerError.noCredential
@@ -229,19 +240,14 @@ final class CommercialAccessController {
             try await client.deactivate(request, locale: locale)
         } catch {
             if Self.isTerminal(error) {
-                try? await worker.deleteAccess()
-                guard isCurrent(token) else { return }
-                clearLocalAccess()
-                resolveState()
+                let reason = Self.terminalReason(error) ?? .deviceDeactivated
+                try await applyTerminal(reason, token: token)
                 return
             }
             throw sanitized(error)
         }
         guard isCurrent(token) else { return }
-        do { try await worker.deleteAccess() }
-        catch { throw CommercialAccessControllerError.storage }
-        clearLocalAccess()
-        resolveState()
+        try await applyTerminal(.deviceDeactivated, token: token)
     }
 
     private func loadLocalState(token: Int) async {
@@ -265,11 +271,26 @@ final class CommercialAccessController {
 
         do {
             let cachedAccess = try await worker.loadAccess()
-            let cachedAnchor = try await worker.loadAnchor()
             guard isCurrent(token) else { return }
-            accessEnvelope = cachedAccess
-            entitlement = try cachedAccess.map(verifier.verifyEntitlement)
-            timeAnchor = cachedAnchor
+            if cachedAccess?.status == .terminal {
+                terminalDenyActive = true
+                clearLocalAccess()
+                setState(.free(reason: .serverDenied))
+                do {
+                    try await worker.deleteAccess()
+                    hasPendingTerminalCleanup = false
+                } catch {
+                    hasPendingTerminalCleanup = true
+                }
+                return
+            }
+            if terminalDenyActive {
+                clearLocalAccess()
+                return
+            }
+            accessEnvelope = cachedAccess?.envelope
+            entitlement = try cachedAccess?.envelope.map(verifier.verifyEntitlement)
+            timeAnchor = cachedAccess?.anchor
             if let entitlement {
                 let hash = try await deviceWorker.hash()
                 guard isCurrent(token) else { return }
@@ -281,9 +302,13 @@ final class CommercialAccessController {
                 }
             }
         } catch {
-            accessEnvelope = nil
-            entitlement = nil
-            timeAnchor = nil
+            // A transient Keychain/anchor read failure must not revoke an already
+            // verified paid credential held by this controller. Trials fail closed.
+            if entitlement?.access != .pro {
+                accessEnvelope = nil
+                entitlement = nil
+                timeAnchor = nil
+            }
         }
     }
 
@@ -303,10 +328,8 @@ final class CommercialAccessController {
             resolveState()
         } catch {
             guard isCurrent(token), Self.isTerminal(error) else { return }
-            try? await worker.deleteAccess()
-            guard isCurrent(token) else { return }
-            clearLocalAccess()
-            resolveState()
+            let reason = Self.terminalReason(error) ?? .revoked
+            try? await applyTerminal(reason, token: token)
         }
     }
 
@@ -324,6 +347,7 @@ final class CommercialAccessController {
             guard isCurrent(token) else { return }
             accessEnvelope = envelope
             entitlement = payload
+            terminalDenyActive = false
             resolveState()
         } catch {
             // A trial is server-owned and one-time. Keep the deterministic free state.
@@ -342,6 +366,10 @@ final class CommercialAccessController {
                 setState(.allFreeGrace(until: graceUntil))
                 return
             }
+        }
+        if terminalDenyActive {
+            setState(.free(reason: .serverDenied))
+            return
         }
 
         if let entitlement, entitlement.issuedAt <= effective.now {
@@ -428,8 +456,42 @@ final class CommercialAccessController {
 
     private func persistAccess(_ envelope: SignedEnvelope, payload: EntitlementPayload) async throws {
         let anchor = CommercialTimeAnchor(issuedAt: payload.issuedAt, systemUptime: clock.currentUptime)
-        try await worker.saveAccess(envelope, anchor: anchor)
+        try await worker.saveAccess(.active(envelope: envelope, anchor: anchor))
         timeAnchor = anchor
+    }
+
+    private func applyTerminal(_ reason: CommercialTerminalReason, token: Int) async throws {
+        guard isCurrent(token) else { return }
+        do {
+            try await worker.saveAccess(.terminal(reason))
+        } catch {
+            // If the atomic deny write itself is unavailable, removing the old
+            // credential is the only safe fallback.
+            do { try await worker.deleteAccess() }
+            catch {
+                terminalDenyActive = true
+                hasPendingTerminalCleanup = true
+                clearLocalAccess()
+                setState(.free(reason: .serverDenied))
+                throw CommercialAccessControllerError.storage
+            }
+            terminalDenyActive = true
+            hasPendingTerminalCleanup = false
+            clearLocalAccess()
+            setState(.free(reason: .serverDenied))
+            throw CommercialAccessControllerError.storage
+        }
+        guard isCurrent(token) else { return }
+        terminalDenyActive = true
+        clearLocalAccess()
+        setState(.free(reason: .serverDenied))
+        do {
+            try await worker.deleteAccess()
+            hasPendingTerminalCleanup = false
+        } catch {
+            hasPendingTerminalCleanup = true
+            throw CommercialAccessControllerError.storage
+        }
     }
 
     private func clearLocalAccess() {
@@ -459,7 +521,16 @@ final class CommercialAccessController {
     }
 
     private static func isTerminal(_ error: Error) -> Bool {
-        guard case let CommercialPolicyClientError.server(_, detail) = error else { return false }
-        return ["license_refunded", "license_revoked", "device_deactivated"].contains(detail.code)
+        terminalReason(error) != nil
+    }
+
+    private static func terminalReason(_ error: Error) -> CommercialTerminalReason? {
+        guard case let CommercialPolicyClientError.server(_, detail) = error else { return nil }
+        switch detail.code {
+        case "license_refunded": return .refunded
+        case "license_revoked": return .revoked
+        case "device_deactivated": return .deviceDeactivated
+        default: return nil
+        }
     }
 }

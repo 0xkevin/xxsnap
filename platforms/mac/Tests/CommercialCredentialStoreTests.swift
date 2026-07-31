@@ -4,26 +4,74 @@ import XCTest
 @testable import xxsnap
 
 final class CommercialCredentialStoreTests: XCTestCase {
-    func testKeychainStoreAddsLoadsUpdatesAndDeletesSeparateAccounts() throws {
+    func testKeychainStoreAtomicallyStoresEnvelopeAndAnchorInOneAccessAccount() throws {
         let keychain = FakeCommercialKeychain()
         let store = CommercialCredentialStore(keychain: keychain)
         let first = envelope("first")
         let second = envelope("second")
+        let firstAnchor = anchor(issuedAt: 1_000)
+        let secondAnchor = anchor(issuedAt: 2_000)
 
         XCTAssertNil(try store.loadPolicyEnvelope())
         try store.savePolicyEnvelope(first)
-        try store.saveAccessEnvelope(first)
+        try store.saveAccessRecord(.active(envelope: first, anchor: firstAnchor))
         XCTAssertEqual(try store.loadPolicyEnvelope(), first)
-        XCTAssertEqual(try store.loadAccessEnvelope(), first)
+        XCTAssertEqual(
+            try store.loadAccessRecord(),
+            .active(envelope: first, anchor: firstAnchor)
+        )
 
-        try store.saveAccessEnvelope(second)
-        XCTAssertEqual(try store.loadAccessEnvelope(), second)
+        try store.saveAccessRecord(.active(envelope: second, anchor: secondAnchor))
+        XCTAssertEqual(
+            try store.loadAccessRecord(),
+            .active(envelope: second, anchor: secondAnchor)
+        )
         XCTAssertEqual(keychain.addedAccounts, ["policy", "access"])
         XCTAssertEqual(keychain.updatedAccounts, ["access"])
 
-        try store.deleteAccessEnvelope()
-        XCTAssertNil(try store.loadAccessEnvelope())
+        try store.deleteAccessRecord()
+        XCTAssertNil(try store.loadAccessRecord())
         XCTAssertEqual(try store.loadPolicyEnvelope(), first)
+    }
+
+    func testFailedAtomicUpdateLeavesPreviousEnvelopeAndAnchorTogether() throws {
+        let keychain = FakeCommercialKeychain()
+        let store = CommercialCredentialStore(keychain: keychain)
+        let original = CommercialAccessRecord.active(envelope: envelope("old"), anchor: anchor(issuedAt: 1_000))
+        try store.saveAccessRecord(original)
+        keychain.updateStatus = errSecInteractionNotAllowed
+
+        XCTAssertThrowsError(
+            try store.saveAccessRecord(.active(envelope: envelope("new"), anchor: anchor(issuedAt: 2_000)))
+        ) {
+            XCTAssertEqual($0 as? CommercialCredentialStoreError, .keychain(errSecInteractionNotAllowed))
+        }
+
+        keychain.updateStatus = nil
+        XCTAssertEqual(try store.loadAccessRecord(), original)
+    }
+
+    func testCorruptAnchorDoesNotHideValidEnvelopeAndLegacyRawEnvelopeFailsSafeForTrial() throws {
+        let keychain = FakeCommercialKeychain()
+        let store = CommercialCredentialStore(keychain: keychain)
+        let validEnvelope = envelope("paid")
+        let recordData = try JSONEncoder().encode(
+            CommercialAccessRecord.active(envelope: validEnvelope, anchor: anchor(issuedAt: 1_000))
+        )
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: recordData) as? [String: Any])
+        object["anchor"] = "damaged"
+        keychain.items["access"] = try JSONSerialization.data(withJSONObject: object)
+
+        XCTAssertEqual(
+            try store.loadAccessRecord(),
+            .active(envelope: validEnvelope, anchor: nil)
+        )
+
+        keychain.items["access"] = try JSONEncoder().encode(validEnvelope)
+        XCTAssertEqual(
+            try store.loadAccessRecord(),
+            .active(envelope: validEnvelope, anchor: nil)
+        )
     }
 
     func testKeychainStorePropagatesErrorsAndRejectsCorruptData() throws {
@@ -35,7 +83,7 @@ final class CommercialCredentialStoreTests: XCTestCase {
         }
 
         keychain.copyStatus = errSecAuthFailed
-        XCTAssertThrowsError(try store.loadAccessEnvelope()) {
+        XCTAssertThrowsError(try store.loadAccessRecord()) {
             XCTAssertEqual($0 as? CommercialCredentialStoreError, .keychain(errSecAuthFailed))
         }
     }
@@ -57,24 +105,20 @@ final class CommercialCredentialStoreTests: XCTestCase {
         let deleteKeychain = FakeCommercialKeychain()
         deleteKeychain.items["access"] = Data()
         deleteKeychain.deleteStatus = errSecAuthFailed
-        XCTAssertThrowsError(try CommercialCredentialStore(keychain: deleteKeychain).deleteAccessEnvelope()) {
+        XCTAssertThrowsError(try CommercialCredentialStore(keychain: deleteKeychain).deleteAccessRecord()) {
             XCTAssertEqual($0 as? CommercialCredentialStoreError, .keychain(errSecAuthFailed))
         }
     }
 
-    func testAnchorUsesDedicatedKeychainAccountAndNeverUserDefaults() throws {
+    func testTerminalTombstoneReplacesCredentialInSameAccessAccount() throws {
         let keychain = FakeCommercialKeychain()
         let store = CommercialCredentialStore(keychain: keychain)
-        let anchor = CommercialTimeAnchor(
-            issuedAt: Date(timeIntervalSince1970: 1_000),
-            systemUptime: 123
-        )
+        try store.saveAccessRecord(.active(envelope: envelope("private"), anchor: anchor(issuedAt: 1_000)))
+        try store.saveAccessRecord(.terminal(.revoked))
 
-        try store.saveTimeAnchor(anchor)
-        XCTAssertEqual(try store.loadTimeAnchor(), anchor)
-        XCTAssertEqual(keychain.addedAccounts, ["time-anchor"])
-        try store.deleteAccessEnvelope()
-        XCTAssertNil(try store.loadTimeAnchor())
+        XCTAssertEqual(try store.loadAccessRecord(), .terminal(.revoked))
+        XCTAssertEqual(keychain.addedAccounts, ["access"])
+        XCTAssertEqual(keychain.updatedAccounts, ["access"])
     }
 
     func testDeviceIdentityProducesStableLowercaseHashAndTruncatesDisplayName() throws {
@@ -102,6 +146,10 @@ final class CommercialCredentialStoreTests: XCTestCase {
 
     private func envelope(_ value: String) -> SignedEnvelope {
         SignedEnvelope(keyId: "key", payload: Data(value.utf8).base64EncodedString(), signature: String(repeating: "A", count: 88))
+    }
+
+    private func anchor(issuedAt: TimeInterval) -> CommercialTimeAnchor {
+        CommercialTimeAnchor(issuedAt: Date(timeIntervalSince1970: issuedAt), systemUptime: 123)
     }
 }
 
