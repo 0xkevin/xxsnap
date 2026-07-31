@@ -123,12 +123,56 @@ private final class EntryTestRefreshableCommercialAccess: CommercialAccessRefres
 
 @MainActor
 final class CommercialFeatureEntryTests: XCTestCase {
-    func testXCTestLaunchSkipsProductionCommercialDependenciesAndRefresh() async {
+#if DEBUG
+    func testXCTestEnvironmentWithoutRuntimeUsesProductionCommercialDependencies() async {
+        let productionAccess = EntryTestRefreshableCommercialAccess()
+        var controllerCreations = 0
+        let dependencies = CommercialLaunchDependencies.make(
+            runtimeContext: CommercialRuntimeContext(
+                environment: ["XCTestConfigurationFilePath": "/tmp/xxsnap-tests.xctestconfiguration"],
+                hasXCTestRuntime: false
+            )
+        ) {
+            controllerCreations += 1
+            return productionAccess
+        }
+
+        await dependencies.refresh()
+
+        XCTAssertEqual(controllerCreations, 1)
+        XCTAssertEqual(productionAccess.refreshCount, 1)
+        XCTAssertTrue(dependencies.access === productionAccess)
+    }
+
+    func testXCTestRuntimeWithoutEnvironmentUsesProductionCommercialDependencies() async {
+        let productionAccess = EntryTestRefreshableCommercialAccess()
+        var controllerCreations = 0
+        let dependencies = CommercialLaunchDependencies.make(
+            runtimeContext: CommercialRuntimeContext(
+                environment: [:],
+                hasXCTestRuntime: true
+            )
+        ) {
+            controllerCreations += 1
+            return productionAccess
+        }
+
+        await dependencies.refresh()
+
+        XCTAssertEqual(controllerCreations, 1)
+        XCTAssertEqual(productionAccess.refreshCount, 1)
+        XCTAssertTrue(dependencies.access === productionAccess)
+    }
+
+    func testDebugXCTestEnvironmentAndRuntimeSkipProductionCommercialDependencies() async {
         var controllerCreations = 0
         var networkClientCreations = 0
         var keychainStoreCreations = 0
         let dependencies = CommercialLaunchDependencies.make(
-            environment: ["XCTestConfigurationFilePath": "/tmp/xxsnap-tests.xctestconfiguration"]
+            runtimeContext: CommercialRuntimeContext(
+                environment: ["XCTestConfigurationFilePath": "/tmp/xxsnap-tests.xctestconfiguration"],
+                hasXCTestRuntime: true
+            )
         ) {
             controllerCreations += 1
             networkClientCreations += 1
@@ -148,12 +192,21 @@ final class CommercialFeatureEntryTests: XCTestCase {
         )
     }
 
+    func testCurrentRuntimeContextRecognizesHostedXCTest() {
+        XCTAssertTrue(CommercialRuntimeContext.current.isXCTestHost)
+    }
+
     func testNormalLaunchCreatesAndRefreshesProductionCommercialControllerOnce() async {
         let productionAccess = EntryTestRefreshableCommercialAccess()
         var controllerCreations = 0
         var networkClientCreations = 0
         var keychainStoreCreations = 0
-        let dependencies = CommercialLaunchDependencies.make(environment: [:]) {
+        let dependencies = CommercialLaunchDependencies.make(
+            runtimeContext: CommercialRuntimeContext(
+                environment: [:],
+                hasXCTestRuntime: false
+            )
+        ) {
             controllerCreations += 1
             networkClientCreations += 1
             keychainStoreCreations += 1
@@ -168,6 +221,7 @@ final class CommercialFeatureEntryTests: XCTestCase {
         XCTAssertEqual(productionAccess.refreshCount, 1)
         XCTAssertTrue(dependencies.access === productionAccess)
     }
+#endif
 
     func testCommercialFeatureListContainsOnlyTheThreeProFeatures() {
         XCTAssertEqual(

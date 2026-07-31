@@ -1,5 +1,27 @@
 import AppKit
 
+#if DEBUG
+struct CommercialRuntimeContext {
+    let environment: [String: String]
+    let hasXCTestRuntime: Bool
+
+    var isXCTestHost: Bool {
+        environment["XCTestConfigurationFilePath"] != nil && hasXCTestRuntime
+    }
+
+    static var current: CommercialRuntimeContext {
+        let hasXCTestCase = NSClassFromString("XCTestCase") != nil
+        let hasLoadedTestBundle = Bundle.allBundles.contains {
+            $0.bundleURL.pathExtension == "xctest"
+        }
+        return CommercialRuntimeContext(
+            environment: ProcessInfo.processInfo.environment,
+            hasXCTestRuntime: hasXCTestCase && hasLoadedTestBundle
+        )
+    }
+}
+#endif
+
 @MainActor
 struct CommercialLaunchDependencies {
     typealias ProductionFactory = @MainActor () throws -> any CommercialAccessRefreshing
@@ -8,16 +30,36 @@ struct CommercialLaunchDependencies {
     private let refreshHandler: @MainActor () async -> Void
 
     static func make(
-        environment: [String: String] = ProcessInfo.processInfo.environment,
         productionFactory: ProductionFactory = { try CommercialAccessController() }
     ) -> CommercialLaunchDependencies {
-        guard environment["XCTestConfigurationFilePath"] == nil else {
+#if DEBUG
+        return make(
+            runtimeContext: .current,
+            productionFactory: productionFactory
+        )
+#else
+        return makeProduction(productionFactory: productionFactory)
+#endif
+    }
+
+#if DEBUG
+    static func make(
+        runtimeContext: CommercialRuntimeContext,
+        productionFactory: ProductionFactory
+    ) -> CommercialLaunchDependencies {
+        if runtimeContext.isXCTestHost {
             return CommercialLaunchDependencies(
                 access: UnrestrictedCommercialAccess.shared,
                 refreshHandler: {}
             )
         }
+        return makeProduction(productionFactory: productionFactory)
+    }
+#endif
 
+    private static func makeProduction(
+        productionFactory: ProductionFactory
+    ) -> CommercialLaunchDependencies {
         guard let controller = try? productionFactory() else {
             return CommercialLaunchDependencies(
                 access: UnavailableCommercialAccess(),
