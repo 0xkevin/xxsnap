@@ -100,6 +100,8 @@ struct SelectionOverlayConfiguration {
     var initialSelectionCornerRadius: CGFloat?
     var showsBackgroundSnapshot: Bool = true
     var shortcutFeedbackHandler: ((NSEvent) -> Void)?
+    var pinToolbarShortcut: SelectionToolbarState.ToolbarShortcut? =
+        SelectionToolbarState.defaultPinShortcut
 
     static let `default` = SelectionOverlayConfiguration(
         windowFrame: nil,
@@ -1143,6 +1145,13 @@ final class SelectionOverlayWindow: NSWindow {
     func test_tooltipText(for button: TestToolbarButton) -> String? {
         (contentView as? SelectionOverlayView)?.test_tooltipText(for: button)
     }
+
+    func test_toolbarShortcut(
+        for button: TestToolbarButton
+    ) -> SelectionToolbarState.ToolbarShortcut? {
+        (contentView as? SelectionOverlayView)?.test_toolbarShortcut(for: button)
+    }
+
     func test_setLockedSelectionRect(_ rect: NSRect) {
         (contentView as? SelectionOverlayView)?.test_setLockedSelectionRect(rect)
     }
@@ -4003,7 +4012,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
 
         if let button = shortcutToolbarButtons().first(where: { button in
-            SelectionToolbarState.toolbarShortcut(for: tooltipIdentifier(for: button))?.matches(
+            toolbarShortcut(for: tooltipIdentifier(for: button))?.matches(
                 charactersIgnoringModifiers: event.charactersIgnoringModifiers,
                 modifierFlags: event.modifierFlags
             ) == true
@@ -4028,6 +4037,15 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
 
         return false
+    }
+
+    private func toolbarShortcut(
+        for identifier: String
+    ) -> SelectionToolbarState.ToolbarShortcut? {
+        SelectionToolbarState.toolbarShortcut(
+            for: identifier,
+            pinShortcut: configuration.pinToolbarShortcut
+        )
     }
 
     func finishPinnedImageEditingForEscape() -> Bool {
@@ -7534,6 +7552,51 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
     func test_tooltipText(for button: TestToolbarButton) -> String? {
         guard let point = test_mainToolbarButtonPoint(for: button) else { return nil }
         return tooltipTarget(at: point)?.text
+    }
+
+    func test_toolbarShortcut(
+        for button: TestToolbarButton
+    ) -> SelectionToolbarState.ToolbarShortcut? {
+        let identifier: String
+        switch button {
+        case .rectangle:
+            identifier = "rectangle"
+        case .arrow:
+            identifier = "polyline"
+        case .pen:
+            identifier = "pen"
+        case .marker:
+            identifier = "marker"
+        case .eyedropper:
+            identifier = "eyedropper"
+        case .mosaic:
+            identifier = "mosaic"
+        case .text:
+            identifier = "text"
+        case .number:
+            identifier = "number"
+        case .magnifier:
+            identifier = "magnifier"
+        case .eraser:
+            identifier = "eraser"
+        case .undo:
+            identifier = "undo"
+        case .redo:
+            identifier = "redo"
+        case .cancel:
+            identifier = "cancel"
+        case .pin:
+            identifier = "pin"
+        case .save:
+            identifier = "save"
+        case .copy:
+            identifier = "copy"
+        case .scroll:
+            identifier = "scroll"
+        case .finishEditing:
+            identifier = "finishEditing"
+        }
+        return toolbarShortcut(for: identifier)
     }
 
     var test_isPinnedImageDragInProgress: Bool {
@@ -13380,6 +13443,11 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         let rectInContainer: NSRect
         if textLength == 0 || layoutManager.numberOfGlyphs == 0 {
             rectInContainer = layoutManager.extraLineFragmentRect
+        } else if selectedLocation >= textLength,
+                  textEditor.string.last?.isNewline == true {
+            var lineStartRect = layoutManager.extraLineFragmentRect
+            lineStartRect.size.width = 1
+            rectInContainer = lineStartRect
         } else if selectedLocation >= textLength {
             let glyphRange = NSRange(location: max(0, layoutManager.numberOfGlyphs - 1), length: 1)
             var lastGlyphRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
@@ -14125,7 +14193,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             .font: samplerInfoFont(ofSize: 12, weight: .medium),
             .foregroundColor: NSColor.white,
         ]
-        let shortcut = SelectionToolbarState.toolbarShortcut(for: hoveredTooltip.identifier)
+        let shortcut = toolbarShortcut(for: hoveredTooltip.identifier)
         let hasShortcutIcon = shortcut?.iconName != nil
         let iconSize: CGFloat = hasShortcutIcon ? 12 : 0
         let iconSpacing: CGFloat = hasShortcutIcon ? 3 : 0

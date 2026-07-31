@@ -525,6 +525,7 @@ final class CaptureCoordinator {
             case .teachingPen:
                 configuration = .teachingPen(windowFrame: SelectionOverlayWindow.desktopFrame())
             }
+            configuration.pinToolbarShortcut = Self.pinToolbarShortcut(from: settings)
             configuration.shortcutFeedbackHandler = { [weak self] event in
                 self?.shortcutFeedbackDidRequest?(event)
             }
@@ -1596,6 +1597,18 @@ final class CaptureCoordinator {
             date: date,
             timeZone: timeZone
         )) ?? "xxsnap_截图.png"
+    }
+
+    nonisolated static func pinToolbarShortcut(
+        from settings: AppSettings
+    ) -> SelectionToolbarState.ToolbarShortcut? {
+        let action = HotKeyAction.restoreMostRecentlyHiddenPinnedImage
+        guard !settings.disabledHotkeys.contains(action.rawValue) else {
+            return nil
+        }
+        return HotKeyFormatter.toolbarShortcut(
+            from: settings.hotkeys[action.rawValue] ?? action.defaultSettings
+        )
     }
 }
 

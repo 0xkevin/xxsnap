@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import XCTest
 @testable import xxsnap
 
@@ -2670,6 +2671,25 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(insertionRect.minX, contentOrigin.x, accuracy: 2)
     }
 
+    func testTextAnnotationReturnAtEndMovesDrawnCaretToNewLineStart() throws {
+        let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 500, height: 300))
+        window.test_activateTextTool()
+
+        window.test_mouseDown(at: NSPoint(x: 140, y: 180))
+        window.test_mouseUp(at: NSPoint(x: 140, y: 180))
+
+        let editor = try XCTUnwrap(window.firstResponder as? NSTextView)
+        editor.insertText("第一行", replacementRange: editor.selectedRange())
+        editor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+
+        let contentOrigin = try XCTUnwrap(window.test_textEditorContentOrigin())
+        let caretRect = try XCTUnwrap(window.test_editingTextCaretDrawRect())
+        XCTAssertEqual(editor.string, "第一行\n")
+        XCTAssertEqual(editor.selectedRange().location, (editor.string as NSString).length)
+        XCTAssertEqual(caretRect.minX, contentOrigin.x, accuracy: 2)
+    }
+
     func testTextEditingFallbackReturnUsesCurrentCaretInsteadOfAppending() throws {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         let selection = NSRect(x: 100, y: 100, width: 1_400, height: 500)
@@ -3182,6 +3202,108 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         XCTAssertEqual(result?.action, .pin)
         XCTAssertEqual(feedback.map(HotKeyFormatter.displayString), "⌘1")
+    }
+
+    func testF1CompletesSelectionAsPinWhenConfigured() {
+        var result: CaptureSelectionResult?
+        var feedback: HotKeySettings?
+        let expectation = expectation(description: "dynamic pin shortcut")
+        var configuration = SelectionOverlayConfiguration.default
+        configuration.pinToolbarShortcut = HotKeyFormatter.toolbarShortcut(
+            from: HotKeySettings(keyCode: UInt32(kVK_F1), modifiers: 0)
+        )
+        configuration.shortcutFeedbackHandler = { event in
+            feedback = HotKeyFormatter.settings(from: event)
+        }
+        let window = SelectionOverlayWindow(
+            backgroundImage: nil,
+            configuration: configuration
+        ) { selectionResult in
+            result = selectionResult
+            expectation.fulfill()
+        }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+
+        window.test_keyDown(
+            keyCode: UInt16(kVK_F1),
+            charactersIgnoringModifiers: String(UnicodeScalar(NSF1FunctionKey)!),
+            modifierFlags: []
+        )
+        wait(for: [expectation], timeout: 0.5)
+
+        XCTAssertEqual(result?.action, .pin)
+        XCTAssertEqual(feedback.map(HotKeyFormatter.displayString), "F1")
+    }
+
+    func testCommandOneDoesNotPinWhenPinShortcutIsCleared() {
+        let expectation = expectation(description: "cleared pin shortcut does not complete")
+        expectation.isInverted = true
+        var configuration = SelectionOverlayConfiguration.default
+        configuration.pinToolbarShortcut = nil
+        let window = SelectionOverlayWindow(
+            backgroundImage: nil,
+            configuration: configuration
+        ) { _ in
+            expectation.fulfill()
+        }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+
+        XCTAssertFalse(
+            window.test_handleKeyDown(
+                keyCode: UInt16(kVK_ANSI_1),
+                charactersIgnoringModifiers: "1",
+                modifierFlags: [.command]
+            )
+        )
+        wait(for: [expectation], timeout: 0.1)
+    }
+
+    func testCommandOneDoesNotPinAfterPinShortcutChangesToF1() {
+        let expectation = expectation(description: "old pin shortcut does not complete")
+        expectation.isInverted = true
+        var configuration = SelectionOverlayConfiguration.default
+        configuration.pinToolbarShortcut = HotKeyFormatter.toolbarShortcut(
+            from: HotKeySettings(keyCode: UInt32(kVK_F1), modifiers: 0)
+        )
+        let window = SelectionOverlayWindow(
+            backgroundImage: nil,
+            configuration: configuration
+        ) { _ in
+            expectation.fulfill()
+        }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+
+        XCTAssertFalse(
+            window.test_handleKeyDown(
+                keyCode: UInt16(kVK_ANSI_1),
+                charactersIgnoringModifiers: "1",
+                modifierFlags: [.command]
+            )
+        )
+        wait(for: [expectation], timeout: 0.1)
+    }
+
+    func testOverlayResolvesConfiguredPinShortcutForKeyboardAndTooltipMetadata() throws {
+        var configuration = SelectionOverlayConfiguration.default
+        configuration.pinToolbarShortcut = HotKeyFormatter.toolbarShortcut(
+            from: HotKeySettings(keyCode: UInt32(kVK_F1), modifiers: 0)
+        )
+        let configuredWindow = SelectionOverlayWindow(
+            backgroundImage: nil,
+            configuration: configuration
+        ) { _ in }
+
+        XCTAssertEqual(
+            try XCTUnwrap(configuredWindow.test_toolbarShortcut(for: .pin)).displayText,
+            "F1"
+        )
+
+        configuration.pinToolbarShortcut = nil
+        let clearedWindow = SelectionOverlayWindow(
+            backgroundImage: nil,
+            configuration: configuration
+        ) { _ in }
+        XCTAssertNil(clearedWindow.test_toolbarShortcut(for: .pin))
     }
 
     func testToolbarToolShortcutsSelectMatchingButtonForLowercaseAndShiftUppercase() {
@@ -16886,6 +17008,69 @@ final class SelectionToolbarStateTests: XCTestCase {
             XCTAssertEqual(shortcut?.key, expectedShortcut.key, identifier)
             XCTAssertEqual(shortcut?.modifiers, expectedShortcut.modifiers, identifier)
         }
+    }
+
+    func testToolbarPinShortcutCanUseDynamicFunctionKeyOrBeEmpty() throws {
+        let f1 = try XCTUnwrap(
+            HotKeyFormatter.toolbarShortcut(
+                from: HotKeySettings(keyCode: UInt32(kVK_F1), modifiers: 0)
+            )
+        )
+
+        XCTAssertEqual(
+            SelectionToolbarState.toolbarShortcut(for: "pin", pinShortcut: f1),
+            f1
+        )
+        XCTAssertNil(
+            SelectionToolbarState.toolbarShortcut(for: "pin", pinShortcut: nil)
+        )
+        XCTAssertEqual(f1.displayText, "F1")
+
+        let defaultPin = try XCTUnwrap(
+            SelectionToolbarState.toolbarShortcut(for: "pin")
+        )
+        XCTAssertEqual(defaultPin.key, "1")
+        XCTAssertEqual(defaultPin.modifiers, [.command])
+    }
+
+    func testFixedToolbarShortcutConflictUsesActualToolbarMatchingRules() {
+        XCTAssertEqual(
+            SelectionToolbarState.fixedShortcutConflict(
+                for: HotKeySettings(
+                    keyCode: UInt32(kVK_ANSI_S),
+                    modifiers: UInt32(shiftKey)
+                )
+            ),
+            .rectangle
+        )
+        XCTAssertEqual(
+            SelectionToolbarState.fixedShortcutConflict(
+                for: HotKeySettings(
+                    keyCode: UInt32(kVK_ANSI_Z),
+                    modifiers: UInt32(cmdKey | shiftKey)
+                )
+            ),
+            .redo
+        )
+        XCTAssertEqual(
+            SelectionToolbarState.fixedShortcutConflict(
+                for: HotKeySettings(keyCode: UInt32(kVK_Escape), modifiers: 0)
+            ),
+            .cancel
+        )
+        XCTAssertNil(
+            SelectionToolbarState.fixedShortcutConflict(
+                for: HotKeySettings(keyCode: UInt32(kVK_F1), modifiers: 0)
+            )
+        )
+        XCTAssertNil(
+            SelectionToolbarState.fixedShortcutConflict(
+                for: HotKeySettings(
+                    keyCode: UInt32(kVK_ANSI_1),
+                    modifiers: UInt32(cmdKey)
+                )
+            )
+        )
     }
 
     func testToolbarShortcutMatchingIsCaseInsensitiveAndRequiresExactRelevantModifiers() throws {

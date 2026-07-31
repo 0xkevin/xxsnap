@@ -26,6 +26,33 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.license.plan, .trial)
     }
 
+    func testCaptureCoordinatorResolvesConfiguredPinFunctionKey() throws {
+        var settings = AppSettings.default
+        settings.hotkeys[HotKeyAction.restoreMostRecentlyHiddenPinnedImage.rawValue] =
+            HotKeySettings(keyCode: UInt32(kVK_F1), modifiers: 0)
+
+        let shortcut = try XCTUnwrap(
+            CaptureCoordinator.pinToolbarShortcut(from: settings)
+        )
+
+        XCTAssertEqual(shortcut.displayText, "F1")
+        XCTAssertEqual(
+            CaptureCoordinator.pinToolbarShortcut(from: .default),
+            SelectionToolbarState.defaultPinShortcut
+        )
+    }
+
+    func testCaptureCoordinatorClearsDisabledPinShortcut() {
+        var settings = AppSettings.default
+        settings.hotkeys[HotKeyAction.restoreMostRecentlyHiddenPinnedImage.rawValue] =
+            HotKeySettings(keyCode: UInt32(kVK_F1), modifiers: 0)
+        settings.disabledHotkeys.insert(
+            HotKeyAction.restoreMostRecentlyHiddenPinnedImage.rawValue
+        )
+
+        XCTAssertNil(CaptureCoordinator.pinToolbarShortcut(from: settings))
+    }
+
     func testSettingsStoreDecodesExistingSettingsWithoutDisabledHotKeys() {
         let suiteName = "com.snipory.tests.settings.migration.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -291,7 +318,7 @@ final class AppSettingsTests: XCTestCase {
 
     @MainActor
     func testHotKeyControllerStillRejectsStandaloneOrdinaryKeys() {
-        for keyCode in [kVK_ANSI_A, kVK_ANSI_1] {
+        for keyCode in [kVK_ANSI_Q, kVK_ANSI_1] {
             let store = FakeAppSettingsStore()
             let registrar = FakeGlobalHotKeyRegistrar()
             let controller = makeHotKeyController(store: store, registrar: registrar)
@@ -302,6 +329,35 @@ final class AppSettingsTests: XCTestCase {
                 equals: .missingModifier
             )
         }
+    }
+
+    @MainActor
+    func testHotKeyControllerRejectsFixedToolbarShortcutWithoutChangingState() {
+        let store = FakeAppSettingsStore()
+        let registrar = FakeGlobalHotKeyRegistrar()
+        let controller = makeHotKeyController(store: store, registrar: registrar)
+        let shortcut = HotKeySettings(
+            keyCode: UInt32(kVK_ANSI_S),
+            modifiers: UInt32(cmdKey)
+        )
+
+        assertHotKeyFailure(
+            controller.apply(shortcut, to: .capture),
+            equals: .fixedToolbarConflict(.save)
+        )
+        XCTAssertEqual(
+            controller.configuredHotKey(for: .capture),
+            HotKeyAction.capture.defaultSettings
+        )
+        XCTAssertEqual(
+            controller.registeredHotKey(for: .capture),
+            HotKeyAction.capture.defaultSettings
+        )
+        XCTAssertEqual(
+            registrar.registered[.capture],
+            HotKeyAction.capture.defaultSettings
+        )
+        XCTAssertNil(store.settings.hotkeys[HotKeyAction.capture.rawValue])
     }
 
     @MainActor
@@ -448,13 +504,110 @@ final class AppSettingsTests: XCTestCase {
 
         assertHotKeyFailure(
             controller.apply(restoreShortcut, to: .capture),
-            equals: .duplicate
+            equals: .configurableConflict(.restoreMostRecentlyHiddenPinnedImage)
         )
         XCTAssertEqual(
             controller.configuredHotKey(for: .capture),
             HotKeyAction.capture.defaultSettings
         )
         XCTAssertEqual(registrar.registered[.capture], HotKeyAction.capture.defaultSettings)
+    }
+
+    @MainActor
+    func testHotKeyControllerReportsConfigurableConflictBeforeReplacement() {
+        let store = FakeAppSettingsStore()
+        let registrar = FakeGlobalHotKeyRegistrar()
+        let controller = makeHotKeyController(store: store, registrar: registrar)
+        let occupied = controller.configuredHotKey(for: .recognizeText)
+        let originalRegistrations = registrar.registered
+
+        assertHotKeyFailure(
+            controller.apply(occupied, to: .capture),
+            equals: .configurableConflict(.recognizeText)
+        )
+
+        XCTAssertEqual(
+            controller.configuredHotKey(for: .capture),
+            HotKeyAction.capture.defaultSettings
+        )
+        XCTAssertEqual(controller.configuredHotKey(for: .recognizeText), occupied)
+        XCTAssertTrue(controller.isHotKeyEnabled(for: .capture))
+        XCTAssertTrue(controller.isHotKeyEnabled(for: .recognizeText))
+        XCTAssertEqual(registrar.registered, originalRegistrations)
+    }
+
+    @MainActor
+    func testHotKeyControllerReplacesConfigurableConflictAndClearsPreviousAction() {
+        let store = FakeAppSettingsStore()
+        let registrar = FakeGlobalHotKeyRegistrar()
+        let controller = makeHotKeyController(store: store, registrar: registrar)
+        let occupied = controller.configuredHotKey(for: .recognizeText)
+
+        assertHotKeySuccess(
+            controller.apply(occupied, to: .capture, replacing: .recognizeText)
+        )
+
+        XCTAssertEqual(controller.registeredHotKey(for: .capture), occupied)
+        XCTAssertEqual(registrar.registered[.capture], occupied)
+        XCTAssertFalse(controller.isHotKeyEnabled(for: .recognizeText))
+        XCTAssertNil(controller.registeredHotKey(for: .recognizeText))
+        XCTAssertNil(registrar.registered[.recognizeText])
+        XCTAssertTrue(
+            store.settings.disabledHotkeys.contains(HotKeyAction.recognizeText.rawValue)
+        )
+        XCTAssertNil(store.settings.hotkeys[HotKeyAction.recognizeText.rawValue])
+    }
+
+    @MainActor
+    func testHotKeyControllerRollsBackBothActionsWhenReplacementPersistenceFails() {
+        let store = FakeAppSettingsStore()
+        let registrar = FakeGlobalHotKeyRegistrar()
+        let controller = makeHotKeyController(store: store, registrar: registrar)
+        let oldCapture = controller.configuredHotKey(for: .capture)
+        let occupied = controller.configuredHotKey(for: .recognizeText)
+        let originalStoreSettings = store.settings
+        let originalRegistrations = registrar.registered
+        store.shouldFailSave = true
+
+        assertHotKeyFailure(
+            controller.apply(occupied, to: .capture, replacing: .recognizeText),
+            equals: .persistenceFailed
+        )
+
+        XCTAssertEqual(controller.configuredHotKey(for: .capture), oldCapture)
+        XCTAssertEqual(controller.configuredHotKey(for: .recognizeText), occupied)
+        XCTAssertTrue(controller.isHotKeyEnabled(for: .capture))
+        XCTAssertTrue(controller.isHotKeyEnabled(for: .recognizeText))
+        XCTAssertEqual(registrar.registered, originalRegistrations)
+        XCTAssertEqual(store.settings, originalStoreSettings)
+        XCTAssertNil(controller.errors[.capture])
+        XCTAssertNil(controller.errors[.recognizeText])
+    }
+
+    @MainActor
+    func testHotKeyControllerRollsBackBothActionsWhenReplacementRegistrationFails() {
+        let store = FakeAppSettingsStore()
+        let registrar = FakeGlobalHotKeyRegistrar()
+        let controller = makeHotKeyController(store: store, registrar: registrar)
+        let oldCapture = controller.configuredHotKey(for: .capture)
+        let occupied = controller.configuredHotKey(for: .recognizeText)
+        let originalStoreSettings = store.settings
+        let originalRegistrations = registrar.registered
+        registrar.failedSettings[.capture] = occupied
+
+        assertHotKeyFailure(
+            controller.apply(occupied, to: .capture, replacing: .recognizeText),
+            equals: .registrationFailed(FakeGlobalHotKeyRegistrar.failureStatus)
+        )
+
+        XCTAssertEqual(controller.configuredHotKey(for: .capture), oldCapture)
+        XCTAssertEqual(controller.configuredHotKey(for: .recognizeText), occupied)
+        XCTAssertTrue(controller.isHotKeyEnabled(for: .capture))
+        XCTAssertTrue(controller.isHotKeyEnabled(for: .recognizeText))
+        XCTAssertEqual(registrar.registered, originalRegistrations)
+        XCTAssertEqual(store.settings, originalStoreSettings)
+        XCTAssertNil(controller.errors[.capture])
+        XCTAssertNil(controller.errors[.recognizeText])
     }
 
     @MainActor
@@ -498,6 +651,35 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(
             controller.registeredHotKey(for: .restoreMostRecentlyHiddenPinnedImage),
             HotKeyAction.restoreMostRecentlyHiddenPinnedImage.defaultSettings
+        )
+    }
+
+    @MainActor
+    func testFixedToolbarConflictRemainsRejectedAfterCaptureSessionEnds() {
+        let store = FakeAppSettingsStore()
+        let shortcut = HotKeySettings(
+            keyCode: UInt32(kVK_ANSI_S),
+            modifiers: UInt32(cmdKey)
+        )
+        store.settings.hotkeys = [
+            HotKeyAction.restoreMostRecentlyHiddenPinnedImage.rawValue: shortcut
+        ]
+        let registrar = FakeGlobalHotKeyRegistrar()
+        let controller = makeHotKeyController(store: store, registrar: registrar)
+
+        XCTAssertNil(controller.registeredHotKey(for: .restoreMostRecentlyHiddenPinnedImage))
+        XCTAssertEqual(
+            controller.errors[.restoreMostRecentlyHiddenPinnedImage],
+            .fixedToolbarConflict(.save)
+        )
+
+        controller.setCaptureSessionActive(true)
+        controller.setCaptureSessionActive(false)
+
+        XCTAssertNil(controller.registeredHotKey(for: .restoreMostRecentlyHiddenPinnedImage))
+        XCTAssertEqual(
+            controller.errors[.restoreMostRecentlyHiddenPinnedImage],
+            .fixedToolbarConflict(.save)
         )
     }
 
@@ -1240,6 +1422,162 @@ final class AppSettingsTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testShortcutRecorderConfirmsBeforeReplacingAnotherConfigurableAction() throws {
+        let settingsStore = FakeAppSettingsStore()
+        let registrar = FakeGlobalHotKeyRegistrar()
+        let hotKeyController = makeHotKeyController(
+            store: settingsStore,
+            registrar: registrar
+        )
+        let controller = PreferencesWindowController(
+            settingsStore: settingsStore,
+            preferencesSettingsStore: FakePreferencesSettingsStore(),
+            hotKeyController: hotKeyController,
+            launchAtLoginManager: FakeLaunchAtLoginManager(),
+            updateChecker: FakeUpdateChecker()
+        )
+        defer {
+            controller.window?.sheets.forEach { controller.window?.endSheet($0) }
+            controller.close()
+        }
+        let originalRegistrations = registrar.registered
+
+        controller.show(section: .shortcuts)
+        let recorder = try captureShortcutRecorder(in: controller)
+        try recordCommandShortcut(
+            on: recorder,
+            keyCode: HotKeyAction.recognizeText.defaultSettings.keyCode,
+            characters: "3"
+        )
+
+        XCTAssertTrue(waitUntil { controller.window?.sheets.count == 1 })
+        let sheet = try XCTUnwrap(controller.window?.sheets.first)
+        let sheetText = descendants(of: sheet.contentView, matching: NSTextField.self)
+            .map(\.stringValue)
+            .joined(separator: " ")
+        XCTAssertTrue(sheetText.contains("识别文字"))
+        XCTAssertEqual(registrar.registered, originalRegistrations)
+        XCTAssertTrue(hotKeyController.isHotKeyEnabled(for: .capture))
+        XCTAssertTrue(hotKeyController.isHotKeyEnabled(for: .recognizeText))
+
+        let replaceButton = try XCTUnwrap(
+            descendants(of: sheet.contentView, matching: NSButton.self)
+                .first { $0.title == "覆盖" }
+        )
+        replaceButton.performClick(nil)
+
+        XCTAssertTrue(waitUntil {
+            registrar.registered[.capture] == HotKeyAction.recognizeText.defaultSettings
+                && controller.window?.sheets.isEmpty == true
+        })
+        XCTAssertEqual(
+            registrar.registered[.capture],
+            HotKeyAction.recognizeText.defaultSettings
+        )
+        XCTAssertNil(registrar.registered[.recognizeText])
+        XCTAssertFalse(hotKeyController.isHotKeyEnabled(for: .recognizeText))
+        XCTAssertTrue(
+            settingsStore.settings.disabledHotkeys.contains(
+                HotKeyAction.recognizeText.rawValue
+            )
+        )
+        XCTAssertNil(
+            settingsStore.settings.hotkeys[HotKeyAction.recognizeText.rawValue]
+        )
+    }
+
+    @MainActor
+    func testShortcutRecorderCancelsConfigurableConflictWithoutChangingAssignments() throws {
+        let settingsStore = FakeAppSettingsStore()
+        let registrar = FakeGlobalHotKeyRegistrar()
+        let hotKeyController = makeHotKeyController(
+            store: settingsStore,
+            registrar: registrar
+        )
+        let controller = PreferencesWindowController(
+            settingsStore: settingsStore,
+            preferencesSettingsStore: FakePreferencesSettingsStore(),
+            hotKeyController: hotKeyController,
+            launchAtLoginManager: FakeLaunchAtLoginManager(),
+            updateChecker: FakeUpdateChecker()
+        )
+        defer {
+            controller.window?.sheets.forEach { controller.window?.endSheet($0) }
+            controller.close()
+        }
+        let originalRegistrations = registrar.registered
+        let originalSettings = settingsStore.settings
+
+        controller.show(section: .shortcuts)
+        let recorder = try captureShortcutRecorder(in: controller)
+        try recordCommandShortcut(
+            on: recorder,
+            keyCode: HotKeyAction.recognizeText.defaultSettings.keyCode,
+            characters: "3"
+        )
+
+        XCTAssertTrue(waitUntil { controller.window?.sheets.count == 1 })
+        let sheet = try XCTUnwrap(controller.window?.sheets.first)
+        let cancelButton = try XCTUnwrap(
+            descendants(of: sheet.contentView, matching: NSButton.self)
+                .first { $0.title == "取消" }
+        )
+        cancelButton.performClick(nil)
+
+        XCTAssertTrue(waitUntil { controller.window?.sheets.isEmpty == true })
+        XCTAssertEqual(registrar.registered, originalRegistrations)
+        XCTAssertEqual(settingsStore.settings, originalSettings)
+        XCTAssertTrue(hotKeyController.isHotKeyEnabled(for: .capture))
+        XCTAssertTrue(hotKeyController.isHotKeyEnabled(for: .recognizeText))
+    }
+
+    @MainActor
+    func testShortcutRecorderRejectsFixedToolbarConflictWithNamedMessage() throws {
+        let settingsStore = FakeAppSettingsStore()
+        let registrar = FakeGlobalHotKeyRegistrar()
+        let hotKeyController = makeHotKeyController(
+            store: settingsStore,
+            registrar: registrar
+        )
+        let controller = PreferencesWindowController(
+            settingsStore: settingsStore,
+            preferencesSettingsStore: FakePreferencesSettingsStore(),
+            hotKeyController: hotKeyController,
+            launchAtLoginManager: FakeLaunchAtLoginManager(),
+            updateChecker: FakeUpdateChecker()
+        )
+        defer {
+            controller.window?.sheets.forEach { controller.window?.endSheet($0) }
+            controller.close()
+        }
+        let originalRegistrations = registrar.registered
+        let originalSettings = settingsStore.settings
+
+        controller.show(section: .shortcuts)
+        let recorder = try captureShortcutRecorder(in: controller)
+        try recordCommandShortcut(
+            on: recorder,
+            keyCode: UInt32(kVK_ANSI_S),
+            characters: "s"
+        )
+
+        XCTAssertTrue(waitUntil { controller.window?.sheets.count == 1 })
+        let sheet = try XCTUnwrap(controller.window?.sheets.first)
+        let sheetText = descendants(of: sheet.contentView, matching: NSTextField.self)
+            .map(\.stringValue)
+            .joined(separator: " ")
+        XCTAssertTrue(sheetText.contains("与“保存”快捷键冲突"))
+        let buttons = descendants(of: sheet.contentView, matching: NSButton.self)
+        XCTAssertEqual(buttons.count, 1)
+        buttons.first?.performClick(nil)
+
+        XCTAssertTrue(waitUntil { controller.window?.sheets.isEmpty == true })
+        XCTAssertEqual(registrar.registered, originalRegistrations)
+        XCTAssertEqual(settingsStore.settings, originalSettings)
+        XCTAssertTrue(hotKeyController.isHotKeyEnabled(for: .capture))
+    }
+
     func testPreferencesMenuUsesRequestedLowerSectionTitles() {
         let chinese = PreferencesStrings(language: .zhHans)
         XCTAssertEqual(chinese.preferences, "偏好设置…")
@@ -1270,6 +1608,49 @@ final class AppSettingsTests: XCTestCase {
         )
         XCTAssertEqual(english.aboutXxSnap, "About...")
         XCTAssertEqual(english.quit, "Quit")
+    }
+
+    func testShortcutConflictMessagesNameActionsInBothLanguages() {
+        let chinese = PreferencesStrings(language: .zhHans)
+        XCTAssertEqual(
+            chinese.fixedShortcutConflict(.rectangle),
+            "与“形状”快捷键冲突，禁止覆盖，请重新设置！"
+        )
+        XCTAssertEqual(chinese.hotKeyActionName(.recognizeText), "识别文字")
+        XCTAssertEqual(chinese.fixedShortcutName(.rectangle), "形状")
+        XCTAssertEqual(chinese.fixedShortcutName(.cancel), "取消 / 完成编辑")
+        XCTAssertTrue(chinese.configurableShortcutConflict(.recognizeText).contains("识别文字"))
+        XCTAssertTrue(chinese.configurableShortcutConflict(.recognizeText).contains("是否覆盖"))
+        XCTAssertTrue(chinese.configurableShortcutConflict(.recognizeText).contains("清空"))
+        XCTAssertEqual(chinese.replaceShortcut, "覆盖")
+        XCTAssertEqual(chinese.cancelShortcutReplacement, "取消")
+
+        let english = PreferencesStrings(language: .english)
+        XCTAssertEqual(
+            english.fixedShortcutConflict(.rectangle),
+            "This shortcut conflicts with “Shape”. It cannot be overridden. Choose another shortcut."
+        )
+        XCTAssertEqual(english.hotKeyActionName(.recognizeText), "Capture Text")
+        XCTAssertEqual(english.fixedShortcutName(.rectangle), "Shape")
+        XCTAssertEqual(english.fixedShortcutName(.cancel), "Cancel / Finish Editing")
+        XCTAssertTrue(english.configurableShortcutConflict(.recognizeText).contains("Capture Text"))
+        XCTAssertTrue(english.configurableShortcutConflict(.recognizeText).contains("Replace"))
+        XCTAssertTrue(english.configurableShortcutConflict(.recognizeText).contains("cleared"))
+        XCTAssertEqual(english.replaceShortcut, "Replace")
+        XCTAssertEqual(english.cancelShortcutReplacement, "Cancel")
+
+        for shortcut in FixedToolbarShortcut.allCases where shortcut != .cancel {
+            XCTAssertEqual(
+                chinese.fixedShortcutName(shortcut),
+                L10n(language: .zhHans).toolbarTooltip(for: shortcut.rawValue),
+                "Chinese \(shortcut.rawValue)"
+            )
+            XCTAssertEqual(
+                english.fixedShortcutName(shortcut),
+                L10n(language: .english).toolbarTooltip(for: shortcut.rawValue),
+                "English \(shortcut.rawValue)"
+            )
+        }
     }
 
     func testPreferencesWindowRetainsSettingsTitle() {
@@ -1759,6 +2140,58 @@ final class AppSettingsTests: XCTestCase {
         return root.subviews.flatMap { view in
             ([view as? View].compactMap { $0 }) + descendants(of: view, matching: type)
         }
+    }
+
+    @MainActor
+    private func captureShortcutRecorder(
+        in controller: PreferencesWindowController
+    ) throws -> NSButton {
+        let rows = descendants(
+            of: controller.window?.contentView,
+            matching: NSStackView.self
+        ).filter { $0.identifier?.rawValue == "shortcutRow" }
+        let captureControl = try XCTUnwrap(rows.first?.arrangedSubviews.last)
+        return try XCTUnwrap(
+            descendants(of: captureControl, matching: NSButton.self)
+                .first { $0.identifier?.rawValue == "shortcutRecorderButton" }
+        )
+    }
+
+    @MainActor
+    private func recordCommandShortcut(
+        on recorder: NSButton,
+        keyCode: UInt32,
+        characters: String
+    ) throws {
+        recorder.performClick(nil)
+        let event = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [.command],
+            timestamp: 0,
+            windowNumber: recorder.window?.windowNumber ?? 0,
+            context: nil,
+            characters: characters,
+            charactersIgnoringModifiers: characters,
+            isARepeat: false,
+            keyCode: UInt16(keyCode)
+        ))
+        XCTAssertTrue(recorder.performKeyEquivalent(with: event))
+    }
+
+    @MainActor
+    private func waitUntil(
+        timeout: TimeInterval = 1,
+        _ condition: () -> Bool
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition(), Date() < deadline {
+            RunLoop.current.run(
+                mode: .default,
+                before: Date().addingTimeInterval(0.01)
+            )
+        }
+        return condition()
     }
 
     @MainActor

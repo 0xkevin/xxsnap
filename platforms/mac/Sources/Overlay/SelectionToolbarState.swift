@@ -1,5 +1,24 @@
 import AppKit
 
+enum FixedToolbarShortcut: String, Equatable, CaseIterable {
+    case rectangle
+    case polyline
+    case pen
+    case marker
+    case eyedropper
+    case mosaic
+    case text
+    case number
+    case magnifier
+    case eraser
+    case scroll
+    case undo
+    case redo
+    case cancel
+    case save
+    case copy
+}
+
 enum SelectionToolbarState {
     struct ToolbarShortcut: Equatable {
         let key: String
@@ -24,6 +43,13 @@ enum SelectionToolbarState {
         }
     }
 
+    static let defaultPinShortcut = ToolbarShortcut(
+        key: "1",
+        modifiers: .command,
+        iconName: "command",
+        displayText: "1"
+    )
+
     private static let toolbarShortcuts: [String: ToolbarShortcut] = {
         let command = NSEvent.ModifierFlags.command
         return [
@@ -41,7 +67,6 @@ enum SelectionToolbarState {
             "undo": ToolbarShortcut(key: "z", modifiers: command, iconName: "command", displayText: "Z"),
             "redo": ToolbarShortcut(key: "z", modifiers: [command, .shift], iconName: "command", displayText: "⇧Z"),
             "cancel": ToolbarShortcut(key: "\u{1b}", modifiers: [], iconName: nil, displayText: "ESC"),
-            "pin": ToolbarShortcut(key: "1", modifiers: command, iconName: "command", displayText: "1"),
             "save": ToolbarShortcut(key: "s", modifiers: command, iconName: "command", displayText: "S"),
             "copy": ToolbarShortcut(key: "c", modifiers: command, iconName: "command", displayText: "C"),
             "finishEditing": ToolbarShortcut(key: "\u{1b}", modifiers: [], iconName: nil, displayText: "ESC"),
@@ -309,8 +334,26 @@ enum SelectionToolbarState {
         L10n(language: language).toolbarTooltip(for: identifier)
     }
 
-    static func toolbarShortcut(for identifier: String) -> ToolbarShortcut? {
-        toolbarShortcuts[identifier]
+    static func toolbarShortcut(
+        for identifier: String,
+        pinShortcut: ToolbarShortcut? = defaultPinShortcut
+    ) -> ToolbarShortcut? {
+        if identifier == "pin" {
+            return pinShortcut
+        }
+        return toolbarShortcuts[identifier]
+    }
+
+    static func fixedShortcutConflict(for settings: HotKeySettings) -> FixedToolbarShortcut? {
+        guard let candidate = HotKeyFormatter.toolbarShortcut(from: settings) else {
+            return nil
+        }
+        return FixedToolbarShortcut.allCases.first { shortcut in
+            toolbarShortcuts[shortcut.rawValue]?.matches(
+                charactersIgnoringModifiers: candidate.key,
+                modifierFlags: candidate.modifiers
+            ) == true
+        }
     }
 
     static func tooltipShortcutIconImage(named name: String, tint: NSColor, size: CGFloat) -> NSImage? {

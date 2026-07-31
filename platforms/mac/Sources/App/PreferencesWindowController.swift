@@ -379,11 +379,7 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
         }
         recorder.onRecorded = { [weak self] settings in
             guard let self else { return }
-            let result = self.hotKeyController.apply(settings, to: action)
-            if case .failure(let error) = result {
-                self.presentHotKeyError(error)
-            }
-            self.refresh()
+            self.applyRecordedShortcut(settings, to: action)
         }
 
         let row = makeRow(title: title, detail: detail, control: recorder)
@@ -899,11 +895,62 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
         NSWorkspace.shared.open(url)
     }
 
+    private func applyRecordedShortcut(
+        _ settings: HotKeySettings,
+        to action: HotKeyAction
+    ) {
+        switch hotKeyController.apply(settings, to: action) {
+        case .success:
+            refresh()
+        case .failure(.configurableConflict(let existingAction)):
+            presentReplacementConfirmation(
+                settings,
+                target: action,
+                existing: existingAction
+            )
+        case .failure(let error):
+            presentHotKeyError(error)
+            refresh()
+        }
+    }
+
+    private func presentReplacementConfirmation(
+        _ settings: HotKeySettings,
+        target: HotKeyAction,
+        existing: HotKeyAction
+    ) {
+        guard let window else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = strings.errorTitle
+        alert.informativeText = strings.configurableShortcutConflict(existing)
+        alert.addButton(withTitle: strings.replaceShortcut)
+        alert.addButton(withTitle: strings.cancelShortcutReplacement)
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self else { return }
+            if response == .alertFirstButtonReturn {
+                let result = self.hotKeyController.apply(
+                    settings,
+                    to: target,
+                    replacing: existing
+                )
+                if case .failure(let error) = result {
+                    self.presentHotKeyError(error)
+                }
+            }
+            self.refresh()
+        }
+    }
+
     private func presentHotKeyError(_ error: HotKeyConfigurationError) {
         let message: String
         switch error {
         case .captureInProgress:
             message = strings.captureInProgress
+        case .fixedToolbarConflict(let shortcut):
+            message = strings.fixedShortcutConflict(shortcut)
+        case .configurableConflict(let action):
+            message = strings.configurableShortcutConflict(action)
         case .missingModifier:
             message = strings.shortcutNeedsModifier
         case .duplicate:
@@ -919,6 +966,10 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
     private func localizedHotKeyError(_ error: HotKeyConfigurationError) -> String {
         switch error {
         case .captureInProgress: return strings.captureInProgress
+        case .fixedToolbarConflict(let shortcut):
+            return strings.fixedShortcutConflict(shortcut)
+        case .configurableConflict(let action):
+            return strings.configurableShortcutConflict(action)
         case .missingModifier: return strings.shortcutNeedsModifier
         case .duplicate: return strings.shortcutConflict
         case .registrationFailed: return strings.shortcutRegistrationFailed

@@ -378,6 +378,8 @@ struct PreferencesStrings {
     var shortcutConflict: String {
         isEnglish ? "This shortcut is already in use." : "该快捷键已被占用。"
     }
+    var replaceShortcut: String { isEnglish ? "Replace" : "覆盖" }
+    var cancelShortcutReplacement: String { isEnglish ? "Cancel" : "取消" }
     var shortcutRegistrationFailed: String {
         isEnglish ? "The shortcut could not be registered." : "快捷键注册失败。"
     }
@@ -398,6 +400,51 @@ struct PreferencesStrings {
     var copyright: String { isEnglish ? "Copyright © 2026 xxsofts.com" : "版权所有 © 2026 xxsofts.com" }
     var saveFailed: String { isEnglish ? "The setting could not be saved." : "设置保存失败。" }
     var errorTitle: String { isEnglish ? "XxSnap Error" : "XxSnap 错误" }
+
+    func hotKeyActionName(_ action: HotKeyAction) -> String {
+        switch action {
+        case .capture:
+            return isEnglish ? "Capture" : "截图"
+        case .fullScreenCapture:
+            return isEnglish ? "Full Screen Capture" : "全屏截图"
+        case .recognizeText:
+            return isEnglish ? "Capture Text" : "识别文字"
+        case .teachingPen:
+            return isEnglish ? "Presentation Pen" : "教笔"
+        case .restoreMostRecentlyHiddenPinnedImage:
+            return isEnglish
+                ? "Restore Most Recently Hidden Pin"
+                : "恢复最近隐藏的贴图"
+        }
+    }
+
+    func fixedShortcutName(_ shortcut: FixedToolbarShortcut) -> String {
+        switch shortcut {
+        case .cancel:
+            return isEnglish
+                ? "Cancel / Finish Editing"
+                : "取消 / 完成编辑"
+        case .rectangle, .polyline, .pen, .marker, .eyedropper, .mosaic,
+             .text, .number, .magnifier, .eraser, .scroll, .undo, .redo,
+             .save, .copy:
+            return L10n(language: language).toolbarTooltip(for: shortcut.rawValue)
+                ?? shortcut.rawValue
+        }
+    }
+
+    func fixedShortcutConflict(_ shortcut: FixedToolbarShortcut) -> String {
+        let actionName = fixedShortcutName(shortcut)
+        return isEnglish
+            ? "This shortcut conflicts with “\(actionName)”. It cannot be overridden. Choose another shortcut."
+            : "与“\(actionName)”快捷键冲突，禁止覆盖，请重新设置！"
+    }
+
+    func configurableShortcutConflict(_ action: HotKeyAction) -> String {
+        let actionName = hotKeyActionName(action)
+        return isEnglish
+            ? "This shortcut is assigned to “\(actionName)”. Replace it? The shortcut for “\(actionName)” will be cleared."
+            : "该快捷键已分配给“\(actionName)”。是否覆盖？覆盖后将清空“\(actionName)”的快捷键。"
+    }
 
     func filenameTemplateError(_ error: Error) -> String {
         guard let error = error as? FilenameTemplateError else {

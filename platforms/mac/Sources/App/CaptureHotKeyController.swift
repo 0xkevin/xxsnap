@@ -39,6 +39,8 @@ enum HotKeyAction: String, CaseIterable {
 
 enum HotKeyConfigurationError: LocalizedError, Equatable {
     case captureInProgress
+    case fixedToolbarConflict(FixedToolbarShortcut)
+    case configurableConflict(HotKeyAction)
     case missingModifier
     case duplicate
     case registrationFailed(OSStatus)
@@ -48,6 +50,10 @@ enum HotKeyConfigurationError: LocalizedError, Equatable {
         switch self {
         case .captureInProgress:
             return "截图进行中"
+        case .fixedToolbarConflict:
+            return "快捷键与截图工具栏快捷键冲突"
+        case .configurableConflict:
+            return "快捷键已被其他动作使用"
         case .missingModifier:
             return "快捷键必须包含修饰键"
         case .duplicate:
@@ -250,36 +256,58 @@ final class CaptureHotKeyController {
 
     func apply(
         _ settings: HotKeySettings,
-        to action: HotKeyAction
+        to action: HotKeyAction,
+        replacing requestedReplacement: HotKeyAction? = nil
     ) -> Result<Void, HotKeyConfigurationError> {
         guard !isCaptureSessionActive else {
             return .failure(.captureInProgress)
         }
+        if let conflict = SelectionToolbarState.fixedShortcutConflict(for: settings) {
+            return .failure(.fixedToolbarConflict(conflict))
+        }
         guard HotKeyFormatter.isValidGlobalShortcut(settings) else {
             return .failure(.missingModifier)
         }
-        guard !configured.contains(where: {
-            $0.key != action && !disabledActions.contains($0.key) && $0.value == settings
-        }) else {
-            return .failure(.duplicate)
+        let occupant = HotKeyAction.allCases.first {
+            $0 != action
+                && !disabledActions.contains($0)
+                && configuredHotKey(for: $0) == settings
+        }
+        if let occupant, occupant != requestedReplacement {
+            return .failure(.configurableConflict(occupant))
+        }
+        if occupant == nil, let requestedReplacement {
+            return .failure(.configurableConflict(requestedReplacement))
         }
 
-        let previous = configuredHotKey(for: action)
-        let wasDisabled = disabledActions.contains(action)
-        if previous == settings, registrations[action] != nil, !wasDisabled {
+        let previousConfigured = configured
+        let previouslyDisabled = disabledActions
+        let previousErrors = errors
+        let affectedActions = [action] + [occupant].compactMap { $0 }
+        let previouslyRegistered = Set(affectedActions.filter {
+            registrations[$0] != nil
+        })
+        if configuredHotKey(for: action) == settings,
+           registrations[action] != nil,
+           !disabledActions.contains(action) {
             errors[action] = nil
             return .success(())
         }
 
-        if let token = registrations.removeValue(forKey: action) {
-            registrar.unregister(token)
+        for affectedAction in affectedActions {
+            if let token = registrations.removeValue(forKey: affectedAction) {
+                registrar.unregister(token)
+            }
         }
         switch registrar.register(settings, action: action) {
         case .failure(let error):
-            if !wasDisabled {
-                restoreRegistration(previous, action: action)
-            }
-            errors[action] = .registrationFailed(error.status)
+            rollbackApplyTransaction(
+                configured: previousConfigured,
+                disabledActions: previouslyDisabled,
+                errors: previousErrors,
+                affectedActions: affectedActions,
+                previouslyRegistered: previouslyRegistered
+            )
             notifyStateChange()
             return .failure(.registrationFailed(error.status))
         case .success(let token):
@@ -288,6 +316,10 @@ final class CaptureHotKeyController {
 
         configured[action] = settings
         disabledActions.remove(action)
+        if let occupant {
+            disabledActions.insert(occupant)
+            errors[occupant] = nil
+        }
         do {
             try persistConfiguredHotKeys()
             errors[action] = nil
@@ -295,16 +327,13 @@ final class CaptureHotKeyController {
             notifyStateChange()
             return .success(())
         } catch {
-            if let token = registrations.removeValue(forKey: action) {
-                registrar.unregister(token)
-            }
-            configured[action] = previous
-            if wasDisabled {
-                disabledActions.insert(action)
-            } else {
-                restoreRegistration(previous, action: action)
-            }
-            errors[action] = .persistenceFailed
+            rollbackApplyTransaction(
+                configured: previousConfigured,
+                disabledActions: previouslyDisabled,
+                errors: previousErrors,
+                affectedActions: affectedActions,
+                previouslyRegistered: previouslyRegistered
+            )
             notifyStateChange()
             return .failure(.persistenceFailed)
         }
@@ -331,7 +360,7 @@ final class CaptureHotKeyController {
             return .success(())
         } catch {
             disabledActions.remove(action)
-            restoreRegistration(configuredHotKey(for: action), action: action)
+            restoreRegistrationIfValid(configuredHotKey(for: action), action: action)
             errors[action] = .persistenceFailed
             notifyStateChange()
             return .failure(.persistenceFailed)
@@ -396,50 +425,30 @@ final class CaptureHotKeyController {
             }
         } else if registrations[restoreAction] == nil,
                   !disabledActions.contains(restoreAction) {
-            restoreRegistration(configuredHotKey(for: restoreAction), action: restoreAction)
+            restoreRegistrationIfValid(
+                configuredHotKey(for: restoreAction),
+                action: restoreAction
+            )
         }
         notifyStateChange()
     }
 
     private func registerConfiguredHotKeys() {
         for action in registrationOrder where !disabledActions.contains(action) {
-            let settings = configuredHotKey(for: action)
-            guard HotKeyFormatter.isValidGlobalShortcut(settings) else {
-                errors[action] = .missingModifier
-                continue
-            }
-            guard !hasRegisteredConflict(settings, excluding: action) else {
-                errors[action] = .duplicate
-                continue
-            }
-            restoreRegistration(settings, action: action)
+            restoreRegistrationIfValid(configuredHotKey(for: action), action: action)
         }
     }
 
     private func restoreAllRegistrations() {
         for action in registrationOrder where !disabledActions.contains(action) {
-            let settings = configuredHotKey(for: action)
-            guard !hasRegisteredConflict(settings, excluding: action) else {
-                errors[action] = .duplicate
-                continue
-            }
-            restoreRegistration(settings, action: action)
+            restoreRegistrationIfValid(configuredHotKey(for: action), action: action)
         }
     }
 
     private func reconcileMissingRegistrations() {
         for action in registrationOrder
             where registrations[action] == nil && !disabledActions.contains(action) {
-            let settings = configuredHotKey(for: action)
-            guard HotKeyFormatter.isValidGlobalShortcut(settings) else {
-                errors[action] = .missingModifier
-                continue
-            }
-            guard !hasRegisteredConflict(settings, excluding: action) else {
-                errors[action] = .duplicate
-                continue
-            }
-            restoreRegistration(settings, action: action)
+            restoreRegistrationIfValid(configuredHotKey(for: action), action: action)
         }
     }
 
@@ -450,6 +459,25 @@ final class CaptureHotKeyController {
         registrations.keys.contains {
             $0 != action && configuredHotKey(for: $0) == settings
         }
+    }
+
+    private func restoreRegistrationIfValid(
+        _ settings: HotKeySettings,
+        action: HotKeyAction
+    ) {
+        if let conflict = SelectionToolbarState.fixedShortcutConflict(for: settings) {
+            errors[action] = .fixedToolbarConflict(conflict)
+            return
+        }
+        guard HotKeyFormatter.isValidGlobalShortcut(settings) else {
+            errors[action] = .missingModifier
+            return
+        }
+        guard !hasRegisteredConflict(settings, excluding: action) else {
+            errors[action] = .duplicate
+            return
+        }
+        restoreRegistration(settings, action: action)
     }
 
     private func restoreRegistration(_ settings: HotKeySettings, action: HotKeyAction) {
@@ -473,10 +501,41 @@ final class CaptureHotKeyController {
         registrations.removeAll()
     }
 
+    private func rollbackApplyTransaction(
+        configured previousConfigured: [HotKeyAction: HotKeySettings],
+        disabledActions previouslyDisabled: Set<HotKeyAction>,
+        errors previousErrors: [HotKeyAction: HotKeyConfigurationError],
+        affectedActions: [HotKeyAction],
+        previouslyRegistered: Set<HotKeyAction>
+    ) {
+        for affectedAction in affectedActions {
+            if let token = registrations.removeValue(forKey: affectedAction) {
+                registrar.unregister(token)
+            }
+        }
+        configured = previousConfigured
+        disabledActions = previouslyDisabled
+        errors = previousErrors
+        for affectedAction in HotKeyAction.allCases
+            where previouslyRegistered.contains(affectedAction) {
+            restoreRegistrationIfValid(
+                configuredHotKey(for: affectedAction),
+                action: affectedAction
+            )
+            if registrations[affectedAction] != nil {
+                errors[affectedAction] = previousErrors[affectedAction]
+            }
+        }
+    }
+
     private func persistConfiguredHotKeys() throws {
         var settings = settingsStore.load()
         for action in HotKeyAction.allCases {
-            settings.hotkeys[action.rawValue] = configuredHotKey(for: action)
+            if disabledActions.contains(action) {
+                settings.hotkeys.removeValue(forKey: action.rawValue)
+            } else {
+                settings.hotkeys[action.rawValue] = configuredHotKey(for: action)
+            }
         }
         settings.disabledHotkeys = Set(disabledActions.map(\.rawValue))
         try settingsStore.save(settings)
@@ -539,6 +598,24 @@ struct HotKeyFormatter {
         return value
     }
 
+    static func toolbarShortcut(
+        from settings: HotKeySettings
+    ) -> SelectionToolbarState.ToolbarShortcut? {
+        guard let key = eventCharacters(for: settings.keyCode) else {
+            return nil
+        }
+        let modifiers = eventModifierFlags(from: settings.modifiers)
+        let commandOnly = modifiers == .command
+        return SelectionToolbarState.ToolbarShortcut(
+            key: key,
+            modifiers: modifiers,
+            iconName: commandOnly ? "command" : nil,
+            displayText: commandOnly
+                ? (keyNames[settings.keyCode] ?? key.uppercased())
+                : displayString(settings)
+        )
+    }
+
     static func hasSupportedModifier(_ settings: HotKeySettings) -> Bool {
         let supported = UInt32(cmdKey | optionKey | controlKey | shiftKey)
         return settings.modifiers & supported != 0
@@ -593,6 +670,35 @@ struct HotKeyFormatter {
 
     private static let standaloneSystemKeyCodes =
         standaloneFunctionKeyCodes.union([UInt32(kVK_Escape)])
+
+    private static let functionKeys: [UInt32: NSEvent.SpecialKey] = [
+        UInt32(kVK_F1): .f1, UInt32(kVK_F2): .f2, UInt32(kVK_F3): .f3,
+        UInt32(kVK_F4): .f4, UInt32(kVK_F5): .f5, UInt32(kVK_F6): .f6,
+        UInt32(kVK_F7): .f7, UInt32(kVK_F8): .f8, UInt32(kVK_F9): .f9,
+        UInt32(kVK_F10): .f10, UInt32(kVK_F11): .f11, UInt32(kVK_F12): .f12
+    ]
+
+    private static func eventCharacters(for keyCode: UInt32) -> String? {
+        if keyCode == UInt32(kVK_Escape) {
+            return "\u{1b}"
+        }
+        if let functionKey = functionKeys[keyCode] {
+            return String(functionKey.unicodeScalar)
+        }
+        guard let keyName = keyNames[keyCode], keyName.count == 1 else {
+            return nil
+        }
+        return keyName.lowercased()
+    }
+
+    private static func eventModifierFlags(from modifiers: UInt32) -> NSEvent.ModifierFlags {
+        var flags: NSEvent.ModifierFlags = []
+        if modifiers & UInt32(cmdKey) != 0 { flags.insert(.command) }
+        if modifiers & UInt32(optionKey) != 0 { flags.insert(.option) }
+        if modifiers & UInt32(controlKey) != 0 { flags.insert(.control) }
+        if modifiers & UInt32(shiftKey) != 0 { flags.insert(.shift) }
+        return flags
+    }
 }
 
 private func fourCharacterCode(_ string: String) -> FourCharCode {
