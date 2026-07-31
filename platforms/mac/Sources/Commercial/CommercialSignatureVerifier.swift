@@ -42,6 +42,15 @@ final class CommercialSignatureVerifier {
     }
 
     func verifyPolicy(_ envelope: SignedEnvelope, at now: Date = Date()) throws -> CommercialPolicy {
+        let policy = try verifyPolicyEnvelope(envelope)
+        guard now >= policy.effectiveAt else { throw CommercialVerificationError.notEffective }
+        guard now < policy.expiresAt else { throw CommercialVerificationError.expired }
+        return policy
+    }
+
+    /// Verifies the signature and immutable policy constraints while leaving the
+    /// effective/expiry decision to the access controller, which owns grace rules.
+    func verifyPolicyEnvelope(_ envelope: SignedEnvelope) throws -> CommercialPolicy {
         let payload = try verifiedPayload(envelope)
         let policy: CommercialPolicy
         do {
@@ -57,7 +66,7 @@ final class CommercialSignatureVerifier {
         guard policy.schemaVersion == 1 else {
             throw CommercialVerificationError.unsupportedSchema(policy.schemaVersion)
         }
-        try validate(policy, at: now)
+        try validate(policy)
         return policy
     }
 
@@ -106,7 +115,7 @@ final class CommercialSignatureVerifier {
         return payload
     }
 
-    private func validate(_ policy: CommercialPolicy, at now: Date) throws {
+    private func validate(_ policy: CommercialPolicy) throws {
         guard policy.policyId.range(of: "^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$", options: .regularExpression) != nil,
               (1...60).contains(policy.trialDays),
               (1...36).contains(policy.updateMonths),
@@ -126,8 +135,6 @@ final class CommercialSignatureVerifier {
         guard policy.expiresAt.timeIntervalSince(policy.effectiveAt) <= 30 * 24 * 60 * 60 else {
             throw CommercialVerificationError.windowTooLong
         }
-        guard now >= policy.effectiveAt else { throw CommercialVerificationError.notEffective }
-        guard now < policy.expiresAt else { throw CommercialVerificationError.expired }
     }
 
     private static func canonicalBase64(_ value: String, field: String) throws -> Data {
