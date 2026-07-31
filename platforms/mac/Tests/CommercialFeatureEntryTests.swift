@@ -104,7 +104,71 @@ private final class EntryTestHotKeyRegistrar: GlobalHotKeyRegistering {
 }
 
 @MainActor
+private final class EntryTestRefreshableCommercialAccess: CommercialAccessRefreshing {
+    let state: CommercialAccessState = .allFree
+    let snapshot = CommercialAccessSnapshot(
+        state: .allFree,
+        availableFeatures: Set(CommercialFeature.allCases),
+        proBadgedFeatures: []
+    )
+    var onStateChange: ((CommercialAccessState) -> Void)?
+    private(set) var refreshCount = 0
+
+    func requestPurchase(for feature: CommercialFeature) {}
+
+    func refresh() async {
+        refreshCount += 1
+    }
+}
+
+@MainActor
 final class CommercialFeatureEntryTests: XCTestCase {
+    func testXCTestLaunchSkipsProductionCommercialDependenciesAndRefresh() async {
+        var controllerCreations = 0
+        var networkClientCreations = 0
+        var keychainStoreCreations = 0
+        let dependencies = CommercialLaunchDependencies.make(
+            environment: ["XCTestConfigurationFilePath": "/tmp/xxsnap-tests.xctestconfiguration"]
+        ) {
+            controllerCreations += 1
+            networkClientCreations += 1
+            keychainStoreCreations += 1
+            return EntryTestRefreshableCommercialAccess()
+        }
+
+        await dependencies.refresh()
+
+        XCTAssertEqual(controllerCreations, 0)
+        XCTAssertEqual(networkClientCreations, 0)
+        XCTAssertEqual(keychainStoreCreations, 0)
+        XCTAssertEqual(dependencies.access.state, .allFree)
+        XCTAssertEqual(
+            dependencies.access.snapshot.availableFeatures,
+            Set(CommercialFeature.allCases)
+        )
+    }
+
+    func testNormalLaunchCreatesAndRefreshesProductionCommercialControllerOnce() async {
+        let productionAccess = EntryTestRefreshableCommercialAccess()
+        var controllerCreations = 0
+        var networkClientCreations = 0
+        var keychainStoreCreations = 0
+        let dependencies = CommercialLaunchDependencies.make(environment: [:]) {
+            controllerCreations += 1
+            networkClientCreations += 1
+            keychainStoreCreations += 1
+            return productionAccess
+        }
+
+        await dependencies.refresh()
+
+        XCTAssertEqual(controllerCreations, 1)
+        XCTAssertEqual(networkClientCreations, 1)
+        XCTAssertEqual(keychainStoreCreations, 1)
+        XCTAssertEqual(productionAccess.refreshCount, 1)
+        XCTAssertTrue(dependencies.access === productionAccess)
+    }
+
     func testCommercialFeatureListContainsOnlyTheThreeProFeatures() {
         XCTAssertEqual(
             Set(CommercialFeature.allCases),

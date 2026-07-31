@@ -40,6 +40,11 @@ protocol CommercialAccessProviding: AnyObject {
     func requestPurchase(for feature: CommercialFeature)
 }
 
+@MainActor
+protocol CommercialAccessRefreshing: CommercialAccessProviding {
+    func refresh() async
+}
+
 struct CommercialAccessSnapshot: Equatable {
     let state: CommercialAccessState
     let availableFeatures: Set<CommercialFeature>
@@ -181,7 +186,7 @@ private actor CommercialDeviceWorker {
 }
 
 @MainActor
-final class CommercialAccessController: CommercialAccessProviding {
+final class CommercialAccessController: CommercialAccessRefreshing {
     private struct PresentationState: Equatable {
         let accessState: CommercialAccessState
         let proBadges: Set<CommercialFeature>

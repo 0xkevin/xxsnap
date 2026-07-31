@@ -1,5 +1,40 @@
 import AppKit
 
+@MainActor
+struct CommercialLaunchDependencies {
+    typealias ProductionFactory = @MainActor () throws -> any CommercialAccessRefreshing
+
+    let access: any CommercialAccessProviding
+    private let refreshHandler: @MainActor () async -> Void
+
+    static func make(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        productionFactory: ProductionFactory = { try CommercialAccessController() }
+    ) -> CommercialLaunchDependencies {
+        guard environment["XCTestConfigurationFilePath"] == nil else {
+            return CommercialLaunchDependencies(
+                access: UnrestrictedCommercialAccess.shared,
+                refreshHandler: {}
+            )
+        }
+
+        guard let controller = try? productionFactory() else {
+            return CommercialLaunchDependencies(
+                access: UnavailableCommercialAccess(),
+                refreshHandler: {}
+            )
+        }
+        return CommercialLaunchDependencies(
+            access: controller,
+            refreshHandler: { await controller.refresh() }
+        )
+    }
+
+    func refresh() async {
+        await refreshHandler()
+    }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var captureCoordinator: CaptureCoordinator?
     private var statusItemController: StatusItemController?
@@ -32,9 +67,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let preferencesSettingsStore = PreferencesSettingsStore()
         let filenameProvider = CaptureFilenameProvider(settingsStore: preferencesSettingsStore)
         let updateChecker = PlaceholderUpdateChecker()
-        let commercialController = try? CommercialAccessController()
-        let commercialAccess: any CommercialAccessProviding = commercialController
-            ?? UnavailableCommercialAccess()
+        let commercialDependencies = CommercialLaunchDependencies.make()
+        let commercialAccess = commercialDependencies.access
         let captureCoordinator = CaptureCoordinator(
             permissionCoordinator: PermissionCoordinator(),
             screenCaptureService: ScreenCaptureService(),
@@ -132,10 +166,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             captureCoordinator?.commercialAccessDidChange()
             statusItemController?.refresh()
         }
-        if let commercialController {
-            Task { @MainActor [weak commercialController] in
-                await commercialController?.refresh()
-            }
+        Task { @MainActor in
+            await commercialDependencies.refresh()
         }
 
         preferencesWindowController.onLanguageChanged = { [weak captureCoordinator, weak statusItemController, weak preferencesWindowController] language in
