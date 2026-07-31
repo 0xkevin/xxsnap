@@ -114,11 +114,28 @@ final class CommercialCredentialStoreTests: XCTestCase {
         let keychain = FakeCommercialKeychain()
         let store = CommercialCredentialStore(keychain: keychain)
         try store.saveAccessRecord(.active(envelope: envelope("private"), anchor: anchor(issuedAt: 1_000)))
-        try store.saveAccessRecord(.terminal(.revoked))
+        let tombstone = CommercialAccessRecord.terminal(.revoked)
+        try store.saveAccessRecord(tombstone)
 
-        XCTAssertEqual(try store.loadAccessRecord(), .terminal(.revoked))
+        XCTAssertEqual(try store.loadAccessRecord(), tombstone)
         XCTAssertEqual(keychain.addedAccounts, ["access"])
         XCTAssertEqual(keychain.updatedAccounts, ["access"])
+    }
+
+    func testTerminalAccessCompareAndDeleteRequiresExactNonceAndNeverDeletesActive() throws {
+        let keychain = FakeCommercialKeychain()
+        let store = CommercialCredentialStore(keychain: keychain)
+        let terminalNonce = UUID()
+        try store.saveAccessRecord(.active(envelope: envelope("active"), anchor: nil))
+        XCTAssertFalse(try store.compareAndDeleteTerminalAccessRecord(expectedNonce: terminalNonce))
+        XCTAssertNotNil(try store.loadAccessRecord())
+
+        let tombstone = CommercialAccessRecord.terminal(.revoked, nonce: terminalNonce)
+        try store.saveAccessRecord(tombstone)
+        XCTAssertFalse(try store.compareAndDeleteTerminalAccessRecord(expectedNonce: UUID()))
+        XCTAssertEqual(try store.loadAccessRecord(), tombstone)
+        XCTAssertTrue(try store.compareAndDeleteTerminalAccessRecord(expectedNonce: terminalNonce))
+        XCTAssertNil(try store.loadAccessRecord())
     }
 
     func testTerminalMarkerPersistsOnlyNonSensitiveVersionReasonAndNonce() throws {
@@ -163,6 +180,36 @@ final class CommercialCredentialStoreTests: XCTestCase {
         let data = try XCTUnwrap(domain["commercial.terminal-deny.v1"] as? Data)
         let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
         XCTAssertEqual(Set(payload.keys), ["schemaVersion", "reason", "nonce"])
+    }
+
+    func testWrongTypeTerminalMarkerIsCorruptAndPrepareNormalizesIt() throws {
+        let suite = "com.xxsnap.tests.wrong-type-terminal-marker.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("not-data", forKey: "commercial.terminal-deny.v1")
+        XCTAssertTrue(defaults.synchronize())
+        let store = CommercialTerminalMarkerStore(userDefaults: defaults)
+
+        XCTAssertThrowsError(try store.loadTerminalMarker()) {
+            XCTAssertEqual($0 as? CommercialTerminalMarkerStoreError, .corruptData)
+        }
+        let normalized = try XCTUnwrap(store.prepareClearanceMarker())
+        XCTAssertEqual(normalized.reason, .revoked)
+        XCTAssertEqual(try store.loadTerminalMarker(), normalized)
+    }
+
+    func testCompareAndClearRejectsWrongTypeTerminalMarker() throws {
+        let suite = "com.xxsnap.tests.wrong-type-terminal-cas.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(42, forKey: "commercial.terminal-deny.v1")
+        XCTAssertTrue(defaults.synchronize())
+        let store = CommercialTerminalMarkerStore(userDefaults: defaults)
+
+        XCTAssertThrowsError(try store.compareAndDeleteTerminalMarker(expectedNonce: UUID())) {
+            XCTAssertEqual($0 as? CommercialTerminalMarkerStoreError, .corruptData)
+        }
+        XCTAssertEqual(defaults.object(forKey: "commercial.terminal-deny.v1") as? Int, 42)
     }
 
     func testDeviceIdentityProducesStableLowercaseHashAndTruncatesDisplayName() throws {

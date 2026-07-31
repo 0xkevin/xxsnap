@@ -7,13 +7,14 @@ protocol CommercialCredentialStoring: AnyObject {
     func loadAccessRecord() throws -> CommercialAccessRecord?
     func saveAccessRecord(_ record: CommercialAccessRecord) throws
     func deleteAccessRecord() throws
+    func compareAndDeleteTerminalAccessRecord(expectedNonce: UUID) throws -> Bool
 }
 
 protocol CommercialTerminalMarkerStoring: AnyObject {
     func loadTerminalMarker() throws -> CommercialTerminalMarker?
     func prepareClearanceMarker() throws -> CommercialTerminalMarker?
     func saveTerminalMarker(_ marker: CommercialTerminalMarker) throws
-    func compareAndDeleteTerminalMarker(expectedNonce: UUID?) throws -> Bool
+    func compareAndDeleteTerminalMarker(expectedNonce: UUID) throws -> Bool
 }
 
 struct CommercialTimeAnchor: Codable, Equatable {
@@ -73,10 +74,12 @@ struct CommercialAccessRecord: Codable, Equatable {
     let envelope: SignedEnvelope?
     let anchor: CommercialTimeAnchor?
     let terminalReason: CommercialTerminalReason?
+    let terminalMarkerNonce: UUID?
     let clearsTerminalMarkerNonce: UUID?
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, status, envelope, anchor, terminalReason, clearsTerminalMarkerNonce
+        case schemaVersion, status, envelope, anchor, terminalReason, terminalMarkerNonce
+        case clearsTerminalMarkerNonce
     }
 
     static func active(
@@ -89,16 +92,18 @@ struct CommercialAccessRecord: Codable, Equatable {
             envelope: envelope,
             anchor: anchor,
             terminalReason: nil,
+            terminalMarkerNonce: nil,
             clearsTerminalMarkerNonce: clearsTerminalMarkerNonce
         )
     }
 
-    static func terminal(_ reason: CommercialTerminalReason) -> Self {
+    static func terminal(_ reason: CommercialTerminalReason, nonce: UUID = UUID()) -> Self {
         Self(
             status: .terminal,
             envelope: nil,
             anchor: nil,
             terminalReason: reason,
+            terminalMarkerNonce: nonce,
             clearsTerminalMarkerNonce: nil
         )
     }
@@ -108,12 +113,14 @@ struct CommercialAccessRecord: Codable, Equatable {
         envelope: SignedEnvelope?,
         anchor: CommercialTimeAnchor?,
         terminalReason: CommercialTerminalReason?,
+        terminalMarkerNonce: UUID?,
         clearsTerminalMarkerNonce: UUID?
     ) {
         self.status = status
         self.envelope = envelope
         self.anchor = anchor
         self.terminalReason = terminalReason
+        self.terminalMarkerNonce = terminalMarkerNonce
         self.clearsTerminalMarkerNonce = clearsTerminalMarkerNonce
     }
 
@@ -131,9 +138,11 @@ struct CommercialAccessRecord: Codable, Equatable {
         // A damaged monotonic-time anchor must not make a valid paid envelope unreadable.
         anchor = try? container.decodeIfPresent(CommercialTimeAnchor.self, forKey: .anchor)
         terminalReason = try container.decodeIfPresent(CommercialTerminalReason.self, forKey: .terminalReason)
+        terminalMarkerNonce = try container.decodeIfPresent(UUID.self, forKey: .terminalMarkerNonce)
         clearsTerminalMarkerNonce = try container.decodeIfPresent(UUID.self, forKey: .clearsTerminalMarkerNonce)
-        guard (status == .active && envelope != nil && terminalReason == nil)
-                || (status == .terminal && envelope == nil && terminalReason != nil && clearsTerminalMarkerNonce == nil)
+        guard (status == .active && envelope != nil && terminalReason == nil && terminalMarkerNonce == nil)
+                || (status == .terminal && envelope == nil && terminalReason != nil
+                    && clearsTerminalMarkerNonce == nil)
         else {
             throw DecodingError.dataCorruptedError(
                 forKey: .status,
@@ -150,7 +159,204 @@ struct CommercialAccessRecord: Codable, Equatable {
         try container.encodeIfPresent(envelope, forKey: .envelope)
         try container.encodeIfPresent(anchor, forKey: .anchor)
         try container.encodeIfPresent(terminalReason, forKey: .terminalReason)
+        try container.encodeIfPresent(terminalMarkerNonce, forKey: .terminalMarkerNonce)
         try container.encodeIfPresent(clearsTerminalMarkerNonce, forKey: .clearsTerminalMarkerNonce)
+    }
+}
+
+struct CommercialCredentialMutationSnapshot: Equatable {
+    let revision: UInt64
+    let marker: CommercialTerminalMarker?
+    let access: CommercialAccessRecord?
+}
+
+enum CommercialCredentialSnapshotError: Error {
+    case marker
+    case access(marker: CommercialTerminalMarker?)
+}
+
+struct CommercialTerminalCommitOutcome {
+    let committed: Bool
+    let marker: CommercialTerminalMarker?
+    let cleanupPending: Bool
+    let storageFailed: Bool
+}
+
+final class CommercialCredentialMutationCoordinator: @unchecked Sendable {
+    static let shared = CommercialCredentialMutationCoordinator()
+
+    private let lock = NSLock()
+    private var revision: UInt64 = 0
+
+    func snapshot(
+        store: CommercialCredentialStoring,
+        markerStore: CommercialTerminalMarkerStoring,
+        prepareClearance: Bool = false
+    ) throws -> CommercialCredentialMutationSnapshot {
+        lock.lock()
+        defer { lock.unlock() }
+        let marker: CommercialTerminalMarker?
+        do {
+            marker = try prepareClearance
+                ? markerStore.prepareClearanceMarker()
+                : markerStore.loadTerminalMarker()
+        } catch {
+            throw CommercialCredentialSnapshotError.marker
+        }
+        let access: CommercialAccessRecord?
+        do { access = try store.loadAccessRecord() }
+        catch { throw CommercialCredentialSnapshotError.access(marker: marker) }
+        return CommercialCredentialMutationSnapshot(
+            revision: revision,
+            marker: marker,
+            access: access
+        )
+    }
+
+    func commitActive(
+        expected: CommercialCredentialMutationSnapshot,
+        record: CommercialAccessRecord,
+        clearingMarkerNonce: UUID?,
+        store: CommercialCredentialStoring,
+        markerStore: CommercialTerminalMarkerStoring
+    ) throws -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard revision == expected.revision,
+              try markerStore.loadTerminalMarker() == expected.marker,
+              try store.loadAccessRecord() == expected.access
+        else { return false }
+        if let clearingMarkerNonce {
+            guard expected.marker?.nonce == clearingMarkerNonce else { return false }
+        } else {
+            guard expected.marker == nil else { return false }
+        }
+        try store.saveAccessRecord(record)
+        revision &+= 1
+        if let clearingMarkerNonce {
+            guard try markerStore.compareAndDeleteTerminalMarker(expectedNonce: clearingMarkerNonce) else {
+                return false
+            }
+        }
+        return true
+    }
+
+    func commitTerminal(
+        expected: CommercialCredentialMutationSnapshot,
+        reason: CommercialTerminalReason,
+        store: CommercialCredentialStoring,
+        markerStore: CommercialTerminalMarkerStoring
+    ) -> CommercialTerminalCommitOutcome {
+        lock.lock()
+        defer { lock.unlock() }
+        guard revision == expected.revision else {
+            return CommercialTerminalCommitOutcome(
+                committed: false, marker: nil, cleanupPending: false, storageFailed: false
+            )
+        }
+        do {
+            guard try markerStore.loadTerminalMarker() == expected.marker,
+                  try store.loadAccessRecord() == expected.access
+            else {
+                return CommercialTerminalCommitOutcome(
+                    committed: false, marker: nil, cleanupPending: false, storageFailed: false
+                )
+            }
+        } catch {
+            revision &+= 1
+            return CommercialTerminalCommitOutcome(
+                committed: true,
+                marker: CommercialTerminalMarker(reason: reason),
+                cleanupPending: true,
+                storageFailed: true
+            )
+        }
+
+        let marker = CommercialTerminalMarker(reason: reason)
+        var markerSaved = false
+        var tombstoneSaved = false
+        var tombstoneDeleted = false
+        do {
+            try markerStore.saveTerminalMarker(marker)
+            markerSaved = true
+        } catch {}
+        do {
+            try store.saveAccessRecord(.terminal(reason, nonce: marker.nonce))
+            tombstoneSaved = true
+        } catch {}
+        if markerSaved, tombstoneSaved {
+            do {
+                tombstoneDeleted = try store.compareAndDeleteTerminalAccessRecord(
+                    expectedNonce: marker.nonce
+                )
+            } catch {}
+        }
+        revision &+= 1
+        let failed = !markerSaved || !tombstoneSaved || !tombstoneDeleted
+        return CommercialTerminalCommitOutcome(
+            committed: true,
+            marker: marker,
+            cleanupPending: failed,
+            storageFailed: failed
+        )
+    }
+
+    func cleanupTerminal(
+        marker: CommercialTerminalMarker,
+        expectedActive: CommercialAccessRecord?,
+        store: CommercialCredentialStoring,
+        markerStore: CommercialTerminalMarkerStoring
+    ) throws -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        let currentMarker = try markerStore.loadTerminalMarker()
+        let initialAccess = try store.loadAccessRecord()
+        if currentMarker == nil {
+            guard let initialAccess,
+                  initialAccess.status == .terminal || initialAccess == expectedActive
+            else { return false }
+            try markerStore.saveTerminalMarker(marker)
+            revision &+= 1
+        } else if currentMarker?.nonce != marker.nonce {
+            return false
+        }
+
+        guard let currentAccess = initialAccess else { return false }
+        switch currentAccess.status {
+        case .active:
+            if currentAccess.clearsTerminalMarkerNonce == marker.nonce { return false }
+            guard currentAccess == expectedActive else { return false }
+            try store.saveAccessRecord(.terminal(marker.reason, nonce: marker.nonce))
+            revision &+= 1
+        case .terminal:
+            if currentAccess.terminalMarkerNonce != marker.nonce {
+                try store.saveAccessRecord(.terminal(marker.reason, nonce: marker.nonce))
+                revision &+= 1
+            }
+        }
+        let deleted = try store.compareAndDeleteTerminalAccessRecord(expectedNonce: marker.nonce)
+        if deleted { revision &+= 1 }
+        return !deleted
+    }
+
+    func clearMarker(
+        expected: CommercialCredentialMutationSnapshot,
+        nonce: UUID,
+        store: CommercialCredentialStoring,
+        markerStore: CommercialTerminalMarkerStoring
+    ) throws -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard revision == expected.revision,
+              try markerStore.loadTerminalMarker() == expected.marker,
+              try store.loadAccessRecord() == expected.access,
+              expected.marker?.nonce == nonce
+        else { return false }
+        guard try markerStore.compareAndDeleteTerminalMarker(expectedNonce: nonce) else {
+            return false
+        }
+        revision &+= 1
+        return true
     }
 }
 
@@ -184,7 +390,7 @@ final class CommercialTerminalMarkerStore: CommercialTerminalMarkerStoring {
     func prepareClearanceMarker() throws -> CommercialTerminalMarker? {
         Self.lock.lock()
         defer { Self.lock.unlock() }
-        guard defaults.data(forKey: Self.key) != nil else { return nil }
+        guard defaults.object(forKey: Self.key) != nil else { return nil }
         if let marker = try? loadUnlocked() { return marker }
         let marker = CommercialTerminalMarker(reason: .revoked)
         try saveUnlocked(marker)
@@ -207,14 +413,12 @@ final class CommercialTerminalMarkerStore: CommercialTerminalMarkerStoring {
         }
     }
 
-    func compareAndDeleteTerminalMarker(expectedNonce: UUID?) throws -> Bool {
+    func compareAndDeleteTerminalMarker(expectedNonce: UUID) throws -> Bool {
         Self.lock.lock()
         defer { Self.lock.unlock() }
         let current = try loadUnlocked()
         guard current?.nonce == expectedNonce else { return false }
-        if current != nil {
-            defaults.removeObject(forKey: Self.key)
-        }
+        defaults.removeObject(forKey: Self.key)
         guard defaults.synchronize() else {
             throw CommercialTerminalMarkerStoreError.persistenceFailed
         }
@@ -222,7 +426,10 @@ final class CommercialTerminalMarkerStore: CommercialTerminalMarkerStoring {
     }
 
     private func loadUnlocked() throws -> CommercialTerminalMarker? {
-        guard let data = defaults.data(forKey: Self.key) else { return nil }
+        guard let object = defaults.object(forKey: Self.key) else { return nil }
+        guard let data = object as? Data else {
+            throw CommercialTerminalMarkerStoreError.corruptData
+        }
         guard let payload = try? JSONDecoder().decode(Payload.self, from: data),
               payload.schemaVersion == 1
         else { throw CommercialTerminalMarkerStoreError.corruptData }
@@ -328,6 +535,15 @@ final class CommercialCredentialStore: CommercialCredentialStoring {
 
     func deleteAccessRecord() throws {
         try delete(account: Account.access)
+    }
+
+    func compareAndDeleteTerminalAccessRecord(expectedNonce: UUID) throws -> Bool {
+        guard let current = try loadAccessRecord(),
+              current.status == .terminal,
+              current.terminalMarkerNonce == expectedNonce
+        else { return false }
+        try deleteAccessRecord()
+        return true
     }
 
     private func load<Value: Decodable>(_ type: Value.Type, account: String) throws -> Value? {

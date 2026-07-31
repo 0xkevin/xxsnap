@@ -322,6 +322,7 @@ final class CommercialAccessControllerTests: XCTestCase {
         XCTAssertEqual(restartedWhileStorageFails.state, .free(reason: .serverDenied))
         XCTAssertFalse(restartedWhileStorageFails.canUse(.ocr))
 
+        fixture.store.saveAccessError = nil
         fixture.store.deleteAccessError = nil
         await controller.refresh()
         XCTAssertFalse(controller.hasPendingTerminalCleanup)
@@ -602,6 +603,98 @@ final class CommercialAccessControllerTests: XCTestCase {
         guard case let .pro(entitlement) = controller.state else { return XCTFail("expected pro") }
         XCTAssertEqual(entitlement.payload.maximumBuildNumber, 100)
     }
+
+    func testOldValidationFromAnotherControllerCannotRestoreAccessAfterTerminalCommit() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        fixture.store.access = try fixture.entitlement(access: .pro, maximumBuildNumber: 50)
+        fixture.client.fetchResult = .success(try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day)))
+        fixture.client.suspendValidation = true
+        let validationStarted = expectation(description: "controller A validation started")
+        fixture.client.onValidate = { validationStarted.fulfill() }
+        let controllerA = fixture.controller()
+        let controllerB = fixture.controller()
+
+        let staleRefresh = Task { await controllerA.refresh() }
+        await fulfillment(of: [validationStarted], timeout: 1)
+        try await controllerB.deactivateCurrentDevice()
+        fixture.client.resumeValidation(
+            with: .success(try fixture.entitlement(access: .pro, maximumBuildNumber: 100))
+        )
+        await staleRefresh.value
+
+        XCTAssertNil(fixture.store.access, "stale validation must not replace terminal state")
+        XCTAssertNotNil(fixture.marker.storedMarker)
+        let restarted = fixture.controller()
+        fixture.client.fetchResult = .failure(URLError(.notConnectedToInternet))
+        await restarted.refresh()
+        XCTAssertEqual(restarted.state, .free(reason: .serverDenied))
+    }
+
+    func testOldTerminalCleanupFromAnotherControllerCannotDeleteReactivatedAccess() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        fixture.store.access = try fixture.entitlement(access: .pro, maximumBuildNumber: 50)
+        fixture.client.fetchResult = .failure(URLError(.notConnectedToInternet))
+        fixture.store.deleteAccessError = CommercialCredentialStoreError.keychain(errSecInteractionNotAllowed)
+        let controllerA = fixture.controller()
+        await controllerA.refresh()
+        do {
+            try await controllerA.deactivateCurrentDevice()
+            XCTFail("terminal cleanup must be pending")
+        } catch {
+            XCTAssertEqual(error as? CommercialAccessControllerError, .storage)
+        }
+        XCTAssertTrue(controllerA.hasPendingTerminalCleanup)
+
+        let controllerB = fixture.controller()
+        fixture.client.activateResult = .success(try fixture.entitlement(access: .pro, maximumBuildNumber: 100))
+        try await controllerB.activate(email: "person@example.com", code: "PRIVATE")
+        let reactivationCommitted = expectation(description: "controller B reactivation committed")
+        reactivationCommitted.fulfill()
+        await fulfillment(of: [reactivationCommitted], timeout: 1)
+
+        fixture.store.deleteAccessError = nil
+        await controllerA.refresh()
+
+        XCTAssertNotNil(fixture.store.access, "old cleanup must not delete newer active record")
+        let restarted = fixture.controller()
+        await restarted.refresh()
+        guard case .pro = restarted.state else { return XCTFail("reactivated Pro must survive restart") }
+    }
+
+    func testWrongTypeMarkerFailsClosedAtStartup() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        fixture.store.access = try fixture.entitlement(access: .pro, maximumBuildNumber: 100)
+        fixture.client.fetchResult = .failure(URLError(.notConnectedToInternet))
+        let suite = "com.xxsnap.tests.wrong-type-startup.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("not-data", forKey: "commercial.terminal-deny.v1")
+        let controller = fixture.controller(markerStore: CommercialTerminalMarkerStore(userDefaults: defaults))
+
+        await controller.refresh()
+
+        XCTAssertEqual(controller.state, .free(reason: .serverDenied))
+    }
+
+    func testWrongTypeMarkerCanOnlyBeClearedByValidActivation() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        fixture.client.activateResult = .success(try fixture.entitlement(access: .pro, maximumBuildNumber: 100))
+        let suite = "com.xxsnap.tests.wrong-type-activation.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(99, forKey: "commercial.terminal-deny.v1")
+        let markerStore = CommercialTerminalMarkerStore(userDefaults: defaults)
+        let controller = fixture.controller(markerStore: markerStore)
+
+        try await controller.activate(email: "person@example.com", code: "PRIVATE")
+
+        guard case .pro = controller.state else { return XCTFail("valid Pro activation must recover") }
+        XCTAssertNil(try markerStore.loadTerminalMarker())
+    }
 }
 
 private extension TimeInterval {
@@ -614,6 +707,7 @@ private final class Fixture {
     let client = FakeCommercialClient()
     let device = FakeCommercialDevice()
     let marker = MemoryTerminalMarkerStore()
+    let coordinator = CommercialCredentialMutationCoordinator()
     let clock: MutableCommercialClock
     let buildNumber: Int
     var bootstrap: SignedEnvelope?
@@ -623,10 +717,13 @@ private final class Fixture {
         self.buildNumber = buildNumber
     }
 
-    @MainActor func controller() -> CommercialAccessController {
+    @MainActor func controller(
+        markerStore: CommercialTerminalMarkerStoring? = nil
+    ) -> CommercialAccessController {
         CommercialAccessController(
             store: store,
-            markerStore: marker,
+            markerStore: markerStore ?? marker,
+            coordinator: coordinator,
             verifier: CommercialSignatureVerifier(publicKeys: ["test": privateKey.publicKey]),
             client: client,
             device: device,
@@ -709,7 +806,7 @@ private final class MemoryTerminalMarkerStore: CommercialTerminalMarkerStoring {
     var loadError: Error?
     var saveError: Error?
     var deleteError: Error?
-    var onCompareAndDelete: ((UUID?) -> Void)?
+    var onCompareAndDelete: ((UUID) -> Void)?
 
     func loadTerminalMarker() throws -> CommercialTerminalMarker? {
         if let loadError { throw loadError }
@@ -732,7 +829,7 @@ private final class MemoryTerminalMarkerStore: CommercialTerminalMarkerStoring {
         storedMarker = marker
     }
 
-    func compareAndDeleteTerminalMarker(expectedNonce: UUID?) throws -> Bool {
+    func compareAndDeleteTerminalMarker(expectedNonce: UUID) throws -> Bool {
         if let deleteError { throw deleteError }
         if let loadError { throw loadError }
         onCompareAndDelete?(expectedNonce)
@@ -778,6 +875,14 @@ private final class MemoryCommercialStore: CommercialCredentialStoring {
     func deleteAccessRecord() throws {
         if let deleteAccessError { throw deleteAccessError }
         record = nil
+    }
+    func compareAndDeleteTerminalAccessRecord(expectedNonce: UUID) throws -> Bool {
+        if let deleteAccessError { throw deleteAccessError }
+        guard record?.status == .terminal,
+              record?.terminalMarkerNonce == expectedNonce
+        else { return false }
+        record = nil
+        return true
     }
 }
 
