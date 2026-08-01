@@ -65,8 +65,17 @@ final class DiagnosticLoggingTests: XCTestCase {
     }
 
     func testRedactorRemovesEveryNonemptyXXSNAPDashTokenButKeepsBrandName() {
-        for secret in ["XXSNAP-secret", "XXSNAP-ABCD", "xxsnap-z"] {
-            XCTAssertEqual(DiagnosticRedactor.redact(secret), "[REDACTED]", secret)
+        let cases = [
+            ("XXSNAP-secret", "[REDACTED]"),
+            ("XXSNAP-ABCD", "[REDACTED]"),
+            ("xxsnap-z", "[REDACTED]"),
+            ("prefixXXSNAP-ABCD", "prefix[REDACTED]"),
+            ("activation_XXSNAP-ABCD", "activation_[REDACTED]"),
+            (#""XXSNAP-ABCD""#, #""[REDACTED]""#),
+            (#"{"value":"XXSNAP-secret"}"#, #"{"value":"[REDACTED]"}"#),
+        ]
+        for (input, expected) in cases {
+            XCTAssertEqual(DiagnosticRedactor.redact(input), expected, input)
         }
         XCTAssertEqual(DiagnosticRedactor.redact("XxSnap"), "XxSnap")
         XCTAssertEqual(DiagnosticRedactor.redact("Use XxSnap for capture"), "Use XxSnap for capture")
@@ -75,7 +84,11 @@ final class DiagnosticLoggingTests: XCTestCase {
     func testShortXXSNAPSecretUsesSameSanitizedEventAndJSONLValue() throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let store = DiagnosticLogStore(directoryURL: directory)
+        var osLogMessages: [String] = []
+        let store = DiagnosticLogStore(
+            directoryURL: directory,
+            osLogSink: { _, message in osLogMessages.append(message) }
+        )
 
         store.record(
             category: .application,
@@ -86,10 +99,18 @@ final class DiagnosticLoggingTests: XCTestCase {
         store.flush()
 
         let event = try XCTUnwrap(readEvents(in: directory).first)
-        XCTAssertFalse(event.event.lowercased().contains("xxsnap-abcd"))
+        XCTAssertEqual(event.event, "activation__redacted_")
+        XCTAssertFalse(event.event.lowercased().contains("xxsnap"))
+        XCTAssertFalse(event.event.lowercased().contains("abcd"))
         XCTAssertEqual(event.metadata["request_result"], "[REDACTED]")
+        XCTAssertEqual(osLogMessages, ["application activation__redacted_"])
+        XCTAssertFalse(osLogMessages.joined().lowercased().contains("xxsnap"))
+        XCTAssertFalse(osLogMessages.joined().lowercased().contains("abcd"))
+        XCTAssertFalse(osLogMessages.joined().lowercased().contains("secret"))
         let raw = try String(contentsOf: XCTUnwrap(logFiles(in: directory).first))
-        XCTAssertFalse(raw.lowercased().contains("xxsnap-"))
+        XCTAssertFalse(raw.lowercased().contains("xxsnap"))
+        XCTAssertFalse(raw.lowercased().contains("abcd"))
+        XCTAssertFalse(raw.lowercased().contains("secret"))
     }
 
     func testMetadataValuesAndEventMessagesAreRedactedWithoutBreakingSafeDiagnostics() throws {

@@ -110,7 +110,7 @@ enum DiagnosticRedactor {
 
     private static let rules: [Rule] = [
         (#"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b"#, "[REDACTED]"),
-        (#"(?i)\bXXSNAP-[A-Z0-9_-]+"#, "[REDACTED]"),
+        (#"(?i)XXSNAP-[A-Z0-9_-]+"#, "[REDACTED]"),
         (#"(?i)\bXXSNAP(?:[_:][A-Z0-9]{2,}){2,}\b"#, "[REDACTED]"),
         (#"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+"#, "[REDACTED]"),
         (#"\b[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_-]{2,}\b"#, "[REDACTED]"),
@@ -257,8 +257,8 @@ final class DiagnosticLogStore: DiagnosticLogging, @unchecked Sendable {
     private let now: () -> Date
     private let nextUUID: () -> UUID
     private let fileManager: FileManager
+    private let osLogSink: (DiagnosticLogLevel, String) -> Void
     private let queue = DispatchQueue(label: "com.xxsnap.diagnostic-log-store")
-    private let systemLogger = Logger(subsystem: "com.xxsnap.mac", category: "diagnostics")
     private var activeSession: DiagnosticCaptureSession?
 
     init(
@@ -266,13 +266,22 @@ final class DiagnosticLogStore: DiagnosticLogging, @unchecked Sendable {
         configuration: Configuration = .init(),
         now: @escaping () -> Date = Date.init,
         nextUUID: @escaping () -> UUID = UUID.init,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        osLogSink: ((DiagnosticLogLevel, String) -> Void)? = nil
     ) {
         self.directoryURL = directoryURL
         self.configuration = configuration
         self.now = now
         self.nextUUID = nextUUID
         self.fileManager = fileManager
+        if let osLogSink {
+            self.osLogSink = osLogSink
+        } else {
+            let logger = Logger(subsystem: "com.xxsnap.mac", category: "diagnostics")
+            self.osLogSink = { level, message in
+                logger.log(level: level.osLogType, "\(message, privacy: .public)")
+            }
+        }
     }
 
     func record(
@@ -287,10 +296,7 @@ final class DiagnosticLogStore: DiagnosticLogging, @unchecked Sendable {
                 return
             }
             let sanitizedEvent = Self.sanitizedEventName(event)
-            systemLogger.log(
-                level: level.osLogType,
-                "\(category.rawValue, privacy: .public) \(sanitizedEvent, privacy: .public)"
-            )
+            osLogSink(level, "\(category.rawValue) \(sanitizedEvent)")
             let logEvent = DiagnosticLogEvent(
                 schemaVersion: 1,
                 timestamp: now(),
