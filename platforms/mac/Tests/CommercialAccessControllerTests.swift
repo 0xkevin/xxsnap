@@ -72,23 +72,44 @@ final class CommercialAccessControllerTests: XCTestCase {
         guard case .pro = paidController.state else { return XCTFail("valid paid access must outrank untrusted all-free") }
     }
 
-    func testBootstrapAllFreeIsTrustedOnlyForCurrentBootAndPersistsAnchor() async throws {
+    func testBootstrapAllFreeStaysUntrustedUntilServerHTTPDateArrives() async throws {
         let fixture = try Fixture(now: now)
-        fixture.bootstrap = try fixture.policy(mode: .allFree, expiresAt: now.addingTimeInterval(.day))
+        let signed = try fixture.policy(mode: .allFree, expiresAt: now.addingTimeInterval(.day))
+        fixture.bootstrap = signed
         fixture.client.fetchResult = .failure(URLError(.notConnectedToInternet))
-        let currentBoot = fixture.controller()
+        let controller = fixture.controller()
 
-        await currentBoot.refresh()
+        await controller.refresh()
 
-        XCTAssertEqual(currentBoot.state, .allFree)
+        XCTAssertEqual(controller.state, .free(reason: .clockRequiresValidation))
+        XCTAssertNil(fixture.store.policyRecord?.timeAnchor)
+        XCTAssertEqual(fixture.store.policyRecord?.envelope, signed)
+
+        fixture.client.fetchResult = .success(signed)
+        fixture.client.policyServerVerifiedAt = now
+        await controller.refresh()
+
+        XCTAssertEqual(controller.state, .allFree)
         XCTAssertEqual(fixture.store.policyRecord?.timeAnchor?.bootSessionID, "boot-a")
+    }
 
-        fixture.clock.bootSessionID = "boot-b"
-        fixture.clock.currentUptime = 1
+    func testExpiredBootstrapCannotRestoreAllFreeAfterCacheDeletionAndPrelaunchClockRollback() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.bootstrap = try fixture.policy(
+            mode: .allFree,
+            expiresAt: now.addingTimeInterval(-.day)
+        )
+        fixture.store.policyRecord = nil
         fixture.clock.now = now.addingTimeInterval(-100 * .day)
-        let restarted = fixture.controller()
-        await restarted.refresh()
-        guard case .free = restarted.state else { return XCTFail("bootstrap must not be reused after reset") }
+        fixture.clock.currentUptime = 50
+        fixture.client.fetchResult = .failure(URLError(.notConnectedToInternet))
+        let controller = fixture.controller()
+
+        await controller.refresh()
+
+        XCTAssertEqual(controller.state, .free(reason: .clockRequiresValidation))
+        XCTAssertFalse(controller.canUse(.scrollCapture))
+        XCTAssertNil(fixture.store.policyRecord?.timeAnchor)
     }
 
     func testCommercialDiagnosticsRecordBoundedRequestsStateChangesAndFeatureBlocks() async throws {
@@ -158,6 +179,39 @@ final class CommercialAccessControllerTests: XCTestCase {
             )
         })
         XCTAssertTrue(fixture.diagnosticLogger.events.contains {
+            $0 == .accessRequest(
+                operation: .terminal,
+                accessKind: .free,
+                result: .success,
+                error: .licenseRevoked
+            )
+        })
+    }
+
+    func testTerminalCommitStorageFailureIsLoggedAsStableFailureNotSuccess() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        fixture.store.access = try fixture.entitlement(access: .pro, maximumBuildNumber: 100)
+        fixture.client.fetchResult = .success(
+            try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        )
+        fixture.client.validateResult = .failure(fixture.serverError("license_revoked"))
+        fixture.store.deleteAccessError = CommercialCredentialStoreError.keychain(
+            errSecInteractionNotAllowed
+        )
+        let controller = fixture.controller()
+
+        await controller.refresh()
+
+        XCTAssertTrue(fixture.diagnosticLogger.events.contains {
+            $0 == .accessRequest(
+                operation: .terminal,
+                accessKind: .free,
+                result: .failure,
+                error: .storage
+            )
+        })
+        XCTAssertFalse(fixture.diagnosticLogger.events.contains {
             $0 == .accessRequest(
                 operation: .terminal,
                 accessKind: .free,
@@ -251,7 +305,9 @@ final class CommercialAccessControllerTests: XCTestCase {
         fixture.client.fetchResult = .failure(URLError(.notConnectedToInternet))
         let controller = fixture.controller()
         await controller.refresh()
-        XCTAssertEqual(controller.state, .allFree)
+        XCTAssertEqual(controller.state, .free(reason: .clockRequiresValidation))
+        XCTAssertEqual(controller.presentationPolicy?.mode, .allFree)
+        XCTAssertNil(fixture.store.policyRecord?.timeAnchor)
 
         let invalidCacheFixture = try Fixture(now: now)
         invalidCacheFixture.store.policy = SignedEnvelope(keyId: "wrong", payload: "AA==", signature: String(repeating: "A", count: 88))

@@ -713,25 +713,22 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
                     error: isTrusted ? nil : .clockValidationRequired
                 )
             } else if let bootstrap = try await bootstrapWorker.load() {
-                let verified = try verifier.verifyPolicy(bootstrap, at: clock.now)
-                let anchor = CommercialPolicyTimeAnchor(
-                    serverVerifiedAt: clock.now,
-                    systemUptime: clock.currentUptime,
-                    bootSessionID: clock.bootSessionID
-                )
-                let record = CommercialPolicyRecord(envelope: bootstrap, timeAnchor: anchor)
+                let verified = try verifier.verifyPolicyEnvelope(bootstrap)
+                let record = CommercialPolicyRecord(envelope: bootstrap, timeAnchor: nil)
+                let cacheError: CommercialDiagnosticErrorCode?
                 do {
                     try await worker.saveBootstrapPolicy(record)
-                    policyTimeAnchor = anchor
+                    cacheError = .clockValidationRequired
                 } catch {
-                    policyTimeAnchor = nil
+                    cacheError = .storage
                 }
                 policy = verified
+                policyTimeAnchor = nil
                 logPolicyRefresh(
                     policy: verified,
                     at: clock.now,
-                    result: policyTimeAnchor == nil ? .failure : .success,
-                    error: policyTimeAnchor == nil ? .storage : nil
+                    result: .failure,
+                    error: cacheError
                 )
             } else {
                 policy = nil
@@ -1186,15 +1183,21 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
         hasPendingTerminalCleanup = outcome.cleanupPending
         clearLocalAccess()
         setState(.free(reason: .serverDenied))
+        if outcome.storageFailed {
+            logAccessRequest(
+                .terminal,
+                result: .failure,
+                error: .storage,
+                accessKind: Self.diagnosticAccessKind(state)
+            )
+            throw CommercialAccessControllerError.storage
+        }
         logAccessRequest(
             .terminal,
             result: .success,
             error: Self.diagnosticTerminalError(reason),
             accessKind: Self.diagnosticAccessKind(state)
         )
-        if outcome.storageFailed {
-            throw CommercialAccessControllerError.storage
-        }
         return true
     }
 

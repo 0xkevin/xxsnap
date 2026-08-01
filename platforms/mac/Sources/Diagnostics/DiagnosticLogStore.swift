@@ -532,19 +532,18 @@ extension DiagnosticLogStore: CommercialDiagnosticLogging {
             name = "commercial_access_state_changed"
             level = .info
             metadata["access_kind"] = accessKind.rawValue
-            metadata["result"] = CommercialDiagnosticResult.success.rawValue
         case let .accessRequest(operation, accessKind, result, error):
             name = "commercial_access_\(operation.rawValue)"
             level = result == .success ? .info : .warning
             metadata["access_kind"] = accessKind.rawValue
-            metadata["result"] = result.rawValue
-            if let error { metadata["error"] = error.rawValue }
+            metadata["request_result"] = result.rawValue
+            if let error { metadata["stable_error_code"] = error.rawValue }
         case let .featureIntercept(feature, accessKind, result):
             name = "commercial_feature_intercept"
             level = .info
             metadata["commercial_feature"] = feature.rawValue
             metadata["access_kind"] = accessKind.rawValue
-            metadata["result"] = result.rawValue
+            metadata["request_result"] = result.rawValue
         }
         record(
             category: .commercial,

@@ -15,15 +15,28 @@ final class DiagnosticLoggingTests: XCTestCase {
         store.record(.policyRefresh(
             mode: .allFree,
             policyID: "00000000-0000-0000-0000-000000000001",
-            expired: false,
-            result: .success,
-            error: nil
+            expired: true,
+            result: .failure,
+            error: .policyExpired
         ))
+        store.record(.accessStateChanged(accessKind: .free))
         store.record(.accessRequest(
             operation: .validate,
             accessKind: .pro,
             result: .failure,
             error: .network
+        ))
+        store.record(.accessRequest(
+            operation: .trial,
+            accessKind: .free,
+            result: .failure,
+            error: .trialUnavailable
+        ))
+        store.record(.accessRequest(
+            operation: .terminal,
+            accessKind: .free,
+            result: .success,
+            error: .licenseRevoked
         ))
         store.record(.featureIntercept(
             feature: .ocr,
@@ -33,24 +46,52 @@ final class DiagnosticLoggingTests: XCTestCase {
         store.flush()
 
         let events = readEvents(in: directory)
-        XCTAssertEqual(events.map(\.category), [.commercial, .commercial, .commercial])
+        XCTAssertEqual(events.map(\.category), Array(repeating: .commercial, count: 6))
         XCTAssertEqual(events.map(\.event), [
             "commercial_policy_refresh",
+            "commercial_access_state_changed",
             "commercial_access_validate",
+            "commercial_access_trial",
+            "commercial_access_terminal",
             "commercial_feature_intercept",
         ])
-        XCTAssertEqual(
-            Set(events[0].metadata.keys),
-            ["policy_mode", "policy_id", "policy_expired", "request_result"]
-        )
-        XCTAssertEqual(
-            Set(events[1].metadata.keys),
-            ["access_kind", "result", "error"]
-        )
-        XCTAssertEqual(
-            Set(events[2].metadata.keys),
-            ["commercial_feature", "access_kind", "result"]
-        )
+        let commercialMetadataWhitelist: Set<String> = [
+            "policy_mode", "policy_id", "policy_expired", "access_kind",
+            "commercial_feature", "request_result", "stable_error_code",
+        ]
+        for event in events {
+            XCTAssertTrue(
+                Set(event.metadata.keys).isSubset(of: commercialMetadataWhitelist),
+                "event=\(event.event), keys=\(event.metadata.keys.sorted())"
+            )
+        }
+        XCTAssertEqual(Set(events[0].metadata.keys), [
+            "policy_mode", "policy_id", "policy_expired", "request_result",
+            "stable_error_code",
+        ])
+        XCTAssertEqual(events[0].metadata["request_result"], "failure")
+        XCTAssertEqual(events[0].metadata["stable_error_code"], "policy_expired")
+        XCTAssertEqual(events[1].metadata, ["access_kind": "free"])
+        XCTAssertEqual(events[2].metadata, [
+            "access_kind": "pro",
+            "request_result": "failure",
+            "stable_error_code": "network",
+        ])
+        XCTAssertEqual(events[3].metadata, [
+            "access_kind": "free",
+            "request_result": "failure",
+            "stable_error_code": "trial_unavailable",
+        ])
+        XCTAssertEqual(events[4].metadata, [
+            "access_kind": "free",
+            "request_result": "success",
+            "stable_error_code": "license_revoked",
+        ])
+        XCTAssertEqual(events[5].metadata, [
+            "commercial_feature": "ocr",
+            "access_kind": "free",
+            "request_result": "blocked",
+        ])
         let raw = try String(contentsOf: XCTUnwrap(logFiles(in: directory).first))
         for forbidden in [
             "email", "activation_code", "device_hash", "payload", "signature",
@@ -70,6 +111,8 @@ final class DiagnosticLoggingTests: XCTestCase {
         XCTAssertFalse(DiagnosticRedactor.containsSensitiveData(exported))
         XCTAssertTrue(exported.contains("commercial_policy_refresh"))
         XCTAssertTrue(exported.contains("commercial_feature_intercept"))
+        XCTAssertTrue(exported.contains(#""request_result":"blocked""#))
+        XCTAssertTrue(exported.contains(#""stable_error_code":"network""#))
     }
 
     func testCommercialMetadataUsesAllowlistAndRejectsSecretKeyVariants() {
