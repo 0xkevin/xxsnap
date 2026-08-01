@@ -409,6 +409,8 @@ final class CommercialPolicyTests: XCTestCase {
         XCTAssertEqual(policy.mode, .allFree)
         XCTAssertFalse(policy.billingReady)
         XCTAssertEqual(policy.features, .init(scrollCapture: false, ocr: false, teachingPen: false))
+        XCTAssertEqual(policy.purchase.zhCNURL.absoluteString, "https://xxsnap.xxsofts.com/zh-CN/pro")
+        XCTAssertEqual(policy.purchase.enURL.absoluteString, "https://xxsnap.xxsofts.com/en/pro")
         XCTAssertLessThanOrEqual(policy.effectiveAt, instant("2026-07-31T23:59:59Z"))
         XCTAssertLessThanOrEqual(policy.expiresAt, instant("2026-08-30T00:00:00Z"))
         XCTAssertLessThanOrEqual(policy.expiresAt.timeIntervalSince(policy.effectiveAt), 30 * 24 * 60 * 60)
