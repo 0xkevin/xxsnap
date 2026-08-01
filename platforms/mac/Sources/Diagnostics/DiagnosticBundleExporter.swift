@@ -106,6 +106,7 @@ final class DiagnosticBundleExporter {
     private let archiver: any DiagnosticArchiveCreating
     private let fileManager: FileManager
     private let limits: Limits
+    private let sourceEnumerationHook: () -> Void
 
     init(
         logStore: DiagnosticLogStore,
@@ -116,7 +117,8 @@ final class DiagnosticBundleExporter {
         temporaryDirectory: URL = FileManager.default.temporaryDirectory,
         archiver: any DiagnosticArchiveCreating = DittoDiagnosticArchiver(),
         fileManager: FileManager = .default,
-        limits: Limits = .standard
+        limits: Limits = .standard,
+        sourceEnumerationHook: @escaping () -> Void = {}
     ) {
         self.logStore = logStore
         self.appInfo = appInfo
@@ -127,6 +129,7 @@ final class DiagnosticBundleExporter {
         self.archiver = archiver
         self.fileManager = fileManager
         self.limits = limits
+        self.sourceEnumerationHook = sourceEnumerationHook
     }
 
     @discardableResult
@@ -176,26 +179,18 @@ final class DiagnosticBundleExporter {
     }
 
     private func sanitizeLogs(from sourceDirectory: URL, to outputDirectory: URL) throws -> [URL] {
-        let root = sourceDirectory.standardizedFileURL.resolvingSymlinksInPath()
-        let sourceURLs = try fileManager.contentsOfDirectory(
-            at: root,
-            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
-            options: [.skipsHiddenFiles]
-        )
-        .filter { $0.pathExtension == "jsonl" }
-        .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        guard let directoryDescriptor = openSourceDirectory(sourceDirectory) else { return [] }
+        defer { Darwin.close(directoryDescriptor) }
+        guard let sourceNames = boundedSourceNames(in: directoryDescriptor) else { return [] }
+        sourceEnumerationHook()
 
         var remainingReadBytes = max(0, limits.maximumTotalReadBytes)
-        var inspectedFileCount = 0
         var outputs: [URL] = []
-        for sourceURL in sourceURLs {
-            guard inspectedFileCount < max(0, limits.maximumFileCount),
-                  remainingReadBytes > 1,
-                  isSafeRegularCandidate(sourceURL, within: root)
-            else { continue }
-            inspectedFileCount += 1
+        for sourceName in sourceNames {
+            guard remainingReadBytes > 1 else { break }
             guard let contents = readBoundedRegularFile(
-                sourceURL,
+                named: sourceName,
+                in: directoryDescriptor,
                 remainingReadBytes: &remainingReadBytes
             ) else { continue }
             let lines = sanitizedLines(from: contents)
@@ -218,30 +213,96 @@ final class DiagnosticBundleExporter {
         return outputs
     }
 
-    private func isSafeRegularCandidate(_ sourceURL: URL, within root: URL) -> Bool {
-        guard let values = try? sourceURL.resourceValues(
-            forKeys: [.isRegularFileKey, .isSymbolicLinkKey]
-        ),
-        values.isSymbolicLink != true,
-        values.isRegularFile == true
-        else { return false }
+    private func openSourceDirectory(_ sourceDirectory: URL) -> Int32? {
+        let descriptor = retryingOnInterrupt {
+            Darwin.open(
+                sourceDirectory.path,
+                O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
+            )
+        }
+        guard descriptor >= 0 else { return nil }
+        var status = stat()
+        guard retryingOnInterrupt({ fstat(descriptor, &status) }) == 0,
+              (status.st_mode & S_IFMT) == S_IFDIR
+        else {
+            Darwin.close(descriptor)
+            return nil
+        }
+        return descriptor
+    }
 
-        let resolved = sourceURL.standardizedFileURL.resolvingSymlinksInPath()
-        let rootPath = root.path.hasSuffix("/") ? root.path : root.path + "/"
-        return resolved.path.hasPrefix(rootPath)
+    private func boundedSourceNames(in directoryDescriptor: Int32) -> [String]? {
+        let duplicate = retryingOnInterrupt { Darwin.dup(directoryDescriptor) }
+        guard duplicate >= 0 else { return nil }
+        guard let directory = directoryStream(for: duplicate) else {
+            Darwin.close(duplicate)
+            return nil
+        }
+        defer { closedir(directory) }
+
+        let maximumCount = max(0, limits.maximumFileCount)
+        guard maximumCount > 0 else { return [] }
+        var names: [String] = []
+        while true {
+            errno = 0
+            if let entry = readdir(directory) {
+                guard let name = directoryEntryName(entry), isSafeLogFileName(name) else {
+                    continue
+                }
+                names.append(name)
+                names.sort()
+                if names.count > maximumCount { names.removeLast() }
+                continue
+            }
+            if errno == EINTR { continue }
+            guard errno == 0 else { return nil }
+            return names
+        }
+    }
+
+    private func directoryEntryName(_ entry: UnsafeMutablePointer<dirent>) -> String? {
+        let length = Int(entry.pointee.d_namlen)
+        guard length > 0 else { return nil }
+        return withUnsafeBytes(of: &entry.pointee.d_name) { bytes in
+            guard length <= bytes.count else { return nil }
+            return String(bytes: bytes.prefix(length), encoding: .utf8)
+        }
+    }
+
+    private func isSafeLogFileName(_ name: String) -> Bool {
+        let suffix = ".jsonl"
+        guard name.hasSuffix(suffix), name.utf8.count <= 180 else { return false }
+        let stem = name.dropLast(suffix.count)
+        guard !stem.isEmpty else { return false }
+        return stem.utf8.allSatisfy { byte in
+            (byte >= 48 && byte <= 57)
+                || (byte >= 65 && byte <= 90)
+                || (byte >= 97 && byte <= 122)
+                || byte == 45
+                || byte == 95
+        }
     }
 
     private func readBoundedRegularFile(
-        _ sourceURL: URL,
+        named sourceName: String,
+        in directoryDescriptor: Int32,
         remainingReadBytes: inout Int
     ) -> Data? {
-        let descriptor = Darwin.open(sourceURL.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        let descriptor = retryingOnInterrupt {
+            sourceName.withCString {
+                Darwin.openat(
+                    directoryDescriptor,
+                    $0,
+                    O_RDONLY | O_NOFOLLOW | O_CLOEXEC
+                )
+            }
+        }
         guard descriptor >= 0 else { return nil }
         let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
         defer { try? handle.close() }
 
         var status = stat()
-        guard fstat(descriptor, &status) == 0,
+        guard retryingOnInterrupt({ fstat(descriptor, &status) }) == 0,
               (status.st_mode & S_IFMT) == S_IFREG,
               status.st_nlink == 1,
               status.st_size >= 0,
@@ -269,6 +330,21 @@ final class DiagnosticBundleExporter {
         remainingReadBytes = max(0, remainingReadBytes - data.count)
         guard data.count == fileSize, data.count <= contentLimit else { return nil }
         return data
+    }
+
+    private func directoryStream(for descriptor: Int32) -> UnsafeMutablePointer<DIR>? {
+        while true {
+            errno = 0
+            let directory = fdopendir(descriptor)
+            if directory != nil || errno != EINTR { return directory }
+        }
+    }
+
+    private func retryingOnInterrupt(_ operation: () -> Int32) -> Int32 {
+        while true {
+            let result = operation()
+            if result >= 0 || errno != EINTR { return result }
+        }
     }
 
     private func sanitizedLines(from contents: Data) -> [Data] {

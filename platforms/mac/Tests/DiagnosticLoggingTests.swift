@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import XCTest
 @testable import xxsnap
 
@@ -216,7 +217,7 @@ final class DiagnosticLoggingTests: XCTestCase {
             try? FileManager.default.removeItem(at: directory)
             try? FileManager.default.removeItem(at: stagingParent)
         }
-        let unsafeName = directory.appendingPathComponent("license-person@example.test-token.jsonl")
+        let unsafeName = directory.appendingPathComponent("historical-input.jsonl")
         try Data(
             """
             not-json
@@ -295,6 +296,212 @@ final class DiagnosticLoggingTests: XCTestCase {
         XCTAssertTrue(archiver.logFileNames.allSatisfy {
             $0.range(of: #"^diagnostic-log-[0-9]{3}\.jsonl$"#, options: .regularExpression) != nil
         })
+    }
+
+    func testExporterRejectsSourceDirectorySymlinkWithoutFollowingIt() throws {
+        let parent = try makeTemporaryDirectory()
+        let realLogs = parent.appendingPathComponent("real-logs", isDirectory: true)
+        let linkedLogs = parent.appendingPathComponent("linked-logs", isDirectory: true)
+        let stagingParent = try makeTemporaryDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: parent)
+            try? FileManager.default.removeItem(at: stagingParent)
+        }
+        try FileManager.default.createDirectory(at: realLogs, withIntermediateDirectories: false)
+        try Data(#"{"marker":"LEAK_ROOT_SYMLINK"}"#.utf8).write(
+            to: realLogs.appendingPathComponent("outside.jsonl")
+        )
+        try FileManager.default.createSymbolicLink(at: linkedLogs, withDestinationURL: realLogs)
+        let archiver = RecordingDiagnosticArchiver()
+        let exporter = DiagnosticBundleExporter(
+            logStore: DiagnosticLogStore(directoryURL: linkedLogs),
+            temporaryDirectory: stagingParent,
+            archiver: archiver
+        )
+
+        _ = try exporter.export(to: stagingParent.appendingPathComponent("support.zip"))
+
+        XCTAssertEqual(archiver.manifest?.logFileCount, 0)
+        XCTAssertTrue(archiver.logFileContents.isEmpty)
+    }
+
+    func testExporterKeepsUsingOpenedDirectoryWhenSourcePathIsRenamedAndReplacedBySymlink() throws {
+        let parent = try makeTemporaryDirectory()
+        let source = parent.appendingPathComponent("logs", isDirectory: true)
+        let movedSource = parent.appendingPathComponent("moved-logs", isDirectory: true)
+        let replacement = parent.appendingPathComponent("replacement", isDirectory: true)
+        let stagingParent = try makeTemporaryDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: parent)
+            try? FileManager.default.removeItem(at: stagingParent)
+        }
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: false)
+        try FileManager.default.createDirectory(at: replacement, withIntermediateDirectories: false)
+        try Data(#"{"marker":"SAFE_FIXED_DIRECTORY"}"#.utf8).write(
+            to: source.appendingPathComponent("capture.jsonl")
+        )
+        try Data(#"{"marker":"LEAK_REPLACEMENT_SYMLINK"}"#.utf8).write(
+            to: replacement.appendingPathComponent("capture.jsonl")
+        )
+        let archiver = RecordingDiagnosticArchiver()
+        var mutationError: Error?
+        let exporter = DiagnosticBundleExporter(
+            logStore: DiagnosticLogStore(directoryURL: source),
+            temporaryDirectory: stagingParent,
+            archiver: archiver,
+            sourceEnumerationHook: {
+                do {
+                    try FileManager.default.moveItem(at: source, to: movedSource)
+                    try FileManager.default.createSymbolicLink(
+                        at: source,
+                        withDestinationURL: replacement
+                    )
+                } catch {
+                    mutationError = error
+                }
+            }
+        )
+
+        _ = try exporter.export(to: stagingParent.appendingPathComponent("support.zip"))
+
+        XCTAssertNil(mutationError)
+        let text = archiver.logFileContents.values.joined(separator: "\n")
+        XCTAssertTrue(text.contains("SAFE_FIXED_DIRECTORY"))
+        XCTAssertFalse(text.contains("LEAK_REPLACEMENT_SYMLINK"))
+    }
+
+    func testExporterSafelySkipsChildReplacedBySymlinkAfterEnumeration() throws {
+        let directory = try makeTemporaryDirectory()
+        let outside = try makeTemporaryDirectory()
+        let stagingParent = try makeTemporaryDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            try? FileManager.default.removeItem(at: outside)
+            try? FileManager.default.removeItem(at: stagingParent)
+        }
+        let candidate = directory.appendingPathComponent("capture.jsonl")
+        let movedCandidate = directory.appendingPathComponent("moved-after-enumeration.jsonl")
+        let outsideLog = outside.appendingPathComponent("outside.jsonl")
+        try Data(#"{"marker":"SAFE_ORIGINAL_CHILD"}"#.utf8).write(to: candidate)
+        try Data(#"{"marker":"LEAK_CHILD_SYMLINK"}"#.utf8).write(to: outsideLog)
+        let archiver = RecordingDiagnosticArchiver()
+        var mutationError: Error?
+        let exporter = DiagnosticBundleExporter(
+            logStore: DiagnosticLogStore(directoryURL: directory),
+            temporaryDirectory: stagingParent,
+            archiver: archiver,
+            sourceEnumerationHook: {
+                do {
+                    try FileManager.default.moveItem(at: candidate, to: movedCandidate)
+                    try FileManager.default.createSymbolicLink(
+                        at: candidate,
+                        withDestinationURL: outsideLog
+                    )
+                } catch {
+                    mutationError = error
+                }
+            }
+        )
+
+        _ = try exporter.export(to: stagingParent.appendingPathComponent("support.zip"))
+
+        XCTAssertNil(mutationError)
+        let text = archiver.logFileContents.values.joined(separator: "\n")
+        XCTAssertFalse(text.contains("LEAK_CHILD_SYMLINK"))
+        XCTAssertFalse(text.contains("SAFE_ORIGINAL_CHILD"))
+    }
+
+    func testExporterRejectsSubdirectoriesAndUnusualSourceNames() throws {
+        let directory = try makeTemporaryDirectory()
+        let stagingParent = try makeTemporaryDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            try? FileManager.default.removeItem(at: stagingParent)
+        }
+        try Data(#"{"marker":"SAFE_NAME"}"#.utf8).write(
+            to: directory.appendingPathComponent("safe-input.jsonl")
+        )
+        for (name, marker) in [
+            ("unsafe@name.jsonl", "LEAK_AT_NAME"),
+            ("line\nbreak.jsonl", "LEAK_CONTROL_NAME"),
+            ("unicode-秘密.jsonl", "LEAK_UNICODE_NAME"),
+        ] {
+            try Data("{\"marker\":\"\(marker)\"}".utf8).write(
+                to: directory.appendingPathComponent(name)
+            )
+        }
+        try FileManager.default.createDirectory(
+            at: directory.appendingPathComponent("nested.jsonl"),
+            withIntermediateDirectories: false
+        )
+        let archiver = RecordingDiagnosticArchiver()
+        let exporter = DiagnosticBundleExporter(
+            logStore: DiagnosticLogStore(
+                directoryURL: directory,
+                configuration: .init(
+                    maximumFileSize: 5 * 1_024 * 1_024,
+                    maximumFileCount: 20,
+                    retentionInterval: 7 * 24 * 60 * 60
+                )
+            ),
+            temporaryDirectory: stagingParent,
+            archiver: archiver,
+            limits: .init(
+                maximumFileCount: 20,
+                maximumFileBytes: 1_024,
+                maximumTotalReadBytes: 20 * 1_024
+            )
+        )
+
+        _ = try exporter.export(to: stagingParent.appendingPathComponent("support.zip"))
+
+        let text = archiver.logFileContents.values.joined(separator: "\n")
+        XCTAssertTrue(text.contains("SAFE_NAME"))
+        XCTAssertFalse(text.contains("LEAK_AT_NAME"))
+        XCTAssertFalse(text.contains("LEAK_CONTROL_NAME"))
+        XCTAssertFalse(text.contains("LEAK_UNICODE_NAME"))
+    }
+
+    func testExporterClosesDirectoryEnumerationAndFileDescriptorsAcrossRepeatedExports() throws {
+        let directory = try makeTemporaryDirectory()
+        let outside = try makeTemporaryDirectory()
+        let stagingParent = try makeTemporaryDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            try? FileManager.default.removeItem(at: outside)
+            try? FileManager.default.removeItem(at: stagingParent)
+        }
+        try Data(#"{"marker":"SAFE_DESCRIPTOR_TEST"}"#.utf8).write(
+            to: directory.appendingPathComponent("regular.jsonl")
+        )
+        let hardLinkTarget = outside.appendingPathComponent("hard-link-target.jsonl")
+        try Data(#"{"marker":"REJECT_HARD_LINK"}"#.utf8).write(to: hardLinkTarget)
+        try FileManager.default.linkItem(
+            at: hardLinkTarget,
+            to: directory.appendingPathComponent("hard-link.jsonl")
+        )
+        let store = DiagnosticLogStore(
+            directoryURL: directory,
+            configuration: .init(
+                maximumFileSize: 5 * 1_024 * 1_024,
+                maximumFileCount: 20,
+                retentionInterval: 7 * 24 * 60 * 60
+            )
+        )
+        let baseline = openFileDescriptorCount()
+
+        for index in 0..<20 {
+            let exporter = DiagnosticBundleExporter(
+                logStore: store,
+                temporaryDirectory: stagingParent,
+                archiver: RecordingDiagnosticArchiver()
+            )
+            _ = try exporter.export(
+                to: stagingParent.appendingPathComponent("support-\(index).zip")
+            )
+        }
+
+        XCTAssertLessThanOrEqual(openFileDescriptorCount(), baseline + 3)
     }
 
     func testExporterSkipsFileLargerThanPerFileBudgetWithoutReadingSecretIntoBundle() throws {
@@ -668,6 +875,12 @@ final class DiagnosticLoggingTests: XCTestCase {
                     .split(separator: "\n")
                     .compactMap { try? decoder.decode(DiagnosticLogEvent.self, from: Data($0.utf8)) }
             } ?? []
+    }
+
+    private func openFileDescriptorCount() -> Int {
+        (0..<Int(getdtablesize())).reduce(into: 0) { count, descriptor in
+            if fcntl(Int32(descriptor), F_GETFD) >= 0 { count += 1 }
+        }
     }
 }
 
