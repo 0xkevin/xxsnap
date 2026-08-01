@@ -1,11 +1,26 @@
 import Foundation
 
+struct CommercialPolicyFetchResponse: Equatable {
+    let envelope: SignedEnvelope
+    let serverVerifiedAt: Date?
+}
+
 protocol CommercialPolicyFetching {
     func fetchPolicy(locale: CommercialLocale) async throws -> SignedEnvelope
+    func fetchPolicyResponse(locale: CommercialLocale) async throws -> CommercialPolicyFetchResponse
     func startTrial(_ request: CommercialTrialStartRequest, locale: CommercialLocale) async throws -> SignedEnvelope
     func activate(_ request: CommercialLicenseActivateRequest, locale: CommercialLocale) async throws -> SignedEnvelope
     func validate(_ request: CommercialLicenseValidateRequest, locale: CommercialLocale) async throws -> SignedEnvelope
     func deactivate(_ request: CommercialLicenseDeactivateRequest, locale: CommercialLocale) async throws
+}
+
+extension CommercialPolicyFetching {
+    func fetchPolicyResponse(locale: CommercialLocale) async throws -> CommercialPolicyFetchResponse {
+        CommercialPolicyFetchResponse(
+            envelope: try await fetchPolicy(locale: locale),
+            serverVerifiedAt: nil
+        )
+    }
 }
 
 enum CommercialPolicyClientError: Error, Equatable {
@@ -42,7 +57,30 @@ final class CommercialPolicyClient: CommercialPolicyFetching {
     }
 
     func fetchPolicy(locale: CommercialLocale) async throws -> SignedEnvelope {
-        try await envelope(path: "/api/v1/commercial/policy", method: "GET", body: Optional<Data>.none, locale: locale)
+        try await fetchPolicyResponse(locale: locale).envelope
+    }
+
+    func fetchPolicyResponse(locale: CommercialLocale) async throws -> CommercialPolicyFetchResponse {
+        let request = try makeRequest(
+            path: "/api/v1/commercial/policy",
+            method: "GET",
+            body: nil,
+            locale: locale
+        )
+        let (data, response) = try await perform(request)
+        guard response.statusCode == 200 else {
+            try throwResponseError(status: response.statusCode, data: data)
+        }
+        let envelope: SignedEnvelope
+        do {
+            envelope = try decoder.decode(SignedEnvelope.self, from: data)
+        } catch {
+            throw CommercialPolicyClientError.malformedResponse
+        }
+        return CommercialPolicyFetchResponse(
+            envelope: envelope,
+            serverVerifiedAt: Self.strictHTTPDate(response.value(forHTTPHeaderField: "Date"))
+        )
     }
 
     func startTrial(
@@ -161,6 +199,20 @@ final class CommercialPolicyClient: CommercialPolicyFetching {
             && (components.path.isEmpty || components.path == "/")
             && components.query == nil
             && components.fragment == nil
+    }
+
+    private static func strictHTTPDate(_ value: String?) -> Date? {
+        guard let value else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "EEE',' dd MMM yyyy HH':'mm':'ss 'GMT'"
+        formatter.isLenient = false
+        guard let date = formatter.date(from: value), formatter.string(from: date) == value else {
+            return nil
+        }
+        return date
     }
 }
 

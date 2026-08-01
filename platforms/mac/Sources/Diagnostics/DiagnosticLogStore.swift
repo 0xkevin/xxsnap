@@ -3,12 +3,80 @@ import OSLog
 
 enum DiagnosticLogCategory: String, Codable {
     case application
+    case commercial
     case capture
     case scrollCapture = "scroll_capture"
     case textRecognition = "text_recognition"
     case teachingPen = "teaching_pen"
     case pin
     case export
+}
+
+enum CommercialDiagnosticResult: String, Equatable {
+    case success
+    case failure
+    case cancelled
+    case blocked
+}
+
+enum CommercialDiagnosticAccessKind: String, Equatable {
+    case allFree = "all_free"
+    case allFreeGrace = "all_free_grace"
+    case trial
+    case pro
+    case free
+}
+
+enum CommercialDiagnosticOperation: String, Equatable {
+    case validate
+    case trial
+    case terminal
+}
+
+enum CommercialDiagnosticErrorCode: String, Equatable {
+    case network
+    case server
+    case storage
+    case invalidPolicy = "invalid_policy"
+    case policyExpired = "policy_expired"
+    case invalidCredential = "invalid_credential"
+    case clockValidationRequired = "clock_validation_required"
+    case trialUnavailable = "trial_unavailable"
+    case licenseRevoked = "license_revoked"
+    case licenseRefunded = "license_refunded"
+    case deviceDeactivated = "device_deactivated"
+}
+
+enum CommercialDiagnosticEvent: Equatable {
+    case policyRefresh(
+        mode: CommercialMode?,
+        policyID: String?,
+        expired: Bool?,
+        result: CommercialDiagnosticResult,
+        error: CommercialDiagnosticErrorCode?
+    )
+    case accessStateChanged(accessKind: CommercialDiagnosticAccessKind)
+    case accessRequest(
+        operation: CommercialDiagnosticOperation,
+        accessKind: CommercialDiagnosticAccessKind,
+        result: CommercialDiagnosticResult,
+        error: CommercialDiagnosticErrorCode?
+    )
+    case featureIntercept(
+        feature: CommercialFeature,
+        accessKind: CommercialDiagnosticAccessKind,
+        result: CommercialDiagnosticResult
+    )
+}
+
+protocol CommercialDiagnosticLogging: AnyObject {
+    func record(_ event: CommercialDiagnosticEvent)
+}
+
+final class NoopCommercialDiagnosticLogger: CommercialDiagnosticLogging {
+    static let shared = NoopCommercialDiagnosticLogger()
+    private init() {}
+    func record(_ event: CommercialDiagnosticEvent) {}
 }
 
 enum DiagnosticLogLevel: String, Codable {
@@ -443,5 +511,47 @@ final class DiagnosticLogStore: DiagnosticLogging, @unchecked Sendable {
         return library
             .appendingPathComponent("Logs", isDirectory: true)
             .appendingPathComponent("XxSnap", isDirectory: true)
+    }
+}
+
+extension DiagnosticLogStore: CommercialDiagnosticLogging {
+    func record(_ event: CommercialDiagnosticEvent) {
+        let name: String
+        let level: DiagnosticLogLevel
+        var metadata: [String: String] = [:]
+        switch event {
+        case let .policyRefresh(mode, policyID, expired, result, error):
+            name = "commercial_policy_refresh"
+            level = result == .success ? .info : .warning
+            if let mode { metadata["policy_mode"] = mode.rawValue }
+            if let policyID { metadata["policy_id"] = policyID }
+            if let expired { metadata["policy_expired"] = expired ? "true" : "false" }
+            metadata["request_result"] = result.rawValue
+            if let error { metadata["stable_error_code"] = error.rawValue }
+        case let .accessStateChanged(accessKind):
+            name = "commercial_access_state_changed"
+            level = .info
+            metadata["access_kind"] = accessKind.rawValue
+            metadata["result"] = CommercialDiagnosticResult.success.rawValue
+        case let .accessRequest(operation, accessKind, result, error):
+            name = "commercial_access_\(operation.rawValue)"
+            level = result == .success ? .info : .warning
+            metadata["access_kind"] = accessKind.rawValue
+            metadata["result"] = result.rawValue
+            if let error { metadata["error"] = error.rawValue }
+        case let .featureIntercept(feature, accessKind, result):
+            name = "commercial_feature_intercept"
+            level = .info
+            metadata["commercial_feature"] = feature.rawValue
+            metadata["access_kind"] = accessKind.rawValue
+            metadata["result"] = result.rawValue
+        }
+        record(
+            category: .commercial,
+            level: level,
+            event: name,
+            metadata: metadata,
+            detail: .standard
+        )
     }
 }

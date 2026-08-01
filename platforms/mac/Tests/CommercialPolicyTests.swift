@@ -581,6 +581,40 @@ final class CommercialPolicyTests: XCTestCase {
         }
     }
 
+    func testPolicyFetchCapturesOnlyStrictTLSHTTPDateAsVerifiedServerTime() async throws {
+        let expected = instant("2026-08-01T08:00:00Z")
+        let valid = try makeClient { request in
+            (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Date": "Sat, 01 Aug 2026 08:00:00 GMT"]
+                )!,
+                try JSONEncoder().encode(self.goldenEnvelope)
+            )
+        }
+        let result = try await valid.fetchPolicyResponse(locale: .english)
+        XCTAssertEqual(result.envelope, goldenEnvelope)
+        XCTAssertEqual(result.serverVerifiedAt, expected)
+
+        for header in [nil, "2026-08-01T08:00:00Z", "Sat, 01 Aug 2026 08:00:00 UTC"] as [String?] {
+            let client = try makeClient { request in
+                (
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: header.map { ["Date": $0] }
+                    )!,
+                    try JSONEncoder().encode(self.goldenEnvelope)
+                )
+            }
+            let untrusted = try await client.fetchPolicyResponse(locale: .english)
+            XCTAssertNil(untrusted.serverVerifiedAt, "header=\(header ?? "missing")")
+        }
+    }
+
     private func verifiedGoldenPolicy() throws -> CommercialPolicy {
         try CommercialSignatureVerifier(publicKeys: ["fixed-test-key": testPublicKey])
             .verifyPolicy(goldenEnvelope, at: instant("2026-08-01T00:00:00Z"))

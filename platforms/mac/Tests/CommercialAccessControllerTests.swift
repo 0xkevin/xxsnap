@@ -7,6 +7,166 @@ import XCTest
 final class CommercialAccessControllerTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 2_000_000_000)
 
+    func testAllFreeUsesHTTPDateAnchorAcrossLocalRollbackAndExactGraceBoundary() async throws {
+        for elapsedDays in [13.0, 14.0, 14.1] {
+            let fixture = try Fixture(now: now)
+            let signed = try fixture.policy(mode: .allFree, expiresAt: now.addingTimeInterval(1))
+            fixture.client.fetchResult = .success(signed)
+            fixture.client.policyServerVerifiedAt = now
+            fixture.clock.now = now.addingTimeInterval(-100 * .day)
+            let controller = fixture.controller()
+
+            await controller.refresh()
+            fixture.clock.currentUptime += elapsedDays * .day + 1
+            await controller.loadCachedCommercialState()
+
+            XCTAssertEqual(
+                controller.canUse(.ocr),
+                elapsedDays <= 14,
+                "elapsedDays=\(elapsedDays), state=\(controller.state)"
+            )
+        }
+    }
+
+    func testCachedAllFreeFailsClosedAfterBootResetAndNetworkDateRestoresIt() async throws {
+        let fixture = try Fixture(now: now)
+        let signed = try fixture.policy(mode: .allFree, expiresAt: now.addingTimeInterval(.day))
+        fixture.store.policy = signed
+        fixture.clock.bootSessionID = "boot-b"
+        fixture.clock.now = now.addingTimeInterval(-100 * .day)
+        fixture.clock.currentUptime = 10
+        fixture.client.fetchResult = .failure(URLError(.notConnectedToInternet))
+        let controller = fixture.controller()
+
+        await controller.refresh()
+
+        guard case .free = controller.state else { return XCTFail("reset cache must fail closed") }
+        XCTAssertFalse(controller.canUse(.scrollCapture))
+
+        fixture.client.fetchResult = .success(signed)
+        fixture.client.policyServerVerifiedAt = now
+        await controller.refresh()
+        XCTAssertEqual(controller.state, .allFree)
+        XCTAssertEqual(fixture.store.policyRecord?.timeAnchor?.bootSessionID, "boot-b")
+    }
+
+    func testAllFreeWithoutValidHTTPDateIsCachedUntrustedAndPaidCredentialStillWins() async throws {
+        let untrusted = try Fixture(now: now)
+        let signed = try untrusted.policy(mode: .allFree, expiresAt: now.addingTimeInterval(.day))
+        untrusted.client.fetchResult = .success(signed)
+        untrusted.client.policyServerVerifiedAt = nil
+        let untrustedController = untrusted.controller()
+
+        await untrustedController.refresh()
+
+        guard case .free = untrustedController.state else { return XCTFail("missing Date must fail closed") }
+        XCTAssertNil(untrusted.store.policyRecord?.timeAnchor)
+
+        let paid = try Fixture(now: now)
+        paid.store.policy = signed
+        paid.store.access = try paid.entitlement(access: .pro, maximumBuildNumber: 100)
+        paid.clock.bootSessionID = "boot-b"
+        paid.client.fetchResult = .failure(URLError(.timedOut))
+        let paidController = paid.controller()
+        await paidController.refresh()
+        guard case .pro = paidController.state else { return XCTFail("valid paid access must outrank untrusted all-free") }
+    }
+
+    func testBootstrapAllFreeIsTrustedOnlyForCurrentBootAndPersistsAnchor() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.bootstrap = try fixture.policy(mode: .allFree, expiresAt: now.addingTimeInterval(.day))
+        fixture.client.fetchResult = .failure(URLError(.notConnectedToInternet))
+        let currentBoot = fixture.controller()
+
+        await currentBoot.refresh()
+
+        XCTAssertEqual(currentBoot.state, .allFree)
+        XCTAssertEqual(fixture.store.policyRecord?.timeAnchor?.bootSessionID, "boot-a")
+
+        fixture.clock.bootSessionID = "boot-b"
+        fixture.clock.currentUptime = 1
+        fixture.clock.now = now.addingTimeInterval(-100 * .day)
+        let restarted = fixture.controller()
+        await restarted.refresh()
+        guard case .free = restarted.state else { return XCTFail("bootstrap must not be reused after reset") }
+    }
+
+    func testCommercialDiagnosticsRecordBoundedRequestsStateChangesAndFeatureBlocks() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        fixture.client.fetchResult = .success(
+            try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        )
+        fixture.client.trialResult = .failure(URLError(.notConnectedToInternet))
+        let controller = fixture.controller()
+
+        await controller.refresh()
+        await controller.loadCachedCommercialState()
+        controller.requestPurchase(for: .ocr)
+
+        XCTAssertTrue(fixture.diagnosticLogger.events.contains {
+            if case let .policyRefresh(mode, policyID, expired, result, error) = $0 {
+                return mode == .paid
+                    && policyID == "00000000-0000-0000-0000-000000000001"
+                    && expired == false && result == .success && error == nil
+            }
+            return false
+        })
+        XCTAssertTrue(fixture.diagnosticLogger.events.contains {
+            $0 == .accessRequest(
+                operation: .trial,
+                accessKind: .free,
+                result: .failure,
+                error: .network
+            )
+        })
+        XCTAssertEqual(
+            fixture.diagnosticLogger.events.filter {
+                if case .accessStateChanged = $0 { return true }
+                return false
+            }.count,
+            1,
+            "reloading an unchanged state must not emit another state event"
+        )
+        XCTAssertTrue(fixture.diagnosticLogger.events.contains {
+            $0 == .featureIntercept(
+                feature: .ocr,
+                accessKind: .free,
+                result: .blocked
+            )
+        })
+    }
+
+    func testCommercialDiagnosticsRecordValidationAndTerminalWithoutRawServerError() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        fixture.store.access = try fixture.entitlement(access: .pro, maximumBuildNumber: 100)
+        fixture.client.fetchResult = .success(
+            try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        )
+        fixture.client.validateResult = .failure(fixture.serverError("license_revoked"))
+        let controller = fixture.controller()
+
+        await controller.refresh()
+
+        XCTAssertTrue(fixture.diagnosticLogger.events.contains {
+            $0 == .accessRequest(
+                operation: .validate,
+                accessKind: .pro,
+                result: .failure,
+                error: .licenseRevoked
+            )
+        })
+        XCTAssertTrue(fixture.diagnosticLogger.events.contains {
+            $0 == .accessRequest(
+                operation: .terminal,
+                accessKind: .free,
+                result: .success,
+                error: .licenseRevoked
+            )
+        })
+    }
+
     func testAllFreePolicyAndExactFourteenDayGraceBoundaries() async throws {
         for (age, expectedAllowed) in [(13.0, true), (14.0, true), (14.1, false)] {
             let fixture = try Fixture(now: now)
@@ -1104,10 +1264,24 @@ private final class Fixture {
     let clock: MutableCommercialClock
     let buildNumber: Int
     var bootstrap: SignedEnvelope?
+    let diagnosticLogger = RecordingCommercialDiagnosticLogger()
 
     init(now: Date, buildNumber: Int = 42) throws {
-        clock = MutableCommercialClock(now: now, currentUptime: 1_000)
+        clock = MutableCommercialClock(
+            now: now,
+            currentUptime: 1_000,
+            bootSessionID: "boot-a"
+        )
         self.buildNumber = buildNumber
+        store.policyAnchorProvider = { [weak clock] in
+            guard let clock else { return nil }
+            return CommercialPolicyTimeAnchor(
+                serverVerifiedAt: clock.now,
+                systemUptime: clock.currentUptime,
+                bootSessionID: clock.bootSessionID
+            )
+        }
+        client.policyServerVerifiedAt = now
     }
 
     @MainActor func controller(
@@ -1124,6 +1298,7 @@ private final class Fixture {
             buildNumber: buildNumber,
             locale: .english,
             clock: clock,
+            diagnosticLogger: diagnosticLogger,
             bootstrapEnvelope: { [weak self] in self?.bootstrap }
         )
     }
@@ -1241,7 +1416,16 @@ private final class MemoryTerminalMarkerStore: CommercialTerminalMarkerStoring {
 }
 
 private final class MemoryCommercialStore: CommercialCredentialStoring {
-    var policy: SignedEnvelope?
+    var policyAnchorProvider: (() -> CommercialPolicyTimeAnchor?)?
+    var policyRecord: CommercialPolicyRecord?
+    var policy: SignedEnvelope? {
+        get { policyRecord?.envelope }
+        set {
+            policyRecord = newValue.map {
+                CommercialPolicyRecord(envelope: $0, timeAnchor: policyAnchorProvider?())
+            }
+        }
+    }
     private var record: CommercialAccessRecord?
     var access: SignedEnvelope? {
         get { record?.status == .active ? record?.envelope : nil }
@@ -1282,6 +1466,8 @@ private final class MemoryCommercialStore: CommercialCredentialStoring {
     var accessRecord: CommercialAccessRecord? { record }
     func loadPolicyEnvelope() throws -> SignedEnvelope? { policy }
     func savePolicyEnvelope(_ envelope: SignedEnvelope) throws { policy = envelope }
+    func loadPolicyRecord() throws -> CommercialPolicyRecord? { policyRecord }
+    func savePolicyRecord(_ value: CommercialPolicyRecord) throws { policyRecord = value }
     func loadAccessRecord() throws -> CommercialAccessRecord? {
         guard simulatesCorruptAnchor, let envelope = record?.envelope else { return record }
         return .active(envelope: envelope, anchor: nil)
@@ -1315,7 +1501,12 @@ private final class FakeCommercialDevice: CommercialDeviceIdentifying {
 private final class MutableCommercialClock: CommercialTimeProviding {
     var now: Date
     var currentUptime: TimeInterval
-    init(now: Date, currentUptime: TimeInterval) { self.now = now; self.currentUptime = currentUptime }
+    var bootSessionID: String
+    init(now: Date, currentUptime: TimeInterval, bootSessionID: String) {
+        self.now = now
+        self.currentUptime = currentUptime
+        self.bootSessionID = bootSessionID
+    }
 }
 
 private final class FakeCommercialClient: CommercialPolicyFetching {
@@ -1324,6 +1515,7 @@ private final class FakeCommercialClient: CommercialPolicyFetching {
     var activateResult: Result<SignedEnvelope, Error> = .failure(URLError(.notConnectedToInternet))
     var validateResult: Result<SignedEnvelope, Error> = .failure(URLError(.notConnectedToInternet))
     var deactivateResult: Result<Void, Error> = .success(())
+    var policyServerVerifiedAt: Date?
     var trialCalls = 0
     var fetchCalls = 0
     var validateCalls = 0
@@ -1336,6 +1528,12 @@ private final class FakeCommercialClient: CommercialPolicyFetching {
 
     func fetchPolicy(locale: CommercialLocale) async throws -> SignedEnvelope {
         fetchCalls += 1; return try fetchResult.get()
+    }
+    func fetchPolicyResponse(locale: CommercialLocale) async throws -> CommercialPolicyFetchResponse {
+        CommercialPolicyFetchResponse(
+            envelope: try await fetchPolicy(locale: locale),
+            serverVerifiedAt: policyServerVerifiedAt
+        )
     }
     func startTrial(_ request: CommercialTrialStartRequest, locale: CommercialLocale) async throws -> SignedEnvelope {
         trialCalls += 1; return try trialResult.get()
@@ -1363,4 +1561,9 @@ private final class FakeCommercialClient: CommercialPolicyFetching {
         validateContinuation = nil
         continuation?.resume(with: result)
     }
+}
+
+private final class RecordingCommercialDiagnosticLogger: CommercialDiagnosticLogging {
+    private(set) var events: [CommercialDiagnosticEvent] = []
+    func record(_ event: CommercialDiagnosticEvent) { events.append(event) }
 }

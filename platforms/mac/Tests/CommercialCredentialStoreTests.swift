@@ -4,6 +4,32 @@ import XCTest
 @testable import xxsnap
 
 final class CommercialCredentialStoreTests: XCTestCase {
+    func testPolicyRecordAtomicallyStoresEnvelopeAndBootBoundServerAnchorAndMigratesRawEnvelope() throws {
+        let keychain = FakeCommercialKeychain()
+        let store = CommercialCredentialStore(keychain: keychain)
+        let signed = envelope("policy")
+        let anchor = CommercialPolicyTimeAnchor(
+            serverVerifiedAt: Date(timeIntervalSince1970: 2_000),
+            systemUptime: 123,
+            bootSessionID: "boot-a"
+        )
+        let record = CommercialPolicyRecord(envelope: signed, timeAnchor: anchor)
+
+        try store.savePolicyRecord(record)
+
+        XCTAssertEqual(try store.loadPolicyRecord(), record)
+        let stored = try XCTUnwrap(keychain.items["policy"])
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: stored) as? [String: Any])
+        XCTAssertEqual(Set(object.keys), ["schemaVersion", "envelope", "timeAnchor"])
+        XCTAssertEqual(object["schemaVersion"] as? Int, 1)
+
+        keychain.items["policy"] = try JSONEncoder().encode(signed)
+        XCTAssertEqual(
+            try store.loadPolicyRecord(),
+            CommercialPolicyRecord(envelope: signed, timeAnchor: nil)
+        )
+    }
+
     func testKeychainStoreAtomicallyStoresEnvelopeAndAnchorInOneAccessAccount() throws {
         let keychain = FakeCommercialKeychain()
         let store = CommercialCredentialStore(keychain: keychain)

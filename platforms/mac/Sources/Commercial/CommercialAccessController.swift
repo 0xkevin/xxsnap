@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 enum CommercialFreeReason: Equatable {
     case policyUnavailable
@@ -139,11 +140,26 @@ final class UnavailableCommercialAccess: CommercialAccessProviding {
 protocol CommercialTimeProviding: AnyObject {
     var now: Date { get }
     var currentUptime: TimeInterval { get }
+    var bootSessionID: String { get }
+}
+
+extension CommercialTimeProviding {
+    var bootSessionID: String { "unknown-boot-session" }
 }
 
 final class SystemCommercialClock: CommercialTimeProviding {
     var now: Date { Date() }
     var currentUptime: TimeInterval { ProcessInfo.processInfo.systemUptime }
+    let bootSessionID: String = {
+        var bootTime = timeval()
+        var size = MemoryLayout<timeval>.size
+        var mib = [CTL_KERN, KERN_BOOTTIME]
+        if sysctl(&mib, u_int(mib.count), &bootTime, &size, nil, 0) == 0 {
+            return "\(bootTime.tv_sec).\(bootTime.tv_usec)"
+        }
+        let approximate = Date().timeIntervalSince1970 - ProcessInfo.processInfo.systemUptime
+        return "approx-\(Int64(approximate.rounded()))"
+    }()
 }
 
 private actor CommercialCredentialWorker {
@@ -161,7 +177,7 @@ private actor CommercialCredentialWorker {
         self.coordinator = coordinator
     }
 
-    func loadPolicy() throws -> SignedEnvelope? { try store.loadPolicyEnvelope() }
+    func loadPolicy() throws -> CommercialPolicyRecord? { try store.loadPolicyRecord() }
     func beginRefreshGeneration() -> CommercialRefreshGeneration {
         coordinator.beginRefreshGeneration()
     }
@@ -172,10 +188,14 @@ private actor CommercialCredentialWorker {
         coordinator.isRefreshGenerationCurrent(generation)
     }
     func savePolicy(
-        _ envelope: SignedEnvelope,
+        _ record: CommercialPolicyRecord,
         refresh: CommercialRefreshGeneration
     ) throws -> Bool {
-        try coordinator.savePolicy(envelope, refresh: refresh, store: store)
+        try coordinator.savePolicy(record, refresh: refresh, store: store)
+    }
+
+    func saveBootstrapPolicy(_ record: CommercialPolicyRecord) throws {
+        try store.savePolicyRecord(record)
     }
 
     func snapshot(prepareClearance: Bool = false) throws -> CommercialCredentialMutationSnapshot {
@@ -290,8 +310,10 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
     private let buildNumber: Int
     private let locale: CommercialLocale
     private let clock: CommercialTimeProviding
+    private let diagnosticLogger: any CommercialDiagnosticLogging
 
     private var policy: CommercialPolicy?
+    private var policyTimeAnchor: CommercialPolicyTimeAnchor?
     var presentationPolicy: CommercialPolicy? { policy }
     var paidValidationContext: CommercialPaidValidationContext? {
         guard entitlement?.access == .pro else { return nil }
@@ -326,6 +348,7 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
         buildNumber: Int,
         locale: CommercialLocale,
         clock: CommercialTimeProviding = SystemCommercialClock(),
+        diagnosticLogger: any CommercialDiagnosticLogging = NoopCommercialDiagnosticLogger.shared,
         bootstrapEnvelope: @escaping @Sendable () throws -> SignedEnvelope?
     ) {
         worker = CommercialCredentialWorker(
@@ -341,9 +364,14 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
         self.buildNumber = buildNumber
         self.locale = locale
         self.clock = clock
+        self.diagnosticLogger = diagnosticLogger
     }
 
-    convenience init(bundle: Bundle = .main, session: URLSession = .shared) throws {
+    convenience init(
+        bundle: Bundle = .main,
+        session: URLSession = .shared,
+        diagnosticLogger: any CommercialDiagnosticLogging = NoopCommercialDiagnosticLogger.shared
+    ) throws {
         let verifier = try CommercialSignatureVerifier(bundle: bundle)
         let client = try CommercialPolicyClient(bundle: bundle, session: session)
         let appVersion = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
@@ -357,6 +385,7 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
             appVersion: appVersion,
             buildNumber: buildNumber,
             locale: Locale.preferredLanguages.first?.hasPrefix("zh") == true ? .zhHans : .english,
+            diagnosticLogger: diagnosticLogger,
             bootstrapEnvelope: {
                 guard let url = bundle.url(
                     forResource: "commercial-policy-bootstrap",
@@ -400,6 +429,13 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
     }
 
     func requestPurchase(for feature: CommercialFeature) {
+        if !snapshot.canUse(feature) {
+            diagnosticLogger.record(.featureIntercept(
+                feature: feature,
+                accessKind: Self.diagnosticAccessKind(state),
+                result: .blocked
+            ))
+        }
         purchaseRequestHandler?(feature)
     }
 
@@ -448,22 +484,48 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
         let token = beginOperation()
         guard await refreshIsCurrent(refreshGeneration), !Task.isCancelled else { return .cancelled }
         do {
-            let envelope = try await client.fetchPolicy(locale: locale)
+            let response = try await client.fetchPolicyResponse(locale: locale)
+            let envelope = response.envelope
             guard isCurrent(token), await refreshIsCurrent(refreshGeneration), !Task.isCancelled else {
                 return .cancelled
             }
-            let verified = try verifier.verifyPolicy(envelope, at: clock.now)
+            let verificationTime = response.serverVerifiedAt ?? clock.now
+            let verified = try verifier.verifyPolicy(envelope, at: verificationTime)
+            let anchor = response.serverVerifiedAt.map {
+                CommercialPolicyTimeAnchor(
+                    serverVerifiedAt: $0,
+                    systemUptime: clock.currentUptime,
+                    bootSessionID: clock.bootSessionID
+                )
+            }
+            let record = CommercialPolicyRecord(envelope: envelope, timeAnchor: anchor)
             guard !Task.isCancelled else { return .cancelled }
-            guard try await worker.savePolicy(envelope, refresh: refreshGeneration) else {
+            guard try await worker.savePolicy(record, refresh: refreshGeneration) else {
                 return .cancelled
             }
             guard isCurrent(token), await refreshIsCurrent(refreshGeneration), !Task.isCancelled else {
                 return .cancelled
             }
             policy = verified
+            policyTimeAnchor = anchor
             presentationNotice = nil
             resolveState()
             notifyPresentationIfNeeded()
+            if verified.mode == .allFree, anchor == nil {
+                logPolicyRefresh(
+                    policy: verified,
+                    at: verificationTime,
+                    result: .failure,
+                    error: .clockValidationRequired
+                )
+                return .retryableFailure
+            }
+            logPolicyRefresh(
+                policy: verified,
+                at: verificationTime,
+                result: .success,
+                error: nil
+            )
             guard verified.mode == .paid else { return .success }
 
             if let accessEnvelope, entitlement?.access == .pro {
@@ -486,6 +548,7 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
             }
             presentationNotice = Self.notice(for: error)
             notifyPresentationIfNeeded()
+            logPolicyRefreshFailure(error)
             return .retryableFailure
         }
     }
@@ -631,21 +694,54 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
 
     private func loadLocalState(token: Int) async {
         do {
-            let cachedPolicy = try await worker.loadPolicy()
+            let cachedRecord = try await worker.loadPolicy()
             guard isCurrent(token) else { return }
 
-            if let cachedPolicy {
-                policy = try verifier.verifyPolicyEnvelope(cachedPolicy)
-                if clock.now < policy!.effectiveAt { throw CommercialVerificationError.notEffective }
+            if let cachedRecord {
+                let verified = try verifier.verifyPolicyEnvelope(cachedRecord.envelope)
+                if verified.mode != .allFree, clock.now < verified.effectiveAt {
+                    throw CommercialVerificationError.notEffective
+                }
+                policy = verified
+                policyTimeAnchor = cachedRecord.timeAnchor
+                let policyNow = trustedPolicyTime()
+                let isTrusted = verified.mode != .allFree || policyNow != nil
+                logPolicyRefresh(
+                    policy: verified,
+                    at: policyNow ?? clock.now,
+                    result: isTrusted ? .success : .failure,
+                    error: isTrusted ? nil : .clockValidationRequired
+                )
             } else if let bootstrap = try await bootstrapWorker.load() {
-                policy = try verifier.verifyPolicyEnvelope(bootstrap)
-                if clock.now < policy!.effectiveAt { throw CommercialVerificationError.notEffective }
+                let verified = try verifier.verifyPolicy(bootstrap, at: clock.now)
+                let anchor = CommercialPolicyTimeAnchor(
+                    serverVerifiedAt: clock.now,
+                    systemUptime: clock.currentUptime,
+                    bootSessionID: clock.bootSessionID
+                )
+                let record = CommercialPolicyRecord(envelope: bootstrap, timeAnchor: anchor)
+                do {
+                    try await worker.saveBootstrapPolicy(record)
+                    policyTimeAnchor = anchor
+                } catch {
+                    policyTimeAnchor = nil
+                }
+                policy = verified
+                logPolicyRefresh(
+                    policy: verified,
+                    at: clock.now,
+                    result: policyTimeAnchor == nil ? .failure : .success,
+                    error: policyTimeAnchor == nil ? .storage : nil
+                )
             } else {
                 policy = nil
+                policyTimeAnchor = nil
             }
         } catch {
             policy = nil
+            policyTimeAnchor = nil
             setState(.free(reason: .policyInvalid))
+            logPolicyRefreshFailure(error)
         }
 
         do {
@@ -749,6 +845,12 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
             guard isCurrent(token), !Task.isCancelled else { return .cancelled }
             presentationNotice = .storage
             notifyPresentationIfNeeded()
+            logAccessRequest(
+                .validate,
+                result: .failure,
+                error: .storage,
+                accessKind: Self.diagnosticAccessKind(state)
+            )
             return .retryableFailure
         }
         do {
@@ -796,6 +898,12 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
             presentationNotice = nil
             resolveState()
             notifyPresentationIfNeeded()
+            logAccessRequest(
+                .validate,
+                result: .success,
+                error: nil,
+                accessKind: Self.diagnosticAccessKind(state)
+            )
             return .success
         } catch {
             guard isCurrent(token), await refreshIsCurrent(refresh), !Task.isCancelled else {
@@ -803,6 +911,13 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
             }
             if Self.isTerminal(error) {
                 let reason = Self.terminalReason(error) ?? .revoked
+                let stableError = Self.diagnosticTerminalError(reason)
+                logAccessRequest(
+                    .validate,
+                    result: .failure,
+                    error: stableError,
+                    accessKind: .pro
+                )
                 let applied = try? await applyTerminal(
                     reason,
                     token: token,
@@ -814,6 +929,12 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
             } else {
                 presentationNotice = Self.notice(for: error)
                 notifyPresentationIfNeeded()
+                logAccessRequest(
+                    .validate,
+                    result: .failure,
+                    error: Self.diagnosticError(error),
+                    accessKind: Self.diagnosticAccessKind(state)
+                )
                 return .retryableFailure
             }
         }
@@ -832,6 +953,12 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
             guard isCurrent(token), await refreshIsCurrent(refresh) else { return .cancelled }
             presentationNotice = .storage
             notifyPresentationIfNeeded()
+            logAccessRequest(
+                .trial,
+                result: .failure,
+                error: .storage,
+                accessKind: Self.diagnosticAccessKind(state)
+            )
             return .retryableFailure
         }
         do {
@@ -872,6 +999,12 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
             terminalDenyActive = false
             resolveState()
             notifyPresentationIfNeeded()
+            logAccessRequest(
+                .trial,
+                result: .success,
+                error: nil,
+                accessKind: Self.diagnosticAccessKind(state)
+            )
             return .success
         } catch {
             guard isCurrent(token), await refreshIsCurrent(refresh), !Task.isCancelled else {
@@ -879,6 +1012,12 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
             }
             presentationNotice = Self.notice(for: error)
             notifyPresentationIfNeeded()
+            logAccessRequest(
+                .trial,
+                result: .failure,
+                error: Self.diagnosticError(error),
+                accessKind: Self.diagnosticAccessKind(state)
+            )
             if Self.isSettledTrialResponse(error) {
                 trialRequestSettled = true
                 return .terminalFailure
@@ -889,13 +1028,20 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
 
     private func resolveState() {
         let effective = effectiveTime()
-        if let policy, policy.mode == .allFree {
-            if effective.now < policy.expiresAt {
+        if let policy,
+           policy.mode == .allFree,
+           let policyNow = trustedPolicyTime()
+        {
+            if policyNow < policy.effectiveAt {
+                setState(.free(reason: .clockRequiresValidation))
+                return
+            }
+            if policyNow < policy.expiresAt {
                 setState(.allFree)
                 return
             }
             let graceUntil = policy.expiresAt.addingTimeInterval(Self.graceInterval)
-            if effective.now <= graceUntil {
+            if policyNow <= graceUntil {
                 setState(.allFreeGrace(until: graceUntil))
                 return
             }
@@ -945,11 +1091,26 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
             }
             return
         }
+        if policy.mode == .allFree, trustedPolicyTime() == nil {
+            setState(.free(reason: .clockRequiresValidation))
+            return
+        }
         guard effective.now < policy.expiresAt else {
             setState(.free(reason: .policyExpired))
             return
         }
         setState(.free(reason: .trialUnavailable))
+    }
+
+    private func trustedPolicyTime() -> Date? {
+        guard let anchor = policyTimeAnchor,
+              anchor.bootSessionID == clock.bootSessionID,
+              clock.currentUptime >= anchor.systemUptime
+        else { return nil }
+        let monotonic = anchor.serverVerifiedAt.addingTimeInterval(
+            clock.currentUptime - anchor.systemUptime
+        )
+        return max(clock.now, monotonic)
     }
 
     private func effectiveTime() -> (now: Date, uptimeReset: Bool) {
@@ -1008,7 +1169,15 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
             reason: reason,
             refresh: refresh
         )
-        guard outcome.committed, let marker = outcome.marker else { return false }
+        guard outcome.committed, let marker = outcome.marker else {
+            logAccessRequest(
+                .terminal,
+                result: .failure,
+                error: .storage,
+                accessKind: Self.diagnosticAccessKind(state)
+            )
+            return false
+        }
         if let refresh, !(await refreshIsCurrent(refresh)) { return true }
         guard isCurrent(token) else { return true }
         terminalDenyActive = true
@@ -1017,6 +1186,12 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
         hasPendingTerminalCleanup = outcome.cleanupPending
         clearLocalAccess()
         setState(.free(reason: .serverDenied))
+        logAccessRequest(
+            .terminal,
+            result: .success,
+            error: Self.diagnosticTerminalError(reason),
+            accessKind: Self.diagnosticAccessKind(state)
+        )
         if outcome.storageFailed {
             throw CommercialAccessControllerError.storage
         }
@@ -1044,7 +1219,93 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
     private func setState(_ newState: CommercialAccessState) {
         guard state != newState else { return }
         state = newState
+        diagnosticLogger.record(.accessStateChanged(
+            accessKind: Self.diagnosticAccessKind(newState)
+        ))
         notifyPresentationIfNeeded()
+    }
+
+    private func logPolicyRefresh(
+        policy: CommercialPolicy,
+        at effectiveDate: Date,
+        result: CommercialDiagnosticResult,
+        error: CommercialDiagnosticErrorCode?
+    ) {
+        diagnosticLogger.record(.policyRefresh(
+            mode: policy.mode,
+            policyID: policy.policyId,
+            expired: effectiveDate >= policy.expiresAt,
+            result: result,
+            error: error
+        ))
+    }
+
+    private func logPolicyRefreshFailure(_ error: Error) {
+        let referenceDate = trustedPolicyTime() ?? clock.now
+        diagnosticLogger.record(.policyRefresh(
+            mode: policy?.mode,
+            policyID: policy?.policyId,
+            expired: policy.map { referenceDate >= $0.expiresAt },
+            result: .failure,
+            error: Self.diagnosticError(error)
+        ))
+    }
+
+    private func logAccessRequest(
+        _ operation: CommercialDiagnosticOperation,
+        result: CommercialDiagnosticResult,
+        error: CommercialDiagnosticErrorCode?,
+        accessKind: CommercialDiagnosticAccessKind
+    ) {
+        diagnosticLogger.record(.accessRequest(
+            operation: operation,
+            accessKind: accessKind,
+            result: result,
+            error: error
+        ))
+    }
+
+    private static func diagnosticAccessKind(
+        _ state: CommercialAccessState
+    ) -> CommercialDiagnosticAccessKind {
+        switch state {
+        case .allFree: return .allFree
+        case .allFreeGrace: return .allFreeGrace
+        case .trial: return .trial
+        case .pro: return .pro
+        case .free: return .free
+        }
+    }
+
+    private static func diagnosticError(_ error: Error) -> CommercialDiagnosticErrorCode {
+        if error is CommercialCredentialStoreError { return .storage }
+        if error is URLError { return .network }
+        if case CommercialPolicyClientError.transport = error { return .network }
+        if let verification = error as? CommercialVerificationError {
+            return verification == .expired ? .policyExpired : .invalidPolicy
+        }
+        if let controller = error as? CommercialAccessControllerError {
+            switch controller {
+            case .storage: return .storage
+            case .network, .identityUnavailable: return .network
+            case .trialUnavailable, .trialAlreadyUsed: return .trialUnavailable
+            case .licenseRevoked: return .licenseRevoked
+            case .licenseRefunded: return .licenseRefunded
+            case .deviceDeactivated: return .deviceDeactivated
+            default: return .invalidCredential
+            }
+        }
+        return .server
+    }
+
+    private static func diagnosticTerminalError(
+        _ reason: CommercialTerminalReason
+    ) -> CommercialDiagnosticErrorCode {
+        switch reason {
+        case .revoked: return .licenseRevoked
+        case .refunded: return .licenseRefunded
+        case .deviceDeactivated: return .deviceDeactivated
+        }
     }
 
     private func notifyPresentationIfNeeded() {

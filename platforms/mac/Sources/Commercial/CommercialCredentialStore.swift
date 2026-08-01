@@ -4,10 +4,22 @@ import Security
 protocol CommercialCredentialStoring: AnyObject {
     func loadPolicyEnvelope() throws -> SignedEnvelope?
     func savePolicyEnvelope(_ envelope: SignedEnvelope) throws
+    func loadPolicyRecord() throws -> CommercialPolicyRecord?
+    func savePolicyRecord(_ record: CommercialPolicyRecord) throws
     func loadAccessRecord() throws -> CommercialAccessRecord?
     func saveAccessRecord(_ record: CommercialAccessRecord) throws
     func deleteAccessRecord() throws
     func compareAndDeleteTerminalAccessRecord(expectedNonce: UUID) throws -> Bool
+}
+
+extension CommercialCredentialStoring {
+    func loadPolicyRecord() throws -> CommercialPolicyRecord? {
+        try loadPolicyEnvelope().map { CommercialPolicyRecord(envelope: $0, timeAnchor: nil) }
+    }
+
+    func savePolicyRecord(_ record: CommercialPolicyRecord) throws {
+        try savePolicyEnvelope(record.envelope)
+    }
 }
 
 protocol CommercialTerminalMarkerStoring: AnyObject {
@@ -48,6 +60,90 @@ struct CommercialTimeAnchor: Codable, Equatable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(CommercialJSON.string(issuedAt), forKey: .issuedAt)
         try container.encode(systemUptime, forKey: .systemUptime)
+    }
+}
+
+struct CommercialPolicyTimeAnchor: Codable, Equatable {
+    let serverVerifiedAt: Date
+    let systemUptime: TimeInterval
+    let bootSessionID: String
+
+    private enum CodingKeys: String, CodingKey {
+        case serverVerifiedAt, systemUptime, bootSessionID
+    }
+
+    init(serverVerifiedAt: Date, systemUptime: TimeInterval, bootSessionID: String) {
+        self.serverVerifiedAt = serverVerifiedAt
+        self.systemUptime = systemUptime
+        self.bootSessionID = bootSessionID
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        serverVerifiedAt = try CommercialJSON.date(
+            container.decode(String.self, forKey: .serverVerifiedAt),
+            field: CodingKeys.serverVerifiedAt.rawValue
+        )
+        systemUptime = try container.decode(TimeInterval.self, forKey: .systemUptime)
+        bootSessionID = try container.decode(String.self, forKey: .bootSessionID)
+        guard systemUptime.isFinite,
+              systemUptime >= 0,
+              !bootSessionID.isEmpty,
+              bootSessionID.utf8.count <= 128
+        else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .systemUptime,
+                in: container,
+                debugDescription: "Invalid policy time anchor"
+            )
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(
+            CommercialJSON.string(serverVerifiedAt),
+            forKey: .serverVerifiedAt
+        )
+        try container.encode(systemUptime, forKey: .systemUptime)
+        try container.encode(bootSessionID, forKey: .bootSessionID)
+    }
+}
+
+struct CommercialPolicyRecord: Codable, Equatable {
+    let envelope: SignedEnvelope
+    let timeAnchor: CommercialPolicyTimeAnchor?
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, envelope, timeAnchor
+    }
+
+    init(envelope: SignedEnvelope, timeAnchor: CommercialPolicyTimeAnchor?) {
+        self.envelope = envelope
+        self.timeAnchor = timeAnchor
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        guard try container.decode(Int.self, forKey: .schemaVersion) == 1 else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .schemaVersion,
+                in: container,
+                debugDescription: "Unsupported policy-record schema"
+            )
+        }
+        envelope = try container.decode(SignedEnvelope.self, forKey: .envelope)
+        timeAnchor = try? container.decodeIfPresent(
+            CommercialPolicyTimeAnchor.self,
+            forKey: .timeAnchor
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(1, forKey: .schemaVersion)
+        try container.encode(envelope, forKey: .envelope)
+        try container.encodeIfPresent(timeAnchor, forKey: .timeAnchor)
     }
 }
 
@@ -235,6 +331,18 @@ final class CommercialCredentialMutationCoordinator: @unchecked Sendable {
         defer { lock.unlock() }
         guard refreshGeneration == refresh.value else { return false }
         try store.savePolicyEnvelope(envelope)
+        return true
+    }
+
+    func savePolicy(
+        _ record: CommercialPolicyRecord,
+        refresh: CommercialRefreshGeneration,
+        store: CommercialCredentialStoring
+    ) throws -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard refreshGeneration == refresh.value else { return false }
+        try store.savePolicyRecord(record)
         return true
     }
 
@@ -559,11 +667,29 @@ final class CommercialCredentialStore: CommercialCredentialStoring {
     }
 
     func loadPolicyEnvelope() throws -> SignedEnvelope? {
-        try load(SignedEnvelope.self, account: Account.policy)
+        try loadPolicyRecord()?.envelope
     }
 
     func savePolicyEnvelope(_ envelope: SignedEnvelope) throws {
-        try save(envelope, account: Account.policy)
+        try savePolicyRecord(CommercialPolicyRecord(envelope: envelope, timeAnchor: nil))
+    }
+
+    func loadPolicyRecord() throws -> CommercialPolicyRecord? {
+        let (status, data) = keychain.copy(service: Self.service, account: Account.policy)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess else { throw CommercialCredentialStoreError.keychain(status) }
+        guard let data else { throw CommercialCredentialStoreError.corruptData }
+        if let record = try? decoder.decode(CommercialPolicyRecord.self, from: data) {
+            return record
+        }
+        if let legacyEnvelope = try? decoder.decode(SignedEnvelope.self, from: data) {
+            return CommercialPolicyRecord(envelope: legacyEnvelope, timeAnchor: nil)
+        }
+        throw CommercialCredentialStoreError.corruptData
+    }
+
+    func savePolicyRecord(_ record: CommercialPolicyRecord) throws {
+        try save(record, account: Account.policy)
     }
 
     func loadAccessRecord() throws -> CommercialAccessRecord? {

@@ -140,7 +140,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let preferencesSettingsStore = PreferencesSettingsStore()
         let filenameProvider = CaptureFilenameProvider(settingsStore: preferencesSettingsStore)
         let updateChecker = PlaceholderUpdateChecker()
-        let commercialDependencies = CommercialLaunchDependencies.make()
+        let commercialDependencies = CommercialLaunchDependencies.make(
+            productionFactory: {
+                try CommercialAccessController(diagnosticLogger: self.diagnosticLogStore)
+            }
+        )
         let commercialAccess = commercialDependencies.access
         self.commercialLaunchDependencies = commercialDependencies
         commercialLaunchTask = Task { @MainActor [weak self] in

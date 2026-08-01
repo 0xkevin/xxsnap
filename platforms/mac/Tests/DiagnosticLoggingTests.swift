@@ -4,6 +4,74 @@ import XCTest
 @testable import xxsnap
 
 final class DiagnosticLoggingTests: XCTestCase {
+    func testCommercialDiagnosticAdapterWritesAndExportsOnlyWhitelistedJSONLFields() throws {
+        let directory = try makeTemporaryDirectory()
+        let stagingParent = try makeTemporaryDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            try? FileManager.default.removeItem(at: stagingParent)
+        }
+        let store = DiagnosticLogStore(directoryURL: directory)
+        store.record(.policyRefresh(
+            mode: .allFree,
+            policyID: "00000000-0000-0000-0000-000000000001",
+            expired: false,
+            result: .success,
+            error: nil
+        ))
+        store.record(.accessRequest(
+            operation: .validate,
+            accessKind: .pro,
+            result: .failure,
+            error: .network
+        ))
+        store.record(.featureIntercept(
+            feature: .ocr,
+            accessKind: .free,
+            result: .blocked
+        ))
+        store.flush()
+
+        let events = readEvents(in: directory)
+        XCTAssertEqual(events.map(\.category), [.commercial, .commercial, .commercial])
+        XCTAssertEqual(events.map(\.event), [
+            "commercial_policy_refresh",
+            "commercial_access_validate",
+            "commercial_feature_intercept",
+        ])
+        XCTAssertEqual(
+            Set(events[0].metadata.keys),
+            ["policy_mode", "policy_id", "policy_expired", "request_result"]
+        )
+        XCTAssertEqual(
+            Set(events[1].metadata.keys),
+            ["access_kind", "result", "error"]
+        )
+        XCTAssertEqual(
+            Set(events[2].metadata.keys),
+            ["commercial_feature", "access_kind", "result"]
+        )
+        let raw = try String(contentsOf: XCTUnwrap(logFiles(in: directory).first))
+        for forbidden in [
+            "email", "activation_code", "device_hash", "payload", "signature",
+            "license_id", "credential_id", "raw_error"
+        ] {
+            XCTAssertFalse(raw.contains(forbidden), forbidden)
+        }
+
+        let archiver = RecordingDiagnosticArchiver()
+        let exporter = DiagnosticBundleExporter(
+            logStore: store,
+            temporaryDirectory: stagingParent,
+            archiver: archiver
+        )
+        _ = try exporter.export(to: stagingParent.appendingPathComponent("support.zip"))
+        let exported = archiver.logFileContents.values.joined(separator: "\n")
+        XCTAssertFalse(DiagnosticRedactor.containsSensitiveData(exported))
+        XCTAssertTrue(exported.contains("commercial_policy_refresh"))
+        XCTAssertTrue(exported.contains("commercial_feature_intercept"))
+    }
+
     func testCommercialMetadataUsesAllowlistAndRejectsSecretKeyVariants() {
         let metadata = DiagnosticMetadata.sanitized([
             "policy_mode": "all_free",
