@@ -82,7 +82,7 @@ struct CommercialAccessSnapshot: Equatable {
 }
 
 @MainActor
-final class UnrestrictedCommercialAccess: CommercialAccessProviding {
+final class UnrestrictedCommercialAccess: CommercialAccessRefreshing, CommercialRefreshControlling {
     static let shared = UnrestrictedCommercialAccess()
     let state: CommercialAccessState = .allFree
     let snapshot = CommercialAccessSnapshot(
@@ -95,6 +95,13 @@ final class UnrestrictedCommercialAccess: CommercialAccessProviding {
     private init() {}
 
     func requestPurchase(for feature: CommercialFeature) {}
+    func refresh() async {}
+    var paidValidationReferenceDate: Date? { nil }
+    var trustedNowFloor: Date? { nil }
+    func loadCachedCommercialState() async {}
+    func performCommercialRefresh(validatePaidCredential: Bool) async -> CommercialRefreshResult {
+        .success
+    }
 }
 
 @MainActor
@@ -208,7 +215,7 @@ private actor CommercialDeviceWorker {
 }
 
 @MainActor
-final class CommercialAccessController: CommercialAccessRefreshing {
+final class CommercialAccessController: CommercialAccessRefreshing, CommercialRefreshControlling {
     private struct PresentationState: Equatable {
         let accessState: CommercialAccessState
         let proBadges: Set<CommercialFeature>
@@ -242,6 +249,10 @@ final class CommercialAccessController: CommercialAccessRefreshing {
 
     private var policy: CommercialPolicy?
     var presentationPolicy: CommercialPolicy? { policy }
+    var paidValidationReferenceDate: Date? {
+        entitlement?.access == .pro ? entitlement?.issuedAt : nil
+    }
+    var trustedNowFloor: Date? { effectiveTime().now }
     private(set) var presentationNotice: CommercialPresentationNotice?
     private var accessEnvelope: SignedEnvelope?
     private var entitlement: EntitlementPayload?
@@ -344,6 +355,12 @@ final class CommercialAccessController: CommercialAccessRefreshing {
     }
 
     func refresh() async {
+        await loadCachedCommercialState()
+        guard !Task.isCancelled else { return }
+        _ = await performCommercialRefresh(validatePaidCredential: true)
+    }
+
+    func loadCachedCommercialState() async {
         let token = beginOperation()
         if terminalDenyActive, hasPendingTerminalCleanup {
             do {
@@ -358,35 +375,44 @@ final class CommercialAccessController: CommercialAccessRefreshing {
             }
         }
         await loadLocalState(token: token)
-        guard isCurrent(token) else { return }
+        guard isCurrent(token), !Task.isCancelled else { return }
         resolveState()
         notifyPresentationIfNeeded()
+    }
 
+    func performCommercialRefresh(
+        validatePaidCredential: Bool
+    ) async -> CommercialRefreshResult {
+        let token = beginOperation()
         do {
             let envelope = try await client.fetchPolicy(locale: locale)
-            guard isCurrent(token) else { return }
+            guard isCurrent(token), !Task.isCancelled else { return .cancelled }
             let verified = try verifier.verifyPolicy(envelope, at: clock.now)
+            guard !Task.isCancelled else { return .cancelled }
             try await worker.savePolicy(envelope)
-            guard isCurrent(token) else { return }
+            guard isCurrent(token), !Task.isCancelled else { return .cancelled }
             policy = verified
             presentationNotice = nil
             resolveState()
             notifyPresentationIfNeeded()
-            guard verified.mode == .paid else { return }
+            guard verified.mode == .paid else { return .success }
 
             if let accessEnvelope, entitlement?.access == .pro {
-                await validateCachedAccess(accessEnvelope, token: token)
+                guard validatePaidCredential else { return .success }
+                return await validateCachedAccess(accessEnvelope, token: token)
             } else if entitlement?.access == .trial {
-                return
+                return .success
             } else if !terminalDenyActive, !trialRequestAttempted {
                 trialRequestAttempted = true
                 await requestTrial(token: token)
             }
+            return Task.isCancelled ? .cancelled : .success
         } catch {
             // Local signed access remains authoritative during transport outages.
-            guard isCurrent(token) else { return }
+            guard isCurrent(token), !Task.isCancelled else { return .cancelled }
             presentationNotice = Self.notice(for: error)
             notifyPresentationIfNeeded()
+            return .retryableFailure
         }
     }
 
@@ -629,19 +655,22 @@ final class CommercialAccessController: CommercialAccessRefreshing {
         }
     }
 
-    private func validateCachedAccess(_ envelope: SignedEnvelope, token: Int) async {
+    private func validateCachedAccess(
+        _ envelope: SignedEnvelope,
+        token: Int
+    ) async -> CommercialRefreshResult {
         let snapshot: CommercialCredentialMutationSnapshot
         do {
             snapshot = try await worker.snapshot()
             guard snapshot.marker == nil,
                   snapshot.access?.status == .active,
                   snapshot.access?.envelope == envelope
-            else { return }
+            else { return .success }
         } catch {
-            guard isCurrent(token) else { return }
+            guard isCurrent(token), !Task.isCancelled else { return .cancelled }
             presentationNotice = .storage
             notifyPresentationIfNeeded()
-            return
+            return .retryableFailure
         }
         do {
             let identity = try await clientIdentity()
@@ -649,31 +678,37 @@ final class CommercialAccessController: CommercialAccessRefreshing {
                 CommercialLicenseValidateRequest(credential: envelope, identity: identity),
                 locale: locale
             )
-            guard isCurrent(token) else { return }
+            guard isCurrent(token), !Task.isCancelled else { return .cancelled }
             let payload = try verifiedEntitlement(refreshed, expectedDeviceHash: identity.deviceHash)
             let anchor = CommercialTimeAnchor(
                 issuedAt: payload.issuedAt,
                 systemUptime: clock.currentUptime
             )
             let record = CommercialAccessRecord.active(envelope: refreshed, anchor: anchor)
+            guard !Task.isCancelled else { return .cancelled }
             guard try await worker.commitActive(
                 expected: snapshot,
                 record: record,
                 clearingMarkerNonce: nil
-            ) else { return }
-            guard isCurrent(token) else { return }
+            ) else { return .retryableFailure }
+            guard isCurrent(token), !Task.isCancelled else { return .cancelled }
             accessEnvelope = refreshed
             entitlement = payload
             timeAnchor = anchor
+            presentationNotice = nil
             resolveState()
+            notifyPresentationIfNeeded()
+            return .success
         } catch {
-            guard isCurrent(token) else { return }
+            guard isCurrent(token), !Task.isCancelled else { return .cancelled }
             if Self.isTerminal(error) {
                 let reason = Self.terminalReason(error) ?? .revoked
                 _ = try? await applyTerminal(reason, token: token, expected: snapshot)
+                return .terminalFailure
             } else {
                 presentationNotice = Self.notice(for: error)
                 notifyPresentationIfNeeded()
+                return .retryableFailure
             }
         }
     }

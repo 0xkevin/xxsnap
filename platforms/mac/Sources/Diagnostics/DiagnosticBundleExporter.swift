@@ -134,6 +134,7 @@ final class DiagnosticBundleExporter {
         )
 
         let logFiles = try logStore.copyLogFiles(to: logsDirectory)
+        try redactExportedLogs(logFiles)
 
         let manifest = DiagnosticBundleManifest(
             schemaVersion: 1,
@@ -154,5 +155,27 @@ final class DiagnosticBundleExporter {
 
         try archiver.createArchive(from: stagingDirectory, at: destinationURL)
         return destinationURL
+    }
+
+    private func redactExportedLogs(_ logFiles: [URL]) throws {
+        for (index, sourceURL) in logFiles.enumerated() {
+            guard let contents = try? String(contentsOf: sourceURL, encoding: .utf8) else {
+                try? fileManager.removeItem(at: sourceURL)
+                continue
+            }
+            let redacted = DiagnosticRedactor.redact(contents)
+            try Data(redacted.utf8).write(to: sourceURL, options: .atomic)
+
+            guard DiagnosticRedactor.containsSensitiveData(sourceURL.lastPathComponent) else {
+                continue
+            }
+            let safeURL = sourceURL.deletingLastPathComponent().appendingPathComponent(
+                "xxsnap-export-\(index + 1).jsonl"
+            )
+            if fileManager.fileExists(atPath: safeURL.path) {
+                try fileManager.removeItem(at: safeURL)
+            }
+            try fileManager.moveItem(at: sourceURL, to: safeURL)
+        }
     }
 }

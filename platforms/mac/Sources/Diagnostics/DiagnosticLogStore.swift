@@ -102,6 +102,108 @@ final class NoopDiagnosticLogger: DiagnosticLogging {
     func endScrollCaptureSession(_ session: DiagnosticCaptureSession) {}
 }
 
+enum DiagnosticRedactor {
+    private struct Rule {
+        let expression: NSRegularExpression
+        let replacement: String
+    }
+
+    private static let rules: [Rule] = [
+        (#"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b"#, "[REDACTED]"),
+        (#"(?i)\bXXSNAP-[A-Z2-9]{4}(?:-[A-Z2-9]{4}){3}\b"#, "[REDACTED]"),
+        (#"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+"#, "[REDACTED]"),
+        (#"\b[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_-]{2,}\b"#, "[REDACTED]"),
+        (#"(?i)\b[a-f0-9]{64}\b"#, "[REDACTED]"),
+        (
+            #"(?i)((?:\"|')?(?:activation[_-]?code|license[_-]?code|credential[_-]?code|auth[_-]?code|recovery[_-]?code|secret[_-]?code|\bcode\b|[A-Za-z0-9_-]*payload[A-Za-z0-9_-]*|signature|device[_-]?hash|license[_-]?id|credential[_-]?id|authorization|[A-Za-z0-9_-]*token[A-Za-z0-9_-]*)(?:\"|')?\s*[:=]\s*(?:\"|')?)[^\"',}\s]+"#,
+            "$1[REDACTED]"
+        ),
+    ].compactMap { pattern, replacement in
+        try? Rule(expression: NSRegularExpression(pattern: pattern), replacement: replacement)
+    }
+
+    static func redact(_ value: String) -> String {
+        rules.reduce(value) { partial, rule in
+            let range = NSRange(partial.startIndex..<partial.endIndex, in: partial)
+            return rule.expression.stringByReplacingMatches(
+                in: partial,
+                range: range,
+                withTemplate: rule.replacement
+            )
+        }
+    }
+
+    static func containsSensitiveData(_ value: String) -> Bool {
+        redact(value) != value
+    }
+}
+
+enum DiagnosticMetadata {
+    private static let allowedCommercialKeys: Set<String> = [
+        "policymode",
+        "policyid",
+        "policyexpired",
+        "accesskind",
+        "commercialfeature",
+        "requestresult",
+        "stableerrorcode",
+    ]
+
+    private static let forbiddenKeyTerms = [
+        "account",
+        "activationcode",
+        "authorization",
+        "clipboard",
+        "code",
+        "credentialid",
+        "devicehash",
+        "email",
+        "filename",
+        "image",
+        "licenseid",
+        "ocr",
+        "path",
+        "screenshot",
+        "signature",
+        "signedpayload",
+        "text",
+        "title",
+        "token",
+        "url",
+        "userinput",
+    ]
+
+    private static let commercialKeyTerms = [
+        "access",
+        "activation",
+        "billing",
+        "commercial",
+        "credential",
+        "device",
+        "entitlement",
+        "license",
+        "policy",
+        "trial",
+    ]
+
+    static func sanitized(_ metadata: [String: String]) -> [String: String] {
+        metadata.reduce(into: [:]) { result, entry in
+            let normalizedKey = entry.key
+                .lowercased()
+                .filter { $0.isLetter || $0.isNumber }
+            let isAllowedCommercialKey = allowedCommercialKeys.contains(normalizedKey)
+            let isCommercialKey = commercialKeyTerms.contains(where: normalizedKey.contains)
+            guard !isCommercialKey || isAllowedCommercialKey else { return }
+            guard isAllowedCommercialKey
+                    || !forbiddenKeyTerms.contains(where: normalizedKey.contains) else { return }
+            let flattened = entry.value
+                .replacingOccurrences(of: "\r", with: " ")
+                .replacingOccurrences(of: "\n", with: " ")
+            result[entry.key] = String(DiagnosticRedactor.redact(flattened).prefix(256))
+        }
+    }
+}
+
 final class DiagnosticLogStore: DiagnosticLogging, @unchecked Sendable {
     struct Configuration {
         var maximumFileSize: Int = 5 * 1_024 * 1_024
@@ -110,22 +212,6 @@ final class DiagnosticLogStore: DiagnosticLogging, @unchecked Sendable {
     }
 
     static let shared = DiagnosticLogStore()
-
-    private static let forbiddenMetadataTerms = [
-        "account",
-        "clipboard",
-        "filename",
-        "file_name",
-        "image",
-        "ocr",
-        "path",
-        "screenshot",
-        "text",
-        "title",
-        "url",
-        "userinput",
-        "user_input",
-    ]
 
     let directoryURL: URL
 
@@ -162,18 +248,19 @@ final class DiagnosticLogStore: DiagnosticLogging, @unchecked Sendable {
             if detail == .detailed, activeSession?.isDetailed != true {
                 return
             }
+            let sanitizedEvent = Self.sanitizedEventName(event)
             systemLogger.log(
                 level: level.osLogType,
-                "\(category.rawValue, privacy: .public) \(event, privacy: .public)"
+                "\(category.rawValue, privacy: .public) \(sanitizedEvent, privacy: .public)"
             )
             let logEvent = DiagnosticLogEvent(
                 schemaVersion: 1,
                 timestamp: now(),
                 category: category,
                 level: level,
-                event: Self.sanitizedEventName(event),
+                event: sanitizedEvent,
                 sessionID: activeSession?.id,
-                metadata: Self.sanitizedMetadata(metadata)
+                metadata: DiagnosticMetadata.sanitized(metadata)
             )
             append(logEvent)
         }
@@ -314,23 +401,10 @@ final class DiagnosticLogStore: DiagnosticLogging, @unchecked Sendable {
     }
 
     private static func sanitizedEventName(_ event: String) -> String {
-        event
+        DiagnosticRedactor.redact(event)
             .lowercased()
             .map { $0.isLetter || $0.isNumber || $0 == "_" ? $0 : "_" }
             .reduce(into: "") { $0.append($1) }
-    }
-
-    private static func sanitizedMetadata(_ metadata: [String: String]) -> [String: String] {
-        metadata.reduce(into: [:]) { result, entry in
-            let normalizedKey = entry.key.lowercased()
-            guard !forbiddenMetadataTerms.contains(where: normalizedKey.contains) else {
-                return
-            }
-            let flattened = entry.value
-                .replacingOccurrences(of: "\r", with: " ")
-                .replacingOccurrences(of: "\n", with: " ")
-            result[entry.key] = String(flattened.prefix(256))
-        }
     }
 
     private static func defaultDirectoryURL() -> URL {

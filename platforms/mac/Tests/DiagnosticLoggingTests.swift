@@ -3,6 +3,102 @@ import XCTest
 @testable import xxsnap
 
 final class DiagnosticLoggingTests: XCTestCase {
+    func testCommercialMetadataUsesAllowlistAndRejectsSecretKeyVariants() {
+        let metadata = DiagnosticMetadata.sanitized([
+            "policy_mode": "all_free",
+            "policy_id": "rollout-1",
+            "policy_expired": "false",
+            "access_kind": "free",
+            "commercial_feature": "ocr",
+            "request_result": "success",
+            "stable_error_code": "network_unavailable",
+            "Email": "person@invalid.test",
+            "ACTIVATION-CODE": "XXSNAP-ABCD-EFGH-JKLM-NPQR",
+            "DeviceHash": String(repeating: "a", count: 64),
+            "signedPayload": "payload",
+            "SIGNATURE": "signature",
+            "licenseId": "license",
+            "license_status": "active",
+            "Credential_ID": "credential",
+            "Authorization": "Bearer header.payload.signature",
+            "code": "secret",
+            "refreshToken": "token",
+        ])
+
+        XCTAssertEqual(
+            Set(metadata.keys),
+            Set([
+                "policy_mode", "policy_id", "policy_expired", "access_kind",
+                "commercial_feature", "request_result", "stable_error_code",
+            ])
+        )
+    }
+
+    func testMetadataValuesAndEventMessagesAreRedactedWithoutBreakingSafeDiagnostics() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = DiagnosticLogStore(directoryURL: directory)
+        let unsafeValues = [
+            "person@invalid.test",
+            "XXSNAP-ABCD-EFGH-JKLM-NPQR",
+            "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.deadbeef",
+            String(repeating: "a", count: 64),
+            #"{"signed_payload":"c2VjcmV0","signature":"c2ln"}"#,
+        ].joined(separator: " | ")
+
+        store.record(
+            category: .application,
+            level: .warning,
+            event: "server_message_\(unsafeValues)",
+            metadata: [
+                "direction": "down",
+                "policy_mode": "all_free",
+                "request_result": unsafeValues,
+            ]
+        )
+        store.flush()
+
+        let logURL = try XCTUnwrap(logFiles(in: directory).first)
+        let raw = try String(contentsOf: logURL, encoding: .utf8)
+        XCTAssertFalse(DiagnosticRedactor.containsSensitiveData(raw))
+        let event = try XCTUnwrap(readEvents(in: directory).first)
+        XCTAssertEqual(event.metadata["direction"], "down")
+        XCTAssertEqual(event.metadata["policy_mode"], "all_free")
+        XCTAssertTrue(event.metadata["request_result"]?.contains("[REDACTED]") == true)
+    }
+
+    func testExporterRedactsHistoricalLogContentsAsFinalDefense() throws {
+        let directory = try makeTemporaryDirectory()
+        let stagingParent = try makeTemporaryDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            try? FileManager.default.removeItem(at: stagingParent)
+        }
+        let historical = directory.appendingPathComponent("third-party.jsonl")
+        try Data(
+            """
+            {"message":"person@invalid.test Bearer eyJ.aWQ.sig","metadata":{"policy_mode":"all_free","stable_error_code":"network_unavailable","activation_code":"XXSNAP-ABCD-EFGH-JKLM-NPQR","device_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}
+            """.utf8
+        ).write(to: historical)
+        let archiver = RecordingDiagnosticArchiver()
+        let exporter = DiagnosticBundleExporter(
+            logStore: DiagnosticLogStore(directoryURL: directory),
+            temporaryDirectory: stagingParent,
+            archiver: archiver
+        )
+
+        _ = try exporter.export(to: stagingParent.appendingPathComponent("support.zip"))
+
+        let exportedText = archiver.logFileContents.values.joined(separator: "\n")
+        XCTAssertFalse(DiagnosticRedactor.containsSensitiveData(exportedText))
+        XCTAssertTrue(exportedText.contains("policy_mode"))
+        XCTAssertTrue(exportedText.contains("all_free"))
+        XCTAssertTrue(exportedText.contains("network_unavailable"))
+        for line in exportedText.split(separator: "\n") {
+            XCTAssertNoThrow(try JSONSerialization.jsonObject(with: Data(line.utf8)))
+        }
+    }
+
     func testStoreWritesJSONLineAndRejectsSensitiveMetadata() throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -317,6 +413,7 @@ private final class RecordingDiagnosticArchiver: DiagnosticArchiveCreating {
     private let error: Error?
     private(set) var manifest: DiagnosticBundleManifest?
     private(set) var logFileNames: [String] = []
+    private(set) var logFileContents: [String: String] = [:]
 
     init(error: Error? = nil) {
         self.error = error
@@ -335,6 +432,10 @@ private final class RecordingDiagnosticArchiver: DiagnosticArchiveCreating {
         )
         .map(\.lastPathComponent)
         .sorted()
+        logFileContents = try Dictionary(uniqueKeysWithValues: logFileNames.map { name in
+            let url = sourceDirectory.appendingPathComponent("logs").appendingPathComponent(name)
+            return (name, try String(contentsOf: url, encoding: .utf8))
+        })
         if let error {
             throw error
         }
