@@ -17,6 +17,13 @@ Current status:
 - captured macOS MVP output is copied to the clipboard; save-panel wiring exists in code and can be surfaced by later UI work
 - 用户侧标注工具说明见 `docs/annotation-tools-user-guide.md`
 - macOS 功能事实基准见 `docs/requirements/xxsnap-mac-feature-requirements.md`
+- 当前所有版本、所有功能都在免费期；收费和支付尚未上线
+- 收费开关的日常检查、故障处理和安全边界见 [`docs/XxSnap收费开关运营检查表.md`](docs/XxSnap收费开关运营检查表.md)
+
+Future Pro scope is limited to scrolling capture, OCR, and teaching pen. All other
+existing features remain Free. The client already understands signed rollout
+policies, but production must stay in `all_free` mode until the separate payment
+phase is complete.
 
 Restart command：
 
