@@ -273,6 +273,47 @@ final class CommercialAccessControllerTests: XCTestCase {
         XCTAssertEqual(fixture.store.lastSuccessfulValidation?.systemUptime, 1_060)
     }
 
+    func testActivatingDifferentLicenseClearsValidationAnchorBeforePublishingAndAcrossRestart() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(30 * .day))
+        let original = try fixture.entitlement(access: .pro, maximumBuildNumber: 100)
+        fixture.store.access = original
+        fixture.store.anchor = CommercialTimeAnchor(issuedAt: now, systemUptime: 1_000)
+        fixture.store.lastSuccessfulValidation = CommercialTimeAnchor(
+            issuedAt: now,
+            systemUptime: 1_000
+        )
+        let controller = fixture.controller()
+        await controller.loadCachedCommercialState()
+        XCTAssertNotNil(controller.paidValidationContext?.lastSuccessfulValidation)
+
+        fixture.clock.now = now.addingTimeInterval(.day)
+        fixture.clock.currentUptime = 2_000
+        let replacement = try fixture.entitlement(access: .pro, maximumBuildNumber: 100)
+        XCTAssertNotEqual(replacement.payload, original.payload)
+        fixture.client.activateResult = .success(replacement)
+        var validationAnchorObservedWhenProPublished: CommercialTimeAnchor?
+        var publishedReplacement = false
+        controller.onStateChange = { state in
+            guard case .pro = state else { return }
+            publishedReplacement = true
+            validationAnchorObservedWhenProPublished = controller.paidValidationContext?
+                .lastSuccessfulValidation
+        }
+
+        try await controller.activate(email: "new-license@example.com", code: "PRIVATE")
+
+        XCTAssertTrue(publishedReplacement)
+        XCTAssertNil(validationAnchorObservedWhenProPublished)
+        XCTAssertEqual(fixture.store.access, replacement)
+        XCTAssertNil(fixture.store.lastSuccessfulValidation)
+        XCTAssertNil(controller.paidValidationContext?.lastSuccessfulValidation)
+
+        let restarted = fixture.controller()
+        await restarted.loadCachedCommercialState()
+        XCTAssertNil(restarted.paidValidationContext?.lastSuccessfulValidation)
+    }
+
     func testCancelledRefreshGenerationCannotCommitValidationResponse() async throws {
         let fixture = try Fixture(now: now)
         fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
@@ -1221,7 +1262,17 @@ private final class MemoryCommercialStore: CommercialCredentialStoring {
         }
     }
     var lastSuccessfulValidation: CommercialTimeAnchor? {
-        record?.lastSuccessfulValidation
+        get { record?.lastSuccessfulValidation }
+        set {
+            if let envelope = record?.envelope {
+                record = .active(
+                    envelope: envelope,
+                    anchor: record?.anchor,
+                    lastSuccessfulValidation: newValue,
+                    clearsTerminalMarkerNonce: record?.clearsTerminalMarkerNonce
+                )
+            }
+        }
     }
     var simulatesCorruptAnchor = false
     var deleteAccessError: Error?

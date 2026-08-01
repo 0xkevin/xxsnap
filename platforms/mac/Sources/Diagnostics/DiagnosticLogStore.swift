@@ -144,6 +144,7 @@ enum DiagnosticRedactor {
         case let dictionary as [String: Any]:
             return dictionary.reduce(into: [String: Any]()) { result, entry in
                 guard !DiagnosticMetadata.mustDrop(entry.key),
+                      !containsSensitiveData(entry.key),
                       let sanitized = sanitizeJSONObject(entry.value, key: entry.key)
                 else { return }
                 result[entry.key] = sanitized
@@ -349,21 +350,6 @@ final class DiagnosticLogStore: DiagnosticLogging, @unchecked Sendable {
             removeExpiredFiles()
             enforceFileCount()
             return logFileURLs()
-        }
-    }
-
-    func copyLogFiles(to destinationDirectory: URL) throws -> [URL] {
-        try queue.sync {
-            ensureDirectoryExists()
-            removeExpiredFiles()
-            enforceFileCount()
-            return try logFileURLs().map { sourceURL in
-                let destinationURL = destinationDirectory.appendingPathComponent(
-                    sourceURL.lastPathComponent
-                )
-                try fileManager.copyItem(at: sourceURL, to: destinationURL)
-                return destinationURL
-            }
         }
     }
 

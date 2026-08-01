@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 struct DiagnosticApplicationInfo: Equatable {
     let version: String
@@ -84,6 +85,18 @@ struct DittoDiagnosticArchiver: DiagnosticArchiveCreating {
 }
 
 final class DiagnosticBundleExporter {
+    struct Limits {
+        static let standard = Limits(
+            maximumFileCount: 5,
+            maximumFileBytes: 5 * 1_024 * 1_024,
+            maximumTotalReadBytes: 20 * 1_024 * 1_024
+        )
+
+        let maximumFileCount: Int
+        let maximumFileBytes: Int
+        let maximumTotalReadBytes: Int
+    }
+
     private let logStore: DiagnosticLogStore
     private let appInfo: DiagnosticApplicationInfo
     private let systemInfo: DiagnosticSystemInfo
@@ -92,6 +105,7 @@ final class DiagnosticBundleExporter {
     private let temporaryDirectory: URL
     private let archiver: any DiagnosticArchiveCreating
     private let fileManager: FileManager
+    private let limits: Limits
 
     init(
         logStore: DiagnosticLogStore,
@@ -101,7 +115,8 @@ final class DiagnosticBundleExporter {
         nextUUID: @escaping () -> UUID = UUID.init,
         temporaryDirectory: URL = FileManager.default.temporaryDirectory,
         archiver: any DiagnosticArchiveCreating = DittoDiagnosticArchiver(),
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        limits: Limits = .standard
     ) {
         self.logStore = logStore
         self.appInfo = appInfo
@@ -111,6 +126,7 @@ final class DiagnosticBundleExporter {
         self.temporaryDirectory = temporaryDirectory
         self.archiver = archiver
         self.fileManager = fileManager
+        self.limits = limits
     }
 
     @discardableResult
@@ -133,8 +149,10 @@ final class DiagnosticBundleExporter {
             withIntermediateDirectories: true
         )
 
-        let copiedLogFiles = try logStore.copyLogFiles(to: logsDirectory)
-        let logFiles = try sanitizeExportedLogs(copiedLogFiles)
+        let logFiles = try sanitizeLogs(
+            from: logStore.directoryURL,
+            to: logsDirectory
+        )
 
         let manifest = DiagnosticBundleManifest(
             schemaVersion: 1,
@@ -157,46 +175,114 @@ final class DiagnosticBundleExporter {
         return destinationURL
     }
 
-    private func sanitizeExportedLogs(_ logFiles: [URL]) throws -> [URL] {
-        let sanitizedFiles: [[Data]] = logFiles.map { sourceURL in
-            guard let contents = try? String(contentsOf: sourceURL, encoding: .utf8) else {
-                return []
-            }
-            return contents.split(whereSeparator: \.isNewline).compactMap { line in
-                guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)),
-                      let sanitized = DiagnosticRedactor.sanitizeJSONObject(object),
-                      JSONSerialization.isValidJSONObject(sanitized),
-                      let data = try? JSONSerialization.data(
-                        withJSONObject: sanitized,
-                        options: [.sortedKeys]
-                      )
-                else { return nil }
-                return data
-            }
-        }
+    private func sanitizeLogs(from sourceDirectory: URL, to outputDirectory: URL) throws -> [URL] {
+        let root = sourceDirectory.standardizedFileURL.resolvingSymlinksInPath()
+        let sourceURLs = try fileManager.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
+            options: [.skipsHiddenFiles]
+        )
+        .filter { $0.pathExtension == "jsonl" }
+        .sorted { $0.lastPathComponent < $1.lastPathComponent }
 
-        for sourceURL in logFiles {
-            try? fileManager.removeItem(at: sourceURL)
-        }
-
-        guard let outputDirectory = logFiles.first?.deletingLastPathComponent() else { return [] }
+        var remainingReadBytes = max(0, limits.maximumTotalReadBytes)
+        var inspectedFileCount = 0
         var outputs: [URL] = []
-        for lines in sanitizedFiles where !lines.isEmpty {
+        for sourceURL in sourceURLs {
+            guard inspectedFileCount < max(0, limits.maximumFileCount),
+                  remainingReadBytes > 1,
+                  isSafeRegularCandidate(sourceURL, within: root)
+            else { continue }
+            inspectedFileCount += 1
+            guard let contents = readBoundedRegularFile(
+                sourceURL,
+                remainingReadBytes: &remainingReadBytes
+            ) else { continue }
+            let lines = sanitizedLines(from: contents)
+            guard !lines.isEmpty else { continue }
             let destination = outputDirectory.appendingPathComponent(
                 String(format: "diagnostic-log-%03d.jsonl", outputs.count + 1)
             )
-            var contents = Data()
+            var sanitizedContents = Data()
             for line in lines {
-                contents.append(line)
-                contents.append(0x0A)
+                sanitizedContents.append(line)
+                sanitizedContents.append(0x0A)
             }
             do {
-                try contents.write(to: destination, options: .atomic)
+                try sanitizedContents.write(to: destination, options: .atomic)
                 outputs.append(destination)
             } catch {
                 try? fileManager.removeItem(at: destination)
             }
         }
         return outputs
+    }
+
+    private func isSafeRegularCandidate(_ sourceURL: URL, within root: URL) -> Bool {
+        guard let values = try? sourceURL.resourceValues(
+            forKeys: [.isRegularFileKey, .isSymbolicLinkKey]
+        ),
+        values.isSymbolicLink != true,
+        values.isRegularFile == true
+        else { return false }
+
+        let resolved = sourceURL.standardizedFileURL.resolvingSymlinksInPath()
+        let rootPath = root.path.hasSuffix("/") ? root.path : root.path + "/"
+        return resolved.path.hasPrefix(rootPath)
+    }
+
+    private func readBoundedRegularFile(
+        _ sourceURL: URL,
+        remainingReadBytes: inout Int
+    ) -> Data? {
+        let descriptor = Darwin.open(sourceURL.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        guard descriptor >= 0 else { return nil }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        defer { try? handle.close() }
+
+        var status = stat()
+        guard fstat(descriptor, &status) == 0,
+              (status.st_mode & S_IFMT) == S_IFREG,
+              status.st_nlink == 1,
+              status.st_size >= 0,
+              let fileSize = Int(exactly: status.st_size)
+        else { return nil }
+
+        let contentLimit = min(
+            max(0, limits.maximumFileBytes),
+            max(0, remainingReadBytes - 1)
+        )
+        guard fileSize <= contentLimit else { return nil }
+        let readLimit = contentLimit + 1
+        var data = Data()
+        do {
+            while data.count < readLimit {
+                guard let chunk = try handle.read(upToCount: readLimit - data.count),
+                      !chunk.isEmpty
+                else { break }
+                data.append(chunk)
+            }
+        } catch {
+            remainingReadBytes = max(0, remainingReadBytes - data.count)
+            return nil
+        }
+        remainingReadBytes = max(0, remainingReadBytes - data.count)
+        guard data.count == fileSize, data.count <= contentLimit else { return nil }
+        return data
+    }
+
+    private func sanitizedLines(from contents: Data) -> [Data] {
+        guard let string = String(data: contents, encoding: .utf8) else { return [] }
+        return string.split(whereSeparator: \.isNewline).compactMap { line in
+            guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)),
+                  let sanitized = DiagnosticRedactor.sanitizeJSONObject(object),
+                  JSONSerialization.isValidJSONObject(sanitized),
+                  let data = try? JSONSerialization.data(
+                    withJSONObject: sanitized,
+                    options: [.sortedKeys]
+                  )
+            else { return nil }
+            return data
+        }
     }
 }

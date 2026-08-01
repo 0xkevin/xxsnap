@@ -560,6 +560,7 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
         accessEnvelope = envelope
         entitlement = payload
         timeAnchor = anchor
+        lastSuccessfulValidation = nil
         terminalDenyActive = false
         terminalMarker = nil
         pendingTerminalAccess = nil

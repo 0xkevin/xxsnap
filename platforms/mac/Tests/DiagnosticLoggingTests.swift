@@ -81,6 +81,37 @@ final class DiagnosticLoggingTests: XCTestCase {
         XCTAssertEqual(DiagnosticRedactor.redact("Use XxSnap for capture"), "Use XxSnap for capture")
     }
 
+    func testRecursiveJSONSanitizerDropsSensitiveKeyNamesWithoutDroppingOperationalKeys() throws {
+        let sensitiveKeys = [
+            "person@example.test",
+            "prefixXXSNAP-ABCD",
+            "Bearer abc.def.ghi",
+            "abc.def.ghi",
+            String(repeating: "a", count: 64),
+            "license_id",
+            "credential",
+            "signed_payload",
+            "signature",
+        ]
+        var nested: [String: Any] = [
+            "stable_error_code": "network_unavailable",
+            "duration_ms": 42,
+        ]
+        for key in sensitiveKeys { nested[key] = "must-not-export" }
+
+        let sanitized = try XCTUnwrap(
+            DiagnosticRedactor.sanitizeJSONObject([
+                "policy_mode": "all_free",
+                "operation": "diagnostic_export",
+                "nested": nested,
+            ]) as? [String: Any]
+        )
+        let sanitizedNested = try XCTUnwrap(sanitized["nested"] as? [String: Any])
+
+        XCTAssertEqual(Set(sanitized.keys), ["policy_mode", "operation", "nested"])
+        XCTAssertEqual(Set(sanitizedNested.keys), ["stable_error_code", "duration_ms"])
+    }
+
     func testShortXXSNAPSecretUsesSameSanitizedEventAndJSONLValue() throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -215,6 +246,154 @@ final class DiagnosticLoggingTests: XCTestCase {
         for line in text.split(separator: "\n") {
             XCTAssertNoThrow(try JSONSerialization.jsonObject(with: Data(line.utf8)))
         }
+    }
+
+    func testExporterRejectsSymlinksHardLinksAndNonRegularEntriesBeforeReading() throws {
+        let directory = try makeTemporaryDirectory()
+        let outside = try makeTemporaryDirectory()
+        let stagingParent = try makeTemporaryDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            try? FileManager.default.removeItem(at: outside)
+            try? FileManager.default.removeItem(at: stagingParent)
+        }
+        let outsideLog = outside.appendingPathComponent("outside.jsonl")
+        try Data(#"{"marker":"LEAK_OUTSIDE_SECRET"}"#.utf8).write(to: outsideLog)
+        try FileManager.default.createSymbolicLink(
+            at: directory.appendingPathComponent("a-symlink.jsonl"),
+            withDestinationURL: outsideLog
+        )
+        try FileManager.default.linkItem(
+            at: outsideLog,
+            to: directory.appendingPathComponent("b-hard-link.jsonl")
+        )
+        try FileManager.default.createDirectory(
+            at: directory.appendingPathComponent("c-directory.jsonl"),
+            withIntermediateDirectories: false
+        )
+        try Data(#"{"marker":"SAFE_LOCAL"}"#.utf8).write(
+            to: directory.appendingPathComponent("d-regular.jsonl")
+        )
+        let archiver = RecordingDiagnosticArchiver()
+        let exporter = DiagnosticBundleExporter(
+            logStore: DiagnosticLogStore(directoryURL: directory),
+            temporaryDirectory: stagingParent,
+            archiver: archiver,
+            limits: .init(
+                maximumFileCount: 10,
+                maximumFileBytes: 1_024,
+                maximumTotalReadBytes: 4_096
+            )
+        )
+
+        _ = try exporter.export(to: stagingParent.appendingPathComponent("support.zip"))
+
+        let text = archiver.logFileContents.values.joined(separator: "\n")
+        XCTAssertTrue(text.contains("SAFE_LOCAL"))
+        XCTAssertFalse(text.contains("LEAK_OUTSIDE_SECRET"))
+        XCTAssertEqual(archiver.manifest?.logFileCount, archiver.logFileNames.count)
+        XCTAssertTrue(archiver.logFileNames.allSatisfy {
+            $0.range(of: #"^diagnostic-log-[0-9]{3}\.jsonl$"#, options: .regularExpression) != nil
+        })
+    }
+
+    func testExporterSkipsFileLargerThanPerFileBudgetWithoutReadingSecretIntoBundle() throws {
+        let directory = try makeTemporaryDirectory()
+        let stagingParent = try makeTemporaryDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            try? FileManager.default.removeItem(at: stagingParent)
+        }
+        try Data(
+            (#"{"marker":"LEAK_OVERSIZED_SECRET","padding":""#
+                + String(repeating: "x", count: 128) + #""}"#).utf8
+        ).write(to: directory.appendingPathComponent("a-oversized.jsonl"))
+        try Data(#"{"marker":"SAFE_SMALL"}"#.utf8).write(
+            to: directory.appendingPathComponent("b-small.jsonl")
+        )
+        let archiver = RecordingDiagnosticArchiver()
+        let exporter = DiagnosticBundleExporter(
+            logStore: DiagnosticLogStore(directoryURL: directory),
+            temporaryDirectory: stagingParent,
+            archiver: archiver,
+            limits: .init(
+                maximumFileCount: 10,
+                maximumFileBytes: 64,
+                maximumTotalReadBytes: 1_024
+            )
+        )
+
+        _ = try exporter.export(to: stagingParent.appendingPathComponent("support.zip"))
+
+        let text = archiver.logFileContents.values.joined(separator: "\n")
+        XCTAssertEqual(archiver.manifest?.logFileCount, 1)
+        XCTAssertTrue(text.contains("SAFE_SMALL"))
+        XCTAssertFalse(text.contains("LEAK_OVERSIZED_SECRET"))
+    }
+
+    func testExporterLimitsSourceFileCountAndKeepsManifestAtActualOutputCount() throws {
+        let directory = try makeTemporaryDirectory()
+        let stagingParent = try makeTemporaryDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            try? FileManager.default.removeItem(at: stagingParent)
+        }
+        for (name, marker) in [("a", "FIRST"), ("b", "SECOND"), ("c", "EXCLUDED_SECRET")] {
+            try Data("{\"marker\":\"\(marker)\"}".utf8).write(
+                to: directory.appendingPathComponent("\(name).jsonl")
+            )
+        }
+        let archiver = RecordingDiagnosticArchiver()
+        let exporter = DiagnosticBundleExporter(
+            logStore: DiagnosticLogStore(directoryURL: directory),
+            temporaryDirectory: stagingParent,
+            archiver: archiver,
+            limits: .init(
+                maximumFileCount: 2,
+                maximumFileBytes: 512,
+                maximumTotalReadBytes: 4_096
+            )
+        )
+
+        _ = try exporter.export(to: stagingParent.appendingPathComponent("support.zip"))
+
+        let text = archiver.logFileContents.values.joined(separator: "\n")
+        XCTAssertEqual(archiver.manifest?.logFileCount, 2)
+        XCTAssertEqual(archiver.logFileNames, ["diagnostic-log-001.jsonl", "diagnostic-log-002.jsonl"])
+        XCTAssertTrue(text.contains("FIRST"))
+        XCTAssertTrue(text.contains("SECOND"))
+        XCTAssertFalse(text.contains("EXCLUDED_SECRET"))
+    }
+
+    func testExporterStopsAtTotalReadBudgetAndDoesNotIncludeLaterSecret() throws {
+        let directory = try makeTemporaryDirectory()
+        let stagingParent = try makeTemporaryDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            try? FileManager.default.removeItem(at: stagingParent)
+        }
+        let first = Data(#"{"marker":"FIRST_WITH_PADDING_123456"}"#.utf8)
+        let second = Data(#"{"marker":"LEAK_TOTAL_SECRET_123456"}"#.utf8)
+        try first.write(to: directory.appendingPathComponent("a.jsonl"))
+        try second.write(to: directory.appendingPathComponent("b.jsonl"))
+        let archiver = RecordingDiagnosticArchiver()
+        let exporter = DiagnosticBundleExporter(
+            logStore: DiagnosticLogStore(directoryURL: directory),
+            temporaryDirectory: stagingParent,
+            archiver: archiver,
+            limits: .init(
+                maximumFileCount: 10,
+                maximumFileBytes: 512,
+                maximumTotalReadBytes: first.count + 4
+            )
+        )
+
+        _ = try exporter.export(to: stagingParent.appendingPathComponent("support.zip"))
+
+        let text = archiver.logFileContents.values.joined(separator: "\n")
+        XCTAssertEqual(archiver.manifest?.logFileCount, 1)
+        XCTAssertTrue(text.contains("FIRST_WITH_PADDING_123456"))
+        XCTAssertFalse(text.contains("LEAK_TOTAL_SECRET_123456"))
     }
 
     func testStoreWritesJSONLineAndRejectsSensitiveMetadata() throws {
