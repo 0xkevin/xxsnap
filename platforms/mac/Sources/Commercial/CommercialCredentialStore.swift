@@ -73,24 +73,30 @@ struct CommercialAccessRecord: Codable, Equatable {
     let status: Status
     let envelope: SignedEnvelope?
     let anchor: CommercialTimeAnchor?
+    /// Independent proof of the last successful `/validate` response.  The
+    /// entitlement issue date is not a validation timestamp.
+    let lastSuccessfulValidation: CommercialTimeAnchor?
     let terminalReason: CommercialTerminalReason?
     let terminalMarkerNonce: UUID?
     let clearsTerminalMarkerNonce: UUID?
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, status, envelope, anchor, terminalReason, terminalMarkerNonce
+        case schemaVersion, status, envelope, anchor, lastSuccessfulValidation
+        case terminalReason, terminalMarkerNonce
         case clearsTerminalMarkerNonce
     }
 
     static func active(
         envelope: SignedEnvelope,
         anchor: CommercialTimeAnchor?,
+        lastSuccessfulValidation: CommercialTimeAnchor? = nil,
         clearsTerminalMarkerNonce: UUID? = nil
     ) -> Self {
         Self(
             status: .active,
             envelope: envelope,
             anchor: anchor,
+            lastSuccessfulValidation: lastSuccessfulValidation,
             terminalReason: nil,
             terminalMarkerNonce: nil,
             clearsTerminalMarkerNonce: clearsTerminalMarkerNonce
@@ -102,6 +108,7 @@ struct CommercialAccessRecord: Codable, Equatable {
             status: .terminal,
             envelope: nil,
             anchor: nil,
+            lastSuccessfulValidation: nil,
             terminalReason: reason,
             terminalMarkerNonce: nonce,
             clearsTerminalMarkerNonce: nil
@@ -112,6 +119,7 @@ struct CommercialAccessRecord: Codable, Equatable {
         status: Status,
         envelope: SignedEnvelope?,
         anchor: CommercialTimeAnchor?,
+        lastSuccessfulValidation: CommercialTimeAnchor?,
         terminalReason: CommercialTerminalReason?,
         terminalMarkerNonce: UUID?,
         clearsTerminalMarkerNonce: UUID?
@@ -119,6 +127,7 @@ struct CommercialAccessRecord: Codable, Equatable {
         self.status = status
         self.envelope = envelope
         self.anchor = anchor
+        self.lastSuccessfulValidation = lastSuccessfulValidation
         self.terminalReason = terminalReason
         self.terminalMarkerNonce = terminalMarkerNonce
         self.clearsTerminalMarkerNonce = clearsTerminalMarkerNonce
@@ -126,7 +135,8 @@ struct CommercialAccessRecord: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        guard try container.decode(Int.self, forKey: .schemaVersion) == 1 else {
+        let schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        guard schemaVersion == 1 || schemaVersion == 2 else {
             throw DecodingError.dataCorruptedError(
                 forKey: .schemaVersion,
                 in: container,
@@ -137,6 +147,9 @@ struct CommercialAccessRecord: Codable, Equatable {
         envelope = try container.decodeIfPresent(SignedEnvelope.self, forKey: .envelope)
         // A damaged monotonic-time anchor must not make a valid paid envelope unreadable.
         anchor = try? container.decodeIfPresent(CommercialTimeAnchor.self, forKey: .anchor)
+        lastSuccessfulValidation = schemaVersion >= 2
+            ? (try? container.decodeIfPresent(CommercialTimeAnchor.self, forKey: .lastSuccessfulValidation))
+            : nil
         terminalReason = try container.decodeIfPresent(CommercialTerminalReason.self, forKey: .terminalReason)
         terminalMarkerNonce = try container.decodeIfPresent(UUID.self, forKey: .terminalMarkerNonce)
         clearsTerminalMarkerNonce = try container.decodeIfPresent(UUID.self, forKey: .clearsTerminalMarkerNonce)
@@ -154,10 +167,11 @@ struct CommercialAccessRecord: Codable, Equatable {
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(1, forKey: .schemaVersion)
+        try container.encode(2, forKey: .schemaVersion)
         try container.encode(status, forKey: .status)
         try container.encodeIfPresent(envelope, forKey: .envelope)
         try container.encodeIfPresent(anchor, forKey: .anchor)
+        try container.encodeIfPresent(lastSuccessfulValidation, forKey: .lastSuccessfulValidation)
         try container.encodeIfPresent(terminalReason, forKey: .terminalReason)
         try container.encodeIfPresent(terminalMarkerNonce, forKey: .terminalMarkerNonce)
         try container.encodeIfPresent(clearsTerminalMarkerNonce, forKey: .clearsTerminalMarkerNonce)
@@ -168,6 +182,10 @@ struct CommercialCredentialMutationSnapshot: Equatable {
     let revision: UInt64
     let marker: CommercialTerminalMarker?
     let access: CommercialAccessRecord?
+}
+
+struct CommercialRefreshGeneration: Equatable, Sendable {
+    fileprivate let value: UInt64
 }
 
 enum CommercialCredentialSnapshotError: Error {
@@ -187,6 +205,38 @@ final class CommercialCredentialMutationCoordinator: @unchecked Sendable {
 
     private let lock = NSLock()
     private var revision: UInt64 = 0
+    private var refreshGeneration: UInt64 = 0
+
+    func beginRefreshGeneration() -> CommercialRefreshGeneration {
+        lock.lock()
+        defer { lock.unlock() }
+        refreshGeneration &+= 1
+        return CommercialRefreshGeneration(value: refreshGeneration)
+    }
+
+    func invalidateRefreshGeneration() {
+        lock.lock()
+        refreshGeneration &+= 1
+        lock.unlock()
+    }
+
+    func isRefreshGenerationCurrent(_ generation: CommercialRefreshGeneration) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return refreshGeneration == generation.value
+    }
+
+    func savePolicy(
+        _ envelope: SignedEnvelope,
+        refresh: CommercialRefreshGeneration,
+        store: CommercialCredentialStoring
+    ) throws -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard refreshGeneration == refresh.value else { return false }
+        try store.savePolicyEnvelope(envelope)
+        return true
+    }
 
     func snapshot(
         store: CommercialCredentialStoring,
@@ -217,12 +267,14 @@ final class CommercialCredentialMutationCoordinator: @unchecked Sendable {
         expected: CommercialCredentialMutationSnapshot,
         record: CommercialAccessRecord,
         clearingMarkerNonce: UUID?,
+        refresh: CommercialRefreshGeneration? = nil,
         store: CommercialCredentialStoring,
         markerStore: CommercialTerminalMarkerStoring
     ) throws -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        guard revision == expected.revision,
+        guard refresh.map({ refreshGeneration == $0.value }) ?? true,
+              revision == expected.revision,
               try markerStore.loadTerminalMarker() == expected.marker,
               try store.loadAccessRecord() == expected.access
         else { return false }
@@ -244,12 +296,14 @@ final class CommercialCredentialMutationCoordinator: @unchecked Sendable {
     func commitTerminal(
         expected: CommercialCredentialMutationSnapshot,
         reason: CommercialTerminalReason,
+        refresh: CommercialRefreshGeneration? = nil,
         store: CommercialCredentialStoring,
         markerStore: CommercialTerminalMarkerStoring
     ) -> CommercialTerminalCommitOutcome {
         lock.lock()
         defer { lock.unlock() }
-        guard revision == expected.revision else {
+        guard (refresh.map { refreshGeneration == $0.value } ?? true),
+              revision == expected.revision else {
             return CommercialTerminalCommitOutcome(
                 committed: false, marker: nil, cleanupPending: false, storageFailed: false
             )

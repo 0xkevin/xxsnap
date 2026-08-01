@@ -215,7 +215,7 @@ final class CommercialAccessControllerTests: XCTestCase {
         guard case .trial = controller.state else { return XCTFail("trial should remain local") }
     }
 
-    func testPaidPolicyWithoutCredentialAttemptsTrialOnlyOnce() async throws {
+    func testPaidPolicyWithoutCredentialRetriesTrialAfterTransientFailure() async throws {
         let fixture = try Fixture(now: now)
         fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
         fixture.client.fetchResult = .success(try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day)))
@@ -223,6 +223,19 @@ final class CommercialAccessControllerTests: XCTestCase {
         let controller = fixture.controller()
         await controller.refresh()
         await controller.refresh()
+        XCTAssertEqual(fixture.client.trialCalls, 2)
+    }
+
+    func testExplicitTrialUnavailableSettlesAndDoesNotRetry() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        fixture.client.fetchResult = .success(try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day)))
+        fixture.client.trialResult = .failure(fixture.serverError("trial_already_used"))
+        let controller = fixture.controller()
+
+        await controller.refresh()
+        await controller.refresh()
+
         XCTAssertEqual(fixture.client.trialCalls, 1)
     }
 
@@ -237,7 +250,59 @@ final class CommercialAccessControllerTests: XCTestCase {
 
         guard case .trial = controller.state else { return XCTFail("expected trial") }
         XCTAssertNotNil(fixture.store.anchor)
+        XCTAssertNil(fixture.store.lastSuccessfulValidation)
         XCTAssertTrue(controller.canUse(.scrollCapture))
+    }
+
+    func testOnlySuccessfulValidationPersistsIndependentValidationAnchor() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        fixture.store.access = try fixture.entitlement(access: .pro, maximumBuildNumber: 100)
+        fixture.store.anchor = CommercialTimeAnchor(issuedAt: now, systemUptime: 1_000)
+        fixture.client.fetchResult = .success(try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day)))
+        fixture.clock.now = now.addingTimeInterval(60)
+        fixture.clock.currentUptime = 1_060
+        fixture.client.validateResult = .success(
+            try fixture.entitlement(access: .pro, maximumBuildNumber: 100)
+        )
+        let controller = fixture.controller()
+
+        await controller.refresh()
+
+        XCTAssertEqual(fixture.store.lastSuccessfulValidation?.issuedAt, fixture.clock.now)
+        XCTAssertEqual(fixture.store.lastSuccessfulValidation?.systemUptime, 1_060)
+    }
+
+    func testCancelledRefreshGenerationCannotCommitValidationResponse() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        let original = try fixture.entitlement(access: .pro, maximumBuildNumber: 100)
+        fixture.store.access = original
+        fixture.store.anchor = CommercialTimeAnchor(issuedAt: now, systemUptime: 1_000)
+        fixture.client.fetchResult = .success(try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day)))
+        fixture.client.suspendValidation = true
+        let validationStarted = expectation(description: "validation started")
+        fixture.client.onValidate = { validationStarted.fulfill() }
+        let controller = fixture.controller()
+        await controller.loadCachedCommercialState()
+        let refreshGeneration = controller.beginCommercialRefreshGeneration()
+
+        let task = Task {
+            await controller.performCommercialRefresh(
+                generation: refreshGeneration,
+                validatePaidCredential: true
+            )
+        }
+        await fulfillment(of: [validationStarted], timeout: 1)
+        controller.invalidateCommercialRefreshGeneration()
+        fixture.client.resumeValidation(with: .success(
+            try fixture.entitlement(access: .pro, maximumBuildNumber: 200)
+        ))
+
+        let result = await task.value
+        XCTAssertEqual(result, .cancelled)
+        XCTAssertNil(fixture.store.lastSuccessfulValidation)
+        XCTAssertEqual(fixture.store.access, original)
     }
 
     func testForwardClockRequestsValidationWithoutRevokingPaidOnNetworkFailure() async throws {
@@ -448,6 +513,7 @@ final class CommercialAccessControllerTests: XCTestCase {
         await restarted.refresh()
         guard case .pro = restarted.state else { return XCTFail("saved activation should recover after marker clears") }
         XCTAssertNil(fixture.marker.reason)
+        XCTAssertNil(fixture.store.lastSuccessfulValidation)
     }
 
     func testPresentationExposesOnlyVerifiedPolicyAndMapsStableActivationFailures() async throws {
@@ -1111,9 +1177,16 @@ private final class MemoryCommercialStore: CommercialCredentialStoring {
         get { record?.anchor }
         set {
             if let envelope = record?.envelope {
-                record = .active(envelope: envelope, anchor: newValue)
+                record = .active(
+                    envelope: envelope,
+                    anchor: newValue,
+                    lastSuccessfulValidation: record?.lastSuccessfulValidation
+                )
             }
         }
+    }
+    var lastSuccessfulValidation: CommercialTimeAnchor? {
+        record?.lastSuccessfulValidation
     }
     var simulatesCorruptAnchor = false
     var deleteAccessError: Error?

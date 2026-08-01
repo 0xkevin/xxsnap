@@ -133,8 +133,8 @@ final class DiagnosticBundleExporter {
             withIntermediateDirectories: true
         )
 
-        let logFiles = try logStore.copyLogFiles(to: logsDirectory)
-        try redactExportedLogs(logFiles)
+        let copiedLogFiles = try logStore.copyLogFiles(to: logsDirectory)
+        let logFiles = try sanitizeExportedLogs(copiedLogFiles)
 
         let manifest = DiagnosticBundleManifest(
             schemaVersion: 1,
@@ -157,25 +157,46 @@ final class DiagnosticBundleExporter {
         return destinationURL
     }
 
-    private func redactExportedLogs(_ logFiles: [URL]) throws {
-        for (index, sourceURL) in logFiles.enumerated() {
+    private func sanitizeExportedLogs(_ logFiles: [URL]) throws -> [URL] {
+        let sanitizedFiles: [[Data]] = logFiles.map { sourceURL in
             guard let contents = try? String(contentsOf: sourceURL, encoding: .utf8) else {
-                try? fileManager.removeItem(at: sourceURL)
-                continue
+                return []
             }
-            let redacted = DiagnosticRedactor.redact(contents)
-            try Data(redacted.utf8).write(to: sourceURL, options: .atomic)
-
-            guard DiagnosticRedactor.containsSensitiveData(sourceURL.lastPathComponent) else {
-                continue
+            return contents.split(whereSeparator: \.isNewline).compactMap { line in
+                guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)),
+                      let sanitized = DiagnosticRedactor.sanitizeJSONObject(object),
+                      JSONSerialization.isValidJSONObject(sanitized),
+                      let data = try? JSONSerialization.data(
+                        withJSONObject: sanitized,
+                        options: [.sortedKeys]
+                      )
+                else { return nil }
+                return data
             }
-            let safeURL = sourceURL.deletingLastPathComponent().appendingPathComponent(
-                "xxsnap-export-\(index + 1).jsonl"
-            )
-            if fileManager.fileExists(atPath: safeURL.path) {
-                try fileManager.removeItem(at: safeURL)
-            }
-            try fileManager.moveItem(at: sourceURL, to: safeURL)
         }
+
+        for sourceURL in logFiles {
+            try? fileManager.removeItem(at: sourceURL)
+        }
+
+        guard let outputDirectory = logFiles.first?.deletingLastPathComponent() else { return [] }
+        var outputs: [URL] = []
+        for lines in sanitizedFiles where !lines.isEmpty {
+            let destination = outputDirectory.appendingPathComponent(
+                String(format: "diagnostic-log-%03d.jsonl", outputs.count + 1)
+            )
+            var contents = Data()
+            for line in lines {
+                contents.append(line)
+                contents.append(0x0A)
+            }
+            do {
+                try contents.write(to: destination, options: .atomic)
+                outputs.append(destination)
+            } catch {
+                try? fileManager.removeItem(at: destination)
+            }
+        }
+        return outputs
     }
 }

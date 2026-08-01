@@ -11,6 +11,7 @@ final class CommercialCredentialStoreTests: XCTestCase {
         let second = envelope("second")
         let firstAnchor = anchor(issuedAt: 1_000)
         let secondAnchor = anchor(issuedAt: 2_000)
+        let validationAnchor = anchor(issuedAt: 1_500)
 
         XCTAssertNil(try store.loadPolicyEnvelope())
         try store.savePolicyEnvelope(first)
@@ -21,10 +22,18 @@ final class CommercialCredentialStoreTests: XCTestCase {
             .active(envelope: first, anchor: firstAnchor)
         )
 
-        try store.saveAccessRecord(.active(envelope: second, anchor: secondAnchor))
+        try store.saveAccessRecord(.active(
+            envelope: second,
+            anchor: secondAnchor,
+            lastSuccessfulValidation: validationAnchor
+        ))
         XCTAssertEqual(
             try store.loadAccessRecord(),
-            .active(envelope: second, anchor: secondAnchor)
+            .active(
+                envelope: second,
+                anchor: secondAnchor,
+                lastSuccessfulValidation: validationAnchor
+            )
         )
         XCTAssertEqual(keychain.addedAccounts, ["policy", "access"])
         XCTAssertEqual(keychain.updatedAccounts, ["access"])
@@ -32,6 +41,65 @@ final class CommercialCredentialStoreTests: XCTestCase {
         try store.deleteAccessRecord()
         XCTAssertNil(try store.loadAccessRecord())
         XCTAssertEqual(try store.loadPolicyEnvelope(), first)
+    }
+
+    func testVersionOneAccessRecordLoadsWithoutInventingValidationTime() throws {
+        let keychain = FakeCommercialKeychain()
+        let store = CommercialCredentialStore(keychain: keychain)
+        let current = CommercialAccessRecord.active(
+            envelope: envelope("paid"),
+            anchor: anchor(issuedAt: 1_000),
+            lastSuccessfulValidation: anchor(issuedAt: 2_000)
+        )
+        let data = try JSONEncoder().encode(current)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        object["schemaVersion"] = 1
+        object.removeValue(forKey: "lastSuccessfulValidation")
+        keychain.items["access"] = try JSONSerialization.data(withJSONObject: object)
+
+        let loaded = try XCTUnwrap(store.loadAccessRecord())
+
+        XCTAssertEqual(loaded.envelope, current.envelope)
+        XCTAssertEqual(loaded.anchor, current.anchor)
+        XCTAssertNil(loaded.lastSuccessfulValidation)
+    }
+
+    func testInvalidatedRefreshGenerationCannotWritePolicyOrAccess() throws {
+        let keychain = FakeCommercialKeychain()
+        let store = CommercialCredentialStore(keychain: keychain)
+        let suite = "com.xxsnap.tests.refresh-generation.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let markerStore = CommercialTerminalMarkerStore(userDefaults: defaults)
+        let coordinator = CommercialCredentialMutationCoordinator()
+        let original = CommercialAccessRecord.active(
+            envelope: envelope("original"),
+            anchor: anchor(issuedAt: 1_000)
+        )
+        try store.saveAccessRecord(original)
+        let snapshot = try coordinator.snapshot(store: store, markerStore: markerStore)
+        let refresh = coordinator.beginRefreshGeneration()
+        coordinator.invalidateRefreshGeneration()
+
+        XCTAssertFalse(try coordinator.savePolicy(
+            envelope("stale-policy"),
+            refresh: refresh,
+            store: store
+        ))
+        XCTAssertFalse(try coordinator.commitActive(
+            expected: snapshot,
+            record: .active(
+                envelope: envelope("stale-access"),
+                anchor: anchor(issuedAt: 2_000),
+                lastSuccessfulValidation: anchor(issuedAt: 2_000)
+            ),
+            clearingMarkerNonce: nil,
+            refresh: refresh,
+            store: store,
+            markerStore: markerStore
+        ))
+        XCTAssertNil(try store.loadPolicyEnvelope())
+        XCTAssertEqual(try store.loadAccessRecord(), original)
     }
 
     func testFailedAtomicUpdateLeavesPreviousEnvelopeAndAnchorTogether() throws {

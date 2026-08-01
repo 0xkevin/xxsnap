@@ -8,12 +8,22 @@ enum CommercialRefreshResult: Equatable {
     case cancelled
 }
 
+struct CommercialPaidValidationContext: Equatable {
+    let lastSuccessfulValidation: CommercialTimeAnchor?
+    let currentUptime: TimeInterval
+    let trustedNowFloor: Date?
+}
+
 @MainActor
 protocol CommercialRefreshControlling: AnyObject {
-    var paidValidationReferenceDate: Date? { get }
-    var trustedNowFloor: Date? { get }
+    var paidValidationContext: CommercialPaidValidationContext? { get }
     func loadCachedCommercialState() async
-    func performCommercialRefresh(validatePaidCredential: Bool) async -> CommercialRefreshResult
+    func beginCommercialRefreshGeneration() -> CommercialRefreshGeneration
+    func invalidateCommercialRefreshGeneration()
+    func performCommercialRefresh(
+        generation: CommercialRefreshGeneration,
+        validatePaidCredential: Bool
+    ) async -> CommercialRefreshResult
 }
 
 protocol CommercialRefreshClock: AnyObject, Sendable {
@@ -145,6 +155,7 @@ final class CommercialRefreshScheduler: CommercialRefreshScheduling {
         guard started || task != nil else { return }
         started = false
         generation += 1
+        controller.invalidateCommercialRefreshGeneration()
         task?.cancel()
         task = nil
         networkMonitor.cancel()
@@ -152,6 +163,7 @@ final class CommercialRefreshScheduler: CommercialRefreshScheduling {
 
     private func replaceLoop(loadCache: Bool) {
         generation += 1
+        controller.invalidateCommercialRefreshGeneration()
         let expectedGeneration = generation
         let previous = task
         previous?.cancel()
@@ -175,15 +187,11 @@ final class CommercialRefreshScheduler: CommercialRefreshScheduling {
 
         var retryIndex = 0
         while isCurrent(generation) {
-            let effectiveNow = max(clock.now, controller.trustedNowFloor ?? .distantPast)
-            let shouldValidate: Bool
-            if let reference = controller.paidValidationReferenceDate {
-                shouldValidate = effectiveNow.timeIntervalSince(reference) >= Self.validationInterval
-            } else {
-                shouldValidate = false
-            }
+            let shouldValidate = paidValidationIsDue()
+            let refreshGeneration = controller.beginCommercialRefreshGeneration()
 
             let result = await controller.performCommercialRefresh(
+                generation: refreshGeneration,
                 validatePaidCredential: shouldValidate
             )
             guard isCurrent(generation) else { return }
@@ -209,13 +217,31 @@ final class CommercialRefreshScheduler: CommercialRefreshScheduling {
     }
 
     private func nextSuccessDelay() -> TimeInterval {
-        let effectiveNow = max(clock.now, controller.trustedNowFloor ?? .distantPast)
-        guard let reference = controller.paidValidationReferenceDate else {
+        guard let context = controller.paidValidationContext,
+              let reference = context.lastSuccessfulValidation,
+              context.currentUptime >= reference.systemUptime
+        else {
             return Self.validationInterval
         }
-        let deadline = reference.addingTimeInterval(Self.validationInterval)
+        let monotonicNow = reference.issuedAt.addingTimeInterval(
+            context.currentUptime - reference.systemUptime
+        )
+        let effectiveNow = max(clock.now, context.trustedNowFloor ?? .distantPast, monotonicNow)
+        let deadline = reference.issuedAt.addingTimeInterval(Self.validationInterval)
         guard deadline > effectiveNow else { return Self.validationInterval }
         return deadline.timeIntervalSince(effectiveNow)
+    }
+
+    private func paidValidationIsDue() -> Bool {
+        guard let context = controller.paidValidationContext else { return false }
+        guard let reference = context.lastSuccessfulValidation,
+              context.currentUptime >= reference.systemUptime
+        else { return true }
+        let monotonicNow = reference.issuedAt.addingTimeInterval(
+            context.currentUptime - reference.systemUptime
+        )
+        let effectiveNow = max(clock.now, context.trustedNowFloor ?? .distantPast, monotonicNow)
+        return effectiveNow.timeIntervalSince(reference.issuedAt) >= Self.validationInterval
     }
 
     private func isCurrent(_ expectedGeneration: Int) -> Bool {

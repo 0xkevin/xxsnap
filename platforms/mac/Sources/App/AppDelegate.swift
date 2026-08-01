@@ -250,11 +250,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             self.statusItemController = statusItemController
 
+            let refreshController = commercialAccess as? CommercialAccessController
             commercialAccess.onStateChange = {
-                [weak captureCoordinator, weak statusItemController, weak preferencesWindowController] _ in
+                [weak self, weak refreshController, weak captureCoordinator,
+                 weak statusItemController, weak preferencesWindowController] state in
                 captureCoordinator?.commercialAccessDidChange()
                 statusItemController?.refresh()
                 preferencesWindowController?.commercialAccessDidChange()
+                if case .pro = state,
+                   refreshController?.paidValidationContext?.lastSuccessfulValidation == nil {
+                    self?.commercialLaunchDependencies?.triggerRefresh()
+                }
             }
             if let controller = commercialAccess as? CommercialAccessController {
                 controller.onPresentationChange = { [weak preferencesWindowController] in

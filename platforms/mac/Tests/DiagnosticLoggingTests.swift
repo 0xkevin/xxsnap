@@ -34,6 +34,36 @@ final class DiagnosticLoggingTests: XCTestCase {
         )
     }
 
+    func testCommercialAllowlistRequiresExactSnakeCaseKeys() {
+        let metadata = DiagnosticMetadata.sanitized([
+            "policy_mode": "paid",
+            "Policy-Mode": "paid",
+            "POLICY_MODE": "paid",
+            "policyMode": "paid",
+            "stable_error_code": "network_unavailable",
+            "StableErrorCode": "network_unavailable",
+        ])
+
+        XCTAssertEqual(metadata, [
+            "policy_mode": "paid",
+            "stable_error_code": "network_unavailable",
+        ])
+    }
+
+    func testRedactorCoversFlexibleSecretAndFieldSeparators() {
+        let unsafe = """
+        XXSNAP_ab12_cd34_ef56 payload c2VjcmV0 signature=deadbeef \
+        license:abc credential xyz person@example.test Bearer abc.def.ghi \
+        abc.def.ghi aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        """
+        let sanitized = DiagnosticRedactor.redact(unsafe)
+
+        XCTAssertFalse(DiagnosticRedactor.containsSensitiveData(sanitized))
+        XCTAssertFalse(sanitized.contains("person@example.test"))
+        XCTAssertFalse(sanitized.contains("c2VjcmV0"))
+        XCTAssertFalse(sanitized.contains("deadbeef"))
+    }
+
     func testMetadataValuesAndEventMessagesAreRedactedWithoutBreakingSafeDiagnostics() throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -95,6 +125,44 @@ final class DiagnosticLoggingTests: XCTestCase {
         XCTAssertTrue(exportedText.contains("all_free"))
         XCTAssertTrue(exportedText.contains("network_unavailable"))
         for line in exportedText.split(separator: "\n") {
+            XCTAssertNoThrow(try JSONSerialization.jsonObject(with: Data(line.utf8)))
+        }
+    }
+
+    func testExporterDropsInvalidLinesRecursivelySanitizesAndAlwaysUsesSafeNames() throws {
+        let directory = try makeTemporaryDirectory()
+        let stagingParent = try makeTemporaryDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            try? FileManager.default.removeItem(at: stagingParent)
+        }
+        let unsafeName = directory.appendingPathComponent("license-person@example.test-token.jsonl")
+        try Data(
+            """
+            not-json
+            {"message":"credential abc","nested":{"payload":"secret","items":[{"email":"person@example.test"}],"stable_error_code":"network_unavailable"}}
+            """.utf8
+        ).write(to: unsafeName)
+        let archiver = RecordingDiagnosticArchiver()
+        let exporter = DiagnosticBundleExporter(
+            logStore: DiagnosticLogStore(directoryURL: directory),
+            temporaryDirectory: stagingParent,
+            archiver: archiver
+        )
+
+        _ = try exporter.export(to: stagingParent.appendingPathComponent("support.zip"))
+
+        XCTAssertEqual(archiver.manifest?.logFileCount, archiver.logFileNames.count)
+        XCTAssertTrue(archiver.logFileNames.allSatisfy {
+            $0.range(of: #"^diagnostic-log-[0-9]{3}\.jsonl$"#, options: .regularExpression) != nil
+        })
+        XCTAssertFalse(archiver.logFileNames.joined().contains("@"))
+        let text = archiver.logFileContents.values.joined(separator: "\n")
+        XCTAssertFalse(text.contains("not-json"))
+        XCTAssertFalse(text.contains("person@example.test"))
+        XCTAssertFalse(text.contains("\"payload\""))
+        XCTAssertTrue(text.contains("stable_error_code"))
+        for line in text.split(separator: "\n") {
             XCTAssertNoThrow(try JSONSerialization.jsonObject(with: Data(line.utf8)))
         }
     }
@@ -298,7 +366,7 @@ final class DiagnosticLoggingTests: XCTestCase {
         XCTAssertEqual(manifest.macOSVersion, "macOS Test")
         XCTAssertEqual(manifest.architecture, "arm64")
         XCTAssertEqual(manifest.logFileCount, 1)
-        XCTAssertEqual(archiver.logFileNames, ["xxsnap-current.jsonl"])
+        XCTAssertEqual(archiver.logFileNames, ["diagnostic-log-001.jsonl"])
         XCTAssertFalse(
             FileManager.default.fileExists(
                 atPath: stagingParent

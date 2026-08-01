@@ -65,6 +65,51 @@ final class CommercialRefreshTests: XCTestCase {
         fixture.scheduler.cancel()
     }
 
+    func testPaidCredentialWithoutValidationRecordValidatesImmediately() async {
+        let controller = RefreshControllerDouble()
+        controller.hasPaidCredential = true
+        let fixture = makeScheduler(controller: controller)
+
+        fixture.scheduler.start()
+        await controller.waitForRefreshCount(1)
+
+        XCTAssertEqual(controller.validateArguments, [true])
+        fixture.scheduler.cancel()
+    }
+
+    func testUptimeResetMakesPaidValidationImmediatelyDue() async {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let controller = RefreshControllerDouble()
+        controller.paidValidationReferenceDate = now.addingTimeInterval(-day)
+        controller.validationSystemUptime = 5_000
+        controller.currentUptime = 100
+        let fixture = makeScheduler(controller: controller, now: now)
+
+        fixture.scheduler.start()
+        await controller.waitForRefreshCount(1)
+
+        XCTAssertEqual(controller.validateArguments, [true])
+        fixture.scheduler.cancel()
+    }
+
+    func testSameBootMonotonicTimePreventsClockRollbackDeferral() async {
+        let serverTime = Date(timeIntervalSince1970: 1_800_000_000)
+        let controller = RefreshControllerDouble()
+        controller.paidValidationReferenceDate = serverTime
+        controller.validationSystemUptime = 1_000
+        controller.currentUptime = 1_000 + (7 * day)
+        let fixture = makeScheduler(
+            controller: controller,
+            now: serverTime.addingTimeInterval(-30 * day)
+        )
+
+        fixture.scheduler.start()
+        await controller.waitForRefreshCount(1)
+
+        XCTAssertEqual(controller.validateArguments, [true])
+        fixture.scheduler.cancel()
+    }
+
     func testTrialNeverUsesPaidValidation() async {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let controller = RefreshControllerDouble()
@@ -228,6 +273,20 @@ private final class RefreshControllerDouble: CommercialRefreshControlling {
 
     var paidValidationReferenceDate: Date?
     var trustedNowFloor: Date?
+    var hasPaidCredential = false
+    var validationSystemUptime: TimeInterval = 1_000
+    var currentUptime: TimeInterval = 1_000
+    private let coordinator = CommercialCredentialMutationCoordinator()
+    var paidValidationContext: CommercialPaidValidationContext? {
+        guard hasPaidCredential || paidValidationReferenceDate != nil else { return nil }
+        return CommercialPaidValidationContext(
+            lastSuccessfulValidation: paidValidationReferenceDate.map {
+                CommercialTimeAnchor(issuedAt: $0, systemUptime: validationSystemUptime)
+            },
+            currentUptime: currentUptime,
+            trustedNowFloor: trustedNowFloor
+        )
+    }
     var results: [CommercialRefreshResult] = [.success]
     var suspendRefresh = false
     private(set) var operations: [Operation] = []
@@ -242,7 +301,18 @@ private final class RefreshControllerDouble: CommercialRefreshControlling {
         operations.append(.loadCache)
     }
 
-    func performCommercialRefresh(validatePaidCredential: Bool) async -> CommercialRefreshResult {
+    func beginCommercialRefreshGeneration() -> CommercialRefreshGeneration {
+        coordinator.beginRefreshGeneration()
+    }
+
+    func invalidateCommercialRefreshGeneration() {
+        coordinator.invalidateRefreshGeneration()
+    }
+
+    func performCommercialRefresh(
+        generation: CommercialRefreshGeneration,
+        validatePaidCredential: Bool
+    ) async -> CommercialRefreshResult {
         cacheAppliedBeforeRefresh = operations.last == .loadCache || cacheAppliedBeforeRefresh
         operations.append(.refresh(validatePaid: validatePaidCredential))
         validateArguments.append(validatePaidCredential)

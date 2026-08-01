@@ -110,12 +110,12 @@ enum DiagnosticRedactor {
 
     private static let rules: [Rule] = [
         (#"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b"#, "[REDACTED]"),
-        (#"(?i)\bXXSNAP-[A-Z2-9]{4}(?:-[A-Z2-9]{4}){3}\b"#, "[REDACTED]"),
+        (#"(?i)\bXXSNAP(?:(?:[-_:][A-Z0-9]{2,}){2,}|[-_:]?[A-Z0-9]{8,})\b"#, "[REDACTED]"),
         (#"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+"#, "[REDACTED]"),
         (#"\b[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_-]{2,}\b"#, "[REDACTED]"),
         (#"(?i)\b[a-f0-9]{64}\b"#, "[REDACTED]"),
         (
-            #"(?i)((?:\"|')?(?:activation[_-]?code|license[_-]?code|credential[_-]?code|auth[_-]?code|recovery[_-]?code|secret[_-]?code|\bcode\b|[A-Za-z0-9_-]*payload[A-Za-z0-9_-]*|signature|device[_-]?hash|license[_-]?id|credential[_-]?id|authorization|[A-Za-z0-9_-]*token[A-Za-z0-9_-]*)(?:\"|')?\s*[:=]\s*(?:\"|')?)[^\"',}\s]+"#,
+            #"(?i)((?:\"|')?(?:activation[_-]?code|license[_-]?code|credential[_-]?code|auth[_-]?code|recovery[_-]?code|secret[_-]?code|\bcode\b|[A-Za-z0-9_-]*payload[A-Za-z0-9_-]*|signature|device[_-]?hash|license[_-]?id|credential[_-]?id|\blicense\b|\bcredential\b|authorization|[A-Za-z0-9_-]*token[A-Za-z0-9_-]*)(?:\"|')?\s*(?::|=|\s)\s*)(?:\"[^\"]*\"|'[^']*'|[^\s,}]+)"#,
             "$1[REDACTED]"
         ),
     ].compactMap { pattern, replacement in
@@ -136,18 +136,42 @@ enum DiagnosticRedactor {
     static func containsSensitiveData(_ value: String) -> Bool {
         redact(value) != value
     }
+
+    static func sanitizeJSONObject(_ value: Any, key: String? = nil) -> Any? {
+        if let key, DiagnosticMetadata.mustDrop(key) { return nil }
+        switch value {
+        case let dictionary as [String: Any]:
+            return dictionary.reduce(into: [String: Any]()) { result, entry in
+                guard !DiagnosticMetadata.mustDrop(entry.key),
+                      let sanitized = sanitizeJSONObject(entry.value, key: entry.key)
+                else { return }
+                result[entry.key] = sanitized
+            }
+        case let array as [Any]:
+            return array.compactMap { sanitizeJSONObject($0) }
+        case let string as String:
+            return redact(string)
+        case is NSNull, is NSNumber:
+            return value
+        default:
+            return redact(String(describing: value))
+        }
+    }
 }
 
 enum DiagnosticMetadata {
     private static let allowedCommercialKeys: Set<String> = [
-        "policymode",
-        "policyid",
-        "policyexpired",
-        "accesskind",
-        "commercialfeature",
-        "requestresult",
-        "stableerrorcode",
+        "policy_mode",
+        "policy_id",
+        "policy_expired",
+        "access_kind",
+        "commercial_feature",
+        "request_result",
+        "stable_error_code",
     ]
+    private static let allowedCommercialNormalizedKeys = Set(
+        allowedCommercialKeys.map(normalize)
+    )
 
     private static let forbiddenKeyTerms = [
         "account",
@@ -163,6 +187,7 @@ enum DiagnosticMetadata {
         "licenseid",
         "ocr",
         "path",
+        "payload",
         "screenshot",
         "signature",
         "signedpayload",
@@ -188,11 +213,11 @@ enum DiagnosticMetadata {
 
     static func sanitized(_ metadata: [String: String]) -> [String: String] {
         metadata.reduce(into: [:]) { result, entry in
-            let normalizedKey = entry.key
-                .lowercased()
-                .filter { $0.isLetter || $0.isNumber }
-            let isAllowedCommercialKey = allowedCommercialKeys.contains(normalizedKey)
+            let normalizedKey = normalize(entry.key)
+            let isAllowedCommercialKey = allowedCommercialKeys.contains(entry.key)
             let isCommercialKey = commercialKeyTerms.contains(where: normalizedKey.contains)
+            guard !allowedCommercialNormalizedKeys.contains(normalizedKey)
+                    || isAllowedCommercialKey else { return }
             guard !isCommercialKey || isAllowedCommercialKey else { return }
             guard isAllowedCommercialKey
                     || !forbiddenKeyTerms.contains(where: normalizedKey.contains) else { return }
@@ -201,6 +226,18 @@ enum DiagnosticMetadata {
                 .replacingOccurrences(of: "\n", with: " ")
             result[entry.key] = String(DiagnosticRedactor.redact(flattened).prefix(256))
         }
+    }
+
+    static func mustDrop(_ key: String) -> Bool {
+        if allowedCommercialKeys.contains(key) { return false }
+        let normalizedKey = normalize(key)
+        if allowedCommercialNormalizedKeys.contains(normalizedKey) { return true }
+        return commercialKeyTerms.contains(where: normalizedKey.contains)
+            || forbiddenKeyTerms.contains(where: normalizedKey.contains)
+    }
+
+    private static func normalize(_ key: String) -> String {
+        key.lowercased().filter { $0.isLetter || $0.isNumber }
     }
 }
 
