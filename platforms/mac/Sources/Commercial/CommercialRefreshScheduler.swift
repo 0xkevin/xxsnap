@@ -18,8 +18,8 @@ struct CommercialPaidValidationContext: Equatable {
 protocol CommercialRefreshControlling: AnyObject {
     var paidValidationContext: CommercialPaidValidationContext? { get }
     func loadCachedCommercialState() async
-    func beginCommercialRefreshGeneration() -> CommercialRefreshGeneration
-    func invalidateCommercialRefreshGeneration()
+    func beginCommercialRefreshGeneration() async -> CommercialRefreshGeneration
+    func invalidateCommercialRefreshGeneration() async
     func performCommercialRefresh(
         generation: CommercialRefreshGeneration,
         validatePaidCredential: Bool
@@ -112,6 +112,7 @@ final class CommercialRefreshScheduler: CommercialRefreshScheduling {
     private let networkMonitor: any CommercialNetworkMonitoring
 
     private var task: Task<Void, Never>?
+    private var invalidationTask: Task<Void, Never>?
     private var generation = 0
     private var started = false
     private var cacheLoaded = false
@@ -155,19 +156,20 @@ final class CommercialRefreshScheduler: CommercialRefreshScheduling {
         guard started || task != nil else { return }
         started = false
         generation += 1
-        controller.invalidateCommercialRefreshGeneration()
         task?.cancel()
         task = nil
+        enqueueGenerationInvalidation()
         networkMonitor.cancel()
     }
 
     private func replaceLoop(loadCache: Bool) {
         generation += 1
-        controller.invalidateCommercialRefreshGeneration()
         let expectedGeneration = generation
         let previous = task
         previous?.cancel()
+        let invalidation = enqueueGenerationInvalidation()
         task = Task { [weak self] in
+            await invalidation.value
             if let previous { await previous.value }
             guard let self,
                   self.started,
@@ -188,7 +190,8 @@ final class CommercialRefreshScheduler: CommercialRefreshScheduling {
         var retryIndex = 0
         while isCurrent(generation) {
             let shouldValidate = paidValidationIsDue()
-            let refreshGeneration = controller.beginCommercialRefreshGeneration()
+            let refreshGeneration = await controller.beginCommercialRefreshGeneration()
+            guard isCurrent(generation) else { return }
 
             let result = await controller.performCommercialRefresh(
                 generation: refreshGeneration,
@@ -246,5 +249,17 @@ final class CommercialRefreshScheduler: CommercialRefreshScheduling {
 
     private func isCurrent(_ expectedGeneration: Int) -> Bool {
         started && generation == expectedGeneration && !Task.isCancelled
+    }
+
+    @discardableResult
+    private func enqueueGenerationInvalidation() -> Task<Void, Never> {
+        let pending = invalidationTask
+        let controller = self.controller
+        let next = Task {
+            if let pending { await pending.value }
+            await controller.invalidateCommercialRefreshGeneration()
+        }
+        invalidationTask = next
+        return next
     }
 }

@@ -110,7 +110,8 @@ enum DiagnosticRedactor {
 
     private static let rules: [Rule] = [
         (#"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b"#, "[REDACTED]"),
-        (#"(?i)\bXXSNAP(?:(?:[-_:][A-Z0-9]{2,}){2,}|[-_:]?[A-Z0-9]{8,})\b"#, "[REDACTED]"),
+        (#"(?i)\bXXSNAP-[A-Z0-9_-]+"#, "[REDACTED]"),
+        (#"(?i)\bXXSNAP(?:[_:][A-Z0-9]{2,}){2,}\b"#, "[REDACTED]"),
         (#"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+"#, "[REDACTED]"),
         (#"\b[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_-]{2,}\b"#, "[REDACTED]"),
         (#"(?i)\b[a-f0-9]{64}\b"#, "[REDACTED]"),

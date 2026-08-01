@@ -285,7 +285,7 @@ final class CommercialAccessControllerTests: XCTestCase {
         fixture.client.onValidate = { validationStarted.fulfill() }
         let controller = fixture.controller()
         await controller.loadCachedCommercialState()
-        let refreshGeneration = controller.beginCommercialRefreshGeneration()
+        let refreshGeneration = await controller.beginCommercialRefreshGeneration()
 
         let task = Task {
             await controller.performCommercialRefresh(
@@ -294,7 +294,7 @@ final class CommercialAccessControllerTests: XCTestCase {
             )
         }
         await fulfillment(of: [validationStarted], timeout: 1)
-        controller.invalidateCommercialRefreshGeneration()
+        await controller.invalidateCommercialRefreshGeneration()
         fixture.client.resumeValidation(with: .success(
             try fixture.entitlement(access: .pro, maximumBuildNumber: 200)
         ))
@@ -303,6 +303,41 @@ final class CommercialAccessControllerTests: XCTestCase {
         XCTAssertEqual(result, .cancelled)
         XCTAssertNil(fixture.store.lastSuccessfulValidation)
         XCTAssertEqual(fixture.store.access, original)
+    }
+
+    func testSchedulerCancelDoesNotBlockMainActorWhileCredentialCommitHoldsLock() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.store.policy = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        fixture.store.access = try fixture.entitlement(access: .pro, maximumBuildNumber: 100)
+        fixture.store.anchor = CommercialTimeAnchor(issuedAt: now, systemUptime: 1_000)
+        fixture.client.fetchResult = .success(
+            try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        )
+        fixture.client.validateResult = .success(
+            try fixture.entitlement(access: .pro, maximumBuildNumber: 100)
+        )
+        let commitStarted = expectation(description: "credential commit started")
+        let releaseCommit = DispatchSemaphore(value: 0)
+        fixture.store.onSaveAccess = {
+            commitStarted.fulfill()
+            _ = releaseCommit.wait(timeout: .now() + 2)
+        }
+        let scheduler = CommercialRefreshScheduler(
+            controller: fixture.controller(),
+            networkMonitor: NoopCommercialNetworkMonitor()
+        )
+        scheduler.start()
+        await fulfillment(of: [commitStarted], timeout: 1)
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.4) {
+            releaseCommit.signal()
+        }
+
+        let startedAt = ProcessInfo.processInfo.systemUptime
+        scheduler.cancel()
+        let elapsed = ProcessInfo.processInfo.systemUptime - startedAt
+
+        XCTAssertLessThan(elapsed, 0.1, "cancel/menu work must never wait for Keychain mutation lock")
+        fixture.store.onSaveAccess = nil
     }
 
     func testForwardClockRequestsValidationWithoutRevokingPaidOnNetworkFailure() async throws {
@@ -1191,6 +1226,7 @@ private final class MemoryCommercialStore: CommercialCredentialStoring {
     var simulatesCorruptAnchor = false
     var deleteAccessError: Error?
     var saveAccessError: Error?
+    var onSaveAccess: (() -> Void)?
     var isTerminalTombstone: Bool { record?.status == .terminal }
     var accessRecord: CommercialAccessRecord? { record }
     func loadPolicyEnvelope() throws -> SignedEnvelope? { policy }
@@ -1201,6 +1237,7 @@ private final class MemoryCommercialStore: CommercialCredentialStoring {
     }
     func saveAccessRecord(_ value: CommercialAccessRecord) throws {
         if let saveAccessError { throw saveAccessError }
+        onSaveAccess?()
         record = value
     }
     func deleteAccessRecord() throws {

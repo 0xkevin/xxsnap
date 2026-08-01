@@ -190,6 +190,30 @@ final class CommercialRefreshTests: XCTestCase {
         XCTAssertEqual(controller.completedRefreshCount, 0)
     }
 
+    func testCancelThenImmediateRestartInvalidatesBeforeBeginningReplacementGeneration() async {
+        let controller = RefreshControllerDouble()
+        controller.suspendRefresh = true
+        let fixture = makeScheduler(controller: controller)
+
+        fixture.scheduler.start()
+        await controller.waitForRefreshCount(1)
+        controller.suspendNextInvalidation = true
+
+        fixture.scheduler.cancel()
+        fixture.scheduler.start()
+        await controller.waitForInvalidationBlock()
+        for _ in 0..<100 { await Task.yield() }
+
+        XCTAssertEqual(controller.refreshCount, 1)
+
+        controller.suspendRefresh = false
+        controller.releaseInvalidationBlock()
+        await controller.waitForRefreshCount(2)
+
+        XCTAssertEqual(controller.refreshGenerationValidity, [true, true])
+        fixture.scheduler.cancel()
+    }
+
     func testManualAndNetworkTriggersAreDeduplicatedWithoutOverlap() async {
         let controller = RefreshControllerDouble()
         controller.suspendRefresh = true
@@ -276,7 +300,7 @@ private final class RefreshControllerDouble: CommercialRefreshControlling {
     var hasPaidCredential = false
     var validationSystemUptime: TimeInterval = 1_000
     var currentUptime: TimeInterval = 1_000
-    private let coordinator = CommercialCredentialMutationCoordinator()
+    private let generationWorker = RefreshGenerationDouble()
     var paidValidationContext: CommercialPaidValidationContext? {
         guard hasPaidCredential || paidValidationReferenceDate != nil else { return nil }
         return CommercialPaidValidationContext(
@@ -289,30 +313,40 @@ private final class RefreshControllerDouble: CommercialRefreshControlling {
     }
     var results: [CommercialRefreshResult] = [.success]
     var suspendRefresh = false
+    var suspendNextInvalidation = false
     private(set) var operations: [Operation] = []
     private(set) var validateArguments: [Bool] = []
+    private(set) var refreshGenerationValidity: [Bool] = []
     private(set) var cacheAppliedBeforeRefresh = false
     private(set) var refreshCount = 0
     private(set) var completedRefreshCount = 0
     private(set) var maximumConcurrentRefreshCount = 0
     private var activeRefreshCount = 0
+    private var invalidationIsBlocked = false
+    private var invalidationContinuation: CheckedContinuation<Void, Never>?
 
     func loadCachedCommercialState() async {
         operations.append(.loadCache)
     }
 
-    func beginCommercialRefreshGeneration() -> CommercialRefreshGeneration {
-        coordinator.beginRefreshGeneration()
+    func beginCommercialRefreshGeneration() async -> CommercialRefreshGeneration {
+        await generationWorker.begin()
     }
 
-    func invalidateCommercialRefreshGeneration() {
-        coordinator.invalidateRefreshGeneration()
+    func invalidateCommercialRefreshGeneration() async {
+        if suspendNextInvalidation {
+            suspendNextInvalidation = false
+            invalidationIsBlocked = true
+            await withCheckedContinuation { invalidationContinuation = $0 }
+        }
+        await generationWorker.invalidate()
     }
 
     func performCommercialRefresh(
         generation: CommercialRefreshGeneration,
         validatePaidCredential: Bool
     ) async -> CommercialRefreshResult {
+        refreshGenerationValidity.append(await generationWorker.isCurrent(generation))
         cacheAppliedBeforeRefresh = operations.last == .loadCache || cacheAppliedBeforeRefresh
         operations.append(.refresh(validatePaid: validatePaidCredential))
         validateArguments.append(validatePaidCredential)
@@ -339,6 +373,25 @@ private final class RefreshControllerDouble: CommercialRefreshControlling {
 
     func waitForCancellation() async {
         for _ in 0..<10_000 where activeRefreshCount > 0 { await Task.yield() }
+    }
+
+    func waitForInvalidationBlock() async {
+        for _ in 0..<10_000 where !invalidationIsBlocked { await Task.yield() }
+    }
+
+    func releaseInvalidationBlock() {
+        invalidationIsBlocked = false
+        invalidationContinuation?.resume()
+        invalidationContinuation = nil
+    }
+}
+
+private actor RefreshGenerationDouble {
+    private let coordinator = CommercialCredentialMutationCoordinator()
+    func begin() -> CommercialRefreshGeneration { coordinator.beginRefreshGeneration() }
+    func invalidate() { coordinator.invalidateRefreshGeneration() }
+    func isCurrent(_ generation: CommercialRefreshGeneration) -> Bool {
+        coordinator.isRefreshGenerationCurrent(generation)
     }
 }
 

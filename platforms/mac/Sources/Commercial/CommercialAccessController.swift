@@ -96,14 +96,14 @@ final class UnrestrictedCommercialAccess: CommercialAccessRefreshing, Commercial
 
     func requestPurchase(for feature: CommercialFeature) {}
     func refresh() async {}
-    private let coordinator = CommercialCredentialMutationCoordinator()
+    private let generationWorker = CommercialRefreshGenerationWorker()
     var paidValidationContext: CommercialPaidValidationContext? { nil }
     func loadCachedCommercialState() async {}
-    func beginCommercialRefreshGeneration() -> CommercialRefreshGeneration {
-        coordinator.beginRefreshGeneration()
+    func beginCommercialRefreshGeneration() async -> CommercialRefreshGeneration {
+        await generationWorker.begin()
     }
-    func invalidateCommercialRefreshGeneration() {
-        coordinator.invalidateRefreshGeneration()
+    func invalidateCommercialRefreshGeneration() async {
+        await generationWorker.invalidate()
     }
     func performCommercialRefresh(
         generation: CommercialRefreshGeneration,
@@ -111,6 +111,13 @@ final class UnrestrictedCommercialAccess: CommercialAccessRefreshing, Commercial
     ) async -> CommercialRefreshResult {
         .success
     }
+}
+
+private actor CommercialRefreshGenerationWorker {
+    private let coordinator = CommercialCredentialMutationCoordinator()
+
+    func begin() -> CommercialRefreshGeneration { coordinator.beginRefreshGeneration() }
+    func invalidate() { coordinator.invalidateRefreshGeneration() }
 }
 
 @MainActor
@@ -155,6 +162,15 @@ private actor CommercialCredentialWorker {
     }
 
     func loadPolicy() throws -> SignedEnvelope? { try store.loadPolicyEnvelope() }
+    func beginRefreshGeneration() -> CommercialRefreshGeneration {
+        coordinator.beginRefreshGeneration()
+    }
+    func invalidateRefreshGeneration() {
+        coordinator.invalidateRefreshGeneration()
+    }
+    func isRefreshGenerationCurrent(_ generation: CommercialRefreshGeneration) -> Bool {
+        coordinator.isRefreshGenerationCurrent(generation)
+    }
     func savePolicy(
         _ envelope: SignedEnvelope,
         refresh: CommercialRefreshGeneration
@@ -266,7 +282,6 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
     var purchaseRequestHandler: ((CommercialFeature) -> Void)?
 
     private let worker: CommercialCredentialWorker
-    private let coordinator: CommercialCredentialMutationCoordinator
     private let bootstrapWorker: CommercialBootstrapWorker
     private let verifier: CommercialSignatureVerifier
     private let client: CommercialPolicyFetching
@@ -318,7 +333,6 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
             markerStore: markerStore,
             coordinator: coordinator
         )
-        self.coordinator = coordinator
         bootstrapWorker = CommercialBootstrapWorker(loadEnvelope: bootstrapEnvelope)
         self.verifier = verifier
         self.client = client
@@ -392,19 +406,19 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
     func refresh() async {
         await loadCachedCommercialState()
         guard !Task.isCancelled else { return }
-        let refreshGeneration = beginCommercialRefreshGeneration()
+        let refreshGeneration = await beginCommercialRefreshGeneration()
         _ = await performCommercialRefresh(
             generation: refreshGeneration,
             validatePaidCredential: true
         )
     }
 
-    func beginCommercialRefreshGeneration() -> CommercialRefreshGeneration {
-        coordinator.beginRefreshGeneration()
+    func beginCommercialRefreshGeneration() async -> CommercialRefreshGeneration {
+        await worker.beginRefreshGeneration()
     }
 
-    func invalidateCommercialRefreshGeneration() {
-        coordinator.invalidateRefreshGeneration()
+    func invalidateCommercialRefreshGeneration() async {
+        await worker.invalidateRefreshGeneration()
     }
 
     func loadCachedCommercialState() async {
@@ -432,10 +446,10 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
         validatePaidCredential: Bool
     ) async -> CommercialRefreshResult {
         let token = beginOperation()
-        guard refreshIsCurrent(refreshGeneration), !Task.isCancelled else { return .cancelled }
+        guard await refreshIsCurrent(refreshGeneration), !Task.isCancelled else { return .cancelled }
         do {
             let envelope = try await client.fetchPolicy(locale: locale)
-            guard isCurrent(token), refreshIsCurrent(refreshGeneration), !Task.isCancelled else {
+            guard isCurrent(token), await refreshIsCurrent(refreshGeneration), !Task.isCancelled else {
                 return .cancelled
             }
             let verified = try verifier.verifyPolicy(envelope, at: clock.now)
@@ -443,7 +457,7 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
             guard try await worker.savePolicy(envelope, refresh: refreshGeneration) else {
                 return .cancelled
             }
-            guard isCurrent(token), refreshIsCurrent(refreshGeneration), !Task.isCancelled else {
+            guard isCurrent(token), await refreshIsCurrent(refreshGeneration), !Task.isCancelled else {
                 return .cancelled
             }
             policy = verified
@@ -467,7 +481,7 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
             return Task.isCancelled ? .cancelled : .success
         } catch {
             // Local signed access remains authoritative during transport outages.
-            guard isCurrent(token), refreshIsCurrent(refreshGeneration), !Task.isCancelled else {
+            guard isCurrent(token), await refreshIsCurrent(refreshGeneration), !Task.isCancelled else {
                 return .cancelled
             }
             presentationNotice = Self.notice(for: error)
@@ -722,7 +736,7 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
         token: Int,
         refresh: CommercialRefreshGeneration
     ) async -> CommercialRefreshResult {
-        guard refreshIsCurrent(refresh), !Task.isCancelled else { return .cancelled }
+        guard await refreshIsCurrent(refresh), !Task.isCancelled else { return .cancelled }
         let snapshot: CommercialCredentialMutationSnapshot
         do {
             snapshot = try await worker.snapshot()
@@ -738,14 +752,14 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
         }
         do {
             let identity = try await clientIdentity()
-            guard isCurrent(token), refreshIsCurrent(refresh), !Task.isCancelled else {
+            guard isCurrent(token), await refreshIsCurrent(refresh), !Task.isCancelled else {
                 return .cancelled
             }
             let refreshed = try await client.validate(
                 CommercialLicenseValidateRequest(credential: envelope, identity: identity),
                 locale: locale
             )
-            guard isCurrent(token), refreshIsCurrent(refresh), !Task.isCancelled else {
+            guard isCurrent(token), await refreshIsCurrent(refresh), !Task.isCancelled else {
                 return .cancelled
             }
             let payload = try verifiedEntitlement(refreshed, expectedDeviceHash: identity.deviceHash)
@@ -769,9 +783,9 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
                 clearingMarkerNonce: nil,
                 refresh: refresh
             ) else {
-                return refreshIsCurrent(refresh) ? .retryableFailure : .cancelled
+                return await refreshIsCurrent(refresh) ? .retryableFailure : .cancelled
             }
-            guard isCurrent(token), refreshIsCurrent(refresh), !Task.isCancelled else {
+            guard isCurrent(token), await refreshIsCurrent(refresh), !Task.isCancelled else {
                 return .cancelled
             }
             accessEnvelope = refreshed
@@ -783,7 +797,7 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
             notifyPresentationIfNeeded()
             return .success
         } catch {
-            guard isCurrent(token), refreshIsCurrent(refresh), !Task.isCancelled else {
+            guard isCurrent(token), await refreshIsCurrent(refresh), !Task.isCancelled else {
                 return .cancelled
             }
             if Self.isTerminal(error) {
@@ -794,7 +808,7 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
                     expected: snapshot,
                     refresh: refresh
                 )
-                if applied != true, !refreshIsCurrent(refresh) { return .cancelled }
+                if applied != true, !(await refreshIsCurrent(refresh)) { return .cancelled }
                 return .terminalFailure
             } else {
                 presentationNotice = Self.notice(for: error)
@@ -808,27 +822,27 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
         token: Int,
         refresh: CommercialRefreshGeneration
     ) async -> CommercialRefreshResult {
-        guard refreshIsCurrent(refresh), !Task.isCancelled else { return .cancelled }
+        guard await refreshIsCurrent(refresh), !Task.isCancelled else { return .cancelled }
         let snapshot: CommercialCredentialMutationSnapshot
         do {
             snapshot = try await worker.snapshot()
             guard snapshot.marker == nil else { return .success }
         } catch {
-            guard isCurrent(token), refreshIsCurrent(refresh) else { return .cancelled }
+            guard isCurrent(token), await refreshIsCurrent(refresh) else { return .cancelled }
             presentationNotice = .storage
             notifyPresentationIfNeeded()
             return .retryableFailure
         }
         do {
             let identity = try await clientIdentity()
-            guard isCurrent(token), refreshIsCurrent(refresh), !Task.isCancelled else {
+            guard isCurrent(token), await refreshIsCurrent(refresh), !Task.isCancelled else {
                 return .cancelled
             }
             let envelope = try await client.startTrial(
                 CommercialTrialStartRequest(identity: identity),
                 locale: locale
             )
-            guard isCurrent(token), refreshIsCurrent(refresh), !Task.isCancelled else {
+            guard isCurrent(token), await refreshIsCurrent(refresh), !Task.isCancelled else {
                 return .cancelled
             }
             let payload = try verifiedEntitlement(envelope, expectedDeviceHash: identity.deviceHash)
@@ -844,9 +858,9 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
                 clearingMarkerNonce: nil,
                 refresh: refresh
             ) else {
-                return refreshIsCurrent(refresh) ? .retryableFailure : .cancelled
+                return await refreshIsCurrent(refresh) ? .retryableFailure : .cancelled
             }
-            guard isCurrent(token), refreshIsCurrent(refresh), !Task.isCancelled else {
+            guard isCurrent(token), await refreshIsCurrent(refresh), !Task.isCancelled else {
                 return .cancelled
             }
             accessEnvelope = envelope
@@ -859,7 +873,7 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
             notifyPresentationIfNeeded()
             return .success
         } catch {
-            guard isCurrent(token), refreshIsCurrent(refresh), !Task.isCancelled else {
+            guard isCurrent(token), await refreshIsCurrent(refresh), !Task.isCancelled else {
                 return .cancelled
             }
             presentationNotice = Self.notice(for: error)
@@ -986,14 +1000,16 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
         expected: CommercialCredentialMutationSnapshot,
         refresh: CommercialRefreshGeneration? = nil
     ) async throws -> Bool {
-        guard isCurrent(token), refresh.map(refreshIsCurrent) ?? true else { return false }
+        if let refresh, !(await refreshIsCurrent(refresh)) { return false }
+        guard isCurrent(token) else { return false }
         let outcome = await worker.commitTerminal(
             expected: expected,
             reason: reason,
             refresh: refresh
         )
         guard outcome.committed, let marker = outcome.marker else { return false }
-        guard isCurrent(token), refresh.map(refreshIsCurrent) ?? true else { return true }
+        if let refresh, !(await refreshIsCurrent(refresh)) { return true }
+        guard isCurrent(token) else { return true }
         terminalDenyActive = true
         terminalMarker = marker
         pendingTerminalAccess = expected.access
@@ -1020,8 +1036,8 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
 
     private func isCurrent(_ token: Int) -> Bool { generation == token }
 
-    private func refreshIsCurrent(_ refresh: CommercialRefreshGeneration) -> Bool {
-        coordinator.isRefreshGenerationCurrent(refresh)
+    private func refreshIsCurrent(_ refresh: CommercialRefreshGeneration) async -> Bool {
+        await worker.isRefreshGenerationCurrent(refresh)
     }
 
     private func setState(_ newState: CommercialAccessState) {

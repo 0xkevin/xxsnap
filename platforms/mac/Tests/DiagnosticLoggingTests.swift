@@ -64,6 +64,34 @@ final class DiagnosticLoggingTests: XCTestCase {
         XCTAssertFalse(sanitized.contains("deadbeef"))
     }
 
+    func testRedactorRemovesEveryNonemptyXXSNAPDashTokenButKeepsBrandName() {
+        for secret in ["XXSNAP-secret", "XXSNAP-ABCD", "xxsnap-z"] {
+            XCTAssertEqual(DiagnosticRedactor.redact(secret), "[REDACTED]", secret)
+        }
+        XCTAssertEqual(DiagnosticRedactor.redact("XxSnap"), "XxSnap")
+        XCTAssertEqual(DiagnosticRedactor.redact("Use XxSnap for capture"), "Use XxSnap for capture")
+    }
+
+    func testShortXXSNAPSecretUsesSameSanitizedEventAndJSONLValue() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = DiagnosticLogStore(directoryURL: directory)
+
+        store.record(
+            category: .application,
+            level: .info,
+            event: "activation_XXSNAP-ABCD",
+            metadata: ["request_result": "XXSNAP-secret"]
+        )
+        store.flush()
+
+        let event = try XCTUnwrap(readEvents(in: directory).first)
+        XCTAssertFalse(event.event.lowercased().contains("xxsnap-abcd"))
+        XCTAssertEqual(event.metadata["request_result"], "[REDACTED]")
+        let raw = try String(contentsOf: XCTUnwrap(logFiles(in: directory).first))
+        XCTAssertFalse(raw.lowercased().contains("xxsnap-"))
+    }
+
     func testMetadataValuesAndEventMessagesAreRedactedWithoutBreakingSafeDiagnostics() throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -140,7 +168,7 @@ final class DiagnosticLoggingTests: XCTestCase {
         try Data(
             """
             not-json
-            {"message":"credential abc","nested":{"payload":"secret","items":[{"email":"person@example.test"}],"stable_error_code":"network_unavailable"}}
+            {"message":"credential abc XXSNAP-ABCD","nested":{"payload":"secret","items":[{"email":"person@example.test"}],"stable_error_code":"network_unavailable"}}
             """.utf8
         ).write(to: unsafeName)
         let archiver = RecordingDiagnosticArchiver()
@@ -160,6 +188,7 @@ final class DiagnosticLoggingTests: XCTestCase {
         let text = archiver.logFileContents.values.joined(separator: "\n")
         XCTAssertFalse(text.contains("not-json"))
         XCTAssertFalse(text.contains("person@example.test"))
+        XCTAssertFalse(text.contains("XXSNAP-ABCD"))
         XCTAssertFalse(text.contains("\"payload\""))
         XCTAssertTrue(text.contains("stable_error_code"))
         for line in text.split(separator: "\n") {
