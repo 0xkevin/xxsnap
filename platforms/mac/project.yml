@@ -177,6 +177,9 @@ targets:
     platform: macOS
     sources:
       - Tests
+      - path: Resources/Help
+        type: folder
+        buildPhase: resources
     dependencies:
       - target: xxsnap
     settings:

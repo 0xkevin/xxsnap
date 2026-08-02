@@ -101,6 +101,7 @@
 		92F6E38660876DEACA421E80 /* aspect-ratio.svg in Resources */ = {isa = PBXBuildFile; fileRef = B688FE29B0B0CC9BDBAB45B2 /* aspect-ratio.svg */; };
 		93FF7877283A3F6F6F6031B8 /* undo-disabled.png in Resources */ = {isa = PBXBuildFile; fileRef = 38AFFB5955898C995A84FFAA /* undo-disabled.png */; };
 		9425994BDDA3431D99130570 /* SystemShortcutMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA85F42BD235F2B3AC78E550 /* SystemShortcutMonitor.swift */; };
+		9537DE2E95C00A3F6FFE1131 /* Help in Resources */ = {isa = PBXBuildFile; fileRef = 2A64C16BC9D8772BE151DF68 /* Help */; };
 		95CC91269F4E8CBE187975D5 /* CommercialPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCD2C0FF90B860AF639AA328 /* CommercialPresentationTests.swift */; };
 		965113C6C60129112B49CA65 /* stop-circle.svg in Resources */ = {isa = PBXBuildFile; fileRef = BD704B03D7D2768491F522D2 /* stop-circle.svg */; };
 		9DB0D5DA2DBD644683C032BC /* text-tool.png in Resources */ = {isa = PBXBuildFile; fileRef = 1FE4C4C27283A5FAF4CBCC58 /* text-tool.png */; };
@@ -827,6 +828,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9537DE2E95C00A3F6FFE1131 /* Help in Resources */,
 				63ABE3D1EE77013000AD73F0 /* manual-capture-checklist.md in Resources */,
 				D212CB339A7DC8FACBCB7652 /* mixed-chinese-korean.png in Resources */,
 				416E0DC64A7ED4E54DFD9419 /* vertical-korean.png in Resources */,
