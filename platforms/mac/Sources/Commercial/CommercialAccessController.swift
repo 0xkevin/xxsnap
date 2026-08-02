@@ -309,6 +309,7 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
     private let appVersion: String
     private let buildNumber: Int
     private let locale: CommercialLocale
+    private let releasePhase: CommercialReleasePhase
     private let clock: CommercialTimeProviding
     private let diagnosticLogger: any CommercialDiagnosticLogging
 
@@ -347,6 +348,7 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
         appVersion: String,
         buildNumber: Int,
         locale: CommercialLocale,
+        releasePhase: CommercialReleasePhase,
         clock: CommercialTimeProviding = SystemCommercialClock(),
         diagnosticLogger: any CommercialDiagnosticLogging = NoopCommercialDiagnosticLogger.shared,
         bootstrapEnvelope: @escaping @Sendable () throws -> SignedEnvelope?
@@ -363,8 +365,12 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
         self.appVersion = appVersion
         self.buildNumber = buildNumber
         self.locale = locale
+        self.releasePhase = releasePhase
         self.clock = clock
         self.diagnosticLogger = diagnosticLogger
+        if releasePhase == .free {
+            state = .allFree
+        }
     }
 
     convenience init(
@@ -374,6 +380,7 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
     ) throws {
         let verifier = try CommercialSignatureVerifier(bundle: bundle)
         let client = try CommercialPolicyClient(bundle: bundle, session: session)
+        let releasePhase = try CommercialReleasePhase(bundle: bundle)
         let appVersion = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
         let buildNumber = Int(bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "") ?? 0
         self.init(
@@ -385,6 +392,7 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
             appVersion: appVersion,
             buildNumber: buildNumber,
             locale: Locale.preferredLanguages.first?.hasPrefix("zh") == true ? .zhHans : .english,
+            releasePhase: releasePhase,
             diagnosticLogger: diagnosticLogger,
             bootstrapEnvelope: {
                 guard let url = bundle.url(
@@ -400,6 +408,7 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
     }
 
     func canUse(_ feature: CommercialFeature) -> Bool {
+        guard releasePhase == .paid else { return true }
         switch state {
         case .allFree, .allFreeGrace, .trial, .pro:
             return true
@@ -413,6 +422,7 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
     }
 
     func showsProBadge(for feature: CommercialFeature) -> Bool {
+        guard releasePhase == .paid else { return false }
         guard case .free = state,
               let policy,
               policy.mode == .paid
@@ -737,9 +747,13 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
         } catch {
             policy = nil
             policyTimeAnchor = nil
-            setState(.free(reason: .policyInvalid))
+            if releasePhase == .paid {
+                setState(.free(reason: .policyInvalid))
+            }
             logPolicyRefreshFailure(error)
         }
+
+        guard releasePhase == .paid else { return }
 
         do {
             let snapshot = try await worker.snapshot()
@@ -1024,6 +1038,10 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
     }
 
     private func resolveState() {
+        guard releasePhase == .paid else {
+            setState(.allFree)
+            return
+        }
         let effective = effectiveTime()
         if let policy,
            policy.mode == .allFree,

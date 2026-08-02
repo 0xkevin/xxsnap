@@ -7,6 +7,45 @@ import XCTest
 final class CommercialAccessControllerTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 2_000_000_000)
 
+    func testFreeReleaseStartsAllFreeAndStaysOpenWhenPolicyServerIsOffline() async throws {
+        let fixture = try Fixture(now: now)
+        fixture.client.fetchResult = .failure(URLError(.notConnectedToInternet))
+        let controller = fixture.controller(releasePhase: .free)
+
+        XCTAssertEqual(controller.state, .allFree)
+        XCTAssertEqual(controller.snapshot.availableFeatures, Set(CommercialFeature.allCases))
+        XCTAssertTrue(controller.snapshot.proBadgedFeatures.isEmpty)
+
+        await controller.refresh()
+
+        XCTAssertEqual(controller.state, .allFree)
+        for feature in CommercialFeature.allCases {
+            XCTAssertTrue(controller.canUse(feature))
+            XCTAssertFalse(controller.showsProBadge(for: feature))
+        }
+    }
+
+    func testFreeReleaseIgnoresInvalidPolicyDataAndTerminalMarkerWithoutDeletingIt() async throws {
+        let fixture = try Fixture(now: now)
+        let invalidEnvelope = SignedEnvelope(
+            keyId: "test",
+            payload: Data("{}".utf8).base64EncodedString(),
+            signature: Data(repeating: 0, count: 64).base64EncodedString()
+        )
+        fixture.store.policy = invalidEnvelope
+        fixture.bootstrap = invalidEnvelope
+        fixture.marker.reason = .revoked
+        fixture.client.fetchResult = .failure(URLError(.timedOut))
+        let controller = fixture.controller(releasePhase: .free)
+
+        await controller.refresh()
+
+        XCTAssertEqual(controller.state, .allFree)
+        XCTAssertEqual(fixture.store.policy, invalidEnvelope)
+        XCTAssertEqual(fixture.marker.reason, .revoked)
+        XCTAssertEqual(controller.snapshot.availableFeatures, Set(CommercialFeature.allCases))
+    }
+
     func testAllFreeUsesHTTPDateAnchorAcrossLocalRollbackAndExactGraceBoundary() async throws {
         for elapsedDays in [13.0, 14.0, 14.1] {
             let fixture = try Fixture(now: now)
@@ -1341,7 +1380,8 @@ private final class Fixture {
     }
 
     @MainActor func controller(
-        markerStore: CommercialTerminalMarkerStoring? = nil
+        markerStore: CommercialTerminalMarkerStoring? = nil,
+        releasePhase: CommercialReleasePhase = .paid
     ) -> CommercialAccessController {
         CommercialAccessController(
             store: store,
@@ -1353,6 +1393,7 @@ private final class Fixture {
             appVersion: "1.0.0",
             buildNumber: buildNumber,
             locale: .english,
+            releasePhase: releasePhase,
             clock: clock,
             diagnosticLogger: diagnosticLogger,
             bootstrapEnvelope: { [weak self] in self?.bootstrap }
