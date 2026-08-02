@@ -306,6 +306,18 @@ final class CommercialPolicyTests: XCTestCase {
         }
     }
 
+    func testReleaseBuildGateRequiresPhaseAndMatchingBootstrapMode() throws {
+        let projectURL = sourceRoot.appendingPathComponent(
+            "platforms/mac/xxsnap.xcodeproj/project.pbxproj"
+        )
+        let project = try String(contentsOf: projectURL, encoding: .utf8)
+
+        XCTAssertTrue(project.contains("XX_COMMERCIAL_RELEASE_PHASE = free;"))
+        XCTAssertTrue(project.contains("XXCommercialReleasePhase"))
+        XCTAssertTrue(project.contains("Free release requires an all_free bootstrap with billing disabled"))
+        XCTAssertTrue(project.contains("Paid release requires a paid bootstrap with billing enabled"))
+    }
+
     func testVerifierSupportsOldAndNewSigningKeysDuringRotation() throws {
         let oldKey = Curve25519.Signing.PrivateKey()
         let newKey = Curve25519.Signing.PrivateKey()
