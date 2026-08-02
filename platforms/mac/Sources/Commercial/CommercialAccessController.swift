@@ -508,6 +508,18 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
                     bootSessionID: clock.bootSessionID
                 )
             }
+            if releasePhase == .free, verified.mode == .paid {
+                presentationNotice = nil
+                resolveState()
+                notifyPresentationIfNeeded()
+                logPolicyRefresh(
+                    policy: verified,
+                    at: verificationTime,
+                    result: .failure,
+                    error: .paidPolicyIgnoredInFreeRelease
+                )
+                return .success
+            }
             let record = CommercialPolicyRecord(envelope: envelope, timeAnchor: anchor)
             guard !Task.isCancelled else { return .cancelled }
             guard try await worker.savePolicy(record, refresh: refreshGeneration) else {
@@ -712,34 +724,56 @@ final class CommercialAccessController: CommercialAccessRefreshing, CommercialRe
                 if verified.mode != .allFree, clock.now < verified.effectiveAt {
                     throw CommercialVerificationError.notEffective
                 }
-                policy = verified
-                policyTimeAnchor = cachedRecord.timeAnchor
-                let policyNow = trustedPolicyTime()
-                let isTrusted = verified.mode != .allFree || policyNow != nil
-                logPolicyRefresh(
-                    policy: verified,
-                    at: policyNow ?? clock.now,
-                    result: isTrusted ? .success : .failure,
-                    error: isTrusted ? nil : .clockValidationRequired
-                )
+                if releasePhase == .free, verified.mode == .paid {
+                    policy = nil
+                    policyTimeAnchor = nil
+                    logPolicyRefresh(
+                        policy: verified,
+                        at: clock.now,
+                        result: .failure,
+                        error: .paidPolicyIgnoredInFreeRelease
+                    )
+                } else {
+                    policy = verified
+                    policyTimeAnchor = cachedRecord.timeAnchor
+                    let policyNow = trustedPolicyTime()
+                    let isTrusted = verified.mode != .allFree || policyNow != nil
+                    logPolicyRefresh(
+                        policy: verified,
+                        at: policyNow ?? clock.now,
+                        result: isTrusted ? .success : .failure,
+                        error: isTrusted ? nil : .clockValidationRequired
+                    )
+                }
             } else if let bootstrap = try await bootstrapWorker.load() {
                 let verified = try verifier.verifyPolicyEnvelope(bootstrap)
-                let record = CommercialPolicyRecord(envelope: bootstrap, timeAnchor: nil)
-                let cacheError: CommercialDiagnosticErrorCode?
-                do {
-                    try await worker.saveBootstrapPolicy(record)
-                    cacheError = .clockValidationRequired
-                } catch {
-                    cacheError = .storage
+                if releasePhase == .free, verified.mode == .paid {
+                    policy = nil
+                    policyTimeAnchor = nil
+                    logPolicyRefresh(
+                        policy: verified,
+                        at: clock.now,
+                        result: .failure,
+                        error: .paidPolicyIgnoredInFreeRelease
+                    )
+                } else {
+                    let record = CommercialPolicyRecord(envelope: bootstrap, timeAnchor: nil)
+                    let cacheError: CommercialDiagnosticErrorCode?
+                    do {
+                        try await worker.saveBootstrapPolicy(record)
+                        cacheError = .clockValidationRequired
+                    } catch {
+                        cacheError = .storage
+                    }
+                    policy = verified
+                    policyTimeAnchor = nil
+                    logPolicyRefresh(
+                        policy: verified,
+                        at: clock.now,
+                        result: .failure,
+                        error: cacheError
+                    )
                 }
-                policy = verified
-                policyTimeAnchor = nil
-                logPolicyRefresh(
-                    policy: verified,
-                    at: clock.now,
-                    result: .failure,
-                    error: cacheError
-                )
             } else {
                 policy = nil
                 policyTimeAnchor = nil

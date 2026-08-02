@@ -4,6 +4,26 @@ import XCTest
 @testable import xxsnap
 
 final class DiagnosticLoggingTests: XCTestCase {
+    func testPaidPolicyIgnoredInFreeReleaseUsesStableDiagnosticCode() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = DiagnosticLogStore(directoryURL: directory)
+
+        store.record(.policyRefresh(
+            mode: .paid,
+            policyID: "00000000-0000-0000-0000-000000000001",
+            expired: false,
+            result: .failure,
+            error: .paidPolicyIgnoredInFreeRelease
+        ))
+        store.flush()
+
+        let event = try XCTUnwrap(readEvents(in: directory).first)
+        XCTAssertEqual(event.metadata["stable_error_code"], "paid_policy_ignored_in_free_release")
+        XCTAssertEqual(event.metadata["policy_mode"], "paid")
+        XCTAssertEqual(event.metadata["request_result"], "failure")
+    }
+
     func testCommercialDiagnosticAdapterWritesAndExportsOnlyWhitelistedJSONLFields() throws {
         let directory = try makeTemporaryDirectory()
         let stagingParent = try makeTemporaryDirectory()

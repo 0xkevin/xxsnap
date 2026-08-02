@@ -38,6 +38,7 @@ enum CommercialDiagnosticErrorCode: String, Equatable {
     case server
     case storage
     case invalidPolicy = "invalid_policy"
+    case paidPolicyIgnoredInFreeRelease = "paid_policy_ignored_in_free_release"
     case policyExpired = "policy_expired"
     case invalidCredential = "invalid_credential"
     case clockValidationRequired = "clock_validation_required"

@@ -46,6 +46,67 @@ final class CommercialAccessControllerTests: XCTestCase {
         XCTAssertEqual(controller.snapshot.availableFeatures, Set(CommercialFeature.allCases))
     }
 
+    func testFreeReleaseIgnoresCachedPaidPolicyWithoutDeletingIt() async throws {
+        let fixture = try Fixture(now: now)
+        let paid = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        fixture.store.policy = paid
+        let controller = fixture.controller(releasePhase: .free)
+
+        await controller.loadCachedCommercialState()
+
+        XCTAssertEqual(controller.state, .allFree)
+        XCTAssertNil(controller.presentationPolicy)
+        XCTAssertEqual(fixture.store.policy, paid)
+    }
+
+    func testFreeReleaseIgnoresFetchedPaidPolicyWithoutOverwritingFreeCache() async throws {
+        let fixture = try Fixture(now: now)
+        let cachedFree = try fixture.policy(mode: .allFree, expiresAt: now.addingTimeInterval(.day))
+        let fetchedPaid = try fixture.policy(mode: .paid, expiresAt: now.addingTimeInterval(.day))
+        fixture.store.policy = cachedFree
+        let originalRecord = fixture.store.policyRecord
+        fixture.client.fetchResult = .success(fetchedPaid)
+        let controller = fixture.controller(releasePhase: .free)
+
+        await controller.loadCachedCommercialState()
+        let generation = await controller.beginCommercialRefreshGeneration()
+        let result = await controller.performCommercialRefresh(
+            generation: generation,
+            validatePaidCredential: true
+        )
+
+        XCTAssertEqual(result, .success)
+        XCTAssertEqual(controller.state, .allFree)
+        XCTAssertEqual(controller.presentationPolicy?.mode, .allFree)
+        XCTAssertEqual(fixture.store.policyRecord, originalRecord)
+        XCTAssertEqual(fixture.client.trialCalls, 0)
+        XCTAssertTrue(fixture.diagnosticLogger.events.contains {
+            $0 == .policyRefresh(
+                mode: .paid,
+                policyID: "00000000-0000-0000-0000-000000000001",
+                expired: false,
+                result: .failure,
+                error: .paidPolicyIgnoredInFreeRelease
+            )
+        })
+    }
+
+    func testFreeReleaseCachesFetchedAllFreePolicyAndTrustedServerTime() async throws {
+        let fixture = try Fixture(now: now)
+        let allFree = try fixture.policy(mode: .allFree, expiresAt: now.addingTimeInterval(.day))
+        fixture.client.fetchResult = .success(allFree)
+        fixture.client.policyServerVerifiedAt = now
+        let controller = fixture.controller(releasePhase: .free)
+
+        await controller.refresh()
+
+        XCTAssertEqual(controller.state, .allFree)
+        XCTAssertEqual(controller.presentationPolicy?.mode, .allFree)
+        XCTAssertEqual(fixture.store.policyRecord?.envelope, allFree)
+        XCTAssertEqual(fixture.store.policyRecord?.timeAnchor?.serverVerifiedAt, now)
+        XCTAssertEqual(fixture.store.policyRecord?.timeAnchor?.bootSessionID, "boot-a")
+    }
+
     func testAllFreeUsesHTTPDateAnchorAcrossLocalRollbackAndExactGraceBoundary() async throws {
         for elapsedDays in [13.0, 14.0, 14.1] {
             let fixture = try Fixture(now: now)
