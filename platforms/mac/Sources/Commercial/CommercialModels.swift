@@ -1,5 +1,31 @@
 import Foundation
 
+enum CommercialReleasePhaseError: Error, Equatable {
+    case missing
+    case invalid(String)
+}
+
+enum CommercialReleasePhase: String, Equatable {
+    case free
+    case paid
+
+    static let infoDictionaryKey = "XXCommercialReleasePhase"
+
+    init(infoValue: Any?) throws {
+        guard let value = infoValue as? String, !value.isEmpty else {
+            throw CommercialReleasePhaseError.missing
+        }
+        guard let phase = Self(rawValue: value) else {
+            throw CommercialReleasePhaseError.invalid(value)
+        }
+        self = phase
+    }
+
+    init(bundle: Bundle = .main) throws {
+        try self.init(infoValue: bundle.object(forInfoDictionaryKey: Self.infoDictionaryKey))
+    }
+}
+
 enum CommercialFeature: String, Codable, CaseIterable, Hashable {
     case scrollCapture = "scroll_capture"
     case ocr

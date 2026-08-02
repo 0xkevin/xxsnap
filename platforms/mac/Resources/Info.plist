@@ -30,6 +30,8 @@
 	<string>NSApplication</string>
 	<key>XXCommercialAPIOrigin</key>
 	<string>https://download.xxsofts.com</string>
+	<key>XXCommercialReleasePhase</key>
+	<string>$(XX_COMMERCIAL_RELEASE_PHASE)</string>
 	<key>XXCommercialSigningPublicKeys</key>
 	<dict>
 		<key>commercial-ed25519-2025-01</key>

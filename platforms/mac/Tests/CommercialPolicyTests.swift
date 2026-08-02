@@ -282,6 +282,7 @@ final class CommercialPolicyTests: XCTestCase {
         )
 
         XCTAssertEqual(info["XXCommercialAPIOrigin"] as? String, "https://download.xxsofts.com")
+        XCTAssertEqual(info["XXCommercialReleasePhase"] as? String, "$(XX_COMMERCIAL_RELEASE_PHASE)")
         let keys = try XCTUnwrap(info["XXCommercialSigningPublicKeys"] as? [String: String])
         XCTAssertEqual(
             keys.keys.sorted(),
@@ -289,6 +290,20 @@ final class CommercialPolicyTests: XCTestCase {
         )
         XCTAssertFalse(try XCTUnwrap(keys["commercial-ed25519-2026-01"]).isEmpty)
         XCTAssertFalse(try XCTUnwrap(keys["commercial-ed25519-2025-01"]).isEmpty)
+    }
+
+    func testCommercialReleasePhaseParsesSupportedValues() throws {
+        XCTAssertEqual(try CommercialReleasePhase(infoValue: "free"), .free)
+        XCTAssertEqual(try CommercialReleasePhase(infoValue: "paid"), .paid)
+    }
+
+    func testCommercialReleasePhaseRejectsMissingAndUnknownValues() {
+        XCTAssertThrowsError(try CommercialReleasePhase(infoValue: nil)) {
+            XCTAssertEqual($0 as? CommercialReleasePhaseError, .missing)
+        }
+        XCTAssertThrowsError(try CommercialReleasePhase(infoValue: "preview")) {
+            XCTAssertEqual($0 as? CommercialReleasePhaseError, .invalid("preview"))
+        }
     }
 
     func testVerifierSupportsOldAndNewSigningKeysDuringRotation() throws {
