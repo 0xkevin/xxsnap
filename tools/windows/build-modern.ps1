@@ -8,7 +8,11 @@ param(
     [string]$Target,
 
     [Parameter()]
-    [string]$BuildRoot = (Join-Path $env:USERPROFILE "build")
+    [string]$BuildRoot = (Join-Path $env:USERPROFILE "build"),
+
+    [Parameter()]
+    [ValidatePattern('^\d+\.\d+\.\d+$')]
+    [string]$Version = "0.1.0"
 )
 
 $ErrorActionPreference = "Stop"
@@ -56,6 +60,7 @@ $configureArguments = @(
     "-DCMAKE_MAKE_PROGRAM=$ninja",
     "-DXXSNAP_BUILD_QT_CORE=OFF",
     "-DXXSNAP_WINDOWS_FAMILY=modern",
+    "-DXXSNAP_VERSION=$Version",
     "-DBUILD_TESTING=ON"
 )
 

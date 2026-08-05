@@ -1,7 +1,11 @@
 [CmdletBinding()]
 param(
     [Parameter()]
-    [string]$BuildRoot = (Join-Path $env:USERPROFILE "build")
+    [string]$BuildRoot = (Join-Path $env:USERPROFILE "build"),
+
+    [Parameter()]
+    [ValidatePattern('^\d+\.\d+\.\d+$')]
+    [string]$Version = "0.1.0"
 )
 
 $ErrorActionPreference = "Stop"
@@ -31,7 +35,7 @@ try {
             Remove-Item -LiteralPath $buildDirectory -Recurse -Force
         }
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $buildScript `
-            -Arch $arch -BuildRoot $BuildRoot
+            -Arch $arch -BuildRoot $BuildRoot -Version $Version
         if ($LASTEXITCODE -ne 0) {
             throw "Modern $arch build failed with exit code $LASTEXITCODE"
         }
@@ -44,6 +48,11 @@ try {
         $binary = Join-Path $buildDirectory "platforms\win\xxsnap_windows.exe"
         if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) {
             throw "Missing Modern $arch executable: $binary"
+        }
+        $versionInfo = [Diagnostics.FileVersionInfo]::GetVersionInfo($binary)
+        if ($versionInfo.FileVersion -ne $Version -or
+            $versionInfo.ProductVersion -ne $Version) {
+            throw "Modern $arch executable version mismatch: expected $Version, file '$($versionInfo.FileVersion)', product '$($versionInfo.ProductVersion)'"
         }
         $headers = @(& $dumpbin /headers $binary)
         if ($LASTEXITCODE -ne 0) {
@@ -62,6 +71,7 @@ try {
             Configuration = "Release"
             Tests = "passed"
             Machine = $expectedMachine.Split(" ")[0]
+            Version = $Version
             Binary = $binary
         })
     }

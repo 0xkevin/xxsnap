@@ -1,0 +1,33 @@
+#include <windows.h>
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION @XXSNAP_VERSION_MAJOR@,@XXSNAP_VERSION_MINOR@,@XXSNAP_VERSION_PATCH@,0
+ PRODUCTVERSION @XXSNAP_VERSION_MAJOR@,@XXSNAP_VERSION_MINOR@,@XXSNAP_VERSION_PATCH@,0
+ FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+#ifdef _DEBUG
+ FILEFLAGS VS_FF_DEBUG
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+ FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName", "Snipory\0"
+            VALUE "FileDescription", "XxSnap\0"
+            VALUE "FileVersion", "@XXSNAP_VERSION@\0"
+            VALUE "InternalName", "xxsnap_windows\0"
+            VALUE "OriginalFilename", "xxsnap_windows.exe\0"
+            VALUE "ProductName", "XxSnap\0"
+            VALUE "ProductVersion", "@XXSNAP_VERSION@\0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1200
+    END
+END

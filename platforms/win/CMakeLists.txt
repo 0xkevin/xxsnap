@@ -1,6 +1,23 @@
 set(XXSNAP_WINDOWS_FAMILY "modern" CACHE STRING "Windows target family (modern or legacy)")
 set_property(CACHE XXSNAP_WINDOWS_FAMILY PROPERTY STRINGS modern legacy)
 
+set(XXSNAP_VERSION "0.1.0" CACHE STRING "XxSnap executable version (major.minor.patch)")
+string(REGEX MATCH "^([0-9]+)\\.([0-9]+)\\.([0-9]+)$" XXSNAP_VERSION_MATCH "${XXSNAP_VERSION}")
+if(NOT XXSNAP_VERSION_MATCH)
+    message(FATAL_ERROR
+        "Invalid XXSNAP_VERSION='${XXSNAP_VERSION}'; expected major.minor.patch"
+    )
+endif()
+set(XXSNAP_VERSION_MAJOR "${CMAKE_MATCH_1}")
+set(XXSNAP_VERSION_MINOR "${CMAKE_MATCH_2}")
+set(XXSNAP_VERSION_PATCH "${CMAKE_MATCH_3}")
+foreach(VERSION_PART IN ITEMS
+        XXSNAP_VERSION_MAJOR XXSNAP_VERSION_MINOR XXSNAP_VERSION_PATCH)
+    if(${VERSION_PART} GREATER 65535)
+        message(FATAL_ERROR "${VERSION_PART} must be <= 65535 for VERSIONINFO")
+    endif()
+endforeach()
+
 if(NOT XXSNAP_WINDOWS_FAMILY STREQUAL "modern" AND
    NOT XXSNAP_WINDOWS_FAMILY STREQUAL "legacy")
     message(FATAL_ERROR
@@ -11,7 +28,17 @@ endif()
 add_library(xxsnap_windows_build_configuration INTERFACE)
 
 enable_language(RC)
-add_library(xxsnap_visual_assets OBJECT resources/xxsnap.rc)
+set(XXSNAP_VERSION_RESOURCE "${CMAKE_CURRENT_BINARY_DIR}/xxsnap_version.rc")
+configure_file(
+    resources/xxsnap_version.rc.in
+    "${XXSNAP_VERSION_RESOURCE}"
+    @ONLY
+)
+add_library(
+    xxsnap_visual_assets OBJECT
+    resources/xxsnap.rc
+    "${XXSNAP_VERSION_RESOURCE}"
+)
 target_include_directories(
     xxsnap_visual_assets
     PRIVATE

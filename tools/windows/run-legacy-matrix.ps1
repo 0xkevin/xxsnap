@@ -1,7 +1,11 @@
 [CmdletBinding()]
 param(
     [Parameter()]
-    [string]$BuildRoot = (Join-Path $env:USERPROFILE "build")
+    [string]$BuildRoot = (Join-Path $env:USERPROFILE "build"),
+
+    [Parameter()]
+    [ValidatePattern('^\d+\.\d+\.\d+$')]
+    [string]$Version = "0.1.0"
 )
 
 $ErrorActionPreference = "Stop"
@@ -89,7 +93,7 @@ try {
         }
 
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $buildScript `
-            -Arch $arch -BuildRoot $BuildRoot
+            -Arch $arch -BuildRoot $BuildRoot -Version $Version
         if ($LASTEXITCODE -ne 0) {
             throw "Legacy $arch build failed with exit code $LASTEXITCODE"
         }
@@ -102,6 +106,11 @@ try {
         $binary = Join-Path $buildDirectory "platforms\win\xxsnap_windows.exe"
         if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) {
             throw "Missing Legacy $arch executable: $binary"
+        }
+        $versionInfo = [Diagnostics.FileVersionInfo]::GetVersionInfo($binary)
+        if ($versionInfo.FileVersion -ne $Version -or
+            $versionInfo.ProductVersion -ne $Version) {
+            throw "Legacy $arch executable version mismatch: expected $Version, file '$($versionInfo.FileVersion)', product '$($versionInfo.ProductVersion)'"
         }
 
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $auditScript `
@@ -132,6 +141,7 @@ try {
             ImportAudit = "passed"
             Machine = $expectedMachine.Split(" ")[0]
             Subsystem = "Windows 6.01"
+            Version = $Version
             Binary = $binary
         })
     }
