@@ -3,11 +3,9 @@ project(xxsnap LANGUAGES CXX)
 
 include(CTest)
 
-option(XXSNAP_BUILD_QT_CORE "Build the existing Qt portable core" ON)
+option(XXSNAP_BUILD_QT_CORE "Build the existing Qt-dependent core" ON)
 
-if(XXSNAP_BUILD_QT_CORE)
-    add_subdirectory(core)
-endif()
+add_subdirectory(core)
 
 if(WIN32)
     add_subdirectory(platforms/win)
