@@ -122,8 +122,36 @@ private final class EntryTestRefreshableCommercialAccess: CommercialAccessRefres
 }
 
 @MainActor
+private final class EntryTestCommercialRefreshScheduler: CommercialRefreshScheduling {
+    private(set) var prepareFromCacheCount = 0
+
+    func prepareFromCache() async { prepareFromCacheCount += 1 }
+    func start() {}
+    func triggerRefresh() {}
+    func networkDidBecomeAvailable() {}
+    func cancel() {}
+}
+
+@MainActor
 final class CommercialFeatureEntryTests: XCTestCase {
 #if DEBUG
+    func testAllFreeLaunchDoesNotWaitForCommercialCacheBeforeBuildingAppUI() async {
+        let access = EntryTestRefreshableCommercialAccess()
+        let scheduler = EntryTestCommercialRefreshScheduler()
+        let dependencies = CommercialLaunchDependencies.make(
+            runtimeContext: CommercialRuntimeContext(
+                environment: [:],
+                hasXCTestRuntime: false
+            ),
+            productionFactory: { access },
+            schedulerFactory: { _ in scheduler }
+        )
+
+        await dependencies.prepareFromCache()
+
+        XCTAssertEqual(scheduler.prepareFromCacheCount, 0)
+    }
+
     func testXCTestEnvironmentWithoutRuntimeUsesProductionCommercialDependencies() async {
         let productionAccess = EntryTestRefreshableCommercialAccess()
         var controllerCreations = 0
@@ -405,7 +433,7 @@ final class CommercialFeatureEntryTests: XCTestCase {
             commercialAccess: access
         )
 
-        XCTAssertEqual(status.test_menuItems[2].title, "识别文字  PRO")
+        XCTAssertEqual(status.test_menuItems[2].title, "文字/二维码识别  PRO")
         XCTAssertEqual(status.test_menuItems[3].title, "教笔  PRO")
         status.captureText()
         status.teachingPen()
@@ -421,7 +449,7 @@ final class CommercialFeatureEntryTests: XCTestCase {
 
         access.update(state: .allFree, denied: [])
         status.refresh()
-        XCTAssertEqual(status.test_menuItems[2].title, "识别文字")
+        XCTAssertEqual(status.test_menuItems[2].title, "文字/二维码识别")
         XCTAssertEqual(status.test_menuItems[3].title, "教笔")
     }
 }

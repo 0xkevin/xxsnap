@@ -88,6 +88,98 @@ private struct TextReplacement {
     let text: String
 }
 
+struct QRCodeCandidate: Equatable {
+    let payload: String
+    let boundingBox: CGRect
+}
+
+protocol QRCodeRecognizing {
+    func recognizeQRCode(in image: NSImage) async throws -> QRCodeCandidate?
+}
+
+enum QRCodeRecognitionError: LocalizedError, Equatable {
+    case imageConversionFailed
+    case requestFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .imageConversionFailed:
+            return "Unable to read image data for QR code recognition."
+        case .requestFailed:
+            return "QR code recognition failed."
+        }
+    }
+}
+
+final class QRCodeRecognitionService: QRCodeRecognizing {
+    func recognizeQRCode(in image: NSImage) async throws -> QRCodeCandidate? {
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            throw QRCodeRecognitionError.imageConversionFailed
+        }
+        return try await recognizeQRCode(in: cgImage)
+    }
+
+    func recognizeQRCode(in cgImage: CGImage) async throws -> QRCodeCandidate? {
+        let candidates: [QRCodeCandidate] = try await withCheckedThrowingContinuation {
+            continuation in
+            let request = VNDetectBarcodesRequest { request, error in
+                if error != nil {
+                    continuation.resume(throwing: QRCodeRecognitionError.requestFailed)
+                    return
+                }
+                let observations = (request.results as? [VNBarcodeObservation]) ?? []
+                let candidates = observations.compactMap { observation -> QRCodeCandidate? in
+                    guard observation.symbology == .qr,
+                          let payload = observation.payloadStringValue
+                    else {
+                        return nil
+                    }
+                    return QRCodeCandidate(
+                        payload: payload,
+                        boundingBox: observation.boundingBox
+                    )
+                }
+                continuation.resume(returning: candidates)
+            }
+            request.symbologies = [.qr]
+
+            do {
+                try VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([request])
+            } catch {
+                continuation.resume(throwing: QRCodeRecognitionError.requestFailed)
+            }
+        }
+        return Self.preferredCandidate(from: candidates)
+    }
+
+    static func preferredCandidate(from candidates: [QRCodeCandidate]) -> QRCodeCandidate? {
+        candidates
+            .map {
+                QRCodeCandidate(
+                    payload: $0.payload.trimmingCharacters(in: .whitespacesAndNewlines),
+                    boundingBox: $0.boundingBox
+                )
+            }
+            .filter { !$0.payload.isEmpty }
+            .sorted { lhs, rhs in
+                let lhsArea = lhs.boundingBox.width * lhs.boundingBox.height
+                let rhsArea = rhs.boundingBox.width * rhs.boundingBox.height
+                if lhsArea != rhsArea {
+                    return lhsArea > rhsArea
+                }
+                return distanceFromCenterSquared(lhs.boundingBox)
+                    < distanceFromCenterSquared(rhs.boundingBox)
+            }
+            .first
+    }
+
+    private static func distanceFromCenterSquared(_ rect: CGRect) -> CGFloat {
+        let deltaX = rect.midX - 0.5
+        let deltaY = rect.midY - 0.5
+        return deltaX * deltaX + deltaY * deltaY
+    }
+}
+
 protocol OCRTextRecognizing {
     func recognizeText(in image: NSImage) async throws -> String
 }

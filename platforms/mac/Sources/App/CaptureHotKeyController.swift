@@ -657,6 +657,9 @@ struct HotKeyFormatter {
         let key: String?
         if let mapped = menuKeys[settings.keyCode] {
             key = mapped
+        } else if let functionKey = functionKeys[settings.keyCode],
+                  let scalar = UnicodeScalar(functionKey.rawValue) {
+            key = String(scalar)
         } else {
             key = keyNames[settings.keyCode]?.lowercased().count == 1
                 ? keyNames[settings.keyCode]?.lowercased()

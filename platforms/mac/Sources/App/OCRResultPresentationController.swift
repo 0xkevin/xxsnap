@@ -4,6 +4,7 @@ import AppKit
 final class OCRResultPresentationController {
     fileprivate enum Result: Equatable {
         case success
+        case qrCodeSuccess
         case failure
     }
 
@@ -11,6 +12,7 @@ final class OCRResultPresentationController {
         let title: String
         let detail: String?
         let accessibilityLabel: String
+        let openLinkTitle: String?
     }
 
     private static let chinesePanelSize = NSSize(width: 176, height: 124)
@@ -23,21 +25,25 @@ final class OCRResultPresentationController {
     private var fadeWorkItem: DispatchWorkItem?
     private let languageProvider: () -> AppLanguage
     private let successSoundPlayer: (() -> Void)?
+    private let openURLHandler: (URL) -> Void
     private let successSound: NSSound?
 
     convenience init(successSoundPlayer: (() -> Void)? = nil) {
         self.init(
             languageProvider: { .zhHans },
-            successSoundPlayer: successSoundPlayer
+            successSoundPlayer: successSoundPlayer,
+            openURLHandler: { _ = NSWorkspace.shared.open($0) }
         )
     }
 
     init(
         languageProvider: @escaping () -> AppLanguage,
-        successSoundPlayer: (() -> Void)? = nil
+        successSoundPlayer: (() -> Void)? = nil,
+        openURLHandler: @escaping (URL) -> Void = { _ = NSWorkspace.shared.open($0) }
     ) {
         self.languageProvider = languageProvider
         self.successSoundPlayer = successSoundPlayer
+        self.openURLHandler = openURLHandler
         if successSoundPlayer == nil,
            let url = Bundle.main.url(forResource: "notification", withExtension: "mp3") {
             successSound = NSSound(contentsOf: url, byReference: false)
@@ -59,11 +65,33 @@ final class OCRResultPresentationController {
         }
     }
 
+    func showQRCodeSuccess(
+        payload: String,
+        near screenRect: NSRect,
+        playsSound: Bool = true,
+        showsNotification: Bool = true
+    ) {
+        if playsSound {
+            playSuccessSound()
+        }
+        if showsNotification {
+            show(
+                .qrCodeSuccess,
+                near: screenRect,
+                openURL: Self.openableWebURL(from: payload)
+            )
+        }
+    }
+
     func showFailure(near screenRect: NSRect) {
         show(.failure, near: screenRect)
     }
 
-    private func show(_ result: Result, near screenRect: NSRect) {
+    private func show(
+        _ result: Result,
+        near screenRect: NSRect,
+        openURL: URL? = nil
+    ) {
         fadeWorkItem?.cancel()
         panel?.orderOut(nil)
 
@@ -84,14 +112,22 @@ final class OCRResultPresentationController {
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = true
-        panel.ignoresMouseEvents = true
+        panel.ignoresMouseEvents = openURL == nil
+        panel.becomesKeyOnlyIfNeeded = true
         panel.hidesOnDeactivate = false
         panel.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
         panel.contentView = OCRResultView(
             result: result,
             copy: copy,
-            size: panelSize
+            size: panelSize,
+            action: openURL.map { [weak self] url in
+                {
+                    self?.openURLHandler(url)
+                    self?.panel?.orderOut(nil)
+                    self?.panel = nil
+                }
+            }
         )
         panel.setFrame(frame, display: false)
         panel.alphaValue = 1
@@ -152,27 +188,57 @@ final class OCRResultPresentationController {
             return Copy(
                 title: "识别成功",
                 detail: "已复制到剪切板",
-                accessibilityLabel: "识别成功\n已复制到剪切板"
+                accessibilityLabel: "识别成功\n已复制到剪切板",
+                openLinkTitle: nil
+            )
+        case (.zhHans, .qrCodeSuccess):
+            return Copy(
+                title: "二维码识别成功",
+                detail: "已复制到剪切板",
+                accessibilityLabel: "二维码识别成功\n已复制到剪切板",
+                openLinkTitle: "打开链接"
             )
         case (.zhHans, .failure):
             return Copy(
                 title: "识别失败",
                 detail: nil,
-                accessibilityLabel: "识别失败"
+                accessibilityLabel: "识别失败",
+                openLinkTitle: nil
             )
         case (.english, .success):
             return Copy(
                 title: "Recognition Successful",
                 detail: "Copied to Clipboard",
-                accessibilityLabel: "Recognition Successful\nCopied to Clipboard"
+                accessibilityLabel: "Recognition Successful\nCopied to Clipboard",
+                openLinkTitle: nil
+            )
+        case (.english, .qrCodeSuccess):
+            return Copy(
+                title: "QR Code Recognized",
+                detail: "Copied to Clipboard",
+                accessibilityLabel: "QR Code Recognized\nCopied to Clipboard",
+                openLinkTitle: "Open Link"
             )
         case (.english, .failure):
             return Copy(
                 title: "Recognition Failed",
                 detail: nil,
-                accessibilityLabel: "Recognition Failed"
+                accessibilityLabel: "Recognition Failed",
+                openLinkTitle: nil
             )
         }
+    }
+
+    nonisolated static func openableWebURL(from payload: String) -> URL? {
+        let value = payload.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let components = URLComponents(string: value),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              components.host?.isEmpty == false
+        else {
+            return nil
+        }
+        return components.url
     }
 }
 
@@ -184,11 +250,15 @@ private extension NSRect {
 
 @MainActor
 private final class OCRResultView: NSView {
+    private let action: (() -> Void)?
+
     init(
         result: OCRResultPresentationController.Result,
         copy: OCRResultPresentationController.Copy,
-        size: NSSize
+        size: NSSize,
+        action: (() -> Void)?
     ) {
+        self.action = action
         super.init(frame: NSRect(origin: .zero, size: size))
         wantsLayer = true
         layer?.backgroundColor = NSColor(calibratedWhite: 0.98, alpha: 0.96).cgColor
@@ -228,6 +298,16 @@ private final class OCRResultView: NSView {
             detail.alignment = .center
             contentStack.addArrangedSubview(detail)
         }
+        if action != nil, let openLinkTitle = copy.openLinkTitle {
+            let openLinkButton = NSButton(
+                title: openLinkTitle,
+                target: self,
+                action: #selector(performAction)
+            )
+            openLinkButton.bezelStyle = .rounded
+            openLinkButton.controlSize = .regular
+            contentStack.addArrangedSubview(openLinkButton)
+        }
         setAccessibilityLabel(copy.accessibilityLabel)
 
         addSubview(contentStack)
@@ -244,8 +324,12 @@ private final class OCRResultView: NSView {
         nil
     }
 
+    @objc private func performAction() {
+        action?()
+    }
+
     private static func icon(for result: OCRResultPresentationController.Result) -> NSImage {
-        let resourceName = result == .success ? "correct" : "failed"
+        let resourceName = result == .failure ? "failed" : "correct"
         if let url = Bundle.main.url(forResource: resourceName, withExtension: "svg"),
            let image = NSImage(contentsOf: url) {
             return image

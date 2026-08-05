@@ -44,6 +44,25 @@ private final class FakeOCRTextRecognizer: OCRTextRecognizing {
     }
 }
 
+private final class FakeQRCodeRecognizer: QRCodeRecognizing {
+    let result: QRCodeCandidate?
+    private(set) var images: [NSImage] = []
+
+    init(payload: String?) {
+        result = payload.map {
+            QRCodeCandidate(
+                payload: $0,
+                boundingBox: CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)
+            )
+        }
+    }
+
+    func recognizeQRCode(in image: NSImage) async throws -> QRCodeCandidate? {
+        images.append(image)
+        return result
+    }
+}
+
 private final class FakeOCRPreferencesSettingsStore: PreferencesSettingsStoring {
     var settings = PreferencesSettings.default
 
@@ -11216,6 +11235,102 @@ final class SelectionToolbarStateTests: XCTestCase {
     }
 
     @MainActor
+    func testCaptureCoordinatorPrefersQRCodeWhenSelectionAlsoContainsText() async throws {
+        let panelIdentifier = NSUserInterfaceItemIdentifier("xxsnap.ocr-copy-success")
+        NSApp.windows
+            .filter { $0.identifier == panelIdentifier }
+            .forEach { $0.close() }
+        let image = solidImage(size: NSSize(width: 80, height: 60), color: .white)
+        let textRecognizer = FakeOCRTextRecognizer(result: "Visible label")
+        let qrCodeRecognizer = FakeQRCodeRecognizer(payload: "https://xxsnap.xxsofts.com")
+        var copiedText: String?
+        let result = CaptureSelectionResult(
+            screenRect: NSRect(origin: .zero, size: image.size),
+            snapshotRect: NSRect(origin: .zero, size: image.size),
+            annotations: [],
+            action: .copy
+        )
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            ocrTextRecognizer: textRecognizer,
+            qrCodeRecognizer: qrCodeRecognizer,
+            textCopyHandler: {
+                copiedText = $0
+                return true
+            }
+        )
+        let completion = expectation(description: "text and QR code recognition")
+        coordinator.captureSessionDidEnd = {
+            completion.fulfill()
+        }
+
+        coordinator.test_installTextRecognitionOverlayWindow(
+            SelectionOverlayWindow(backgroundImage: image, configuration: .textRecognition()) { _ in }
+        )
+        coordinator.test_handleSelection(result, frozenDesktopImage: image)
+        await fulfillment(of: [completion], timeout: 2)
+
+        XCTAssertEqual(copiedText, "https://xxsnap.xxsofts.com")
+        XCTAssertEqual(textRecognizer.images.count, 1)
+        XCTAssertEqual(qrCodeRecognizer.images.count, 1)
+        let panel = try XCTUnwrap(NSApp.windows.first { $0.identifier == panelIdentifier })
+        XCTAssertEqual(panel.contentView?.accessibilityLabel(), "二维码识别成功\n已复制到剪切板")
+        panel.orderOut(nil)
+    }
+
+    func testQRCodeOpenLinkPolicyOnlyAllowsWebURLs() {
+        XCTAssertEqual(
+            OCRResultPresentationController.openableWebURL(
+                from: "https://xxsnap.xxsofts.com/download"
+            )?.absoluteString,
+            "https://xxsnap.xxsofts.com/download"
+        )
+        XCTAssertEqual(
+            OCRResultPresentationController.openableWebURL(
+                from: "HTTP://example.com/path"
+            )?.host,
+            "example.com"
+        )
+        XCTAssertNil(OCRResultPresentationController.openableWebURL(from: "javascript:alert(1)"))
+        XCTAssertNil(OCRResultPresentationController.openableWebURL(from: "file:///tmp/test"))
+        XCTAssertNil(OCRResultPresentationController.openableWebURL(from: "example.com"))
+    }
+
+    @MainActor
+    func testQRCodeSuccessPanelOpensWebLinkOnlyAfterButtonClick() throws {
+        let panelIdentifier = NSUserInterfaceItemIdentifier("xxsnap.ocr-copy-success")
+        NSApp.windows
+            .filter { $0.identifier == panelIdentifier }
+            .forEach { $0.close() }
+        var openedURL: URL?
+        let presenter = OCRResultPresentationController(
+            languageProvider: { .english },
+            successSoundPlayer: {},
+            openURLHandler: { openedURL = $0 }
+        )
+
+        presenter.showQRCodeSuccess(
+            payload: "https://xxsnap.xxsofts.com/download",
+            near: .zero,
+            playsSound: false
+        )
+
+        let panel = try XCTUnwrap(NSApp.windows.first { $0.identifier == panelIdentifier })
+        let contentView = try XCTUnwrap(panel.contentView)
+        XCTAssertTrue(panel.isVisible)
+        XCTAssertFalse(panel.ignoresMouseEvents)
+        XCTAssertEqual(contentView.accessibilityLabel(), "QR Code Recognized\nCopied to Clipboard")
+        let openButton = try XCTUnwrap(buttons(in: contentView).first { $0.title == "Open Link" })
+        XCTAssertNil(openedURL)
+
+        openButton.performClick(nil)
+
+        XCTAssertEqual(openedURL?.absoluteString, "https://xxsnap.xxsofts.com/download")
+        panel.orderOut(nil)
+    }
+
+    @MainActor
     func testTextRecognitionTemporarilySuspendsAndRestoresTeachingPen() async throws {
         let resultPanelIdentifier = NSUserInterfaceItemIdentifier("xxsnap.ocr-copy-success")
         NSApp.windows
@@ -11229,6 +11344,7 @@ final class SelectionToolbarStateTests: XCTestCase {
             permissionCoordinator: FakeScreenCapturePermissionCoordinator(),
             screenCaptureService: ScreenCaptureService(),
             ocrTextRecognizer: recognizer,
+            qrCodeRecognizer: FakeQRCodeRecognizer(payload: nil),
             textCopyHandler: {
                 copiedText = $0
                 return true
@@ -18772,5 +18888,10 @@ final class SelectionToolbarStateTests: XCTestCase {
     private func textFieldStrings(in view: NSView) -> [String] {
         let ownString = (view as? NSTextField).map(\.stringValue)
         return ownString.map { [$0] } ?? view.subviews.flatMap(textFieldStrings(in:))
+    }
+
+    private func buttons(in view: NSView) -> [NSButton] {
+        let ownButton = view as? NSButton
+        return ownButton.map { [$0] } ?? view.subviews.flatMap(buttons(in:))
     }
 }

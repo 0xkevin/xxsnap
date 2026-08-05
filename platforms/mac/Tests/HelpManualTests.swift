@@ -19,7 +19,7 @@ final class HelpManualTests: XCTestCase {
             ("capture", 35, ["滚动截图", "取色", "橡皮擦"]),
             ("pin", 16, ["恢复最近隐藏的贴图"]),
             ("ocr", 18, ["在本机完成", "竖排文字"]),
-            ("teaching-pen", 20, ["右键", "文字识别"])
+            ("teaching-pen", 20, ["右键", "文字/二维码识别"])
         ]
 
         for expectation in expectations {
@@ -342,7 +342,7 @@ final class HelpManualTests: XCTestCase {
         XCTAssertEqual(document.windowTitle, "XxSnap Help")
         XCTAssertEqual(
             document.chapters.map(\.navigationTitle),
-            ["Capture", "Pin", "Capture Text", "Presentation Pen", "Report Issue"]
+            ["Capture", "Pin", "Text / QR Code Recognition", "Presentation Pen", "Report Issue"]
         )
         XCTAssertTrue(
             document.chapters.first?.flattenedText.contains("Region Capture")
@@ -419,7 +419,7 @@ final class HelpManualTests: XCTestCase {
 
         XCTAssertEqual(
             document.chapters.map(\.navigationTitle),
-            ["Capture", "Pin", "Capture Text", "Presentation Pen", "Report Issue"]
+            ["Capture", "Pin", "Text / QR Code Recognition", "Presentation Pen", "Report Issue"]
         )
         XCTAssertTrue(visibleText.contains("Choose Capture from the menu"))
         XCTAssertFalse(
@@ -427,10 +427,10 @@ final class HelpManualTests: XCTestCase {
         )
         XCTAssertFalse(visibleText.contains("restore the Pin from the menu"))
         XCTAssertTrue(visibleText.contains("Long Capture Editor"))
-        XCTAssertTrue(visibleText.contains("Disable Capture Text sound"))
-        XCTAssertTrue(visibleText.contains("Disable Capture Text notification"))
-        XCTAssertFalse(visibleText.contains("Disable Capture Text Sound"))
-        XCTAssertFalse(visibleText.contains("Disable Capture Text Notification"))
+        XCTAssertTrue(visibleText.contains("Disable Text / QR Code Recognition sound"))
+        XCTAssertTrue(visibleText.contains("Disable Text / QR Code Recognition notification"))
+        XCTAssertTrue(visibleText.contains("Open Link"))
+        XCTAssertTrue(visibleText.contains("QR code"))
         XCTAssertFalse(visibleText.contains("Teaching Pen"))
         XCTAssertTrue(visibleText.contains("Start Scroll Step"))
         XCTAssertTrue(headings.contains("Pen"))
@@ -536,7 +536,7 @@ final class HelpManualTests: XCTestCase {
         XCTAssertEqual(controller.window?.title, "XxSnap Help")
         XCTAssertEqual(
             controller.test_navigationTitles,
-            ["Capture", "Pin", "Capture Text", "Presentation Pen", "Report Issue"]
+            ["Capture", "Pin", "Text / QR Code Recognition", "Presentation Pen", "Report Issue"]
         )
         XCTAssertTrue(controller.test_visibleTexts.contains("Region Capture"))
         XCTAssertTrue(
@@ -636,7 +636,7 @@ final class HelpManualTests: XCTestCase {
         XCTAssertEqual(controller.window?.title, "XxSnap 帮助")
         XCTAssertEqual(
             controller.test_navigationTitles,
-            ["截图", "贴图", "文字识别", "教笔"]
+            ["截图", "贴图", "文字/二维码识别", "教笔"]
         )
         XCTAssertEqual(controller.test_selectedChapterID, "capture")
     }
@@ -650,7 +650,7 @@ final class HelpManualTests: XCTestCase {
 
         let root = try XCTUnwrap(controller.window?.contentView)
         let buttons = descendantViews(of: NSButton.self, in: root)
-            .filter { ["截图", "贴图", "文字识别", "教笔"].contains($0.title) }
+            .filter { ["截图", "贴图", "文字/二维码识别", "教笔"].contains($0.title) }
         let captureButton = try XCTUnwrap(
             buttons.first { $0.identifier?.rawValue == "capture" }
         )
@@ -1871,9 +1871,9 @@ final class HelpManualTests: XCTestCase {
             },
             {
               "id": "ocr",
-              "navigationTitle": "文字识别",
-              "title": "文字识别",
-              "introduction": "提取截图中的文字。",
+              "navigationTitle": "文字/二维码识别",
+              "title": "文字/二维码识别",
+              "introduction": "提取截图中的文字或二维码内容。",
               "tableOfContents": [],
               "shortcuts": [],
               "blocks": []

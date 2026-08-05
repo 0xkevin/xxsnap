@@ -1,4 +1,5 @@
 import Carbon.HIToolbox
+import CoreImage.CIFilterBuiltins
 import XCTest
 @testable import xxsnap
 
@@ -846,8 +847,8 @@ final class AppSettingsTests: XCTestCase {
             of: controller.window?.contentView,
             matching: NSTextField.self
         ).map(\.stringValue)
-        XCTAssertTrue(labels.contains("禁用识别文字提示音"))
-        XCTAssertTrue(labels.contains("禁用识别文字通知"))
+        XCTAssertTrue(labels.contains("禁用文字/二维码识别提示音"))
+        XCTAssertTrue(labels.contains("禁用文字/二维码识别通知"))
 
         let switches = descendants(
             of: controller.window?.contentView,
@@ -1482,7 +1483,7 @@ final class AppSettingsTests: XCTestCase {
         let sheetText = descendants(of: sheet.contentView, matching: NSTextField.self)
             .map(\.stringValue)
             .joined(separator: " ")
-        XCTAssertTrue(sheetText.contains("识别文字"))
+        XCTAssertTrue(sheetText.contains("文字/二维码识别"))
         XCTAssertEqual(registrar.registered, originalRegistrations)
         XCTAssertTrue(hotKeyController.isHotKeyEnabled(for: .capture))
         XCTAssertTrue(hotKeyController.isHotKeyEnabled(for: .recognizeText))
@@ -1698,10 +1699,10 @@ final class AppSettingsTests: XCTestCase {
             chinese.fixedShortcutConflict(.rectangle),
             "与“形状”快捷键冲突，禁止覆盖，请重新设置！"
         )
-        XCTAssertEqual(chinese.hotKeyActionName(.recognizeText), "识别文字")
+        XCTAssertEqual(chinese.hotKeyActionName(.recognizeText), "文字/二维码识别")
         XCTAssertEqual(chinese.fixedShortcutName(.rectangle), "形状")
         XCTAssertEqual(chinese.fixedShortcutName(.cancel), "取消 / 完成编辑")
-        XCTAssertTrue(chinese.configurableShortcutConflict(.recognizeText).contains("识别文字"))
+        XCTAssertTrue(chinese.configurableShortcutConflict(.recognizeText).contains("文字/二维码识别"))
         XCTAssertTrue(chinese.configurableShortcutConflict(.recognizeText).contains("是否覆盖"))
         XCTAssertTrue(chinese.configurableShortcutConflict(.recognizeText).contains("清空"))
         XCTAssertEqual(chinese.replaceShortcut, "覆盖")
@@ -1712,10 +1713,16 @@ final class AppSettingsTests: XCTestCase {
             english.fixedShortcutConflict(.rectangle),
             "This shortcut conflicts with “Shape”. It cannot be overridden. Choose another shortcut."
         )
-        XCTAssertEqual(english.hotKeyActionName(.recognizeText), "Capture Text")
+        XCTAssertEqual(
+            english.hotKeyActionName(.recognizeText),
+            "Text / QR Code Recognition"
+        )
         XCTAssertEqual(english.fixedShortcutName(.rectangle), "Shape")
         XCTAssertEqual(english.fixedShortcutName(.cancel), "Cancel / Finish Editing")
-        XCTAssertTrue(english.configurableShortcutConflict(.recognizeText).contains("Capture Text"))
+        XCTAssertTrue(
+            english.configurableShortcutConflict(.recognizeText)
+                .contains("Text / QR Code Recognition")
+        )
         XCTAssertTrue(english.configurableShortcutConflict(.recognizeText).contains("Replace"))
         XCTAssertTrue(english.configurableShortcutConflict(.recognizeText).contains("cleared"))
         XCTAssertEqual(english.replaceShortcut, "Replace")
@@ -1738,6 +1745,18 @@ final class AppSettingsTests: XCTestCase {
     func testPreferencesWindowRetainsSettingsTitle() {
         XCTAssertEqual(PreferencesStrings(language: .zhHans).windowTitle, "XxSnap 设置")
         XCTAssertEqual(PreferencesStrings(language: .english).windowTitle, "XxSnap Settings")
+    }
+
+    func testStatusMenuSupportsStandaloneFunctionKeyEquivalent() throws {
+        let equivalent = try XCTUnwrap(HotKeyFormatter.menuEquivalent(
+            HotKeySettings(keyCode: UInt32(kVK_F1), modifiers: 0)
+        ))
+
+        XCTAssertEqual(
+            equivalent.0.unicodeScalars.first?.value,
+            UInt32(NSEvent.SpecialKey.f1.rawValue)
+        )
+        XCTAssertEqual(equivalent.1, [])
     }
 
     func testDonationPageUsesRequestedEnglishMessage() {
@@ -1970,12 +1989,15 @@ final class AppSettingsTests: XCTestCase {
         )
     }
 
-    func testCaptureTextStringsUseRequestedEnglishName() {
-        XCTAssertEqual(PreferencesStrings(language: .zhHans).captureText, "识别文字")
-        XCTAssertEqual(PreferencesStrings(language: .english).captureText, "Capture Text")
+    func testTextAndQRCodeRecognitionStringsUseUnifiedProductName() {
+        XCTAssertEqual(PreferencesStrings(language: .zhHans).captureText, "文字/二维码识别")
+        XCTAssertEqual(
+            PreferencesStrings(language: .english).captureText,
+            "Text / QR Code Recognition"
+        )
         XCTAssertEqual(
             PreferencesStrings(language: .english).captureTextShortcutDetail,
-            "Capture text from a selected screen area"
+            "Recognize text or a QR code in a selected screen area"
         )
     }
 
@@ -2037,6 +2059,60 @@ final class AppSettingsTests: XCTestCase {
         ]
 
         XCTAssertEqual(OCRTextRecognitionService.join(candidates), "Alpha\nBeta")
+    }
+
+    func testQRCodeRecognitionPrefersLargestCandidate() throws {
+        let candidates = [
+            QRCodeCandidate(
+                payload: "small-center",
+                boundingBox: CGRect(x: 0.45, y: 0.45, width: 0.1, height: 0.1)
+            ),
+            QRCodeCandidate(
+                payload: "large-edge",
+                boundingBox: CGRect(x: 0.05, y: 0.05, width: 0.3, height: 0.3)
+            ),
+        ]
+
+        XCTAssertEqual(
+            QRCodeRecognitionService.preferredCandidate(from: candidates)?.payload,
+            "large-edge"
+        )
+    }
+
+    func testQRCodeRecognitionUsesDistanceFromCenterToBreakSizeTie() throws {
+        let candidates = [
+            QRCodeCandidate(
+                payload: "edge",
+                boundingBox: CGRect(x: 0.05, y: 0.05, width: 0.2, height: 0.2)
+            ),
+            QRCodeCandidate(
+                payload: "center",
+                boundingBox: CGRect(x: 0.4, y: 0.4, width: 0.2, height: 0.2)
+            ),
+        ]
+
+        XCTAssertEqual(
+            QRCodeRecognitionService.preferredCandidate(from: candidates)?.payload,
+            "center"
+        )
+    }
+
+    @MainActor
+    func testQRCodeRecognitionReadsGeneratedQRCode() async throws {
+        let expectedPayload = "https://xxsnap.xxsofts.com/download"
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(expectedPayload.utf8)
+        filter.correctionLevel = "M"
+        let output = try XCTUnwrap(filter.outputImage).transformed(
+            by: CGAffineTransform(scaleX: 12, y: 12)
+        )
+        let representation = NSCIImageRep(ciImage: output)
+        let image = NSImage(size: representation.size)
+        image.addRepresentation(representation)
+
+        let result = try await QRCodeRecognitionService().recognizeQRCode(in: image)
+
+        XCTAssertEqual(result?.payload, expectedPayload)
     }
 
     @MainActor

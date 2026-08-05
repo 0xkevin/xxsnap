@@ -368,30 +368,30 @@
     },
     {
       "id": "ocr",
-      "navigationTitle": "Capture Text",
-      "title": "Capture Text",
-      "introduction": "Capture Text reads the selected area and copies the result straight to the clipboard. Recognition happens entirely on your Mac, and the image is never uploaded.",
+      "navigationTitle": "Text / QR Code Recognition",
+      "title": "Text / QR Code Recognition",
+      "introduction": "Text / QR Code Recognition reads the selected area, identifies its contents automatically, and copies the result straight to the clipboard. Recognition happens entirely on your Mac, and the image is never uploaded.",
       "tableOfContents": [
-        "Start Capture Text",
+        "Start Recognition",
         "Success and Failure Messages",
-        "Capture Text Settings",
-        "Supported Text",
+        "Recognition Settings",
+        "Supported Content",
         "Use It While Editing",
         "Improve Recognition",
         "Common Questions"
       ],
       "shortcuts": [
-        { "action": "Start Capture Text (default)", "keys": ["⌘", "3"] },
+        { "action": "Start Text / QR Code Recognition (default)", "keys": ["⌘", "3"] },
         { "action": "Cancel selection", "keys": ["Esc"] }
       ],
       "blocks": [
-        { "type": "heading", "level": 2, "text": "Start Capture Text" },
-        { "type": "paragraph", "text": "Command+3 is the default shortcut for Capture Text. You can change or disable it in Settings; check the menu or Settings for the current keys. Start it from the menu or press the current shortcut, then drag around the text. Recognition and copying begin automatically when you release the mouse. There is no toolbar and no extra confirmation button." },
+        { "type": "heading", "level": 2, "text": "Start Recognition" },
+        { "type": "paragraph", "text": "Command+3 is the default shortcut for Text / QR Code Recognition. You can change or disable it in Settings; check the menu or Settings for the current keys. Start it from the menu or press the current shortcut, then drag around the text or QR code. Recognition and copying begin automatically when you release the mouse. There is no toolbar and no extra confirmation button." },
         {
           "type": "steps",
           "items": [
-            { "text": "Choose Capture Text from the menu or press its current shortcut, which is Command+3 by default, and wait for the screen to freeze.", "keys": ["⌘", "3"] },
-            { "text": "Drag from one corner of the text block to the opposite corner, leaving a small margin around the letters."},
+            { "text": "Choose Text / QR Code Recognition from the menu or press its current shortcut, which is Command+3 by default, and wait for the screen to freeze.", "keys": ["⌘", "3"] },
+            { "text": "Select the text or QR code, leaving a small margin around it."},
             { "text": "Release the mouse. When the success message appears, switch to the destination app and paste."}
           ]
         },
@@ -399,38 +399,40 @@
           "type": "image",
           "name": "ocr-selection",
           "caption": "Select only the text you need to reduce interference from icons and borders.",
-          "accessibilityLabel": "Capture Text selection tightly surrounding two lines of horizontal text with no toolbar on screen"
+          "accessibilityLabel": "Text / QR Code Recognition selection tightly surrounding two lines of horizontal text with no toolbar on screen"
         },
         { "type": "heading", "level": 2, "text": "Success Message" },
-        { "type": "paragraph", "text": "After recognition succeeds and the text reaches the clipboard, XxSnap shows a success message and plays a sound. The message stays for about three seconds, then fades out." },
+        { "type": "paragraph", "text": "After text or QR code recognition succeeds and the result reaches the clipboard, XxSnap shows a success message and plays a sound. The message stays for about three seconds, then fades out." },
         {
           "type": "image",
           "name": "ocr-success",
           "caption": "When the success message appears, the recognized text is already on the clipboard.",
-          "accessibilityLabel": "Capture Text success message near the lower middle of the screen saying that the result was copied to the clipboard"
+          "accessibilityLabel": "Text / QR Code Recognition success message near the lower middle of the screen saying that the result was copied to the clipboard"
         },
+        { "type": "heading", "level": 2, "text": "QR Code Results" },
+        { "type": "paragraph", "text": "When a QR code is detected, XxSnap gives its content priority and copies it. If the content is an HTTP or HTTPS URL, the success message includes an Open Link button, but the link never opens automatically. Plain text, Wi-Fi details, and other content are copied without being opened." },
         { "type": "heading", "level": 2, "text": "Failure Message" },
-        { "type": "paragraph", "text": "A failure message appears if no text was found, the image could not be read, or the clipboard could not be updated. It also fades after about three seconds. Failures do not play the success sound." },
+        { "type": "paragraph", "text": "A failure message appears if no text or QR code was found, the image could not be read, or the clipboard could not be updated. It also fades after about three seconds. Failures do not play the success sound." },
         {
           "type": "image",
           "name": "ocr-failure",
           "caption": "A failure message means that no new recognition result was added to the clipboard.",
-          "accessibilityLabel": "Capture Text failure message near the lower middle of the screen asking the user to select the text again"
+          "accessibilityLabel": "Text / QR Code Recognition failure message near the lower middle of the screen asking the user to select the content again"
         },
-        { "type": "heading", "level": 2, "text": "Capture Text Settings" },
-        { "type": "paragraph", "text": "Disable Capture Text sound in Settings only turns off the sound after a successful recognition. Disable Capture Text notification hides the success message. Failure messages always remain visible so you do not mistake an unchanged clipboard for a new result." },
+        { "type": "heading", "level": 2, "text": "Recognition Settings" },
+        { "type": "paragraph", "text": "Disable Text / QR Code Recognition sound in Settings only turns off the sound after a successful recognition. Disable Text / QR Code Recognition notification hides the success message. Failure messages always remain visible so you do not mistake an unchanged clipboard for a new result." },
         {
           "type": "image",
           "name": "ocr-settings",
           "caption": "The sound and success message can be disabled separately. Failure messages are not affected by either setting.",
-          "accessibilityLabel": "XxSnap Settings showing the Disable Capture Text sound and Disable Capture Text notification switches and their descriptions"
+          "accessibilityLabel": "XxSnap Settings showing the Text / QR Code Recognition sound and notification switches and their descriptions"
         },
-        { "type": "heading", "level": 2, "text": "Supported Text Layouts" },
-        { "type": "paragraph", "text": "Capture Text handles both horizontal and vertical text, with basic support for mixed Chinese, English, and Korean. For multiple columns or changing text directions, separate selections usually give better results." },
+        { "type": "heading", "level": 2, "text": "Supported Content" },
+        { "type": "paragraph", "text": "XxSnap recognizes QR codes plus horizontal and vertical text, with basic support for mixed Chinese, English, and Korean. For multiple QR codes, multiple columns, or changing text directions, separate selections usually give better results." },
         { "type": "heading", "level": 2, "text": "Use It While Editing" },
-        { "type": "paragraph", "text": "Capture Text can run independently while the Long Capture Editor, Full Screen Capture editor, or Presentation Pen is open. It does not end the task you were already working on. When recognition finishes, return to the previous screen and keep going." },
-        { "type": "heading", "level": 2, "text": "Capture Text with Presentation Pen" },
-        { "type": "paragraph", "text": "If Presentation Pen is visible when Capture Text starts, your existing annotations stay on screen, but Presentation Pen temporarily stops accepting mouse input. When recognition finishes, the previous interaction state returns and your drawings remain intact." },
+        { "type": "paragraph", "text": "Text / QR Code Recognition can run independently while the Long Capture Editor, Full Screen Capture editor, or Presentation Pen is open. It does not end the task you were already working on. When recognition finishes, return to the previous screen and keep going." },
+        { "type": "heading", "level": 2, "text": "Recognition with Presentation Pen" },
+        { "type": "paragraph", "text": "If Presentation Pen is visible when recognition starts, your existing annotations stay on screen, but Presentation Pen temporarily stops accepting mouse input. When recognition finishes, the previous interaction state returns and your drawings remain intact." },
         { "type": "heading", "level": 2, "text": "Recognition Stays on Your Mac" },
         { "type": "paragraph", "text": "The current OCR runs locally and does not upload the selected image. Recognized content can still include private information such as accounts or addresses, so take a quick look at the result before pasting." },
         { "type": "heading", "level": 2, "text": "Improve Recognition" },
@@ -441,7 +443,8 @@
             "Decorative fonts, handwriting, or heavy shadows: Use a clearer, higher-contrast image and recognize one line at a time when needed.",
             "Icons, table lines, or unrelated text inside the selection: Tighten the area, but keep a small margin around the letters.",
             "Vertical and horizontal text mixed together: Make separate selections for each text direction.",
-            "Similar text and background colors: Use the original image or increase its contrast before trying again."
+            "Similar text and background colors: Use the original image or increase its contrast before trying again.",
+            "A small or blurry QR code: Enlarge it and select only the target QR code before trying again."
           ]
         },
         { "type": "heading", "level": 2, "text": "Common Questions" },
@@ -453,8 +456,12 @@
               "answer": "It is already on the system clipboard. Switch to a text field or document and press Command+V to paste it."
             },
             {
+              "question": "Will a URL inside a QR code open automatically?",
+              "answer": "No. The content is copied first. Only HTTP or HTTPS URLs show an Open Link button, and the link opens only after you click it."
+            },
+            {
               "question": "Why is there no toolbar?",
-              "answer": "Capture Text is a direct recognition mode. It starts as soon as you release the selection, so the capture annotation toolbar never appears. The default shortcut is Command+3. If you changed it, use the current keys; if it is disabled, start from the menu."
+              "answer": "Text / QR Code Recognition is a direct recognition mode. It starts as soon as you release the selection, so the capture annotation toolbar never appears. The default shortcut is Command+3. If you changed it, use the current keys; if it is disabled, start from the menu."
             },
             {
               "question": "Will a failure still appear if I turn off success notifications?",
@@ -482,7 +489,7 @@
         "Compact Toolbar",
         "Tools and Styles",
         "Select and Edit",
-        "Use with Capture Text",
+        "Use with Text / QR Code Recognition",
         "Multiple Displays",
         "Common Questions"
       ],
@@ -541,14 +548,14 @@
         { "type": "heading", "level": 2, "text": "Select, Move, and Delete" },
         { "type": "paragraph", "text": "If a main tool is still active, press Esc first to leave it. Shapes, arrows, highlighter marks, text, numbered markers, freehand or rectangular redaction regions, and magnifiers can be selected and moved later. Drag handles to resize shapes, text, numbered markers, rectangular redaction regions, and magnifiers. Arrows and highlighter marks have their own adjustment handles. Pen strokes cannot be selected by clicking or resized directly. Press Delete or Backspace to remove the selected item." },
         { "type": "heading", "level": 2, "text": "Separate from Capture" },
-        { "type": "paragraph", "text": "Presentation Pen, Region Capture, Full Screen Capture, and Capture Text are separate features. Presentation Pen never turns into Region Capture automatically. To keep the screen you are presenting, use Copy or Save in the Presentation Pen toolbar." },
-        { "type": "heading", "level": 2, "text": "Use with Capture Text" },
-        { "type": "paragraph", "text": "You can start Capture Text independently while Presentation Pen is visible. During the OCR selection, existing annotations remain visible, but Presentation Pen temporarily stops accepting mouse input. When recognition finishes, the annotations become interactive again and none of their content is lost." },
+        { "type": "paragraph", "text": "Presentation Pen, Region Capture, Full Screen Capture, and Text / QR Code Recognition are separate features. Presentation Pen never turns into Region Capture automatically. To keep the screen you are presenting, use Copy or Save in the Presentation Pen toolbar." },
+        { "type": "heading", "level": 2, "text": "Use with Text / QR Code Recognition" },
+        { "type": "paragraph", "text": "You can start Text / QR Code Recognition independently while Presentation Pen is visible. During the recognition selection, existing annotations remain visible, but Presentation Pen temporarily stops accepting mouse input. When recognition finishes, the annotations become interactive again and none of their content is lost." },
         {
           "type": "image",
           "name": "teaching-pen-ocr",
-          "caption": "Presentation Pen annotations remain visible during a Capture Text selection, but cannot be moved until recognition finishes.",
-          "accessibilityLabel": "Red Presentation Pen annotations remaining on screen beside a Capture Text selection and recognition status"
+          "caption": "Presentation Pen annotations remain visible during a Text / QR Code Recognition selection, but cannot be moved until recognition finishes.",
+          "accessibilityLabel": "Red Presentation Pen annotations remaining on screen beside a Text / QR Code Recognition selection and recognition status"
         },
         { "type": "heading", "level": 2, "text": "Multiple Displays and Exiting" },
         {
@@ -573,7 +580,7 @@
               "answer": "Use the menu or current shortcut again. The default is Command+2. If you changed it, use the current keys; if it is disabled, exit from the menu. Copying or saving the current desktop also ends the session."
             },
             {
-              "question": "Will my annotations disappear while I use Capture Text?",
+              "question": "Will my annotations disappear while I use Text / QR Code Recognition?",
               "answer": "No. They remain visible during OCR but temporarily stop accepting mouse input. You can continue working with them after recognition ends."
             },
             {
@@ -592,7 +599,7 @@
       "id": "report-issue",
       "navigationTitle": "Report Issue",
       "title": "Report Issue",
-      "introduction": "If XxSnap is not working correctly, export the diagnostic logs and report the issue by email. The archive contains operational records for screenshots, scrolling capture, Capture Text, Presentation Pen, and related features. It does not contain captured images, recognized text, clipboard contents, URLs, or file paths.",
+      "introduction": "If XxSnap is not working correctly, export the diagnostic logs and report the issue by email. The archive contains operational records for screenshots, scrolling capture, Text / QR Code Recognition, Presentation Pen, and related features. It does not contain captured images, recognized content, clipboard contents, URLs, or file paths.",
       "tableOfContents": [],
       "shortcuts": [],
       "blocks": [

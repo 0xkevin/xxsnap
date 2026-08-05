@@ -134,6 +134,7 @@ final class CaptureCoordinator {
     private let longImageCopyHandler: (@MainActor (NSImage) -> Bool)?
     private let longImageSaveHandler: (@MainActor (NSImage) -> Bool)?
     private let ocrTextRecognizer: any OCRTextRecognizing
+    private let qrCodeRecognizer: any QRCodeRecognizing
     private let textCopyHandler: @MainActor (String) -> Bool
     private let ocrResultPresenter: OCRResultPresentationController
     private let frontmostApplicationResolver: @MainActor () -> NSRunningApplication?
@@ -183,6 +184,7 @@ final class CaptureCoordinator {
         longImageCopyHandler: (@MainActor (NSImage) -> Bool)? = nil,
         longImageSaveHandler: (@MainActor (NSImage) -> Bool)? = nil,
         ocrTextRecognizer: any OCRTextRecognizing = OCRTextRecognitionService(),
+        qrCodeRecognizer: any QRCodeRecognizing = QRCodeRecognitionService(),
         textCopyHandler: (@MainActor (String) -> Bool)? = nil,
         ocrResultPresenter: OCRResultPresentationController? = nil,
         frontmostApplicationResolver: @escaping @MainActor () -> NSRunningApplication? = CaptureCoordinator.refreshTargetApplication,
@@ -253,6 +255,7 @@ final class CaptureCoordinator {
         self.longImageCopyHandler = longImageCopyHandler
         self.longImageSaveHandler = longImageSaveHandler
         self.ocrTextRecognizer = ocrTextRecognizer
+        self.qrCodeRecognizer = qrCodeRecognizer
         self.textCopyHandler = textCopyHandler ?? Self.copyTextToPasteboard
         self.ocrResultPresenter = ocrResultPresenter ?? OCRResultPresentationController(
             languageProvider: { languageSnapshot.language }
@@ -1445,52 +1448,72 @@ final class CaptureCoordinator {
     }
 
     private func handleTextRecognition(_ image: NSImage, screenRect: NSRect) async {
-        do {
-            let text = try await ocrTextRecognizer.recognizeText(in: image)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !text.isEmpty else {
-                ocrResultPresenter.showFailure(near: screenRect)
-                diagnosticLogger.record(
-                    category: .textRecognition,
-                    level: .warning,
-                    event: "text_recognition_empty_result"
-                )
-                NSLog("xxsnap text recognition completed with empty result")
-                return
-            }
-            guard textCopyHandler(text) else {
-                ocrResultPresenter.showFailure(near: screenRect)
-                diagnosticLogger.record(
-                    category: .textRecognition,
-                    level: .error,
-                    event: "text_recognition_copy_failed"
-                )
-                NSLog("xxsnap text recognition copy failed")
-                return
-            }
-            let preferences = preferencesSettingsStore.load()
+        async let qrCodeAttempt = recognitionAttempt {
+            try await qrCodeRecognizer.recognizeQRCode(in: image)
+        }
+        async let textAttempt = recognitionAttempt {
+            try await ocrTextRecognizer.recognizeText(in: image)
+        }
+        let (qrCodeResult, textResult) = await (qrCodeAttempt, textAttempt)
+        let qrCodePayload = qrCodeResult.successValue.flatMap { $0 }?.payload
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = textResult.successValue?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let recognizedContent = [qrCodePayload, text]
+            .compactMap { $0 }
+            .first { !$0.isEmpty }
+
+        guard let recognizedContent else {
+            ocrResultPresenter.showFailure(near: screenRect)
+            diagnosticLogger.record(
+                category: .textRecognition,
+                level: qrCodeResult.isFailure && textResult.isFailure ? .error : .warning,
+                event: qrCodeResult.isFailure && textResult.isFailure
+                    ? "text_recognition_failed"
+                    : "text_recognition_empty_result"
+            )
+            NSLog("xxsnap text and QR code recognition completed without a result")
+            return
+        }
+        guard textCopyHandler(recognizedContent) else {
+            ocrResultPresenter.showFailure(near: screenRect)
+            diagnosticLogger.record(
+                category: .textRecognition,
+                level: .error,
+                event: "text_recognition_copy_failed"
+            )
+            NSLog("xxsnap text and QR code recognition copy failed")
+            return
+        }
+        let preferences = preferencesSettingsStore.load()
+        let recognizedQRCode = qrCodePayload == recognizedContent
+        if recognizedQRCode {
+            ocrResultPresenter.showQRCodeSuccess(
+                payload: recognizedContent,
+                near: screenRect,
+                playsSound: !preferences.disablesTextRecognitionSound,
+                showsNotification: !preferences.disablesTextRecognitionSuccessNotification
+            )
+        } else {
             ocrResultPresenter.showSuccess(
                 near: screenRect,
                 playsSound: !preferences.disablesTextRecognitionSound,
                 showsNotification: !preferences.disablesTextRecognitionSuccessNotification
             )
-            diagnosticLogger.record(
-                category: .textRecognition,
-                level: .info,
-                event: "text_recognition_completed",
-                metadata: ["character_count": String(text.count)]
-            )
-            NSLog("xxsnap text recognition copied %ld characters", text.count)
-        } catch {
-            ocrResultPresenter.showFailure(near: screenRect)
-            diagnosticLogger.record(
-                category: .textRecognition,
-                level: .error,
-                event: "text_recognition_failed",
-                metadata: ["error_type": String(describing: type(of: error))]
-            )
-            NSLog("xxsnap text recognition failed: \(error.localizedDescription)")
         }
+        diagnosticLogger.record(
+            category: .textRecognition,
+            level: .info,
+            event: recognizedQRCode
+                ? "qr_code_recognition_completed"
+                : "text_recognition_completed",
+            metadata: ["character_count": String(recognizedContent.count)]
+        )
+        NSLog(
+            "xxsnap %@ recognition copied %ld characters",
+            recognizedQRCode ? "QR code" : "text",
+            recognizedContent.count
+        )
     }
 
     private func captureFallbackImage(
@@ -1628,6 +1651,28 @@ final class CaptureCoordinator {
         return HotKeyFormatter.toolbarShortcut(
             from: settings.hotkeys[action.rawValue] ?? action.defaultSettings
         )
+    }
+}
+
+private func recognitionAttempt<Value>(
+    _ operation: () async throws -> Value
+) async -> Result<Value, Error> {
+    do {
+        return .success(try await operation())
+    } catch {
+        return .failure(error)
+    }
+}
+
+private extension Result {
+    var successValue: Success? {
+        guard case let .success(value) = self else { return nil }
+        return value
+    }
+
+    var isFailure: Bool {
+        guard case .failure = self else { return false }
+        return true
     }
 }
 

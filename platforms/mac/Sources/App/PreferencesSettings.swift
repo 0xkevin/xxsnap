@@ -234,7 +234,9 @@ struct PreferencesStrings {
     var appTooltip: String { isEnglish ? "XxSnap Capture" : "xxsnap 截图" }
     var capture: String { isEnglish ? "Capture" : "截图" }
     var fullScreenCapture: String { isEnglish ? "Full Screen Capture" : "全屏截图" }
-    var captureText: String { isEnglish ? "Capture Text" : "识别文字" }
+    var captureText: String {
+        isEnglish ? "Text / QR Code Recognition" : "文字/二维码识别"
+    }
     var teachingPen: String { isEnglish ? "Presentation Pen" : "教笔" }
     var preferences: String { isEnglish ? "Settings..." : "偏好设置…" }
     var checkForUpdates: String { isEnglish ? "Check for Updates…" : "检查更新…" }
@@ -304,13 +306,17 @@ struct PreferencesStrings {
         isEnglish ? "Menu and settings update immediately" : "菜单和设置立即切换"
     }
     var disableTextRecognitionSound: String {
-        isEnglish ? "Disable Capture Text sound" : "禁用识别文字提示音"
+        isEnglish
+            ? "Disable Text / QR Code Recognition sound"
+            : "禁用文字/二维码识别提示音"
     }
     var disableTextRecognitionSoundDetail: String {
         isEnglish ? "Do not play a sound after successful recognition" : "识别成功后不播放提示音"
     }
     var disableTextRecognitionSuccessNotification: String {
-        isEnglish ? "Disable Capture Text notification" : "禁用识别文字通知"
+        isEnglish
+            ? "Disable Text / QR Code Recognition notification"
+            : "禁用文字/二维码识别通知"
     }
     var disableTextRecognitionSuccessNotificationDetail: String {
         isEnglish
@@ -356,7 +362,9 @@ struct PreferencesStrings {
         isEnglish ? "Capture the entire visible desktop immediately" : "立即截取整个可见桌面"
     }
     var captureTextShortcutDetail: String {
-        isEnglish ? "Capture text from a selected screen area" : "框选屏幕区域并识别文字"
+        isEnglish
+            ? "Recognize text or a QR code in a selected screen area"
+            : "框选屏幕区域并识别文字或二维码"
     }
     var teachingPenShortcutDetail: String {
         isEnglish ? "Start full-screen presentation annotation" : "进入全屏教笔标注模式"
@@ -409,7 +417,7 @@ struct PreferencesStrings {
         case .fullScreenCapture:
             return isEnglish ? "Full Screen Capture" : "全屏截图"
         case .recognizeText:
-            return isEnglish ? "Capture Text" : "识别文字"
+            return isEnglish ? "Text / QR Code Recognition" : "文字/二维码识别"
         case .teachingPen:
             return isEnglish ? "Presentation Pen" : "教笔"
         case .restoreMostRecentlyHiddenPinnedImage:

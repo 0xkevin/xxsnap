@@ -100,7 +100,10 @@ struct CommercialLaunchDependencies {
     }
 
     func refresh() async { await refreshHandler() }
-    func prepareFromCache() async { await scheduler.prepareFromCache() }
+    func prepareFromCache() async {
+        guard access.state != .allFree else { return }
+        await scheduler.prepareFromCache()
+    }
     func startRefresh() { scheduler.start() }
     func triggerRefresh() { scheduler.triggerRefresh() }
     func cancelRefresh() { scheduler.cancel() }
