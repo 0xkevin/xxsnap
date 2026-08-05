@@ -159,6 +159,36 @@ target_link_libraries(
     PUBLIC xxsnap_capture_backend
 )
 
+add_library(
+    xxsnap_png_writer
+    src/export/PngWriter.cpp
+)
+target_compile_features(xxsnap_png_writer PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_png_writer
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_png_writer
+    PUBLIC snipory_core_portable
+    PRIVATE xxsnap_windows_build_configuration windowscodecs ole32
+)
+
+add_library(
+    xxsnap_clipboard_writer
+    src/export/ClipboardWriter.cpp
+)
+target_compile_features(xxsnap_clipboard_writer PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_clipboard_writer
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_clipboard_writer
+    PUBLIC xxsnap_png_writer snipory_core_portable
+    PRIVATE xxsnap_windows_build_configuration user32
+)
+
 if(BUILD_TESTING)
     add_executable(xxsnap_build_configuration_test tests/TestBuildConfiguration.cpp)
     target_compile_features(xxsnap_build_configuration_test PRIVATE cxx_std_20)
@@ -248,6 +278,29 @@ if(BUILD_TESTING)
         PRIVATE xxsnap_selection_composer xxsnap_display_topology
     )
     add_test(NAME selection_composer COMMAND xxsnap_selection_composer_test)
+
+    add_executable(
+        xxsnap_clipboard_writer_test
+        tests/TestClipboardWriter.cpp
+    )
+    target_compile_features(xxsnap_clipboard_writer_test PRIVATE cxx_std_17)
+    target_link_libraries(
+        xxsnap_clipboard_writer_test
+        PRIVATE xxsnap_clipboard_writer xxsnap_windows_build_configuration
+    )
+    add_test(NAME clipboard_writer COMMAND xxsnap_clipboard_writer_test)
+
+    add_executable(
+        xxsnap_png_writer_test
+        tests/TestPngWriter.cpp
+    )
+    target_compile_features(xxsnap_png_writer_test PRIVATE cxx_std_17)
+    target_link_libraries(
+        xxsnap_png_writer_test
+        PRIVATE xxsnap_png_writer xxsnap_windows_build_configuration
+                windowscodecs ole32
+    )
+    add_test(NAME png_writer COMMAND xxsnap_png_writer_test)
 endif()
 
 set(xxsnap_capture_session_targets
@@ -258,6 +311,8 @@ set(xxsnap_capture_session_targets
     xxsnap_dxgi_capture_backend
     xxsnap_fallback_capture_backend
     xxsnap_selection_composer
+    xxsnap_png_writer
+    xxsnap_clipboard_writer
 )
 if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_capture_session_state_test)
@@ -267,6 +322,8 @@ if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_fallback_capture_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_visual_style_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_selection_composer_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_clipboard_writer_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_png_writer_test)
 endif()
 
 if(MSVC)
