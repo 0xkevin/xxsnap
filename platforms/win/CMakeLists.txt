@@ -24,6 +24,7 @@ set_property(
         "${PROJECT_SOURCE_DIR}/platforms/mac/Resources/Icons/cancel-capture.png"
         "${PROJECT_SOURCE_DIR}/platforms/mac/Resources/Icons/save-to-file.png"
         "${PROJECT_SOURCE_DIR}/platforms/mac/Resources/Icons/copy-to-clipboard.png"
+        "${PROJECT_SOURCE_DIR}/platforms/win/resources/icons/Snipory.ico"
 )
 add_library(xxsnap_visual_resources INTERFACE)
 target_sources(
@@ -279,6 +280,54 @@ target_link_libraries(
     PRIVATE xxsnap_windows_build_configuration user32
 )
 
+add_library(
+    xxsnap_capture_session_coordinator
+    src/session/CaptureSessionCoordinator.cpp
+)
+target_compile_features(xxsnap_capture_session_coordinator PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_capture_session_coordinator
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_capture_session_coordinator
+    PUBLIC xxsnap_capture_session_state xxsnap_capture_backend
+           xxsnap_selection_composer xxsnap_overlay_host
+)
+
+add_executable(
+    xxsnap_windows WIN32
+    src/app/AppHost.cpp
+    src/app/WinMain.cpp
+)
+target_compile_features(xxsnap_windows PRIVATE cxx_std_17)
+target_include_directories(
+    xxsnap_windows
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/resources"
+)
+target_link_libraries(
+    xxsnap_windows
+    PRIVATE
+        xxsnap_capture_session_coordinator
+        xxsnap_display_topology
+        xxsnap_dxgi_capture_backend
+        xxsnap_gdi_capture_backend
+        xxsnap_fallback_capture_backend
+        xxsnap_selection_composer
+        xxsnap_png_writer
+        xxsnap_clipboard_writer
+        xxsnap_single_instance
+        xxsnap_tray_icon
+        xxsnap_hot_key_registrar
+        xxsnap_visual_resources
+        xxsnap_windows_build_configuration
+        comdlg32
+        ole32
+        user32
+)
+
 if(BUILD_TESTING)
     add_executable(xxsnap_build_configuration_test tests/TestBuildConfiguration.cpp)
     target_compile_features(xxsnap_build_configuration_test PRIVATE cxx_std_20)
@@ -412,6 +461,23 @@ if(BUILD_TESTING)
     add_test(NAME app_entry_services COMMAND xxsnap_app_entry_services_test)
 
     add_executable(
+        xxsnap_capture_session_coordinator_test
+        tests/TestCaptureSessionCoordinator.cpp
+    )
+    target_compile_features(
+        xxsnap_capture_session_coordinator_test PRIVATE cxx_std_17
+    )
+    target_link_libraries(
+        xxsnap_capture_session_coordinator_test
+        PRIVATE xxsnap_capture_session_coordinator
+                xxsnap_windows_build_configuration
+    )
+    add_test(
+        NAME capture_session_coordinator
+        COMMAND xxsnap_capture_session_coordinator_test
+    )
+
+    add_executable(
         xxsnap_selection_composer_test
         tests/TestSelectionComposer.cpp
     )
@@ -462,6 +528,8 @@ set(xxsnap_capture_session_targets
     xxsnap_single_instance
     xxsnap_tray_icon
     xxsnap_hot_key_registrar
+    xxsnap_capture_session_coordinator
+    xxsnap_windows
 )
 if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_capture_session_state_test)
@@ -473,6 +541,7 @@ if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_overlay_layout_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_overlay_input_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_app_entry_services_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_capture_session_coordinator_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_selection_composer_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_clipboard_writer_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_png_writer_test)
