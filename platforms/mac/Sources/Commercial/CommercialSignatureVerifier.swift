@@ -97,6 +97,36 @@ final class CommercialSignatureVerifier {
         return entitlement
     }
 
+    func verifyUpdatePolicy(_ envelope: SignedEnvelope, at now: Date = Date()) throws -> AppUpdatePolicy {
+        let payload = try verifiedPayload(envelope)
+        let policy: AppUpdatePolicy
+        do {
+            policy = try CommercialJSON.decoder.decode(AppUpdatePolicy.self, from: payload)
+        } catch let error as CommercialDateDecodingError {
+            throw CommercialVerificationError.invalidDate(error.field)
+        } catch {
+            throw CommercialVerificationError.invalidPayload
+        }
+        guard policy.schemaVersion == 1 else {
+            throw CommercialVerificationError.unsupportedSchema(policy.schemaVersion)
+        }
+        guard policy.generatedAt <= now.addingTimeInterval(5 * 60),
+              now < policy.expiresAt,
+              policy.generatedAt < policy.expiresAt,
+              policy.expiresAt.timeIntervalSince(policy.generatedAt) <= 15 * 60,
+              AppUpdateVersion(policy.latest.version) != nil,
+              policy.latest.buildNumber >= 1,
+              AppUpdateRelease.isAllowedDownloadURL(policy.latest.downloadURL),
+              policy.latest.sha256.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil,
+              policy.requirements.count <= 100,
+              policy.requirements.allSatisfy({
+                  AppUpdateVersion($0.minimumVersion) != nil
+                      && $0.minimumBuildNumber >= 1
+              })
+        else { throw CommercialVerificationError.invalidPayload }
+        return policy
+    }
+
     private func verifiedPayload(_ envelope: SignedEnvelope) throws -> Data {
         guard !envelope.keyId.isEmpty else { throw CommercialVerificationError.emptyField("keyId") }
         guard envelope.keyId.count <= 128 else { throw CommercialVerificationError.fieldTooLong("keyId") }

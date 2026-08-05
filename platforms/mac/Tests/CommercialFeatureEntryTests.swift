@@ -427,7 +427,7 @@ final class CommercialFeatureEntryTests: XCTestCase {
             captureCoordinator: coordinator,
             settingsStore: settings,
             hotKeyController: hotKeys,
-            updateChecker: PlaceholderUpdateChecker(),
+            updateChecker: UnavailableUpdateChecker(),
             showPreferences: { _ in },
             showHelp: {},
             commercialAccess: access

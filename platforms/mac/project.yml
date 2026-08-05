@@ -49,6 +49,7 @@ targets:
         INFOPLIST_FILE: Resources/Info.plist
         ENABLE_DEBUG_DYLIB: NO
         SWIFT_OBJC_BRIDGING_HEADER: Sources/Bridge/xxsnap-Bridging-Header.h
+        XX_COMMERCIAL_RELEASE_PHASE: free
         CODE_SIGN_STYLE: Manual
         CODE_SIGNING_ALLOWED: YES
         CODE_SIGNING_REQUIRED: YES
@@ -110,8 +111,10 @@ targets:
           let infoData = try Data(contentsOf: URL(fileURLWithPath: arguments[1]))
           let envelopeData = try Data(contentsOf: URL(fileURLWithPath: arguments[2]))
           guard let info = try PropertyListSerialization.propertyList(from: infoData, format: nil) as? [String: Any],
+                let releasePhase = info["XXCommercialReleasePhase"] as? String,
+                ["free", "paid"].contains(releasePhase),
                 let publicKeys = info["XXCommercialSigningPublicKeys"] as? [String: String] else {
-              fail("Release commercial signing public-key dictionary is missing")
+            fail("Release commercial phase or signing public-key dictionary is missing or invalid")
           }
           let debugKeys = Set([
               "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
@@ -151,9 +154,18 @@ targets:
           }
           guard let policy = try JSONSerialization.jsonObject(with: payload) as? [String: Any],
                 policy["schemaVersion"] as? Int == 1,
-                policy["mode"] as? String == "all_free",
-                policy["billingReady"] as? Bool == false else {
-              fail("Release commercial bootstrap payload is malformed")
+                let policyMode = policy["mode"] as? String,
+                let billingReady = policy["billingReady"] as? Bool else {
+            fail("Release commercial bootstrap payload is malformed")
+          }
+          if releasePhase == "free" {
+            guard policyMode == "all_free", billingReady == false else {
+              fail("Free release requires an all_free bootstrap with billing disabled")
+            }
+          } else {
+            guard policyMode == "paid", billingReady == true else {
+              fail("Paid release requires a paid bootstrap with billing enabled")
+            }
           }
           let effectiveAt = utcDate(policy["effectiveAt"], field: "effectiveAt")
           let expiresAt = utcDate(policy["expiresAt"], field: "expiresAt")

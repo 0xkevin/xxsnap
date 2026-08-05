@@ -42,7 +42,7 @@ final class CommercialPolicyClient: CommercialPolicyFetching {
     private let redirectDelegate = CommercialSessionDelegate()
 
     init(origin: URL, session: URLSession) throws {
-        guard Self.isAllowed(origin: origin) else {
+        guard Self.isAllowedProductionOrigin(origin) else {
             throw CommercialPolicyClientError.invalidOrigin
         }
         self.origin = origin
@@ -187,7 +187,7 @@ final class CommercialPolicyClient: CommercialPolicyFetching {
         throw CommercialPolicyClientError.unexpectedStatus(status)
     }
 
-    private static func isAllowed(origin: URL) -> Bool {
+    static func isAllowedProductionOrigin(_ origin: URL) -> Bool {
         guard let components = URLComponents(url: origin, resolvingAgainstBaseURL: false) else {
             return false
         }

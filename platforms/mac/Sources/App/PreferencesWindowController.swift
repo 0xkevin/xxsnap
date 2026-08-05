@@ -559,7 +559,7 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
 
         let page = makeStandardPage(
             rows: [
-                makeRow(title: strings.checkAtLaunch, detail: nil, control: launchSwitch),
+                makeRow(title: strings.checkAtLaunch, detail: strings.checkAtLaunchDetail, control: launchSwitch),
                 makeRow(title: strings.checkInterval, detail: nil, control: intervalPopup)
             ]
         )
@@ -955,9 +955,19 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
     @objc private func checkForUpdates() {
         Task { @MainActor [weak self] in
             guard let self else { return }
-            _ = await self.updateChecker.checkForUpdates()
-            self.updateStatusText = self.strings.upToDate
+            let result = await self.updateChecker.checkForUpdates()
+            switch result {
+            case .upToDate:
+                self.updateStatusText = self.strings.upToDate
+            case .available, .grace:
+                self.updateStatusText = self.strings.updateAvailableTitle
+            case .required:
+                self.updateStatusText = self.strings.updateRequiredTitle
+            case .unavailable:
+                self.updateStatusText = self.strings.updateUnavailableTitle
+            }
             self.refresh()
+            self.updateChecker.presentUpdateResult(result, manual: true)
         }
     }
 

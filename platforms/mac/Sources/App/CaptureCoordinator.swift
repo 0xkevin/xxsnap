@@ -490,23 +490,28 @@ final class CaptureCoordinator {
             let refreshTargetApplication = self.captureTargetApplication
 
             let backgroundImage: NSImage?
-            do {
-                backgroundImage = try await desktopFallbackCapture()
-                frozenDesktopImage = backgroundImage
-                diagnosticLogger.record(
-                    category: diagnosticCategory(for: mode),
-                    level: .debug,
-                    event: diagnosticEventPrefix(for: mode) + "_desktop_snapshot_ready",
-                    metadata: backgroundImage.map { Self.sizeMetadata($0.size) } ?? [:]
-                )
-            } catch {
-                NSLog("xxsnap desktop snapshot failed before overlay: \(error.localizedDescription)")
-                diagnosticLogger.record(
-                    category: diagnosticCategory(for: mode),
-                    level: .error,
-                    event: diagnosticEventPrefix(for: mode) + "_desktop_snapshot_failed",
-                    metadata: ["error_type": String(describing: type(of: error))]
-                )
+            if mode == .region {
+                do {
+                    backgroundImage = try await desktopFallbackCapture()
+                    frozenDesktopImage = backgroundImage
+                    diagnosticLogger.record(
+                        category: diagnosticCategory(for: mode),
+                        level: .debug,
+                        event: diagnosticEventPrefix(for: mode) + "_desktop_snapshot_ready",
+                        metadata: backgroundImage.map { Self.sizeMetadata($0.size) } ?? [:]
+                    )
+                } catch {
+                    NSLog("xxsnap desktop snapshot failed before overlay: \(error.localizedDescription)")
+                    diagnosticLogger.record(
+                        category: diagnosticCategory(for: mode),
+                        level: .error,
+                        event: diagnosticEventPrefix(for: mode) + "_desktop_snapshot_failed",
+                        metadata: ["error_type": String(describing: type(of: error))]
+                    )
+                    backgroundImage = nil
+                    frozenDesktopImage = nil
+                }
+            } else {
                 backgroundImage = nil
                 frozenDesktopImage = nil
             }

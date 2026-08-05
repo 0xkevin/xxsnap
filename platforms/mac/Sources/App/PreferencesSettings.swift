@@ -401,9 +401,43 @@ struct PreferencesStrings {
         isEnglish ? "Variables: {yyyyMMdd}, {HHmmss}" : "可用变量：{yyyyMMdd}、{HHmmss}"
     }
     var checkAtLaunch: String { isEnglish ? "Check at launch" : "启动时检查更新" }
+    var checkAtLaunchDetail: String {
+        isEnglish
+            ? "Controls normal update reminders only; mandatory update checks always stay on"
+            : "仅控制普通更新提醒，强制更新检查始终开启"
+    }
     var checkInterval: String { isEnglish ? "Automatic check interval" : "自动检查间隔" }
     var checkNow: String { isEnglish ? "Check Now" : "立即检查" }
     var upToDate: String { isEnglish ? "You're up to date" : "已是最新版本" }
+    var confirm: String { isEnglish ? "OK" : "确定" }
+    var later: String { isEnglish ? "Later" : "稍后" }
+    var downloadUpdate: String { isEnglish ? "Download Update" : "立即下载更新" }
+    var updateAvailableTitle: String { isEnglish ? "Update Available" : "发现新版本" }
+    var updateGraceTitle: String { isEnglish ? "Update Required Soon" : "请在截止时间前更新" }
+    var updateRequiredTitle: String { isEnglish ? "Update Required" : "必须更新后才能继续使用" }
+    var updateUnavailableTitle: String { isEnglish ? "Unable to Check for Updates" : "暂时无法检查更新" }
+    var updateUnavailableDetail: String {
+        isEnglish ? "Check your network connection and try again." : "请检查网络连接后重试。"
+    }
+    func updateGraceDetail(deadline: Date) -> String {
+        let value = Self.updateDeadlineFormatter(language: language).string(from: deadline)
+        return isEnglish
+            ? "Please update before \(value). After that time, an internet-connected older version will stop working."
+            : "请在 \(value) 前完成更新。到期后，联网的旧版本将停止使用。"
+    }
+    func updateRequiredDetail(version: String, deadline: Date) -> String {
+        let value = Self.updateDeadlineFormatter(language: language).string(from: deadline)
+        return isEnglish
+            ? "The update deadline (\(value)) has passed. Download XxSnap \(version) to continue."
+            : "更新截止时间（\(value)）已过，请下载 XxSnap \(version) 后继续使用。"
+    }
+    private static func updateDeadlineFormatter(language: AppLanguage) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: language == .english ? "en_US" : "zh_CN")
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }
     var hourSuffix: String { isEnglish ? "hours" : "小时" }
     var version: String { isEnglish ? "Version" : "版本" }
     var copyright: String { isEnglish ? "Copyright © 2026 xxsofts.com" : "版权所有 © 2026 xxsofts.com" }

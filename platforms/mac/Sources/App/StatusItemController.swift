@@ -41,18 +41,22 @@ final class StatusItemController: NSObject {
     }
 
     @objc func capture() {
+        guard allowCoreAction() else { return }
         captureCoordinator.startCapture()
     }
 
     @objc func fullScreenCapture() {
+        guard allowCoreAction() else { return }
         captureCoordinator.startFullScreenCapture()
     }
 
     @objc func captureText() {
+        guard allowCoreAction() else { return }
         captureCoordinator.startTextRecognition()
     }
 
     @objc func teachingPen() {
+        guard allowCoreAction() else { return }
         captureCoordinator.toggleTeachingPen()
     }
 
@@ -83,13 +87,8 @@ final class StatusItemController: NSObject {
     @objc func checkForUpdates() {
         Task { @MainActor [weak self] in
             guard let self else { return }
-            _ = await self.updateChecker.checkForUpdates()
-            let strings = PreferencesStrings(language: self.settingsStore.load().language)
-            let alert = NSAlert()
-            alert.messageText = strings.upToDate
-            alert.informativeText = "XxSnap \(self.versionText)"
-            NSApp.activate(ignoringOtherApps: true)
-            alert.runModal()
+            let result = await self.updateChecker.checkForUpdates()
+            self.updateChecker.presentUpdateResult(result, manual: true)
         }
     }
 
@@ -208,12 +207,12 @@ final class StatusItemController: NSObject {
         commercialAccess.snapshot.showsProBadge(for: feature) ? "\(title)  PRO" : title
     }
 
-    private var versionText: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
-            ?? "0.0.0"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
-            ?? "0"
-        return "\(version) (\(build))"
+    private func allowCoreAction() -> Bool {
+        guard !updateChecker.blocksAppUse else {
+            updateChecker.presentRequiredUpdate()
+            return false
+        }
+        return true
     }
 
     private func statusBarImage() -> NSImage? {

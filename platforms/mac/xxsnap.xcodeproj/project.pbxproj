@@ -14,6 +14,7 @@
 		06D0A675DA873D0AEC83074A /* redo-disabled.svg in Resources */ = {isa = PBXBuildFile; fileRef = D28A278CFB0A71EF7C226931 /* redo-disabled.svg */; };
 		0B580D13A7027126833929FB /* close.svg in Resources */ = {isa = PBXBuildFile; fileRef = 59DBC544B325FC074E97E95A /* close.svg */; };
 		0FB0F41C5A5ABD609008810E /* CaptureControlWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24BDEB3AE00354C36614F3C1 /* CaptureControlWindowController.swift */; };
+		0FB8B2A27F708CC4F26ADA9E /* UpdateController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3CBB949DFEEAB8140A541B8 /* UpdateController.swift */; };
 		0FE265B997BADE94F03E511A /* WindowSelectionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7E12CD93A98EF67FC506F54 /* WindowSelectionState.swift */; };
 		107C26AE9F7D1144D28D7227 /* FrameFingerprint.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E05EC584B36298813DBD0B8F /* FrameFingerprint.cpp */; };
 		12815CDACF4A802A2EC59759 /* CommercialDeviceIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DBA2905AF84F7451A848B40 /* CommercialDeviceIdentity.swift */; };
@@ -52,6 +53,7 @@
 		4C61F31AECC18ADFCC8F5665 /* arrow.svg in Resources */ = {isa = PBXBuildFile; fileRef = DDEADF04C25FD6C8A3892E82 /* arrow.svg */; };
 		4CA5B8B429BE6591AC70C5CD /* CommercialCredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7514DB09EF7725FE92CF61C4 /* CommercialCredentialStore.swift */; };
 		4E62604E76890F5112DEF975 /* PreferencesSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95CF3AB1FE953C69432B3834 /* PreferencesSettings.swift */; };
+		512BE22DD8BE80DAADA9C988 /* AnnotationToolPreferencesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 302DD9FDE8FEA7FF9CBDEC4F /* AnnotationToolPreferencesTests.swift */; };
 		512F956DF83061A47167C08B /* highlighter-tool.svg in Resources */ = {isa = PBXBuildFile; fileRef = DB0753FB16E984A9D3A9EC65 /* highlighter-tool.svg */; };
 		56462BFC968000298B727BC1 /* number-sequence.svg in Resources */ = {isa = PBXBuildFile; fileRef = 7B73F549F3FDCF8AF73E5868 /* number-sequence.svg */; };
 		569284AA817376C3F20348F1 /* WindowSelectionStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3617A169724914AB97DA76C4 /* WindowSelectionStateTests.swift */; };
@@ -94,6 +96,7 @@
 		8995EB75BB34DE9C01D7451E /* CommercialModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37986A1276A384BEE49DA4AC /* CommercialModels.swift */; };
 		8A1D5C6713066839A5C21C4C /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7D7DA546BB3234545506458 /* AppDelegate.swift */; };
 		8B88348E80AD052EBD21197B /* eraser-tool.png in Resources */ = {isa = PBXBuildFile; fileRef = 3EA6D152633E6E31441322EA /* eraser-tool.png */; };
+		8CAEFA296F66F29846733A05 /* UpdateControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB89C870A61A4E73859B1B63 /* UpdateControllerTests.swift */; };
 		8D2D0027AE3671BF227FE0B4 /* SelectionOverlayWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C2C9A82C9F64C7D76730267 /* SelectionOverlayWindow.swift */; };
 		8D46DA2C4E3DED0A4A0FBA68 /* shape-marker.png in Resources */ = {isa = PBXBuildFile; fileRef = 1ADEAA166682CB019207C3A4 /* shape-marker.png */; };
 		8DCF03B4FB53CB725EACBA1F /* CommercialRefreshTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EA05424093910CEDC50E094 /* CommercialRefreshTests.swift */; };
@@ -134,6 +137,7 @@
 		C5FF36DC8ADC797972E0A148 /* PinnedImageWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2F4EA6238BB786E1F4F3FC8 /* PinnedImageWindowController.swift */; };
 		C679C275101C830B61421469 /* border-corner-square.svg in Resources */ = {isa = PBXBuildFile; fileRef = 851C3F8F7298C801D1874B4C /* border-corner-square.svg */; };
 		C6F8975757D47CFF0EECF37E /* mosaic-tool.png in Resources */ = {isa = PBXBuildFile; fileRef = A7EABCA72191CADC6E20729C /* mosaic-tool.png */; };
+		C7B2688F7A8BFBCE433D1C82 /* AnnotationToolPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94DD050E69ABE10AF1A20F59 /* AnnotationToolPreferences.swift */; };
 		C9074FF569D4610572CFE532 /* copy-to-clipboard.svg in Resources */ = {isa = PBXBuildFile; fileRef = 16F9496957D9500C499D44CB /* copy-to-clipboard.svg */; };
 		CB7B20E444C4FC3FD6C8F584 /* mosaic-tool.svg in Resources */ = {isa = PBXBuildFile; fileRef = 19A9DB1B5DDF521A858E0762 /* mosaic-tool.svg */; };
 		CCADF1C12AE0363FE4DE6B4C /* DiagnosticSupportController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBA5E6EEB22147D2D8EF0C92 /* DiagnosticSupportController.swift */; };
@@ -199,6 +203,7 @@
 		2707D35D06AF1C4CB212F441 /* settings-more.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "settings-more.png"; sourceTree = "<group>"; };
 		2A64C16BC9D8772BE151DF68 /* Help */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Help; path = Resources/Help; sourceTree = SOURCE_ROOT; };
 		2B30756E650444A1B3BE993E /* wechatpay.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = wechatpay.jpg; sourceTree = "<group>"; };
+		302DD9FDE8FEA7FF9CBDEC4F /* AnnotationToolPreferencesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationToolPreferencesTests.swift; sourceTree = "<group>"; };
 		30F8BFFDF14E4559FB86BF58 /* eyedropper.svg */ = {isa = PBXFileReference; path = eyedropper.svg; sourceTree = "<group>"; };
 		31142970D1AD9FA528A7EC7C /* scroll-capture.svg */ = {isa = PBXFileReference; path = "scroll-capture.svg"; sourceTree = "<group>"; };
 		3617A169724914AB97DA76C4 /* WindowSelectionStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowSelectionStateTests.swift; sourceTree = "<group>"; };
@@ -255,6 +260,7 @@
 		90744D11E6558739B43E552E /* ScrollCaptureSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollCaptureSession.swift; sourceTree = "<group>"; };
 		9126B19E9594AEC07AA8C674 /* notification.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = notification.mp3; sourceTree = "<group>"; };
 		9381E644823646F0488892C2 /* settings-more.svg */ = {isa = PBXFileReference; path = "settings-more.svg"; sourceTree = "<group>"; };
+		94DD050E69ABE10AF1A20F59 /* AnnotationToolPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationToolPreferences.swift; sourceTree = "<group>"; };
 		95CF3AB1FE953C69432B3834 /* PreferencesSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencesSettings.swift; sourceTree = "<group>"; };
 		95FB5FC844E7D04225DF9701 /* xxsnapMacTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = xxsnapMacTests.swift; sourceTree = "<group>"; };
 		97A1C65AD9B951F8B1035A91 /* CommercialWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommercialWindowController.swift; sourceTree = "<group>"; };
@@ -274,6 +280,7 @@
 		A9B0B6076E8D2E3890917553 /* HelpContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpContent.swift; sourceTree = "<group>"; };
 		AA6B91AB12760BD3E07E1301 /* square_masaike.svg */ = {isa = PBXFileReference; path = square_masaike.svg; sourceTree = "<group>"; };
 		AA85F42BD235F2B3AC78E550 /* SystemShortcutMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemShortcutMonitor.swift; sourceTree = "<group>"; };
+		AB89C870A61A4E73859B1B63 /* UpdateControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateControllerTests.swift; sourceTree = "<group>"; };
 		AC03368121DD362591C135BB /* ScrollCaptureBridgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollCaptureBridgeTests.swift; sourceTree = "<group>"; };
 		AD23934318EC97BB5A9EBAFF /* HelpWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpWindowController.swift; sourceTree = "<group>"; };
 		ADE3CA502C8AB2DE9791CD66 /* pin-to-screen.svg */ = {isa = PBXFileReference; path = "pin-to-screen.svg"; sourceTree = "<group>"; };
@@ -318,6 +325,7 @@
 		DE8CA0660F22BC823E1A8DBC /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		E05EC584B36298813DBD0B8F /* FrameFingerprint.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = FrameFingerprint.cpp; path = ../../core/src/scroll/FrameFingerprint.cpp; sourceTree = "<group>"; };
 		E06F5FA13C638ADE764DDA8B /* xxsnap.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = xxsnap.icns; sourceTree = "<group>"; };
+		E3CBB949DFEEAB8140A541B8 /* UpdateController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateController.swift; sourceTree = "<group>"; };
 		E4F7C38789DCA5D0BBB5EEFA /* xxsnap.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = xxsnap.png; sourceTree = "<group>"; };
 		E5ED70B358305ACFBCF32457 /* CommercialAccessController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommercialAccessController.swift; sourceTree = "<group>"; };
 		E6A0AA60A543238DAD640571 /* VerticalOverlapMatcher.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = VerticalOverlapMatcher.cpp; path = ../../core/src/scroll/VerticalOverlapMatcher.cpp; sourceTree = "<group>"; };
@@ -363,6 +371,7 @@
 				BA438FF791561A757586E0BF /* ShortcutFeedbackPresentationController.swift */,
 				216073E47CB43ABDD6AD1B83 /* StatusItemController.swift */,
 				AA85F42BD235F2B3AC78E550 /* SystemShortcutMonitor.swift */,
+				E3CBB949DFEEAB8140A541B8 /* UpdateController.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -495,6 +504,7 @@
 		E47B99274545910C8159BABC /* Tests */ = {
 			isa = PBXGroup;
 			children = (
+				302DD9FDE8FEA7FF9CBDEC4F /* AnnotationToolPreferencesTests.swift */,
 				7E58F0FBF019037172C857FC /* AppSettingsTests.swift */,
 				7C4919377BCC3AB0F5C0602A /* CommercialAccessControllerTests.swift */,
 				9971E375C61716AD5E804AB1 /* CommercialCredentialStoreTests.swift */,
@@ -513,6 +523,7 @@
 				AE92468A4EDF1E94CCEC85EF /* ScrollCaptureTargetDetectorTests.swift */,
 				9B27A48605436F0C1D37649F /* ScrollCaptureTestSupport.swift */,
 				5D09140AE83525CD00CBA67A /* SelectionToolbarStateTests.swift */,
+				AB89C870A61A4E73859B1B63 /* UpdateControllerTests.swift */,
 				3617A169724914AB97DA76C4 /* WindowSelectionStateTests.swift */,
 				95FB5FC844E7D04225DF9701 /* xxsnapMacTests.swift */,
 				AE84A9DD28951DF7B77B10C4 /* Fixtures */,
@@ -554,6 +565,7 @@
 		F37C448F1A3EA306B87B3856 /* Overlay */ = {
 			isa = PBXGroup;
 			children = (
+				94DD050E69ABE10AF1A20F59 /* AnnotationToolPreferences.swift */,
 				C662C2A250F475591381BB05 /* CaptureAnnotationRenderer.swift */,
 				9C2C9A82C9F64C7D76730267 /* SelectionOverlayWindow.swift */,
 				CE931250563980B3056AED56 /* SelectionToolbarState.swift */,
@@ -855,7 +867,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "if [ \"$CONFIGURATION\" != \"Release\" ]; then\n  exit 0\nfi\nBUILT_INFO=\"$TARGET_BUILD_DIR/$INFOPLIST_PATH\"\nBOOTSTRAP=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/commercial-policy-bootstrap.json\"\nif [ ! -f \"$BUILT_INFO\" ] || [ ! -f \"$BOOTSTRAP\" ]; then\n  echo \"error: Release commercial policy bootstrap is missing\"\n  exit 1\nfi\n/usr/bin/xcrun --sdk macosx swift - \"$BUILT_INFO\" \"$BOOTSTRAP\" <<'SWIFT'\nimport CryptoKit\nimport Foundation\n\nfunc fail(_ message: String) -> Never {\n    FileHandle.standardError.write(Data(\"error: \\(message)\\n\".utf8))\n    exit(1)\n}\n\nfunc canonicalBase64(_ value: Any?, field: String) -> Data {\n    guard let value = value as? String,\n          let data = Data(base64Encoded: value),\n          data.base64EncodedString() == value else {\n        fail(\"Release commercial \\(field) is not canonical Base64\")\n    }\n    return data\n}\n\nfunc utcDate(_ value: Any?, field: String) -> Date {\n    guard let value = value as? String, value.hasSuffix(\"Z\") else {\n        fail(\"Release commercial \\(field) is not a UTC ISO8601 date\")\n    }\n    let formatter = ISO8601DateFormatter()\n    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]\n    if let date = formatter.date(from: value) { return date }\n    formatter.formatOptions = [.withInternetDateTime]\n    guard let date = formatter.date(from: value) else {\n        fail(\"Release commercial \\(field) is not a UTC ISO8601 date\")\n    }\n    return date\n}\n\nlet arguments = CommandLine.arguments\nguard arguments.count == 3 else { fail(\"Release commercial validation arguments are missing\") }\nlet infoData = try Data(contentsOf: URL(fileURLWithPath: arguments[1]))\nlet envelopeData = try Data(contentsOf: URL(fileURLWithPath: arguments[2]))\nguard let info = try PropertyListSerialization.propertyList(from: infoData, format: nil) as? [String: Any],\n      let releasePhase = info[\"XXCommercialReleasePhase\"] as? String,\n      [\"free\", \"paid\"].contains(releasePhase),\n      let publicKeys = info[\"XXCommercialSigningPublicKeys\"] as? [String: String] else {\n    fail(\"Release commercial phase or signing public-key dictionary is missing or invalid\")\n}\nlet debugKeys = Set([\n    \"11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=\",\n    \"iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=\",\n])\nvar validatedPublicKeys: [String: Data] = [:]\nfor (keyId, encodedPublicKey) in publicKeys {\n    if encodedPublicKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {\n        continue\n    }\n    let publicKeyData = canonicalBase64(encodedPublicKey, field: \"public key\")\n    guard publicKeyData.count == 32 else {\n        fail(\"Release commercial public key must be 32 bytes\")\n    }\n    guard !debugKeys.contains(encodedPublicKey) else {\n        fail(\"Release cannot use a Debug/test commercial signing public key\")\n    }\n    validatedPublicKeys[keyId] = publicKeyData\n}\nguard !validatedPublicKeys.isEmpty else {\n    fail(\"Release commercial signing public-key dictionary has no configured keys\")\n}\nguard let envelope = try JSONSerialization.jsonObject(with: envelopeData) as? [String: Any],\n      Set(envelope.keys) == Set([\"keyId\", \"payload\", \"signature\"]),\n      let keyId = envelope[\"keyId\"] as? String,\n      !keyId.isEmpty,\n      keyId.count <= 128,\n      let publicKeyData = validatedPublicKeys[keyId] else {\n    fail(\"Release commercial envelope is malformed or its keyId has no public key\")\n}\nlet payload = canonicalBase64(envelope[\"payload\"], field: \"payload\")\nlet signature = canonicalBase64(envelope[\"signature\"], field: \"signature\")\nguard signature.count == 64,\n      let publicKey = try? Curve25519.Signing.PublicKey(rawRepresentation: publicKeyData),\n      publicKey.isValidSignature(signature, for: payload) else {\n    fail(\"Release commercial bootstrap signature verification failed\")\n}\nguard let policy = try JSONSerialization.jsonObject(with: payload) as? [String: Any],\n      policy[\"schemaVersion\"] as? Int == 1,\n      let policyMode = policy[\"mode\"] as? String,\n      let billingReady = policy[\"billingReady\"] as? Bool else {\n    fail(\"Release commercial bootstrap payload is malformed\")\n}\nif releasePhase == \"free\" {\n    guard policyMode == \"all_free\", billingReady == false else {\n        fail(\"Free release requires an all_free bootstrap with billing disabled\")\n    }\n} else {\n    guard policyMode == \"paid\", billingReady == true else {\n        fail(\"Paid release requires a paid bootstrap with billing enabled\")\n    }\n}\nlet effectiveAt = utcDate(policy[\"effectiveAt\"], field: \"effectiveAt\")\nlet expiresAt = utcDate(policy[\"expiresAt\"], field: \"expiresAt\")\nlet buildDate = Date()\nguard effectiveAt < expiresAt,\n      expiresAt.timeIntervalSince(effectiveAt) <= 30 * 24 * 60 * 60 else {\n    fail(\"Release commercial bootstrap window exceeds 30 days\")\n}\nguard effectiveAt <= buildDate else {\n    fail(\"Release commercial bootstrap is not effective at build time\")\n}\nguard buildDate.addingTimeInterval(14 * 24 * 60 * 60) < expiresAt else {\n    fail(\"Release commercial bootstrap has less than 14 days of validity\")\n}\nguard expiresAt <= buildDate.addingTimeInterval(30 * 24 * 60 * 60) else {\n    fail(\"Release commercial bootstrap expires more than 30 days after build time\")\n}\nSWIFT\n";
+			shellScript = "if [ \"$CONFIGURATION\" != \"Release\" ]; then\n  exit 0\nfi\nBUILT_INFO=\"$TARGET_BUILD_DIR/$INFOPLIST_PATH\"\nBOOTSTRAP=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/commercial-policy-bootstrap.json\"\nif [ ! -f \"$BUILT_INFO\" ] || [ ! -f \"$BOOTSTRAP\" ]; then\n  echo \"error: Release commercial policy bootstrap is missing\"\n  exit 1\nfi\n/usr/bin/xcrun --sdk macosx swift - \"$BUILT_INFO\" \"$BOOTSTRAP\" <<'SWIFT'\nimport CryptoKit\nimport Foundation\n\nfunc fail(_ message: String) -> Never {\n    FileHandle.standardError.write(Data(\"error: \\(message)\\n\".utf8))\n    exit(1)\n}\n\nfunc canonicalBase64(_ value: Any?, field: String) -> Data {\n    guard let value = value as? String,\n          let data = Data(base64Encoded: value),\n          data.base64EncodedString() == value else {\n        fail(\"Release commercial \\(field) is not canonical Base64\")\n    }\n    return data\n}\n\nfunc utcDate(_ value: Any?, field: String) -> Date {\n    guard let value = value as? String, value.hasSuffix(\"Z\") else {\n        fail(\"Release commercial \\(field) is not a UTC ISO8601 date\")\n    }\n    let formatter = ISO8601DateFormatter()\n    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]\n    if let date = formatter.date(from: value) { return date }\n    formatter.formatOptions = [.withInternetDateTime]\n    guard let date = formatter.date(from: value) else {\n        fail(\"Release commercial \\(field) is not a UTC ISO8601 date\")\n    }\n    return date\n}\n\nlet arguments = CommandLine.arguments\nguard arguments.count == 3 else { fail(\"Release commercial validation arguments are missing\") }\nlet infoData = try Data(contentsOf: URL(fileURLWithPath: arguments[1]))\nlet envelopeData = try Data(contentsOf: URL(fileURLWithPath: arguments[2]))\nguard let info = try PropertyListSerialization.propertyList(from: infoData, format: nil) as? [String: Any],\n      let releasePhase = info[\"XXCommercialReleasePhase\"] as? String,\n      [\"free\", \"paid\"].contains(releasePhase),\n      let publicKeys = info[\"XXCommercialSigningPublicKeys\"] as? [String: String] else {\n  fail(\"Release commercial phase or signing public-key dictionary is missing or invalid\")\n}\nlet debugKeys = Set([\n    \"11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=\",\n    \"iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=\",\n])\nvar validatedPublicKeys: [String: Data] = [:]\nfor (keyId, encodedPublicKey) in publicKeys {\n    if encodedPublicKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {\n        continue\n    }\n    let publicKeyData = canonicalBase64(encodedPublicKey, field: \"public key\")\n    guard publicKeyData.count == 32 else {\n        fail(\"Release commercial public key must be 32 bytes\")\n    }\n    guard !debugKeys.contains(encodedPublicKey) else {\n        fail(\"Release cannot use a Debug/test commercial signing public key\")\n    }\n    validatedPublicKeys[keyId] = publicKeyData\n}\nguard !validatedPublicKeys.isEmpty else {\n    fail(\"Release commercial signing public-key dictionary has no configured keys\")\n}\nguard let envelope = try JSONSerialization.jsonObject(with: envelopeData) as? [String: Any],\n      Set(envelope.keys) == Set([\"keyId\", \"payload\", \"signature\"]),\n      let keyId = envelope[\"keyId\"] as? String,\n      !keyId.isEmpty,\n      keyId.count <= 128,\n      let publicKeyData = validatedPublicKeys[keyId] else {\n    fail(\"Release commercial envelope is malformed or its keyId has no public key\")\n}\nlet payload = canonicalBase64(envelope[\"payload\"], field: \"payload\")\nlet signature = canonicalBase64(envelope[\"signature\"], field: \"signature\")\nguard signature.count == 64,\n      let publicKey = try? Curve25519.Signing.PublicKey(rawRepresentation: publicKeyData),\n      publicKey.isValidSignature(signature, for: payload) else {\n    fail(\"Release commercial bootstrap signature verification failed\")\n}\nguard let policy = try JSONSerialization.jsonObject(with: payload) as? [String: Any],\n      policy[\"schemaVersion\"] as? Int == 1,\n      let policyMode = policy[\"mode\"] as? String,\n      let billingReady = policy[\"billingReady\"] as? Bool else {\n  fail(\"Release commercial bootstrap payload is malformed\")\n}\nif releasePhase == \"free\" {\n  guard policyMode == \"all_free\", billingReady == false else {\n    fail(\"Free release requires an all_free bootstrap with billing disabled\")\n  }\n} else {\n  guard policyMode == \"paid\", billingReady == true else {\n    fail(\"Paid release requires a paid bootstrap with billing enabled\")\n  }\n}\nlet effectiveAt = utcDate(policy[\"effectiveAt\"], field: \"effectiveAt\")\nlet expiresAt = utcDate(policy[\"expiresAt\"], field: \"expiresAt\")\nlet buildDate = Date()\nguard effectiveAt < expiresAt,\n      expiresAt.timeIntervalSince(effectiveAt) <= 30 * 24 * 60 * 60 else {\n    fail(\"Release commercial bootstrap window exceeds 30 days\")\n}\nguard effectiveAt <= buildDate else {\n    fail(\"Release commercial bootstrap is not effective at build time\")\n}\nguard buildDate.addingTimeInterval(14 * 24 * 60 * 60) < expiresAt else {\n    fail(\"Release commercial bootstrap has less than 14 days of validity\")\n}\nguard expiresAt <= buildDate.addingTimeInterval(30 * 24 * 60 * 60) else {\n    fail(\"Release commercial bootstrap expires more than 30 days after build time\")\n}\nSWIFT\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -864,6 +876,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C7B2688F7A8BFBCE433D1C82 /* AnnotationToolPreferences.swift in Sources */,
 				8A1D5C6713066839A5C21C4C /* AppDelegate.swift in Sources */,
 				56D24669DF98A8356C8D5638 /* AppServices.swift in Sources */,
 				2AE784E6242C209A3757AFA2 /* AppSettings.swift in Sources */,
@@ -908,6 +921,7 @@
 				6BBCFA1AA4FA3F5B9DDF82FB /* SnapshotExportBridge.mm in Sources */,
 				D33C9F37039E2FD69220AE5B /* StatusItemController.swift in Sources */,
 				9425994BDDA3431D99130570 /* SystemShortcutMonitor.swift in Sources */,
+				0FB8B2A27F708CC4F26ADA9E /* UpdateController.swift in Sources */,
 				407309C186AFD49EC1A764BC /* VerticalOverlapMatcher.cpp in Sources */,
 				0FE265B997BADE94F03E511A /* WindowSelectionState.swift in Sources */,
 				A43BB570B51F8FD3E4C6735D /* main.swift in Sources */,
@@ -918,6 +932,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				512BE22DD8BE80DAADA9C988 /* AnnotationToolPreferencesTests.swift in Sources */,
 				F8365189DAE642AC6E7A2BA5 /* AppSettingsTests.swift in Sources */,
 				E7DD4142D94657722C9D65FA /* CommercialAccessControllerTests.swift in Sources */,
 				A15F3C468CCCDDCE14F9A090 /* CommercialCredentialStoreTests.swift in Sources */,
@@ -935,6 +950,7 @@
 				6C9E4ECAB24F90400F7FA518 /* ScrollCaptureTargetDetectorTests.swift in Sources */,
 				03F322CEAC1395592F9757E5 /* ScrollCaptureTestSupport.swift in Sources */,
 				2932C52816DBBB75B3E3D9C3 /* SelectionToolbarStateTests.swift in Sources */,
+				8CAEFA296F66F29846733A05 /* UpdateControllerTests.swift in Sources */,
 				569284AA817376C3F20348F1 /* WindowSelectionStateTests.swift in Sources */,
 				373154DBAEF7397C9B344879 /* xxsnapMacTests.swift in Sources */,
 			);

@@ -123,6 +123,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var commercialAccess: (any CommercialAccessProviding)?
     private var commercialLaunchDependencies: CommercialLaunchDependencies?
     private var commercialLaunchTask: Task<Void, Never>?
+    private var updateController: AppUpdateController?
     private let diagnosticLogStore = DiagnosticLogStore.shared
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -142,7 +143,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let settingsStore = SettingsStore()
         let preferencesSettingsStore = PreferencesSettingsStore()
         let filenameProvider = CaptureFilenameProvider(settingsStore: preferencesSettingsStore)
-        let updateChecker = PlaceholderUpdateChecker()
+        let updateController = try? AppUpdateController()
+        let updateChecker: any UpdateChecking = updateController ?? UnavailableUpdateChecker()
+        self.updateController = updateController
         let commercialDependencies = CommercialLaunchDependencies.make(
             productionFactory: {
                 try CommercialAccessController(diagnosticLogger: self.diagnosticLogStore)
@@ -153,9 +156,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         commercialLaunchTask = Task { @MainActor [weak self] in
             await commercialDependencies.prepareFromCache()
             guard let self, !Task.isCancelled else { return }
+            let screenCaptureService = ScreenCaptureService()
             let captureCoordinator = CaptureCoordinator(
                 permissionCoordinator: PermissionCoordinator(),
-                screenCaptureService: ScreenCaptureService(),
+                screenCaptureService: screenCaptureService,
                 settingsStore: settingsStore,
                 preferencesSettingsStore: preferencesSettingsStore,
                 filenameProvider: filenameProvider,
@@ -165,6 +169,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.settingsStore = settingsStore
             self.preferencesSettingsStore = preferencesSettingsStore
             self.captureCoordinator = captureCoordinator
+            Task { @MainActor [weak screenCaptureService] in
+                await screenCaptureService?.prepareShareableContent()
+            }
             self.commercialAccess = commercialAccess
             let helpWindowController = HelpWindowController(settingsStore: settingsStore)
             self.helpWindowController = helpWindowController
@@ -178,24 +185,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     HotKeyFormatter.settings(from: event)
                 )
             }
+            let updateGate: @MainActor () -> Bool = {
+                guard !updateChecker.blocksAppUse else {
+                    updateChecker.presentRequiredUpdate()
+                    return false
+                }
+                return true
+            }
             let hotKeyController = CaptureHotKeyController(
                 settingsStore: settingsStore,
                 captureHandler: {
+                    guard updateGate() else { return }
                     captureCoordinator.startCapture()
                 },
                 fullScreenCaptureHandler: {
+                    guard updateGate() else { return }
                     captureCoordinator.startFullScreenCapture()
                 },
                 recognizeTextHandler: {
+                    guard updateGate() else { return }
                     captureCoordinator.startTextRecognition()
                 },
                 hotKeyFeedbackHandler: { [weak shortcutFeedbackPresentationController] settings in
                     shortcutFeedbackPresentationController?.show(settings)
                 },
                 teachingPenHandler: {
+                    guard updateGate() else { return }
                     captureCoordinator.toggleTeachingPen()
                 },
                 restorePinnedImageHandler: {
+                    guard updateGate() else { return }
                     captureCoordinator.restoreMostRecentlyHiddenPinnedWindow()
                 }
             )
@@ -256,6 +275,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 commercialAccess: commercialAccess
             )
             self.statusItemController = statusItemController
+            updateController?.onStateChange = { [weak statusItemController, weak preferencesWindowController] in
+                statusItemController?.refresh()
+                preferencesWindowController?.refresh()
+            }
+            let updateSettings = preferencesSettingsStore.load()
+            updateController?.start(
+                showOptionalAtLaunch: updateSettings.checksForUpdatesAtLaunch,
+                intervalHours: updateSettings.updateCheckIntervalHours
+            )
 
             let refreshController = commercialAccess as? CommercialAccessController
             commercialAccess.onStateChange = {
@@ -304,6 +332,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         systemShortcutMonitor?.refresh()
         preferencesWindowController?.refresh()
         commercialLaunchDependencies?.triggerRefresh()
+        Task { @MainActor [weak updateController] in
+            guard let updateController else { return }
+            let result = await updateController.checkForUpdates()
+            if case .required = result {
+                updateController.presentRequiredUpdate()
+            }
+        }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -314,6 +349,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSLog("xxsnap applicationWillTerminate")
         commercialLaunchTask?.cancel()
         commercialLaunchDependencies?.cancelRefresh()
+        updateController?.stop()
         systemShortcutMonitor?.stop()
         diagnosticLogStore.record(
             category: .application,

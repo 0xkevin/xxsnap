@@ -403,6 +403,54 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertNil(coordinator.test_lastCapture)
     }
 
+    @MainActor
+    func testTextRecognitionPresentsWithoutCapturingWholeDesktopFirst() async {
+        let image = solidImage(size: NSSize(width: 320, height: 200), color: .white)
+        var desktopCaptureCount = 0
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: FakeScreenCapturePermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            desktopFallbackCapture: {
+                desktopCaptureCount += 1
+                return image
+            }
+        )
+
+        coordinator.startTextRecognition()
+        for _ in 0..<100 where !coordinator.test_isTextRecognitionOverlayActive {
+            await Task.yield()
+        }
+
+        XCTAssertTrue(coordinator.test_isTextRecognitionOverlayActive)
+        XCTAssertEqual(desktopCaptureCount, 0)
+        XCTAssertNil(coordinator.test_overlayWindow?.test_backgroundImage)
+        coordinator.test_overlayWindow?.cancel()
+    }
+
+    @MainActor
+    func testTeachingPenPresentsWithoutCapturingWholeDesktopFirst() async {
+        let image = solidImage(size: NSSize(width: 320, height: 200), color: .white)
+        var desktopCaptureCount = 0
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: FakeScreenCapturePermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService(),
+            desktopFallbackCapture: {
+                desktopCaptureCount += 1
+                return image
+            }
+        )
+
+        coordinator.toggleTeachingPen()
+        for _ in 0..<100 where !coordinator.test_isTeachingPenOverlayActive {
+            await Task.yield()
+        }
+
+        XCTAssertTrue(coordinator.test_isTeachingPenOverlayActive)
+        XCTAssertEqual(desktopCaptureCount, 0)
+        XCTAssertNil(coordinator.test_overlayWindow?.test_backgroundImage)
+        coordinator.test_overlayWindow?.cancel()
+    }
+
     func testOpenCaptureToolbarUpdatesTooltipsWhenLanguageChanges() throws {
         var settings = AppSettings.default
         settings.language = .zhHans
@@ -4836,7 +4884,7 @@ final class SelectionToolbarStateTests: XCTestCase {
             min(abs(options.minX - main.maxX), abs(main.minX - options.maxX)),
             5
         )
-        XCTAssertEqual(main.size, NSSize(width: 56, height: 168))
+        XCTAssertEqual(main.size, NSSize(width: 56, height: 196))
         XCTAssertEqual(options.width, main.width)
         window.test_rightMouseDown(at: pointer)
 
@@ -4907,6 +4955,7 @@ final class SelectionToolbarStateTests: XCTestCase {
             .mosaic, .eyedropper,
             .eraser, .magnifier,
             .copy, .save,
+            .clearAll,
         ]
         for button in visibleButtons {
             let rect = try XCTUnwrap(
@@ -4926,6 +4975,56 @@ final class SelectionToolbarStateTests: XCTestCase {
     }
 
     @MainActor
+    func testTeachingPenSeparatesActionsAndMovesClearAllBelowCopyAndSave() throws {
+        let frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        let window = SelectionOverlayWindow(
+            backgroundImage: solidImage(size: frame.size, color: .white),
+            configuration: .teachingPen(windowFrame: frame)
+        ) { _ in }
+        window.test_setAnnotations([
+            CaptureAnnotation(
+                kind: .rectangle,
+                rect: NSRect(x: 40, y: 40, width: 80, height: 60),
+                style: CaptureAnnotationStyle()
+            ),
+        ])
+        window.test_rightMouseDown(at: NSPoint(x: 360, y: 420))
+
+        let copy = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .copy))
+        let save = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .save))
+        let clearAll = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .clearAll))
+        let separator = try XCTUnwrap(window.test_teachingPenActionSeparatorRect)
+        XCTAssertGreaterThan(separator.minY, max(copy.maxY, save.maxY))
+        XCTAssertLessThan(clearAll.maxY, min(copy.minY, save.minY))
+        XCTAssertEqual(clearAll.midX, try XCTUnwrap(window.test_mainToolbarRect()).midX, accuracy: 0.5)
+
+        window.test_mouseDown(at: NSPoint(x: clearAll.midX, y: clearAll.midY))
+        window.test_mouseUp(at: NSPoint(x: clearAll.midX, y: clearAll.midY))
+        XCTAssertEqual(window.test_annotationCount, 0)
+    }
+
+    @MainActor
+    func testTeachingPenEraserOptionsOnlyContainTwoModesAtCompactHeight() throws {
+        let frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        let window = SelectionOverlayWindow(
+            backgroundImage: solidImage(size: frame.size, color: .white),
+            configuration: .teachingPen(windowFrame: frame)
+        ) { _ in }
+        window.test_activateEraserTool()
+        window.test_rightMouseDown(at: NSPoint(x: 360, y: 420))
+
+        let options = try XCTUnwrap(window.test_optionsToolbarRect)
+        let pointMode = try XCTUnwrap(window.test_eraserPointOptionRect)
+        let rectangleMode = try XCTUnwrap(window.test_eraserRectangleOptionRect)
+        XCTAssertEqual(options.width, 34, accuracy: 0.5)
+        XCTAssertEqual(options.height, 60, accuracy: 0.5)
+        XCTAssertEqual(pointMode.midX, options.midX, accuracy: 0.5)
+        XCTAssertEqual(rectangleMode.midX, options.midX, accuracy: 0.5)
+        XCTAssertGreaterThan(pointMode.minY, rectangleMode.maxY)
+        XCTAssertNil(window.test_eraserClearAllOptionRect)
+    }
+
+    @MainActor
     func testTextRecognitionDoesNotShowToolbar() {
         let image = solidImage(size: NSSize(width: 640, height: 420), color: .white)
         let window = SelectionOverlayWindow(
@@ -4937,7 +5036,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         let buttons: [TestToolbarButton] = [
             .rectangle, .arrow, .pen, .marker, .eyedropper, .mosaic,
             .text, .number, .magnifier, .eraser,
-            .undo, .redo, .cancel, .pin, .save, .copy, .scroll, .finishEditing,
+            .undo, .redo, .cancel, .pin, .save, .copy, .scroll, .finishEditing, .clearAll,
         ]
         for button in buttons {
             XCTAssertNil(window.test_mainToolbarButtonRect(for: button), "\(button) should be hidden")
@@ -15854,6 +15953,8 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         XCTAssertLessThan(leadingPoint.x, firstButton.minX)
         XCTAssertGreaterThan(trailingPoint.x, lastButton.maxX)
+        XCTAssertLessThanOrEqual(firstButton.minX - leadingPoint.x, 14)
+        XCTAssertLessThanOrEqual(trailingPoint.x - lastButton.maxX, 14)
         XCTAssertEqual(window.test_cursorStyle(at: leadingPoint), .move)
         XCTAssertEqual(window.test_cursorStyle(at: trailingPoint), .move)
     }

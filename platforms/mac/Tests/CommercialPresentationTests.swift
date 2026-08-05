@@ -587,7 +587,7 @@ private final class PresentationLaunchManager: LaunchAtLoginManaging {
 }
 
 private struct PresentationUpdateChecker: UpdateChecking {
-    func checkForUpdates() async -> UpdateCheckResult { .placeholderUpToDate }
+    func checkForUpdates() async -> UpdateCheckResult { .upToDate }
 }
 
 @MainActor

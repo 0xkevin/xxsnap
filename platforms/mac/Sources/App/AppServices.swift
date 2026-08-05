@@ -47,20 +47,6 @@ final class LaunchAtLoginManager: LaunchAtLoginManaging {
     }
 }
 
-enum UpdateCheckResult: Equatable {
-    case placeholderUpToDate
-}
-
-protocol UpdateChecking {
-    func checkForUpdates() async -> UpdateCheckResult
-}
-
-struct PlaceholderUpdateChecker: UpdateChecking {
-    func checkForUpdates() async -> UpdateCheckResult {
-        .placeholderUpToDate
-    }
-}
-
 struct RecognizedTextCandidate: Equatable {
     let text: String
     let boundingBox: CGRect
@@ -247,11 +233,20 @@ final class OCRTextRecognitionService: OCRTextRecognizing {
         )
         let text = Self.joinedText(from: lines)
         if recognitionLanguages == nil,
-           !Self.containsHangul(text),
-           Self.containsHanIdeograph(text) {
+           Self.shouldAttemptEmbeddedKoreanRepair(text) {
             lines = await repairingEmbeddedKorean(in: lines, sourceImage: cgImage)
         }
         return Self.joinedText(from: lines)
+    }
+
+    static func shouldAttemptEmbeddedKoreanRepair(_ text: String) -> Bool {
+        guard containsHanIdeograph(text), !containsHangul(text) else { return false }
+        let groupingPairs: [(Character, Character)] = [
+            ("(", ")"), ("（", "）"), ("[", "]"), ("【", "】"), ("{", "}"),
+        ]
+        return groupingPairs.contains { opening, closing in
+            text.contains(opening) && text.contains(closing)
+        }
     }
 
     private func recognizeHorizontalLines(

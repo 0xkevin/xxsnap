@@ -2061,6 +2061,18 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(OCRTextRecognitionService.join(candidates), "Alpha\nBeta")
     }
 
+    func testOCROnlyAttemptsEmbeddedKoreanRepairForGroupedChineseText() {
+        XCTAssertFalse(
+            OCRTextRecognitionService.shouldAttemptEmbeddedKoreanRepair("普通中文文字识别")
+        )
+        XCTAssertFalse(
+            OCRTextRecognitionService.shouldAttemptEmbeddedKoreanRepair("한국어와 中文")
+        )
+        XCTAssertTrue(
+            OCRTextRecognitionService.shouldAttemptEmbeddedKoreanRepair("韩语声母（示例）说明")
+        )
+    }
+
     func testQRCodeRecognitionPrefersLargestCandidate() throws {
         let candidates = [
             QRCodeCandidate(
@@ -2551,6 +2563,6 @@ private final class FakeLaunchAtLoginManager: LaunchAtLoginManaging {
 
 private struct FakeUpdateChecker: UpdateChecking {
     func checkForUpdates() async -> UpdateCheckResult {
-        .placeholderUpToDate
+        .upToDate
     }
 }

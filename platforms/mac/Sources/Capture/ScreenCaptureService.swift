@@ -233,6 +233,13 @@ private final class ScrollCaptureFrameReceiver: NSObject, SCStreamOutput, @unche
 
 @MainActor
 final class ScreenCaptureService: ScrollRegionCapturing {
+    private var cachedShareableContent: SCShareableContent?
+
+    func prepareShareableContent() async {
+        guard CGPreflightScreenCaptureAccess() else { return }
+        _ = try? await shareableContent()
+    }
+
     static func sourceRect(for selectionRect: NSRect, in screenFrame: NSRect) -> CGRect {
         CGRect(
             x: selectionRect.minX - screenFrame.minX,
@@ -273,7 +280,7 @@ final class ScreenCaptureService: ScrollRegionCapturing {
             throw ScreenCaptureServiceError.displayNotFound
         }
 
-        let shareableContent = try await SCShareableContent.current
+        let shareableContent = try await shareableContent()
 
         let targets = displayTargets(from: shareableContent.displays)
         if targets.count == 1, let target = targets.first {
@@ -349,7 +356,7 @@ final class ScreenCaptureService: ScrollRegionCapturing {
             throw ScreenCaptureServiceError.emptySelection
         }
 
-        let shareableContent = try await SCShareableContent.current
+        let shareableContent = try await shareableContent()
         guard let target = targetDisplay(for: normalizedSelection, displays: shareableContent.displays) else {
             throw ScreenCaptureServiceError.displayNotFound
         }
@@ -391,7 +398,7 @@ final class ScreenCaptureService: ScrollRegionCapturing {
     func startScrollFrameStream(in selectionRect: NSRect) async throws -> ScrollCaptureFrameStream {
         let normalizedSelection = selectionRect.standardized
         guard !normalizedSelection.isEmpty else { throw ScreenCaptureServiceError.emptySelection }
-        let shareableContent = try await SCShareableContent.current
+        let shareableContent = try await shareableContent()
         guard let target = targetDisplay(for: normalizedSelection, displays: shareableContent.displays) else {
             throw ScreenCaptureServiceError.displayNotFound
         }
@@ -432,6 +439,26 @@ final class ScreenCaptureService: ScrollRegionCapturing {
 }
 
 private extension ScreenCaptureService {
+    func shareableContent() async throws -> SCShareableContent {
+        let displayIDs = activeDisplayIDs()
+        if let cachedShareableContent,
+           !displayIDs.isEmpty,
+           Set(cachedShareableContent.displays.map(\.displayID)) == displayIDs {
+            return cachedShareableContent
+        }
+
+        let content = try await SCShareableContent.current
+        cachedShareableContent = content
+        return content
+    }
+
+    func activeDisplayIDs() -> Set<CGDirectDisplayID> {
+        Set(NSScreen.screens.compactMap { screen in
+            (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)
+                .map { CGDirectDisplayID($0.uint32Value) }
+        })
+    }
+
     struct DisplayTarget {
         let display: SCDisplay
         let screenFrame: NSRect

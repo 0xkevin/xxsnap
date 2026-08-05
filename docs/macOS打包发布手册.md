@@ -245,18 +245,33 @@ dist/1.0.0/
 
 后台会自己校验文件大小和 SHA-256。校验不通过时不要绕过，应重新检查 DMG 和 manifest。
 
+### 需要强制旧版本更新时
+
+不要在新安装包还没完成实机验证时开启强制更新。
+
+1. 先按上面的步骤正常发布新版本。
+2. 用另一台 Mac 从官网下载、安装并验证新版本。
+3. 回到“版本管理”，在已发布版本右侧点击“设置强制更新”。
+4. 选择宽限期的截止时间。截止前旧版本只会提醒更新；截止后，联网的旧版本必须下载新版本才能继续截图、滚动截图、贴图、文字识别和教笔。
+5. 输入 `设置强制更新`，再保存。
+
+需要取消时，打开同一个窗口并点击“取消强制更新”。客户端的“检查更新”菜单不会删除；“启动时检查更新”只控制普通新版提醒，强制更新检查始终开启。
+
 ## 九、发布后检查
 
 ### [Mac]
 
 ```bash
 curl -fsS "https://download.xxsofts.com/api/v1/releases/latest?locale=zh-CN"
+curl -fsS "https://download.xxsofts.com/api/v1/releases/update-policy?locale=zh-CN"
 curl -fsSI "https://download.xxsofts.com/files/$VERSION/$DMG_NAME"
 open "https://xxsnap.xxsofts.com/zh-CN/"
 open "https://xxsnap.xxsofts.com/zh-CN/releases/"
 ```
 
-确认官网版本、更新日志和下载按钮都指向新版本。再用另一台 Mac 下载 DMG，安装后检查截图、贴图、滚动截图、文字识别和教笔。
+确认更新策略接口返回 `keyId`、`payload` 和 `signature`，官网版本、更新日志和下载按钮都指向新版本。客户端会先验签，再执行普通提醒、宽限期提醒或到期强制更新；服务暂时不可用时不会误锁从未收到过强制策略的离线用户。
+
+再用另一台 Mac 下载 DMG，安装后检查截图、贴图、滚动截图、文字识别和教笔。
 
 确认没有问题后打标签：
 

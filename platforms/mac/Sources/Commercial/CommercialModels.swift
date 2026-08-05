@@ -583,14 +583,14 @@ struct CommercialDateDecodingError: Error, Equatable {
     let field: String
 }
 
-private struct AnyCodingKey: CodingKey {
+struct AnyCodingKey: CodingKey {
     let stringValue: String
     let intValue: Int? = nil
     init?(stringValue: String) { self.stringValue = stringValue }
     init?(intValue: Int) { return nil }
 }
 
-private extension Decoder {
+extension Decoder {
     func rejectUnknownKeys(allowed: [String]) throws {
         let container = try container(keyedBy: AnyCodingKey.self)
         let unexpected = Set(container.allKeys.map(\.stringValue)).subtracting(allowed)
