@@ -38,6 +38,11 @@ CaptureResult FallbackCaptureBackend::capture(
     const DisplayTopologySnapshot& snapshot,
     MemoryBudget& budget) noexcept
 {
+#if defined(XXSNAP_LEGACY)
+    auto fallbackResult = fallback_.capture(snapshot, budget);
+    lastBackend_ = CaptureBackendKind::fallback;
+    return fallbackResult;
+#else
     auto preferredResult = preferred_.capture(snapshot, budget);
     auto* preferredError = std::get_if<CaptureError>(&preferredResult);
     if (preferredError == nullptr || isTerminal(preferredError->code)) {
@@ -58,6 +63,7 @@ CaptureResult FallbackCaptureBackend::capture(
     auto fallbackResult = fallback_.capture(snapshot, budget);
     lastBackend_ = CaptureBackendKind::fallback;
     return fallbackResult;
+#endif
 }
 
 CaptureBackendKind FallbackCaptureBackend::lastBackend() const noexcept

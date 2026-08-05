@@ -149,6 +149,7 @@ target_link_libraries(
     xxsnap_fallback_capture_backend
     PUBLIC xxsnap_capture_backend
     PRIVATE xxsnap_dxgi_capture_backend xxsnap_gdi_capture_backend
+            xxsnap_windows_build_configuration
 )
 
 add_library(
@@ -328,6 +329,16 @@ target_link_libraries(
         ole32
         user32
 )
+if(XXSNAP_WINDOWS_FAMILY STREQUAL "legacy")
+    if(NOT XXSNAP_WINDOWS7_SUBSYSTEM_VERSION STREQUAL "6.01")
+        message(FATAL_ERROR
+            "Legacy Windows builds require subsystem version 6.01"
+        )
+    endif()
+    target_link_options(
+        xxsnap_windows PRIVATE "/SUBSYSTEM:WINDOWS,6.01"
+    )
+endif()
 
 if(BUILD_TESTING)
     add_executable(xxsnap_build_configuration_test tests/TestBuildConfiguration.cpp)
@@ -395,6 +406,27 @@ if(BUILD_TESTING)
                 xxsnap_windows_build_configuration
     )
     add_test(NAME fallback_capture COMMAND xxsnap_fallback_capture_test)
+
+    add_executable(
+        xxsnap_legacy_runtime_apis_test
+        tests/TestLegacyRuntimeApis.cpp
+        src/capture/FallbackCaptureBackend.cpp
+    )
+    target_compile_features(
+        xxsnap_legacy_runtime_apis_test PRIVATE cxx_std_17
+    )
+    target_link_libraries(
+        xxsnap_legacy_runtime_apis_test
+        PRIVATE xxsnap_capture_backend
+    )
+    target_compile_definitions(
+        xxsnap_legacy_runtime_apis_test
+        PRIVATE XXSNAP_LEGACY _WIN32_WINNT=0x0601 WINVER=0x0601
+    )
+    add_test(
+        NAME legacy_runtime_apis
+        COMMAND xxsnap_legacy_runtime_apis_test
+    )
 
     add_executable(
         xxsnap_visual_style_test
