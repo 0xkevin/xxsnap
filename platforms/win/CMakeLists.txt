@@ -46,6 +46,17 @@ target_include_directories(
 )
 
 add_library(
+    xxsnap_selection_model
+    src/overlay/SelectionModel.cpp
+)
+target_compile_features(xxsnap_selection_model PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_selection_model
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(xxsnap_selection_model PUBLIC snipory_core_portable)
+
+add_library(
     xxsnap_display_topology
     src/capture/DisplayTopology.cpp
     src/support/RuntimeApis.cpp
@@ -141,6 +152,17 @@ if(BUILD_TESTING)
     )
 
     add_executable(
+        xxsnap_selection_model_test
+        tests/TestSelectionModel.cpp
+    )
+    target_compile_features(xxsnap_selection_model_test PRIVATE cxx_std_17)
+    target_link_libraries(
+        xxsnap_selection_model_test
+        PRIVATE xxsnap_selection_model
+    )
+    add_test(NAME selection_model COMMAND xxsnap_selection_model_test)
+
+    add_executable(
         xxsnap_display_topology_test
         tests/TestDisplayTopology.cpp
     )
@@ -177,6 +199,7 @@ endif()
 
 set(xxsnap_capture_session_targets
     xxsnap_capture_session_state
+    xxsnap_selection_model
     xxsnap_display_topology
     xxsnap_gdi_capture_backend
     xxsnap_dxgi_capture_backend
@@ -184,6 +207,7 @@ set(xxsnap_capture_session_targets
 )
 if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_capture_session_state_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_selection_model_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_display_topology_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_gdi_capture_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_fallback_capture_test)
