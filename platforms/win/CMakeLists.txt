@@ -10,6 +10,22 @@ endif()
 
 add_library(xxsnap_windows_build_configuration INTERFACE)
 
+enable_language(RC)
+add_library(xxsnap_visual_assets OBJECT resources/xxsnap.rc)
+target_include_directories(
+    xxsnap_visual_assets
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/resources"
+        "${PROJECT_SOURCE_DIR}"
+)
+set_property(
+    SOURCE resources/xxsnap.rc
+    APPEND PROPERTY OBJECT_DEPENDS
+        "${PROJECT_SOURCE_DIR}/platforms/mac/Resources/Icons/cancel-capture.png"
+        "${PROJECT_SOURCE_DIR}/platforms/mac/Resources/Icons/save-to-file.png"
+        "${PROJECT_SOURCE_DIR}/platforms/mac/Resources/Icons/copy-to-clipboard.png"
+)
+
 if(XXSNAP_WINDOWS_FAMILY STREQUAL "modern")
     target_compile_definitions(xxsnap_windows_build_configuration INTERFACE
         XXSNAP_MODERN
@@ -195,6 +211,18 @@ if(BUILD_TESTING)
                 xxsnap_windows_build_configuration
     )
     add_test(NAME fallback_capture COMMAND xxsnap_fallback_capture_test)
+
+    add_executable(
+        xxsnap_visual_style_test
+        tests/TestVisualStyleCatalog.cpp
+    )
+    target_compile_features(xxsnap_visual_style_test PRIVATE cxx_std_17)
+    target_include_directories(
+        xxsnap_visual_style_test
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    add_dependencies(xxsnap_visual_style_test xxsnap_visual_assets)
+    add_test(NAME visual_style COMMAND xxsnap_visual_style_test)
 endif()
 
 set(xxsnap_capture_session_targets
@@ -211,6 +239,7 @@ if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_display_topology_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_gdi_capture_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_fallback_capture_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_visual_style_test)
 endif()
 
 if(MSVC)

@@ -1,0 +1,5 @@
+#pragma once
+
+#define IDR_CANCEL_CAPTURE_PNG 101
+#define IDR_SAVE_TO_FILE_PNG 102
+#define IDR_COPY_TO_CLIPBOARD_PNG 103

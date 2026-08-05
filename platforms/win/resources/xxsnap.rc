@@ -1,0 +1,5 @@
+#include "resource.h"
+
+IDR_CANCEL_CAPTURE_PNG RCDATA "platforms/mac/Resources/Icons/cancel-capture.png"
+IDR_SAVE_TO_FILE_PNG RCDATA "platforms/mac/Resources/Icons/save-to-file.png"
+IDR_COPY_TO_CLIPBOARD_PNG RCDATA "platforms/mac/Resources/Icons/copy-to-clipboard.png"
