@@ -1,5 +1,9 @@
 # macOS Packaging
 
+完整中文操作手册见 [`../../../docs/macOS打包发布手册.md`](../../../docs/macOS打包发布手册.md)。
+
+本目录目前没有自动打包脚本，正式发布按手册中的命令执行。
+
 ## Commercial policy bootstrap
 
 `Resources/Commercial/commercial-policy-bootstrap.json` is signed with the backend's

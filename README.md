@@ -19,6 +19,7 @@ Current status:
 - macOS 功能事实基准见 `docs/requirements/xxsnap-mac-feature-requirements.md`
 - 当前所有版本、所有功能都在免费期；收费和支付尚未上线
 - 收费开关的日常检查、故障处理和安全边界见 [`docs/XxSnap收费开关运营检查表.md`](docs/XxSnap收费开关运营检查表.md)
+- macOS 正式版打包、签名、公证和后台发布见 [`docs/macOS打包发布手册.md`](docs/macOS打包发布手册.md)
 
 Future Pro scope is limited to scrolling capture, OCR, and teaching pen. All other
 existing features remain Free. The client already understands signed rollout

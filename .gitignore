@@ -14,4 +14,5 @@ xcuserdata/
 .DS_Store
 .codex/
 .superpowers/
-docs/
+docs/*
+!docs/macOS打包发布手册.md
