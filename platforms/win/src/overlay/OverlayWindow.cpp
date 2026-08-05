@@ -88,10 +88,12 @@ const std::optional<OverlayWindowError>& DpiRestartDecision::error() const noexc
 OverlayWindow::OverlayWindow(
     HINSTANCE instance,
     const FrozenDisplay& display,
-    RestartCallback restartCallback)
+    RestartCallback restartCallback,
+    InputCallback inputCallback)
     : instance_(instance)
     , display_(&display)
     , restartCallback_(std::move(restartCallback))
+    , inputCallback_(std::move(inputCallback))
     , renderer_(instance)
 {
 }
@@ -108,7 +110,8 @@ OverlayWindow::~OverlayWindow()
 OverlayWindowCreateResult OverlayWindow::create(
     HINSTANCE instance,
     const FrozenDisplay& display,
-    RestartCallback restartCallback)
+    RestartCallback restartCallback,
+    InputCallback inputCallback)
 {
     if (instance == nullptr) {
         instance = GetModuleHandleW(nullptr);
@@ -151,7 +154,8 @@ OverlayWindowCreateResult OverlayWindow::create(
         auto value = std::unique_ptr<OverlayWindow>(new OverlayWindow(
             instance,
             display,
-            std::move(restartCallback)));
+            std::move(restartCallback),
+            std::move(inputCallback)));
         const auto window = CreateWindowExW(
             overlayWindowExtendedStyle(),
             overlayWindowClassName,
@@ -281,6 +285,18 @@ LRESULT OverlayWindow::handleMessage(
     WPARAM wParam,
     LPARAM lParam) noexcept
 {
+    const auto dispatchInput = [this](OverlayWindowInput input) noexcept {
+        InputCallback callback;
+        try {
+            callback = inputCallback_;
+        } catch (...) {
+            return;
+        }
+        const auto sourceWindow = window_;
+        if (callback && sourceWindow != nullptr) {
+            callback(sourceWindow, input);
+        }
+    };
     switch (message) {
     case WM_PAINT:
         paint();
@@ -294,6 +310,51 @@ LRESULT OverlayWindow::handleMessage(
         }
         return 0;
     }
+    case WM_LBUTTONDOWN:
+        dispatchInput({
+            OverlayWindowInputKind::pointerDown,
+            PixelPoint{
+                static_cast<short>(LOWORD(lParam)),
+                static_cast<short>(HIWORD(lParam)),
+            },
+        });
+        return 0;
+    case WM_MOUSEMOVE:
+        dispatchInput({
+            OverlayWindowInputKind::pointerMove,
+            PixelPoint{
+                static_cast<short>(LOWORD(lParam)),
+                static_cast<short>(HIWORD(lParam)),
+            },
+        });
+        return 0;
+    case WM_LBUTTONUP:
+        dispatchInput({
+            OverlayWindowInputKind::pointerUp,
+            PixelPoint{
+                static_cast<short>(LOWORD(lParam)),
+                static_cast<short>(HIWORD(lParam)),
+            },
+        });
+        return 0;
+    case WM_CAPTURECHANGED:
+        dispatchInput({OverlayWindowInputKind::captureChanged, {}});
+        return 0;
+    case WM_CANCELMODE:
+        dispatchInput({OverlayWindowInputKind::cancelMode, {}});
+        return 0;
+    case WM_HOTKEY:
+        if (isOverlayEscapeHotKey(wParam)) {
+            dispatchInput({OverlayWindowInputKind::escape, {}});
+            return 0;
+        }
+        return DefWindowProcW(window_, message, wParam, lParam);
+    case WM_KEYDOWN:
+        if (wParam == VK_ESCAPE) {
+            dispatchInput({OverlayWindowInputKind::escape, {}});
+            return 0;
+        }
+        return DefWindowProcW(window_, message, wParam, lParam);
     case WM_DPICHANGED: {
         RestartCallback callback;
         try {

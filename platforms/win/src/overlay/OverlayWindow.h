@@ -15,6 +15,8 @@
 
 namespace xxsnap::win {
 
+using snipory::core::portable::PixelPoint;
+
 constexpr DWORD overlayWindowStyle() noexcept
 {
     return WS_POPUP;
@@ -23,6 +25,13 @@ constexpr DWORD overlayWindowStyle() noexcept
 constexpr DWORD overlayWindowExtendedStyle() noexcept
 {
     return WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
+}
+
+inline constexpr int overlayEscapeHotKeyIdentifier = 0x5853;
+
+constexpr bool isOverlayEscapeHotKey(WPARAM identifier) noexcept
+{
+    return identifier == static_cast<WPARAM>(overlayEscapeHotKeyIdentifier);
 }
 
 enum class OverlayWindowErrorCode {
@@ -67,11 +76,26 @@ private:
     std::shared_ptr<Status> status_;
 };
 
+enum class OverlayWindowInputKind {
+    pointerDown,
+    pointerMove,
+    pointerUp,
+    captureChanged,
+    cancelMode,
+    escape,
+};
+
+struct OverlayWindowInput {
+    OverlayWindowInputKind kind;
+    PixelPoint clientPoint{};
+};
+
 struct OverlayWindowCreateResult;
 
 class OverlayWindow final {
 public:
     using RestartCallback = std::function<void()>;
+    using InputCallback = std::function<void(HWND, const OverlayWindowInput&)>;
 
     ~OverlayWindow();
 
@@ -83,7 +107,8 @@ public:
     static OverlayWindowCreateResult create(
         HINSTANCE instance,
         const FrozenDisplay& display,
-        RestartCallback restartCallback);
+        RestartCallback restartCallback,
+        InputCallback inputCallback = {});
 
     HWND handle() const noexcept;
     void show() noexcept;
@@ -98,7 +123,8 @@ private:
     OverlayWindow(
         HINSTANCE instance,
         const FrozenDisplay& display,
-        RestartCallback restartCallback);
+        RestartCallback restartCallback,
+        InputCallback inputCallback);
 
     static LRESULT CALLBACK windowProcedure(
         HWND window,
@@ -112,6 +138,7 @@ private:
     HWND window_ = nullptr;
     const FrozenDisplay* display_ = nullptr;
     RestartCallback restartCallback_;
+    InputCallback inputCallback_;
     DpiRestartDecision dpiRestartDecision_;
     OverlayRenderer renderer_;
     std::optional<PixelRect> selection_;

@@ -229,6 +229,23 @@ target_link_libraries(
     PRIVATE xxsnap_windows_build_configuration user32 gdi32
 )
 
+add_library(
+    xxsnap_overlay_host
+    src/overlay/OverlayHost.cpp
+)
+target_compile_features(xxsnap_overlay_host PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_overlay_host
+    PUBLIC
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/resources"
+)
+target_link_libraries(
+    xxsnap_overlay_host
+    PUBLIC xxsnap_overlay_window xxsnap_selection_model
+    PRIVATE xxsnap_windows_build_configuration user32
+)
+
 if(BUILD_TESTING)
     add_executable(xxsnap_build_configuration_test tests/TestBuildConfiguration.cpp)
     target_compile_features(xxsnap_build_configuration_test PRIVATE cxx_std_20)
@@ -327,6 +344,24 @@ if(BUILD_TESTING)
     add_test(NAME overlay_layout COMMAND xxsnap_overlay_layout_test)
 
     add_executable(
+        xxsnap_overlay_input_test
+        tests/TestOverlayInputRouting.cpp
+    )
+    target_compile_features(xxsnap_overlay_input_test PRIVATE cxx_std_17)
+    target_link_libraries(
+        xxsnap_overlay_input_test
+        PRIVATE xxsnap_overlay_host xxsnap_windows_build_configuration
+    )
+    add_test(NAME overlay_input COMMAND xxsnap_overlay_input_test)
+    add_custom_target(
+        xxsnap_overlay_input_verification
+        DEPENDS
+            xxsnap_overlay_input_test
+            xxsnap_overlay_layout_test
+            xxsnap_selection_model_test
+    )
+
+    add_executable(
         xxsnap_selection_composer_test
         tests/TestSelectionComposer.cpp
     )
@@ -373,6 +408,7 @@ set(xxsnap_capture_session_targets
     xxsnap_clipboard_writer
     xxsnap_overlay_renderer
     xxsnap_overlay_window
+    xxsnap_overlay_host
 )
 if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_capture_session_state_test)
@@ -382,6 +418,7 @@ if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_fallback_capture_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_visual_style_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_overlay_layout_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_overlay_input_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_selection_composer_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_clipboard_writer_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_png_writer_test)
