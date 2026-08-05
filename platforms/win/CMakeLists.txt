@@ -246,6 +246,39 @@ target_link_libraries(
     PRIVATE xxsnap_windows_build_configuration user32
 )
 
+add_library(xxsnap_single_instance src/app/SingleInstance.cpp)
+target_compile_features(xxsnap_single_instance PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_single_instance
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_single_instance
+    PRIVATE xxsnap_windows_build_configuration user32
+)
+
+add_library(xxsnap_tray_icon src/app/TrayIcon.cpp)
+target_compile_features(xxsnap_tray_icon PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_tray_icon
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_tray_icon
+    PRIVATE xxsnap_windows_build_configuration user32 shell32
+)
+
+add_library(xxsnap_hot_key_registrar src/app/HotKeyRegistrar.cpp)
+target_compile_features(xxsnap_hot_key_registrar PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_hot_key_registrar
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_hot_key_registrar
+    PRIVATE xxsnap_windows_build_configuration user32
+)
+
 if(BUILD_TESTING)
     add_executable(xxsnap_build_configuration_test tests/TestBuildConfiguration.cpp)
     target_compile_features(xxsnap_build_configuration_test PRIVATE cxx_std_20)
@@ -362,6 +395,23 @@ if(BUILD_TESTING)
     )
 
     add_executable(
+        xxsnap_app_entry_services_test
+        tests/TestAppEntryServices.cpp
+    )
+    target_compile_features(xxsnap_app_entry_services_test PRIVATE cxx_std_17)
+    target_include_directories(
+        xxsnap_app_entry_services_test
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    target_link_libraries(
+        xxsnap_app_entry_services_test
+        PRIVATE xxsnap_single_instance xxsnap_tray_icon
+                xxsnap_hot_key_registrar xxsnap_windows_build_configuration
+                user32 shell32
+    )
+    add_test(NAME app_entry_services COMMAND xxsnap_app_entry_services_test)
+
+    add_executable(
         xxsnap_selection_composer_test
         tests/TestSelectionComposer.cpp
     )
@@ -409,6 +459,9 @@ set(xxsnap_capture_session_targets
     xxsnap_overlay_renderer
     xxsnap_overlay_window
     xxsnap_overlay_host
+    xxsnap_single_instance
+    xxsnap_tray_icon
+    xxsnap_hot_key_registrar
 )
 if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_capture_session_state_test)
@@ -419,6 +472,7 @@ if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_visual_style_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_overlay_layout_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_overlay_input_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_app_entry_services_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_selection_composer_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_clipboard_writer_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_png_writer_test)
