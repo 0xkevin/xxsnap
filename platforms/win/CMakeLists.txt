@@ -88,6 +88,36 @@ target_link_libraries(
             xxsnap_windows_build_configuration user32 gdi32
 )
 
+add_library(
+    xxsnap_dxgi_capture_backend
+    src/capture/DxgiCaptureBackend.cpp
+)
+target_compile_features(xxsnap_dxgi_capture_backend PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_dxgi_capture_backend
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_dxgi_capture_backend
+    PUBLIC xxsnap_capture_backend
+    PRIVATE xxsnap_windows_build_configuration d3d11 dxgi
+)
+
+add_library(
+    xxsnap_fallback_capture_backend
+    src/capture/FallbackCaptureBackend.cpp
+)
+target_compile_features(xxsnap_fallback_capture_backend PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_fallback_capture_backend
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_fallback_capture_backend
+    PUBLIC xxsnap_capture_backend
+    PRIVATE xxsnap_dxgi_capture_backend xxsnap_gdi_capture_backend
+)
+
 if(BUILD_TESTING)
     add_executable(xxsnap_build_configuration_test tests/TestBuildConfiguration.cpp)
     target_compile_features(xxsnap_build_configuration_test PRIVATE cxx_std_20)
@@ -131,17 +161,32 @@ if(BUILD_TESTING)
         PRIVATE xxsnap_gdi_capture_backend
     )
     add_test(NAME gdi_capture COMMAND xxsnap_gdi_capture_test)
+
+    add_executable(
+        xxsnap_fallback_capture_test
+        tests/TestFallbackCaptureBackend.cpp
+    )
+    target_compile_features(xxsnap_fallback_capture_test PRIVATE cxx_std_17)
+    target_link_libraries(
+        xxsnap_fallback_capture_test
+        PRIVATE xxsnap_fallback_capture_backend xxsnap_dxgi_capture_backend
+                xxsnap_windows_build_configuration
+    )
+    add_test(NAME fallback_capture COMMAND xxsnap_fallback_capture_test)
 endif()
 
 set(xxsnap_capture_session_targets
     xxsnap_capture_session_state
     xxsnap_display_topology
     xxsnap_gdi_capture_backend
+    xxsnap_dxgi_capture_backend
+    xxsnap_fallback_capture_backend
 )
 if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_capture_session_state_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_display_topology_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_gdi_capture_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_fallback_capture_test)
 endif()
 
 if(MSVC)
