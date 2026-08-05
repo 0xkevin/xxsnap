@@ -45,6 +45,22 @@ target_include_directories(
     PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 
+add_library(
+    xxsnap_display_topology
+    src/capture/DisplayTopology.cpp
+    src/support/RuntimeApis.cpp
+)
+target_compile_features(xxsnap_display_topology PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_display_topology
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_display_topology
+    PUBLIC snipory_core_portable
+    PRIVATE xxsnap_windows_build_configuration user32 gdi32
+)
+
 if(BUILD_TESTING)
     add_executable(xxsnap_build_configuration_test tests/TestBuildConfiguration.cpp)
     target_compile_features(xxsnap_build_configuration_test PRIVATE cxx_std_20)
@@ -66,11 +82,26 @@ if(BUILD_TESTING)
         NAME capture_session_state
         COMMAND xxsnap_capture_session_state_test
     )
+
+    add_executable(
+        xxsnap_display_topology_test
+        tests/TestDisplayTopology.cpp
+    )
+    target_compile_features(xxsnap_display_topology_test PRIVATE cxx_std_17)
+    target_link_libraries(
+        xxsnap_display_topology_test
+        PRIVATE xxsnap_display_topology
+    )
+    add_test(NAME display_topology COMMAND xxsnap_display_topology_test)
 endif()
 
-set(xxsnap_capture_session_targets xxsnap_capture_session_state)
+set(xxsnap_capture_session_targets
+    xxsnap_capture_session_state
+    xxsnap_display_topology
+)
 if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_capture_session_state_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_display_topology_test)
 endif()
 
 if(MSVC)
