@@ -35,6 +35,16 @@ add_executable(xxsnap_toolchain_probe src/build/ToolchainProbe.cpp)
 target_compile_features(xxsnap_toolchain_probe PRIVATE cxx_std_20)
 target_link_libraries(xxsnap_toolchain_probe PRIVATE xxsnap_windows_build_configuration)
 
+add_library(
+    xxsnap_capture_session_state
+    src/session/CaptureSessionStateMachine.cpp
+)
+target_compile_features(xxsnap_capture_session_state PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_capture_session_state
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+
 if(BUILD_TESTING)
     add_executable(xxsnap_build_configuration_test tests/TestBuildConfiguration.cpp)
     target_compile_features(xxsnap_build_configuration_test PRIVATE cxx_std_20)
@@ -42,4 +52,33 @@ if(BUILD_TESTING)
         PRIVATE xxsnap_windows_build_configuration
     )
     add_test(NAME build_configuration COMMAND xxsnap_build_configuration_test)
+
+    add_executable(
+        xxsnap_capture_session_state_test
+        tests/TestCaptureSessionStateMachine.cpp
+    )
+    target_compile_features(xxsnap_capture_session_state_test PRIVATE cxx_std_17)
+    target_link_libraries(
+        xxsnap_capture_session_state_test
+        PRIVATE xxsnap_capture_session_state
+    )
+    add_test(
+        NAME capture_session_state
+        COMMAND xxsnap_capture_session_state_test
+    )
+endif()
+
+set(xxsnap_capture_session_targets xxsnap_capture_session_state)
+if(BUILD_TESTING)
+    list(APPEND xxsnap_capture_session_targets xxsnap_capture_session_state_test)
+endif()
+
+if(MSVC)
+    foreach(target IN LISTS xxsnap_capture_session_targets)
+        target_compile_options(${target} PRIVATE /W4 /WX /permissive-)
+    endforeach()
+else()
+    foreach(target IN LISTS xxsnap_capture_session_targets)
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    endforeach()
 endif()
