@@ -61,6 +61,33 @@ target_link_libraries(
     PRIVATE xxsnap_windows_build_configuration user32 gdi32
 )
 
+add_library(xxsnap_capture_backend INTERFACE)
+target_compile_features(xxsnap_capture_backend INTERFACE cxx_std_17)
+target_include_directories(
+    xxsnap_capture_backend
+    INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_capture_backend
+    INTERFACE xxsnap_display_topology snipory_core_portable
+)
+
+add_library(
+    xxsnap_gdi_capture_backend
+    src/capture/GdiCaptureBackend.cpp
+)
+target_compile_features(xxsnap_gdi_capture_backend PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_gdi_capture_backend
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_gdi_capture_backend
+    PUBLIC xxsnap_capture_backend
+    PRIVATE xxsnap_display_topology snipory_core_portable
+            xxsnap_windows_build_configuration user32 gdi32
+)
+
 if(BUILD_TESTING)
     add_executable(xxsnap_build_configuration_test tests/TestBuildConfiguration.cpp)
     target_compile_features(xxsnap_build_configuration_test PRIVATE cxx_std_20)
@@ -93,15 +120,28 @@ if(BUILD_TESTING)
         PRIVATE xxsnap_display_topology
     )
     add_test(NAME display_topology COMMAND xxsnap_display_topology_test)
+
+    add_executable(
+        xxsnap_gdi_capture_test
+        tests/TestGdiCaptureBackend.cpp
+    )
+    target_compile_features(xxsnap_gdi_capture_test PRIVATE cxx_std_17)
+    target_link_libraries(
+        xxsnap_gdi_capture_test
+        PRIVATE xxsnap_gdi_capture_backend
+    )
+    add_test(NAME gdi_capture COMMAND xxsnap_gdi_capture_test)
 endif()
 
 set(xxsnap_capture_session_targets
     xxsnap_capture_session_state
     xxsnap_display_topology
+    xxsnap_gdi_capture_backend
 )
 if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_capture_session_state_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_display_topology_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_gdi_capture_test)
 endif()
 
 if(MSVC)
