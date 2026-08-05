@@ -41,6 +41,7 @@ CaptureResult FallbackCaptureBackend::capture(
     auto preferredResult = preferred_.capture(snapshot, budget);
     auto* preferredError = std::get_if<CaptureError>(&preferredResult);
     if (preferredError == nullptr || isTerminal(preferredError->code)) {
+        lastBackend_ = CaptureBackendKind::preferred;
         return preferredResult;
     }
 
@@ -49,11 +50,19 @@ CaptureResult FallbackCaptureBackend::capture(
         auto retryResult = preferred_.capture(snapshot, budget);
         const auto* retryError = std::get_if<CaptureError>(&retryResult);
         if (retryError == nullptr || isTerminal(retryError->code)) {
+            lastBackend_ = CaptureBackendKind::preferred;
             return retryResult;
         }
     }
 
-    return fallback_.capture(snapshot, budget);
+    auto fallbackResult = fallback_.capture(snapshot, budget);
+    lastBackend_ = CaptureBackendKind::fallback;
+    return fallbackResult;
+}
+
+CaptureBackendKind FallbackCaptureBackend::lastBackend() const noexcept
+{
+    return lastBackend_;
 }
 
 } // namespace xxsnap::win

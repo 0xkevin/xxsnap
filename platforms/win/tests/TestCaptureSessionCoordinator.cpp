@@ -304,6 +304,15 @@ void testCaptureTopologyMismatchRetriesOnlyOnce()
 
 void testFailuresAreExplicitAndRecoverable()
 {
+    FakeServices memoryFailure;
+    CaptureSessionCoordinator memoryCoordinator(memoryFailure, 100);
+    CHECK(memoryCoordinator.start() == CaptureSessionStartResult::failed);
+    CHECK(memoryCoordinator.lastError()
+          == CaptureSessionErrorCode::memoryLimitExceeded);
+    CHECK(memoryFailure.captureCalls == 0);
+    CHECK(memoryFailure.reportedErrors.back()
+          == CaptureSessionErrorCode::memoryLimitExceeded);
+
     FakeServices topologyFailure;
     topologyFailure.failTopology = true;
     CaptureSessionCoordinator topologyCoordinator(topologyFailure);

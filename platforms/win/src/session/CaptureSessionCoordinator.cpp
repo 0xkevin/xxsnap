@@ -1,5 +1,7 @@
 #include "session/CaptureSessionCoordinator.h"
 
+#include "session/CaptureMemoryPlan.h"
+
 #include <new>
 #include <utility>
 #include <variant>
@@ -59,6 +61,13 @@ CaptureSessionStartResult CaptureSessionCoordinator::startSession(
             const auto* topology = topologyResult.value();
             if (topology == nullptr) {
                 fail(CaptureSessionErrorCode::topologyFailed);
+                return CaptureSessionStartResult::failed;
+            }
+
+            const auto memoryPlan = planFrozenDesktopMemory(
+                topology->displays(), memoryLimitBytes_);
+            if (memoryPlan.status != CaptureMemoryPlanStatus::fits) {
+                fail(CaptureSessionErrorCode::memoryLimitExceeded);
                 return CaptureSessionStartResult::failed;
             }
 

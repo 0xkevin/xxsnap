@@ -18,10 +18,13 @@
 #include <commdlg.h>
 #include <objbase.h>
 
+#include <chrono>
+#include <cstdio>
 #include <cwchar>
 #include <memory>
 #include <new>
 #include <optional>
+#include <string>
 #include <utility>
 #include <variant>
 
@@ -38,6 +41,61 @@ constexpr wchar_t clipboardFailureText[] =
     L"\u65e0\u6cd5\u5199\u5165\u526a\u8d34\u677f\uff0c\u622a\u56fe\u5df2\u6682\u5b58\u5728\u5f53\u524d\u8fdb\u7a0b\u4e2d\u3002";
 constexpr wchar_t sessionFailureText[] =
     L"\u672c\u6b21\u622a\u56fe\u672a\u5b8c\u6210\uff0c\u8bf7\u91cd\u8bd5\u3002";
+constexpr wchar_t captureMetricsPathVariable[] = L"XXSNAP_CAPTURE_METRICS_PATH";
+
+void appendCaptureTiming(
+    const char* trigger,
+    CaptureBackendKind backend,
+    std::chrono::steady_clock::duration duration) noexcept
+{
+    try {
+        const DWORD required = GetEnvironmentVariableW(
+            captureMetricsPathVariable, nullptr, 0);
+        if (required <= 1) {
+            return;
+        }
+        std::wstring path(required, L'\0');
+        if (GetEnvironmentVariableW(
+                captureMetricsPathVariable, path.data(), required) == 0) {
+            return;
+        }
+        path.resize(std::wcslen(path.c_str()));
+
+        const auto milliseconds = std::chrono::duration<double, std::milli>(
+            duration).count();
+        char line[128]{};
+        const int length = std::snprintf(
+            line,
+            sizeof(line),
+            "%s,%s,%.3f\r\n",
+            trigger,
+            backend == CaptureBackendKind::preferred ? "dxgi" : "gdi",
+            milliseconds);
+        if (length <= 0 || static_cast<std::size_t>(length) >= sizeof(line)) {
+            return;
+        }
+        const HANDLE file = CreateFileW(
+            path.c_str(),
+            FILE_APPEND_DATA,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            nullptr,
+            OPEN_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL,
+            nullptr);
+        if (file == INVALID_HANDLE_VALUE) {
+            return;
+        }
+        DWORD written = 0;
+        WriteFile(
+            file,
+            line,
+            static_cast<DWORD>(length),
+            &written,
+            nullptr);
+        CloseHandle(file);
+    } catch (...) {
+    }
+}
 
 enum class HostInitializationResult {
     primary,
@@ -166,6 +224,11 @@ public:
         }
     }
 
+    CaptureBackendKind lastBackend() const noexcept
+    {
+        return fallback_.lastBackend();
+    }
+
 private:
     HINSTANCE instance_ = nullptr;
     HWND owner_ = nullptr;
@@ -206,7 +269,7 @@ public:
         }
 
         auto single = SingleInstance::create(
-            systemSingleInstanceApi(), [this] { startRegionCapture(); });
+            systemSingleInstanceApi(), [this] { startRegionCapture("wake"); });
         if (single.role == SingleInstanceRole::secondary) {
             return HostInitializationResult::secondary;
         }
@@ -236,7 +299,7 @@ public:
         tray_ = std::move(trayResult.value);
 
         hotKey_ = std::make_unique<HotKeyRegistrar>(
-            systemHotKeyApi(), [this] { startRegionCapture(); });
+            systemHotKeyApi(), [this] { startRegionCapture("hotkey"); });
         if (!hotKey_->registerMvpRegionCapture(window_)) {
             if (!tray_->showHotKeyConflict(hotKeyConflictText)) {
                 MessageBoxW(
@@ -340,17 +403,27 @@ private:
         }
     }
 
-    void startRegionCapture() noexcept
+    void startRegionCapture(const char* trigger) noexcept
     {
         if (coordinator_) {
-            coordinator_->start();
+            const auto startedAt = std::chrono::steady_clock::now();
+            const auto result = coordinator_->start();
+            const auto finishedAt = std::chrono::steady_clock::now();
+            if (result == CaptureSessionStartResult::started
+                && coordinator_->state() == CaptureSessionState::selecting
+                && sessionServices_) {
+                appendCaptureTiming(
+                    trigger,
+                    sessionServices_->lastBackend(),
+                    finishedAt - startedAt);
+            }
         }
     }
 
     void handleTrayCommand(TrayCommand command) noexcept
     {
         if (command == TrayCommand::regionCapture) {
-            startRegionCapture();
+            startRegionCapture("tray");
         } else if (command == TrayCommand::exit && window_ != nullptr) {
             PostMessageW(window_, WM_CLOSE, 0, 0);
         }

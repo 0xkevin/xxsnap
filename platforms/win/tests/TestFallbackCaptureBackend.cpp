@@ -156,6 +156,7 @@ void testDxgiSuccessReturnsWithoutResetOrFallback()
     CHECK((events == std::vector{Event::dxgiCapture}));
     CHECK(dxgi.resetCalls == 0);
     CHECK(gdi.captureCalls == 0);
+    CHECK(backend.lastBackend() == CaptureBackendKind::preferred);
 }
 
 void testDeviceLostResetsOnceAndRetriesDxgiOnce()
@@ -180,6 +181,7 @@ void testDeviceLostResetsOnceAndRetriesDxgiOnce()
     }));
     CHECK(dxgi.resetCalls == 1);
     CHECK(gdi.captureCalls == 0);
+    CHECK(backend.lastBackend() == CaptureBackendKind::preferred);
 }
 
 void testFailedRetryFallsBackToGdiAndReturnsItsResultUnchanged()
@@ -205,6 +207,7 @@ void testFailedRetryFallsBackToGdiAndReturnsItsResultUnchanged()
     }));
     CHECK(errorFrom(result)->code == CaptureErrorCode::systemFailure);
     CHECK(errorFrom(result)->nativeCode == E_UNEXPECTED);
+    CHECK(backend.lastBackend() == CaptureBackendKind::fallback);
 }
 
 void testSecondDeviceLostDoesNotResetTwice()
@@ -230,6 +233,7 @@ void testSecondDeviceLostDoesNotResetTwice()
     }));
     CHECK(dxgi.resetCalls == 1);
     CHECK(gdi.captureCalls == 1);
+    CHECK(backend.lastBackend() == CaptureBackendKind::fallback);
 }
 
 void testRecoverableErrorsFallBackDirectlyWithoutReset()
@@ -254,6 +258,7 @@ void testRecoverableErrorsFallBackDirectlyWithoutReset()
         CHECK((events == std::vector{Event::dxgiCapture, Event::gdiCapture}));
         CHECK(dxgi.resetCalls == 0);
         CHECK(gdi.captureCalls == 1);
+        CHECK(backend.lastBackend() == CaptureBackendKind::fallback);
     }
 }
 
@@ -279,6 +284,7 @@ void testTerminalErrorsNeverRetryOrFallBack()
         CHECK((events == std::vector{Event::dxgiCapture}));
         CHECK(dxgi.resetCalls == 0);
         CHECK(gdi.captureCalls == 0);
+        CHECK(backend.lastBackend() == CaptureBackendKind::preferred);
     }
 }
 

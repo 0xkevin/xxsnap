@@ -282,6 +282,7 @@ target_link_libraries(
 
 add_library(
     xxsnap_capture_session_coordinator
+    src/session/CaptureMemoryPlan.cpp
     src/session/CaptureSessionCoordinator.cpp
 )
 target_compile_features(xxsnap_capture_session_coordinator PUBLIC cxx_std_17)
@@ -478,6 +479,20 @@ if(BUILD_TESTING)
     )
 
     add_executable(
+        xxsnap_memory_budget_matrix_test
+        tests/TestMemoryBudgetMatrix.cpp
+    )
+    target_compile_features(
+        xxsnap_memory_budget_matrix_test PRIVATE cxx_std_17
+    )
+    target_link_libraries(
+        xxsnap_memory_budget_matrix_test
+        PRIVATE xxsnap_capture_session_coordinator
+                xxsnap_windows_build_configuration
+    )
+    add_test(NAME memory_budget_matrix COMMAND xxsnap_memory_budget_matrix_test)
+
+    add_executable(
         xxsnap_selection_composer_test
         tests/TestSelectionComposer.cpp
     )
@@ -542,6 +557,7 @@ if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_overlay_input_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_app_entry_services_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_capture_session_coordinator_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_memory_budget_matrix_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_selection_composer_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_clipboard_writer_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_png_writer_test)

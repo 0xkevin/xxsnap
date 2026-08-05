@@ -24,6 +24,7 @@ enum class CaptureSessionErrorCode {
     captureFailed,
     overlayFailed,
     topologyChanged,
+    memoryLimitExceeded,
     selectionUnavailable,
     compositionFailed,
     exportFailed,
