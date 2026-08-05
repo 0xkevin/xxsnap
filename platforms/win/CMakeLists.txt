@@ -145,6 +145,20 @@ target_link_libraries(
     PRIVATE xxsnap_dxgi_capture_backend xxsnap_gdi_capture_backend
 )
 
+add_library(
+    xxsnap_selection_composer
+    src/export/SelectionComposer.cpp
+)
+target_compile_features(xxsnap_selection_composer PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_selection_composer
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_selection_composer
+    PUBLIC xxsnap_capture_backend
+)
+
 if(BUILD_TESTING)
     add_executable(xxsnap_build_configuration_test tests/TestBuildConfiguration.cpp)
     target_compile_features(xxsnap_build_configuration_test PRIVATE cxx_std_20)
@@ -223,6 +237,17 @@ if(BUILD_TESTING)
     )
     add_dependencies(xxsnap_visual_style_test xxsnap_visual_assets)
     add_test(NAME visual_style COMMAND xxsnap_visual_style_test)
+
+    add_executable(
+        xxsnap_selection_composer_test
+        tests/TestSelectionComposer.cpp
+    )
+    target_compile_features(xxsnap_selection_composer_test PRIVATE cxx_std_17)
+    target_link_libraries(
+        xxsnap_selection_composer_test
+        PRIVATE xxsnap_selection_composer xxsnap_display_topology
+    )
+    add_test(NAME selection_composer COMMAND xxsnap_selection_composer_test)
 endif()
 
 set(xxsnap_capture_session_targets
@@ -232,6 +257,7 @@ set(xxsnap_capture_session_targets
     xxsnap_gdi_capture_backend
     xxsnap_dxgi_capture_backend
     xxsnap_fallback_capture_backend
+    xxsnap_selection_composer
 )
 if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_capture_session_state_test)
@@ -240,6 +266,7 @@ if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_gdi_capture_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_fallback_capture_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_visual_style_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_selection_composer_test)
 endif()
 
 if(MSVC)
