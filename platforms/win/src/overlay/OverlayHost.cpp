@@ -2,6 +2,8 @@
 
 #include "overlay/OverlayRenderer.h"
 
+#include <commdlg.h>
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -30,6 +32,14 @@ bool contains(PixelRect rect, PixelPoint point) noexcept
     return point.x >= rect.x && point.y >= rect.y
         && point.x < saturatingAdd(rect.x, rect.width)
         && point.y < saturatingAdd(rect.y, rect.height);
+}
+
+bool contains(AnnotationRect rect, AnnotationPoint point) noexcept
+{
+    rect = standardized(rect);
+    return point.x >= rect.x && point.y >= rect.y
+        && point.x <= rect.x + rect.width
+        && point.y <= rect.y + rect.height;
 }
 
 PixelRect buttonRectPhysical(DipRect rect, const OverlaySurface& surface) noexcept
@@ -86,6 +96,58 @@ public:
     {
         return UnregisterHotKey(window, identifier) != FALSE;
     }
+
+    bool registerEditorHotKeys(HWND window) noexcept override
+    {
+        if (window == nullptr) {
+            return false;
+        }
+        RegisterHotKey(window, overlayUndoHotKeyIdentifier, MOD_CONTROL, 'Z');
+        RegisterHotKey(
+            window,
+            overlayRedoHotKeyIdentifier,
+            MOD_CONTROL | MOD_SHIFT,
+            'Z');
+        RegisterHotKey(window, overlaySaveHotKeyIdentifier, MOD_CONTROL, 'S');
+        RegisterHotKey(window, overlayCopyHotKeyIdentifier, MOD_CONTROL, 'C');
+        RegisterHotKey(window, overlayDeleteHotKeyIdentifier, 0, VK_DELETE);
+        return true;
+    }
+
+    bool unregisterEditorHotKeys(HWND window) noexcept override
+    {
+        for (const auto identifier : {
+                 overlayUndoHotKeyIdentifier,
+                 overlayRedoHotKeyIdentifier,
+                 overlaySaveHotKeyIdentifier,
+                 overlayCopyHotKeyIdentifier,
+                 overlayDeleteHotKeyIdentifier}) {
+            UnregisterHotKey(window, identifier);
+        }
+        return true;
+    }
+
+    std::optional<AnnotationColor> chooseColor(
+        HWND owner,
+        AnnotationColor current) noexcept override
+    {
+        static COLORREF customColors[16]{};
+        CHOOSECOLORW chooser{};
+        chooser.lStructSize = sizeof(chooser);
+        chooser.hwndOwner = owner;
+        chooser.rgbResult = RGB(current.red, current.green, current.blue);
+        chooser.lpCustColors = customColors;
+        chooser.Flags = CC_FULLOPEN | CC_RGBINIT;
+        if (!ChooseColorW(&chooser)) {
+            return std::nullopt;
+        }
+        return AnnotationColor{
+            GetRValue(chooser.rgbResult),
+            GetGValue(chooser.rgbResult),
+            GetBValue(chooser.rgbResult),
+            255,
+        };
+    }
 };
 
 } // namespace
@@ -94,11 +156,13 @@ OverlayInputRouter::OverlayInputRouter(
     PixelRect virtualBounds,
     std::vector<OverlaySurface> surfaces,
     OverlayInputPlatform& platform,
-    ActionCallback actionCallback)
+    ActionCallback actionCallback,
+    bool shapeAnnotationsEnabled)
     : model_(snipory::core::portable::standardized(virtualBounds))
     , surfaces_(std::move(surfaces))
     , platform_(platform)
     , actionCallback_(std::move(actionCallback))
+    , shapeAnnotationsEnabled_(shapeAnnotationsEnabled)
 {
     for (auto& surface : surfaces_) {
         surface.physicalBounds = snipory::core::portable::standardized(
@@ -110,6 +174,110 @@ OverlayInputRouter::OverlayInputRouter(
             surface.dpiY = 96;
         }
     }
+}
+
+std::vector<ToolbarAction> OverlayInputRouter::toolbarActions() const
+{
+    return editor_ != nullptr
+        ? editor_->toolbarState().visibleActions()
+        : std::vector<ToolbarAction>{
+              terminalToolbarActions().begin(),
+              terminalToolbarActions().end(),
+          };
+}
+
+bool OverlayInputRouter::toolbarActionEnabled(
+    ToolbarAction action) const noexcept
+{
+    return editor_ == nullptr || editor_->toolbarState().isEnabled(action);
+}
+
+void OverlayInputRouter::ensureEditor() noexcept
+{
+    if (!shapeAnnotationsEnabled_
+        || model_.phase() != SelectionPhase::ready
+        || !model_.selection().has_value()) {
+        return;
+    }
+    const auto owner = actionOwner();
+    if (!owner.has_value()) {
+        return;
+    }
+    const auto selection = snipory::core::portable::standardized(
+        *model_.selection());
+    const auto& surface = surfaces_[*owner];
+    const AnnotationRect bounds{
+        0.0F,
+        0.0F,
+        physicalPixelsToDip(selection.width, surface.dpiX),
+        physicalPixelsToDip(selection.height, surface.dpiY),
+    };
+    if (!editor_) {
+        try {
+            editor_ = std::make_unique<ShapeEditorController>(bounds);
+            editorOwnerIndex_ = owner;
+        } catch (...) {
+            editor_.reset();
+            editorOwnerIndex_.reset();
+        }
+        return;
+    }
+    if (editorOwnerIndex_ == owner) {
+        editor_->setCanvasBounds(bounds);
+    }
+}
+
+std::optional<AnnotationPoint> OverlayInputRouter::annotationPoint(
+    PixelPoint virtualPoint) const noexcept
+{
+    if (!editor_ || !editorOwnerIndex_.has_value()
+        || !model_.selection().has_value()) {
+        return std::nullopt;
+    }
+    const auto selection = snipory::core::portable::standardized(
+        *model_.selection());
+    const auto& owner = surfaces_[*editorOwnerIndex_];
+    return AnnotationPoint{
+        physicalPixelsToDip(virtualPoint.x - selection.x, owner.dpiX),
+        physicalPixelsToDip(virtualPoint.y - selection.y, owner.dpiY),
+    };
+}
+
+std::optional<ShapeOptionsLayout>
+OverlayInputRouter::currentShapeOptionsLayout(
+    const OverlaySurface& surface) const
+{
+    if (!editor_ || !editor_->isShapeToolActive()
+        || !model_.selection().has_value()) {
+        return std::nullopt;
+    }
+    const auto actions = toolbarActions();
+    const auto chrome = computeOverlayLayout({
+        surface.physicalBounds,
+        *model_.selection(),
+        surface.dpiX,
+        surface.dpiY,
+        0.0F,
+        true,
+        actions,
+    });
+    const auto initial = shapeOptionsLayout({}, macShapePalette().size());
+    const AnnotationRect safe{
+        8.0F,
+        8.0F,
+        (std::max)(0.0F, chrome.overlayBounds.width - 16.0F),
+        (std::max)(0.0F, chrome.overlayBounds.height - 16.0F),
+    };
+    auto x = (std::max)(safe.x, (std::min)(
+        chrome.toolbar.bounds.x,
+        safe.x + (std::max)(0.0F, safe.width - initial.toolbar.width)));
+    auto y = chrome.toolbar.bounds.y + chrome.toolbar.bounds.height + 8.0F;
+    if (y + initial.toolbar.height > safe.y + safe.height) {
+        y = chrome.toolbar.bounds.y - 8.0F - initial.toolbar.height;
+    }
+    y = (std::max)(safe.y, (std::min)(
+        y, safe.y + (std::max)(0.0F, safe.height - initial.toolbar.height)));
+    return shapeOptionsLayout({x, y}, macShapePalette().size());
 }
 
 OverlayInputRouter::~OverlayInputRouter()
@@ -141,6 +309,9 @@ bool OverlayInputRouter::activateEscapeHotKey(HWND owner) noexcept
         return false;
     }
     escapeHotKeyWindow_ = owner;
+    if (shapeAnnotationsEnabled_) {
+        editorHotKeysRegistered_ = platform_.registerEditorHotKeys(owner);
+    }
     return true;
 }
 
@@ -148,6 +319,10 @@ bool OverlayInputRouter::deactivateEscapeHotKey() noexcept
 {
     if (escapeHotKeyWindow_ == nullptr) {
         return true;
+    }
+    if (editorHotKeysRegistered_) {
+        platform_.unregisterEditorHotKeys(escapeHotKeyWindow_);
+        editorHotKeysRegistered_ = false;
     }
     if (!platform_.unregisterEscapeHotKey(
             escapeHotKeyWindow_, overlayEscapeHotKeyIdentifier)) {
@@ -224,6 +399,7 @@ std::vector<OverlayPresentation> OverlayInputRouter::presentations() const
             continue;
         }
         const auto& surface = surfaces_[index];
+        const auto actions = toolbarActions();
         const auto layout = computeOverlayLayout({
             surface.physicalBounds,
             *presentation.selection,
@@ -231,6 +407,7 @@ std::vector<OverlayPresentation> OverlayInputRouter::presentations() const
             surface.dpiY,
             0.0F,
             true,
+            actions,
         });
         presentation.toolbarItems.reserve(layout.toolbarItems.size());
         for (const auto& item : layout.toolbarItems) {
@@ -239,13 +416,61 @@ std::vector<OverlayPresentation> OverlayInputRouter::presentations() const
                 item.action,
                 rect,
                 buttonCenterPhysical(rect),
+                editor_ != nullptr
+                    && editor_->toolbarState().selectedAction() == item.action,
+                toolbarActionEnabled(item.action),
             });
+        }
+        if (editor_ != nullptr && editorOwnerIndex_ == index) {
+            const auto selection = snipory::core::portable::standardized(
+                *presentation.selection);
+            presentation.annotationPlan = editor_->renderPlan({
+                physicalPixelsToDip(
+                    selection.x - surface.physicalBounds.x, surface.dpiX),
+                physicalPixelsToDip(
+                    selection.y - surface.physicalBounds.y, surface.dpiY),
+            });
+            if (const auto options = currentShapeOptionsLayout(surface)) {
+                OverlayPresentationShapeOptions shapeOptions{
+                    *options,
+                    editor_->options(),
+                    std::nullopt,
+                    std::nullopt,
+                };
+                const AnnotationRect safe{
+                    0.0F,
+                    0.0F,
+                    layout.overlayBounds.width,
+                    layout.overlayBounds.height,
+                };
+                if (editor_->strokePatternMenuVisible()) {
+                    const auto menuHeight = 6.0F * 24.0F + 8.0F;
+                    auto menuRect = AnnotationRect{
+                        options->strokeStyle.x,
+                        options->strokeStyle.y
+                            + options->strokeStyle.height + 8.0F,
+                        options->strokeStyle.width,
+                        menuHeight,
+                    };
+                    if (menuRect.y + menuRect.height > safe.height - 8.0F) {
+                        menuRect.y = options->strokeStyle.y
+                            - 8.0F - menuRect.height;
+                    }
+                    shapeOptions.strokePatternMenu =
+                        strokePatternMenuLayout(menuRect);
+                }
+                if (editor_->cornerRadiusPanelVisible()) {
+                    shapeOptions.cornerRadiusPanel = cornerRadiusPanelLayout(
+                        *options, safe);
+                }
+                presentation.shapeOptions = std::move(shapeOptions);
+            }
         }
     }
     return result;
 }
 
-std::optional<OverlayInputAction> OverlayInputRouter::hitAction(
+std::optional<ToolbarAction> OverlayInputRouter::hitToolbarAction(
     const OverlaySurface& surface, PixelPoint clientPoint) const noexcept
 {
     const auto owner = actionOwner();
@@ -260,25 +485,13 @@ std::optional<OverlayInputAction> OverlayInputRouter::hitAction(
         surface.dpiY,
         0.0F,
         true,
+        toolbarActions(),
     });
     const auto x = static_cast<float>(clientPoint.x) * 96.0F
         / static_cast<float>(surface.dpiX);
     const auto y = static_cast<float>(clientPoint.y) * 96.0F
         / static_cast<float>(surface.dpiY);
-    const auto toolbarAction = toolbarActionAt(layout.toolbar, {x, y});
-    if (!toolbarAction.has_value()) {
-        return std::nullopt;
-    }
-    switch (*toolbarAction) {
-    case ToolbarAction::cancel:
-        return OverlayInputAction::cancel;
-    case ToolbarAction::save:
-        return OverlayInputAction::save;
-    case ToolbarAction::copy:
-        return OverlayInputAction::copy;
-    default:
-        return std::nullopt;
-    }
+    return toolbarActionAt(layout.toolbar, {x, y});
 }
 
 bool OverlayInputRouter::pointerDown(HWND source, PixelPoint clientPoint) noexcept
@@ -290,13 +503,117 @@ bool OverlayInputRouter::pointerDown(HWND source, PixelPoint clientPoint) noexce
     if (surface == nullptr) {
         return false;
     }
-    if (const auto action = hitAction(*surface, clientPoint)) {
-        if (*action == OverlayInputAction::cancel) {
+    if (const auto action = hitToolbarAction(*surface, clientPoint)) {
+        if (!toolbarActionEnabled(*action)) {
+            return true;
+        }
+        if (*action == ToolbarAction::cancel) {
             cancelOnce();
-        } else {
-            completeOnce(*action);
+        } else if (*action == ToolbarAction::save) {
+            completeOnce(OverlayInputAction::save);
+        } else if (*action == ToolbarAction::copy) {
+            completeOnce(OverlayInputAction::copy);
+        } else if (editor_ != nullptr) {
+            editor_->handleToolbarAction(*action);
         }
         return true;
+    }
+    if (editor_ != nullptr && editorOwnerIndex_.has_value()
+        && &surfaces_[*editorOwnerIndex_] == surface) {
+        const auto x = static_cast<float>(clientPoint.x) * 96.0F
+            / static_cast<float>(surface->dpiX);
+        const auto y = static_cast<float>(clientPoint.y) * 96.0F
+            / static_cast<float>(surface->dpiY);
+        if (const auto options = currentShapeOptionsLayout(*surface);
+            options.has_value()) {
+            const AnnotationPoint point{x, y};
+            if (editor_->strokePatternMenuVisible()) {
+                constexpr float menuHeight = 6.0F * 24.0F + 8.0F;
+                AnnotationRect menuRect{
+                    options->strokeStyle.x,
+                    options->strokeStyle.y + options->strokeStyle.height + 8.0F,
+                    options->strokeStyle.width,
+                    menuHeight,
+                };
+                const auto safeHeight = physicalPixelsToDip(
+                    surface->physicalBounds.height, surface->dpiY);
+                if (menuRect.y + menuRect.height > safeHeight - 8.0F) {
+                    menuRect.y = options->strokeStyle.y - 8.0F - menuHeight;
+                }
+                const auto menu = strokePatternMenuLayout(menuRect);
+                if (const auto pattern = hitTestStrokePatternMenu(menu, point)) {
+                    editor_->applyStrokePattern(*pattern);
+                    return true;
+                }
+            }
+            if (editor_->cornerRadiusPanelVisible()) {
+                const AnnotationRect safe{
+                    0.0F,
+                    0.0F,
+                    physicalPixelsToDip(
+                        surface->physicalBounds.width, surface->dpiX),
+                    physicalPixelsToDip(
+                        surface->physicalBounds.height, surface->dpiY),
+                };
+                const auto panel = cornerRadiusPanelLayout(*options, safe);
+                if (contains(panel.increment, point)) {
+                    editor_->adjustCornerRadius(1.0F);
+                    return true;
+                }
+                if (contains(panel.decrement, point)) {
+                    editor_->adjustCornerRadius(-1.0F);
+                    return true;
+                }
+                const AnnotationRect sliderHit{
+                    panel.sliderTrack.x - 5.0F,
+                    panel.sliderTrack.y - 8.0F,
+                    panel.sliderTrack.width + 10.0F,
+                    panel.sliderTrack.height + 16.0F,
+                };
+                if (contains(sliderHit, point) && panel.sliderTrack.width > 0.0F) {
+                    const auto ratio = (std::max)(0.0F, (std::min)(
+                        1.0F,
+                        (point.x - panel.sliderTrack.x)
+                            / panel.sliderTrack.width));
+                    editor_->setCornerRadius(
+                        static_cast<float>(static_cast<int>(ratio * 30.0F + 0.5F)));
+                    return true;
+                }
+                if (contains(panel.panel, point)) {
+                    return true;
+                }
+            }
+            if (const auto hit = shapeOptionHitTest(*options, {x, y});
+                hit.has_value()) {
+                if (hit->control == ShapeOptionControl::customColor) {
+                    if (const auto chosen = platform_.chooseColor(
+                            source, editor_->options().style().strokeColor)) {
+                        editor_->selectCustomColor(*chosen);
+                    }
+                    return true;
+                }
+                editor_->applyOptionHit(*hit);
+                return true;
+            }
+            editor_->dismissPopovers();
+        }
+    }
+
+    const auto virtualPoint = toVirtual(*surface, clientPoint);
+    if (editor_ != nullptr) {
+        if (const auto local = annotationPoint(virtualPoint);
+            local.has_value() && editor_->pointerDown(*local)) {
+            if (!platform_.captureMouse(source)) {
+                editor_->cancelInteraction();
+                lastError_ = OverlayInputErrorCode::mouseCaptureFailed;
+                cancelOnce();
+                return false;
+            }
+            captureWindow_ = source;
+            dragging_ = true;
+            annotationDragging_ = true;
+            return true;
+        }
     }
     if (!platform_.captureMouse(source)) {
         lastError_ = OverlayInputErrorCode::mouseCaptureFailed;
@@ -304,7 +621,7 @@ bool OverlayInputRouter::pointerDown(HWND source, PixelPoint clientPoint) noexce
         return false;
     }
 
-    const auto point = toVirtual(*surface, clientPoint);
+    const auto point = virtualPoint;
     const auto handleRadius = (std::max<std::int64_t>)(
         1, dipLengthToPhysicalPixels(
             VisualStyleCatalog::selectionHandleDiameterDip / 2.0F,
@@ -327,6 +644,7 @@ bool OverlayInputRouter::pointerDown(HWND source, PixelPoint clientPoint) noexce
     }
     captureWindow_ = source;
     dragging_ = true;
+    annotationDragging_ = false;
     return true;
 }
 
@@ -361,7 +679,13 @@ void OverlayInputRouter::pointerUp(HWND, PixelPoint) noexcept
 void OverlayInputRouter::platformPointerMove(PixelPoint virtualPoint) noexcept
 {
     if (dragging_ && status_ == OverlayInputStatus::active) {
-        model_.updateInteraction(virtualPoint);
+        if (annotationDragging_ && editor_ != nullptr) {
+            if (const auto local = annotationPoint(virtualPoint)) {
+                editor_->pointerMove(*local);
+            }
+        } else {
+            model_.updateInteraction(virtualPoint);
+        }
     }
 }
 
@@ -370,9 +694,19 @@ void OverlayInputRouter::platformPointerUp(PixelPoint virtualPoint) noexcept
     if (!dragging_ || status_ != OverlayInputStatus::active) {
         return;
     }
-    model_.updateInteraction(virtualPoint);
-    model_.finishInteraction();
+    if (annotationDragging_ && editor_ != nullptr) {
+        if (const auto local = annotationPoint(virtualPoint)) {
+            editor_->pointerUp(*local);
+        } else {
+            editor_->cancelInteraction();
+        }
+    } else {
+        model_.updateInteraction(virtualPoint);
+        model_.finishInteraction();
+        ensureEditor();
+    }
     dragging_ = false;
+    annotationDragging_ = false;
     captureWindow_ = nullptr;
     releasingCapture_ = true;
     const auto released = platform_.releaseMouse();
@@ -386,6 +720,9 @@ void OverlayInputRouter::platformPointerUp(PixelPoint virtualPoint) noexcept
 void OverlayInputRouter::captureChanged() noexcept
 {
     if (dragging_ && !releasingCapture_) {
+        if (annotationDragging_ && editor_ != nullptr) {
+            editor_->cancelInteraction();
+        }
         cancelOnce();
     }
 }
@@ -397,12 +734,46 @@ void OverlayInputRouter::cancelMode() noexcept
 
 void OverlayInputRouter::escapePressed() noexcept
 {
+    if (editor_ != nullptr) {
+        const auto result = editor_->handleKey(
+            ShapeEditorKey::escapeKey, false, false);
+        if (result == ShapeEditorKeyResult::consumed) {
+            return;
+        }
+    }
     cancelOnce();
 }
 
 void OverlayInputRouter::cancelPressed() noexcept
 {
     cancelOnce();
+}
+
+bool OverlayInputRouter::keyPressed(
+    ShapeEditorKey key,
+    bool control,
+    bool shift) noexcept
+{
+    if (status_ != OverlayInputStatus::active || editor_ == nullptr) {
+        return false;
+    }
+    const auto result = editor_->handleKey(key, control, shift);
+    switch (result) {
+    case ShapeEditorKeyResult::ignored:
+        return false;
+    case ShapeEditorKeyResult::consumed:
+        return true;
+    case ShapeEditorKeyResult::requestCancel:
+        cancelOnce();
+        return true;
+    case ShapeEditorKeyResult::requestSave:
+        completeOnce(OverlayInputAction::save);
+        return true;
+    case ShapeEditorKeyResult::requestCopy:
+        completeOnce(OverlayInputAction::copy);
+        return true;
+    }
+    return false;
 }
 
 void OverlayInputRouter::shutdownForRestart() noexcept
@@ -421,6 +792,10 @@ void OverlayInputRouter::releaseInteraction() noexcept
         return;
     }
     dragging_ = false;
+    if (annotationDragging_ && editor_ != nullptr) {
+        editor_->cancelInteraction();
+    }
+    annotationDragging_ = false;
     captureWindow_ = nullptr;
     releasingCapture_ = true;
     if (!platform_.releaseMouse()) {
@@ -485,6 +860,22 @@ SelectionPhase OverlayInputRouter::phase() const noexcept
 std::optional<PixelRect> OverlayInputRouter::selection() const noexcept
 {
     return model_.selection();
+}
+
+const AnnotationDocument& OverlayInputRouter::annotationDocument() const noexcept
+{
+    static const AnnotationDocument empty;
+    return editor_ != nullptr ? editor_->document() : empty;
+}
+
+std::pair<UINT, UINT> OverlayInputRouter::annotationDpi() const noexcept
+{
+    if (!editorOwnerIndex_.has_value()
+        || *editorOwnerIndex_ >= surfaces_.size()) {
+        return {96U, 96U};
+    }
+    const auto& surface = surfaces_[*editorOwnerIndex_];
+    return {surface.dpiX, surface.dpiY};
 }
 
 struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl> {
@@ -557,6 +948,27 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
         case OverlayWindowInputKind::escape:
             router->escapePressed();
             break;
+        case OverlayWindowInputKind::keyDown: {
+            ShapeEditorKey key;
+            switch (input.virtualKey) {
+            case VK_DELETE:
+                key = ShapeEditorKey::deleteKey;
+                break;
+            case 'Z':
+                key = ShapeEditorKey::z;
+                break;
+            case 'S':
+                key = ShapeEditorKey::save;
+                break;
+            case 'C':
+                key = ShapeEditorKey::copy;
+                break;
+            default:
+                return;
+            }
+            router->keyPressed(key, input.control, input.shift);
+            break;
+        }
         }
         if (!refresh()) {
             router->cancelMode();
@@ -572,8 +984,33 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
             const auto current = router->presentations();
             const auto count = (std::min)(windows.size(), current.size());
             for (std::size_t index = 0; index < count; ++index) {
-                windows[index]->setSelection(
-                    current[index].selection, current[index].showActions);
+                OverlayRenderState state;
+                state.selection = current[index].selection;
+                state.showActions = current[index].showActions;
+                state.annotationPlan = current[index].annotationPlan;
+                state.toolbarActions.clear();
+                state.toolbarActions.reserve(current[index].toolbarItems.size());
+                for (const auto& item : current[index].toolbarItems) {
+                    state.toolbarActions.push_back(item.action);
+                    if (item.selected) {
+                        state.selectedToolbarAction = item.action;
+                    }
+                    if (item.action == ToolbarAction::undo) {
+                        state.canUndo = item.enabled;
+                    } else if (item.action == ToolbarAction::redo) {
+                        state.canRedo = item.enabled;
+                    }
+                }
+                if (current[index].shapeOptions.has_value()) {
+                    const auto& options = *current[index].shapeOptions;
+                    state.shapeOptions = OverlayShapeOptionsRenderState{
+                        options.layout,
+                        options.state,
+                        options.strokePatternMenu,
+                        options.cornerRadiusPanel,
+                    };
+                }
+                windows[index]->setRenderState(std::move(state));
             }
             return true;
         } catch (...) {
@@ -655,7 +1092,8 @@ OverlayHostCreateResult OverlayHost::create(
                 if (const auto locked = weak.lock()) {
                     locked->dispatchAction(action);
                 }
-            });
+            },
+            true);
         if (!impl->router->activateEscapeHotKey(impl->windows.front()->handle())) {
             return {
                 nullptr,
@@ -713,6 +1151,25 @@ std::optional<PixelRect> OverlayHost::selection() const noexcept
     return impl_ && impl_->router
         ? impl_->router->selection()
         : std::nullopt;
+}
+
+OverlayAnnotationSnapshot OverlayHost::annotationSnapshot() const
+{
+    OverlayAnnotationSnapshot snapshot;
+    if (!impl_ || !impl_->router) {
+        return snapshot;
+    }
+    snapshot.plan = impl_->router->annotationDocument().annotations().empty()
+        ? AnnotationRenderPlan{}
+        : buildAnnotationRenderPlan(
+              impl_->router->annotationDocument(),
+              std::nullopt,
+              {0.0F, 0.0F},
+              false);
+    const auto dpi = impl_->router->annotationDpi();
+    snapshot.dpiX = dpi.first;
+    snapshot.dpiY = dpi.second;
+    return snapshot;
 }
 
 SelectionPhase OverlayHost::phase() const noexcept

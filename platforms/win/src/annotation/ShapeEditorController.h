@@ -45,7 +45,9 @@ public:
     bool applyOptionHit(ShapeOptionHit hit);
     bool applyStrokePattern(std::size_t index);
     bool setCornerRadius(float cornerRadiusDip);
+    bool adjustCornerRadius(float deltaDip);
     bool selectCustomColor(AnnotationColor color);
+    void dismissPopovers() noexcept;
 
     bool pointerDown(AnnotationPoint point) noexcept;
     void pointerMove(AnnotationPoint point) noexcept;

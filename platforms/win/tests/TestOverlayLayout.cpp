@@ -391,6 +391,7 @@ void testEmbeddedToolbarResources()
              icon.resourceIdAt144Dpi,
              icon.resourceIdAt192Dpi});
     }
+    expectedResourceIds.push_back(IDR_PALETTE_TOOL_PNG);
 
     constexpr std::array<unsigned char, 8> pngSignature{
         0x89U, 0x50U, 0x4EU, 0x47U, 0x0DU, 0x0AU, 0x1AU, 0x0AU};

@@ -237,7 +237,19 @@ bool ShapeEditorController::applyOptionHit(ShapeOptionHit hit)
         break;
     case ShapeOptionControl::rectangleMode:
         changed = options_.setKind(AnnotationKind::rectangle);
-        cornerRadiusPanelVisible_ = false;
+        strokePatternMenuVisible_ = false;
+        break;
+    case ShapeOptionControl::cornerRadiusDisclosure:
+        changed = options_.setKind(AnnotationKind::rectangle);
+        strokePatternMenuVisible_ = false;
+        cornerRadiusPanelVisible_ = !cornerRadiusPanelVisible_;
+        if (changed) {
+            if (const auto selected = document_.selectedId(); selected.has_value()) {
+                document_.updateKind(*selected, options_.kind());
+            }
+            syncHistory();
+        }
+        return true;
         break;
     case ShapeOptionControl::ellipseMode:
         changed = options_.setKind(AnnotationKind::ellipse);
@@ -292,6 +304,16 @@ bool ShapeEditorController::setCornerRadius(float cornerRadiusDip)
     return changed || !document_.selectedId().has_value();
 }
 
+bool ShapeEditorController::adjustCornerRadius(float deltaDip)
+{
+    if (!options_.adjustCornerRadius(deltaDip)) {
+        return false;
+    }
+    const auto changed = applyOptionsStyleToSelection();
+    syncHistory();
+    return changed || !document_.selectedId().has_value();
+}
+
 bool ShapeEditorController::selectCustomColor(AnnotationColor color)
 {
     if (!options_.selectCustomColor(color)) {
@@ -300,6 +322,12 @@ bool ShapeEditorController::selectCustomColor(AnnotationColor color)
     const auto changed = applyOptionsStyleToSelection();
     syncHistory();
     return changed || !document_.selectedId().has_value();
+}
+
+void ShapeEditorController::dismissPopovers() noexcept
+{
+    strokePatternMenuVisible_ = false;
+    cornerRadiusPanelVisible_ = false;
 }
 
 bool ShapeEditorController::pointerDown(AnnotationPoint point) noexcept

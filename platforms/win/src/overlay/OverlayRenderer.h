@@ -5,6 +5,8 @@
 #endif
 
 #include "capture/CaptureBackend.h"
+#include "annotation/AnnotationRenderer.h"
+#include "annotation/ShapeOptions.h"
 #include "overlay/VisualStyleCatalog.h"
 #include "toolbar/ToolbarLayout.h"
 
@@ -53,6 +55,27 @@ struct OverlayLayout {
     std::array<DipRect, 8> handles{};
     std::wstring sizeLabelText;
     bool showActions = true;
+};
+
+struct OverlayShapeOptionsRenderState {
+    ShapeOptionsLayout layout;
+    ShapeOptionsState state;
+    std::optional<StrokePatternMenuLayout> strokePatternMenu;
+    std::optional<CornerRadiusPanelLayout> cornerRadiusPanel;
+};
+
+struct OverlayRenderState {
+    std::optional<PixelRect> selection;
+    bool showActions = true;
+    std::vector<ToolbarAction> toolbarActions{
+        terminalToolbarActions().begin(),
+        terminalToolbarActions().end(),
+    };
+    std::optional<ToolbarAction> selectedToolbarAction;
+    bool canUndo = false;
+    bool canRedo = false;
+    AnnotationRenderPlan annotationPlan;
+    std::optional<OverlayShapeOptionsRenderState> shapeOptions;
 };
 
 float physicalPixelsToDip(std::int64_t pixels, std::uint32_t dpi) noexcept;
@@ -104,6 +127,9 @@ public:
         const FrozenDisplay& display,
         const std::optional<PixelRect>& selection,
         bool showActions = true) noexcept;
+    std::optional<OverlayRendererError> render(
+        const FrozenDisplay& display,
+        const OverlayRenderState& state) noexcept;
     void discardDeviceResources() noexcept;
 
 private:

@@ -272,6 +272,14 @@ ShapeOptionsLayout shapeOptionsLayout(
     layout.rectangleMode = {origin.x + 130.0F, controlY, 26.0F, 20.0F};
     layout.rectangleModeBackground = inset(
         layout.rectangleMode, -3.0F, -4.0F);
+    layout.rectangleDisclosure = {
+        layout.rectangleModeBackground.x
+            + layout.rectangleModeBackground.width - 12.0F,
+        layout.rectangleModeBackground.y
+            + layout.rectangleModeBackground.height - 12.0F,
+        12.0F,
+        12.0F,
+    };
     layout.ellipseMode = {origin.x + 162.0F, controlY, 22.0F, 20.0F};
     layout.ellipseModeBackground = inset(
         layout.ellipseMode, -3.0F, -5.0F);
@@ -336,6 +344,9 @@ std::optional<ShapeOptionHit> shapeOptionHitTest(
     }
     if (contains(layout.fillToggle, point)) {
         return ShapeOptionHit{ShapeOptionControl::fillToggle, 0};
+    }
+    if (contains(layout.rectangleDisclosure, point)) {
+        return ShapeOptionHit{ShapeOptionControl::cornerRadiusDisclosure, 0};
     }
     if (contains(layout.rectangleMode, point)) {
         return ShapeOptionHit{ShapeOptionControl::rectangleMode, 0};

@@ -89,6 +89,7 @@ void testTwoRowDefaultLayoutUsesExactMacDips()
     CHECK((layout.strokeWidthHits[0] == AnnotationRect{107, 205, 26, 30}));
     CHECK((layout.fillToggle == AnnotationRect{190, 210, 20, 20}));
     CHECK((layout.rectangleMode == AnnotationRect{230, 210, 26, 20}));
+    CHECK((layout.rectangleDisclosure == AnnotationRect{247, 222, 12, 12}));
     CHECK((layout.ellipseMode == AnnotationRect{262, 210, 22, 20}));
     CHECK((layout.strokeStyle == AnnotationRect{304, 210, 102, 20}));
     CHECK(layout.colorSwatches.size() == 21U);
@@ -126,6 +127,8 @@ void testSharedHitGeometryAndMenus()
         == ShapeOptionHit{ShapeOptionControl::fillToggle, 0}));
     CHECK((shapeOptionHitTest(layout, {131, 20})
         == ShapeOptionHit{ShapeOptionControl::rectangleMode, 0}));
+    CHECK((shapeOptionHitTest(layout, {151, 32})
+        == ShapeOptionHit{ShapeOptionControl::cornerRadiusDisclosure, 0}));
     CHECK((shapeOptionHitTest(layout, {164, 20})
         == ShapeOptionHit{ShapeOptionControl::ellipseMode, 0}));
     CHECK((shapeOptionHitTest(layout, {205, 20})

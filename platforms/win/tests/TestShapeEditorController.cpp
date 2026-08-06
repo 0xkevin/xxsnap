@@ -64,6 +64,13 @@ void testDrawOptionsHistoryAndKindSwitch()
     CHECK(editor.applyOptionHit({ShapeOptionControl::ellipseMode, 0}));
     CHECK(editor.document().find(id)->kind == AnnotationKind::ellipse);
     CHECK(editor.options().kind() == AnnotationKind::ellipse);
+    CHECK(editor.applyOptionHit({ShapeOptionControl::cornerRadiusDisclosure, 0}));
+    CHECK(editor.options().kind() == AnnotationKind::rectangle);
+    CHECK(editor.cornerRadiusPanelVisible());
+    CHECK(editor.adjustCornerRadius(1.0F));
+    CHECK(editor.document().find(id)->style.cornerRadiusDip == 6.0F);
+    editor.dismissPopovers();
+    CHECK(!editor.cornerRadiusPanelVisible());
     CHECK(editor.applyStrokePattern(3));
     CHECK(editor.document().find(id)->style.strokePattern
         == AnnotationStrokePattern::dashLongShort);
@@ -71,7 +78,7 @@ void testDrawOptionsHistoryAndKindSwitch()
     CHECK(editor.document().find(id)->style.cornerRadiusDip == 30.0F);
 
     CHECK(editor.handleToolbarAction(ToolbarAction::undo));
-    CHECK(editor.document().find(id)->style.cornerRadiusDip == 5.0F);
+    CHECK(editor.document().find(id)->style.cornerRadiusDip == 6.0F);
     CHECK(editor.toolbarState().isEnabled(ToolbarAction::redo));
     CHECK(editor.handleToolbarAction(ToolbarAction::redo));
     CHECK(editor.document().find(id)->style.cornerRadiusDip == 30.0F);

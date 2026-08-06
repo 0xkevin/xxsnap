@@ -43,6 +43,7 @@ enum class ShapeOptionControl : std::uint8_t {
     strokeWidth,
     fillToggle,
     rectangleMode,
+    cornerRadiusDisclosure,
     ellipseMode,
     strokeStyle,
     palette,
@@ -69,6 +70,7 @@ struct ShapeOptionsLayout {
     AnnotationRect fillToggle{};
     AnnotationRect fillToggleBackground{};
     AnnotationRect rectangleMode{};
+    AnnotationRect rectangleDisclosure{};
     AnnotationRect rectangleModeBackground{};
     AnnotationRect ellipseMode{};
     AnnotationRect ellipseModeBackground{};

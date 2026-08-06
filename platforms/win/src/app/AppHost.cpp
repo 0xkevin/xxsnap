@@ -7,6 +7,7 @@
 #include "capture/DxgiCaptureBackend.h"
 #include "capture/FallbackCaptureBackend.h"
 #include "capture/GdiCaptureBackend.h"
+#include "export/AnnotationComposer.h"
 #include "export/ClipboardWriter.h"
 #include "export/PngWriter.h"
 #include "export/SelectionComposer.h"
@@ -172,7 +173,20 @@ public:
         const FrozenDesktop& desktop,
         MemoryBudget& budget) noexcept override
     {
-        return composeSelection(selectionRect, desktop, budget);
+        auto composition = composeSelection(selectionRect, desktop, budget);
+        auto* pixels = std::get_if<PixelBuffer>(&composition);
+        if (pixels == nullptr || !overlay_) {
+            return composition;
+        }
+        const auto annotations = overlay_->annotationSnapshot();
+        if (const auto compositionError = composeAnnotations(
+                *pixels,
+                annotations.plan,
+                annotations.dpiX,
+                annotations.dpiY)) {
+            return *compositionError;
+        }
+        return composition;
     }
 
     CaptureExportResult exportSelection(

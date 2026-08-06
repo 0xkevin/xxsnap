@@ -233,8 +233,17 @@ void OverlayWindow::setSelection(
     std::optional<PixelRect> selection,
     bool showActions) noexcept
 {
-    selection_ = selection;
-    showActions_ = showActions;
+    renderState_ = {};
+    renderState_.selection = selection;
+    renderState_.showActions = showActions;
+    if (window_ != nullptr) {
+        InvalidateRect(window_, nullptr, FALSE);
+    }
+}
+
+void OverlayWindow::setRenderState(OverlayRenderState state) noexcept
+{
+    renderState_ = std::move(state);
     if (window_ != nullptr) {
         InvalidateRect(window_, nullptr, FALSE);
     }
@@ -348,13 +357,69 @@ LRESULT OverlayWindow::handleMessage(
             dispatchInput({OverlayWindowInputKind::escape, {}});
             return 0;
         }
+        switch (static_cast<int>(wParam)) {
+        case overlayUndoHotKeyIdentifier:
+            dispatchInput({
+                OverlayWindowInputKind::keyDown,
+                {},
+                'Z',
+                true,
+                false,
+            });
+            return 0;
+        case overlayRedoHotKeyIdentifier:
+            dispatchInput({
+                OverlayWindowInputKind::keyDown,
+                {},
+                'Z',
+                true,
+                true,
+            });
+            return 0;
+        case overlaySaveHotKeyIdentifier:
+            dispatchInput({
+                OverlayWindowInputKind::keyDown,
+                {},
+                'S',
+                true,
+                false,
+            });
+            return 0;
+        case overlayCopyHotKeyIdentifier:
+            dispatchInput({
+                OverlayWindowInputKind::keyDown,
+                {},
+                'C',
+                true,
+                false,
+            });
+            return 0;
+        case overlayDeleteHotKeyIdentifier:
+            dispatchInput({
+                OverlayWindowInputKind::keyDown,
+                {},
+                VK_DELETE,
+                false,
+                false,
+            });
+            return 0;
+        default:
+            break;
+        }
         return DefWindowProcW(window_, message, wParam, lParam);
     case WM_KEYDOWN:
         if (wParam == VK_ESCAPE) {
             dispatchInput({OverlayWindowInputKind::escape, {}});
             return 0;
         }
-        return DefWindowProcW(window_, message, wParam, lParam);
+        dispatchInput({
+            OverlayWindowInputKind::keyDown,
+            {},
+            wParam,
+            (GetKeyState(VK_CONTROL) & 0x8000) != 0,
+            (GetKeyState(VK_SHIFT) & 0x8000) != 0,
+        });
+        return 0;
     case WM_DPICHANGED: {
         RestartCallback callback;
         try {
@@ -391,7 +456,7 @@ void OverlayWindow::paint() noexcept
     BeginPaint(window_, &paint);
     if (display_ != nullptr) {
         lastRendererError_ = renderer_.render(
-            *display_, selection_, showActions_);
+            *display_, renderState_);
         if (lastRendererError_.has_value()
             && lastRendererError_->code == OverlayRendererErrorCode::deviceLost) {
             InvalidateRect(window_, nullptr, FALSE);

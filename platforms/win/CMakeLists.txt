@@ -53,6 +53,7 @@ set_property(
     SOURCE resources/xxsnap.rc
     APPEND PROPERTY OBJECT_DEPENDS
         "${PROJECT_SOURCE_DIR}/platforms/win/resources/icons/Snipory.ico"
+        "${PROJECT_SOURCE_DIR}/platforms/mac/Resources/Icons/palette-tool.png"
         ${XXSNAP_TOOLBAR_ASSET_FILES}
 )
 add_library(xxsnap_visual_resources INTERFACE)
@@ -196,6 +197,21 @@ target_link_libraries(
 )
 
 add_library(
+    xxsnap_annotation_composer
+    src/export/AnnotationComposer.cpp
+)
+target_compile_features(xxsnap_annotation_composer PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_annotation_composer
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_annotation_composer
+    PUBLIC xxsnap_annotation_renderer xxsnap_capture_backend
+    PRIVATE xxsnap_windows_build_configuration d2d1 windowscodecs ole32
+)
+
+add_library(
     xxsnap_png_writer
     src/export/PngWriter.cpp
 )
@@ -323,6 +339,7 @@ target_include_directories(
 target_link_libraries(
     xxsnap_overlay_renderer
     PUBLIC xxsnap_capture_backend xxsnap_visual_resources xxsnap_toolbar_layout
+           xxsnap_annotation_renderer xxsnap_shape_options
     PRIVATE xxsnap_windows_build_configuration
             d2d1 dwrite windowscodecs ole32 user32 gdi32
 )
@@ -358,7 +375,8 @@ target_include_directories(
 target_link_libraries(
     xxsnap_overlay_host
     PUBLIC xxsnap_overlay_window xxsnap_selection_model
-    PRIVATE xxsnap_windows_build_configuration user32
+           xxsnap_shape_editor_controller
+    PRIVATE xxsnap_windows_build_configuration user32 comdlg32
 )
 
 add_library(xxsnap_single_instance src/app/SingleInstance.cpp)
@@ -431,6 +449,7 @@ target_link_libraries(
         xxsnap_gdi_capture_backend
         xxsnap_fallback_capture_backend
         xxsnap_selection_composer
+        xxsnap_annotation_composer
         xxsnap_png_writer
         xxsnap_clipboard_writer
         xxsnap_single_instance
@@ -783,6 +802,17 @@ if(BUILD_TESTING)
     add_test(NAME selection_composer COMMAND xxsnap_selection_composer_test)
 
     add_executable(
+        xxsnap_annotation_composer_test
+        tests/TestAnnotationComposer.cpp
+    )
+    target_compile_features(xxsnap_annotation_composer_test PRIVATE cxx_std_17)
+    target_link_libraries(
+        xxsnap_annotation_composer_test
+        PRIVATE xxsnap_annotation_composer
+    )
+    add_test(NAME annotation_composer COMMAND xxsnap_annotation_composer_test)
+
+    add_executable(
         xxsnap_clipboard_writer_test
         tests/TestClipboardWriter.cpp
     )
@@ -814,6 +844,7 @@ set(xxsnap_capture_session_targets
     xxsnap_dxgi_capture_backend
     xxsnap_fallback_capture_backend
     xxsnap_selection_composer
+    xxsnap_annotation_composer
     xxsnap_png_writer
     xxsnap_clipboard_writer
     xxsnap_toolbar_layout
@@ -856,6 +887,7 @@ if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_capture_session_coordinator_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_memory_budget_matrix_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_selection_composer_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_annotation_composer_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_clipboard_writer_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_png_writer_test)
 endif()

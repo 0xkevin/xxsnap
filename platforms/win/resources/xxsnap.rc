@@ -80,4 +80,5 @@ IDR_TOOLBAR_200_CANCEL_CAPTURE_PNG RCDATA "platforms/win/resources/toolbar/200/c
 IDR_TOOLBAR_200_PIN_TO_SCREEN_PNG RCDATA "platforms/win/resources/toolbar/200/pin-to-screen.png"
 IDR_TOOLBAR_200_SAVE_TO_FILE_PNG RCDATA "platforms/win/resources/toolbar/200/save-to-file.png"
 IDR_TOOLBAR_200_COPY_TO_CLIPBOARD_PNG RCDATA "platforms/win/resources/toolbar/200/copy-to-clipboard.png"
+IDR_PALETTE_TOOL_PNG RCDATA "platforms/mac/Resources/Icons/palette-tool.png"
 IDI_XXSNAP ICON "platforms/win/resources/icons/Snipory.ico"

@@ -28,6 +28,11 @@ constexpr DWORD overlayWindowExtendedStyle() noexcept
 }
 
 inline constexpr int overlayEscapeHotKeyIdentifier = 0x5853;
+inline constexpr int overlayUndoHotKeyIdentifier = 0x5854;
+inline constexpr int overlayRedoHotKeyIdentifier = 0x5855;
+inline constexpr int overlaySaveHotKeyIdentifier = 0x5856;
+inline constexpr int overlayCopyHotKeyIdentifier = 0x5857;
+inline constexpr int overlayDeleteHotKeyIdentifier = 0x5858;
 
 constexpr bool isOverlayEscapeHotKey(WPARAM identifier) noexcept
 {
@@ -83,11 +88,15 @@ enum class OverlayWindowInputKind {
     captureChanged,
     cancelMode,
     escape,
+    keyDown,
 };
 
 struct OverlayWindowInput {
     OverlayWindowInputKind kind;
     PixelPoint clientPoint{};
+    WPARAM virtualKey = 0;
+    bool control = false;
+    bool shift = false;
 };
 
 struct OverlayWindowCreateResult;
@@ -115,6 +124,7 @@ public:
     void setSelection(
         std::optional<PixelRect> selection,
         bool showActions = true) noexcept;
+    void setRenderState(OverlayRenderState state) noexcept;
     DpiRestartState dpiRestartState() const noexcept;
     const std::optional<OverlayWindowError>& lastWindowError() const noexcept;
     const std::optional<OverlayRendererError>& lastRendererError() const noexcept;
@@ -141,8 +151,7 @@ private:
     InputCallback inputCallback_;
     DpiRestartDecision dpiRestartDecision_;
     OverlayRenderer renderer_;
-    std::optional<PixelRect> selection_;
-    bool showActions_ = true;
+    OverlayRenderState renderState_;
     std::optional<OverlayRendererError> lastRendererError_;
 };
 

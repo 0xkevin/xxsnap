@@ -16,6 +16,9 @@ using xxsnap::win::OverlayInputRouter;
 using xxsnap::win::OverlayInputStatus;
 using xxsnap::win::OverlaySurface;
 using xxsnap::win::SelectionPhase;
+using xxsnap::win::ShapeEditorKey;
+using xxsnap::win::AnnotationColor;
+using xxsnap::win::AnnotationRect;
 
 int failureCount = 0;
 
@@ -67,6 +70,15 @@ public:
             && identifier == registeredIdentifier;
     }
 
+    std::optional<AnnotationColor> chooseColor(
+        HWND window,
+        AnnotationColor) noexcept override
+    {
+        ++chooseColorCalls;
+        chosenColorWindow = window;
+        return chosenColor;
+    }
+
     bool captureSucceeds = true;
     bool releaseSucceeds = true;
     bool registerSucceeds = true;
@@ -80,6 +92,9 @@ public:
     int cursorCalls = 0;
     int registerCalls = 0;
     int unregisterCalls = 0;
+    int chooseColorCalls = 0;
+    HWND chosenColorWindow = nullptr;
+    std::optional<AnnotationColor> chosenColor = AnnotationColor{1, 2, 3, 255};
 };
 
 const HWND leftWindow = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(1));
@@ -100,6 +115,14 @@ void createReadySelection(OverlayInputRouter& router)
     router.platformPointerUp(PixelPoint{120, 280});
     CHECK(router.phase() == SelectionPhase::ready);
     CHECK((router.selection() == PixelRect{-140, 80, 260, 200}));
+}
+
+PixelPoint dipCenterAt144Dpi(AnnotationRect rect)
+{
+    return {
+        static_cast<std::int64_t>((rect.x + rect.width / 2.0F) * 1.5F + 0.5F),
+        static_cast<std::int64_t>((rect.y + rect.height / 2.0F) * 1.5F + 0.5F),
+    };
 }
 
 void testCrossWindowRoutingUsesVirtualPhysicalCoordinates()
@@ -382,6 +405,85 @@ void testRestartShutdownReleasesCaptureAndHotKeyWithoutCancelAction()
     CHECK(actions.empty());
 }
 
+void testShapeToolIsNonTerminalAndEditsThroughSharedPresentation()
+{
+    FakePlatform platform;
+    std::vector<OverlayInputAction> actions;
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360},
+        surfaces(),
+        platform,
+        [&actions](OverlayInputAction action) { actions.push_back(action); },
+        true);
+    createReadySelection(router);
+
+    auto owner = router.presentations()[1];
+    CHECK(owner.toolbarItems.size() == 6U);
+    const auto rectangle = owner.toolbarItems[0];
+    CHECK(rectangle.action == xxsnap::win::ToolbarAction::rectangle);
+    const auto capturesBeforeTool = platform.captureCalls;
+    CHECK(router.pointerDown(rightWindow, rectangle.centerPhysical));
+    CHECK(actions.empty());
+    CHECK(platform.captureCalls == capturesBeforeTool);
+
+    owner = router.presentations()[1];
+    CHECK(owner.toolbarItems[0].selected);
+    CHECK(owner.shapeOptions.has_value());
+    CHECK(owner.annotationPlan.items.empty());
+
+    auto options = *owner.shapeOptions;
+    CHECK(router.pointerDown(
+        rightWindow, dipCenterAt144Dpi(options.layout.rectangleDisclosure)));
+    owner = router.presentations()[1];
+    CHECK(owner.shapeOptions->cornerRadiusPanel.has_value());
+    CHECK(router.pointerDown(
+        rightWindow,
+        dipCenterAt144Dpi(owner.shapeOptions->cornerRadiusPanel->increment)));
+    CHECK(router.presentations()[1].shapeOptions->state.style().cornerRadiusDip
+        == 6.0F);
+
+    options = *router.presentations()[1].shapeOptions;
+    CHECK(router.pointerDown(
+        rightWindow, dipCenterAt144Dpi(options.layout.strokeStyle)));
+    owner = router.presentations()[1];
+    CHECK(owner.shapeOptions->strokePatternMenu.has_value());
+    CHECK(router.pointerDown(
+        rightWindow,
+        dipCenterAt144Dpi(owner.shapeOptions->strokePatternMenu->items[2])));
+    CHECK(router.presentations()[1].shapeOptions->state.style().strokePattern
+        == xxsnap::win::AnnotationStrokePattern::dashNarrow);
+
+    options = *router.presentations()[1].shapeOptions;
+    CHECK(router.pointerDown(
+        rightWindow, dipCenterAt144Dpi(options.layout.colorSwatches.back())));
+    CHECK(platform.chooseColorCalls == 1);
+    CHECK(platform.chosenColorWindow == rightWindow);
+    CHECK((router.presentations()[1].shapeOptions->state.style().strokeColor
+        == AnnotationColor{1, 2, 3, 255}));
+
+    CHECK(router.pointerDown(rightWindow, PixelPoint{10, 100}));
+    platform.cursor = PixelPoint{100, 180};
+    router.pointerMove(rightWindow, PixelPoint{100, 180});
+    CHECK(router.presentations()[1].annotationPlan.items.size() == 1U);
+    router.pointerUp(rightWindow, PixelPoint{100, 180});
+    CHECK(router.annotationDocument().annotations().size() == 1U);
+    CHECK(actions.empty());
+
+    owner = router.presentations()[1];
+    CHECK(owner.annotationPlan.items.size() == 1U);
+    CHECK(owner.toolbarItems[1].action == xxsnap::win::ToolbarAction::undo);
+    CHECK(owner.toolbarItems[1].enabled);
+    CHECK(router.pointerDown(rightWindow, owner.toolbarItems[1].centerPhysical));
+    CHECK(router.annotationDocument().annotations().empty());
+    CHECK(actions.empty());
+
+    CHECK(router.keyPressed(ShapeEditorKey::z, true, true));
+    CHECK(router.annotationDocument().annotations().size() == 1U);
+    CHECK(router.keyPressed(ShapeEditorKey::copy, true, false));
+    CHECK(actions.size() == 1U);
+    CHECK(actions[0] == OverlayInputAction::copy);
+}
+
 } // namespace
 
 int main()
@@ -396,5 +498,6 @@ int main()
     testEscapeUnregisterFailureIsObservableAndRetriedOnDestruction();
     testTerminalCallbackMaySynchronouslyDestroyRouter();
     testRestartShutdownReleasesCaptureAndHotKeyWithoutCancelAction();
+    testShapeToolIsNonTerminalAndEditsThroughSharedPresentation();
     return failureCount == 0 ? 0 : 1;
 }
