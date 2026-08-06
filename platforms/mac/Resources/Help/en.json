@@ -182,7 +182,7 @@
           "accessibilityLabel": "Full Screen Capture editor showing the desktop with arrow and text annotations and the complete toolbar below"
         },
         { "type": "heading", "level": 2, "text": "Scroll Capture" },
-        { "type": "paragraph", "text": "Start with Region Capture, place the selection inside scrollable content, and choose Scroll Capture. Then scroll directly with your mouse wheel or trackpad. Basic Scroll Capture does not need Accessibility permission." },
+        { "type": "paragraph", "text": "Start with Region Capture, place the selection inside scrollable content, and choose Scroll Capture. Then scroll directly with your mouse wheel or trackpad. Scroll Capture itself does not require Accessibility permission." },
         {
           "type": "steps",
           "items": [
@@ -210,7 +210,7 @@
         { "type": "heading", "level": 3, "text": "Capture Preview" },
         { "type": "paragraph", "text": "The preview does not accept mouse input. It only shows the complete accepted image and a position marker, so you cannot browse it manually. While scrolling, check that new content joins where you expect." },
         { "type": "heading", "level": 3, "text": "Finish or Cancel" },
-        { "type": "paragraph", "text": "Click the temporary checkmark to the right of Scroll Capture in the main toolbar to finish. Return or Enter finishes, and Esc cancels. Global shortcuts may need Accessibility permission, but Basic Scroll Capture does not. If the finish key does nothing, click the temporary checkmark. Cancel returns to the original locked selection with the capture and annotations from before scrolling." },
+        { "type": "paragraph", "text": "Click the temporary checkmark to the right of Scroll Capture in the main toolbar to finish. Return or Enter finishes, and Esc cancels. Scroll Capture itself does not require Accessibility permission, but global shortcuts may need it. If the finish key does nothing, click the temporary checkmark. Cancel returns to the original locked selection with the capture and annotations from before scrolling." },
         { "type": "heading", "level": 3, "text": "Pauses and Resource Limits" },
         { "type": "paragraph", "text": "Page animation or too little overlap can pause stitching. Wait for the page to settle and continue scrolling. If no new content appears, finish the image you have, or cancel, make the selection smaller, and try again." },
         { "type": "paragraph", "text": "When XxSnap reaches the resource limit, it pauses the capture and stops accepting new frames. Everything already captured is kept. Finish with the current image or cancel." },
@@ -242,7 +242,7 @@
             },
             {
               "question": "Does Scroll Capture need Accessibility permission?",
-              "answer": "Basic Scroll Capture does not need Accessibility permission: just scroll directly with your mouse wheel or trackpad. Accessibility may only be needed to receive global shortcuts such as Return, Enter, or Esc while another app is active."
+              "answer": "Scroll Capture itself does not require Accessibility permission: just scroll directly with your mouse wheel or trackpad. Accessibility may only be needed to receive global shortcuts such as Return, Enter, or Esc while another app is active."
             },
             {
               "question": "Why do Return, Enter, or Esc sometimes do nothing?",

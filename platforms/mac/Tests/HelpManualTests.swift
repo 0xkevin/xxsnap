@@ -196,7 +196,7 @@ final class HelpManualTests: XCTestCase {
         XCTAssertTrue(text.contains("反向滚动只用于回看，不会拼接"))
         XCTAssertTrue(text.contains("滚动截图右侧临时出现的对勾"))
         XCTAssertTrue(text.contains("Return 或 Enter 完成，Esc 取消"))
-        XCTAssertTrue(text.contains("基本滚动截图不需要辅助功能权限"))
+        XCTAssertTrue(text.contains("滚动截图本身不需要辅助功能权限"))
         XCTAssertTrue(text.contains("全局快捷键可能需要辅助功能权限"))
         XCTAssertTrue(text.contains("预览面板不接收鼠标"))
         XCTAssertTrue(text.contains("不能手动回看"))
@@ -217,7 +217,8 @@ final class HelpManualTests: XCTestCase {
             "每点一次",
             "自动推动目标页面",
             "不能改成反向",
-            "达到资源上限后不能继续单步"
+            "达到资源上限后不能继续单步",
+            "基本滚动截图"
         ] {
             XCTAssertFalse(text.contains(obsoleteText), "滚动截图仍包含旧说明：\(obsoleteText)")
         }
@@ -248,7 +249,7 @@ final class HelpManualTests: XCTestCase {
         XCTAssertTrue(text.contains("Scrolling in reverse only reviews earlier content; it is not stitched"))
         XCTAssertTrue(text.contains("temporary checkmark to the right of Scroll Capture"))
         XCTAssertTrue(text.contains("Return or Enter finishes, and Esc cancels"))
-        XCTAssertTrue(text.contains("Basic Scroll Capture does not need Accessibility permission"))
+        XCTAssertTrue(text.contains("Scroll Capture itself does not require Accessibility permission"))
         XCTAssertTrue(text.contains("Global shortcuts may need Accessibility permission"))
 
         for obsoleteText in [
@@ -257,7 +258,8 @@ final class HelpManualTests: XCTestCase {
             "direction menu",
             "Start Scroll Step",
             "step-by-step scrolling panel",
-            "move the target page automatically"
+            "move the target page automatically",
+            "Basic Scroll Capture"
         ] {
             XCTAssertFalse(text.contains(obsoleteText), "Scroll Capture still contains obsolete copy: \(obsoleteText)")
         }
