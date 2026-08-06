@@ -542,6 +542,37 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.scrollCaptureOverlayState, .capturing)
     }
 
+    func testScrollCaptureFinishTooltipUsesReturnWithoutChangingOrdinaryShortcuts() throws {
+        let image = solidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let selection = NSRect(x: 80, y: 60, width: 300, height: 220)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.onScrollCaptureRequested = { _ in }
+        window.test_setLockedSelectionRect(selection)
+        let scrollShortcutBefore = try XCTUnwrap(window.test_tooltipShortcut(for: .scroll))
+
+        window.test_beginScrollCapture()
+
+        XCTAssertEqual(
+            window.test_tooltipText(for: .finishEditing),
+            L10n(language: .zhHans).text(.finishScrollCapture)
+        )
+        let finishShortcut = try XCTUnwrap(window.test_tooltipShortcut(for: .finishEditing))
+        XCTAssertNotEqual(finishShortcut.key, "\u{1b}")
+        XCTAssertEqual(finishShortcut.keyCode, UInt32(kVK_Return))
+        XCTAssertEqual(finishShortcut.displayText, "Return")
+        XCTAssertEqual(window.test_tooltipShortcut(for: .scroll), scrollShortcutBefore)
+
+        let pinnedEditor = SelectionOverlayWindow(
+            backgroundImage: image,
+            configuration: .pinnedImageEditor(selectionRect: selection)
+        ) { _ in }
+        let ordinaryFinishShortcut = try XCTUnwrap(
+            pinnedEditor.test_tooltipShortcut(for: .finishEditing)
+        )
+        XCTAssertEqual(ordinaryFinishShortcut.key, "\u{1b}")
+        XCTAssertEqual(ordinaryFinishShortcut.displayText, "ESC")
+    }
+
     func testBeginScrollCapturePreservesBoundaryCrossingOverlayContentInOriginalSeed() throws {
         let image = solidImage(size: NSSize(width: 640, height: 420), color: .white)
         var request: ScrollCaptureSeed?
@@ -1063,14 +1094,12 @@ final class SelectionToolbarStateTests: XCTestCase {
     }
 
     func testScrollCaptureFinishToolbarButtonRequestsFinishExactlyOnceWithoutOrdinaryCompletion() {
-        var ordinaryResults: [CaptureSelectionResult] = []
+        var ordinarySelectionHandlerCallCount = 0
         var finishCount = 0
         let window = SelectionOverlayWindow(
             backgroundImage: solidImage(size: NSSize(width: 500, height: 400), color: .white)
-        ) { result in
-            if let result {
-                ordinaryResults.append(result)
-            }
+        ) { _ in
+            ordinarySelectionHandlerCallCount += 1
         }
         window.onScrollCaptureRequested = { _ in }
         window.onScrollCaptureFinishRequested = { finishCount += 1 }
@@ -1081,7 +1110,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_performFinishEditingToolbarButton()
 
         XCTAssertEqual(finishCount, 1)
-        XCTAssertTrue(ordinaryResults.isEmpty)
+        XCTAssertEqual(ordinarySelectionHandlerCallCount, 0)
         XCTAssertEqual(window.scrollCaptureOverlayState, .capturing)
     }
 

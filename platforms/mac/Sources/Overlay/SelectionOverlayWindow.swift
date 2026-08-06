@@ -1171,6 +1171,12 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_toolbarShortcut(for: button)
     }
 
+    func test_tooltipShortcut(
+        for button: TestToolbarButton
+    ) -> SelectionToolbarState.ToolbarShortcut? {
+        (contentView as? SelectionOverlayView)?.test_tooltipShortcut(for: button)
+    }
+
     func test_setLockedSelectionRect(_ rect: NSRect) {
         (contentView as? SelectionOverlayView)?.test_setLockedSelectionRect(rect)
     }
@@ -4884,7 +4890,11 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             for (button, rect) in toolbarButtonRects(in: toolbar) where rect.contains(point) {
                 let identifier = tooltipIdentifier(for: button)
                 if button == .finishEditing, scrollCaptureOverlayState != .inactive {
-                    return (identifier, L10n(language: settings.language).text(.finishScrollCapture), rect)
+                    return (
+                        "finishScrollCapture",
+                        L10n(language: settings.language).text(.finishScrollCapture),
+                        rect
+                    )
                 }
                 guard let title = tooltipTitle(for: identifier) else {
                     return nil
@@ -7758,6 +7768,14 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             identifier = "eraserClearAll"
         }
         return toolbarShortcut(for: identifier)
+    }
+
+    func test_tooltipShortcut(
+        for button: TestToolbarButton
+    ) -> SelectionToolbarState.ToolbarShortcut? {
+        guard let point = test_mainToolbarButtonPoint(for: button),
+              let target = tooltipTarget(at: point) else { return nil }
+        return toolbarShortcut(for: target.identifier)
     }
 
     var test_isPinnedImageDragInProgress: Bool {

@@ -140,6 +140,13 @@ enum SelectionToolbarState {
             "save": ToolbarShortcut(key: "s", modifiers: command, iconName: "command", displayText: "S"),
             "copy": ToolbarShortcut(key: "c", modifiers: command, iconName: "command", displayText: "C"),
             "finishEditing": ToolbarShortcut(key: "\u{1b}", modifiers: [], iconName: nil, displayText: "ESC"),
+            "finishScrollCapture": ToolbarShortcut(
+                key: "\r",
+                modifiers: [],
+                iconName: nil,
+                displayText: "Return",
+                keyCode: UInt32(kVK_Return)
+            ),
         ]
     }()
 
