@@ -1427,6 +1427,10 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.test_mainToolbarButtonPoint(for: button)
     }
 
+    func test_performFinishEditingToolbarButton() {
+        (contentView as? SelectionOverlayView)?.test_performFinishEditingToolbarButton()
+    }
+
     func test_toolbarButtonIsSelected(_ button: TestToolbarButton) -> Bool {
         (contentView as? SelectionOverlayView)?.test_toolbarButtonIsSelected(button) ?? false
     }
@@ -4879,7 +4883,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         if let toolbar = mainToolbarRect(for: selectionRect) {
             for (button, rect) in toolbarButtonRects(in: toolbar) where rect.contains(point) {
                 let identifier = tooltipIdentifier(for: button)
-                if button == .scroll, scrollCaptureOverlayState != .inactive {
+                if button == .finishEditing, scrollCaptureOverlayState != .inactive {
                     return (identifier, L10n(language: settings.language).text(.finishScrollCapture), rect)
                 }
                 guard let title = tooltipTitle(for: identifier) else {
@@ -6728,7 +6732,11 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             }
             beginScrollCapture()
         case .finishEditing:
-            finish(action: .finishEditing)
+            if scrollCaptureOverlayState != .inactive {
+                scrollCaptureFinishDidRequest?()
+            } else {
+                finish(action: .finishEditing)
+            }
         case .clearAll:
             if clearAllAnnotationsAndMasks() {
                 configuration.annotationHistoryChanged?()
@@ -7639,6 +7647,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return nil
         }
         return NSPoint(x: rect.midX, y: rect.midY)
+    }
+
+    func test_performFinishEditingToolbarButton() {
+        perform(.finishEditing)
     }
 
     func test_toolbarButtonIsSelected(_ button: TestToolbarButton) -> Bool {
@@ -14339,7 +14351,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         var separators: [(ToolbarButton, ToolbarButton)] = [
             (.redo, .cancel),
         ]
-        separators.insert(contentsOf: [(.eraser, .scroll), (.scroll, .undo)], at: 0)
+        let scrollCaptureActionSeparator: (ToolbarButton, ToolbarButton) = scrollCaptureOverlayState == .inactive
+            ? (.scroll, .undo)
+            : (.finishEditing, .undo)
+        separators.insert(contentsOf: [(.eraser, .scroll), scrollCaptureActionSeparator], at: 0)
 
         NSColor.tertiaryLabelColor.withAlphaComponent(0.5).setFill()
 
@@ -14360,7 +14375,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     private func isToolbarButtonEnabled(_ button: ToolbarButton) -> Bool {
         if scrollCaptureOverlayState != .inactive {
-            return button == .scroll || button == .cancel
+            return button == .finishEditing
         }
         switch button {
         case .undo:
@@ -16228,7 +16243,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     private func drawToolbarIcon(named name: String, in rect: NSRect, enabled: Bool, selected: Bool) {
         let color: NSColor
-        if name == "toolbar-scroll-screen2", enabled, !selected {
+        if name == "toolbar-scroll-screen2", selected {
+            color = .systemBlue
+        } else if name == "toolbar-scroll-screen2", enabled {
             color = .black
         } else {
             color = toolbarIconColor(enabled: enabled, selected: selected)
@@ -16495,6 +16512,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         }
         if configuration.showsAnnotationToolbarButtons {
             buttons.append(.scroll)
+            if scrollCaptureOverlayState != .inactive {
+                buttons.append(.finishEditing)
+            }
         }
         if configuration.showsAnnotationToolbarButtons {
             buttons.append(contentsOf: [
@@ -16509,7 +16529,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             .copy,
         ])
         buttons = buttons.filter { !isMainToolbarButtonHidden($0) }
-        if configuration.showsFinishEditingButton {
+        if configuration.showsFinishEditingButton, !buttons.contains(.finishEditing) {
             buttons.append(.finishEditing)
         }
         return buttons
@@ -16541,8 +16561,12 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     private func mainToolbarExtraGap(after button: ToolbarButton) -> CGFloat {
         switch button {
-        case .eraser, .scroll, .redo:
+        case .eraser, .redo:
             return 8
+        case .scroll:
+            return scrollCaptureOverlayState == .inactive ? 8 : 0
+        case .finishEditing:
+            return scrollCaptureOverlayState == .inactive ? 0 : 8
         default:
             return 0
         }
@@ -16659,7 +16683,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         guard let selectionRect,
               let toolbarFrame = mainToolbarRect(for: selectionRect) else { return nil }
         let frames = Dictionary(uniqueKeysWithValues: toolbarButtonRects(in: toolbarFrame))
-        guard let finishButtonFrame = frames[.scroll],
+        guard let finishButtonFrame = frames[.finishEditing],
               let cancelButtonFrame = frames[.cancel] else { return nil }
         return ScrollCaptureControlGeometry(
             toolbarFrame: toolbarFrame,

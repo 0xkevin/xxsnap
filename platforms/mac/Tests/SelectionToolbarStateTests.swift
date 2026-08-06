@@ -484,8 +484,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_setLockedSelectionRect(selection)
         window.test_setAnnotations([annotation])
         let toolbarBefore = try XCTUnwrap(window.test_mainToolbarRect())
-        let scrollBefore = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .scroll))
-        let cancelBefore = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .cancel))
+        XCTAssertNil(window.test_mainToolbarButtonRect(for: .finishEditing))
         XCTAssertNotNil(window.test_measurementControlPoint(.cornerStyle))
         XCTAssertNotNil(window.test_measurementControlPoint(.aspectRatioLock))
         XCTAssertNotNil(window.test_measurementControlPoint(.refresh))
@@ -500,16 +499,27 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(ordinaryCompletionCount, 0)
         XCTAssertEqual(window.scrollCaptureOverlayState, .capturing)
         XCTAssertTrue(window.ignoresMouseEvents)
-        XCTAssertEqual(window.test_mainToolbarRect(), toolbarBefore)
+        let toolbarAfter = try XCTUnwrap(window.test_mainToolbarRect())
+        let scrollAfter = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .scroll))
+        let finishAfter = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .finishEditing))
+        let cancelAfter = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .cancel))
+        XCTAssertGreaterThan(toolbarAfter.width, toolbarBefore.width)
+        XCTAssertEqual(finishAfter.minX - scrollAfter.maxX, 8, accuracy: 0.001)
         let geometry = try XCTUnwrap(window.scrollCaptureControlGeometry)
-        XCTAssertEqual(geometry.toolbarFrame, window.convertToScreen(toolbarBefore))
-        XCTAssertEqual(geometry.finishButtonFrame, window.convertToScreen(scrollBefore))
-        XCTAssertEqual(geometry.cancelButtonFrame, window.convertToScreen(cancelBefore))
+        XCTAssertEqual(geometry.toolbarFrame, window.convertToScreen(toolbarAfter))
+        XCTAssertEqual(geometry.finishButtonFrame, window.convertToScreen(finishAfter))
+        XCTAssertEqual(geometry.cancelButtonFrame, window.convertToScreen(cancelAfter))
         XCTAssertTrue(window.test_toolbarButtonIsSelected(.scroll))
+        XCTAssertFalse(window.test_toolbarButtonIsEnabled(.scroll))
+        XCTAssertTrue(window.test_toolbarButtonIsEnabled(.finishEditing))
         XCTAssertFalse(window.test_toolbarButtonIsEnabled(.rectangle))
-        XCTAssertTrue(window.test_toolbarButtonIsEnabled(.scroll))
-        XCTAssertTrue(window.test_toolbarButtonIsEnabled(.cancel))
-        XCTAssertEqual(window.test_tooltipText(for: .scroll), L10n(language: .zhHans).text(.finishScrollCapture))
+        XCTAssertFalse(window.test_toolbarButtonIsEnabled(.undo))
+        XCTAssertFalse(window.test_toolbarButtonIsEnabled(.redo))
+        XCTAssertFalse(window.test_toolbarButtonIsEnabled(.cancel))
+        XCTAssertFalse(window.test_toolbarButtonIsEnabled(.pin))
+        XCTAssertFalse(window.test_toolbarButtonIsEnabled(.save))
+        XCTAssertFalse(window.test_toolbarButtonIsEnabled(.copy))
+        XCTAssertEqual(window.test_tooltipText(for: .finishEditing), L10n(language: .zhHans).text(.finishScrollCapture))
         XCTAssertNil(window.test_measurementControlPoint(.cornerStyle))
         XCTAssertNil(window.test_measurementControlPoint(.aspectRatioLock))
         XCTAssertNil(window.test_measurementControlPoint(.refresh))
@@ -1038,12 +1048,41 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_setLockedSelectionRect(NSRect(x: 40, y: 40, width: 260, height: 200))
         window.test_activateShapeTool(.rectangle)
         window.test_beginScrollCapture()
-        window.endScrollCapturePassiveMode()
+        XCTAssertNotNil(window.test_mainToolbarButtonRect(for: .finishEditing))
+
+        window.restoreAfterScrollCaptureCancellation()
+
         XCTAssertEqual(window.scrollCaptureOverlayState, .inactive)
         XCTAssertFalse(window.ignoresMouseEvents)
         XCTAssertTrue(window.test_toolbarButtonIsSelected(.rectangle))
+        XCTAssertNil(window.test_mainToolbarButtonRect(for: .finishEditing))
+        XCTAssertTrue(window.test_toolbarButtonIsEnabled(.scroll))
+        XCTAssertTrue(window.test_toolbarButtonIsEnabled(.cancel))
         window.test_beginScrollCapture()
         XCTAssertEqual(requestCount, 2)
+    }
+
+    func testScrollCaptureFinishToolbarButtonRequestsFinishExactlyOnceWithoutOrdinaryCompletion() {
+        var ordinaryResults: [CaptureSelectionResult] = []
+        var finishCount = 0
+        let window = SelectionOverlayWindow(
+            backgroundImage: solidImage(size: NSSize(width: 500, height: 400), color: .white)
+        ) { result in
+            if let result {
+                ordinaryResults.append(result)
+            }
+        }
+        window.onScrollCaptureRequested = { _ in }
+        window.onScrollCaptureFinishRequested = { finishCount += 1 }
+        window.test_setLockedSelectionRect(NSRect(x: 40, y: 40, width: 260, height: 200))
+        window.test_beginScrollCapture()
+
+        window.test_performFinishEditingToolbarButton()
+        window.test_performFinishEditingToolbarButton()
+
+        XCTAssertEqual(finishCount, 1)
+        XCTAssertTrue(ordinaryResults.isEmpty)
+        XCTAssertEqual(window.scrollCaptureOverlayState, .capturing)
     }
 
     func testPassiveScrollCaptureConsumesOverlayCommandsAndPreservesGeometry() throws {
