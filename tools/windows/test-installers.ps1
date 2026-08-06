@@ -47,22 +47,56 @@ function Test-PackageAcceptance($Package, $Environment) {
 }
 
 function Invoke-ComMethod($Object, [string]$Name, [object[]]$Arguments) {
-    return $Object.GetType().InvokeMember(
-        $Name,
-        [System.Reflection.BindingFlags]::InvokeMethod,
-        $null,
-        $Object,
-        $Arguments)
+    try {
+        return $Object.GetType().InvokeMember(
+            $Name,
+            [System.Reflection.BindingFlags]::InvokeMethod,
+            $null,
+            $Object,
+            $Arguments)
+    }
+    catch {
+        throw "Windows Installer COM method '$Name' failed: $($_.Exception.Message)"
+    }
+}
+
+function Get-ComProperty($Object, [string]$Name, [object[]]$Arguments) {
+    try {
+        return $Object.GetType().InvokeMember(
+            $Name,
+            [System.Reflection.BindingFlags]::GetProperty,
+            $null,
+            $Object,
+            $Arguments)
+    }
+    catch {
+        throw "Windows Installer COM property '$Name' failed: $($_.Exception.Message)"
+    }
+}
+
+function Release-ComObject($Object) {
+    if ($null -ne $Object -and
+        [Runtime.InteropServices.Marshal]::IsComObject($Object)) {
+        [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($Object)
+    }
 }
 
 function Read-MsiScalar($Database, [string]$Sql) {
-    $view = Invoke-ComMethod $Database "OpenView" @($Sql)
-    [void](Invoke-ComMethod $view "Execute" @())
-    $record = Invoke-ComMethod $view "Fetch" @()
-    if (-not $record) {
-        throw "MSI query returned no rows: $Sql"
+    $view = $null
+    $record = $null
+    try {
+        $view = Invoke-ComMethod $Database "OpenView" @($Sql)
+        [void](Invoke-ComMethod $view "Execute" @())
+        $record = Invoke-ComMethod $view "Fetch" @()
+        if (-not $record) {
+            throw "MSI query returned no rows: $Sql"
+        }
+        return [string]$record.StringData(1)
     }
-    return [string]$record.StringData(1)
+    finally {
+        Release-ComObject $record
+        Release-ComObject $view
+    }
 }
 
 function Get-PeMachine([string]$Path) {
@@ -185,39 +219,61 @@ Assert-True ($msiFiles.Count -eq 4) `
     "Expected exactly four MSI files in '$installerDirectory', found $($msiFiles.Count)."
 
 $installer = New-Object -ComObject WindowsInstaller.Installer
-foreach ($package in $packages) {
+try {
+  foreach ($package in $packages) {
     $matching = @($msiFiles | Where-Object {
         $_.Name -match "^$([regex]::Escape($package.name))-\d+\.\d+\.\d+\.msi$"
     })
     Assert-True ($matching.Count -eq 1) "Missing or duplicate MSI for $($package.name)."
     $msi = $matching[0]
-    $database = Invoke-ComMethod $installer "OpenDatabase" @($msi.FullName, 0)
-    $productName = Read-MsiScalar $database `
-        "SELECT ``Value`` FROM ``Property`` WHERE ``Property``='ProductName'"
-    $upgradeCode = Read-MsiScalar $database `
-        "SELECT ``Value`` FROM ``Property`` WHERE ``Property``='UpgradeCode'"
-    $productVersion = Read-MsiScalar $database `
-        "SELECT ``Value`` FROM ``Property`` WHERE ``Property``='ProductVersion'"
-    $launchCondition = Read-MsiScalar $database `
-        "SELECT ``Condition`` FROM ``LaunchCondition`` WHERE ``Description``='$($package.launchMessage.Replace("'", "''"))'"
-    Assert-True ($productName -eq $package.productName) "ProductName mismatch in $($msi.Name)."
-    Assert-True ($upgradeCode -eq $package.upgradeCode) "UpgradeCode mismatch in $($msi.Name)."
-    Assert-True ($msi.BaseName -eq "$($package.name)-$productVersion") `
-        "MSI file name and ProductVersion mismatch in $($msi.Name)."
-    Assert-True ($launchCondition -eq $package.launchCondition) `
-        "LaunchCondition mismatch in $($msi.Name)."
+    Write-Verbose "Validating $($msi.Name)"
+    $database = $null
+    $summary = $null
+    try {
+        $database = Invoke-ComMethod $installer "OpenDatabase" @($msi.FullName, 0)
+        $productName = Read-MsiScalar $database `
+            "SELECT ``Value`` FROM ``Property`` WHERE ``Property``='ProductName'"
+        $upgradeCode = Read-MsiScalar $database `
+            "SELECT ``Value`` FROM ``Property`` WHERE ``Property``='UpgradeCode'"
+        $productVersion = Read-MsiScalar $database `
+            "SELECT ``Value`` FROM ``Property`` WHERE ``Property``='ProductVersion'"
+        $launchCondition = Read-MsiScalar $database `
+            "SELECT ``Condition`` FROM ``LaunchCondition`` WHERE ``Description``='$($package.launchMessage.Replace("'", "''"))'"
+        Assert-True ($productName -eq $package.productName) "ProductName mismatch in $($msi.Name)."
+        Assert-True (
+            ([guid]$upgradeCode) -eq ([guid][string]$package.upgradeCode)) `
+            "UpgradeCode mismatch in $($msi.Name)."
+        Assert-True ($msi.BaseName -eq "$($package.name)-$productVersion") `
+            "MSI file name and ProductVersion mismatch in $($msi.Name)."
+        Assert-True ($launchCondition -eq $package.launchCondition) `
+            "LaunchCondition mismatch in $($msi.Name): expected '$($package.launchCondition)', found '$launchCondition'."
 
-    $summary = Invoke-ComMethod $installer "SummaryInformation" @($msi.FullName, 0)
-    $template = [string]$summary.Property(7)
-    $expectedTemplate = if ($package.architecture -eq "x64") { "x64" } else { "Intel" }
-    Assert-True ($template.StartsWith("$expectedTemplate;")) `
-        "MSI architecture mismatch in $($msi.Name): $template"
+        $summary = Get-ComProperty $installer "SummaryInformation" @($msi.FullName, 0)
+        $template = [string]$summary.Property(7)
+        $expectedTemplate = if ($package.architecture -eq "x64") { "x64" } else { "Intel" }
+        Assert-True ($template.StartsWith("$expectedTemplate;")) `
+            "MSI architecture mismatch in $($msi.Name): $template"
+    }
+    finally {
+        Release-ComObject $summary
+        Release-ComObject $database
+    }
 
     $extractRoot = Join-Path $env:TEMP "XxSnap installer extract $([guid]::NewGuid().ToString('N'))"
     New-Item -ItemType Directory -Path $extractRoot | Out-Null
     try {
-        & msiexec.exe /a $msi.FullName /qn "TARGETDIR=$extractRoot"
-        $extractExitCode = $LASTEXITCODE
+        $startInfo = [Diagnostics.ProcessStartInfo]::new()
+        $startInfo.FileName = Join-Path $env:SystemRoot "System32\msiexec.exe"
+        $startInfo.Arguments = "/a `"$($msi.FullName)`" /qn TARGETDIR=`"$extractRoot`""
+        $startInfo.UseShellExecute = $false
+        $msiexec = [Diagnostics.Process]::Start($startInfo)
+        try {
+            $msiexec.WaitForExit()
+            $extractExitCode = $msiexec.ExitCode
+        }
+        finally {
+            $msiexec.Dispose()
+        }
         Assert-True ($extractExitCode -eq 0) `
             "Administrative extraction failed for $($msi.Name) with code $extractExitCode."
         $manifests = @(Get-ChildItem -LiteralPath $extractRoot -Filter "payload-manifest.json" -File -Recurse)
@@ -277,6 +333,10 @@ foreach ($package in $packages) {
             Remove-Item -LiteralPath $extractRoot -Recurse -Force
         }
     }
+  }
+}
+finally {
+    Release-ComObject $installer
 }
 
 Write-Output "Installer validation passed: four MSI identities, gates, architectures, and payload hashes."

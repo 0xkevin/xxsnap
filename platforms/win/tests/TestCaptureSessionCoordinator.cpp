@@ -220,9 +220,11 @@ void testCopyCompletesAndBusyStartIsIgnored()
 void testArchitectureDefaultMemoryLimit()
 {
 #if defined(_WIN64)
-    CHECK(defaultCaptureSessionMemoryLimit == 2ULL * 1024ULL * 1024ULL * 1024ULL);
+    static_assert(
+        defaultCaptureSessionMemoryLimit == 2ULL * 1024ULL * 1024ULL * 1024ULL);
 #else
-    CHECK(defaultCaptureSessionMemoryLimit == 512ULL * 1024ULL * 1024ULL);
+    static_assert(
+        defaultCaptureSessionMemoryLimit == 512ULL * 1024ULL * 1024ULL);
 #endif
 }
 

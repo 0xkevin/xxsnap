@@ -422,17 +422,19 @@ if(BUILD_TESTING)
     )
     add_test(NAME gdi_capture COMMAND xxsnap_gdi_capture_test)
 
-    add_executable(
-        xxsnap_fallback_capture_test
-        tests/TestFallbackCaptureBackend.cpp
-    )
-    target_compile_features(xxsnap_fallback_capture_test PRIVATE cxx_std_17)
-    target_link_libraries(
-        xxsnap_fallback_capture_test
-        PRIVATE xxsnap_fallback_capture_backend xxsnap_dxgi_capture_backend
-                xxsnap_windows_build_configuration
-    )
-    add_test(NAME fallback_capture COMMAND xxsnap_fallback_capture_test)
+    if(XXSNAP_WINDOWS_FAMILY STREQUAL "modern")
+        add_executable(
+            xxsnap_fallback_capture_test
+            tests/TestFallbackCaptureBackend.cpp
+        )
+        target_compile_features(xxsnap_fallback_capture_test PRIVATE cxx_std_17)
+        target_link_libraries(
+            xxsnap_fallback_capture_test
+            PRIVATE xxsnap_fallback_capture_backend xxsnap_dxgi_capture_backend
+                    xxsnap_windows_build_configuration
+        )
+        add_test(NAME fallback_capture COMMAND xxsnap_fallback_capture_test)
+    endif()
 
     add_executable(
         xxsnap_legacy_runtime_apis_test
@@ -610,7 +612,9 @@ if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_selection_model_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_display_topology_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_gdi_capture_test)
-    list(APPEND xxsnap_capture_session_targets xxsnap_fallback_capture_test)
+    if(XXSNAP_WINDOWS_FAMILY STREQUAL "modern")
+        list(APPEND xxsnap_capture_session_targets xxsnap_fallback_capture_test)
+    endif()
     list(APPEND xxsnap_capture_session_targets xxsnap_visual_style_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_overlay_layout_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_overlay_input_test)

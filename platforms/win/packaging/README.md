@@ -22,8 +22,8 @@ Build and test the application binaries first:
 ```
 
 The packaging machine also needs a .NET SDK, the repository-pinned WiX Toolset
-4.0.6, VC143 app-local runtimes, VC142 app-local runtimes, and the Windows SDK
-10.0.19041 UCRT payload. The build script discovers Visual Studio with
+4.0.6, the active Modern MSVC app-local runtimes, VC142 app-local runtimes, and
+the Windows SDK 10.0.19041 UCRT payload. The build script discovers Visual Studio with
 `vswhere.exe`. Air-gapped build machines can provide explicit runtime folders:
 
 - `XXSNAP_MODERN_RUNTIME_X64` and `XXSNAP_MODERN_RUNTIME_X86`

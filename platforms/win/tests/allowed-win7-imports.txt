@@ -82,12 +82,16 @@ SHELL32.dll!Shell_NotifyIconW
 
 KERNEL32.dll!AcquireSRWLockExclusive
 KERNEL32.dll!CloseHandle
+KERNEL32.dll!CreateEventW
 KERNEL32.dll!CreateFileW
 KERNEL32.dll!CreateMutexW
+KERNEL32.dll!DeleteCriticalSection
 KERNEL32.dll!DeleteFileW
+KERNEL32.dll!EnterCriticalSection
 KERNEL32.dll!FindResourceW
 KERNEL32.dll!FlushFileBuffers
 KERNEL32.dll!FreeLibrary
+KERNEL32.dll!GetCurrentProcess
 KERNEL32.dll!GetCurrentProcessId
 KERNEL32.dll!GetCurrentThreadId
 KERNEL32.dll!GetEnvironmentVariableW
@@ -101,19 +105,30 @@ KERNEL32.dll!GlobalFree
 KERNEL32.dll!GlobalLock
 KERNEL32.dll!GlobalSize
 KERNEL32.dll!GlobalUnlock
+KERNEL32.dll!InitializeCriticalSectionAndSpinCount
 KERNEL32.dll!InitializeSListHead
 KERNEL32.dll!IsProcessorFeaturePresent
+KERNEL32.dll!IsDebuggerPresent
+KERNEL32.dll!LeaveCriticalSection
 KERNEL32.dll!LoadLibraryW
 KERNEL32.dll!LoadResource
 KERNEL32.dll!LockResource
 KERNEL32.dll!MoveFileExW
 KERNEL32.dll!QueryPerformanceCounter
 KERNEL32.dll!ReleaseSRWLockExclusive
+KERNEL32.dll!ResetEvent
+KERNEL32.dll!RtlCaptureContext
+KERNEL32.dll!RtlLookupFunctionEntry
+KERNEL32.dll!RtlVirtualUnwind
+KERNEL32.dll!SetEvent
 KERNEL32.dll!SetLastError
 KERNEL32.dll!SetUnhandledExceptionFilter
 KERNEL32.dll!SizeofResource
 KERNEL32.dll!Sleep
 KERNEL32.dll!SleepConditionVariableSRW
+KERNEL32.dll!TerminateProcess
+KERNEL32.dll!UnhandledExceptionFilter
+KERNEL32.dll!WaitForSingleObjectEx
 KERNEL32.dll!WakeAllConditionVariable
 KERNEL32.dll!WriteFile
 
@@ -159,6 +174,7 @@ api-ms-win-crt-runtime-l1-1-0.dll!_initialize_onexit_table
 api-ms-win-crt-runtime-l1-1-0.dll!_initialize_wide_environment
 api-ms-win-crt-runtime-l1-1-0.dll!_initterm
 api-ms-win-crt-runtime-l1-1-0.dll!_initterm_e
+api-ms-win-crt-runtime-l1-1-0.dll!_invalid_parameter_noinfo_noreturn
 api-ms-win-crt-runtime-l1-1-0.dll!_register_onexit_function
 api-ms-win-crt-runtime-l1-1-0.dll!_register_thread_local_exe_atexit_callback
 api-ms-win-crt-runtime-l1-1-0.dll!_seh_filter_exe

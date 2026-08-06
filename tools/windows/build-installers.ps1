@@ -49,15 +49,29 @@ function Get-VisualStudioRoots {
 }
 
 function Resolve-DotnetSdk {
+    $candidates = [System.Collections.Generic.List[string]]::new()
+    if ($env:XXSNAP_DOTNET_EXE) {
+        $candidates.Add($env:XXSNAP_DOTNET_EXE)
+    }
+    $candidates.Add("C:\Program Files\dotnet\dotnet.exe")
+    $candidates.Add("C:\Program Files\dotnet\x64\dotnet.exe")
+    $candidates.Add("C:\Program Files (x86)\dotnet\dotnet.exe")
     $command = Get-Command dotnet.exe -ErrorAction SilentlyContinue
-    if (-not $command) {
-        throw "Missing required tool: .NET SDK for the pinned WiX 4 tool manifest."
+    if ($command) {
+        $candidates.Add($command.Source)
     }
-    $sdks = @(& $command.Source --list-sdks 2>&1)
-    if ($LASTEXITCODE -ne 0 -or $sdks.Count -eq 0) {
-        throw "The dotnet host is installed, but no .NET SDK is available for WiX 4."
+
+    foreach ($candidate in @($candidates | Select-Object -Unique)) {
+        if (-not $candidate -or
+            -not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+            continue
+        }
+        $sdks = @(& $candidate --list-sdks 2>&1)
+        if ($LASTEXITCODE -eq 0 -and $sdks.Count -gt 0) {
+            return (Resolve-Path -LiteralPath $candidate).ProviderPath
+        }
     }
-    return $command.Source
+    throw "No .NET SDK host is available for the pinned WiX 4 tool manifest. Set XXSNAP_DOTNET_EXE explicitly if the SDK is installed in a custom location."
 }
 
 function Resolve-VcRuntimeDirectory([string]$Family, [string]$Architecture) {
@@ -70,22 +84,25 @@ function Resolve-VcRuntimeDirectory([string]$Family, [string]$Architecture) {
         return (Resolve-Path -LiteralPath $override).ProviderPath
     }
 
-    $crtFolder = if ($Family -eq "legacy") {
+    $crtFolderPattern = if ($Family -eq "legacy") {
         "Microsoft.VC142.CRT"
     } else {
-        "Microsoft.VC143.CRT"
+        "Microsoft.VC*.CRT"
     }
     foreach ($root in Get-VisualStudioRoots) {
         $redistRoot = Join-Path $root "VC\Redist\MSVC"
         foreach ($versionDirectory in @(Get-ChildItem -LiteralPath $redistRoot -Directory -ErrorAction SilentlyContinue |
             Sort-Object Name -Descending)) {
-            $candidate = Join-Path $versionDirectory.FullName "$Architecture\$crtFolder"
-            if (Test-Path -LiteralPath (Join-Path $candidate "vcruntime140.dll") -PathType Leaf) {
-                return $candidate
+            $architectureRoot = Join-Path $versionDirectory.FullName $Architecture
+            foreach ($candidate in @(Get-ChildItem -LiteralPath $architectureRoot -Directory -Filter $crtFolderPattern -ErrorAction SilentlyContinue |
+                Sort-Object Name -Descending)) {
+                if (Test-Path -LiteralPath (Join-Path $candidate.FullName "vcruntime140.dll") -PathType Leaf) {
+                    return $candidate.FullName
+                }
             }
         }
     }
-    throw "Missing $crtFolder app-local runtime for $Architecture. Set $overrideName to its directory."
+    throw "Missing $crtFolderPattern app-local runtime for $Architecture. Set $overrideName to its directory."
 }
 
 function Resolve-UcrtDirectory([string]$Architecture) {
@@ -348,6 +365,7 @@ try {
             New-Item -ItemType Directory -Path $intermediate -Force | Out-Null
             $payloadWixSource = Join-Path $intermediate "Payload.wxs"
             Write-PayloadWixSource $stageDirectory $payloadWixSource
+            $escapedLaunchCondition = $package.launchCondition.Replace('"', '\"')
             $wixArguments = @(
                 "tool", "run", "wix", "--", "build", $wixSource, $payloadWixSource,
                 "-arch", $package.architecture,
@@ -358,7 +376,7 @@ try {
                 "-d", "StageDir=$stageDirectory",
                 "-d", "PlatformUpdateD2DMinVersion=$($definition.win7Prerequisites.platformUpdateD2DMinVersion)",
                 "-d", "Sha2WinTrustMinVersion=$($definition.win7Prerequisites.sha2WinTrustMinVersion)",
-                "-d", "LaunchCondition=$($package.launchCondition)",
+                "-d", "LaunchCondition=$escapedLaunchCondition",
                 "-d", "LaunchMessage=$($package.launchMessage)",
                 "-intermediateFolder", $intermediate,
                 "-pdbtype", "none",

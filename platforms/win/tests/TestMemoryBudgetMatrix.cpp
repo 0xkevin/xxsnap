@@ -44,13 +44,13 @@ DisplayDescriptor display(
 void testArchitectureLimit()
 {
 #if defined(_WIN64)
-    CHECK(sizeof(void*) == 8U);
-    CHECK(defaultCaptureSessionMemoryLimit
-          == 2ULL * 1024ULL * 1024ULL * 1024ULL);
+    static_assert(sizeof(void*) == 8U);
+    static_assert(
+        defaultCaptureSessionMemoryLimit == 2ULL * 1024ULL * 1024ULL * 1024ULL);
 #else
-    CHECK(sizeof(void*) == 4U);
-    CHECK(defaultCaptureSessionMemoryLimit
-          == 512ULL * 1024ULL * 1024ULL);
+    static_assert(sizeof(void*) == 4U);
+    static_assert(
+        defaultCaptureSessionMemoryLimit == 512ULL * 1024ULL * 1024ULL);
 #endif
 }
 
