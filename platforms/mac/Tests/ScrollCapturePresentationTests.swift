@@ -242,7 +242,6 @@ final class ScrollCapturePresentationTests: XCTestCase {
         XCTAssertTrue(controller.test_toolbarPointIsInteractive(NSPoint(x: finish.midX, y: finish.midY)))
         XCTAssertFalse(controller.test_toolbarPointIsInteractive(NSPoint(x: formerCancel.midX, y: formerCancel.midY)))
         XCTAssertFalse(controller.test_toolbarPointIsInteractive(NSPoint(x: toolbar.minX + 20, y: toolbar.midY)))
-        XCTAssertFalse(controller.test_hasVisibleStepControls)
         XCTAssertEqual(controller.test_finishButtonToolTip, L10n(language: .english).text(.finishScrollCapture))
         XCTAssertEqual(controller.test_finishAccessibilityLabel, L10n(language: .english).text(.finishScrollCapture))
         XCTAssertEqual(controller.test_accessibilityRoles, [.button])

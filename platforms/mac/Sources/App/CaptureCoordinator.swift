@@ -224,11 +224,6 @@ final class CaptureCoordinator {
                 stitcher: bridge,
                 clock: ContinuousScrollCaptureClock(),
                 activityMonitor: ScrollActivityMonitor(),
-                stepController: AutomaticScrollCaptureStepController(
-                    targetProcessIdentifierProvider: {
-                        seed.targetApplicationProcessIdentifier
-                    }
-                ),
                 diagnosticLogger: diagnosticLogger,
                 presentation: update
             )
@@ -1669,6 +1664,10 @@ extension CaptureCoordinator {
 
     var test_hasScrollCaptureSession: Bool {
         scrollCaptureSession != nil
+    }
+
+    func test_makeScrollCaptureSession(seed: ScrollCaptureSeed) -> any ScrollCaptureSessionRunning {
+        scrollCaptureSessionFactory(seed) { _ in }
     }
 
     var test_overlayWindow: SelectionOverlayWindow? {

@@ -1288,6 +1288,8 @@ final class ScrollCaptureSession {
     }
 
 #if DEBUG
+    var test_hasAutomaticStepController: Bool { stepController != nil }
+
     func test_runSamplingTick() async {
         await runSamplingTick()
     }

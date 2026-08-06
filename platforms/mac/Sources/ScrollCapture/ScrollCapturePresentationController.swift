@@ -1166,7 +1166,6 @@ final class ScrollCapturePresentationController: NSObject {
         let local = NSPoint(x: point.x - controlFrame.minX, y: point.y - controlFrame.minY)
         return finishButton.frame.contains(local)
     }
-    var test_hasVisibleStepControls: Bool { false }
     var test_hasVisiblePanels: Bool {
         controlPanel.isVisible
             || previewPanel.isVisible

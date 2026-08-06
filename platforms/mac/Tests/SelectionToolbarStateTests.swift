@@ -12273,6 +12273,21 @@ final class SelectionToolbarStateTests: XCTestCase {
     }
 
     @MainActor
+    func testDefaultScrollCaptureUsesManualActivitySampling() async throws {
+        let coordinator = CaptureCoordinator(
+            permissionCoordinator: PermissionCoordinator(),
+            screenCaptureService: ScreenCaptureService()
+        )
+
+        let session = try XCTUnwrap(
+            coordinator.test_makeScrollCaptureSession(seed: scrollCaptureSeedForCoordinatorTests())
+                as? ScrollCaptureSession
+        )
+
+        XCTAssertFalse(session.test_hasAutomaticStepController)
+    }
+
+    @MainActor
     func testCaptureCoordinatorStartsOneScrollSessionAndRoutesPresentationUpdates() async throws {
         let suiteName = "com.xxsnap.tests.capture-language.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
