@@ -45,6 +45,10 @@ target_include_directories(
         "${CMAKE_CURRENT_SOURCE_DIR}/resources"
         "${PROJECT_SOURCE_DIR}"
 )
+file(GLOB_RECURSE XXSNAP_TOOLBAR_ASSET_FILES
+    CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/resources/toolbar/*/*.png"
+)
 set_property(
     SOURCE resources/xxsnap.rc
     APPEND PROPERTY OBJECT_DEPENDS
@@ -52,6 +56,7 @@ set_property(
         "${PROJECT_SOURCE_DIR}/platforms/mac/Resources/Icons/save-to-file.png"
         "${PROJECT_SOURCE_DIR}/platforms/mac/Resources/Icons/copy-to-clipboard.png"
         "${PROJECT_SOURCE_DIR}/platforms/win/resources/icons/Snipory.ico"
+        ${XXSNAP_TOOLBAR_ASSET_FILES}
 )
 add_library(xxsnap_visual_resources INTERFACE)
 target_sources(
@@ -498,6 +503,11 @@ if(BUILD_TESTING)
         xxsnap_toolbar_catalog_test
         PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
     )
+    target_link_libraries(
+        xxsnap_toolbar_catalog_test
+        PRIVATE xxsnap_visual_resources windowscodecs ole32
+    )
+    add_dependencies(xxsnap_toolbar_catalog_test xxsnap_visual_assets)
     add_test(NAME toolbar_catalog COMMAND xxsnap_toolbar_catalog_test)
 
     add_executable(

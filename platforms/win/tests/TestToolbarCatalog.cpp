@@ -1,10 +1,32 @@
 #include "toolbar/ToolbarCatalog.h"
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <Windows.h>
+#include <wincodec.h>
+#include <wrl/client.h>
+
 #include <array>
+#include <cstdint>
 #include <cstdlib>
+#include <iostream>
 #include <string_view>
 
 using namespace xxsnap::win;
+using Microsoft::WRL::ComPtr;
+
+int failureCount = 0;
+
+void check(bool condition, const char* expression, int line)
+{
+    if (!condition) {
+        std::cerr << "CHECK failed at line " << line << ": " << expression << '\n';
+        ++failureCount;
+    }
+}
+
+#define CHECK(expression) check((expression), #expression, __LINE__)
 
 template <typename T, std::size_t Size>
 constexpr bool arraysEqual(
@@ -19,7 +41,7 @@ constexpr bool arraysEqual(
     return true;
 }
 
-int main()
+void testCatalogContract()
 {
     static_assert(ToolbarMetrics::heightDip == 28.0F);
     static_assert(ToolbarMetrics::buttonSizeDip == 20.0F);
@@ -60,8 +82,108 @@ int main()
     static_assert(extraGapAfter(ToolbarAction::redo) == 8.0F);
     static_assert(extraGapAfter(ToolbarAction::copy) == 0.0F);
 
-    return std::wstring_view(toolbarIcon(ToolbarAction::cancel).resourceName)
-            == L"cancel-capture"
-        ? EXIT_SUCCESS
-        : EXIT_FAILURE;
+    static_assert(toolbarImageResources().size() == 20);
+    static_assert(dragHandleIcon().resourceIdAt96Dpi > 0);
+    static_assert(toolbarResourceId(dragHandleIcon(), 72) == dragHandleIcon().resourceIdAt96Dpi);
+    static_assert(toolbarResourceId(dragHandleIcon(), 97) == dragHandleIcon().resourceIdAt120Dpi);
+    static_assert(toolbarResourceId(dragHandleIcon(), 121) == dragHandleIcon().resourceIdAt144Dpi);
+    static_assert(toolbarResourceId(dragHandleIcon(), 145) == dragHandleIcon().resourceIdAt192Dpi);
+    static_assert(toolbarResourceId(dragHandleIcon(), 240) == dragHandleIcon().resourceIdAt192Dpi);
+
+    for (const auto action : fullToolbarActions()) {
+        const auto& icon = toolbarIcon(action);
+        CHECK(icon.resourceIdAt96Dpi > 0);
+        CHECK(icon.resourceIdAt120Dpi > 0);
+        CHECK(icon.resourceIdAt144Dpi > 0);
+        CHECK(icon.resourceIdAt192Dpi > 0);
+    }
+    CHECK(std::wstring_view(toolbarIcon(ToolbarAction::cancel).resourceName)
+        == L"cancel-capture");
+}
+
+void checkEmbeddedPng(
+    IWICImagingFactory* factory,
+    int resourceId,
+    UINT expectedEdge)
+{
+    const auto module = GetModuleHandleW(nullptr);
+    const auto resource = FindResourceW(
+        module,
+        MAKEINTRESOURCEW(resourceId),
+        MAKEINTRESOURCEW(10));
+    CHECK(resource != nullptr);
+    if (resource == nullptr) {
+        return;
+    }
+
+    const auto byteCount = SizeofResource(module, resource);
+    const auto loaded = LoadResource(module, resource);
+    auto* bytes = static_cast<BYTE*>(LockResource(loaded));
+    CHECK(byteCount > 0);
+    CHECK(loaded != nullptr);
+    CHECK(bytes != nullptr);
+    if (byteCount == 0 || loaded == nullptr || bytes == nullptr) {
+        return;
+    }
+
+    ComPtr<IWICStream> stream;
+    CHECK(SUCCEEDED(factory->CreateStream(&stream)));
+    if (!stream) {
+        return;
+    }
+    CHECK(SUCCEEDED(stream->InitializeFromMemory(bytes, byteCount)));
+
+    ComPtr<IWICBitmapDecoder> decoder;
+    CHECK(SUCCEEDED(factory->CreateDecoderFromStream(
+        stream.Get(),
+        nullptr,
+        WICDecodeMetadataCacheOnLoad,
+        &decoder)));
+    if (!decoder) {
+        return;
+    }
+
+    ComPtr<IWICBitmapFrameDecode> frame;
+    CHECK(SUCCEEDED(decoder->GetFrame(0, &frame)));
+    if (!frame) {
+        return;
+    }
+    UINT width = 0;
+    UINT height = 0;
+    CHECK(SUCCEEDED(frame->GetSize(&width, &height)));
+    CHECK(width == expectedEdge);
+    CHECK(height == expectedEdge);
+}
+
+void testAllEmbeddedResourcesDecode()
+{
+    const auto comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    CHECK(SUCCEEDED(comResult));
+    if (FAILED(comResult)) {
+        return;
+    }
+
+    ComPtr<IWICImagingFactory> factory;
+    CHECK(SUCCEEDED(CoCreateInstance(
+        CLSID_WICImagingFactory,
+        nullptr,
+        CLSCTX_INPROC_SERVER,
+        IID_PPV_ARGS(&factory))));
+    if (factory) {
+        for (const auto& icon : toolbarImageResources()) {
+            checkEmbeddedPng(factory.Get(), icon.resourceIdAt96Dpi, 20);
+            checkEmbeddedPng(factory.Get(), icon.resourceIdAt120Dpi, 25);
+            checkEmbeddedPng(factory.Get(), icon.resourceIdAt144Dpi, 30);
+            checkEmbeddedPng(factory.Get(), icon.resourceIdAt192Dpi, 40);
+        }
+    }
+    factory.Reset();
+    CoUninitialize();
+}
+
+int main()
+{
+    testCatalogContract();
+    testAllEmbeddedResourcesDecode();
+    return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

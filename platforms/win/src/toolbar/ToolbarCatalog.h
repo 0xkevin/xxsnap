@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "../../resources/resource.h"
+
 namespace xxsnap::win {
 
 enum class ToolbarAction : std::uint8_t {
@@ -27,10 +29,13 @@ enum class ToolbarAction : std::uint8_t {
 };
 
 struct ToolbarIconSpec {
-    ToolbarAction action;
     const wchar_t* resourceName;
     float insetDip;
     bool fixedColor;
+    int resourceIdAt96Dpi;
+    int resourceIdAt120Dpi;
+    int resourceIdAt144Dpi;
+    int resourceIdAt192Dpi;
 };
 
 struct ToolbarMetrics {
@@ -70,24 +75,151 @@ inline constexpr std::array terminalActions{
     ToolbarAction::copy,
 };
 
-inline constexpr std::array icons{
-    ToolbarIconSpec{ToolbarAction::rectangle, L"screenshot", -1.0F, false},
-    ToolbarIconSpec{ToolbarAction::polyline, L"arrow", 0.0F, false},
-    ToolbarIconSpec{ToolbarAction::pen, L"pencil-tool", 2.0F, false},
-    ToolbarIconSpec{ToolbarAction::marker, L"highlighter-tool", 2.0F, false},
-    ToolbarIconSpec{ToolbarAction::eyedropper, L"straw-ranging", 0.0F, false},
-    ToolbarIconSpec{ToolbarAction::mosaic, L"masaike2", 0.0F, false},
-    ToolbarIconSpec{ToolbarAction::text, L"text-tool", 0.0F, false},
-    ToolbarIconSpec{ToolbarAction::number, L"number-sequence", 3.0F, false},
-    ToolbarIconSpec{ToolbarAction::magnifier, L"zoom-in-tool", 2.0F, false},
-    ToolbarIconSpec{ToolbarAction::eraser, L"eraser-tool", 2.0F, false},
-    ToolbarIconSpec{ToolbarAction::scroll, L"scroll-screen2", 0.0F, false},
-    ToolbarIconSpec{ToolbarAction::undo, L"undo-enabled", 0.0F, true},
-    ToolbarIconSpec{ToolbarAction::redo, L"redo-enabled", 0.0F, true},
-    ToolbarIconSpec{ToolbarAction::cancel, L"cancel-capture", 2.0F, false},
-    ToolbarIconSpec{ToolbarAction::pin, L"pin-to-screen", 2.0F, false},
-    ToolbarIconSpec{ToolbarAction::save, L"save-to-file", 2.0F, false},
-    ToolbarIconSpec{ToolbarAction::copy, L"copy-to-clipboard", 2.0F, false},
+inline constexpr std::array imageResources{
+    ToolbarIconSpec{
+        L"settings-more", 2.0F, false,
+        IDR_TOOLBAR_100_SETTINGS_MORE_PNG,
+        IDR_TOOLBAR_125_SETTINGS_MORE_PNG,
+        IDR_TOOLBAR_150_SETTINGS_MORE_PNG,
+        IDR_TOOLBAR_200_SETTINGS_MORE_PNG,
+    },
+    ToolbarIconSpec{
+        L"screenshot", -1.0F, false,
+        IDR_TOOLBAR_100_SCREENSHOT_PNG,
+        IDR_TOOLBAR_125_SCREENSHOT_PNG,
+        IDR_TOOLBAR_150_SCREENSHOT_PNG,
+        IDR_TOOLBAR_200_SCREENSHOT_PNG,
+    },
+    ToolbarIconSpec{
+        L"arrow", 0.0F, false,
+        IDR_TOOLBAR_100_ARROW_PNG,
+        IDR_TOOLBAR_125_ARROW_PNG,
+        IDR_TOOLBAR_150_ARROW_PNG,
+        IDR_TOOLBAR_200_ARROW_PNG,
+    },
+    ToolbarIconSpec{
+        L"pencil-tool", 2.0F, false,
+        IDR_TOOLBAR_100_PENCIL_TOOL_PNG,
+        IDR_TOOLBAR_125_PENCIL_TOOL_PNG,
+        IDR_TOOLBAR_150_PENCIL_TOOL_PNG,
+        IDR_TOOLBAR_200_PENCIL_TOOL_PNG,
+    },
+    ToolbarIconSpec{
+        L"highlighter-tool", 2.0F, false,
+        IDR_TOOLBAR_100_HIGHLIGHTER_TOOL_PNG,
+        IDR_TOOLBAR_125_HIGHLIGHTER_TOOL_PNG,
+        IDR_TOOLBAR_150_HIGHLIGHTER_TOOL_PNG,
+        IDR_TOOLBAR_200_HIGHLIGHTER_TOOL_PNG,
+    },
+    ToolbarIconSpec{
+        L"straw-ranging", 0.0F, false,
+        IDR_TOOLBAR_100_STRAW_RANGING_PNG,
+        IDR_TOOLBAR_125_STRAW_RANGING_PNG,
+        IDR_TOOLBAR_150_STRAW_RANGING_PNG,
+        IDR_TOOLBAR_200_STRAW_RANGING_PNG,
+    },
+    ToolbarIconSpec{
+        L"masaike2", 0.0F, false,
+        IDR_TOOLBAR_100_MASAIKE2_PNG,
+        IDR_TOOLBAR_125_MASAIKE2_PNG,
+        IDR_TOOLBAR_150_MASAIKE2_PNG,
+        IDR_TOOLBAR_200_MASAIKE2_PNG,
+    },
+    ToolbarIconSpec{
+        L"text-tool", 0.0F, false,
+        IDR_TOOLBAR_100_TEXT_TOOL_PNG,
+        IDR_TOOLBAR_125_TEXT_TOOL_PNG,
+        IDR_TOOLBAR_150_TEXT_TOOL_PNG,
+        IDR_TOOLBAR_200_TEXT_TOOL_PNG,
+    },
+    ToolbarIconSpec{
+        L"number-sequence", 3.0F, false,
+        IDR_TOOLBAR_100_NUMBER_SEQUENCE_PNG,
+        IDR_TOOLBAR_125_NUMBER_SEQUENCE_PNG,
+        IDR_TOOLBAR_150_NUMBER_SEQUENCE_PNG,
+        IDR_TOOLBAR_200_NUMBER_SEQUENCE_PNG,
+    },
+    ToolbarIconSpec{
+        L"zoom-in-tool", 2.0F, false,
+        IDR_TOOLBAR_100_ZOOM_IN_TOOL_PNG,
+        IDR_TOOLBAR_125_ZOOM_IN_TOOL_PNG,
+        IDR_TOOLBAR_150_ZOOM_IN_TOOL_PNG,
+        IDR_TOOLBAR_200_ZOOM_IN_TOOL_PNG,
+    },
+    ToolbarIconSpec{
+        L"eraser-tool", 2.0F, false,
+        IDR_TOOLBAR_100_ERASER_TOOL_PNG,
+        IDR_TOOLBAR_125_ERASER_TOOL_PNG,
+        IDR_TOOLBAR_150_ERASER_TOOL_PNG,
+        IDR_TOOLBAR_200_ERASER_TOOL_PNG,
+    },
+    ToolbarIconSpec{
+        L"scroll-screen2", 0.0F, false,
+        IDR_TOOLBAR_100_SCROLL_SCREEN2_PNG,
+        IDR_TOOLBAR_125_SCROLL_SCREEN2_PNG,
+        IDR_TOOLBAR_150_SCROLL_SCREEN2_PNG,
+        IDR_TOOLBAR_200_SCROLL_SCREEN2_PNG,
+    },
+    ToolbarIconSpec{
+        L"undo-enabled", 0.0F, true,
+        IDR_TOOLBAR_100_UNDO_ENABLED_PNG,
+        IDR_TOOLBAR_125_UNDO_ENABLED_PNG,
+        IDR_TOOLBAR_150_UNDO_ENABLED_PNG,
+        IDR_TOOLBAR_200_UNDO_ENABLED_PNG,
+    },
+    ToolbarIconSpec{
+        L"undo-disabled", 0.0F, true,
+        IDR_TOOLBAR_100_UNDO_DISABLED_PNG,
+        IDR_TOOLBAR_125_UNDO_DISABLED_PNG,
+        IDR_TOOLBAR_150_UNDO_DISABLED_PNG,
+        IDR_TOOLBAR_200_UNDO_DISABLED_PNG,
+    },
+    ToolbarIconSpec{
+        L"redo-enabled", 0.0F, true,
+        IDR_TOOLBAR_100_REDO_ENABLED_PNG,
+        IDR_TOOLBAR_125_REDO_ENABLED_PNG,
+        IDR_TOOLBAR_150_REDO_ENABLED_PNG,
+        IDR_TOOLBAR_200_REDO_ENABLED_PNG,
+    },
+    ToolbarIconSpec{
+        L"redo-disabled", 0.0F, true,
+        IDR_TOOLBAR_100_REDO_DISABLED_PNG,
+        IDR_TOOLBAR_125_REDO_DISABLED_PNG,
+        IDR_TOOLBAR_150_REDO_DISABLED_PNG,
+        IDR_TOOLBAR_200_REDO_DISABLED_PNG,
+    },
+    ToolbarIconSpec{
+        L"cancel-capture", 2.0F, false,
+        IDR_TOOLBAR_100_CANCEL_CAPTURE_PNG,
+        IDR_TOOLBAR_125_CANCEL_CAPTURE_PNG,
+        IDR_TOOLBAR_150_CANCEL_CAPTURE_PNG,
+        IDR_TOOLBAR_200_CANCEL_CAPTURE_PNG,
+    },
+    ToolbarIconSpec{
+        L"pin-to-screen", 2.0F, false,
+        IDR_TOOLBAR_100_PIN_TO_SCREEN_PNG,
+        IDR_TOOLBAR_125_PIN_TO_SCREEN_PNG,
+        IDR_TOOLBAR_150_PIN_TO_SCREEN_PNG,
+        IDR_TOOLBAR_200_PIN_TO_SCREEN_PNG,
+    },
+    ToolbarIconSpec{
+        L"save-to-file", 2.0F, false,
+        IDR_TOOLBAR_100_SAVE_TO_FILE_PNG,
+        IDR_TOOLBAR_125_SAVE_TO_FILE_PNG,
+        IDR_TOOLBAR_150_SAVE_TO_FILE_PNG,
+        IDR_TOOLBAR_200_SAVE_TO_FILE_PNG,
+    },
+    ToolbarIconSpec{
+        L"copy-to-clipboard", 2.0F, false,
+        IDR_TOOLBAR_100_COPY_TO_CLIPBOARD_PNG,
+        IDR_TOOLBAR_125_COPY_TO_CLIPBOARD_PNG,
+        IDR_TOOLBAR_150_COPY_TO_CLIPBOARD_PNG,
+        IDR_TOOLBAR_200_COPY_TO_CLIPBOARD_PNG,
+    },
+};
+
+inline constexpr std::array<std::size_t, fullActions.size()> actionIconIndices{
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 17, 18, 19,
 };
 
 } // namespace toolbar_catalog_detail
@@ -104,7 +236,47 @@ constexpr const auto& terminalToolbarActions() noexcept
 
 constexpr const ToolbarIconSpec& toolbarIcon(ToolbarAction action) noexcept
 {
-    return toolbar_catalog_detail::icons[static_cast<std::size_t>(action)];
+    const auto index = toolbar_catalog_detail::actionIconIndices[
+        static_cast<std::size_t>(action)];
+    return toolbar_catalog_detail::imageResources[index];
+}
+
+constexpr const ToolbarIconSpec& disabledToolbarIcon(
+    ToolbarAction action) noexcept
+{
+    if (action == ToolbarAction::undo) {
+        return toolbar_catalog_detail::imageResources[13];
+    }
+    if (action == ToolbarAction::redo) {
+        return toolbar_catalog_detail::imageResources[15];
+    }
+    return toolbarIcon(action);
+}
+
+constexpr const ToolbarIconSpec& dragHandleIcon() noexcept
+{
+    return toolbar_catalog_detail::imageResources[0];
+}
+
+constexpr const auto& toolbarImageResources() noexcept
+{
+    return toolbar_catalog_detail::imageResources;
+}
+
+constexpr int toolbarResourceId(
+    const ToolbarIconSpec& icon,
+    std::uint32_t dpi) noexcept
+{
+    if (dpi <= 96U) {
+        return icon.resourceIdAt96Dpi;
+    }
+    if (dpi <= 120U) {
+        return icon.resourceIdAt120Dpi;
+    }
+    if (dpi <= 144U) {
+        return icon.resourceIdAt144Dpi;
+    }
+    return icon.resourceIdAt192Dpi;
 }
 
 constexpr float extraGapAfter(ToolbarAction action) noexcept
