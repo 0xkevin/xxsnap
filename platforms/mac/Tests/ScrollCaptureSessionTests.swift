@@ -1249,17 +1249,47 @@ final class ScrollCaptureSessionTests: XCTestCase {
         XCTAssertEqual(presentation.kinds, [.acceptedInitial])
     }
 
-    func testStartPrimesLiveFrameSourceBeforeMonitoringScroll() async throws {
+    func testStartPrimesLiveFrameSourceWithoutSamplingBeforeScrollActivity() async throws {
         let capturer = PrimingFakeCapturer()
+        let clock = ControlledClock()
         let monitor = FakeActivityMonitor()
         let engine = FakeStitcher(results: [.acceptedInitial])
-        let session = makeSession(capturer: capturer, engine: engine, monitor: monitor)
+        let session = makeSession(
+            capturer: capturer,
+            engine: engine,
+            clock: clock,
+            monitor: monitor
+        )
 
         try await session.start()
+        for _ in 0..<10 { await Task.yield() }
 
         XCTAssertEqual(capturer.primeCount, 1)
         XCTAssertEqual(monitor.startCount, 1)
+        XCTAssertEqual(capturer.captureCount, 0)
+        XCTAssertEqual(clock.pendingCount, 0)
+        XCTAssertFalse(session.isSamplingArmed)
+    }
+
+    func testMonitoredScrollActivityStartsSamplingAfterPriming() async throws {
+        let capturer = PrimingFakeCapturer()
+        let clock = ControlledClock()
+        let monitor = FakeActivityMonitor()
+        let engine = FakeStitcher(results: [.acceptedInitial, .duplicateDiscarded])
+        let session = makeSession(
+            capturer: capturer,
+            engine: engine,
+            clock: clock,
+            monitor: monitor
+        )
+        try await session.start()
+
+        monitor.send(ScrollCaptureScrollActivity(direction: .down, distance: 12))
+
+        await waitUntil { capturer.captureCount == 1 && clock.pendingCount == 1 }
         XCTAssertTrue(session.isSamplingArmed)
+        XCTAssertEqual(engine.preferredDirections, [.down])
+        _ = session.cancel()
     }
 
     func testStartRejectsNonInitialResultAndPausesForCaptureFailure() async {
@@ -1342,32 +1372,34 @@ final class ScrollCaptureSessionTests: XCTestCase {
         XCTAssertEqual(engine.previewCallCount, 1)
     }
 
-    func testDuplicateFramesNeverStopSamplingBeforeUserTerminatesCapture() async throws {
-        let engine = FakeStitcher(results: [.acceptedInitial, .duplicateDiscarded, .duplicateDiscarded, .duplicateDiscarded, .duplicateDiscarded])
-        let session = makeSession(engine: engine)
+    func testThreeStableDuplicateFramesDisarmSampling() async throws {
+        let capturer = FakeCapturer()
+        let engine = FakeStitcher(results: [
+            .acceptedInitial,
+            .duplicateDiscarded,
+            .duplicateDiscarded,
+            .duplicateDiscarded,
+        ])
+        let session = makeSession(capturer: capturer, engine: engine)
         try await session.start()
         session.recordScrollActivity()
 
         await session.test_runSamplingTick()
-        session.recordScrollActivity()
         await session.test_runSamplingTick()
-        XCTAssertTrue(session.isSamplingArmed)
-        await session.test_runSamplingTick()
-        XCTAssertTrue(session.isSamplingArmed)
         await session.test_runSamplingTick()
 
-        XCTAssertTrue(session.isSamplingArmed)
-        XCTAssertEqual(session.state, .capturing)
-
-        _ = try await session.finish()
         XCTAssertFalse(session.isSamplingArmed)
-        XCTAssertEqual(session.state, .finished)
+        XCTAssertEqual(capturer.captureCount, 3)
+        await session.test_runSamplingTick()
+        XCTAssertEqual(capturer.captureCount, 3)
+        XCTAssertEqual(session.state, .capturing)
     }
 
-    func testReviewDiscardedNeverStopsSamplingAndDoesNotPublishPreview() async throws {
+    func testThreeStableReviewFramesDisarmSamplingWithoutPublishingPreview() async throws {
+        let capturer = FakeCapturer()
         let engine = FakeStitcher(results: [.acceptedInitial, .reviewDiscarded, .reviewDiscarded, .reviewDiscarded])
         let presentation = PresentationRecorder()
-        let session = makeSession(engine: engine, presentation: presentation)
+        let session = makeSession(capturer: capturer, engine: engine, presentation: presentation)
         try await session.start()
         session.recordScrollActivity()
 
@@ -1375,7 +1407,8 @@ final class ScrollCaptureSessionTests: XCTestCase {
         await session.test_runSamplingTick()
         await session.test_runSamplingTick()
 
-        XCTAssertTrue(session.isSamplingArmed)
+        XCTAssertFalse(session.isSamplingArmed)
+        XCTAssertEqual(capturer.captureCount, 3)
         XCTAssertEqual(presentation.previews.count, 1)
         XCTAssertEqual(presentation.kinds, [.acceptedInitial, .reviewDiscarded, .reviewDiscarded, .reviewDiscarded])
     }
@@ -1665,36 +1698,37 @@ final class ScrollCaptureSessionTests: XCTestCase {
         XCTAssertEqual(engine.concurrent, 0)
     }
 
-    func testRealSamplingLoopContinuesAcrossStableFramesUntilUserCancels() async throws {
+    func testRealSamplingLoopStopsAfterStableFramesAndRearmsOnNextActivity() async throws {
         let clock = ControlledClock()
         let capturer = FakeCapturer()
         let engine = FakeStitcher(results: [
             .acceptedInitial,
+            .duplicateDiscarded,
+            .duplicateDiscarded,
+            .duplicateDiscarded,
             .acceptedAppend,
-            .duplicateDiscarded,
-            .duplicateDiscarded,
-            .duplicateDiscarded,
         ])
         let session = makeSession(capturer: capturer, engine: engine, clock: clock)
         try await session.start()
 
         session.recordScrollActivity()
         await waitUntil { clock.pendingCount == 1 }
-        clock.advance()
-        await waitUntil { engine.appendedImages.count == 2 && clock.pendingCount == 1 }
-
-        // Repeated activity must reuse the same continuous sampling loop.
-        session.recordScrollActivity()
-        XCTAssertEqual(clock.pendingCount, 1)
-        for expectedCount in 3...5 {
+        for expectedCount in 2...4 {
             clock.advance()
             await waitUntil {
                 engine.appendedImages.count == expectedCount
-                    && (expectedCount == 5 || clock.pendingCount == 1)
+                    && (expectedCount == 4 || clock.pendingCount == 1)
             }
         }
 
+        await waitUntil { !session.isSamplingArmed && clock.pendingCount == 0 }
+        XCTAssertEqual(capturer.captureCount, 3)
+
+        session.recordScrollActivity()
         await waitUntil { session.isSamplingArmed && clock.pendingCount == 1 }
+        clock.advance()
+        await waitUntil { engine.appendedImages.count == 5 && clock.pendingCount == 1 }
+
         XCTAssertEqual(capturer.captureCount, 4)
         XCTAssertEqual(capturer.maximumConcurrent, 1)
         XCTAssertEqual(engine.maximumConcurrent, 1)
@@ -2265,13 +2299,15 @@ private final class BufferingFakeCapturer: ScrollRegionCapturing, ScrollRegionCa
 @MainActor
 private final class PrimingFakeCapturer: ScrollRegionCapturing, ScrollRegionCapturePriming {
     private(set) var primeCount = 0
+    private(set) var captureCount = 0
 
     func primeCapture(in selectionRect: NSRect) async throws {
         primeCount += 1
     }
 
     func captureImage(in selectionRect: NSRect) async throws -> NSImage {
-        TestImageFactory.solid(size: selectionRect.size, color: .green)
+        captureCount += 1
+        return TestImageFactory.solid(size: selectionRect.size, color: .green)
     }
 }
 
@@ -2519,6 +2555,7 @@ private final class FakeMonitorRegistrar: ScrollEventMonitorRegistering {
 private final class FakeActivityMonitor: ScrollActivityMonitoring {
     private(set) var startCount = 0
     private(set) var stopCount = 0
+    private var scrollActivity: (@MainActor (ScrollCaptureScrollActivity) -> Void)?
     private var terminalCommand: (@MainActor (ScrollCaptureTerminalCommand) -> Void)?
     func start(_ callback: @escaping @MainActor () -> Void) { startCount += 1 }
     func start(
@@ -2528,7 +2565,16 @@ private final class FakeActivityMonitor: ScrollActivityMonitoring {
         startCount += 1
         terminalCommand = onTerminalCommand
     }
+    func start(
+        onScrollActivity: @escaping @MainActor (ScrollCaptureScrollActivity) -> Void,
+        onTerminalCommand: @escaping @MainActor (ScrollCaptureTerminalCommand) -> Void
+    ) {
+        startCount += 1
+        scrollActivity = onScrollActivity
+        terminalCommand = onTerminalCommand
+    }
     func stop() { stopCount += 1 }
+    func send(_ activity: ScrollCaptureScrollActivity) { scrollActivity?(activity) }
     func send(_ command: ScrollCaptureTerminalCommand) { terminalCommand?(command) }
 }
 

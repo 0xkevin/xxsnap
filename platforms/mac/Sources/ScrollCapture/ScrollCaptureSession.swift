@@ -291,6 +291,7 @@ final class ScrollCaptureSession {
     private static let compactViewportRatio: CGFloat = 0.40
     private static let largeViewportRatio: CGFloat = 0.50
     private static let lowConfidenceVisualBoundaryThreshold = 2
+    private static let stableSamplingFrameThreshold = 3
 
     static func stepDistance(forViewportHeight height: CGFloat) -> CGFloat {
         guard height.isFinite else { return 1 }
@@ -317,6 +318,7 @@ final class ScrollCaptureSession {
     private var generation = 0
     private var currentWarning: ScrollCaptureMatchWarning?
     private var preferredDirection: ScrollCaptureDirection = .unknown
+    private var consecutiveStableSamplingFrames = 0
     private var captureViewportPixelHeight = 1
     private var lockedStepDirection: ScrollCaptureDirection?
     private var lockedContentDirection: ScrollCaptureDirection?
@@ -406,10 +408,6 @@ final class ScrollCaptureSession {
                 presentation(.stepState(.ready(directionLocked: false)))
             } else {
                 startActivityMonitor()
-            }
-            if stepController == nil, capturer is any ScrollRegionCapturePriming {
-                isSamplingArmed = true
-                ensureSamplingLoop()
             }
         } catch {
             guard generation == operationGeneration, state == .preparing else { return }
@@ -928,6 +926,7 @@ final class ScrollCaptureSession {
     private func armSampling(direction: ScrollCaptureDirection) {
         guard state == .capturing else { return }
         if direction != .unknown { preferredDirection = direction }
+        consecutiveStableSamplingFrames = 0
         isSamplingArmed = true
         ensureSamplingLoop()
         if direction != .unknown, !tickInProgress {
@@ -1079,6 +1078,7 @@ final class ScrollCaptureSession {
                 operationGeneration: tickGeneration,
                 expectedState: appendState
             ) else { return }
+            updateSamplingStability(for: update.kind)
             try await handle(update, stitcher: stitcher, operationGeneration: tickGeneration)
         } catch {
             NSLog("xxsnap scroll-capture sampling failed: %@", String(describing: error))
@@ -1250,6 +1250,22 @@ final class ScrollCaptureSession {
         )
     }
 
+    private func updateSamplingStability(for kind: ScrollCaptureAppendKind) {
+        switch kind {
+        case .duplicateDiscarded, .reviewDiscarded:
+            consecutiveStableSamplingFrames += 1
+            if consecutiveStableSamplingFrames >= Self.stableSamplingFrameThreshold {
+                disarmSampling()
+            }
+        case .acceptedAppend, .awaitingEvidence, .lowConfidenceDiscarded:
+            consecutiveStableSamplingFrames = 0
+        case .acceptedInitial, .resourceLimit:
+            break
+        @unknown default:
+            consecutiveStableSamplingFrames = 0
+        }
+    }
+
     private static func pixelHeight(of image: NSImage) -> Int {
         if let height = image.representations.map(\.pixelsHigh).filter({ $0 > 0 }).max() {
             return height
@@ -1259,6 +1275,7 @@ final class ScrollCaptureSession {
 
     private func disarmSampling() {
         isSamplingArmed = false
+        consecutiveStableSamplingFrames = 0
         currentSamplingLoopID = nil
         samplingTask?.cancel()
         samplingTask = nil
