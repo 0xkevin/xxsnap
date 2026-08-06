@@ -1271,6 +1271,70 @@ final class ScrollCaptureSessionTests: XCTestCase {
         XCTAssertFalse(session.isSamplingArmed)
     }
 
+    func testStartDoesNotDiscardPrimedBufferedFramesBeforeScrollActivity() async throws {
+        let capturer = PrimingBufferingFakeCapturer()
+        let engine = FakeStitcher(results: [.acceptedInitial])
+        let session = makeSession(capturer: capturer, engine: engine)
+
+        try await session.start()
+
+        XCTAssertEqual(capturer.operations, ["prime"])
+        XCTAssertEqual(capturer.discardCount, 0)
+        XCTAssertEqual(capturer.captureCount, 0)
+    }
+
+    func testFirstScrollActivityDiscardsBufferedFramesBeforeSamplingCapture() async throws {
+        let capturer = PrimingBufferingFakeCapturer()
+        let monitor = FakeActivityMonitor()
+        let engine = FakeStitcher(results: [.acceptedInitial, .duplicateDiscarded])
+        let session = makeSession(capturer: capturer, engine: engine, monitor: monitor)
+        try await session.start()
+
+        monitor.send(ScrollCaptureScrollActivity(direction: .down, distance: 12))
+
+        await waitUntil { capturer.captureCount == 1 }
+        XCTAssertEqual(capturer.discardCount, 1)
+        XCTAssertEqual(capturer.operations, ["prime", "discard", "capture"])
+        _ = session.cancel()
+    }
+
+    func testRepeatedActivityWhileSamplingIsArmedDoesNotDiscardBufferedFramesAgain() async throws {
+        let capturer = PrimingBufferingFakeCapturer()
+        let engine = FakeStitcher(results: [.acceptedInitial, .duplicateDiscarded])
+        let session = makeSession(capturer: capturer, engine: engine)
+        try await session.start()
+
+        session.recordScrollActivity()
+        session.recordScrollActivity()
+
+        XCTAssertEqual(capturer.discardCount, 1)
+        await session.test_runSamplingTick()
+        XCTAssertEqual(capturer.operations, ["prime", "discard", "capture"])
+    }
+
+    func testActivityAfterStableDisarmDiscardsBufferedFramesAgain() async throws {
+        let capturer = PrimingBufferingFakeCapturer()
+        let engine = FakeStitcher(results: [
+            .acceptedInitial,
+            .duplicateDiscarded,
+            .duplicateDiscarded,
+            .duplicateDiscarded,
+        ])
+        let session = makeSession(capturer: capturer, engine: engine)
+        try await session.start()
+        session.recordScrollActivity()
+        await session.test_runSamplingTick()
+        await session.test_runSamplingTick()
+        await session.test_runSamplingTick()
+        XCTAssertFalse(session.isSamplingArmed)
+
+        session.recordScrollActivity()
+
+        XCTAssertTrue(session.isSamplingArmed)
+        XCTAssertEqual(capturer.discardCount, 2)
+        _ = session.cancel()
+    }
+
     func testMonitoredScrollActivityStartsSamplingAfterPriming() async throws {
         let capturer = PrimingFakeCapturer()
         let clock = ControlledClock()
@@ -2308,6 +2372,32 @@ private final class PrimingFakeCapturer: ScrollRegionCapturing, ScrollRegionCapt
     func captureImage(in selectionRect: NSRect) async throws -> NSImage {
         captureCount += 1
         return TestImageFactory.solid(size: selectionRect.size, color: .green)
+    }
+}
+
+@MainActor
+private final class PrimingBufferingFakeCapturer:
+    ScrollRegionCapturing,
+    ScrollRegionCapturePriming,
+    ScrollRegionCaptureBuffering
+{
+    private(set) var operations: [String] = []
+    private(set) var discardCount = 0
+    private(set) var captureCount = 0
+
+    func primeCapture(in selectionRect: NSRect) async throws {
+        operations.append("prime")
+    }
+
+    func captureImage(in selectionRect: NSRect) async throws -> NSImage {
+        captureCount += 1
+        operations.append("capture")
+        return TestImageFactory.solid(size: selectionRect.size, color: .green)
+    }
+
+    func discardBufferedFrames() {
+        discardCount += 1
+        operations.append("discard")
     }
 }
 

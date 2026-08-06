@@ -927,6 +927,9 @@ final class ScrollCaptureSession {
         guard state == .capturing else { return }
         if direction != .unknown { preferredDirection = direction }
         consecutiveStableSamplingFrames = 0
+        if !isSamplingArmed {
+            (capturer as? any ScrollRegionCaptureBuffering)?.discardBufferedFrames()
+        }
         isSamplingArmed = true
         ensureSamplingLoop()
         if direction != .unknown, !tickInProgress {
