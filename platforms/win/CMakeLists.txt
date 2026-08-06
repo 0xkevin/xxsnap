@@ -234,6 +234,16 @@ target_include_directories(
 )
 
 add_library(
+    xxsnap_toolbar_state
+    src/toolbar/ToolbarState.cpp
+)
+target_compile_features(xxsnap_toolbar_state PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_toolbar_state
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+
+add_library(
     xxsnap_overlay_renderer
     src/overlay/OverlayRenderer.cpp
 )
@@ -506,6 +516,21 @@ if(BUILD_TESTING)
     add_test(NAME toolbar_layout COMMAND xxsnap_toolbar_layout_test)
 
     add_executable(
+        xxsnap_toolbar_state_test
+        tests/TestToolbarState.cpp
+    )
+    target_compile_features(xxsnap_toolbar_state_test PRIVATE cxx_std_17)
+    target_include_directories(
+        xxsnap_toolbar_state_test
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    target_link_libraries(
+        xxsnap_toolbar_state_test
+        PRIVATE xxsnap_toolbar_state
+    )
+    add_test(NAME toolbar_state COMMAND xxsnap_toolbar_state_test)
+
+    add_executable(
         xxsnap_overlay_layout_test
         tests/TestOverlayLayout.cpp
     )
@@ -635,6 +660,7 @@ set(xxsnap_capture_session_targets
     xxsnap_png_writer
     xxsnap_clipboard_writer
     xxsnap_toolbar_layout
+    xxsnap_toolbar_state
     xxsnap_overlay_renderer
     xxsnap_overlay_window
     xxsnap_overlay_host
@@ -655,6 +681,7 @@ if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_visual_style_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_toolbar_catalog_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_toolbar_layout_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_toolbar_state_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_overlay_layout_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_overlay_input_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_app_entry_services_test)
