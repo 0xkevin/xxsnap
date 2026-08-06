@@ -21,6 +21,24 @@ Build and test the application binaries first:
 .\tools\windows\run-legacy-matrix.ps1
 ```
 
+Windows toolbar PNGs are mechanically derived from the unchanged macOS SVG
+sources. Regenerate them on macOS after an approved source-icon change:
+
+```bash
+swift tools/windows/generate-toolbar-assets.swift
+```
+
+Before any Windows build or package is published, verify the source hashes,
+generated dimensions, alpha channels, and the original locked icon bytes:
+
+```powershell
+.\tools\windows\verify-toolbar-assets.ps1
+.\tools\windows\verify-assets.ps1
+```
+
+`verify-assets.ps1` also runs the toolbar verifier, so packaging must fail if
+the generated matrix is missing, stale, or no longer matches its macOS source.
+
 The packaging machine also needs a .NET SDK, the repository-pinned WiX Toolset
 4.0.6, the active Modern MSVC app-local runtimes, VC142 app-local runtimes, and
 the Windows SDK 10.0.19041 UCRT payload. The build script discovers Visual Studio with
