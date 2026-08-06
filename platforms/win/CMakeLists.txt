@@ -538,6 +538,17 @@ if(BUILD_TESTING)
     add_test(NAME toolbar_state COMMAND xxsnap_toolbar_state_test)
 
     add_executable(
+        xxsnap_annotation_types_test
+        tests/TestAnnotationTypes.cpp
+    )
+    target_compile_features(xxsnap_annotation_types_test PRIVATE cxx_std_17)
+    target_include_directories(
+        xxsnap_annotation_types_test
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    add_test(NAME annotation_types COMMAND xxsnap_annotation_types_test)
+
+    add_executable(
         xxsnap_overlay_layout_test
         tests/TestOverlayLayout.cpp
     )
@@ -689,6 +700,7 @@ if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_toolbar_catalog_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_toolbar_layout_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_toolbar_state_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_annotation_types_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_overlay_layout_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_overlay_input_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_app_entry_services_test)
