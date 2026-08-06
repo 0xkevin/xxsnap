@@ -295,6 +295,21 @@ target_link_libraries(
 )
 
 add_library(
+    xxsnap_shape_editor_controller
+    src/annotation/ShapeEditorController.cpp
+)
+target_compile_features(xxsnap_shape_editor_controller PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_shape_editor_controller
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_shape_editor_controller
+    PUBLIC xxsnap_annotation_document xxsnap_annotation_renderer
+           xxsnap_shape_interaction xxsnap_shape_options xxsnap_toolbar_state
+)
+
+add_library(
     xxsnap_overlay_renderer
     src/overlay/OverlayRenderer.cpp
 )
@@ -658,6 +673,21 @@ if(BUILD_TESTING)
     add_test(NAME annotation_renderer COMMAND xxsnap_annotation_renderer_test)
 
     add_executable(
+        xxsnap_shape_editor_controller_test
+        tests/TestShapeEditorController.cpp
+    )
+    target_compile_features(xxsnap_shape_editor_controller_test PRIVATE cxx_std_17)
+    target_include_directories(
+        xxsnap_shape_editor_controller_test
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    target_link_libraries(
+        xxsnap_shape_editor_controller_test
+        PRIVATE xxsnap_shape_editor_controller
+    )
+    add_test(NAME shape_editor_controller COMMAND xxsnap_shape_editor_controller_test)
+
+    add_executable(
         xxsnap_overlay_layout_test
         tests/TestOverlayLayout.cpp
     )
@@ -792,6 +822,7 @@ set(xxsnap_capture_session_targets
     xxsnap_shape_interaction
     xxsnap_shape_options
     xxsnap_annotation_renderer
+    xxsnap_shape_editor_controller
     xxsnap_overlay_renderer
     xxsnap_overlay_window
     xxsnap_overlay_host
@@ -818,6 +849,7 @@ if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_shape_interaction_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_shape_options_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_annotation_renderer_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_shape_editor_controller_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_overlay_layout_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_overlay_input_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_app_entry_services_test)

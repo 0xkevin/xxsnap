@@ -19,6 +19,7 @@ public:
     bool remove(AnnotationId id);
     bool updateRect(AnnotationId id, AnnotationRect rect);
     bool move(AnnotationId id, AnnotationPoint offset);
+    bool updateKind(AnnotationId id, AnnotationKind kind);
     bool updateRotation(AnnotationId id, float rotationDegrees);
     bool updateStyle(AnnotationId id, AnnotationStyle style);
 

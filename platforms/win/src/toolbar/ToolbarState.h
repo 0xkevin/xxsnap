@@ -20,6 +20,7 @@ public:
     void setCapability(ToolbarAction action, bool available) noexcept;
     void setHistoryAvailability(bool canUndo, bool canRedo) noexcept;
     bool selectTool(ToolbarAction action) noexcept;
+    void clearSelectedTool() noexcept;
 
 private:
     static constexpr std::size_t indexOf(ToolbarAction action) noexcept

@@ -53,6 +53,9 @@ void testCapabilitiesStayInMacOrderAndControlSelection()
     CHECK(state.visibleActions() == expected);
     CHECK(state.selectTool(ToolbarAction::rectangle));
     CHECK(state.selectedAction() == ToolbarAction::rectangle);
+    state.clearSelectedTool();
+    CHECK(!state.selectedAction().has_value());
+    CHECK(state.selectTool(ToolbarAction::rectangle));
 
     state.setCapability(ToolbarAction::rectangle, false);
     CHECK(!state.selectedAction().has_value());

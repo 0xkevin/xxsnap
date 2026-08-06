@@ -56,6 +56,7 @@ void testAllShapeEditsAreReversible()
     CHECK(document.updateRect(id, {20, 30, 90, 50}));
     CHECK(document.move(id, {5, -10}));
     CHECK(document.updateRotation(id, 35.0F));
+    CHECK(document.updateKind(id, AnnotationKind::ellipse));
 
     auto style = document.find(id)->style;
     style.fillEnabled = true;
@@ -63,10 +64,13 @@ void testAllShapeEditsAreReversible()
     CHECK(document.updateStyle(id, style));
     CHECK((document.find(id)->rect == AnnotationRect{25, 20, 90, 50}));
     CHECK(document.find(id)->rotationDegrees == 35.0F);
+    CHECK(document.find(id)->kind == AnnotationKind::ellipse);
     CHECK(document.find(id)->style == style);
 
     CHECK(document.undo());
     CHECK(document.find(id)->style != style);
+    CHECK(document.undo());
+    CHECK(document.find(id)->kind == AnnotationKind::rectangle);
     CHECK(document.undo());
     CHECK(document.find(id)->rotationDegrees == 0.0F);
     CHECK(document.undo());
@@ -74,6 +78,7 @@ void testAllShapeEditsAreReversible()
     CHECK(document.undo());
     CHECK((document.find(id)->rect == AnnotationRect{10, 20, 80, 40}));
 
+    CHECK(document.redo());
     CHECK(document.redo());
     CHECK(document.redo());
     CHECK(document.redo());

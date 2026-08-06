@@ -70,6 +70,20 @@ bool AnnotationDocument::move(AnnotationId id, AnnotationPoint offset)
     return updateRect(id, translated(annotation->rect, offset));
 }
 
+bool AnnotationDocument::updateKind(AnnotationId id, AnnotationKind kind)
+{
+    auto* annotation = findMutable(id);
+    if (annotation == nullptr
+        || !isShapeKind(kind)
+        || annotation->kind == kind) {
+        return false;
+    }
+    auto before = snapshot();
+    annotation->kind = kind;
+    commit(std::move(before));
+    return true;
+}
+
 bool AnnotationDocument::updateRotation(
     AnnotationId id,
     float rotationDegrees)

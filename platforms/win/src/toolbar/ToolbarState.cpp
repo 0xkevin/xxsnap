@@ -70,4 +70,9 @@ bool ToolbarState::selectTool(ToolbarAction action) noexcept
     return true;
 }
 
+void ToolbarState::clearSelectedTool() noexcept
+{
+    selectedAction_.reset();
+}
+
 } // namespace xxsnap::win
