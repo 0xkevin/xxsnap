@@ -3,6 +3,8 @@
 #include <array>
 #include <cstdint>
 
+#include "toolbar/ToolbarCatalog.h"
+
 namespace xxsnap::win {
 
 struct Rgba8 {
@@ -40,14 +42,16 @@ struct VisualStyleCatalog {
     inline static constexpr Rgba8 dimColor{0, 0, 0, 255};
     inline static constexpr float dimAlpha = 0.34f;
     inline static constexpr float selectionBorderDip = 2.0f;
-    inline static constexpr float toolbarHeightDip = 28.0f;
-    inline static constexpr float buttonSizeDip = 20.0f;
-    inline static constexpr float buttonStepDip = 28.0f;
-    inline static constexpr float horizontalPaddingDip = 4.0f;
+    inline static constexpr float toolbarHeightDip = ToolbarMetrics::heightDip;
+    inline static constexpr float buttonSizeDip = ToolbarMetrics::buttonSizeDip;
+    inline static constexpr float buttonStepDip = ToolbarMetrics::buttonStepDip;
+    inline static constexpr float horizontalPaddingDip =
+        ToolbarMetrics::horizontalPaddingDip;
     inline static constexpr float mvpToolbarWidthDip = 144.0f;
     inline static constexpr float layoutMarginDip = 8.0f;
     inline static constexpr float toolbarGapDip = 8.0f;
-    inline static constexpr float toolbarCornerRadiusDip = 6.0f;
+    inline static constexpr float toolbarCornerRadiusDip =
+        ToolbarMetrics::cornerRadiusDip;
     inline static constexpr float toolbarBackgroundAlpha = 0.9f;
     inline static constexpr float toolbarBorderDip = 1.0f;
     // Sampled from AppKit under an explicitly forced NSAppearance.aqua.
