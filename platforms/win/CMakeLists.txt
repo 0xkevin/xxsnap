@@ -280,6 +280,21 @@ target_include_directories(
 )
 
 add_library(
+    xxsnap_annotation_renderer
+    src/annotation/AnnotationRenderer.cpp
+)
+target_compile_features(xxsnap_annotation_renderer PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_annotation_renderer
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_annotation_renderer
+    PUBLIC xxsnap_annotation_document
+    PRIVATE d2d1
+)
+
+add_library(
     xxsnap_overlay_renderer
     src/overlay/OverlayRenderer.cpp
 )
@@ -628,6 +643,21 @@ if(BUILD_TESTING)
     add_test(NAME shape_options COMMAND xxsnap_shape_options_test)
 
     add_executable(
+        xxsnap_annotation_renderer_test
+        tests/TestAnnotationRenderer.cpp
+    )
+    target_compile_features(xxsnap_annotation_renderer_test PRIVATE cxx_std_17)
+    target_include_directories(
+        xxsnap_annotation_renderer_test
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    target_link_libraries(
+        xxsnap_annotation_renderer_test
+        PRIVATE xxsnap_annotation_renderer d2d1 windowscodecs ole32
+    )
+    add_test(NAME annotation_renderer COMMAND xxsnap_annotation_renderer_test)
+
+    add_executable(
         xxsnap_overlay_layout_test
         tests/TestOverlayLayout.cpp
     )
@@ -761,6 +791,7 @@ set(xxsnap_capture_session_targets
     xxsnap_annotation_document
     xxsnap_shape_interaction
     xxsnap_shape_options
+    xxsnap_annotation_renderer
     xxsnap_overlay_renderer
     xxsnap_overlay_window
     xxsnap_overlay_host
@@ -786,6 +817,7 @@ if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_annotation_document_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_shape_interaction_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_shape_options_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_annotation_renderer_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_overlay_layout_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_overlay_input_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_app_entry_services_test)
