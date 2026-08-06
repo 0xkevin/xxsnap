@@ -256,6 +256,20 @@ target_include_directories(
 )
 
 add_library(
+    xxsnap_shape_interaction
+    src/annotation/ShapeInteraction.cpp
+)
+target_compile_features(xxsnap_shape_interaction PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_shape_interaction
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_shape_interaction
+    PUBLIC xxsnap_annotation_document
+)
+
+add_library(
     xxsnap_overlay_renderer
     src/overlay/OverlayRenderer.cpp
 )
@@ -574,6 +588,21 @@ if(BUILD_TESTING)
     add_test(NAME annotation_document COMMAND xxsnap_annotation_document_test)
 
     add_executable(
+        xxsnap_shape_interaction_test
+        tests/TestShapeInteraction.cpp
+    )
+    target_compile_features(xxsnap_shape_interaction_test PRIVATE cxx_std_17)
+    target_include_directories(
+        xxsnap_shape_interaction_test
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    target_link_libraries(
+        xxsnap_shape_interaction_test
+        PRIVATE xxsnap_shape_interaction
+    )
+    add_test(NAME shape_interaction COMMAND xxsnap_shape_interaction_test)
+
+    add_executable(
         xxsnap_overlay_layout_test
         tests/TestOverlayLayout.cpp
     )
@@ -705,6 +734,7 @@ set(xxsnap_capture_session_targets
     xxsnap_toolbar_layout
     xxsnap_toolbar_state
     xxsnap_annotation_document
+    xxsnap_shape_interaction
     xxsnap_overlay_renderer
     xxsnap_overlay_window
     xxsnap_overlay_host
@@ -728,6 +758,7 @@ if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_toolbar_state_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_annotation_types_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_annotation_document_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_shape_interaction_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_overlay_layout_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_overlay_input_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_app_entry_services_test)
