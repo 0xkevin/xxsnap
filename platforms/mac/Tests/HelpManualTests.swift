@@ -174,7 +174,7 @@ final class HelpManualTests: XCTestCase {
         XCTAssertFalse(text.contains("仍指向原来的区域"))
     }
 
-    func testCaptureManualDocumentsFullscreenPreviewAndAutomaticScrollWorkflow() throws {
+    func testCaptureManualDocumentsFullscreenPreviewAndContinuousManualScrollWorkflow() throws {
         let loader = HelpContentLoader(bundle: Bundle(for: HelpManualTests.self))
         let document = try loader.load(language: .zhHans)
         let capture = try XCTUnwrap(
@@ -191,35 +191,88 @@ final class HelpManualTests: XCTestCase {
             )
         )
 
-        XCTAssertTrue(text.contains("辅助功能权限"))
-        XCTAssertTrue(text.contains("没有权限"))
-        XCTAssertTrue(text.contains("退出滚动截图并恢复原选区"))
-        XCTAssertTrue(text.contains("方向下拉菜单"))
-        XCTAssertTrue(text.contains("向下滚动"))
-        XCTAssertTrue(text.contains("向上滚动"))
-        XCTAssertTrue(text.contains("开始单步滚动"))
-        XCTAssertTrue(text.contains("结束滚动截图"))
-        XCTAssertTrue(text.contains("每点一次开始单步滚动"))
-        XCTAssertTrue(text.contains("XxSnap 会自动推动目标页面一段并采集"))
-        XCTAssertTrue(text.contains("第一次成功采集后，方向会锁定"))
-        XCTAssertTrue(text.contains("不能改成反向"))
-        XCTAssertTrue(text.contains("物理滚轮会被拦截"))
+        XCTAssertTrue(text.contains("直接用鼠标滚轮或触控板滚动"))
+        XCTAssertTrue(text.contains("第一次可靠移动会锁定拼接方向"))
+        XCTAssertTrue(text.contains("反向滚动只用于回看，不会拼接"))
+        XCTAssertTrue(text.contains("滚动截图右侧临时出现的对勾"))
+        XCTAssertTrue(text.contains("Return 或 Enter 完成，Esc 取消"))
+        XCTAssertTrue(text.contains("基本滚动截图不需要辅助功能权限"))
+        XCTAssertTrue(text.contains("全局快捷键可能需要辅助功能权限"))
         XCTAssertTrue(text.contains("预览面板不接收鼠标"))
         XCTAssertTrue(text.contains("不能手动回看"))
-        XCTAssertTrue(text.contains("Return 或 Enter 完成，Esc 取消"))
-        XCTAssertTrue(text.contains("全局键监听依赖辅助功能权限"))
-        XCTAssertTrue(text.contains("结束滚动截图和取消按钮始终是可靠入口"))
         XCTAssertTrue(text.contains("资源上限"))
         XCTAssertTrue(text.contains("阻塞暂停"))
         XCTAssertTrue(text.contains("不再继续接收"))
         XCTAssertTrue(text.contains("已接受的内容"))
         XCTAssertTrue(text.contains("页面动画或重叠不足"))
-        XCTAssertTrue(text.contains("等页面稳定后再试一步"))
-        XCTAssertTrue(text.contains("达到资源上限后不能继续单步"))
+        XCTAssertTrue(text.contains("等页面稳定后继续滚动"))
+        XCTAssertTrue(text.contains("达到资源上限后不能继续采集"))
         XCTAssertTrue(text.contains("只能完成已接受的长图或取消"))
-        XCTAssertFalse(text.contains("只支持手动纵向滚动"))
-        XCTAssertFalse(text.contains("反向滚动只用于回看"))
-        XCTAssertFalse(text.contains("回到当前扩展端后恢复跟随"))
+
+        for obsoleteText in [
+            "自动滚动",
+            "物理滚轮会被拦截",
+            "方向下拉菜单",
+            "开始单步滚动",
+            "每点一次",
+            "自动推动目标页面",
+            "不能改成反向",
+            "达到资源上限后不能继续单步"
+        ] {
+            XCTAssertFalse(text.contains(obsoleteText), "滚动截图仍包含旧说明：\(obsoleteText)")
+        }
+
+        let scrollSessionCaption = try XCTUnwrap(
+            capture.caption(forImageNamed: "capture-scroll-session")
+        )
+        let scrollSessionLabel = try XCTUnwrap(
+            capture.accessibilityLabel(forImageNamed: "capture-scroll-session")
+        )
+        XCTAssertTrue(scrollSessionCaption.contains("鼠标滚轮或触控板"))
+        XCTAssertTrue(scrollSessionCaption.contains("临时对勾"))
+        XCTAssertTrue(scrollSessionLabel.contains("滚动截图按钮右侧的临时对勾"))
+        XCTAssertFalse(scrollSessionCaption.contains("单步"))
+        XCTAssertFalse(scrollSessionLabel.contains("方向下拉菜单"))
+    }
+
+    func testEnglishCaptureManualDocumentsContinuousManualScrollWorkflow() throws {
+        let loader = HelpContentLoader(bundle: Bundle(for: HelpManualTests.self))
+        let document = try loader.load(language: .english)
+        let capture = try XCTUnwrap(
+            document.chapters.first { $0.id == "capture" }
+        )
+        let text = capture.flattenedText
+
+        XCTAssertTrue(text.contains("scroll directly with your mouse wheel or trackpad"))
+        XCTAssertTrue(text.contains("first reliable movement locks the stitching direction"))
+        XCTAssertTrue(text.contains("Scrolling in reverse only reviews earlier content; it is not stitched"))
+        XCTAssertTrue(text.contains("temporary checkmark to the right of Scroll Capture"))
+        XCTAssertTrue(text.contains("Return or Enter finishes, and Esc cancels"))
+        XCTAssertTrue(text.contains("Basic Scroll Capture does not need Accessibility permission"))
+        XCTAssertTrue(text.contains("Global shortcuts may need Accessibility permission"))
+
+        for obsoleteText in [
+            "automatic scrolling",
+            "blocks your physical scroll wheel",
+            "direction menu",
+            "Start Scroll Step",
+            "step-by-step scrolling panel",
+            "move the target page automatically"
+        ] {
+            XCTAssertFalse(text.contains(obsoleteText), "Scroll Capture still contains obsolete copy: \(obsoleteText)")
+        }
+
+        let scrollSessionCaption = try XCTUnwrap(
+            capture.caption(forImageNamed: "capture-scroll-session")
+        )
+        let scrollSessionLabel = try XCTUnwrap(
+            capture.accessibilityLabel(forImageNamed: "capture-scroll-session")
+        )
+        XCTAssertTrue(scrollSessionCaption.contains("mouse wheel or trackpad"))
+        XCTAssertTrue(scrollSessionCaption.contains("temporary checkmark"))
+        XCTAssertTrue(scrollSessionLabel.contains("temporary checkmark to the right of Scroll Capture"))
+        XCTAssertFalse(scrollSessionCaption.contains("step-by-step"))
+        XCTAssertFalse(scrollSessionLabel.contains("direction menu"))
     }
 
     func testPinAndOCRManualBoundariesMatchCurrentProduct() throws {
@@ -432,7 +485,8 @@ final class HelpManualTests: XCTestCase {
         XCTAssertTrue(visibleText.contains("Open Link"))
         XCTAssertTrue(visibleText.contains("QR code"))
         XCTAssertFalse(visibleText.contains("Teaching Pen"))
-        XCTAssertTrue(visibleText.contains("Start Scroll Step"))
+        XCTAssertTrue(visibleText.contains("temporary checkmark"))
+        XCTAssertFalse(visibleText.contains("Start Scroll Step"))
         XCTAssertTrue(headings.contains("Pen"))
         XCTAssertTrue(headings.contains("Redact"))
         XCTAssertTrue(visibleText.contains("Clear All"))
@@ -1934,6 +1988,10 @@ private extension HelpChapter {
     func accessibilityLabel(forImageNamed name: String) -> String? {
         blocks.first { $0.imageName == name }?.imageAccessibilityLabel
     }
+
+    func caption(forImageNamed name: String) -> String? {
+        blocks.first { $0.imageName == name }?.imageCaption
+    }
 }
 
 private extension HelpContentBlock {
@@ -2040,6 +2098,13 @@ private extension HelpContentBlock {
     var imageAccessibilityLabel: String? {
         if case let .image(_, _, accessibilityLabel) = self {
             return accessibilityLabel
+        }
+        return nil
+    }
+
+    var imageCaption: String? {
+        if case let .image(_, caption, _) = self {
+            return caption
         }
         return nil
     }

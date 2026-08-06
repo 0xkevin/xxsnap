@@ -182,37 +182,37 @@
           "accessibilityLabel": "Full Screen Capture editor showing the desktop with arrow and text annotations and the complete toolbar below"
         },
         { "type": "heading", "level": 2, "text": "Scroll Capture" },
-        { "type": "paragraph", "text": "Start with Region Capture, place the selection inside scrollable content, and choose Scroll Capture. XxSnap first asks for Accessibility permission because automatic scrolling, blocking the physical scroll wheel, and global key handling all depend on it. Without permission, macOS asks you to allow access, this Scroll Capture ends, and the original selection returns." },
+        { "type": "paragraph", "text": "Start with Region Capture, place the selection inside scrollable content, and choose Scroll Capture. Then scroll directly with your mouse wheel or trackpad. Basic Scroll Capture does not need Accessibility permission." },
         {
           "type": "steps",
           "items": [
             { "text": "Select the content area of a webpage, document, or list, leaving out any fixed sidebar."},
-            { "text": "Choose Scroll Down or Scroll Up from the direction menu."},
-            { "text": "Click Start Scroll Step to let XxSnap move the target page and capture the next section. Wait for the button to become available before starting another step."}
+            { "text": "Click Scroll Capture in the main toolbar. Other tools become unavailable, and a temporary checkmark appears to its right."},
+            { "text": "Scroll directly with your mouse wheel or trackpad so the page moves naturally through the selection. XxSnap continuously captures and stitches new content."}
           ]
         },
         { "type": "heading", "level": 3, "text": "Direction Lock" },
-        { "type": "paragraph", "text": "After the first successful step, the direction locks and the direction menu becomes unavailable. Every later step continues in the same direction; you cannot reverse it." },
+        { "type": "paragraph", "text": "The first reliable movement locks the stitching direction. Continue in that direction to extend the long image. Scrolling in reverse only reviews earlier content; it is not stitched. Return to the current extending edge and scroll in the locked direction to continue capturing." },
         {
           "type": "bullets",
           "items": [
-            "XxSnap blocks your physical scroll wheel during capture. Do not scroll the target page yourself.",
-            "Move one step at a time. Check that the preview joins correctly before starting the next step.",
-            "At the end of the page, the Start button becomes unavailable. You can then finish the Scroll Capture."
+            "Keep the page content moving through the selection, and avoid fixed sidebars, floating controls, and large animations when possible.",
+            "You do not need to scroll very slowly; continue while the preview is extending correctly.",
+            "At the end of the page, or when you have everything you need, click the temporary checkmark to finish."
           ]
         },
         {
           "type": "image",
           "name": "capture-scroll-session",
-          "caption": "The step-by-step scrolling panel lets you choose a direction, capture the next section, or finish at any time.",
-          "accessibilityLabel": "Scroll Capture screen with a direction menu, Start Scroll Step and Finish Scroll Capture buttons, and a preview of the accepted long image"
+          "caption": "Scroll directly with your mouse wheel or trackpad, then click the temporary checkmark in the main toolbar to finish.",
+          "accessibilityLabel": "Scroll Capture screen with ordinary tools unavailable, a temporary checkmark to the right of Scroll Capture for finishing, and a preview of the accepted long image"
         },
         { "type": "heading", "level": 3, "text": "Capture Preview" },
-        { "type": "paragraph", "text": "The preview does not accept mouse input. It only shows the complete accepted image and a position marker, so you cannot browse it manually. After each step, check that the new section joined where you expected." },
+        { "type": "paragraph", "text": "The preview does not accept mouse input. It only shows the complete accepted image and a position marker, so you cannot browse it manually. While scrolling, check that new content joins where you expect." },
         { "type": "heading", "level": 3, "text": "Finish or Cancel" },
-        { "type": "paragraph", "text": "The Finish Scroll Capture and Cancel buttons in the toolbar are always reliable. Return or Enter finishes, and Esc cancels, but these global keys require Accessibility permission. If a key does nothing, click the button instead. Cancel returns to the original locked selection with the capture and annotations from before scrolling." },
+        { "type": "paragraph", "text": "Click the temporary checkmark to the right of Scroll Capture in the main toolbar to finish. Return or Enter finishes, and Esc cancels. Global shortcuts may need Accessibility permission, but Basic Scroll Capture does not. If the finish key does nothing, click the temporary checkmark. Cancel returns to the original locked selection with the capture and annotations from before scrolling." },
         { "type": "heading", "level": 3, "text": "Pauses and Resource Limits" },
-        { "type": "paragraph", "text": "Page animation or too little overlap can pause stitching. Wait for the page to settle and try one more step. If no new content appears, finish the image you have, or cancel, make the selection smaller, and try again." },
+        { "type": "paragraph", "text": "Page animation or too little overlap can pause stitching. Wait for the page to settle and continue scrolling. If no new content appears, finish the image you have, or cancel, make the selection smaller, and try again." },
         { "type": "paragraph", "text": "When XxSnap reaches the resource limit, it pauses the capture and stops accepting new frames. Everything already captured is kept. Finish with the current image or cancel." },
         {
           "type": "image",
@@ -241,12 +241,12 @@
               "answer": "Press Command+Z to undo. If you undo too far, press Command+Shift+Z to redo, or use the eraser on a particular stroke."
             },
             {
-              "question": "Why does Scroll Capture quit as soon as it starts?",
-              "answer": "Allow XxSnap in the Accessibility section of System Settings. Without this permission, XxSnap cannot block the physical scroll wheel or move the page automatically, so Scroll Capture ends and restores the original selection."
+              "question": "Does Scroll Capture need Accessibility permission?",
+              "answer": "Basic Scroll Capture does not need Accessibility permission: just scroll directly with your mouse wheel or trackpad. Accessibility may only be needed to receive global shortcuts such as Return, Enter, or Esc while another app is active."
             },
             {
               "question": "Why do Return, Enter, or Esc sometimes do nothing?",
-              "answer": "These keys use a global listener that also needs Accessibility permission. The Finish Scroll Capture and Cancel buttons do not depend on global keys and are the most reliable controls."
+              "answer": "Global shortcuts may need Accessibility permission. To finish, click the temporary checkmark to the right of Scroll Capture in the main toolbar; to cancel, press Esc."
             },
             {
               "question": "Can I preview a Full Screen Capture before saving it?",
