@@ -77,6 +77,13 @@ float normalizedDpi(std::uint32_t dpi) noexcept
     return dpi == 0U ? windowsBaselineDpi : static_cast<float>(dpi);
 }
 
+float floorDip(float value) noexcept
+{
+    const auto truncated = static_cast<std::int64_t>(value);
+    const auto result = static_cast<float>(truncated);
+    return result > value ? result - 1.0F : result;
+}
+
 DipRect clampRect(DipRect rect, DipRect bounds) noexcept
 {
     if (rect.width > bounds.width) {
@@ -873,7 +880,7 @@ struct OverlayRenderer::Impl final {
                     if (index + 1U < layout.toolbarItems.size()
                         && extraGapAfter(item.action) > 0.0F) {
                         const auto& next = layout.toolbarItems[index + 1U].rect;
-                        const auto separatorX = std::floor(
+                        const auto separatorX = floorDip(
                             item.rect.x + item.rect.width
                             + (next.x - item.rect.x - item.rect.width) / 2.0F)
                             + 0.25F;
