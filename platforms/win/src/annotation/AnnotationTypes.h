@@ -105,6 +105,13 @@ constexpr bool operator==(
         && left.cornerRadiusDip == right.cornerRadiusDip;
 }
 
+constexpr bool operator!=(
+    const AnnotationStyle& left,
+    const AnnotationStyle& right) noexcept
+{
+    return !(left == right);
+}
+
 constexpr AnnotationStyle primaryShapeActivationStyle(
     AnnotationStyle style) noexcept
 {

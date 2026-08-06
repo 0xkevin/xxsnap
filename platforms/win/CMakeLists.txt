@@ -246,6 +246,16 @@ target_include_directories(
 )
 
 add_library(
+    xxsnap_annotation_document
+    src/annotation/AnnotationDocument.cpp
+)
+target_compile_features(xxsnap_annotation_document PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_annotation_document
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+
+add_library(
     xxsnap_overlay_renderer
     src/overlay/OverlayRenderer.cpp
 )
@@ -549,6 +559,21 @@ if(BUILD_TESTING)
     add_test(NAME annotation_types COMMAND xxsnap_annotation_types_test)
 
     add_executable(
+        xxsnap_annotation_document_test
+        tests/TestAnnotationDocument.cpp
+    )
+    target_compile_features(xxsnap_annotation_document_test PRIVATE cxx_std_17)
+    target_include_directories(
+        xxsnap_annotation_document_test
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    target_link_libraries(
+        xxsnap_annotation_document_test
+        PRIVATE xxsnap_annotation_document
+    )
+    add_test(NAME annotation_document COMMAND xxsnap_annotation_document_test)
+
+    add_executable(
         xxsnap_overlay_layout_test
         tests/TestOverlayLayout.cpp
     )
@@ -679,6 +704,7 @@ set(xxsnap_capture_session_targets
     xxsnap_clipboard_writer
     xxsnap_toolbar_layout
     xxsnap_toolbar_state
+    xxsnap_annotation_document
     xxsnap_overlay_renderer
     xxsnap_overlay_window
     xxsnap_overlay_host
@@ -701,6 +727,7 @@ if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_toolbar_layout_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_toolbar_state_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_annotation_types_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_annotation_document_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_overlay_layout_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_overlay_input_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_app_entry_services_test)
