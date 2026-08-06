@@ -7,6 +7,7 @@
 #include "capture/CaptureBackend.h"
 #include "overlay/OverlayWindow.h"
 #include "overlay/SelectionModel.h"
+#include "toolbar/ToolbarCatalog.h"
 
 #include <Windows.h>
 
@@ -45,12 +46,16 @@ struct OverlaySurface {
     UINT dpiY = 96;
 };
 
+struct OverlayPresentationToolbarItem {
+    ToolbarAction action;
+    PixelRect rectPhysical{};
+    PixelPoint centerPhysical{};
+};
+
 struct OverlayPresentation {
     std::optional<PixelRect> selection;
     bool showActions = false;
-    PixelPoint cancelButtonCenterPhysical{};
-    PixelPoint saveButtonCenterPhysical{};
-    PixelPoint copyButtonCenterPhysical{};
+    std::vector<OverlayPresentationToolbarItem> toolbarItems;
 };
 
 class OverlayInputPlatform {

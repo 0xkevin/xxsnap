@@ -128,11 +128,10 @@ bool intersectsRect(DipRect lhs, DipRect rhs) noexcept
         && rectBottom(lhs) > rhs.y;
 }
 
-DipRect toolbarRect(DipRect anchor, DipRect bounds) noexcept
+DipRect toolbarRect(DipRect anchor, DipRect bounds, float width) noexcept
 {
     const auto gap = VisualStyleCatalog::toolbarGapDip;
-    const auto width = VisualStyleCatalog::mvpToolbarWidthDip;
-    const auto height = VisualStyleCatalog::toolbarHeightDip;
+    const auto height = ToolbarMetrics::heightDip;
     // SelectionToolbarState.toolbarRect order, translated from AppKit's
     // bottom-up coordinates to Direct2D's top-down coordinates.
     const std::array candidates{
@@ -371,29 +370,17 @@ OverlayLayout computeOverlayLayout(const OverlayLayoutInput& input)
     }
     layout.sizeLabel = clampRect(layout.sizeLabel, safeBounds);
 
-    layout.toolbar = toolbarRect(visibleSelection, safeBounds);
-
-    const auto buttonY = layout.toolbar.y
-        + (layout.toolbar.height - VisualStyleCatalog::buttonSizeDip) / 2.0F;
-    auto buttonX = layout.toolbar.x + VisualStyleCatalog::horizontalPaddingDip
-        + VisualStyleCatalog::buttonStepDip;
-    layout.cancel = {
-        buttonX, buttonY,
-        VisualStyleCatalog::buttonSizeDip,
-        VisualStyleCatalog::buttonSizeDip,
-    };
-    buttonX += VisualStyleCatalog::buttonStepDip;
-    layout.save = {
-        buttonX, buttonY,
-        VisualStyleCatalog::buttonSizeDip,
-        VisualStyleCatalog::buttonSizeDip,
-    };
-    buttonX += VisualStyleCatalog::buttonStepDip;
-    layout.copy = {
-        buttonX, buttonY,
-        VisualStyleCatalog::buttonSizeDip,
-        VisualStyleCatalog::buttonSizeDip,
-    };
+    const auto positionedToolbar = toolbarRect(
+        visibleSelection,
+        safeBounds,
+        toolbarWidth(input.toolbarActions));
+    layout.toolbar = computeMainToolbarLayout(
+        {positionedToolbar.x, positionedToolbar.y},
+        input.toolbarActions);
+    layout.toolbarItems.reserve(layout.toolbar.items.size());
+    for (const auto& item : layout.toolbar.items) {
+        layout.toolbarItems.push_back({item.action, item.rect, false, true});
+    }
 
     return layout;
 }
@@ -414,13 +401,19 @@ std::string overlayLayoutManifestJson(const OverlayLayout& layout)
     stream << ",\"sizeLabel\":";
     appendRect(stream, layout.sizeLabel);
     stream << ",\"toolbar\":";
-    appendRect(stream, layout.toolbar);
-    stream << ",\"cancel\":";
-    appendRect(stream, layout.cancel);
-    stream << ",\"save\":";
-    appendRect(stream, layout.save);
-    stream << ",\"copy\":";
-    appendRect(stream, layout.copy);
+    appendRect(stream, layout.toolbar.bounds);
+    stream << ",\"toolbarItems\":[";
+    for (std::size_t index = 0; index < layout.toolbarItems.size(); ++index) {
+        if (index != 0U) {
+            stream << ',';
+        }
+        stream << "{\"action\":"
+               << static_cast<unsigned int>(layout.toolbarItems[index].action)
+               << ",\"rect\":";
+        appendRect(stream, layout.toolbarItems[index].rect);
+        stream << '}';
+    }
+    stream << ']';
     stream << ",\"handles\":[";
     for (std::size_t index = 0; index < layout.handles.size(); ++index) {
         if (index != 0U) {
@@ -673,10 +666,11 @@ struct OverlayRenderer::Impl final {
             return error(OverlayRendererErrorCode::backgroundBitmapFailed, result);
         }
 
-        constexpr auto resources = mvpOverlayButtonResources();
+        constexpr auto resources = toolbarImageResources();
+        const auto resourceDpi = static_cast<std::uint32_t>((std::max)(dpiX, dpiY));
         for (std::size_t index = 0; index < resources.size(); ++index) {
             if (const auto iconError = createIconBitmap(
-                    resources[index].resourceId,
+                    toolbarResourceId(resources[index], resourceDpi),
                     iconBitmaps[index].put())) {
                 discardDeviceResources();
                 return iconError;
@@ -738,6 +732,7 @@ struct OverlayRenderer::Impl final {
         ComPtr<ID2D1SolidColorBrush> labelTextBrush;
         ComPtr<ID2D1SolidColorBrush> toolbarBackgroundBrush;
         ComPtr<ID2D1SolidColorBrush> toolbarBorderBrush;
+        ComPtr<ID2D1SolidColorBrush> toolbarSeparatorBrush;
 
         const std::array brushResults{
             createBrush(D2D1::ColorF(
@@ -761,6 +756,7 @@ struct OverlayRenderer::Impl final {
                 VisualStyleCatalog::toolbarBackgroundColor,
                 VisualStyleCatalog::toolbarBackgroundAlpha), toolbarBackgroundBrush),
             createBrush(color(VisualStyleCatalog::toolbarBorderColor), toolbarBorderBrush),
+            createBrush(D2D1::ColorF(0.0F, 0.0F, 0.0F, 0.15F), toolbarSeparatorBrush),
         };
         for (const auto& brushResult : brushResults) {
             if (brushResult.has_value()) {
@@ -842,9 +838,9 @@ struct OverlayRenderer::Impl final {
                     D2D1_DRAW_TEXT_OPTIONS_CLIP);
 
                 const auto toolbarRounded = D2D1::RoundedRect(
-                    d2dRect(layout.toolbar),
-                    VisualStyleCatalog::toolbarCornerRadiusDip,
-                    VisualStyleCatalog::toolbarCornerRadiusDip);
+                    d2dRect(layout.toolbar.bounds),
+                    ToolbarMetrics::cornerRadiusDip,
+                    ToolbarMetrics::cornerRadiusDip);
                 renderTarget->FillRoundedRectangle(
                     &toolbarRounded, toolbarBackgroundBrush.get());
                 renderTarget->DrawRoundedRectangle(
@@ -852,15 +848,52 @@ struct OverlayRenderer::Impl final {
                     toolbarBorderBrush.get(),
                     VisualStyleCatalog::toolbarBorderDip);
 
-                const std::array buttonRects{
-                    layout.cancel, layout.save, layout.copy};
-                for (std::size_t index = 0; index < buttonRects.size(); ++index) {
+                const auto drawToolbarIcon = [this](
+                        const ToolbarIconSpec& icon,
+                        std::size_t iconIndex,
+                        DipRect rect) {
                     renderTarget->DrawBitmap(
-                        iconBitmaps[index].get(),
-                        d2dRect(buttonRects[index]),
+                        iconBitmaps[iconIndex].get(),
+                        d2dRect(insetRect(rect, icon.insetDip)),
                         1.0F,
                         D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+                };
+                drawToolbarIcon(
+                    dragHandleIcon(),
+                    0U,
+                    layout.toolbar.leadingDragHandle);
+                for (std::size_t index = 0; index < layout.toolbarItems.size(); ++index) {
+                    const auto& item = layout.toolbarItems[index];
+                    const auto iconIndex = item.enabled
+                        ? toolbarIconIndex(item.action)
+                        : disabledToolbarIconIndex(item.action);
+                    const auto& icon = toolbarImageResources()[iconIndex];
+                    drawToolbarIcon(icon, iconIndex, item.rect);
+
+                    if (index + 1U < layout.toolbarItems.size()
+                        && extraGapAfter(item.action) > 0.0F) {
+                        const auto& next = layout.toolbarItems[index + 1U].rect;
+                        const auto separatorX = std::floor(
+                            item.rect.x + item.rect.width
+                            + (next.x - item.rect.x - item.rect.width) / 2.0F)
+                            + 0.25F;
+                        const DipRect separator{
+                            separatorX,
+                            layout.toolbar.bounds.y
+                                + layout.toolbar.bounds.height / 2.0F - 6.0F,
+                            1.5F,
+                            12.0F,
+                        };
+                        const auto roundedSeparator = D2D1::RoundedRect(
+                            d2dRect(separator), 0.75F, 0.75F);
+                        renderTarget->FillRoundedRectangle(
+                            &roundedSeparator, toolbarSeparatorBrush.get());
+                    }
                 }
+                drawToolbarIcon(
+                    dragHandleIcon(),
+                    0U,
+                    layout.toolbar.trailingDragHandle);
             }
 
             for (const auto handle : layout.handles) {
@@ -908,7 +941,7 @@ struct OverlayRenderer::Impl final {
     ComPtr<IDWriteTextFormat> textFormat;
     ComPtr<ID2D1HwndRenderTarget> renderTarget;
     ComPtr<ID2D1Bitmap> backgroundBitmap;
-    std::array<ComPtr<ID2D1Bitmap>, 3> iconBitmaps;
+    std::array<ComPtr<ID2D1Bitmap>, toolbarImageResources().size()> iconBitmaps;
 };
 
 OverlayRenderer::OverlayRenderer(HMODULE resourceModule)

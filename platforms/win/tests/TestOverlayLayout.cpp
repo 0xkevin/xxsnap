@@ -20,7 +20,6 @@ using xxsnap::win::DipRect;
 using xxsnap::win::DpiRestartDecision;
 using xxsnap::win::DpiRestartResult;
 using xxsnap::win::DpiRestartState;
-using xxsnap::win::MvpToolbarAction;
 using xxsnap::win::OverlayLayout;
 using xxsnap::win::OverlayLayoutInput;
 using xxsnap::win::Rgba8;
@@ -137,17 +136,20 @@ void testDeterministicManifest()
     CHECK_RECT(layout.overlayBounds, (DipRect{0, 0, 640, 360}));
     CHECK_RECT(layout.border, (DipRect{160, 90, 320, 180}));
     CHECK_RECT(layout.sizeLabel, (DipRect{160, 58, 98, 24}));
-    CHECK_RECT(layout.toolbar, (DipRect{336, 278, 144, 28}));
-    CHECK_RECT(layout.cancel, (DipRect{368, 282, 20, 20}));
-    CHECK_RECT(layout.save, (DipRect{396, 282, 20, 20}));
-    CHECK_RECT(layout.copy, (DipRect{424, 282, 20, 20}));
+    CHECK_RECT(layout.toolbar.bounds, (DipRect{336, 278, 144, 28}));
+    CHECK(layout.toolbarItems.size() == 3U);
+    CHECK_RECT(layout.toolbarItems[0].rect, (DipRect{368, 282, 20, 20}));
+    CHECK_RECT(layout.toolbarItems[1].rect, (DipRect{396, 282, 20, 20}));
+    CHECK_RECT(layout.toolbarItems[2].rect, (DipRect{424, 282, 20, 20}));
     CHECK(layout.sizeLabelText == L"320 x 180  px");
 
     const std::string expected =
         "{\"mask\":[[0,0,640,90],[0,90,160,180],[480,90,160,180],[0,270,640,90]],"
         "\"border\":[160,90,320,180],\"sizeLabel\":[160,58,98,24],"
-        "\"toolbar\":[336,278,144,28],\"cancel\":[368,282,20,20],"
-        "\"save\":[396,282,20,20],\"copy\":[424,282,20,20],"
+        "\"toolbar\":[336,278,144,28],\"toolbarItems\":["
+        "{\"action\":13,\"rect\":[368,282,20,20]},"
+        "{\"action\":15,\"rect\":[396,282,20,20]},"
+        "{\"action\":16,\"rect\":[424,282,20,20]}],"
         "\"handles\":[[155,85,10,10],[315,85,10,10],[475,85,10,10],"
         "[155,175,10,10],[475,175,10,10],[155,265,10,10],"
         "[315,265,10,10],[475,265,10,10]]}";
@@ -161,35 +163,46 @@ void testDpiScaling()
     constexpr std::array dpis{96U, 120U, 144U, 192U};
     for (const auto dpi : dpis) {
         const auto layout = fixedLayout(dpi);
-        CHECK(close(layout.toolbar.width, 144.0F));
-        CHECK(close(layout.toolbar.height, 28.0F));
-        CHECK(close(layout.cancel.width, 20.0F));
+        CHECK(close(layout.toolbar.bounds.width, 144.0F));
+        CHECK(close(layout.toolbar.bounds.height, 28.0F));
+        CHECK(close(layout.toolbarItems[0].rect.width, 20.0F));
         CHECK(
-            xxsnap::win::dipLengthToPhysicalPixels(layout.toolbar.width, dpi)
+            xxsnap::win::dipLengthToPhysicalPixels(layout.toolbar.bounds.width, dpi)
             == static_cast<std::int64_t>(144U * dpi / 96U));
         CHECK(
-            xxsnap::win::dipLengthToPhysicalPixels(layout.cancel.width, dpi)
+            xxsnap::win::dipLengthToPhysicalPixels(layout.toolbarItems[0].rect.width, dpi)
             == static_cast<std::int64_t>(20U * dpi / 96U));
-        CHECK(layout.cancel.x < layout.save.x);
-        CHECK(layout.save.x < layout.copy.x);
+        CHECK(layout.toolbarItems[0].rect.x < layout.toolbarItems[1].rect.x);
+        CHECK(layout.toolbarItems[1].rect.x < layout.toolbarItems[2].rect.x);
     }
+}
+
+void testOverlayUsesSharedToolbarLayout()
+{
+    const auto layout = fixedLayout(96U);
+    CHECK(layout.toolbar.bounds.width == 144.0F);
+    CHECK(layout.toolbarItems.size() == 3U);
+    CHECK(layout.toolbarItems[0].action == xxsnap::win::ToolbarAction::cancel);
+    CHECK(layout.toolbarItems[1].action == xxsnap::win::ToolbarAction::save);
+    CHECK(layout.toolbarItems[2].action == xxsnap::win::ToolbarAction::copy);
 }
 
 void testEdgePlacementAndClamping()
 {
     const OverlayLayout nearBottom = xxsnap::win::computeOverlayLayout({
         PixelRect{0, 0, 640, 360}, PixelRect{400, 330, 220, 24}, 96, 96, 80.0F});
-    CHECK(nearBottom.toolbar.y + nearBottom.toolbar.height < nearBottom.border.y);
+    CHECK(nearBottom.toolbar.bounds.y + nearBottom.toolbar.bounds.height
+        < nearBottom.border.y);
 
     const OverlayLayout nearTop = xxsnap::win::computeOverlayLayout({
         PixelRect{0, 0, 640, 360}, PixelRect{0, 2, 80, 20}, 96, 96, 72.0F});
-    CHECK_RECT(nearTop.toolbar, (DipRect{88, 10, 144, 28}));
-    CHECK(!intersects(nearTop.toolbar, nearTop.border));
+    CHECK_RECT(nearTop.toolbar.bounds, (DipRect{88, 10, 144, 28}));
+    CHECK(!intersects(nearTop.toolbar.bounds, nearTop.border));
 
     const OverlayLayout nearRight = xxsnap::win::computeOverlayLayout({
         PixelRect{0, 0, 640, 360}, PixelRect{620, 100, 20, 80}, 96, 96, 72.0F});
-    CHECK(nearRight.toolbar.x >= 8.0F);
-    CHECK(nearRight.toolbar.x + nearRight.toolbar.width <= 632.0F);
+    CHECK(nearRight.toolbar.bounds.x >= 8.0F);
+    CHECK(nearRight.toolbar.bounds.x + nearRight.toolbar.bounds.width <= 632.0F);
 
     const OverlayLayout tiny = xxsnap::win::computeOverlayLayout({
         PixelRect{-320, -180, 640, 360}, PixelRect{-320, -180, 1, 1}, 96, 96, 30.0F});
@@ -200,10 +213,10 @@ void testEdgePlacementAndClamping()
             && rect.y + rect.height <= tiny.overlayBounds.y + tiny.overlayBounds.height;
     };
     CHECK(inside(tiny.sizeLabel));
-    CHECK(inside(tiny.toolbar));
-    CHECK(inside(tiny.cancel));
-    CHECK(inside(tiny.save));
-    CHECK(inside(tiny.copy));
+    CHECK(inside(tiny.toolbar.bounds));
+    for (const auto& item : tiny.toolbarItems) {
+        CHECK(inside(item.rect));
+    }
     CHECK_RECT(tiny.border, (DipRect{0, 0, 1, 1}));
     CHECK_RECT(tiny.handles[0], (DipRect{-5, -5, 10, 10}));
 }
@@ -237,12 +250,10 @@ void testCrossDisplaySelectionChromeOwnership()
     CHECK(left.showActions);
     CHECK(!right.showActions);
     CHECK(left.sizeLabel.width > 0.0F);
-    CHECK(left.toolbar.width == VisualStyleCatalog::mvpToolbarWidthDip);
+    CHECK(left.toolbar.bounds.width == 144.0F);
     CHECK_RECT(right.sizeLabel, (DipRect{}));
-    CHECK_RECT(right.toolbar, (DipRect{}));
-    CHECK_RECT(right.cancel, (DipRect{}));
-    CHECK_RECT(right.save, (DipRect{}));
-    CHECK_RECT(right.copy, (DipRect{}));
+    CHECK_RECT(right.toolbar.bounds, (DipRect{}));
+    CHECK(right.toolbarItems.empty());
 }
 
 void testMacToolbarSideCandidatesAtEveryDpi()
@@ -262,8 +273,8 @@ void testMacToolbarSideCandidatesAtEveryDpi()
             80.0F,
             true,
         });
-        CHECK_RECT(rightSide.toolbar, (DipRect{508, 544, 144, 28}));
-        CHECK(!intersects(rightSide.toolbar, (DipRect{200, 20, 300, 560})));
+        CHECK_RECT(rightSide.toolbar.bounds, (DipRect{508, 544, 144, 28}));
+        CHECK(!intersects(rightSide.toolbar.bounds, (DipRect{200, 20, 300, 560})));
 
         const auto leftSide = xxsnap::win::computeOverlayLayout({
             display,
@@ -273,8 +284,8 @@ void testMacToolbarSideCandidatesAtEveryDpi()
             80.0F,
             true,
         });
-        CHECK_RECT(leftSide.toolbar, (DipRect{348, 544, 144, 28}));
-        CHECK(!intersects(leftSide.toolbar, (DipRect{500, 20, 292, 560})));
+        CHECK_RECT(leftSide.toolbar.bounds, (DipRect{348, 544, 144, 28}));
+        CHECK(!intersects(leftSide.toolbar.bounds, (DipRect{500, 20, 292, 560})));
     }
 }
 
@@ -285,14 +296,15 @@ void testWindowAndResourceContracts()
         xxsnap::win::overlayWindowExtendedStyle()
         == (WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE));
 
-    constexpr auto resources = xxsnap::win::mvpOverlayButtonResources();
-    static_assert(resources.size() == 3);
-    CHECK(resources[0].action == MvpToolbarAction::cancel);
-    CHECK(resources[0].resourceId == IDR_CANCEL_CAPTURE_PNG);
-    CHECK(resources[1].action == MvpToolbarAction::save);
-    CHECK(resources[1].resourceId == IDR_SAVE_TO_FILE_PNG);
-    CHECK(resources[2].action == MvpToolbarAction::copy);
-    CHECK(resources[2].resourceId == IDR_COPY_TO_CLIPBOARD_PNG);
+    CHECK(xxsnap::win::toolbarResourceId(
+        xxsnap::win::toolbarIcon(xxsnap::win::ToolbarAction::cancel), 96)
+        == IDR_TOOLBAR_100_CANCEL_CAPTURE_PNG);
+    CHECK(xxsnap::win::toolbarResourceId(
+        xxsnap::win::toolbarIcon(xxsnap::win::ToolbarAction::save), 144)
+        == IDR_TOOLBAR_150_SAVE_TO_FILE_PNG);
+    CHECK(xxsnap::win::toolbarResourceId(
+        xxsnap::win::toolbarIcon(xxsnap::win::ToolbarAction::copy), 192)
+        == IDR_TOOLBAR_200_COPY_TO_CLIPBOARD_PNG);
 }
 
 void testDpiRestartNotificationIsSingleAndFailClosed()
@@ -370,12 +382,22 @@ void testEmbeddedToolbarResources()
         return;
     }
 
+    std::vector<int> expectedResourceIds;
+    for (const auto& icon : xxsnap::win::toolbarImageResources()) {
+        expectedResourceIds.insert(
+            expectedResourceIds.end(),
+            {icon.resourceIdAt96Dpi,
+             icon.resourceIdAt120Dpi,
+             icon.resourceIdAt144Dpi,
+             icon.resourceIdAt192Dpi});
+    }
+
     constexpr std::array<unsigned char, 8> pngSignature{
         0x89U, 0x50U, 0x4EU, 0x47U, 0x0DU, 0x0AU, 0x1AU, 0x0AU};
-    for (const auto resource : xxsnap::win::mvpOverlayButtonResources()) {
+    for (const auto resourceId : expectedResourceIds) {
         const auto handle = FindResourceW(
             module,
-            MAKEINTRESOURCEW(resource.resourceId),
+            MAKEINTRESOURCEW(resourceId),
             MAKEINTRESOURCEW(10));
         CHECK(handle != nullptr);
         if (handle == nullptr) {
@@ -396,12 +418,6 @@ void testEmbeddedToolbarResources()
         }
     }
 
-    constexpr int nonMvpSettingsResourceId = 104;
-    CHECK(FindResourceW(
-        module,
-        MAKEINTRESOURCEW(nonMvpSettingsResourceId),
-        MAKEINTRESOURCEW(10)) == nullptr);
-
     std::vector<int> embeddedResourceIds;
     CHECK(EnumResourceNamesW(
         module,
@@ -409,11 +425,8 @@ void testEmbeddedToolbarResources()
         &collectIntegerResourceName,
         reinterpret_cast<LONG_PTR>(&embeddedResourceIds)) != FALSE);
     std::sort(embeddedResourceIds.begin(), embeddedResourceIds.end());
-    CHECK((embeddedResourceIds == std::vector<int>{
-        IDR_CANCEL_CAPTURE_PNG,
-        IDR_SAVE_TO_FILE_PNG,
-        IDR_COPY_TO_CLIPBOARD_PNG,
-    }));
+    std::sort(expectedResourceIds.begin(), expectedResourceIds.end());
+    CHECK(embeddedResourceIds == expectedResourceIds);
 }
 
 } // namespace
@@ -422,6 +435,7 @@ int main()
 {
     testDeterministicManifest();
     testDpiScaling();
+    testOverlayUsesSharedToolbarLayout();
     testEdgePlacementAndClamping();
     testCrossDisplaySelectionChromeOwnership();
     testMacToolbarSideCandidatesAtEveryDpi();

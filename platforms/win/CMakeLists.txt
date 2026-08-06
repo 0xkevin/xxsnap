@@ -52,9 +52,6 @@ file(GLOB_RECURSE XXSNAP_TOOLBAR_ASSET_FILES
 set_property(
     SOURCE resources/xxsnap.rc
     APPEND PROPERTY OBJECT_DEPENDS
-        "${PROJECT_SOURCE_DIR}/platforms/mac/Resources/Icons/cancel-capture.png"
-        "${PROJECT_SOURCE_DIR}/platforms/mac/Resources/Icons/save-to-file.png"
-        "${PROJECT_SOURCE_DIR}/platforms/mac/Resources/Icons/copy-to-clipboard.png"
         "${PROJECT_SOURCE_DIR}/platforms/win/resources/icons/Snipory.ico"
         ${XXSNAP_TOOLBAR_ASSET_FILES}
 )
@@ -261,7 +258,7 @@ target_include_directories(
 )
 target_link_libraries(
     xxsnap_overlay_renderer
-    PUBLIC xxsnap_capture_backend xxsnap_visual_resources
+    PUBLIC xxsnap_capture_backend xxsnap_visual_resources xxsnap_toolbar_layout
     PRIVATE xxsnap_windows_build_configuration
             d2d1 dwrite windowscodecs ole32 user32 gdi32
 )

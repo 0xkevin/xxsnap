@@ -1,9 +1,6 @@
 #pragma once
 
-#include <array>
 #include <cstdint>
-
-#include "toolbar/ToolbarCatalog.h"
 
 namespace xxsnap::win {
 
@@ -27,12 +24,6 @@ constexpr bool operator!=(Rgba8 left, Rgba8 right) noexcept
     return !(left == right);
 }
 
-enum class MvpToolbarAction : std::uint8_t {
-    cancel,
-    save,
-    copy,
-};
-
 enum class VisualFontWeight : std::uint16_t {
     medium = 500,
 };
@@ -42,16 +33,8 @@ struct VisualStyleCatalog {
     inline static constexpr Rgba8 dimColor{0, 0, 0, 255};
     inline static constexpr float dimAlpha = 0.34f;
     inline static constexpr float selectionBorderDip = 2.0f;
-    inline static constexpr float toolbarHeightDip = ToolbarMetrics::heightDip;
-    inline static constexpr float buttonSizeDip = ToolbarMetrics::buttonSizeDip;
-    inline static constexpr float buttonStepDip = ToolbarMetrics::buttonStepDip;
-    inline static constexpr float horizontalPaddingDip =
-        ToolbarMetrics::horizontalPaddingDip;
-    inline static constexpr float mvpToolbarWidthDip = 144.0f;
     inline static constexpr float layoutMarginDip = 8.0f;
     inline static constexpr float toolbarGapDip = 8.0f;
-    inline static constexpr float toolbarCornerRadiusDip =
-        ToolbarMetrics::cornerRadiusDip;
     inline static constexpr float toolbarBackgroundAlpha = 0.9f;
     inline static constexpr float toolbarBorderDip = 1.0f;
     // Sampled from AppKit under an explicitly forced NSAppearance.aqua.
@@ -81,11 +64,6 @@ struct VisualStyleCatalog {
     inline static constexpr float sizeLabelExtraWidthDip = 18.0f;
     inline static constexpr const wchar_t* sizeLabelDimensionSeparator = L" x ";
     inline static constexpr const wchar_t* sizeLabelSuffix = L"  px";
-    inline static constexpr std::array mvpToolbarActions{
-        MvpToolbarAction::cancel,
-        MvpToolbarAction::save,
-        MvpToolbarAction::copy,
-    };
 };
 
 } // namespace xxsnap::win

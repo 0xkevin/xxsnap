@@ -241,6 +241,23 @@ constexpr const ToolbarIconSpec& toolbarIcon(ToolbarAction action) noexcept
     return toolbar_catalog_detail::imageResources[index];
 }
 
+constexpr std::size_t toolbarIconIndex(ToolbarAction action) noexcept
+{
+    return toolbar_catalog_detail::actionIconIndices[
+        static_cast<std::size_t>(action)];
+}
+
+constexpr std::size_t disabledToolbarIconIndex(ToolbarAction action) noexcept
+{
+    if (action == ToolbarAction::undo) {
+        return 13;
+    }
+    if (action == ToolbarAction::redo) {
+        return 15;
+    }
+    return toolbarIconIndex(action);
+}
+
 constexpr const ToolbarIconSpec& disabledToolbarIcon(
     ToolbarAction action) noexcept
 {

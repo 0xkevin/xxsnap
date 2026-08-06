@@ -6,7 +6,7 @@
 
 #include "capture/CaptureBackend.h"
 #include "overlay/VisualStyleCatalog.h"
-#include "resource.h"
+#include "toolbar/ToolbarLayout.h"
 
 #include <Windows.h>
 
@@ -15,17 +15,13 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace xxsnap::win {
 
 using snipory::core::portable::PixelRect;
 
-struct DipRect {
-    float x;
-    float y;
-    float width;
-    float height;
-};
+using DipRect = ToolbarRect;
 
 struct OverlayLayoutInput {
     PixelRect displayRectPhysical;
@@ -34,6 +30,17 @@ struct OverlayLayoutInput {
     std::uint32_t dpiY;
     float sizeLabelTextWidthDip;
     bool showActions = true;
+    std::vector<ToolbarAction> toolbarActions{
+        terminalToolbarActions().begin(),
+        terminalToolbarActions().end(),
+    };
+};
+
+struct OverlayToolbarItem {
+    ToolbarAction action;
+    DipRect rect;
+    bool selected = false;
+    bool enabled = true;
 };
 
 struct OverlayLayout {
@@ -41,28 +48,12 @@ struct OverlayLayout {
     std::array<DipRect, 4> mask{};
     DipRect border{};
     DipRect sizeLabel{};
-    DipRect toolbar{};
-    DipRect cancel{};
-    DipRect save{};
-    DipRect copy{};
+    MainToolbarLayout toolbar{};
+    std::vector<OverlayToolbarItem> toolbarItems;
     std::array<DipRect, 8> handles{};
     std::wstring sizeLabelText;
     bool showActions = true;
 };
-
-struct OverlayButtonResource {
-    MvpToolbarAction action;
-    int resourceId;
-};
-
-inline constexpr std::array<OverlayButtonResource, 3> mvpOverlayButtonResources() noexcept
-{
-    return {{
-        {MvpToolbarAction::cancel, IDR_CANCEL_CAPTURE_PNG},
-        {MvpToolbarAction::save, IDR_SAVE_TO_FILE_PNG},
-        {MvpToolbarAction::copy, IDR_COPY_TO_CLIPBOARD_PNG},
-    }};
-}
 
 float physicalPixelsToDip(std::int64_t pixels, std::uint32_t dpi) noexcept;
 std::int64_t dipLengthToPhysicalPixels(float dips, std::uint32_t dpi) noexcept;

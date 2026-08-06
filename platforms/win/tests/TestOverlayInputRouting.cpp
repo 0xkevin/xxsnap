@@ -146,7 +146,8 @@ void testActionHandleBodyAndBlankPriority()
 
     const auto owner = router.presentations()[1];
     CHECK(owner.showActions);
-    CHECK(router.pointerDown(rightWindow, owner.copyButtonCenterPhysical));
+    CHECK(owner.toolbarItems.size() == 3U);
+    CHECK(router.pointerDown(rightWindow, owner.toolbarItems[2].centerPhysical));
     CHECK(actions.size() == 1);
     CHECK(actions[0] == OverlayInputAction::copy);
     CHECK(router.status() == OverlayInputStatus::completed);
@@ -189,11 +190,11 @@ void testAllToolbarActionsFireExactlyOnceWithoutStartingCapture()
         CHECK(router.activateEscapeHotKey(leftWindow));
         createReadySelection(router);
         const auto owner = router.presentations()[1];
-        const auto point = expected == OverlayInputAction::cancel
-            ? owner.cancelButtonCenterPhysical
-            : expected == OverlayInputAction::save
-                ? owner.saveButtonCenterPhysical
-                : owner.copyButtonCenterPhysical;
+        const auto itemIndex = expected == OverlayInputAction::cancel
+            ? 0U
+            : expected == OverlayInputAction::save ? 1U : 2U;
+        CHECK(owner.toolbarItems.size() == 3U);
+        const auto point = owner.toolbarItems[itemIndex].centerPhysical;
         const auto capturesBeforeAction = platform.captureCalls;
         CHECK(router.pointerDown(rightWindow, point));
         CHECK(actions.size() == 1);
@@ -203,6 +204,45 @@ void testAllToolbarActionsFireExactlyOnceWithoutStartingCapture()
         router.escapePressed();
         router.cancelPressed();
         CHECK(actions.size() == 1);
+    }
+}
+
+void testToolbarPresentationUsesSharedPhysicalRects()
+{
+    FakePlatform platform;
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform, {});
+    createReadySelection(router);
+    const auto owner = router.presentations()[1];
+    CHECK(owner.toolbarItems.size() == 3U);
+    CHECK(owner.toolbarItems[0].action == xxsnap::win::ToolbarAction::cancel);
+    CHECK(owner.toolbarItems[1].action == xxsnap::win::ToolbarAction::save);
+    CHECK(owner.toolbarItems[2].action == xxsnap::win::ToolbarAction::copy);
+    for (const auto& item : owner.toolbarItems) {
+        CHECK(item.rectPhysical.width == 30);
+        CHECK(item.rectPhysical.height == 30);
+        CHECK(item.centerPhysical.x >= item.rectPhysical.x);
+        CHECK(item.centerPhysical.x < item.rectPhysical.x + item.rectPhysical.width);
+    }
+}
+
+void testOnePixelOutsideToolbarItemsDoesNotFireAction()
+{
+    for (std::size_t itemIndex = 0; itemIndex < 3U; ++itemIndex) {
+        FakePlatform platform;
+        std::vector<OverlayInputAction> actions;
+        OverlayInputRouter router(
+            PixelRect{-640, 0, 1280, 360}, surfaces(), platform,
+            [&actions](OverlayInputAction action) { actions.push_back(action); });
+        createReadySelection(router);
+        const auto item = router.presentations()[1].toolbarItems[itemIndex];
+        const PixelPoint outside{
+            item.rectPhysical.x + item.rectPhysical.width,
+            item.centerPhysical.y,
+        };
+        CHECK(router.pointerDown(rightWindow, outside));
+        CHECK(actions.empty());
+        CHECK(router.phase() == SelectionPhase::creating);
     }
 }
 
@@ -349,6 +389,8 @@ int main()
     testCrossWindowRoutingUsesVirtualPhysicalCoordinates();
     testActionHandleBodyAndBlankPriority();
     testAllToolbarActionsFireExactlyOnceWithoutStartingCapture();
+    testToolbarPresentationUsesSharedPhysicalRects();
+    testOnePixelOutsideToolbarItemsDoesNotFireAction();
     testCancelSourcesAreIdempotentAndCaptureFailureFailsClosed();
     testEscapeRegistrationLifecycleIsExplicit();
     testEscapeUnregisterFailureIsObservableAndRetriedOnDestruction();

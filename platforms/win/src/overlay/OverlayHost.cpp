@@ -32,21 +32,23 @@ bool contains(PixelRect rect, PixelPoint point) noexcept
         && point.y < saturatingAdd(rect.y, rect.height);
 }
 
-bool contains(DipRect rect, float x, float y) noexcept
+PixelRect buttonRectPhysical(DipRect rect, const OverlaySurface& surface) noexcept
 {
-    return x >= rect.x && y >= rect.y
-        && x < rect.x + rect.width && y < rect.y + rect.height;
+    const auto left = dipLengthToPhysicalPixels(rect.x, surface.dpiX);
+    const auto top = dipLengthToPhysicalPixels(rect.y, surface.dpiY);
+    const auto right = dipLengthToPhysicalPixels(
+        rect.x + rect.width, surface.dpiX);
+    const auto bottom = dipLengthToPhysicalPixels(
+        rect.y + rect.height, surface.dpiY);
+    return {left, top, right - left, bottom - top};
 }
 
-PixelPoint buttonCenterPhysical(DipRect rect, const OverlaySurface& surface) noexcept
+PixelPoint buttonCenterPhysical(PixelRect rect) noexcept
 {
-    const auto x = static_cast<std::int64_t>(std::llround(
-        (static_cast<double>(rect.x) + static_cast<double>(rect.width) / 2.0)
-        * static_cast<double>(surface.dpiX == 0 ? 96U : surface.dpiX) / 96.0));
-    const auto y = static_cast<std::int64_t>(std::llround(
-        (static_cast<double>(rect.y) + static_cast<double>(rect.height) / 2.0)
-        * static_cast<double>(surface.dpiY == 0 ? 96U : surface.dpiY) / 96.0));
-    return {x, y};
+    return {
+        rect.x + rect.width / 2,
+        rect.y + rect.height / 2,
+    };
 }
 
 class SystemOverlayInputPlatform final : public OverlayInputPlatform {
@@ -230,12 +232,15 @@ std::vector<OverlayPresentation> OverlayInputRouter::presentations() const
             0.0F,
             true,
         });
-        presentation.cancelButtonCenterPhysical = buttonCenterPhysical(
-            layout.cancel, surface);
-        presentation.saveButtonCenterPhysical = buttonCenterPhysical(
-            layout.save, surface);
-        presentation.copyButtonCenterPhysical = buttonCenterPhysical(
-            layout.copy, surface);
+        presentation.toolbarItems.reserve(layout.toolbarItems.size());
+        for (const auto& item : layout.toolbarItems) {
+            const auto rect = buttonRectPhysical(item.rect, surface);
+            presentation.toolbarItems.push_back({
+                item.action,
+                rect,
+                buttonCenterPhysical(rect),
+            });
+        }
     }
     return result;
 }
@@ -260,16 +265,20 @@ std::optional<OverlayInputAction> OverlayInputRouter::hitAction(
         / static_cast<float>(surface.dpiX);
     const auto y = static_cast<float>(clientPoint.y) * 96.0F
         / static_cast<float>(surface.dpiY);
-    if (contains(layout.cancel, x, y)) {
+    const auto toolbarAction = toolbarActionAt(layout.toolbar, {x, y});
+    if (!toolbarAction.has_value()) {
+        return std::nullopt;
+    }
+    switch (*toolbarAction) {
+    case ToolbarAction::cancel:
         return OverlayInputAction::cancel;
-    }
-    if (contains(layout.save, x, y)) {
+    case ToolbarAction::save:
         return OverlayInputAction::save;
-    }
-    if (contains(layout.copy, x, y)) {
+    case ToolbarAction::copy:
         return OverlayInputAction::copy;
+    default:
+        return std::nullopt;
     }
-    return std::nullopt;
 }
 
 bool OverlayInputRouter::pointerDown(HWND source, PixelPoint clientPoint) noexcept
