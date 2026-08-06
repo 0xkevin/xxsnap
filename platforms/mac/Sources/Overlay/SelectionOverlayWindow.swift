@@ -1013,8 +1013,7 @@ final class SelectionOverlayWindow: NSWindow {
               let geometry = overlayView.scrollCaptureControlGeometry else { return nil }
         return ScrollCaptureControlGeometry(
             toolbarFrame: convertToScreen(geometry.toolbarFrame),
-            finishButtonFrame: convertToScreen(geometry.finishButtonFrame),
-            cancelButtonFrame: convertToScreen(geometry.cancelButtonFrame)
+            finishButtonFrame: convertToScreen(geometry.finishButtonFrame)
         )
     }
 
@@ -16701,12 +16700,10 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         guard let selectionRect,
               let toolbarFrame = mainToolbarRect(for: selectionRect) else { return nil }
         let frames = Dictionary(uniqueKeysWithValues: toolbarButtonRects(in: toolbarFrame))
-        guard let finishButtonFrame = frames[.finishEditing],
-              let cancelButtonFrame = frames[.cancel] else { return nil }
+        guard let finishButtonFrame = frames[.finishEditing] else { return nil }
         return ScrollCaptureControlGeometry(
             toolbarFrame: toolbarFrame,
-            finishButtonFrame: finishButtonFrame,
-            cancelButtonFrame: cancelButtonFrame
+            finishButtonFrame: finishButtonFrame
         )
     }
 

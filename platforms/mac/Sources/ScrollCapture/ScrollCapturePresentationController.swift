@@ -8,59 +8,6 @@ private final class ScrollCapturePreviewDocumentView: NSView {
     override var isFlipped: Bool { true }
 }
 
-enum ScrollCaptureStepGuidePointerDirection: Equatable {
-    case up
-    case down
-}
-
-struct ScrollCaptureStepGuidePlacement: Equatable {
-    let frame: NSRect
-    let pointerDirection: ScrollCaptureStepGuidePointerDirection
-}
-
-private final class ScrollCaptureStepGuideView: NSView {
-    static let pointerHeight: CGFloat = 8
-    var fillColor = NSColor.systemBlue { didSet { needsDisplay = true } }
-    var pointerDirection = ScrollCaptureStepGuidePointerDirection.down {
-        didSet { needsDisplay = true }
-    }
-    var pointerCenterX: CGFloat = 0 { didSet { needsDisplay = true } }
-
-    var bodyRect: NSRect {
-        switch pointerDirection {
-        case .up:
-            return NSRect(x: 0, y: 0, width: bounds.width, height: bounds.height - Self.pointerHeight)
-        case .down:
-            return NSRect(
-                x: 0,
-                y: Self.pointerHeight,
-                width: bounds.width,
-                height: bounds.height - Self.pointerHeight
-            )
-        }
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        fillColor.setFill()
-        NSBezierPath(roundedRect: bodyRect, xRadius: 9, yRadius: 9).fill()
-        let centerX = min(max(pointerCenterX, 10), max(10, bounds.width - 10))
-        let pointer = NSBezierPath()
-        switch pointerDirection {
-        case .up:
-            pointer.move(to: NSPoint(x: centerX - 8, y: bodyRect.maxY))
-            pointer.line(to: NSPoint(x: centerX, y: bounds.maxY))
-            pointer.line(to: NSPoint(x: centerX + 8, y: bodyRect.maxY))
-        case .down:
-            pointer.move(to: NSPoint(x: centerX - 8, y: bodyRect.minY))
-            pointer.line(to: NSPoint(x: centerX, y: bounds.minY))
-            pointer.line(to: NSPoint(x: centerX + 8, y: bodyRect.minY))
-        }
-        pointer.close()
-        pointer.fill()
-    }
-}
-
 private enum ScrollCapturePreviewVerticalAnchor: Equatable {
     case top
     case bottom
@@ -82,35 +29,19 @@ enum ScrollCaptureStepControlState: Equatable {
 struct ScrollCaptureControlGeometry: Equatable {
     let toolbarFrame: NSRect
     let finishButtonFrame: NSRect
-    let cancelButtonFrame: NSRect
 }
 
 @MainActor
 final class ScrollCapturePresentationController: NSObject {
     private let controlPanel: NSPanel
-    private let stepPanel: NSPanel
-    private let stepGuidePanel: NSPanel
     private let previewPanel: NSPanel
     private let warningPanel: NSPanel
     private let boundaryPanel: NSPanel
     private let controlFrame: NSRect
-    private let stepAnchorButtonFrame: NSRect
     private let captureViewportPointHeight: CGFloat
     private let maximumPreviewContentSize: NSSize
     private var language: AppLanguage
     private let finishButton = NSButton()
-    private let cancelButton = NSButton()
-    private let directionControl = NSPopUpButton()
-    private let startButton = NSButton()
-    private let stepProgressIndicator = NSProgressIndicator()
-    private let stopButton = NSButton()
-    private let stepGuideBackground = ScrollCaptureStepGuideView()
-    private let stepGuideLabel = NSTextField(labelWithString: "")
-    private let stepGuideBackgroundColor = NSColor.systemBlue
-    private static let stepGuideFont = NSFont.systemFont(ofSize: 13, weight: .semibold)
-    private static let stepGuideHorizontalTextPadding: CGFloat = 3
-    private static let stepGuideTextRenderingAllowance: CGFloat = 4
-    private var startButtonIdleImage: NSImage?
     private let scrollView = NSScrollView()
     private let previewDocumentView = ScrollCapturePreviewDocumentView()
     private let imageView = NSImageView()
@@ -130,12 +61,7 @@ final class ScrollCapturePresentationController: NSObject {
     private static let boundaryTitleTrailing: CGFloat = 20
     private static let boundaryTextRenderingAllowance: CGFloat = 4
     private static let boundaryMinimumWidth: CGFloat = 156
-    private static let stepToolbarSize = NSSize(width: 202, height: 32)
-    private static let directionControlWidth: CGFloat = 126
-    private static let startButtonFrame = NSRect(x: 138, y: 2, width: 28, height: 28)
-    private let onStep: (ScrollCaptureDirection) -> Void
     private let onFinish: () -> Void
-    private let onCancel: () -> Void
     private var boundsObserver: NSObjectProtocol?
     private var isProgrammaticScroll = false
     private(set) var isFollowingTail = true
@@ -151,61 +77,27 @@ final class ScrollCapturePresentationController: NSObject {
     private var placementVisibleFrame: NSRect
     private var previewGrowthFrame: NSRect
     private var terminalActionTriggered = false
-    private var stepControlState: ScrollCaptureStepControlState = .preparing
-    private var boundaryWarningVisible = false
     private var boundaryIsTop: Bool?
     private var boundaryDismissTask: DispatchWorkItem?
     private var hasStarted = false
-    private var hasDismissedStepGuide = false
     private var stopped = false
 
     init(
         toolbarFrame: NSRect,
         finishButtonFrame: NSRect,
-        cancelButtonFrame: NSRect,
         selectionFrame: NSRect,
         visibleFrame: NSRect,
         language: AppLanguage,
-        onStep: @escaping (ScrollCaptureDirection) -> Void = { _ in },
-        onFinish: @escaping () -> Void,
-        onCancel: @escaping () -> Void
+        onFinish: @escaping () -> Void
     ) {
-        self.onStep = onStep
         self.onFinish = onFinish
-        self.onCancel = onCancel
         self.controlFrame = toolbarFrame
-        self.stepAnchorButtonFrame = finishButtonFrame
         self.language = language
         self.captureViewportPointHeight = max(1, selectionFrame.height)
         self.placementSelectionFrame = selectionFrame
         self.placementVisibleFrame = visibleFrame
         controlPanel = ScrollCaptureHitPanel(
             contentRect: toolbarFrame,
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
-        let stepSize = Self.stepToolbarSize
-        stepPanel = ScrollCaptureHitPanel(
-            contentRect: Self.stepToolbarFrame(
-                anchoredTo: finishButtonFrame,
-                toolbarFrame: toolbarFrame,
-                selectionFrame: selectionFrame,
-                size: stepSize,
-                visibleFrame: visibleFrame
-            ),
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
-        let guideSize = Self.stepGuideSize(for: language)
-        stepGuidePanel = NSPanel(
-            contentRect: Self.stepGuidePlacement(
-                stepToolbarFrame: stepPanel.frame,
-                selectionFrame: selectionFrame,
-                size: guideSize,
-                visibleFrame: visibleFrame
-            ).frame,
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -219,7 +111,7 @@ final class ScrollCapturePresentationController: NSObject {
             selection: selectionFrame,
             previewSize: previewSize,
             visibleFrame: visibleFrame,
-            blockedFrames: [toolbarFrame, stepPanel.frame]
+            blockedFrames: [toolbarFrame]
         )
         self.previewGrowthFrame = previewFrame
         previewPanel = NSPanel(
@@ -233,7 +125,7 @@ final class ScrollCapturePresentationController: NSObject {
                 selection: selectionFrame,
                 size: NSSize(width: 252, height: 44),
                 visibleFrame: visibleFrame,
-                blockedFrames: [toolbarFrame, stepPanel.frame, previewFrame]
+                blockedFrames: [toolbarFrame, previewFrame]
             ),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
@@ -254,12 +146,8 @@ final class ScrollCapturePresentationController: NSObject {
         let l10n = L10n(language: language)
         configureControlPanel(
             finishButtonFrame: finishButtonFrame,
-            cancelButtonFrame: cancelButtonFrame,
-            finishLabel: l10n.text(.finishScrollCapture),
-            cancelLabel: l10n.text(.cancel)
+            finishLabel: l10n.text(.finishScrollCapture)
         )
-        configureStepPanel(language: language)
-        configureStepGuide(language: language)
         configurePreviewPanel()
         configureWarningPanel()
         configureBoundaryPanel()
@@ -270,29 +158,9 @@ final class ScrollCapturePresentationController: NSObject {
         guard self.language != language, !stopped else { return }
         self.language = language
         let l10n = L10n(language: language)
-
-        cancelButton.toolTip = l10n.text(.cancel)
-        cancelButton.setAccessibilityLabel(l10n.text(.cancel))
-
-        let selectedDirection = directionControl.indexOfSelectedItem
-        directionControl.removeAllItems()
-        directionControl.addItems(withTitles: language == .zhHans
-            ? ["向下滚动", "向上滚动"]
-            : ["Scroll Down", "Scroll Up"])
-        directionControl.selectItem(at: max(0, selectedDirection))
-
-        let startLabel = language == .zhHans ? "开始单步滚动" : "Start Scroll Step"
-        startButton.toolTip = startLabel
-        startButton.setAccessibilityLabel(startLabel)
         let finishLabel = l10n.text(.finishScrollCapture)
-        stopButton.toolTip = finishLabel
-        stopButton.setAccessibilityLabel(finishLabel)
-
-        let guideSize = Self.stepGuideSize(for: language)
-        stepGuidePanel.setContentSize(guideSize)
-        stepGuidePanel.contentView?.frame = NSRect(origin: .zero, size: guideSize)
-        stepGuideBackground.frame = NSRect(origin: .zero, size: guideSize)
-        stepGuideLabel.stringValue = Self.stepGuideCopy(for: language)
+        finishButton.toolTip = finishLabel
+        finishButton.setAccessibilityLabel(finishLabel)
 
         let notice = language == .zhHans ? "提示" : "Notice"
         warningIconView.image = NSImage(
@@ -314,9 +182,7 @@ final class ScrollCapturePresentationController: NSObject {
 
     private func configureControlPanel(
         finishButtonFrame: NSRect,
-        cancelButtonFrame: NSRect,
-        finishLabel: String,
-        cancelLabel: String
+        finishLabel: String
     ) {
         controlPanel.level = .screenSaver
         controlPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
@@ -326,138 +192,13 @@ final class ScrollCapturePresentationController: NSObject {
         controlPanel.ignoresMouseEvents = false
         let content = NSView(frame: NSRect(origin: .zero, size: controlPanel.frame.size))
         configureControlButton(
-            cancelButton,
-            frame: cancelButtonFrame.offsetBy(dx: -controlFrame.minX, dy: -controlFrame.minY),
-            action: #selector(cancelPressed),
-            label: cancelLabel
-        )
-        content.addSubview(cancelButton)
-        controlPanel.contentView = content
-    }
-
-    private func configureStepPanel(language: AppLanguage) {
-        stepPanel.level = .screenSaver
-        stepPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-        stepPanel.isOpaque = false
-        stepPanel.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.96)
-        stepPanel.hasShadow = true
-        stepPanel.ignoresMouseEvents = false
-
-        let content = NSView(frame: NSRect(origin: .zero, size: stepPanel.frame.size))
-        directionControl.frame = NSRect(
-            x: 6,
-            y: 4,
-            width: Self.directionControlWidth,
-            height: 24
-        )
-        directionControl.removeAllItems()
-        directionControl.addItems(withTitles: language == .zhHans
-            ? ["向下滚动", "向上滚动"]
-            : ["Scroll Down", "Scroll Up"])
-        directionControl.selectItem(at: 0)
-        directionControl.target = self
-        directionControl.action = #selector(directionChanged)
-
-        configureStepButton(
-            startButton,
-            frame: Self.startButtonFrame,
-            resourceName: "mouse-point",
-            fallbackSymbol: "play.circle",
-            action: #selector(startPressed),
-            label: language == .zhHans ? "开始单步滚动" : "Start Scroll Step"
-        )
-        startButtonIdleImage = startButton.image
-        stepProgressIndicator.frame = NSRect(
-            x: startButton.frame.midX - 9,
-            y: startButton.frame.midY - 9,
-            width: 18,
-            height: 18
-        )
-        stepProgressIndicator.style = .spinning
-        stepProgressIndicator.controlSize = .small
-        stepProgressIndicator.isIndeterminate = true
-        stepProgressIndicator.isDisplayedWhenStopped = false
-        stepProgressIndicator.isHidden = true
-        configureStepButton(
-            stopButton,
-            frame: NSRect(x: 168, y: 2, width: 28, height: 28),
-            resourceName: "stop-circle",
-            fallbackSymbol: "stop.circle",
+            finishButton,
+            frame: finishButtonFrame.offsetBy(dx: -controlFrame.minX, dy: -controlFrame.minY),
             action: #selector(finishPressed),
-            label: language == .zhHans ? "结束滚动截图" : "Finish Scroll Capture"
+            label: finishLabel
         )
-        content.addSubview(directionControl)
-        content.addSubview(startButton)
-        content.addSubview(stepProgressIndicator)
-        content.addSubview(stopButton)
-        stepPanel.contentView = content
-        directionChanged()
-        setStepControlState(.preparing)
-    }
-
-    private func configureStepGuide(language: AppLanguage) {
-        stepGuidePanel.level = .screenSaver
-        stepGuidePanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-        stepGuidePanel.isOpaque = false
-        stepGuidePanel.backgroundColor = .clear
-        stepGuidePanel.hasShadow = true
-        stepGuidePanel.ignoresMouseEvents = true
-
-        let content = NSView(frame: NSRect(origin: .zero, size: stepGuidePanel.frame.size))
-        stepGuideBackground.frame = content.bounds
-        stepGuideBackground.autoresizingMask = [.width, .height]
-        let placement = Self.stepGuidePlacement(
-            stepToolbarFrame: stepPanel.frame,
-            selectionFrame: placementSelectionFrame,
-            size: stepGuidePanel.frame.size,
-            visibleFrame: placementVisibleFrame
-        )
-        stepGuideBackground.fillColor = stepGuideBackgroundColor
-        stepGuideBackground.pointerDirection = placement.pointerDirection
-        stepGuideBackground.pointerCenterX = stepPanel.frame.minX
-            + startButton.frame.midX
-            - placement.frame.minX
-
-        stepGuideLabel.stringValue = Self.stepGuideCopy(for: language)
-        stepGuideLabel.font = Self.stepGuideFont
-        stepGuideLabel.frame = stepGuideBackground.bodyRect.insetBy(
-            dx: Self.stepGuideHorizontalTextPadding,
-            dy: 6
-        )
-        stepGuideLabel.textColor = .white
-        stepGuideLabel.alignment = .center
-        stepGuideLabel.lineBreakMode = .byClipping
-        stepGuideLabel.maximumNumberOfLines = 1
-
-        stepGuideBackground.addSubview(stepGuideLabel)
-        content.addSubview(stepGuideBackground)
-        stepGuidePanel.contentView = content
-    }
-
-    private func configureStepButton(
-        _ button: NSButton,
-        frame: NSRect,
-        resourceName: String,
-        fallbackSymbol: String,
-        action: Selector,
-        label: String
-    ) {
-        button.frame = frame
-        button.title = ""
-        button.isBordered = false
-        button.imagePosition = .imageOnly
-        button.imageScaling = .scaleProportionallyDown
-        let image = NSImage(named: resourceName)
-            ?? Bundle.main.url(forResource: resourceName, withExtension: "svg").flatMap(NSImage.init(contentsOf:))
-            ?? NSImage(systemSymbolName: fallbackSymbol, accessibilityDescription: label)
-        image?.size = NSSize(width: 20, height: 20)
-        image?.isTemplate = true
-        button.image = image
-        button.toolTip = label
-        button.setAccessibilityLabel(label)
-        button.setAccessibilityRole(.button)
-        button.target = self
-        button.action = action
+        content.addSubview(finishButton)
+        controlPanel.contentView = content
     }
 
     private func configureControlButton(_ button: NSButton, frame: NSRect, action: Selector, label: String) {
@@ -629,11 +370,7 @@ final class ScrollCapturePresentationController: NSObject {
         guard !hasStarted, !stopped else { return }
         hasStarted = true
         controlPanel.orderFrontRegardless()
-        stepPanel.orderFrontRegardless()
         previewPanel.orderFrontRegardless()
-        if !hasDismissedStepGuide {
-            stepGuidePanel.orderFrontRegardless()
-        }
     }
 
     func stop() {
@@ -648,21 +385,17 @@ final class ScrollCapturePresentationController: NSObject {
             self.boundsObserver = nil
         }
         dismissBoundaryAlert()
-        [controlPanel, stepPanel, stepGuidePanel, previewPanel, warningPanel, boundaryPanel].forEach { panel in
+        [controlPanel, previewPanel, warningPanel, boundaryPanel].forEach { panel in
             panel.orderOut(nil)
             panel.close()
         }
         imageView.image = nil
-        stepProgressIndicator.stopAnimation(nil)
-        stepProgressIndicator.isHidden = true
         viewportIndicatorView.frame = .zero
         warningLabel.stringValue = ""
         warningLabel.isHidden = true
         warningLabel.toolTip = nil
         scrollView.documentView = nil
         controlPanel.contentView = nil
-        stepPanel.contentView = nil
-        stepGuidePanel.contentView = nil
         previewPanel.contentView = nil
         warningPanel.contentView = nil
         boundaryPanel.contentView = nil
@@ -750,9 +483,7 @@ final class ScrollCapturePresentationController: NSObject {
             viewportTopPixel = retainedTopPixel
             indicatorTopPixel = min(max(0, retainedTopPixel), maximumTopPixel)
         } else {
-            let anchorsAtBottom = stepControlState == .preparing
-                ? initialVerticalAnchor == .bottom
-                : edge == .bottom
+            let anchorsAtBottom = edge == .bottom
             indicatorTopPixel = anchorsAtBottom ? maximumTopPixel : 0
             viewportTopPixel = indicatorTopPixel
         }
@@ -824,7 +555,6 @@ final class ScrollCapturePresentationController: NSObject {
         let indicator = viewportIndicatorView.frame
         let targetOffset: CGFloat?
         if previewDocumentView.frame.height > visible.height,
-           stepControlState != .preparing,
            indicator.height < visible.height - 0.5 {
             let trackingFraction: CGFloat = followEdge == .bottom ? 0.65 : 0.35
             let trackingY = visible.minY + visible.height * trackingFraction
@@ -865,7 +595,6 @@ final class ScrollCapturePresentationController: NSObject {
 
     func setWarning(_ text: String) {
         guard !stopped else { return }
-        boundaryWarningVisible = false
         dismissBoundaryAlert()
         resizeWarningPanel(for: text)
         updateWarningPanelFrame()
@@ -883,7 +612,6 @@ final class ScrollCapturePresentationController: NSObject {
     }
 
     func clearWarning() {
-        boundaryWarningVisible = false
         dismissBoundaryAlert()
         warningLabel.stringValue = ""
         warningLabel.toolTip = nil
@@ -1042,33 +770,11 @@ final class ScrollCapturePresentationController: NSObject {
     func updatePlacement(selectionFrame: NSRect, visibleFrame: NSRect) {
         placementSelectionFrame = selectionFrame
         placementVisibleFrame = visibleFrame
-        stepPanel.setFrame(Self.stepToolbarFrame(
-            anchoredTo: stepAnchorButtonFrame,
-            toolbarFrame: controlFrame,
-            selectionFrame: selectionFrame,
-            size: stepPanel.frame.size,
-            visibleFrame: visibleFrame
-        ), display: false)
-        let guidePlacement = Self.stepGuidePlacement(
-            stepToolbarFrame: stepPanel.frame,
-            selectionFrame: selectionFrame,
-            size: stepGuidePanel.frame.size,
-            visibleFrame: visibleFrame
-        )
-        stepGuidePanel.setFrame(guidePlacement.frame, display: false)
-        stepGuideBackground.pointerDirection = guidePlacement.pointerDirection
-        stepGuideBackground.pointerCenterX = stepPanel.frame.minX
-            + startButton.frame.midX
-            - guidePlacement.frame.minX
-        stepGuideLabel.frame = stepGuideBackground.bodyRect.insetBy(
-            dx: Self.stepGuideHorizontalTextPadding,
-            dy: 6
-        )
         previewGrowthFrame = Self.previewFrameAvoidingControls(
             selection: selectionFrame,
             previewSize: maximumPreviewContentSize,
             visibleFrame: visibleFrame,
-            blockedFrames: [controlFrame, stepPanel.frame]
+            blockedFrames: [controlFrame]
         )
         if imageView.image == nil {
             previewPanel.setFrame(previewGrowthFrame, display: false)
@@ -1113,7 +819,7 @@ final class ScrollCapturePresentationController: NSObject {
             selection: placementSelectionFrame,
             size: warningPanel.frame.size,
             visibleFrame: placementVisibleFrame,
-            blockedFrames: [controlFrame, stepPanel.frame, previewPanel.frame]
+            blockedFrames: [controlFrame, previewPanel.frame]
         ), display: false)
     }
 
@@ -1137,83 +843,14 @@ final class ScrollCapturePresentationController: NSObject {
     func resetTerminalActionsForRetry() {
         guard !stopped else { return }
         terminalActionTriggered = false
-        stopButton.isEnabled = true
-        cancelButton.isEnabled = true
+        finishButton.isEnabled = true
         controlPanel.ignoresMouseEvents = false
-        stepPanel.ignoresMouseEvents = false
-    }
-
-    func setStepControlState(_ state: ScrollCaptureStepControlState) {
-        guard !stopped else { return }
-        if case .boundary = state {
-        } else if boundaryWarningVisible {
-            clearWarning()
-        }
-        stepControlState = state
-        setStepLoading(state == .executing)
-        switch state {
-        case .preparing:
-            directionControl.isEnabled = false
-            startButton.isEnabled = false
-            startButton.contentTintColor = .disabledControlTextColor
-        case .ready(let directionLocked):
-            directionControl.isEnabled = !directionLocked
-            startButton.isEnabled = true
-            startButton.contentTintColor = .systemBlue
-        case .executing:
-            directionControl.isEnabled = false
-            startButton.isEnabled = false
-            startButton.contentTintColor = .black
-        case .boundary:
-            directionControl.isEnabled = false
-            startButton.isEnabled = false
-            startButton.contentTintColor = .disabledControlTextColor
-            let isTopBoundary = directionControl.indexOfSelectedItem == 1
-            showBoundaryAlert(isTopBoundary: isTopBoundary)
-            boundaryWarningVisible = true
-        }
-        stopButton.isEnabled = !terminalActionTriggered
-        stopButton.contentTintColor = .black
-    }
-
-    private func setStepLoading(_ loading: Bool) {
-        if loading {
-            startButton.image = nil
-            stepProgressIndicator.isHidden = false
-            stepProgressIndicator.startAnimation(nil)
-        } else {
-            stepProgressIndicator.stopAnimation(nil)
-            stepProgressIndicator.isHidden = true
-            startButton.image = startButtonIdleImage
-        }
-    }
-
-    @objc private func startPressed() {
-        guard startButton.isEnabled else { return }
-        if !hasDismissedStepGuide {
-            hasDismissedStepGuide = true
-            stepGuidePanel.orderOut(nil)
-        }
-        let direction: ScrollCaptureDirection = directionControl.indexOfSelectedItem == 1 ? .up : .down
-        onStep(direction)
-    }
-
-    @objc private func directionChanged() {
-        initialVerticalAnchor = directionControl.indexOfSelectedItem == 1 ? .bottom : .top
-        guard imageView.image != nil else { return }
-        var frame = viewportIndicatorView.frame
-        frame.origin.y = initialVerticalAnchor == .bottom
-            ? max(imageView.frame.minY, imageView.frame.maxY - frame.height)
-            : imageView.frame.minY
-        viewportIndicatorView.frame = frame
-        keepViewportIndicatorVisible()
     }
 
     @objc private func finishPressed() {
         NSLog("xxsnap scroll-capture finish button pressed")
         triggerTerminalAction(onFinish)
     }
-    @objc private func cancelPressed() { triggerTerminalAction(onCancel) }
 
     private func triggerTerminalAction(_ action: () -> Void) {
         guard !terminalActionTriggered else {
@@ -1221,11 +858,8 @@ final class ScrollCapturePresentationController: NSObject {
             return
         }
         terminalActionTriggered = true
-        startButton.isEnabled = false
-        stopButton.isEnabled = false
-        cancelButton.isEnabled = false
+        finishButton.isEnabled = false
         controlPanel.ignoresMouseEvents = true
-        stepPanel.ignoresMouseEvents = true
         action()
         NSLog("xxsnap scroll-capture terminal action delivered")
     }
@@ -1244,111 +878,6 @@ final class ScrollCapturePresentationController: NSObject {
         isFollowingTail = followEdge == .bottom
             ? reviewOffset >= maximumOffset - 2
             : reviewOffset <= 2
-    }
-
-    static func stepToolbarFrame(
-        anchoredTo buttonFrame: NSRect,
-        toolbarFrame: NSRect,
-        selectionFrame: NSRect,
-        size: NSSize,
-        visibleFrame: NSRect,
-        spacing: CGFloat = 6
-    ) -> NSRect {
-        let visible = visibleFrame.standardized
-        let toolbar = toolbarFrame.standardized
-        let selection = selectionFrame.standardized
-        let clampedX = min(
-            max(buttonFrame.midX - size.width / 2, visible.minX),
-            visible.maxX - size.width
-        )
-        let below = NSRect(
-            x: clampedX,
-            y: toolbar.minY - spacing - size.height,
-            width: size.width,
-            height: size.height
-        )
-        let above = NSRect(
-            x: clampedX,
-            y: toolbar.maxY + spacing,
-            width: size.width,
-            height: size.height
-        )
-        let verticalCandidates = toolbar.minY >= selection.maxY
-            ? [above, below]
-            : [below, above]
-        let fittingVerticalCandidates = verticalCandidates.filter {
-            visible.contains($0) && !$0.intersects(toolbar)
-        }
-        if let outsideSelection = fittingVerticalCandidates.first(where: { !$0.intersects(selection) }) {
-            return outsideSelection
-        }
-        if let insideFallback = fittingVerticalCandidates.first {
-            return insideFallback
-        }
-        // Keep the step toolbar vertically attached to its anchor. It must not
-        // jump to either side when the available space changes.
-        return NSRect(
-            x: clampedX,
-            y: min(max(above.minY, visible.minY), visible.maxY - size.height),
-            width: size.width,
-            height: size.height
-        )
-    }
-
-    static func stepGuidePlacement(
-        stepToolbarFrame: NSRect,
-        selectionFrame: NSRect,
-        size: NSSize,
-        visibleFrame: NSRect,
-        spacing: CGFloat = 4
-    ) -> ScrollCaptureStepGuidePlacement {
-        let visible = visibleFrame.standardized
-        let size = NSSize(
-            width: min(size.width, visible.width),
-            height: min(size.height, visible.height)
-        )
-        let startButtonCenterX = stepToolbarFrame.minX + startButtonFrame.midX
-        let x = min(
-            max(startButtonCenterX - size.width / 2, visible.minX),
-            visible.maxX - size.width
-        )
-        let belowY = stepToolbarFrame.minY - spacing - size.height
-        let isFullScreen = SelectionToolbarState.isFullScreenSelection(
-            selectionFrame.standardized,
-            in: visible
-        )
-        if !isFullScreen, belowY >= visible.minY {
-            return ScrollCaptureStepGuidePlacement(
-                frame: NSRect(x: x, y: belowY, width: size.width, height: size.height),
-                pointerDirection: .up
-            )
-        }
-        let aboveY = min(
-            stepToolbarFrame.maxY + spacing,
-            visible.maxY - size.height
-        )
-        return ScrollCaptureStepGuidePlacement(
-            frame: NSRect(x: x, y: max(visible.minY, aboveY), width: size.width, height: size.height),
-            pointerDirection: .down
-        )
-    }
-
-    private static func stepGuideCopy(for language: AppLanguage) -> String {
-        language == .zhHans
-            ? "引导提示：请点击进行单步滚动"
-            : "Guide: Click for single-step scrolling"
-    }
-
-    private static func stepGuideSize(for language: AppLanguage) -> NSSize {
-        let measuringLabel = NSTextField(labelWithString: stepGuideCopy(for: language))
-        measuringLabel.font = stepGuideFont
-        let copyWidth = ceil(
-            measuringLabel.fittingSize.width + stepGuideTextRenderingAllowance
-        )
-        return NSSize(
-            width: copyWidth + stepGuideHorizontalTextPadding * 2,
-            height: 42
-        )
     }
 
     static func warningPanelFrame(
@@ -1623,71 +1152,37 @@ final class ScrollCapturePresentationController: NSObject {
     var test_terminalHitPanelsCanBecomeKey: Bool { controlPanel.canBecomeKey }
     var test_controlIsOpaque: Bool { controlPanel.isOpaque }
     var test_controlBackgroundColor: NSColor { controlPanel.backgroundColor }
-    var test_finishButtonFrame: NSRect { stepPanel.convertToScreen(stopButton.frame) }
-    var test_cancelButtonFrame: NSRect { controlPanel.convertToScreen(cancelButton.frame) }
-    var test_finishButtonToolTip: String? { stopButton.toolTip }
-    var test_cancelButtonToolTip: String? { cancelButton.toolTip }
-    var test_finishAccessibilityLabel: String? { stopButton.accessibilityLabel() }
-    var test_cancelAccessibilityLabel: String? { cancelButton.accessibilityLabel() }
+    var test_finishButtonFrame: NSRect { controlPanel.convertToScreen(finishButton.frame) }
+    var test_finishButtonToolTip: String? { finishButton.toolTip }
+    var test_finishAccessibilityLabel: String? { finishButton.accessibilityLabel() }
     var test_accessibilityRoles: [NSAccessibility.Role] {
-        [startButton, stopButton, cancelButton].compactMap { $0.accessibilityRole() }
+        [finishButton].compactMap { $0.accessibilityRole() }
     }
-    var test_controlHitTargetCount: Int { [startButton, stopButton, cancelButton].count }
-    var test_controlHitTargetsAreTransparent: Bool {
-        [startButton, stopButton, cancelButton].allSatisfy { !$0.isBordered }
-    }
-    var test_interactiveWindowFrames: [NSRect] { [controlPanel.frame, stepPanel.frame] }
+    var test_controlHitTargetCount: Int { controlPanel.contentView?.subviews.count ?? 0 }
+    var test_controlHitTargetsAreTransparent: Bool { !finishButton.isBordered && finishButton.isTransparent }
+    var test_interactiveWindowFrames: [NSRect] { [controlPanel.frame] }
     func test_toolbarPointIsInteractive(_ point: NSPoint) -> Bool {
         guard !controlPanel.ignoresMouseEvents, controlPanel.frame.contains(point) else { return false }
         let local = NSPoint(x: point.x - controlFrame.minX, y: point.y - controlFrame.minY)
-        return cancelButton.frame.contains(local)
+        return finishButton.frame.contains(local)
     }
+    var test_hasVisibleStepControls: Bool { false }
     var test_hasVisiblePanels: Bool {
         controlPanel.isVisible
-            || stepPanel.isVisible
-            || stepGuidePanel.isVisible
             || previewPanel.isVisible
             || warningPanel.isVisible
             || boundaryPanel.isVisible
     }
+    var test_visiblePanelKinds: [String] {
+        [("control", controlPanel), ("preview", previewPanel), ("warning", warningPanel), ("boundary", boundaryPanel)]
+            .compactMap { name, panel in panel.isVisible ? name : nil }
+    }
     var test_panelsAreClosedAndDetached: Bool {
         controlPanel.contentView == nil
-            && stepPanel.contentView == nil
-            && stepGuidePanel.contentView == nil
             && previewPanel.contentView == nil
             && warningPanel.contentView == nil
             && boundaryPanel.contentView == nil
     }
-    var test_stepToolbarFrame: NSRect { stepPanel.frame }
-    var test_directionControlFrame: NSRect { directionControl.frame }
-    var test_directionControlTitles: [String] { directionControl.itemTitles }
-    var test_stepGuideIsVisible: Bool { stepGuidePanel.isVisible }
-    var test_stepGuideText: String { stepGuideLabel.stringValue }
-    var test_stepGuideBackgroundColor: NSColor { stepGuideBackgroundColor }
-    var test_stepGuideTextColor: NSColor? { stepGuideLabel.textColor }
-    var test_stepGuideFrame: NSRect { stepGuidePanel.frame }
-    var test_stepGuideTextFrame: NSRect { stepGuideLabel.frame }
-    var test_stepGuideLineBreakMode: NSLineBreakMode { stepGuideLabel.lineBreakMode }
-    var test_stepGuidePointerDirection: ScrollCaptureStepGuidePointerDirection {
-        stepGuideBackground.pointerDirection
-    }
-    var test_stepGuidePointerHeight: CGFloat { ScrollCaptureStepGuideView.pointerHeight }
-    var test_stepGuidePointerScreenX: CGFloat {
-        let centerX = min(
-            max(stepGuideBackground.pointerCenterX, 10),
-            max(10, stepGuideBackground.bounds.width - 10)
-        )
-        return stepGuidePanel.frame.minX + centerX
-    }
-    var test_startButtonScreenMidX: CGFloat {
-        stepPanel.frame.minX + startButton.frame.midX
-    }
-    var test_directionControlIsEnabled: Bool { directionControl.isEnabled }
-    var test_startButtonIsEnabled: Bool { startButton.isEnabled }
-    var test_startButtonTint: NSColor? { startButton.contentTintColor }
-    var test_startButtonImageSize: NSSize? { startButton.image?.size }
-    var test_stepProgressIsVisible: Bool { !stepProgressIndicator.isHidden }
-    var test_stopButtonImageSize: NSSize? { stopButton.image?.size }
     var test_previewFrame: NSRect { previewPanel.frame }
     var test_previewIgnoresMouseEvents: Bool { previewPanel.ignoresMouseEvents }
     var test_isFollowingTail: Bool { isFollowingTail }
@@ -1760,13 +1255,10 @@ final class ScrollCapturePresentationController: NSObject {
     var test_boundaryAutoDismissScheduled: Bool { boundaryDismissTask != nil }
     func test_triggerWarningClose() { warningCloseButton.performClick(nil) }
     func test_triggerBoundaryAlertClose() { boundaryDismissButton.performClick(nil) }
-    func test_triggerStart() { startButton.performClick(nil) }
-    func test_selectDirection(_ direction: ScrollCaptureDirection) {
-        directionControl.selectItem(at: direction == .up ? 1 : 0)
-        directionChanged()
+    func test_showBoundaryAlert(isTopBoundary: Bool) {
+        showBoundaryAlert(isTopBoundary: isTopBoundary)
     }
-    func test_triggerFinish() { stopButton.performClick(nil) }
-    func test_triggerCancel() { cancelButton.performClick(nil) }
+    func test_triggerFinish() { finishButton.performClick(nil) }
     func test_userScroll(to offset: CGFloat) {
         scrollView.contentView.scroll(to: NSPoint(x: 0, y: offset))
         scrollView.reflectScrolledClipView(scrollView.contentView)

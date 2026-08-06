@@ -137,8 +137,6 @@ private final class FakeScrollCapturePresentation: ScrollCapturePresenting {
     private(set) var resetTerminalCount = 0
     private(set) var languages: [AppLanguage] = []
     var onFinish: (() -> Void)?
-    var onCancel: (() -> Void)?
-    var onStep: ((ScrollCaptureDirection) -> Void)?
     var onStart: (() -> Void)?
 
     func start() {
@@ -502,13 +500,11 @@ final class SelectionToolbarStateTests: XCTestCase {
         let toolbarAfter = try XCTUnwrap(window.test_mainToolbarRect())
         let scrollAfter = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .scroll))
         let finishAfter = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .finishEditing))
-        let cancelAfter = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .cancel))
         XCTAssertGreaterThan(toolbarAfter.width, toolbarBefore.width)
         XCTAssertEqual(finishAfter.minX - scrollAfter.maxX, 8, accuracy: 0.001)
         let geometry = try XCTUnwrap(window.scrollCaptureControlGeometry)
         XCTAssertEqual(geometry.toolbarFrame, window.convertToScreen(toolbarAfter))
         XCTAssertEqual(geometry.finishButtonFrame, window.convertToScreen(finishAfter))
-        XCTAssertEqual(geometry.cancelButtonFrame, window.convertToScreen(cancelAfter))
         XCTAssertTrue(window.test_toolbarButtonIsSelected(.scroll))
         XCTAssertFalse(window.test_toolbarButtonIsEnabled(.scroll))
         XCTAssertTrue(window.test_toolbarButtonIsEnabled(.finishEditing))
@@ -1139,11 +1135,9 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(toolbarWhileCapturing.height, toolbar.height, accuracy: 0.001)
         XCTAssertEqual(toolbarWhileCapturing.width, toolbar.width + 28, accuracy: 0.001)
         let finishButton = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .finishEditing))
-        let cancelButton = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .cancel))
         let controlGeometry = try XCTUnwrap(window.scrollCaptureControlGeometry)
         XCTAssertEqual(controlGeometry.toolbarFrame, window.convertToScreen(toolbarWhileCapturing))
         XCTAssertEqual(controlGeometry.finishButtonFrame, window.convertToScreen(finishButton))
-        XCTAssertEqual(controlGeometry.cancelButtonFrame, window.convertToScreen(cancelButton))
 
         window.setScrollCapturePaused(message: "Paused")
         XCTAssertEqual(window.scrollCaptureOverlayState, .paused(message: "Paused"))
@@ -12314,9 +12308,7 @@ final class SelectionToolbarStateTests: XCTestCase {
                 return value
             },
             scrollCapturePresentationFactory: { context in
-                presentation.onStep = context.onStep
                 presentation.onFinish = context.onFinish
-                presentation.onCancel = context.onCancel
                 return presentation
             },
             longImageHandoff: { _, _ in XCTFail("unexpected handoff") },
@@ -12341,9 +12333,6 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertTrue(overlay.isVisible, "selection chrome and toolbar must remain visible while scrolling")
         XCTAssertEqual(activatedApplication?.processIdentifier, NSRunningApplication.current.processIdentifier)
         XCTAssertTrue(coordinator.test_hasScrollCaptureSession)
-        presentation.onStep?(.up)
-        for _ in 0..<20 where session?.stepDirections != [.up] { await Task.yield() }
-        XCTAssertEqual(session?.stepDirections, [.up])
         let preview = NSImage(size: NSSize(width: 30, height: 80))
         update?(.preview(
             preview,
@@ -12405,7 +12394,6 @@ final class SelectionToolbarStateTests: XCTestCase {
             },
             scrollCapturePresentationFactory: { context in
                 presentation.onFinish = context.onFinish
-                presentation.onCancel = context.onCancel
                 return presentation
             },
             longImageHandoff: { _, _ in XCTFail("cancel must not hand off") },
@@ -12443,7 +12431,6 @@ final class SelectionToolbarStateTests: XCTestCase {
             scrollCaptureSessionFactory: { _, _ in session },
             scrollCapturePresentationFactory: { context in
                 presentation.onFinish = context.onFinish
-                presentation.onCancel = context.onCancel
                 return presentation
             },
             longImageHandoff: {
@@ -12503,7 +12490,6 @@ final class SelectionToolbarStateTests: XCTestCase {
             },
             scrollCapturePresentationFactory: { context in
                 presentation.onFinish = context.onFinish
-                presentation.onCancel = context.onCancel
                 return presentation
             },
             longImageHandoff: { image, _ in handedOff = image },
@@ -12539,7 +12525,6 @@ final class SelectionToolbarStateTests: XCTestCase {
             scrollCaptureSessionFactory: { _, _ in session },
             scrollCapturePresentationFactory: { context in
                 presentation.onFinish = context.onFinish
-                presentation.onCancel = context.onCancel
                 return presentation
             },
             longImageHandoff: { _, _ in handoffCount += 1 },
@@ -12552,7 +12537,7 @@ final class SelectionToolbarStateTests: XCTestCase {
 
         presentation.onFinish?()
         overlay.onScrollCaptureFinishRequested?()
-        presentation.onCancel?()
+        overlay.onScrollCaptureCancelRequested?()
         overlay.onScrollCaptureCancelRequested?()
         XCTAssertEqual(session.finishCount, 0)
         XCTAssertEqual(session.cancelCount, 0)
@@ -12577,7 +12562,6 @@ final class SelectionToolbarStateTests: XCTestCase {
             scrollCaptureSessionFactory: { _, _ in session },
             scrollCapturePresentationFactory: { context in
                 presentation.onFinish = context.onFinish
-                presentation.onCancel = context.onCancel
                 return presentation
             },
             longImageHandoff: { _, _ in handoffCount += 1 },
@@ -12618,7 +12602,6 @@ final class SelectionToolbarStateTests: XCTestCase {
             scrollCaptureSessionFactory: { _, _ in session },
             scrollCapturePresentationFactory: { context in
                 presentation.onFinish = context.onFinish
-                presentation.onCancel = context.onCancel
                 return presentation
             },
             longImageHandoff: { _, _ in handoffCount += 1 },
@@ -12724,7 +12707,6 @@ final class SelectionToolbarStateTests: XCTestCase {
             scrollCaptureSessionFactory: { _, _ in session },
             scrollCapturePresentationFactory: { context in
                 presentation.onFinish = context.onFinish
-                presentation.onCancel = context.onCancel
                 return presentation
             },
             longImageHandoff: { _, _ in XCTFail("failed start must not hand off") },
@@ -12770,7 +12752,6 @@ final class SelectionToolbarStateTests: XCTestCase {
                 let value = presentationIndex == 0 ? firstPresentation : secondPresentation
                 presentationIndex += 1
                 value.onFinish = context.onFinish
-                value.onCancel = context.onCancel
                 return value
             },
             longImageHandoff: { _, _ in handoffCount += 1 },
@@ -12812,7 +12793,6 @@ final class SelectionToolbarStateTests: XCTestCase {
             scrollCaptureSessionFactory: { _, _ in session },
             scrollCapturePresentationFactory: { context in
                 presentation.onFinish = context.onFinish
-                presentation.onCancel = context.onCancel
                 return presentation
             },
             longImageHandoff: { _, _ in XCTFail("cancelled lifecycle must not hand off") },
@@ -12823,7 +12803,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         coordinator.test_requestScrollCapture(seed: seed)
         await Task.yield()
 
-        presentation.onCancel?()
+        overlay.onScrollCaptureCancelRequested?()
         presentation.onFinish?()
         overlay.onScrollCaptureFinishRequested?()
 
@@ -12843,7 +12823,6 @@ final class SelectionToolbarStateTests: XCTestCase {
             scrollCaptureSessionFactory: { _, _ in session },
             scrollCapturePresentationFactory: { context in
                 presentation.onFinish = context.onFinish
-                presentation.onCancel = context.onCancel
                 return presentation
             },
             longImageHandoff: { _, _ in },
@@ -12898,7 +12877,6 @@ final class SelectionToolbarStateTests: XCTestCase {
             scrollCaptureSessionFactory: { _, _ in session },
             scrollCapturePresentationFactory: { context in
                 presentation.onFinish = context.onFinish
-                presentation.onCancel = context.onCancel
                 return presentation
             },
             longImageEditorFactory: { image, seed, actions in
@@ -12981,7 +12959,6 @@ final class SelectionToolbarStateTests: XCTestCase {
             scrollCaptureSessionFactory: { _, _ in session },
             scrollCapturePresentationFactory: { context in
                 presentation.onFinish = context.onFinish
-                presentation.onCancel = context.onCancel
                 return presentation
             },
             screenVisibleFrameResolver: { rect in
@@ -13045,7 +13022,6 @@ final class SelectionToolbarStateTests: XCTestCase {
             scrollCaptureSessionFactory: { _, _ in session },
             scrollCapturePresentationFactory: { context in
                 presentation.onFinish = context.onFinish
-                presentation.onCancel = context.onCancel
                 return presentation
             },
             longImageEditorFactory: { _, _, _ in throw FakeScrollCaptureSession.Failure.finish },
@@ -13095,7 +13071,6 @@ final class SelectionToolbarStateTests: XCTestCase {
             scrollCaptureSessionFactory: { _, _ in session },
             scrollCapturePresentationFactory: { context in
                 presentation.onFinish = context.onFinish
-                presentation.onCancel = context.onCancel
                 return presentation
             },
             longImageEditorFactory: { _, _, _ in nil },
@@ -13131,7 +13106,6 @@ final class SelectionToolbarStateTests: XCTestCase {
             scrollCaptureSessionFactory: { _, _ in session },
             scrollCapturePresentationFactory: { context in
                 presentation.onFinish = context.onFinish
-                presentation.onCancel = context.onCancel
                 return presentation
             },
             longImageHandoff: { _, _ in },
@@ -13141,7 +13115,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         coordinator.test_requestScrollCapture(seed: seed)
         await Task.yield()
 
-        presentation.onCancel?()
+        overlay.onScrollCaptureCancelRequested?()
 
         XCTAssertEqual(session.cancelCount, 1)
         XCTAssertEqual(presentation.stopCount, 1)
@@ -13171,7 +13145,6 @@ final class SelectionToolbarStateTests: XCTestCase {
             scrollCaptureSessionFactory: { _, _ in session },
             scrollCapturePresentationFactory: { context in
                 presentation.onFinish = context.onFinish
-                presentation.onCancel = context.onCancel
                 return presentation
             },
             longImageHandoff: { _, _ in },
@@ -13181,7 +13154,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         coordinator.test_requestScrollCapture(seed: seed)
         await Task.yield()
 
-        presentation.onCancel?()
+        overlay.onScrollCaptureCancelRequested?()
         XCTAssertEqual(ordinaryCompletionCount, 0)
         overlay.test_keyDown(keyCode: 53)
         await Task.yield()
@@ -13206,7 +13179,6 @@ final class SelectionToolbarStateTests: XCTestCase {
                 scrollCaptureSessionFactory: { _, _ in session },
                 scrollCapturePresentationFactory: { context in
                     presentation.onFinish = context.onFinish
-                    presentation.onCancel = context.onCancel
                     return presentation
                 },
                 longImageHandoff: { _, _ in XCTFail("error must not hand off") },
@@ -13245,7 +13217,6 @@ final class SelectionToolbarStateTests: XCTestCase {
             scrollCaptureSessionFactory: { _, _ in session },
             scrollCapturePresentationFactory: { context in
                 presentation.onFinish = context.onFinish
-                presentation.onCancel = context.onCancel
                 return presentation
             },
             longImageHandoff: { image, _ in
@@ -13293,7 +13264,6 @@ final class SelectionToolbarStateTests: XCTestCase {
                 let value = presentationIndex == 0 ? oldPresentation : newPresentation
                 presentationIndex += 1
                 value.onFinish = context.onFinish
-                value.onCancel = context.onCancel
                 return value
             },
             longImageHandoff: { _, _ in XCTFail("stale start must not hand off") },
@@ -13330,7 +13300,6 @@ final class SelectionToolbarStateTests: XCTestCase {
                 scrollCaptureSessionFactory: { _, _ in session },
                 scrollCapturePresentationFactory: { context in
                     presentation.onFinish = context.onFinish
-                    presentation.onCancel = context.onCancel
                     return presentation
                 },
                 longImageHandoff: { _, _ in },

@@ -27,7 +27,6 @@ protocol ScrollCapturePresenting: AnyObject {
         viewport: ScrollCapturePreviewViewport
     )
     func moveViewportIndicator(_ activity: ScrollCaptureScrollActivity)
-    func setStepControlState(_ state: ScrollCaptureStepControlState)
     func setWarning(_ text: String)
     func clearWarning()
     func updatePlacement(selectionFrame: NSRect, visibleFrame: NSRect)
@@ -36,7 +35,6 @@ protocol ScrollCapturePresenting: AnyObject {
 }
 
 extension ScrollCapturePresenting {
-    func setStepControlState(_ state: ScrollCaptureStepControlState) {}
     func updateLanguage(_ language: AppLanguage) {}
 }
 
@@ -67,9 +65,7 @@ struct ScrollCapturePresentationContext {
     let selectionFrame: NSRect
     let visibleFrame: NSRect
     let language: AppLanguage
-    let onStep: @MainActor (ScrollCaptureDirection) -> Void
     let onFinish: @MainActor () -> Void
-    let onCancel: @MainActor () -> Void
 }
 
 private enum ScrollCaptureLifecyclePhase: Equatable {
@@ -685,13 +681,10 @@ final class CaptureCoordinator {
         ScrollCapturePresentationController(
             toolbarFrame: context.geometry.toolbarFrame,
             finishButtonFrame: context.geometry.finishButtonFrame,
-            cancelButtonFrame: context.geometry.cancelButtonFrame,
             selectionFrame: context.selectionFrame,
             visibleFrame: context.visibleFrame,
             language: context.language,
-            onStep: context.onStep,
-            onFinish: context.onFinish,
-            onCancel: context.onCancel
+            onFinish: context.onFinish
         )
     }
 
@@ -810,9 +803,7 @@ final class CaptureCoordinator {
             selectionFrame: captureSeed.screenRect,
             visibleFrame: visibleFrame,
             language: language,
-            onStep: { [weak self] direction in self?.performScrollCaptureStep(direction: direction) },
-            onFinish: { [weak self] in self?.finishScrollCapture() },
-            onCancel: { [weak self] in self?.cancelScrollCapture() }
+            onFinish: { [weak self] in self?.finishScrollCapture() }
         ))
         let session = scrollCaptureSessionFactory(captureSeed) { [weak self] update in
             self?.receiveScrollCaptureUpdate(update, generation: generation)
@@ -851,32 +842,6 @@ final class CaptureCoordinator {
                 guard let self, self.scrollCaptureGeneration == generation,
                       self.scrollCaptureSession === session else { return }
                 self.recoverScrollCaptureOverlay(generation: generation)
-            }
-        }
-    }
-
-    private func performScrollCaptureStep(direction: ScrollCaptureDirection) {
-        guard scrollCapturePhase == .active,
-              scrollCaptureTask == nil,
-              let session = scrollCaptureSession
-        else { return }
-        let generation = scrollCaptureGeneration
-        scrollCaptureTask = Task { @MainActor [weak self, weak session] in
-            do {
-                try await session?.performStep(direction: direction)
-                guard let self, self.scrollCaptureGeneration == generation,
-                      self.scrollCaptureSession === session else { return }
-                self.scrollCaptureTask = nil
-                if self.scrollCapturePhase == .finishPending {
-                    self.finishScrollCapture()
-                }
-            } catch {
-                guard let self, self.scrollCaptureGeneration == generation,
-                      self.scrollCaptureSession === session else { return }
-                self.scrollCaptureTask = nil
-                if self.scrollCapturePhase == .finishPending {
-                    self.finishScrollCapture()
-                }
             }
         }
     }
@@ -954,8 +919,8 @@ final class CaptureCoordinator {
         case .warning(nil):
             scrollCaptureMessageKey = nil
             presentation.clearWarning()
-        case .stepState(let state):
-            presentation.setStepControlState(state)
+        case .stepState:
+            break
         case .state:
             break
         }
