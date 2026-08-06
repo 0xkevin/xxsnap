@@ -17203,6 +17203,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     private var optionsToolbarRect: NSRect? {
         guard
+            scrollCaptureOverlayState == .inactive,
             SelectionToolbarState.shouldShowOptionsToolbar(isPrimaryShapeToolActive: isShapeToolActive || isTextToolActive || isNumberToolActive || isMagnifierToolActive || isEraserToolActive),
             let selectionRect,
             let toolbar = mainToolbarRect(for: selectionRect)

@@ -522,6 +522,39 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_measurementLabelText, "300 x 220  px")
     }
 
+    func testScrollCaptureHidesActiveOptionsToolbarUntilOrdinaryToolbarIsRestored() throws {
+        let image = solidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.onScrollCaptureRequested = { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 80, y: 60, width: 300, height: 220))
+        window.test_activateShapeTool(.rectangle)
+        XCTAssertNotNil(window.test_optionsToolbarRect)
+
+        window.test_beginScrollCapture()
+
+        XCTAssertNil(window.test_optionsToolbarRect)
+        XCTAssertTrue(window.test_toolbarButtonIsEnabled(.finishEditing))
+        let ordinaryButtons: [TestToolbarButton] = [
+            .rectangle, .arrow, .pen, .marker, .eyedropper, .mosaic, .text, .number,
+            .magnifier, .eraser, .undo, .redo, .cancel, .pin, .save, .copy, .scroll,
+        ]
+        for button in ordinaryButtons {
+            XCTAssertFalse(window.test_toolbarButtonIsEnabled(button), "Expected \(button) to be disabled")
+        }
+
+        window.restoreAfterScrollCaptureCancellation()
+
+        XCTAssertEqual(window.scrollCaptureOverlayState, .inactive)
+        XCTAssertFalse(window.ignoresMouseEvents)
+        XCTAssertNil(window.test_mainToolbarButtonRect(for: .finishEditing))
+        XCTAssertTrue(window.test_toolbarButtonIsEnabled(.rectangle))
+        XCTAssertTrue(window.test_toolbarButtonIsEnabled(.scroll))
+        XCTAssertTrue(window.test_toolbarButtonIsEnabled(.cancel))
+        XCTAssertTrue(window.test_toolbarButtonIsEnabled(.pin))
+        XCTAssertTrue(window.test_toolbarButtonIsEnabled(.save))
+        XCTAssertTrue(window.test_toolbarButtonIsEnabled(.copy))
+    }
+
     func testPlainRStartsScrollCaptureFromTheMainToolbar() {
         let image = solidImage(size: NSSize(width: 640, height: 420), color: .white)
         var request: ScrollCaptureSeed?
