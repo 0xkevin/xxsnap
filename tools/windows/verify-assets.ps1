@@ -5,6 +5,16 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).ProviderPath
 $iconsDirectory = Join-Path $repoRoot "platforms\mac\Resources\Icons"
+$toolbarVerifier = Join-Path $PSScriptRoot "verify-toolbar-assets.ps1"
+
+& (Join-Path $PSHOME "powershell.exe") `
+    -NoProfile `
+    -ExecutionPolicy Bypass `
+    -File $toolbarVerifier
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}
+
 $expectedAssets = [ordered]@{
     "cancel-capture.png" = "5a0a437c72735a37218286e58549bc46442e8f50ff6462f94b5f970b2171c2ad"
     "save-to-file.png" = "b31ea77ff9937c431f3d57ef9afac2e35e68b23d398b6071c26ccdf72753dc1d"
