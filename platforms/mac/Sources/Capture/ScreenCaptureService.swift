@@ -65,6 +65,18 @@ final class ScrollCaptureFrameStream: @unchecked Sendable {
 
 }
 
+final class ScrollCaptureFrameChangeDetector: @unchecked Sendable {
+    func shouldEnqueue(signature: [UInt8]) -> Bool {
+        !signature.isEmpty
+    }
+
+    func shouldEnqueue(pixelBuffer: CVPixelBuffer) -> Bool {
+        true
+    }
+
+    func reset() {}
+}
+
 final class ScrollCaptureFrameBuffer: @unchecked Sendable {
     private struct Waiter {
         let id: UInt64
@@ -92,7 +104,7 @@ final class ScrollCaptureFrameBuffer: @unchecked Sendable {
 
     var canAcceptImage: Bool {
         lock.lock()
-        let result = !stopped && (waiter != nil || images.count < capacity)
+        let result = !stopped
         lock.unlock()
         return result
     }
@@ -127,6 +139,9 @@ final class ScrollCaptureFrameBuffer: @unchecked Sendable {
                 return
             }
             if !images.isEmpty {
+                // Stitching needs a chain of overlapping frames. When matching is
+                // slower than the capture stream, preserve capture order instead of
+                // jumping straight to the newest frame and losing the overlap.
                 let image = images.removeFirst()
                 lock.unlock()
                 continuation.resume(returning: image)
@@ -189,7 +204,10 @@ private final class ScrollCaptureFrameReceiver: NSObject, SCStreamOutput, @unche
     private let context = CIContext(options: [.cacheIntermediates: false])
     private let pointSize: NSSize
     private let colorSpace: CGColorSpace
-    private let frameBuffer = ScrollCaptureFrameBuffer(capacity: 8)
+    private let frameBuffer = ScrollCaptureFrameBuffer(
+        capacity: ScreenCaptureService.scrollCaptureFrameBufferCapacity
+    )
+    private let changeDetector = ScrollCaptureFrameChangeDetector()
 
     init(pointSize: NSSize, colorSpace: CGColorSpace) {
         self.pointSize = pointSize
@@ -202,6 +220,7 @@ private final class ScrollCaptureFrameReceiver: NSObject, SCStreamOutput, @unche
 
     func discardBufferedImages() {
         frameBuffer.discardBufferedImages()
+        changeDetector.reset()
     }
 
     func stop() {
@@ -216,7 +235,8 @@ private final class ScrollCaptureFrameReceiver: NSObject, SCStreamOutput, @unche
         guard outputType == .screen,
               sampleBuffer.isValid,
               frameBuffer.canAcceptImage,
-              let pixelBuffer = sampleBuffer.imageBuffer
+              let pixelBuffer = sampleBuffer.imageBuffer,
+              changeDetector.shouldEnqueue(pixelBuffer: pixelBuffer)
         else { return }
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
         guard let cgImage = context.createCGImage(
@@ -233,6 +253,8 @@ private final class ScrollCaptureFrameReceiver: NSObject, SCStreamOutput, @unche
 
 @MainActor
 final class ScreenCaptureService: ScrollRegionCapturing {
+    nonisolated static let scrollCaptureFrameBufferCapacity = 8
+
     private var cachedShareableContent: SCShareableContent?
 
     func prepareShareableContent() async {
@@ -259,6 +281,16 @@ final class ScreenCaptureService: ScrollRegionCapturing {
         if #available(macOS 15.0, *) {
             configuration.captureDynamicRange = .SDR
         }
+        return configuration
+    }
+
+    static func makeScrollStreamConfiguration(width: Int, height: Int) -> SCStreamConfiguration {
+        let configuration = makeScreenshotConfiguration(width: width, height: height)
+        configuration.scalesToFit = true
+        configuration.queueDepth = 5
+        // PixPin samples on a 100 ms timer. Feeding this serial stitcher at 30 fps
+        // creates backlog and eventually evicts the intermediate overlap frames.
+        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 10)
         return configuration
     }
 
@@ -414,14 +446,11 @@ final class ScreenCaptureService: ScrollRegionCapturing {
         )
         Self.includeSystemChrome(in: filter)
         let relativeRect = Self.sourceRect(for: clippedSelection, in: target.screenFrame)
-        let configuration = Self.makeScreenshotConfiguration(
+        let configuration = Self.makeScrollStreamConfiguration(
             width: Int(ceil(relativeRect.width * target.scale)),
             height: Int(ceil(relativeRect.height * target.scale))
         )
         configuration.sourceRect = relativeRect
-        configuration.scalesToFit = true
-        configuration.queueDepth = 5
-        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 30)
 
         let receiver = ScrollCaptureFrameReceiver(
             pointSize: clippedSelection.size,

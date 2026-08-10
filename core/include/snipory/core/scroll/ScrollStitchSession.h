@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 
 namespace snipory::core::scroll {
@@ -66,6 +67,12 @@ struct ScrollStitchConfig final
 class ScrollStitchSession final
 {
 public:
+    using FinalRowVisitor = std::function<bool(
+        const std::uint8_t* pixels,
+        std::size_t bytes,
+        int row,
+        int totalRows)>;
+
     explicit ScrollStitchSession(ScrollStitchConfig config = {});
     ~ScrollStitchSession();
 
@@ -75,7 +82,7 @@ public:
     ScrollStitchSession& operator=(const ScrollStitchSession&) = delete;
 
     [[nodiscard]] AppendResult append(
-        const ScrollFrame& frame,
+        ScrollFrame frame,
         ScrollDirection preferredDirection = ScrollDirection::Undetermined,
         int expectedAdvance = 0);
     // Replaces only the matching baseline. Accepted output is unchanged, so a
@@ -90,6 +97,11 @@ public:
     [[nodiscard]] ScrollFrame previewForWidth(int maximumWidth) const;
     [[nodiscard]] ScrollFrame finalize() const;
     [[nodiscard]] ScrollFrame finalizeIncludingPending() const;
+    // Visits the composed image in natural top-down order. The row memory is
+    // borrowed and remains valid only for the duration of the callback.
+    [[nodiscard]] bool visitFinalRows(
+        bool includePending,
+        const FinalRowVisitor& visitor) const;
     // Streams the composed top-down image into caller-owned storage without
     // allocating another full-size frame. bottomUp is useful for Core Graphics.
     [[nodiscard]] bool copyFinalPixels(

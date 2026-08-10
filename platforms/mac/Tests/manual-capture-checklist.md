@@ -90,6 +90,7 @@ For every executed row, save a representative PNG outside the repository and ins
 - [ ] Click Save, save PNG outside the repository, reopen it, and compare dimensions/content with the editor result.
 - [ ] Click Pin and confirm the complete long image is pinned, initially fitted on-screen while preserving aspect ratio, and remains movable/zoomable.
 - [ ] Click Finish editing and Close in separate runs; confirm each ends the editor once without repeating an earlier output action.
+- [ ] Continue one capture past 29,000 pixels; confirm the extra-long warning appears once and collection continues. Click Finish, cancel the first PNG save panel, then finish again and save outside the repository. Verify the saved PNG is taller than 100,000 pixels, preserves the original pixel width and sharpness in a large-image-capable viewer, and no long-image editor/copy/pin workflow appears for that capture.
 
 ## Failure and resource recovery
 

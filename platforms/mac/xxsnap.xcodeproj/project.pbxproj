@@ -147,6 +147,7 @@
 		D03DABAF3EDD5E5BE11AE26D /* ScrollCaptureSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90744D11E6558739B43E552E /* ScrollCaptureSession.swift */; };
 		D212CB339A7DC8FACBCB7652 /* mixed-chinese-korean.png in Resources */ = {isa = PBXBuildFile; fileRef = 546011ABD14F108E2F19D308 /* mixed-chinese-korean.png */; };
 		D33C9F37039E2FD69220AE5B /* StatusItemController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 216073E47CB43ABDD6AD1B83 /* StatusItemController.swift */; };
+		D422A5BA48E3CFD0B563D911 /* SuperLongCaptureWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4509E924773F69F0913DA78 /* SuperLongCaptureWindowController.swift */; };
 		D489ABD4FE40373447CCDBA2 /* DiagnosticLoggingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCF420422449874A63EA003A /* DiagnosticLoggingTests.swift */; };
 		D5C3FCA28541BA209FD4F9F5 /* notification.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = 9126B19E9594AEC07AA8C674 /* notification.mp3 */; };
 		D6E76E6282834497F12647B2 /* LongImageEditorWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CCB6A5EC8E669B03292F82D /* LongImageEditorWindowController.swift */; };
@@ -336,6 +337,7 @@
 		F1BB17D8F2583289C2819684 /* bold.svg */ = {isa = PBXFileReference; path = bold.svg; sourceTree = "<group>"; };
 		F2F4EA6238BB786E1F4F3FC8 /* PinnedImageWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinnedImageWindowController.swift; sourceTree = "<group>"; };
 		F381587580D5BE8109B34A1C /* x-circle-fill.svg */ = {isa = PBXFileReference; path = "x-circle-fill.svg"; sourceTree = "<group>"; };
+		F4509E924773F69F0913DA78 /* SuperLongCaptureWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuperLongCaptureWindowController.swift; sourceTree = "<group>"; };
 		F59DFFE797088CFD27AE3EE4 /* arrow-line.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "arrow-line.png"; sourceTree = "<group>"; };
 		F5F1CC1AD901DE8A86E8B7F0 /* refresh-svgrepo-com3.svg */ = {isa = PBXFileReference; path = "refresh-svgrepo-com3.svg"; sourceTree = "<group>"; };
 		F7D7DA546BB3234545506458 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
@@ -370,6 +372,7 @@
 				B4DCF9DEB940528A16B429A9 /* PreferencesWindowController.swift */,
 				BA438FF791561A757586E0BF /* ShortcutFeedbackPresentationController.swift */,
 				216073E47CB43ABDD6AD1B83 /* StatusItemController.swift */,
+				F4509E924773F69F0913DA78 /* SuperLongCaptureWindowController.swift */,
 				AA85F42BD235F2B3AC78E550 /* SystemShortcutMonitor.swift */,
 				E3CBB949DFEEAB8140A541B8 /* UpdateController.swift */,
 			);
@@ -920,6 +923,7 @@
 				59A6BF51A7B6DB63746E2AC7 /* ShortcutFeedbackPresentationController.swift in Sources */,
 				6BBCFA1AA4FA3F5B9DDF82FB /* SnapshotExportBridge.mm in Sources */,
 				D33C9F37039E2FD69220AE5B /* StatusItemController.swift in Sources */,
+				D422A5BA48E3CFD0B563D911 /* SuperLongCaptureWindowController.swift in Sources */,
 				9425994BDDA3431D99130570 /* SystemShortcutMonitor.swift in Sources */,
 				0FB8B2A27F708CC4F26ADA9E /* UpdateController.swift in Sources */,
 				407309C186AFD49EC1A764BC /* VerticalOverlapMatcher.cpp in Sources */,
@@ -1050,6 +1054,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				OTHER_LDFLAGS = "$(inherited) -lz";
 				PRODUCT_BUNDLE_IDENTIFIER = com.xxsnap.mac;
 				PRODUCT_MODULE_NAME = xxsnap;
 				PRODUCT_NAME = XxSnap;
@@ -1097,6 +1102,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				OTHER_LDFLAGS = "$(inherited) -lz";
 				PRODUCT_BUNDLE_IDENTIFIER = com.xxsnap.mac;
 				PRODUCT_MODULE_NAME = xxsnap;
 				PRODUCT_NAME = XxSnap;

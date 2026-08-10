@@ -4,6 +4,93 @@ import XCTest
 
 @MainActor
 final class ScrollCapturePresentationTests: XCTestCase {
+    @MainActor
+    func testSuperLongWarningCardUsesApprovedNarrowWrappingLayout() throws {
+        let controller = SuperLongCaptureWarningWindowController(language: .zhHans)
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+
+        XCTAssertEqual(contentView.bounds.width, 348, accuracy: 0.5)
+        XCTAssertEqual(controller.titleLabel.alignment, .center)
+        XCTAssertEqual(controller.bodyLabel.alignment, .left)
+        XCTAssertEqual(controller.bodyLabel.lineBreakMode, .byWordWrapping)
+        XCTAssertFalse(controller.bodyLabel.usesSingleLineMode)
+        XCTAssertEqual(controller.noteLabel.alignment, .left)
+        XCTAssertEqual(controller.limitLabel.alignment, .left)
+    }
+
+    @MainActor
+    func testSuperLongWarningDoesNotActivateOrBlockTheCaptureLoop() throws {
+        let controller = SuperLongCaptureWarningWindowController(language: .zhHans)
+        let panel = try XCTUnwrap(controller.window as? NSPanel)
+
+        controller.show()
+
+        XCTAssertTrue(panel.styleMask.contains(.nonactivatingPanel))
+        XCTAssertFalse(panel.hidesOnDeactivate)
+        XCTAssertTrue(panel.isVisible)
+        XCTAssertNil(NSApp.modalWindow)
+
+        controller.continueButton.performClick(nil)
+        XCTAssertFalse(panel.isVisible)
+    }
+
+    @MainActor
+    func testSuperLongSaveProgressIsDeterminateMonotonicAndEscDoesNotCancel() throws {
+        var cancelCount = 0
+        let controller = SuperLongCaptureSaveProgressWindowController(
+            destination: URL(fileURLWithPath: "/tmp/a/very/long/path/capture.png"),
+            language: .zhHans,
+            onCancel: { cancelCount += 1 }
+        )
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+
+        XCTAssertEqual(contentView.bounds.width, 348, accuracy: 0.5)
+        XCTAssertFalse(controller.progressIndicator.isIndeterminate)
+        controller.updateProgress(0.6)
+        controller.updateProgress(0.2)
+        XCTAssertEqual(controller.displayedProgress, 0.6, accuracy: 0.001)
+        XCTAssertEqual(controller.percentageLabel.stringValue, "60%")
+
+        controller.window?.cancelOperation(nil)
+        XCTAssertEqual(cancelCount, 0)
+        controller.cancelButton.performClick(nil)
+        controller.cancelButton.performClick(nil)
+        XCTAssertEqual(cancelCount, 1)
+        XCTAssertFalse(controller.cancelButton.isEnabled)
+    }
+
+    @MainActor
+    func testSuperLongSaveProgressCentersOnCaptureSelection() throws {
+        let selection = NSRect(x: 120, y: 240, width: 760, height: 920)
+        let controller = SuperLongCaptureSaveProgressWindowController(
+            destination: URL(fileURLWithPath: "/tmp/capture.png"),
+            selectionFrame: selection,
+            language: .zhHans,
+            onCancel: {}
+        )
+
+        controller.show()
+
+        let frame = try XCTUnwrap(controller.window?.frame)
+        XCTAssertEqual(frame.midX, selection.midX, accuracy: 0.5)
+        XCTAssertEqual(frame.midY, selection.midY, accuracy: 0.5)
+    }
+
+    @MainActor
+    func testSuperLongSaveProgressRemainsVisibleAcrossAppsAndSpaces() throws {
+        let controller = SuperLongCaptureSaveProgressWindowController(
+            destination: URL(fileURLWithPath: "/tmp/capture.png"),
+            language: .zhHans,
+            onCancel: {}
+        )
+        let panel = try XCTUnwrap(controller.window as? NSPanel)
+
+        XCTAssertTrue(panel.isFloatingPanel)
+        XCTAssertFalse(panel.hidesOnDeactivate)
+        XCTAssertTrue(panel.collectionBehavior.contains(.canJoinAllSpaces))
+        XCTAssertTrue(panel.collectionBehavior.contains(.fullScreenAuxiliary))
+        XCTAssertTrue(panel.collectionBehavior.contains(.stationary))
+    }
     func testOpenScrollCaptureControlsUpdateWhenLanguageChanges() {
         let controller = makeController(language: .zhHans)
 
@@ -614,6 +701,61 @@ final class ScrollCapturePresentationTests: XCTestCase {
             ScrollCaptureScrollActivity(direction: .up, distance: 6)
         )
         XCTAssertEqual(controller.test_viewportIndicatorFrame.minY, imageTop + 25 * scale, accuracy: 0.5)
+    }
+
+    func testPhysicalDownScrollMovesIndicatorDownAndKeepsItThereAfterTopEdgeGrowth() {
+        let controller = makeController()
+        let width = controller.test_contentWidth
+        controller.updatePreview(
+            NSImage(size: NSSize(width: width, height: 800)),
+            following: .top,
+            viewport: ScrollCapturePreviewViewport(viewportHeight: 200, outputHeight: 800)
+        )
+        let imageTop = controller.test_previewImageFrame.minY
+        let activity = ScrollActivityMonitor.activity(forScrollingDeltaY: -120)
+
+        controller.moveViewportIndicator(activity)
+        XCTAssertGreaterThan(controller.test_viewportIndicatorFrame.minY, imageTop)
+        let wheelDrivenY = controller.test_viewportIndicatorFrame.minY
+
+        controller.updatePreview(
+            NSImage(size: NSSize(width: width, height: 1_000)),
+            following: .top,
+            viewport: ScrollCapturePreviewViewport(viewportHeight: 200, outputHeight: 1_000)
+        )
+        XCTAssertGreaterThanOrEqual(controller.test_viewportIndicatorFrame.minY, wheelDrivenY)
+    }
+
+    func testUpwardCorrectionDoesNotJumpIndicatorToTopAfterTopEdgeGrowth() {
+        let controller = makeController()
+        let width = controller.test_contentWidth
+        controller.updatePreview(
+            NSImage(size: NSSize(width: width, height: 120_000)),
+            following: .top,
+            viewport: ScrollCapturePreviewViewport(viewportHeight: 4_000, outputHeight: 120_000)
+        )
+        controller.moveViewportIndicator(ScrollCaptureScrollActivity(
+            direction: .down,
+            distance: 100_000,
+            viewportDirection: .down
+        ))
+        controller.moveViewportIndicator(ScrollCaptureScrollActivity(
+            direction: .up,
+            distance: 20,
+            viewportDirection: .up
+        ))
+        let beforeGrowth = controller.test_viewportIndicatorFrame.minY
+        let imageTop = controller.test_previewImageFrame.minY
+        XCTAssertGreaterThan(beforeGrowth, imageTop + 20)
+
+        controller.updatePreview(
+            NSImage(size: NSSize(width: width, height: 121_000)),
+            following: .top,
+            viewport: ScrollCapturePreviewViewport(viewportHeight: 4_000, outputHeight: 121_000)
+        )
+
+        XCTAssertGreaterThan(controller.test_viewportIndicatorFrame.minY, imageTop + 20)
+        XCTAssertGreaterThanOrEqual(controller.test_viewportIndicatorFrame.minY, beforeGrowth - 1)
     }
 
     func testPreviewRefreshPreservesWheelDrivenViewportPosition() {

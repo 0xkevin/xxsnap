@@ -821,15 +821,10 @@ final class ScrollActivityMonitor: ScrollActivityMonitoring {
         isDirectionInvertedFromDevice: Bool = true,
         isPreciseScrollingDelta: Bool = true
     ) -> ScrollCaptureScrollActivity {
-        let documentDeltaY = isDirectionInvertedFromDevice ? -deltaY : deltaY
-        let direction: ScrollCaptureDirection
-        if documentDeltaY < 0 {
-            direction = .down
-        } else if documentDeltaY > 0 {
-            direction = .up
-        } else {
-            direction = .unknown
-        }
+        // AppKit has already applied the user's scrolling preference. The matcher
+        // follows the pixels moving across the screen, while the preview indicator
+        // follows the viewport through the document, so their directions oppose.
+        _ = isDirectionInvertedFromDevice
         let distanceScale: CGFloat = isPreciseScrollingDelta ? 1 : 24
         let viewportDirection: ScrollCaptureDirection
         if deltaY < 0 {
@@ -839,9 +834,16 @@ final class ScrollActivityMonitor: ScrollActivityMonitoring {
         } else {
             viewportDirection = .unknown
         }
+        let matcherDirection: ScrollCaptureDirection
+        switch viewportDirection {
+        case .down: matcherDirection = .up
+        case .up: matcherDirection = .down
+        case .unknown: matcherDirection = .unknown
+        @unknown default: matcherDirection = .unknown
+        }
         return ScrollCaptureScrollActivity(
-            direction: direction,
-            distance: abs(documentDeltaY) * distanceScale,
+            direction: matcherDirection,
+            distance: abs(deltaY) * distanceScale,
             viewportDirection: viewportDirection
         )
     }

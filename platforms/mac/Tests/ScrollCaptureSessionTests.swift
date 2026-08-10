@@ -1312,10 +1312,11 @@ final class ScrollCaptureSessionTests: XCTestCase {
         XCTAssertEqual(capturer.operations, ["prime", "discard", "capture"])
     }
 
-    func testActivityAfterStableDisarmDiscardsBufferedFramesAgain() async throws {
+    func testActivityAfterStableFramesDoesNotRestartOrDiscardContinuousStream() async throws {
         let capturer = PrimingBufferingFakeCapturer()
         let engine = FakeStitcher(results: [
             .acceptedInitial,
+            .duplicateDiscarded,
             .duplicateDiscarded,
             .duplicateDiscarded,
             .duplicateDiscarded,
@@ -1326,12 +1327,12 @@ final class ScrollCaptureSessionTests: XCTestCase {
         await session.test_runSamplingTick()
         await session.test_runSamplingTick()
         await session.test_runSamplingTick()
-        XCTAssertFalse(session.isSamplingArmed)
+        XCTAssertTrue(session.isSamplingArmed)
 
         session.recordScrollActivity()
 
         XCTAssertTrue(session.isSamplingArmed)
-        XCTAssertEqual(capturer.discardCount, 2)
+        XCTAssertEqual(capturer.discardCount, 1)
         _ = session.cancel()
     }
 
@@ -1436,10 +1437,11 @@ final class ScrollCaptureSessionTests: XCTestCase {
         XCTAssertEqual(engine.previewCallCount, 1)
     }
 
-    func testThreeStableDuplicateFramesDisarmSampling() async throws {
+    func testStableDuplicateFramesKeepContinuousSamplingArmed() async throws {
         let capturer = FakeCapturer()
         let engine = FakeStitcher(results: [
             .acceptedInitial,
+            .duplicateDiscarded,
             .duplicateDiscarded,
             .duplicateDiscarded,
             .duplicateDiscarded,
@@ -1452,14 +1454,14 @@ final class ScrollCaptureSessionTests: XCTestCase {
         await session.test_runSamplingTick()
         await session.test_runSamplingTick()
 
-        XCTAssertFalse(session.isSamplingArmed)
+        XCTAssertTrue(session.isSamplingArmed)
         XCTAssertEqual(capturer.captureCount, 3)
         await session.test_runSamplingTick()
-        XCTAssertEqual(capturer.captureCount, 3)
+        XCTAssertEqual(capturer.captureCount, 4)
         XCTAssertEqual(session.state, .capturing)
     }
 
-    func testThreeStableReviewFramesDisarmSamplingWithoutPublishingPreview() async throws {
+    func testStableReviewFramesKeepContinuousSamplingArmedWithoutPublishingPreview() async throws {
         let capturer = FakeCapturer()
         let engine = FakeStitcher(results: [.acceptedInitial, .reviewDiscarded, .reviewDiscarded, .reviewDiscarded])
         let presentation = PresentationRecorder()
@@ -1471,7 +1473,7 @@ final class ScrollCaptureSessionTests: XCTestCase {
         await session.test_runSamplingTick()
         await session.test_runSamplingTick()
 
-        XCTAssertFalse(session.isSamplingArmed)
+        XCTAssertTrue(session.isSamplingArmed)
         XCTAssertEqual(capturer.captureCount, 3)
         XCTAssertEqual(presentation.previews.count, 1)
         XCTAssertEqual(presentation.kinds, [.acceptedInitial, .reviewDiscarded, .reviewDiscarded, .reviewDiscarded])
@@ -1600,6 +1602,30 @@ final class ScrollCaptureSessionTests: XCTestCase {
         XCTAssertEqual(engine.previewCallCount, 1)
     }
 
+    func testSuperLongModeBeginsOnlyAfterTwentyNineThousandPixelsAndEmitsOnce() async throws {
+        let engine = FakeStitcher(
+            results: [.acceptedInitial, .acceptedAppend, .acceptedAppend],
+            directions: [.unknown, .down, .down],
+            outputHeights: [29_000, 29_001, 31_000]
+        )
+        let presentation = PresentationRecorder()
+        let session = makeSession(engine: engine, presentation: presentation)
+
+        try await session.start()
+        XCTAssertFalse(session.requiresSaveOnlyCompletion)
+        XCTAssertTrue(presentation.superLongModeHeights.isEmpty)
+
+        session.recordScrollActivity()
+        await session.test_runSamplingTick()
+        XCTAssertTrue(session.requiresSaveOnlyCompletion)
+        XCTAssertEqual(presentation.superLongModeHeights, [29_001])
+
+        session.recordScrollActivity()
+        await session.test_runSamplingTick()
+        XCTAssertTrue(session.requiresSaveOnlyCompletion)
+        XCTAssertEqual(presentation.superLongModeHeights, [29_001])
+    }
+
     func testReentrantTicksNeverOverlapCaptureOrAppend() async throws {
         let capturer = BlockingCapturer()
         let engine = FakeStitcher(results: [.acceptedInitial, .acceptedAppend])
@@ -1650,6 +1676,153 @@ final class ScrollCaptureSessionTests: XCTestCase {
         XCTAssertFalse(session.isSamplingArmed)
         XCTAssertEqual(monitor.stopCount, 1)
         XCTAssertEqual(presentation.states.suffix(2), [.finishing, .finished])
+    }
+
+    func testFinishWaitsForInFlightAppendBeforeFinalizing() async throws {
+        let engine = BlockingLiveAppendStitcher()
+        let session = makeSession(engine: engine)
+        try await session.start()
+        session.recordScrollActivity()
+        let sampling = Task { await session.test_runSamplingTick() }
+        await engine.waitUntilLiveAppendStarts()
+
+        let finish = Task { try await session.finish() }
+        for _ in 0..<20 { await Task.yield() }
+
+        XCTAssertEqual(engine.finalImageCallCount, 0)
+        engine.resumeLiveAppend()
+        _ = try await finish.value
+        await sampling.value
+        XCTAssertEqual(engine.finalImageCallCount, 1)
+        XCTAssertEqual(session.state, .finished)
+    }
+
+    func testSuperLongFinishWritesPNGWithoutCreatingFinalImage() async throws {
+        let engine = FakeStitcher(
+            results: [.acceptedInitial],
+            outputHeights: [29_001]
+        )
+        let session = makeSession(engine: engine)
+        try await session.start()
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("xxsnap-session-super-long-\(UUID().uuidString).png")
+
+        try await session.finishSaving(to: destination)
+
+        XCTAssertEqual(engine.writtenPNGURLs, [destination])
+        XCTAssertEqual(engine.finalImageCallCount, 0)
+        XCTAssertEqual(session.state, .finished)
+    }
+
+    func testSuperLongFinishForwardsRealPNGProgress() async throws {
+        let engine = FakeStitcher(
+            results: [.acceptedInitial],
+            outputHeights: [29_001],
+            pngProgressValues: [0, 0.18, 0.67, 1]
+        )
+        let session = makeSession(engine: engine)
+        let recorder = ThreadSafeProgressRecorder()
+        try await session.start()
+
+        try await session.finishSaving(
+            to: FileManager.default.temporaryDirectory.appendingPathComponent("progress.png"),
+            progress: { recorder.append($0) }
+        )
+
+        XCTAssertEqual(recorder.values, [0, 0.18, 0.67, 1])
+        XCTAssertEqual(session.state, .finished)
+    }
+
+    func testCancellingSuperLongFinishCancelsEncoderAndDiscardsSession() async throws {
+        let engine = FakeStitcher(
+            results: [.acceptedInitial],
+            outputHeights: [29_001],
+            pngProgressValues: [0.1],
+            pngWriteDelay: .seconds(60)
+        )
+        let session = makeSession(engine: engine)
+        try await session.start()
+        let task = Task {
+            try await session.finishSaving(
+                to: FileManager.default.temporaryDirectory.appendingPathComponent("cancel.png"),
+                progress: { _ in }
+            )
+        }
+        for _ in 0..<100 where engine.writtenPNGURLs.isEmpty { await Task.yield() }
+
+        task.cancel()
+        do {
+            try await task.value
+            XCTFail("Cancellation must stop the PNG export")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
+
+        XCTAssertEqual(engine.cancelPNGWriteCount, 1)
+        XCTAssertEqual(session.state, .cancelled)
+    }
+
+    func testCaptureContinuesAtTwoHundredThousandPixels() async throws {
+        let engine = FakeStitcher(
+            results: [.acceptedInitial, .acceptedAppend],
+            directions: [.unknown, .down],
+            outputHeights: [1_000, 200_000]
+        )
+        let session = makeSession(engine: engine)
+        try await session.start()
+
+        session.recordScrollActivity()
+        await session.test_runSamplingTick()
+
+        XCTAssertEqual(session.state, .capturing)
+        XCTAssertTrue(session.requiresSaveOnlyCompletion)
+        XCTAssertTrue(session.isSamplingArmed)
+    }
+
+    func testCaptureStopsOnlyAfterAcceptedAppendExceedsTwoHundredThousandPixels() async throws {
+        let engine = FakeStitcher(
+            results: [.acceptedInitial, .acceptedAppend, .acceptedAppend],
+            directions: [.unknown, .down, .down],
+            outputHeights: [1_000, 200_001, 201_000]
+        )
+        let capturer = FakeCapturer()
+        let presentation = PresentationRecorder()
+        let session = makeSession(capturer: capturer, engine: engine, presentation: presentation)
+        try await session.start()
+
+        session.recordScrollActivity()
+        await session.test_runSamplingTick()
+
+        XCTAssertEqual(session.state, .paused(.maximumHeightReached))
+        XCTAssertTrue(session.requiresSaveOnlyCompletion)
+        XCTAssertFalse(session.isSamplingArmed)
+        XCTAssertEqual(capturer.captureCount, 1)
+        XCTAssertEqual(presentation.previewViewports.last?.outputHeight, 200_001)
+
+        let acceptedFrameCount = engine.appendedImages.count
+        session.recordScrollActivity()
+        await session.test_runSamplingTick()
+
+        XCTAssertEqual(engine.appendedImages.count, acceptedFrameCount)
+    }
+
+    func testMaximumHeightPauseCanStillSaveAcceptedContent() async throws {
+        let engine = FakeStitcher(
+            results: [.acceptedInitial, .acceptedAppend],
+            directions: [.unknown, .down],
+            outputHeights: [1_000, 200_001]
+        )
+        let session = makeSession(engine: engine)
+        try await session.start()
+        session.recordScrollActivity()
+        await session.test_runSamplingTick()
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("xxsnap-maximum-height-\(UUID().uuidString).png")
+
+        try await session.finishSaving(to: destination)
+
+        XCTAssertEqual(engine.writtenPNGURLs, [destination])
+        XCTAssertEqual(session.state, .finished)
     }
 
     func testFinishFailureKeepsStitcherAndCanRetrySameSession() async throws {
@@ -1762,7 +1935,7 @@ final class ScrollCaptureSessionTests: XCTestCase {
         XCTAssertEqual(engine.concurrent, 0)
     }
 
-    func testRealSamplingLoopStopsAfterStableFramesAndRearmsOnNextActivity() async throws {
+    func testRealSamplingLoopKeepsPollingAfterStableFramesWithoutNewActivity() async throws {
         let clock = ControlledClock()
         let capturer = FakeCapturer()
         let engine = FakeStitcher(results: [
@@ -1785,11 +1958,9 @@ final class ScrollCaptureSessionTests: XCTestCase {
             }
         }
 
-        await waitUntil { !session.isSamplingArmed && clock.pendingCount == 0 }
+        await waitUntil { session.isSamplingArmed && clock.pendingCount == 1 }
         XCTAssertEqual(capturer.captureCount, 3)
 
-        session.recordScrollActivity()
-        await waitUntil { session.isSamplingArmed && clock.pendingCount == 1 }
         clock.advance()
         await waitUntil { engine.appendedImages.count == 5 && clock.pendingCount == 1 }
 
@@ -2033,7 +2204,7 @@ final class ScrollCaptureSessionTests: XCTestCase {
                 forScrollingDeltaY: -1,
                 isDirectionInvertedFromDevice: false
             ),
-            .down
+            .up
         )
     }
 
@@ -2056,6 +2227,115 @@ final class ScrollCaptureSessionTests: XCTestCase {
             ),
             ScrollCaptureScrollActivity(direction: .down, distance: 24, viewportDirection: .up)
         )
+    }
+
+    func testActivitySamplingUsesWheelOnlyForDirectionNotPixelDisplacement() async throws {
+        let engine = FakeStitcher(results: [.acceptedInitial, .duplicateDiscarded])
+        let session = makeSession(engine: engine)
+        try await session.start()
+
+        session.recordScrollActivity(
+            ScrollCaptureScrollActivity(direction: .down, distance: 18)
+        )
+
+        await waitUntil { engine.expectedAdvances.count == 1 }
+        XCTAssertEqual(engine.preferredDirections, [.down])
+        XCTAssertEqual(engine.expectedAdvances, [0])
+        _ = session.cancel()
+    }
+
+    func testActivitySamplingDoesNotAccumulateRejectedWheelDistanceAsPixelDisplacement() async throws {
+        let engine = FakeStitcher(results: [
+            .acceptedInitial,
+            .lowConfidenceDiscarded,
+            .acceptedAppend,
+        ])
+        let session = makeSession(engine: engine)
+        try await session.start()
+
+        session.recordScrollActivity(
+            ScrollCaptureScrollActivity(direction: .down, distance: 18)
+        )
+        await waitUntil { engine.expectedAdvances.count == 1 }
+        session.recordScrollActivity(
+            ScrollCaptureScrollActivity(direction: .down, distance: 7)
+        )
+        await waitUntil { engine.expectedAdvances.count == 2 }
+
+        XCTAssertEqual(engine.expectedAdvances, [0, 0])
+        _ = session.cancel()
+    }
+
+    func testLowConfidenceSamplingKeepsLastValidMatcherReference() async throws {
+        let engine = FakeStitcher(results: [
+            .acceptedInitial,
+            .lowConfidenceDiscarded,
+            .acceptedAppend,
+        ])
+        let session = makeSession(engine: engine)
+        try await session.start()
+        session.recordScrollActivity()
+
+        await session.test_runSamplingTick()
+
+        XCTAssertEqual(engine.rebasedImages.count, 0)
+        await session.test_runSamplingTick()
+        XCTAssertEqual(engine.appendedImages.count, 3)
+        _ = session.cancel()
+    }
+
+    func testActivitySamplingIncludesDistanceReportedWhileWaitingForFrame() async throws {
+        let capturer = BlockingCapturer()
+        let engine = FakeStitcher(results: [
+            .acceptedInitial,
+            .acceptedAppend,
+        ])
+        let session = makeSession(capturer: capturer, engine: engine)
+        try await session.start()
+
+        session.recordScrollActivity(
+            ScrollCaptureScrollActivity(direction: .down, distance: 18)
+        )
+        await capturer.waitUntilCaptureStarts()
+        session.recordScrollActivity(
+            ScrollCaptureScrollActivity(direction: .down, distance: 7)
+        )
+        capturer.resumeCapture()
+        await waitUntil { engine.expectedAdvances.count == 1 }
+
+        XCTAssertEqual(engine.preferredDirections, [.down])
+        XCTAssertEqual(engine.expectedAdvances, [0])
+        _ = session.cancel()
+    }
+
+    func testActivitySamplingUsesLatestDirectionForReturnedFrameAndRecovery() async throws {
+        let capturer = BlockingCapturer()
+        let engine = FakeStitcher(results: [
+            .acceptedInitial,
+            .lowConfidenceDiscarded,
+            .acceptedAppend,
+        ])
+        let session = makeSession(capturer: capturer, engine: engine)
+        try await session.start()
+
+        session.recordScrollActivity(
+            ScrollCaptureScrollActivity(direction: .down, distance: 18)
+        )
+        await capturer.waitUntilCaptureStarts()
+        session.recordScrollActivity(
+            ScrollCaptureScrollActivity(direction: .up, distance: 7)
+        )
+        capturer.resumeCapture()
+        await waitUntil { engine.expectedAdvances.count == 1 }
+
+        let secondTick = Task { await session.test_runSamplingTick() }
+        await capturer.waitUntilCaptureStarts(minimumCount: 2)
+        capturer.resumeCapture()
+        await secondTick.value
+
+        XCTAssertEqual(engine.preferredDirections, [.up, .up])
+        XCTAssertEqual(engine.expectedAdvances, [0, 0])
+        _ = session.cancel()
     }
 
     func testDuplicateAndReviewFramesClearStaleLowConfidenceWarning() async throws {
@@ -2183,14 +2463,16 @@ final class ScrollCaptureSessionTests: XCTestCase {
         presentation: PresentationRecorder? = nil,
         presentationHandler: (@MainActor (ScrollCapturePresentationUpdate) -> Void)? = nil,
         diagnosticLogger: any DiagnosticLogging = RecordingDiagnosticLogger(),
-        screenRect: NSRect = NSRect(x: 100, y: 200, width: 80, height: 60)
+        screenRect: NSRect = NSRect(x: 100, y: 200, width: 80, height: 60),
+        frozenImage: NSImage? = nil
     ) -> ScrollCaptureSession {
         let presentation = presentation ?? PresentationRecorder()
         return ScrollCaptureSession(
             seed: ScrollCaptureSeed(
                 screenRect: screenRect,
                 snapshotRect: NSRect(x: 0, y: 0, width: 80, height: 60),
-                frozenImage: TestImageFactory.solid(size: CGSize(width: 80, height: 60), color: .red),
+                frozenImage: frozenImage
+                    ?? TestImageFactory.solid(size: CGSize(width: 80, height: 60), color: .red),
                 annotations: [],
                 eraserMasks: []
             ),
@@ -2444,8 +2726,8 @@ private final class BlockingCapturer: ScrollRegionCapturing {
         return try await withCheckedThrowingContinuation { resume = $0 }
     }
 
-    func waitUntilCaptureStarts() async {
-        if captureCount > 0 { return }
+    func waitUntilCaptureStarts(minimumCount: Int = 1) async {
+        if captureCount >= minimumCount { return }
         await withCheckedContinuation { started = $0 }
     }
 
@@ -2464,30 +2746,42 @@ private final class BlockingCapturer: ScrollRegionCapturing {
 private final class FakeStitcher: ScrollStitching {
     private var results: [ScrollCaptureAppendKind]
     private var directions: [ScrollCaptureDirection]
+    private var outputHeights: [Int]
     let final: NSImage
     private let onDeinit: (() -> Void)?
     private(set) var appendedImages: [NSImage] = []
     private(set) var preferredDirections: [ScrollCaptureDirection] = []
     private(set) var expectedAdvances: [CGFloat] = []
+    private(set) var rebasedImages: [NSImage] = []
     private(set) var concurrent = 0
     private(set) var maximumConcurrent = 0
     private(set) var previewCallCount = 0
     private(set) var previewHeights: [Int] = []
     private(set) var previewWidths: [Int] = []
     private(set) var finalImageCallCount = 0
+    private(set) var writtenPNGURLs: [URL] = []
+    private(set) var cancelPNGWriteCount = 0
     private var finalErrors: [Error]
+    private let pngProgressValues: [Double]
+    private let pngWriteDelay: Duration?
 
     init(
         results: [ScrollCaptureAppendKind],
         directions: [ScrollCaptureDirection] = [],
+        outputHeights: [Int] = [],
         final: NSImage? = nil,
         finalErrors: [Error] = [],
+        pngProgressValues: [Double] = [1],
+        pngWriteDelay: Duration? = nil,
         onDeinit: (() -> Void)? = nil
     ) {
         self.results = results
         self.directions = directions
+        self.outputHeights = outputHeights
         self.final = final ?? TestImageFactory.solid(size: CGSize(width: 80, height: 120), color: .purple)
         self.finalErrors = finalErrors
+        self.pngProgressValues = pngProgressValues
+        self.pngWriteDelay = pngWriteDelay
         self.onDeinit = onDeinit
     }
 
@@ -2501,7 +2795,8 @@ private final class FakeStitcher: ScrollStitching {
         let direction = directions.isEmpty
             ? (kind == .acceptedAppend ? .down : .unknown)
             : directions.removeFirst()
-        return .testValue(kind: kind, direction: direction)
+        let outputHeight = outputHeights.isEmpty ? 0 : outputHeights.removeFirst()
+        return .testValue(kind: kind, direction: direction, outputHeight: outputHeight)
     }
 
     func append(
@@ -2519,6 +2814,11 @@ private final class FakeStitcher: ScrollStitching {
     ) async throws -> ScrollCaptureAppendUpdate {
         expectedAdvances.append(expectedAdvance)
         return try await append(image, preferredDirection: preferredDirection)
+    }
+
+    func rebase(_ image: NSImage) async throws -> Bool {
+        rebasedImages.append(image)
+        return true
     }
 
     func preview(maximumHeight: Int) async throws -> NSImage {
@@ -2539,7 +2839,43 @@ private final class FakeStitcher: ScrollStitching {
         return final
     }
 
+    func writePNG(to url: URL) async throws {
+        writtenPNGURLs.append(url)
+    }
+
+    func writePNG(
+        to url: URL,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws {
+        writtenPNGURLs.append(url)
+        pngProgressValues.forEach(progress)
+        if let pngWriteDelay {
+            try await Task.sleep(for: pngWriteDelay)
+        }
+    }
+
+    func cancelPNGWrite() {
+        cancelPNGWriteCount += 1
+    }
+
     deinit { onDeinit?() }
+}
+
+private final class ThreadSafeProgressRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [Double] = []
+
+    var values: [Double] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func append(_ value: Double) {
+        lock.lock()
+        storage.append(value)
+        lock.unlock()
+    }
 }
 
 @MainActor
@@ -2563,6 +2899,48 @@ private final class SlowLiveStitcher: ScrollStitching {
 
     private let image = TestImageFactory.solid(
         size: CGSize(width: 80, height: 60),
+        color: .white
+    )
+}
+
+@MainActor
+private final class BlockingLiveAppendStitcher: ScrollStitching {
+    private var appendCount = 0
+    private var liveAppendStarted: CheckedContinuation<Void, Never>?
+    private var liveAppendResume: CheckedContinuation<ScrollCaptureAppendUpdate, Never>?
+    private(set) var finalImageCallCount = 0
+
+    func append(_ image: NSImage) async throws -> ScrollCaptureAppendUpdate {
+        appendCount += 1
+        if appendCount == 1 {
+            return .testValue(kind: .acceptedInitial, direction: .unknown, outputHeight: 60)
+        }
+        liveAppendStarted?.resume()
+        liveAppendStarted = nil
+        return await withCheckedContinuation { liveAppendResume = $0 }
+    }
+
+    func waitUntilLiveAppendStarts() async {
+        if appendCount > 1 { return }
+        await withCheckedContinuation { liveAppendStarted = $0 }
+    }
+
+    func resumeLiveAppend() {
+        liveAppendResume?.resume(
+            returning: .testValue(kind: .acceptedAppend, direction: .down, outputHeight: 120)
+        )
+        liveAppendResume = nil
+    }
+
+    func preview(maximumHeight: Int) async throws -> NSImage { image }
+
+    func finalImage() async throws -> NSImage {
+        finalImageCallCount += 1
+        return image
+    }
+
+    private let image = TestImageFactory.solid(
+        size: CGSize(width: 80, height: 120),
         color: .white
     )
 }
@@ -2679,6 +3057,7 @@ private final class PresentationRecorder {
     private(set) var commands: [ScrollCaptureTerminalCommand] = []
     private(set) var warningEvents: [ScrollCaptureMatchWarning?] = []
     private(set) var stepStates: [ScrollCaptureStepControlState] = []
+    private(set) var superLongModeHeights: [Int] = []
     var warnings: [ScrollCaptureMatchWarning] { warningEvents.compactMap { $0 } }
     var eventCount: Int { states.count + kinds.count + previews.count + commands.count + warningEvents.count }
     func record(_ event: ScrollCapturePresentationUpdate) {
@@ -2693,6 +3072,7 @@ private final class PresentationRecorder {
         case let .viewportScroll(activity): scrollActivities.append(activity)
         case let .warning(warning): warningEvents.append(warning)
         case let .stepState(state): stepStates.append(state)
+        case let .enteredSuperLongMode(outputHeight): superLongModeHeights.append(outputHeight)
         }
     }
 }

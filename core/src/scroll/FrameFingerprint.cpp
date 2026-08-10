@@ -72,10 +72,23 @@ Fingerprint FrameFingerprint::make(const ScrollFrame& frame, FingerprintSize siz
 
             std::uint64_t sum = 0;
             std::uint64_t samples = 0;
-            for (int sourceY = verticalRange.begin; sourceY < verticalRange.end; ++sourceY) {
+            constexpr int MaximumSamplesPerAxis = 4;
+            const int verticalStep = std::max(
+                1,
+                (verticalRange.end - verticalRange.begin + MaximumSamplesPerAxis - 1)
+                    / MaximumSamplesPerAxis);
+            const int horizontalStep = std::max(
+                1,
+                (horizontalRange.end - horizontalRange.begin + MaximumSamplesPerAxis - 1)
+                    / MaximumSamplesPerAxis);
+            for (int sourceY = verticalRange.begin;
+                 sourceY < verticalRange.end;
+                 sourceY += verticalStep) {
                 const auto rowOffset = static_cast<std::size_t>(sourceY)
                     * static_cast<std::size_t>(frame.bytesPerRow);
-                for (int sourceX = horizontalRange.begin; sourceX < horizontalRange.end; ++sourceX) {
+                for (int sourceX = horizontalRange.begin;
+                     sourceX < horizontalRange.end;
+                     sourceX += horizontalStep) {
                     const auto pixelOffset = rowOffset + static_cast<std::size_t>(sourceX) * 4U;
                     sum += luminance(frame.pixels.data() + pixelOffset);
                     ++samples;

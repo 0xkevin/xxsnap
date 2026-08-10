@@ -5,6 +5,11 @@ add_library(snipory_core
     src/scroll/VerticalOverlapMatcher.cpp
     src/usecases/SnapshotExportUseCase.cpp
 )
+set_source_files_properties(
+    src/scroll/VerticalOverlapMatcher.cpp
+    src/scroll/ScrollStitchSession.cpp
+    PROPERTIES COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-O2>"
+)
 target_compile_features(snipory_core PUBLIC cxx_std_20)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui)

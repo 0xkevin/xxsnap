@@ -2250,12 +2250,57 @@ final class AppSettingsTests: XCTestCase {
         let chinese = L10n(language: .zhHans).text(.scrollCaptureLowConfidence)
         let english = L10n(language: .english).text(.scrollCaptureLowConfidence)
 
-        XCTAssertEqual(chinese, "暂无法识别到拼接位置，将继续尝试拼接")
+        XCTAssertEqual(
+            chinese,
+            "当前画面无法与上一次成功截图可靠匹配，请滚回最后成功位置后缓慢滚动"
+        )
         XCTAssertFalse(chinese.contains("暂停"))
-        XCTAssertEqual(english, "Overlap not found yet. Continuing to stitch.")
+        XCTAssertEqual(
+            english,
+            "The current frame cannot be matched reliably. Scroll back to the last successful position, then continue slowly."
+        )
         XCTAssertFalse(english.localizedCaseInsensitiveContains("paused"))
-        XCTAssertTrue(L10n(language: .zhHans).text(.scrollCaptureResourceLimit).contains("暂停"))
-        XCTAssertTrue(L10n(language: .english).text(.scrollCaptureResourceLimit).localizedCaseInsensitiveContains("paused"))
+        XCTAssertEqual(
+            L10n(language: .zhHans).text(.scrollCaptureResourceLimit),
+            "已达到长截图的尺寸或内存上限，请完成并保存已拼接内容"
+        )
+        XCTAssertEqual(
+            L10n(language: .english).text(.scrollCaptureResourceLimit),
+            "The capture has reached its size or memory limit. Finish and save the stitched content."
+        )
+    }
+
+    func testSuperLongCaptureWarningExplainsSaveOnlyModeInBothLanguages() {
+        let chineseTitle = L10n(language: .zhHans).text(.scrollCaptureSuperLongTitle)
+        let chineseDetail = L10n(language: .zhHans).text(.scrollCaptureSuperLongDetail)
+        let englishTitle = L10n(language: .english).text(.scrollCaptureSuperLongTitle)
+        let englishDetail = L10n(language: .english).text(.scrollCaptureSuperLongDetail)
+
+        XCTAssertTrue(chineseTitle.contains("超长截图"))
+        XCTAssertTrue(chineseDetail.contains("29,000"))
+        XCTAssertTrue(chineseDetail.contains("仅支持保存为 PNG"))
+        XCTAssertTrue(chineseDetail.contains("原始像素无损保存"))
+        XCTAssertTrue(chineseDetail.contains("200,000"))
+        XCTAssertTrue(chineseDetail.contains("不会缩放或降低清晰度"))
+        XCTAssertEqual(
+            L10n(language: .zhHans).text(.scrollCaptureMaximumHeight),
+            "滚动截图已达到最大高度 200,000 像素，已停止继续拼接，请完成并保存当前截图。"
+        )
+        XCTAssertEqual(
+            L10n(language: .zhHans).text(.scrollCaptureSaveEscapeNote),
+            "保存期间按 Esc 不会取消"
+        )
+        XCTAssertEqual(L10n(language: .zhHans).text(.scrollCaptureSaveCancel), "取消保存")
+        XCTAssertTrue(englishTitle.localizedCaseInsensitiveContains("extra-long"))
+        XCTAssertTrue(englishDetail.contains("29,000"))
+        XCTAssertTrue(englishDetail.localizedCaseInsensitiveContains("PNG saving only"))
+        XCTAssertTrue(englishDetail.localizedCaseInsensitiveContains("losslessly"))
+        XCTAssertTrue(englishDetail.contains("200,000"))
+        XCTAssertTrue(englishDetail.localizedCaseInsensitiveContains("never downscaled"))
+        XCTAssertEqual(
+            L10n(language: .english).text(.scrollCaptureMaximumHeight),
+            "The scroll capture exceeded the maximum height of 200,000 pixels and has stopped stitching. Finish and save the current capture."
+        )
     }
 
     @MainActor

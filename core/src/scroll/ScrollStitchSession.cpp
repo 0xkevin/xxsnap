@@ -6,7 +6,6 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 #include <limits>
 #include <iterator>
@@ -24,6 +23,13 @@ constexpr FingerprintSize AnchorFingerprintSize{16, 12};
 constexpr std::size_t MaximumAnchorSearchCount = 256;
 constexpr double AutomaticFixedBandMaximumRatio = 0.75;
 constexpr int StationaryPixelChannelTolerance = 3;
+constexpr int MaximumStationaryColumnSamples = 256;
+constexpr int MaximumStationaryRowSamples = 256;
+
+[[nodiscard]] int samplingStride(int count, int maximumSamples)
+{
+    return std::max(1, (count + maximumSamples - 1) / maximumSamples);
+}
 
 [[nodiscard]] bool validUnit(double value)
 {
@@ -35,14 +41,18 @@ constexpr int StationaryPixelChannelTolerance = 3;
     const auto& matcher = config.matcher;
     const bool matcherIsValid = std::isfinite(matcher.minimumOverlapRatio)
         && std::isfinite(matcher.maximumAdvanceRatio)
+        && std::isfinite(matcher.maximumReliableAdvanceRatio)
         && std::isfinite(matcher.maximumNormalizedError)
         && std::isfinite(matcher.minimumWinnerMargin)
+        && std::isfinite(matcher.minimumReliableConfidence)
         && matcher.minimumOverlapRatio > 0.0
         && matcher.minimumOverlapRatio <= 1.0
         && matcher.maximumAdvanceRatio >= 0.0
         && matcher.maximumAdvanceRatio <= 1.0
+        && validUnit(matcher.maximumReliableAdvanceRatio)
         && matcher.maximumNormalizedError >= 0.0
         && matcher.minimumWinnerMargin >= 0.0
+        && validUnit(matcher.minimumReliableConfidence)
         && matcher.expectedAdvance >= 0
         && matcher.expectedAdvanceTolerance >= 0
         && matcher.maximumFullResolutionCandidates > 0
@@ -179,11 +189,6 @@ void repairIsolatedNearWhiteSeamRows(
     return static_cast<int>(weighted >> 8U);
 }
 
-[[nodiscard]] bool pixelEqual(const ScrollFrame& left, const ScrollFrame& right, int x, int y)
-{
-    return pixelKey(left, x, y) == pixelKey(right, x, y);
-}
-
 [[nodiscard]] bool pixelStationary(
     const ScrollFrame& left,
     const ScrollFrame& right,
@@ -234,6 +239,18 @@ void repairIsolatedNearWhiteSeamRows(
     }
     try {
         return std::make_shared<const ScrollFrame>(std::move(normalized));
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
+[[nodiscard]] std::optional<std::shared_ptr<const ScrollFrame>> takeFrame(ScrollFrame&& frame)
+{
+    if (!frame.isValid()) {
+        return std::nullopt;
+    }
+    try {
+        return std::make_shared<const ScrollFrame>(std::move(frame));
     } catch (...) {
         return std::nullopt;
     }
@@ -339,6 +356,41 @@ public:
                 return false;
             }
             return std::fread(destination, 1U, rowBytes, file_) == rowBytes;
+        }
+
+        [[nodiscard]] bool overwriteRows(
+            const Segment& segment,
+            int firstSegmentRow,
+            const ScrollFrame& frame,
+            int firstFrameRow,
+            int rowCount)
+        {
+            if (file_ == nullptr || firstSegmentRow < 0 || firstFrameRow < 0
+                || rowCount <= 0
+                || firstSegmentRow > segment.outputRows - rowCount
+                || firstFrameRow > frame.height - rowCount) {
+                return false;
+            }
+            const auto rowBytes = checkedProduct(
+                static_cast<std::size_t>(frame.width), 4U);
+            const auto rowOffset = rowBytes.has_value()
+                ? checkedProduct(static_cast<std::size_t>(firstSegmentRow), *rowBytes)
+                : std::nullopt;
+            if (!rowBytes.has_value() || !rowOffset.has_value()
+                || *rowOffset > std::numeric_limits<std::uint64_t>::max()
+                    - segment.fileOffset
+                || !seek(segment.fileOffset + *rowOffset)) {
+                return false;
+            }
+            for (int row = 0; row < rowCount; ++row) {
+                const auto sourceOffset = static_cast<std::size_t>(firstFrameRow + row)
+                    * static_cast<std::size_t>(frame.bytesPerRow);
+                if (std::fwrite(frame.pixels.data() + sourceOffset, 1U, *rowBytes, file_)
+                    != *rowBytes) {
+                    return false;
+                }
+            }
+            return std::fflush(file_) == 0;
         }
 
         [[nodiscard]] std::uint64_t byteCount() const noexcept { return byteCount_; }
@@ -455,11 +507,13 @@ public:
 
     [[nodiscard]] static bool usableMovement(
         const OverlapResult& value,
-        bool allowHighConfidenceAmbiguous)
+        bool allowHighConfidenceAmbiguous,
+        double minimumReliableConfidence = 0.0)
     {
         constexpr double MinimumUsableAmbiguousConfidence = 0.80;
         return value.verticalAdvance > 0
-            && (value.kind == OverlapKind::Reliable
+            && ((value.kind == OverlapKind::Reliable
+                    && value.confidence >= minimumReliableConfidence)
                 || (allowHighConfidenceAmbiguous
                     && value.kind == OverlapKind::Ambiguous
                     && value.confidence >= MinimumUsableAmbiguousConfidence));
@@ -484,6 +538,7 @@ public:
         Direction expected,
         Direction preferred = Direction::Undetermined) const
     {
+        const double minimumMovementConfidence = matcherConfig.minimumReliableConfidence;
         const auto makeMovement = [expected](Direction candidate, OverlapResult overlap) {
             DirectionalMatch result;
             result.candidate = candidate;
@@ -495,21 +550,27 @@ public:
             return result;
         };
         if (preferred != Direction::Undetermined) {
+            auto preferredMatcherConfig = matcherConfig;
+            preferredMatcherConfig.allowChangedPixelFallback = true;
             auto preferredOverlap = matchInDirection(
-                previous, current, matcherConfig, preferred);
-            const bool preferredUsable = usableMovement(preferredOverlap, true);
+                previous, current, preferredMatcherConfig, preferred);
+            const bool preferredUsable = usableMovement(
+                preferredOverlap, true, minimumMovementConfidence);
+            if (preferredUsable) {
+                return makeMovement(preferred, std::move(preferredOverlap));
+            }
+            if (matcherConfig.expectedAdvance > 0) {
+                DirectionalMatch result;
+                result.confidence = preferredOverlap.confidence;
+                return result;
+            }
             const Direction opposite = preferred == Direction::Down
                 ? Direction::Up
                 : Direction::Down;
             auto oppositeOverlap = matchInDirection(
                 previous, current, matcherConfig, opposite);
-            const bool oppositeUsable = usableMovement(oppositeOverlap, true);
-            const bool oppositeIsSubstantiallyBetter = preferredUsable && oppositeUsable
-                && oppositeOverlap.normalizedError + matcherConfig.minimumWinnerMargin
-                    < preferredOverlap.normalizedError;
-            if (preferredUsable && !oppositeIsSubstantiallyBetter) {
-                return makeMovement(preferred, std::move(preferredOverlap));
-            }
+            const bool oppositeUsable = usableMovement(
+                oppositeOverlap, true, minimumMovementConfidence);
             if (oppositeUsable) {
                 return makeMovement(opposite, std::move(oppositeOverlap));
             }
@@ -518,12 +579,22 @@ public:
                 preferredOverlap.confidence, oppositeOverlap.confidence);
             return result;
         }
+        if (expected != Direction::Undetermined
+            && matcherConfig.expectedAdvance > 0) {
+            auto expectedOverlap = matchInDirection(
+                previous, current, matcherConfig, expected);
+            if (usableMovement(expectedOverlap, true, minimumMovementConfidence)) {
+                return makeMovement(expected, std::move(expectedOverlap));
+            }
+        }
         const auto down = matchInDirection(
             previous, current, matcherConfig, Direction::Down);
         const auto up = matchInDirection(
             previous, current, matcherConfig, Direction::Up);
-        const bool downReliable = usableMovement(down, false);
-        const bool upReliable = usableMovement(up, false);
+        const bool downReliable = usableMovement(
+            down, false, minimumMovementConfidence);
+        const bool upReliable = usableMovement(
+            up, false, minimumMovementConfidence);
         DirectionalMatch result;
         result.confidence = std::max(down.confidence, up.confidence);
         if (!downReliable && !upReliable) {
@@ -643,6 +714,50 @@ public:
         return result;
     }
 
+    [[nodiscard]] bool overwriteComposedBack(
+        const ScrollFrame& frame,
+        int firstFrameRow,
+        int rowCount)
+    {
+        int remaining = rowCount;
+        int sourceEnd = firstFrameRow + rowCount;
+        for (auto segment = segments.rbegin(); segment != segments.rend() && remaining > 0;
+             ++segment) {
+            const int written = std::min(remaining, segment->outputRows);
+            sourceEnd -= written;
+            if (!segmentStore.overwriteRows(
+                    *segment,
+                    segment->outputRows - written,
+                    frame,
+                    sourceEnd,
+                    written)) {
+                return false;
+            }
+            remaining -= written;
+        }
+        return remaining == 0;
+    }
+
+    [[nodiscard]] bool overwriteComposedFront(
+        const ScrollFrame& frame,
+        int firstFrameRow,
+        int rowCount)
+    {
+        int remaining = rowCount;
+        int sourceRow = firstFrameRow;
+        for (auto segment = segments.begin(); segment != segments.end() && remaining > 0;
+             ++segment) {
+            const int written = std::min(remaining, segment->outputRows);
+            if (!segmentStore.overwriteRows(
+                    *segment, 0, frame, sourceRow, written)) {
+                return false;
+            }
+            sourceRow += written;
+            remaining -= written;
+        }
+        return remaining == 0;
+    }
+
     [[nodiscard]] std::size_t pruneAnchorHistory()
     {
         if (anchors.size() <= MaximumAnchorSearchCount) {
@@ -679,13 +794,17 @@ public:
             return 0;
         }
         int stationaryColumns = 0;
+        const int rowStride = samplingStride(rowCount, MaximumStationaryRowSamples);
         for (int offset = 0; offset < budget; ++offset) {
             const int x = left ? offset : current.width - 1 - offset;
             int equal = 0;
-            for (int y = firstRow; y < lastRow; ++y) {
+            int sampledRows = 0;
+            for (int y = firstRow; y < lastRow; y += rowStride) {
                 equal += pixelStationary(previous, current, x, y) ? 1 : 0;
+                ++sampledRows;
             }
-            const double ratio = static_cast<double>(equal) / static_cast<double>(rowCount);
+            const double ratio = static_cast<double>(equal)
+                / static_cast<double>(sampledRows);
             if (ratio < config.fixedSideStationaryThreshold) {
                 break;
             }
@@ -696,7 +815,8 @@ public:
 
     [[nodiscard]] OverlapConfig effectiveMatcherConfig(
         const ScrollFrame* previous = nullptr,
-        const ScrollFrame* current = nullptr) const
+        const ScrollFrame* current = nullptr,
+        bool includeUnconfirmedFixedBands = false) const
     {
         auto result = config.matcher;
         if (fixedTopConfirmed) {
@@ -706,6 +826,23 @@ public:
         if (fixedBottomConfirmed) {
             result.excludedBands.bottom = std::max(
                 result.excludedBands.bottom, fixedBottomHeight);
+        }
+        if (previous != nullptr && current != nullptr
+            && config.enableFixedBandDetection && includeUnconfirmedFixedBands) {
+            const int transientTop = fixedTopConfirmed
+                ? 0
+                : stationaryBandHeight(*previous, *current, true);
+            const int transientBottom = fixedBottomConfirmed
+                ? 0
+                : stationaryBandHeight(*previous, *current, false);
+            const int minimumScrollingRows = std::max(1, static_cast<int>(std::ceil(
+                static_cast<double>(current->height) * config.matcher.minimumOverlapRatio)));
+            if (transientTop + transientBottom
+                <= current->height - minimumScrollingRows) {
+                result.excludedBands.top = std::max(result.excludedBands.top, transientTop);
+                result.excludedBands.bottom = std::max(
+                    result.excludedBands.bottom, transientBottom);
+            }
         }
         result.excludedBands.right = std::max(
             result.excludedBands.right, config.scrollbarMaximumWidth);
@@ -732,10 +869,13 @@ public:
             return 0.0;
         }
         std::size_t equal = 0U;
-        const auto total = static_cast<std::size_t>(rowCount) * static_cast<std::size_t>(width);
-        for (int y = firstRow; y < firstRow + rowCount; ++y) {
-            for (int x = 0; x < width; ++x) {
+        std::size_t total = 0U;
+        const int rowStride = samplingStride(rowCount, MaximumStationaryRowSamples);
+        const int columnStride = samplingStride(width, MaximumStationaryColumnSamples);
+        for (int y = firstRow; y < firstRow + rowCount; y += rowStride) {
+            for (int x = 0; x < width; x += columnStride) {
                 equal += pixelStationary(previous, current, x, y) ? 1U : 0U;
+                ++total;
             }
         }
         return static_cast<double>(equal) / static_cast<double>(total);
@@ -779,13 +919,18 @@ public:
             return 0;
         }
         int stationaryRows = 0;
+        const int columnStride = samplingStride(
+            columnCount, MaximumStationaryColumnSamples);
         for (int offset = 0; offset < budget; ++offset) {
             const int y = top ? offset : current.height - 1 - offset;
             int equal = 0;
-            for (int x = firstColumn; x < firstColumn + columnCount; ++x) {
+            int sampledColumns = 0;
+            for (int x = firstColumn; x < firstColumn + columnCount; x += columnStride) {
                 equal += pixelStationary(previous, current, x, y) ? 1 : 0;
+                ++sampledColumns;
             }
-            const double ratio = static_cast<double>(equal) / static_cast<double>(columnCount);
+            const double ratio = static_cast<double>(equal)
+                / static_cast<double>(sampledColumns);
             if (ratio < config.fixedBandStationaryThreshold) {
                 break;
             }
@@ -797,7 +942,9 @@ public:
     [[nodiscard]] FixedBandEvidence fixedBandEvidence(
         const ScrollFrame& previous,
         const ScrollFrame& current,
-        Direction establishedDirection) const
+        Direction establishedDirection,
+        const OverlapConfig& baseMatcherConfig,
+        const DirectionalMatch* knownMovement = nullptr) const
     {
         FixedBandEvidence evidence;
         evidence.topHeight = stationaryBandHeight(previous, current, true);
@@ -817,7 +964,7 @@ public:
             evidence.bottom = false;
             return evidence;
         }
-        auto matcherConfig = effectiveMatcherConfig(&previous, &current);
+        auto matcherConfig = baseMatcherConfig;
         if (evidence.top) {
             matcherConfig.excludedBands.top = std::max(
                 matcherConfig.excludedBands.top,
@@ -829,7 +976,10 @@ public:
                 std::max(evidence.bottomHeight, fixedBottomRunHeight));
         }
         DirectionalMatch directional;
-        if (establishedDirection == Direction::Undetermined) {
+        if (knownMovement != nullptr
+            && knownMovement->decision == DirectionalDecision::Movement) {
+            directional = *knownMovement;
+        } else if (establishedDirection == Direction::Undetermined) {
             directional = directionalMatch(
                 previous, current, matcherConfig, Direction::Undetermined);
         } else {
@@ -844,7 +994,7 @@ public:
         if (directional.decision != DirectionalDecision::Movement
             && evidence.top && evidence.bottom) {
             const auto matchSingleBand = [&](bool top) {
-                auto singleBandConfig = effectiveMatcherConfig(&previous, &current);
+                auto singleBandConfig = baseMatcherConfig;
                 if (top) {
                     singleBandConfig.excludedBands.top = std::max(
                         singleBandConfig.excludedBands.top,
@@ -903,11 +1053,19 @@ public:
             std::size_t horizontalPairs = 0U;
             double sameError = 0.0;
             double alignedError = 0.0;
+            std::size_t sameSamples = 0U;
             std::size_t alignedSamples = 0U;
-            for (int row = 0; row < height; ++row) {
+            const int rowStride = samplingStride(height, MaximumStationaryRowSamples);
+            const int columnStride = samplingStride(
+                columnCount, MaximumStationaryColumnSamples);
+            std::size_t sampledColumns = 0U;
+            for (int x = firstColumn; x < firstColumn + columnCount; x += columnStride) {
+                ++sampledColumns;
+            }
+            for (int row = 0; row < height; row += rowStride) {
                 const int y = top ? row : current.height - height + row;
                 int previousValue = -1;
-                for (int x = firstColumn; x < firstColumn + columnCount; ++x) {
+                for (int x = firstColumn; x < firstColumn + columnCount; x += columnStride) {
                     const int currentValue = luminanceAt(current, x, y);
                     const int previousSame = luminanceAt(previous, x, y);
                     minimumValue = std::min(minimumValue, currentValue);
@@ -918,6 +1076,7 @@ public:
                     }
                     previousValue = currentValue;
                     sameError += std::abs(currentValue - previousSame) / 255.0;
+                    ++sameSamples;
 
                     const bool upward = evidence.candidate == Direction::Up;
                     const int alignedPreviousY = top
@@ -935,13 +1094,11 @@ public:
                     }
                 }
             }
-            const std::size_t sameSamples = static_cast<std::size_t>(height)
-                * static_cast<std::size_t>(columnCount);
             const double edgeRatio = horizontalPairs > 0U
                 ? static_cast<double>(horizontalEdges) / static_cast<double>(horizontalPairs)
                 : 0.0;
             if (maximumValue - minimumValue < 8 || edgeRatio < 0.05
-                || alignedSamples < static_cast<std::size_t>(columnCount)) {
+                || alignedSamples < sampledColumns) {
                 return false;
             }
             const double meanSameError = sameError / static_cast<double>(sameSamples);
@@ -959,7 +1116,7 @@ public:
             if (!evidence.top && !evidence.bottom) {
                 return evidence;
             }
-            matcherConfig = effectiveMatcherConfig(&previous, &current);
+            matcherConfig = baseMatcherConfig;
             if (evidence.top) {
                 matcherConfig.excludedBands.top = std::max(
                     matcherConfig.excludedBands.top,
@@ -970,13 +1127,16 @@ public:
                     matcherConfig.excludedBands.bottom,
                     std::max(evidence.bottomHeight, fixedBottomRunHeight));
             }
-            const auto refined = matchInDirection(
-                previous, current, matcherConfig, evidence.candidate);
-            if (!reliableMovement(refined)) {
-                evidence.top = false;
-                evidence.bottom = false;
-            } else {
-                evidence.overlap = refined;
+            if (knownMovement == nullptr
+                || knownMovement->decision != DirectionalDecision::Movement) {
+                const auto refined = matchInDirection(
+                    previous, current, matcherConfig, evidence.candidate);
+                if (!reliableMovement(refined)) {
+                    evidence.top = false;
+                    evidence.bottom = false;
+                } else {
+                    evidence.overlap = refined;
+                }
             }
         }
         return evidence;
@@ -1131,7 +1291,7 @@ ScrollStitchSession::ScrollStitchSession(ScrollStitchSession&&) noexcept = defau
 ScrollStitchSession& ScrollStitchSession::operator=(ScrollStitchSession&&) noexcept = default;
 
 AppendResult ScrollStitchSession::append(
-    const ScrollFrame& frame,
+    ScrollFrame frame,
     ScrollDirection preferredDirection,
     int expectedAdvance)
 try {
@@ -1168,9 +1328,9 @@ try {
             result.kind = AppendKind::ResourceLimit;
             return result;
         }
-        const auto storedFrame = copyFrame(frame);
         const auto storedSegment = implementation_->segmentStore.appendRows(
             frame, 0, frame.height);
+        const auto storedFrame = takeFrame(std::move(frame));
         if (!storedFrame.has_value() || !storedSegment.has_value()) {
             result.kind = AppendKind::ResourceLimit;
             return result;
@@ -1188,13 +1348,13 @@ try {
         }
         implementation_->tail = *storedFrame;
         implementation_->oppositeFrontier = *storedFrame;
-        implementation_->width = frame.width;
-        implementation_->viewportHeight = frame.height;
-        implementation_->height = frame.height;
+        implementation_->width = (*storedFrame)->width;
+        implementation_->viewportHeight = (*storedFrame)->height;
+        implementation_->height = (*storedFrame)->height;
         implementation_->persistentBytes = *projected;
         result.kind = AppendKind::AcceptedInitial;
-        result.appendedHeight = frame.height;
-        result.outputHeight = frame.height;
+        result.appendedHeight = implementation_->viewportHeight;
+        result.outputHeight = implementation_->height;
         result.confidence = 1.0;
         return result;
     }
@@ -1203,26 +1363,49 @@ try {
         || frame.height != implementation_->viewportHeight) {
         return result;
     }
-    if (const auto match = implementation_->matchingAnchor(fingerprint); match.has_value()) {
-        result.kind = implementation_->pending.empty()
-                && *match + 1U == implementation_->anchors.size()
-            ? AppendKind::DuplicateDiscarded
-            : AppendKind::ReviewDiscarded;
-        result.confidence = 1.0;
-        return result;
-    }
-    if (const auto match = implementation_->matchingPending(fingerprint); match.has_value()) {
-        result.kind = *match + 1U == implementation_->pending.size()
-            ? AppendKind::DuplicateDiscarded
-            : AppendKind::ReviewDiscarded;
-        result.confidence = 1.0;
-        return result;
+    const auto matchingAnchor = implementation_->matchingAnchor(fingerprint);
+    const auto matchingPending = implementation_->matchingPending(fingerprint);
+    const bool matchesLatestAnchor = matchingAnchor.has_value()
+        && implementation_->pending.empty()
+        && *matchingAnchor + 1U == implementation_->anchors.size();
+    const bool matchesLatestPending = matchingPending.has_value()
+        && *matchingPending + 1U == implementation_->pending.size();
+    const auto fingerprintClassifiedDiscard = [&]() {
+        auto classified = result;
+        if (matchingAnchor.has_value()) {
+            classified.kind = matchesLatestAnchor
+                ? AppendKind::DuplicateDiscarded
+                : AppendKind::ReviewDiscarded;
+            classified.confidence = 1.0;
+        } else if (matchingPending.has_value()) {
+            classified.kind = matchesLatestPending
+                ? AppendKind::DuplicateDiscarded
+                : AppendKind::ReviewDiscarded;
+            classified.confidence = 1.0;
+        }
+        return classified;
+    };
+    const auto framesEqual = [&frame](const ScrollFrame& stored) {
+        return stored.width == frame.width
+            && stored.height == frame.height
+            && stored.bytesPerRow == frame.bytesPerRow
+            && stored.pixels == frame.pixels;
+    };
+    const bool exactLatestAnchor = matchesLatestAnchor
+        && implementation_->tail != nullptr
+        && framesEqual(*implementation_->tail);
+    const bool exactPending = matchingPending.has_value()
+        && *matchingPending < implementation_->pending.size()
+        && framesEqual(*implementation_->pending[*matchingPending].frame);
+    if (exactLatestAnchor || exactPending) {
+        return fingerprintClassifiedDiscard();
     }
 
     const ScrollFrame* evidenceTail = implementation_->pending.empty()
         ? implementation_->tail.get()
         : implementation_->pending.back().frame.get();
-    auto matcherConfig = implementation_->effectiveMatcherConfig(evidenceTail, &frame);
+    auto matcherConfig = implementation_->effectiveMatcherConfig(
+        evidenceTail, &frame, expectedAdvance > 0);
     if (expectedAdvance > 0) {
         matcherConfig.expectedAdvance = expectedAdvance;
         matcherConfig.expectedAdvanceTolerance = std::min(
@@ -1251,26 +1434,40 @@ try {
                 implementation_->fixedBottomRunHeight);
         }
         const auto pendingDirectional = implementation_->directionalMatch(
-            *evidenceTail, frame, pendingDirectionConfig, expectedDirection);
+            *evidenceTail, frame, pendingDirectionConfig, expectedDirection, preferredDirection);
         if (pendingDirectional.decision == DirectionalDecision::Opposite) {
             const Direction restartedCandidate = pendingDirectional.candidate;
             implementation_->clearPending();
             evidenceTail = implementation_->tail.get();
             expectedDirection = Direction::Undetermined;
             directional = implementation_->directionalMatch(
-                *evidenceTail, frame, matcherConfig, expectedDirection);
+                *evidenceTail, frame, matcherConfig, expectedDirection, preferredDirection);
             if (directional.decision != DirectionalDecision::Movement
                 || directional.candidate != restartedCandidate) {
+                auto restartedMatcherConfig = implementation_->effectiveMatcherConfig(
+                    evidenceTail, &frame, expectedAdvance > 0);
+                if (expectedAdvance > 0) {
+                    restartedMatcherConfig.expectedAdvance = expectedAdvance;
+                    restartedMatcherConfig.expectedAdvanceTolerance = std::min(
+                        16, std::max(2, static_cast<int>(
+                            std::ceil(expectedAdvance * 0.03))));
+                }
                 const auto restartedEvidence = implementation_->fixedBandEvidence(
-                    *evidenceTail, frame, Direction::Undetermined);
+                    *evidenceTail,
+                    frame,
+                    Direction::Undetermined,
+                    restartedMatcherConfig);
                 if ((!restartedEvidence.top && !restartedEvidence.bottom)
-                    || restartedEvidence.candidate != restartedCandidate) {
+                    || restartedEvidence.candidate != restartedCandidate
+                    || (preferredDirection != Direction::Undetermined
+                        && expectedAdvance > 0
+                        && restartedCandidate != preferredDirection)) {
                     result.kind = directional.decision == DirectionalDecision::Ambiguous
                         ? AppendKind::LowConfidenceDiscarded
                         : AppendKind::ReviewDiscarded;
                     result.confidence = std::max(
                         pendingDirectional.confidence, directional.confidence);
-                    return result;
+                    return fingerprintClassifiedDiscard();
                 }
                 directional.decision = DirectionalDecision::Movement;
                 directional.candidate = restartedCandidate;
@@ -1300,7 +1497,7 @@ try {
             result.kind = directional.decision == DirectionalDecision::Opposite
                 ? AppendKind::ReviewDiscarded
                 : AppendKind::LowConfidenceDiscarded;
-            return result;
+            return fingerprintClassifiedDiscard();
         }
         directionToLock = implementation_->direction == Direction::Undetermined
             ? std::optional<Direction>(directional.candidate)
@@ -1313,8 +1510,17 @@ try {
                 ? directional.candidate
                 : Direction::Undetermined);
     const auto evidence = implementation_->fixedBandEvidence(
-        *evidenceTail, frame, establishedDirection);
-    if (evidence.top || evidence.bottom) {
+        *evidenceTail,
+        frame,
+        establishedDirection,
+        matcherConfig,
+        directional.decision == DirectionalDecision::Movement ? &directional : nullptr);
+    const bool evidenceFollowsExplicitMotion = preferredDirection == Direction::Undetermined
+        || expectedAdvance <= 0
+        || evidence.candidate == preferredDirection;
+    const bool acceptedFixedBandEvidence = (evidence.top || evidence.bottom)
+        && evidenceFollowsExplicitMotion;
+    if (acceptedFixedBandEvidence) {
         directional.decision = DirectionalDecision::Movement;
         directional.candidate = evidence.candidate;
         directional.overlap = evidence.overlap;
@@ -1344,7 +1550,7 @@ try {
                 }
                 result.kind = AppendKind::ReviewDiscarded;
                 result.confidence = review.confidence;
-                return result;
+                return fingerprintClassifiedDiscard();
             }
         }
     }
@@ -1352,23 +1558,23 @@ try {
         && implementation_->fixedTopAgreement > 0 && !evidence.top;
     const bool bottomEvidenceBroke = !implementation_->fixedBottomConfirmed
         && implementation_->fixedBottomAgreement > 0 && !evidence.bottom;
-    auto movementOverlap = evidence.top || evidence.bottom
+    auto movementOverlap = acceptedFixedBandEvidence
         ? evidence.overlap
         : overlap;
     if (!implementation_->pending.empty() && (topEvidenceBroke || bottomEvidenceBroke)) {
         auto transitionConfig = matcherConfig;
-        if (evidence.top || topEvidenceBroke) {
+        if ((acceptedFixedBandEvidence && evidence.top) || topEvidenceBroke) {
             transitionConfig.excludedBands.top = std::max(
                 transitionConfig.excludedBands.top,
                 std::max(evidence.topHeight, implementation_->fixedTopRunHeight));
         }
-        if (evidence.bottom || bottomEvidenceBroke) {
+        if ((acceptedFixedBandEvidence && evidence.bottom) || bottomEvidenceBroke) {
             transitionConfig.excludedBands.bottom = std::max(
                 transitionConfig.excludedBands.bottom,
                 std::max(evidence.bottomHeight, implementation_->fixedBottomRunHeight));
         }
         const auto transition = implementation_->directionalMatch(
-            *evidenceTail, frame, transitionConfig, expectedDirection);
+            *evidenceTail, frame, transitionConfig, expectedDirection, preferredDirection);
         if (transition.decision == DirectionalDecision::Movement) {
             directional = transition;
             overlap = transition.overlap;
@@ -1382,14 +1588,16 @@ try {
         result.kind = directional.decision == DirectionalDecision::Opposite
             ? AppendKind::ReviewDiscarded
             : AppendKind::LowConfidenceDiscarded;
-        return result;
+        return fingerprintClassifiedDiscard();
     }
 
     const bool continuePending = !implementation_->pending.empty()
-        || evidence.top || evidence.bottom;
+        || acceptedFixedBandEvidence;
     if (continuePending) {
         if (!Implementation::usableMovement(
-                movementOverlap, preferredDirection != Direction::Undetermined)) {
+                movementOverlap,
+                preferredDirection != Direction::Undetermined,
+                matcherConfig.minimumReliableConfidence)) {
             auto reviewConfig = matcherConfig;
             if (implementation_->fixedTopAgreement > 0) {
                 reviewConfig.excludedBands.top = std::max(
@@ -1409,10 +1617,10 @@ try {
                     }
                     result.kind = AppendKind::ReviewDiscarded;
                     result.confidence = review.confidence;
-                    return result;
+                    return fingerprintClassifiedDiscard();
                 }
             }
-            return result;
+            return fingerprintClassifiedDiscard();
         }
         const auto contribution = checkedSum(*fullFrameBytes, fingerprintBytes);
         const auto projected = contribution.has_value()
@@ -1422,7 +1630,7 @@ try {
             result.kind = AppendKind::ResourceLimit;
             return result;
         }
-        const auto storedPendingFrame = copyFrame(frame);
+        const auto storedPendingFrame = takeFrame(std::move(frame));
         if (!storedPendingFrame.has_value()) {
             result.kind = AppendKind::ResourceLimit;
             return result;
@@ -1682,9 +1890,11 @@ try {
     }
 
     if (!Implementation::usableMovement(
-            overlap, preferredDirection != Direction::Undetermined)) {
+            overlap,
+            preferredDirection != Direction::Undetermined,
+            matcherConfig.minimumReliableConfidence)) {
         implementation_->clearPending();
-        return result;
+        return fingerprintClassifiedDiscard();
     }
     if (implementation_->direction == Direction::Undetermined) {
         directionToLock = directional.candidate;
@@ -1726,10 +1936,16 @@ try {
         return result;
     }
 
+    const int overlapRefresh = std::min({
+        overlap.overlapHeight,
+        frame.height / 2,
+        prepend
+            ? frame.height - excludedBottom - appendedHeight
+            : firstNewRow - excludedTop,
+    });
     const auto storedSegment = implementation_->segmentStore.appendRows(
         frame, firstNewRow, appendedHeight);
-    const auto storedTail = copyFrame(frame);
-    if (!storedSegment.has_value() || !storedTail.has_value()) {
+    if (!storedSegment.has_value()) {
         result.kind = AppendKind::ResourceLimit;
         return result;
     }
@@ -1743,6 +1959,20 @@ try {
 
     const auto preparedScrollbar = implementation_->nextScrollbarState(
         implementation_->scrollbar, *implementation_->tail, frame);
+    const bool contacted = prepend
+        ? implementation_->overwriteComposedFront(
+            frame, firstNewRow + appendedHeight, overlapRefresh)
+        : implementation_->overwriteComposedBack(
+            frame, firstNewRow - overlapRefresh, overlapRefresh);
+    if (!contacted) {
+        result.kind = AppendKind::ResourceLimit;
+        return result;
+    }
+    const auto storedTail = takeFrame(std::move(frame));
+    if (!storedTail.has_value()) {
+        result.kind = AppendKind::ResourceLimit;
+        return result;
+    }
     Implementation::Segment newSegment = *storedSegment;
     if (prepend) {
         newSegment.documentStart = implementation_->segments.front().documentStart
@@ -1861,6 +2091,178 @@ std::uint64_t ScrollStitchSession::spooledBytes() const noexcept
     return implementation_->segmentStore.byteCount();
 }
 
+bool ScrollStitchSession::visitFinalRows(
+    bool includePending,
+    const FinalRowVisitor& visitor) const
+{
+    if (implementation_->segments.empty() || !visitor) {
+        return false;
+    }
+    const int leftCrop = implementation_->scrollbar.confirmedSide < 0
+        ? implementation_->scrollbar.confirmedWidth
+        : 0;
+    const int composedWidth = outputWidth();
+    const int composedHeight = includePending
+        ? previewOutputHeight()
+        : implementation_->height;
+    const auto rowBytes = checkedProduct(static_cast<std::size_t>(composedWidth), 4U);
+    if (!rowBytes.has_value() || composedHeight <= 0) {
+        return false;
+    }
+    try {
+        const auto storedRowBytes = static_cast<std::size_t>(implementation_->width) * 4U;
+        std::vector<std::uint8_t> storedRow(storedRowBytes);
+        std::vector<std::uint8_t> directRow(*rowBytes);
+        std::vector<std::uint8_t> beforeRow(*rowBytes);
+        std::vector<std::uint8_t> candidateRow(*rowBytes);
+        std::vector<std::uint8_t> nextRow(*rowBytes);
+        const auto seamRows = implementation_->seamRows(includePending, composedHeight);
+        std::size_t seamIndex = 0U;
+        int sourceRow = 0;
+        int emittedRow = 0;
+        int bufferedRows = 0;
+        const auto emit = [&](const std::vector<std::uint8_t>& row) {
+            if (emittedRow >= composedHeight
+                || !visitor(row.data(), *rowBytes, emittedRow, composedHeight)) {
+                return false;
+            }
+            ++emittedRow;
+            return true;
+        };
+        const auto repairCandidateIfNeeded = [&]() {
+            const int candidateLogicalRow = sourceRow - 2;
+            if (candidateLogicalRow <= 0 || candidateLogicalRow >= composedHeight - 1
+                || !std::binary_search(
+                    seamRows.cbegin(), seamRows.cend(), candidateLogicalRow)
+                || nearWhitePixelRatio(candidateRow.data(), composedWidth) < 0.98
+                || nearWhitePixelRatio(beforeRow.data(), composedWidth) > 0.90
+                || nearWhitePixelRatio(nextRow.data(), composedWidth) > 0.90) {
+                return;
+            }
+            for (int x = 0; x < composedWidth; ++x) {
+                const auto offset = static_cast<std::size_t>(x) * 4U;
+                for (std::size_t channel = 0; channel < 4U; ++channel) {
+                    candidateRow[offset + channel] = static_cast<std::uint8_t>(
+                        (static_cast<unsigned>(beforeRow[offset + channel])
+                            + static_cast<unsigned>(nextRow[offset + channel])
+                            + 1U)
+                        / 2U);
+                }
+            }
+        };
+        const auto acceptSourceRow = [&](const std::uint8_t* pixels) {
+            if (pixels == nullptr || sourceRow >= composedHeight) {
+                return false;
+            }
+            const auto* cropped = pixels + static_cast<std::size_t>(leftCrop) * 4U;
+            if (implementation_->config.seamWhiteCoverage > 0.0) {
+                std::memcpy(directRow.data(), cropped, *rowBytes);
+                if (seamIndex < seamRows.size() && sourceRow == seamRows[seamIndex]) {
+                    blendWhite(
+                        directRow.data(),
+                        composedWidth,
+                        implementation_->config.seamWhiteCoverage);
+                    ++seamIndex;
+                }
+                ++sourceRow;
+                return emit(directRow);
+            }
+            auto* destination = bufferedRows == 0
+                ? beforeRow.data()
+                : (bufferedRows == 1 ? candidateRow.data() : nextRow.data());
+            std::memcpy(destination, cropped, *rowBytes);
+            ++sourceRow;
+            if (bufferedRows < 2) {
+                ++bufferedRows;
+                return true;
+            }
+            repairCandidateIfNeeded();
+            if (!emit(beforeRow)) {
+                return false;
+            }
+            beforeRow.swap(candidateRow);
+            candidateRow.swap(nextRow);
+            return true;
+        };
+        const auto acceptFrameRows = [&](const ScrollFrame& frame, int firstRow, int rowCount) {
+            if (firstRow < 0 || rowCount <= 0 || firstRow > frame.height - rowCount) {
+                return false;
+            }
+            for (int row = 0; row < rowCount; ++row) {
+                const auto* pixels = frame.pixels.data()
+                    + static_cast<std::size_t>(firstRow + row)
+                        * static_cast<std::size_t>(frame.bytesPerRow);
+                if (!acceptSourceRow(pixels)) {
+                    return false;
+                }
+            }
+            return true;
+        };
+        const auto acceptCommitted = [&]() {
+            for (const auto& segment : implementation_->segments) {
+                for (int row = 0; row < segment.outputRows; ++row) {
+                    if (!implementation_->segmentStore.readRow(
+                            segment, row, storedRow.data(), storedRowBytes)
+                        || !acceptSourceRow(storedRow.data())) {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        };
+        const ScrollDirection pendingDirection = includePending
+                && !implementation_->pending.empty()
+            ? implementation_->pending.front().candidate
+            : ScrollDirection::Undetermined;
+        if (pendingDirection == ScrollDirection::Up) {
+            for (auto movement = implementation_->pending.crbegin();
+                 movement != implementation_->pending.crend(); ++movement) {
+                const int topHeight = movement->topDecision
+                        == Implementation::BandDecision::Ordinary
+                    ? 0
+                    : (implementation_->fixedTopConfirmed
+                            ? implementation_->fixedTopHeight
+                            : implementation_->fixedTopRunHeight);
+                if (!acceptFrameRows(*movement->frame, topHeight, movement->advance)) {
+                    return false;
+                }
+            }
+        }
+        if (!acceptCommitted()) {
+            return false;
+        }
+        if (pendingDirection == ScrollDirection::Down) {
+            for (const auto& movement : implementation_->pending) {
+                const int bottomHeight = movement.bottomDecision
+                        == Implementation::BandDecision::Ordinary
+                    ? 0
+                    : (implementation_->fixedBottomConfirmed
+                            ? implementation_->fixedBottomHeight
+                            : implementation_->fixedBottomRunHeight);
+                const int firstRow = movement.frame->height
+                    - movement.advance - bottomHeight;
+                if (!acceptFrameRows(*movement.frame, firstRow, movement.advance)) {
+                    return false;
+                }
+            }
+        }
+        if (sourceRow != composedHeight) {
+            return false;
+        }
+        if (implementation_->config.seamWhiteCoverage == 0.0) {
+            if (bufferedRows >= 1 && !emit(beforeRow)) {
+                return false;
+            }
+            if (bufferedRows == 2 && !emit(candidateRow)) {
+                return false;
+            }
+        }
+        return emittedRow == composedHeight;
+    } catch (...) {
+        return false;
+    }
+}
+
 bool ScrollStitchSession::copyFinalPixels(
     void* destination,
     std::size_t destinationBytes,
@@ -1868,12 +2270,9 @@ bool ScrollStitchSession::copyFinalPixels(
     bool includePending,
     bool bottomUp) const
 {
-    if (implementation_->segments.empty() || destination == nullptr) {
+    if (destination == nullptr) {
         return false;
     }
-    const int leftCrop = implementation_->scrollbar.confirmedSide < 0
-        ? implementation_->scrollbar.confirmedWidth
-        : 0;
     const int composedWidth = outputWidth();
     const int composedHeight = includePending
         ? previewOutputHeight()
@@ -1885,108 +2284,16 @@ bool ScrollStitchSession::copyFinalPixels(
         || destinationBytesPerRow < *rowBytes || destinationBytes < *requiredBytes) {
         return false;
     }
-    const auto storedRowBytes = static_cast<std::size_t>(implementation_->width) * 4U;
-    std::vector<std::uint8_t> storedRow(storedRowBytes);
     auto* destinationPixels = static_cast<std::uint8_t*>(destination);
-    const auto seamRows = implementation_->seamRows(includePending, composedHeight);
-    std::size_t seamIndex = 0U;
-    int outputRow = 0;
-    const auto writeRow = [&](const std::uint8_t* pixels) {
-        if (pixels == nullptr || outputRow >= composedHeight) {
-            return false;
-        }
-        const int destinationRow = bottomUp
-            ? composedHeight - 1 - outputRow
-            : outputRow;
-        auto* destinationRowPixels = destinationPixels
-            + static_cast<std::size_t>(destinationRow) * destinationBytesPerRow;
-        std::memcpy(
-            destinationRowPixels,
-            pixels + static_cast<std::size_t>(leftCrop) * 4U,
-            *rowBytes);
-        if (implementation_->config.seamWhiteCoverage > 0.0
-            && seamIndex < seamRows.size() && outputRow == seamRows[seamIndex]) {
-            blendWhite(
-                destinationRowPixels,
-                composedWidth,
-                implementation_->config.seamWhiteCoverage);
-            ++seamIndex;
-        }
-        ++outputRow;
-        return true;
-    };
-    const auto writeFrameRows = [&](const ScrollFrame& frame, int firstRow, int rowCount) {
-        if (firstRow < 0 || rowCount <= 0 || firstRow > frame.height - rowCount) {
-            return false;
-        }
-        for (int row = 0; row < rowCount; ++row) {
-            const auto* pixels = frame.pixels.data()
-                + static_cast<std::size_t>(firstRow + row)
-                    * static_cast<std::size_t>(frame.bytesPerRow);
-            if (!writeRow(pixels)) {
-                return false;
-            }
-        }
-        return true;
-    };
-    const auto writeCommitted = [&]() {
-        for (const auto& segment : implementation_->segments) {
-            for (int row = 0; row < segment.outputRows; ++row) {
-                if (!implementation_->segmentStore.readRow(
-                        segment, row, storedRow.data(), storedRowBytes)
-                    || !writeRow(storedRow.data())) {
-                    return false;
-                }
-            }
-        }
-        return true;
-    };
-    const ScrollDirection pendingDirection = includePending && !implementation_->pending.empty()
-        ? implementation_->pending.front().candidate
-        : ScrollDirection::Undetermined;
-    if (pendingDirection == ScrollDirection::Up) {
-        for (auto movement = implementation_->pending.crbegin();
-             movement != implementation_->pending.crend(); ++movement) {
-            const int topHeight = movement->topDecision == Implementation::BandDecision::Ordinary
-                ? 0
-                : (implementation_->fixedTopConfirmed
-                        ? implementation_->fixedTopHeight
-                        : implementation_->fixedTopRunHeight);
-            if (!writeFrameRows(*movement->frame, topHeight, movement->advance)) {
-                return false;
-            }
-        }
-    }
-    if (!writeCommitted()) {
-        return false;
-    }
-    if (pendingDirection == ScrollDirection::Down) {
-        for (const auto& movement : implementation_->pending) {
-            const int bottomHeight = movement.bottomDecision
-                    == Implementation::BandDecision::Ordinary
-                ? 0
-                : (implementation_->fixedBottomConfirmed
-                        ? implementation_->fixedBottomHeight
-                        : implementation_->fixedBottomRunHeight);
-            const int firstRow = movement.frame->height - movement.advance - bottomHeight;
-            if (!writeFrameRows(*movement.frame, firstRow, movement.advance)) {
-                return false;
-            }
-        }
-    }
-    if (outputRow != composedHeight) {
-        return false;
-    }
-    if (implementation_->config.seamWhiteCoverage == 0.0) {
-        repairIsolatedNearWhiteSeamRows(
-            destinationPixels,
-            composedWidth,
-            composedHeight,
-            destinationBytesPerRow,
-            seamRows,
-            bottomUp);
-    }
-    return true;
+    return visitFinalRows(
+        includePending,
+        [&](const std::uint8_t* pixels, std::size_t bytes, int row, int totalRows) {
+            const int destinationRow = bottomUp ? totalRows - 1 - row : row;
+            auto* destinationRowPixels = destinationPixels
+                + static_cast<std::size_t>(destinationRow) * destinationBytesPerRow;
+            std::memcpy(destinationRowPixels, pixels, bytes);
+            return true;
+        });
 }
 
 ScrollFrame ScrollStitchSession::finalize() const

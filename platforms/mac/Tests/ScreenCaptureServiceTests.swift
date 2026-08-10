@@ -6,7 +6,45 @@ import XCTest
 @testable import xxsnap
 
 final class ScreenCaptureServiceTests: XCTestCase {
-    func testScrollFrameBufferKeepsOldestRetainedIntermediateFrames() async throws {
+    @MainActor
+    func testScrollStreamConfigurationPreservesEnoughIntermediateFramesForFastScrolling() {
+        let configuration = ScreenCaptureService.makeScrollStreamConfiguration(width: 320, height: 200)
+
+        // Match PixPin's proven 100 ms cadence. Capturing faster than the serial
+        // matcher can consume frames only evicts the overlap-preserving frames.
+        XCTAssertEqual(configuration.minimumFrameInterval, CMTime(value: 1, timescale: 10))
+        XCTAssertEqual(configuration.queueDepth, 5)
+        XCTAssertEqual(ScreenCaptureService.scrollCaptureFrameBufferCapacity, 8)
+    }
+
+    func testScrollFrameAdmissionDoesNotDropSparseOrDuplicateFrames() {
+        let detector = ScrollCaptureFrameChangeDetector()
+        let baseline = [UInt8](repeating: 120, count: 144)
+        var sparseListMovement = baseline
+        sparseListMovement[17] = 255
+
+        XCTAssertTrue(detector.shouldEnqueue(signature: baseline))
+        XCTAssertTrue(detector.shouldEnqueue(signature: baseline))
+        XCTAssertTrue(detector.shouldEnqueue(signature: sparseListMovement))
+    }
+
+    func testScrollFrameChangeDetectorKeepsContinuousViewportMovement() {
+        let detector = ScrollCaptureFrameChangeDetector()
+        let baseline = [UInt8](repeating: 30, count: 144)
+        var scrolled = baseline
+        for index in stride(from: 0, to: scrolled.count, by: 8) {
+            scrolled[index] = 220
+        }
+
+        XCTAssertTrue(detector.shouldEnqueue(signature: baseline))
+        XCTAssertTrue(detector.shouldEnqueue(signature: scrolled))
+        XCTAssertTrue(detector.shouldEnqueue(signature: scrolled))
+
+        detector.reset()
+        XCTAssertTrue(detector.shouldEnqueue(signature: scrolled))
+    }
+
+    func testScrollFrameBufferKeepsTheOldestRetainedFrameForStitchContinuity() async throws {
         let buffer = ScrollCaptureFrameBuffer(capacity: 3)
         let first = NSImage(size: NSSize(width: 1, height: 1))
         let second = NSImage(size: NSSize(width: 2, height: 2))
@@ -18,12 +56,26 @@ final class ScreenCaptureServiceTests: XCTestCase {
         buffer.enqueue(third)
         buffer.enqueue(fourth)
 
-        let deliveredSecond = try await buffer.nextImage()
-        let deliveredThird = try await buffer.nextImage()
-        let deliveredFourth = try await buffer.nextImage()
+        let delivered = try await buffer.nextImage()
+        XCTAssertTrue(delivered === second)
+    }
+
+    func testScrollFrameBufferDeliversRetainedFramesInCaptureOrder() async throws {
+        let buffer = ScrollCaptureFrameBuffer(capacity: 3)
+        let first = NSImage(size: NSSize(width: 1, height: 1))
+        let second = NSImage(size: NSSize(width: 2, height: 2))
+        let third = NSImage(size: NSSize(width: 3, height: 3))
+
+        buffer.enqueue(first)
+        buffer.enqueue(second)
+        buffer.enqueue(third)
+
+        let deliveredFirst = try await buffer.nextImage(maximumWait: 0.01)
+        let deliveredSecond = try await buffer.nextImage(maximumWait: 0.01)
+        let deliveredThird = try await buffer.nextImage(maximumWait: 0.01)
+        XCTAssertTrue(deliveredFirst === first)
         XCTAssertTrue(deliveredSecond === second)
         XCTAssertTrue(deliveredThird === third)
-        XCTAssertTrue(deliveredFourth === fourth)
     }
 
     func testScrollFrameBufferCanDiscardFramesCapturedBeforeAStep() async throws {
@@ -52,13 +104,13 @@ final class ScreenCaptureServiceTests: XCTestCase {
         XCTAssertLessThan(startedAt.duration(to: .now), .milliseconds(200))
     }
 
-    func testScrollFrameBufferStopsExpensiveProductionWhileItsQueueIsFull() async throws {
+    func testScrollFrameBufferKeepsAcceptingNewerFramesWhileQueueIsFull() async throws {
         let buffer = ScrollCaptureFrameBuffer(capacity: 2)
         XCTAssertTrue(buffer.canAcceptImage)
 
         buffer.enqueue(NSImage(size: NSSize(width: 1, height: 1)))
         buffer.enqueue(NSImage(size: NSSize(width: 2, height: 2)))
-        XCTAssertFalse(buffer.canAcceptImage)
+        XCTAssertTrue(buffer.canAcceptImage)
 
         _ = try await buffer.nextImage()
         XCTAssertTrue(buffer.canAcceptImage)

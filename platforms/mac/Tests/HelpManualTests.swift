@@ -208,6 +208,14 @@ final class HelpManualTests: XCTestCase {
         XCTAssertTrue(text.contains("等页面稳定后继续滚动"))
         XCTAssertTrue(text.contains("达到资源上限后不能继续采集"))
         XCTAssertTrue(text.contains("只能完成已接受的长图或取消"))
+        XCTAssertTrue(text.contains("超过 29,000 像素"))
+        XCTAssertTrue(text.contains("仅支持保存为 PNG"))
+        XCTAssertTrue(text.contains("200,000 像素时仍会继续采集"))
+        XCTAssertTrue(text.contains("超过 200,000 像素后才停止"))
+        XCTAssertTrue(text.contains("可能略高于 200,000 像素"))
+        XCTAssertTrue(text.contains("只保留保存进度窗口"))
+        XCTAssertTrue(text.contains("Esc 不会取消保存"))
+        XCTAssertTrue(text.contains("点击取消保存"))
 
         for obsoleteText in [
             "自动滚动",
@@ -251,6 +259,14 @@ final class HelpManualTests: XCTestCase {
         XCTAssertTrue(text.contains("Return or Enter finishes, and Esc cancels"))
         XCTAssertTrue(text.contains("Scroll Capture itself does not require Accessibility permission"))
         XCTAssertTrue(text.contains("Global shortcuts may need Accessibility permission"))
+        XCTAssertTrue(text.contains("over 29,000 pixels"))
+        XCTAssertTrue(text.contains("PNG saving only"))
+        XCTAssertTrue(text.contains("continues at exactly 200,000 pixels"))
+        XCTAssertTrue(text.contains("stops only after an accepted stitch exceeds 200,000 pixels"))
+        XCTAssertTrue(text.contains("may be slightly taller than 200,000 pixels"))
+        XCTAssertTrue(text.contains("only the save progress window remains"))
+        XCTAssertTrue(text.contains("Esc does not cancel saving"))
+        XCTAssertTrue(text.contains("Cancel Saving"))
 
         for obsoleteText in [
             "automatic scrolling",

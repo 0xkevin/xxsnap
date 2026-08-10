@@ -75,6 +75,90 @@ ScrollFrame sparseChatWithStationaryWatermark(int documentY)
     return frame;
 }
 
+ScrollFrame sparseVirtualList(int contentPhase)
+{
+    ScrollFrame frame(240, 240);
+    for (int y = 0; y < frame.height; ++y) {
+        const int row = y / 20;
+        const int rowInItem = y % 20;
+        for (int x = 0; x < frame.width; ++x) {
+            std::uint8_t value = 248;
+            const bool icon = x >= 8 && x < 18 && rowInItem >= 5 && rowInItem < 15;
+            const bool title = x >= 28 && x < 118 + row * 3
+                && rowInItem >= 6 && rowInItem < 9;
+            const bool metadata = x >= 150 && x < 190
+                && rowInItem >= 7 && rowInItem < 9;
+            if (icon || title || metadata) {
+                value = static_cast<std::uint8_t>(60 + contentPhase * 20);
+            }
+            setGray(frame, x, y, value);
+        }
+    }
+    return frame;
+}
+
+ScrollFrame sparseListDocument(int width, int height)
+{
+    ScrollFrame frame(width, height);
+    for (int y = 0; y < height; ++y) {
+        const int item = y / 48;
+        const int rowInItem = y % 48;
+        const int titleWidth = 90 + (item * 53) % 360;
+        const int metadataStart = width - 150 - (item * 17) % 80;
+        for (int x = 0; x < width; ++x) {
+            std::uint8_t value = 250;
+            const bool icon = x >= 12 && x < 38 && rowInItem >= 11 && rowInItem < 37;
+            const bool title = x >= 56 && x < 56 + titleWidth
+                && rowInItem >= 15 && rowInItem < 20;
+            const bool metadata = x >= metadataStart && x < width - 20
+                && rowInItem >= 17 && rowInItem < 21;
+            if (icon) {
+                value = static_cast<std::uint8_t>(50 + (item * 29) % 150);
+            } else if (title || metadata) {
+                value = static_cast<std::uint8_t>(35 + (item * 11) % 80);
+            }
+            setGray(frame, x, y, value);
+        }
+    }
+    return frame;
+}
+
+ScrollFrame detailSkippedByAspectScalingDocument(
+    int width,
+    int viewportHeight,
+    int documentHeight)
+{
+    constexpr int matchingHeight = 512;
+    const int scaledWidth = std::max(1, static_cast<int>(std::lround(
+        static_cast<double>(width) * matchingHeight / viewportHeight)));
+    std::vector<bool> sampledColumns(static_cast<std::size_t>(width), false);
+    const double sourceColumnsPerTarget = static_cast<double>(width) / scaledWidth;
+    for (int targetX = 0; targetX < scaledWidth; ++targetX) {
+        const double sourcePosition = (static_cast<double>(targetX) + 0.5)
+                * sourceColumnsPerTarget
+            - 0.5;
+        const int first = std::clamp(
+            static_cast<int>(std::floor(sourcePosition)), 0, width - 1);
+        sampledColumns[static_cast<std::size_t>(first)] = true;
+        sampledColumns[static_cast<std::size_t>(std::min(width - 1, first + 1))] = true;
+    }
+
+    ScrollFrame frame(width, documentHeight);
+    for (int y = 0; y < documentHeight; ++y) {
+        for (int x = 0; x < width; ++x) {
+            std::uint8_t value = 250;
+            if (!sampledColumns[static_cast<std::size_t>(x)]) {
+                auto bits = static_cast<std::uint32_t>(y) * 0x9e3779b9U
+                    ^ static_cast<std::uint32_t>(x) * 0x85ebca6bU;
+                bits ^= bits >> 16U;
+                value = static_cast<std::uint8_t>(32U + bits % 176U);
+            }
+            setGray(frame, x, y, value);
+        }
+    }
+    return frame;
+}
+
 ScrollFrame verticalGradient(int width, int height)
 {
     ScrollFrame frame(width, height);
@@ -211,6 +295,25 @@ void corruptQuarterGrid(ScrollFrame& frame)
     }
 }
 
+void paintFixedHeader(ScrollFrame& frame, int height)
+{
+    for (int y = 0; y < std::min(height, frame.height); ++y) {
+        for (int x = 0; x < frame.width; ++x) {
+            setGray(frame, x, y, static_cast<std::uint8_t>(32 + (x * 13 + y * 7) % 160));
+        }
+    }
+}
+
+void paintFixedMiddleBand(ScrollFrame& frame, int firstColumn, int columnCount)
+{
+    const int lastColumn = std::min(frame.width, firstColumn + columnCount);
+    for (int y = 0; y < frame.height; ++y) {
+        for (int x = std::max(0, firstColumn); x < lastColumn; ++x) {
+            setGray(frame, x, y, static_cast<std::uint8_t>(32 + (x * 13 + y * 7) % 160));
+        }
+    }
+}
+
 } // namespace
 
 class TestVerticalOverlapMatcher final : public QObject
@@ -228,6 +331,8 @@ private slots:
     void matchesWhenScoringRegionIsNarrowerThanCoarseBlock();
     void masksLeftRightAndBottomBands();
     void respectsMaximumAdvanceRatio();
+    void defaultRejectsAdvanceBeyondTwoThirdsOfViewport();
+    void expectedAdvanceCannotBypassTwoThirdsSafetyLimit();
     void respectsMaximumNormalizedError();
     void respectsMinimumWinnerMargin();
     void rejectsInvalidInputsAndConfig();
@@ -239,6 +344,11 @@ private slots:
     void detectsIndependentPeaksHiddenByFlatSignature();
     void usesExpectedAdvanceToResolveStationaryWatermarkAmbiguity();
     void expectedAdvanceDoesNotPromoteNearThresholdVisualMismatch();
+    void expectedAdvanceRejectsLowConfidenceVirtualListReplacement();
+    void matchesLargeViewportAtFullResolutionAdvance();
+    void preservesHorizontalDetailWhenReducingLargeViewportHeight();
+    void isolatesChangedScrollingRegionFromLargeFixedHeader();
+    void ignoresStationaryPixelsInsideChangedRegion();
     void avoidsFlatSignatureFullResolutionDegeneration();
     void returnsConservativeResultWhenEvaluationBudgetIsExhausted();
     void sufficientBudgetResolvesSmallCommonNullspaceInput();
@@ -254,7 +364,11 @@ void TestVerticalOverlapMatcher::findsDownwardOffset()
 
     const auto result = VerticalOverlapMatcher().match(previous, current, {});
 
-    QCOMPARE(result.kind, OverlapKind::Reliable);
+    QVERIFY2(result.kind == OverlapKind::Reliable,
+        qPrintable(QStringLiteral("advance=%1 confidence=%2 error=%3")
+            .arg(result.verticalAdvance)
+            .arg(result.confidence)
+            .arg(result.normalizedError)));
     QCOMPARE(result.verticalAdvance, 72);
     QCOMPARE(result.overlapHeight, 108);
     QVERIFY(result.confidence >= 0.8);
@@ -267,10 +381,15 @@ void TestVerticalOverlapMatcher::usesExpectedAdvanceToResolveStationaryWatermark
     OverlapConfig config;
     config.expectedAdvance = 80;
     config.expectedAdvanceTolerance = 8;
+    config.minimumReliableConfidence = 0.30;
 
     const auto result = VerticalOverlapMatcher().match(previous, current, config);
 
-    QCOMPARE(result.kind, OverlapKind::Reliable);
+    QVERIFY2(result.kind == OverlapKind::Reliable,
+        qPrintable(QStringLiteral("advance=%1 confidence=%2 error=%3")
+            .arg(result.verticalAdvance)
+            .arg(result.confidence)
+            .arg(result.normalizedError)));
     QCOMPARE(result.verticalAdvance, 80);
     QVERIFY(result.normalizedError <= config.maximumNormalizedError);
 }
@@ -288,6 +407,125 @@ void TestVerticalOverlapMatcher::expectedAdvanceDoesNotPromoteNearThresholdVisua
     const auto result = VerticalOverlapMatcher().match(previous, current, config);
 
     QVERIFY(result.kind != OverlapKind::Reliable);
+}
+
+void TestVerticalOverlapMatcher::expectedAdvanceRejectsLowConfidenceVirtualListReplacement()
+{
+    const auto previous = sparseVirtualList(0);
+    const auto replaced = sparseVirtualList(1);
+    OverlapConfig config;
+    config.expectedAdvance = 80;
+    config.expectedAdvanceTolerance = 2;
+
+    const auto result = VerticalOverlapMatcher().match(previous, replaced, config);
+
+    QVERIFY2(result.kind != OverlapKind::Reliable,
+        qPrintable(QStringLiteral("advance=%1 confidence=%2 error=%3")
+            .arg(result.verticalAdvance)
+            .arg(result.confidence)
+            .arg(result.normalizedError)));
+}
+
+void TestVerticalOverlapMatcher::matchesLargeViewportAtFullResolutionAdvance()
+{
+    constexpr int viewportWidth = 1'482;
+    constexpr int viewportHeight = 3'491;
+    constexpr int advance = 620;
+    const ScrollFrame document = sparseListDocument(
+        viewportWidth, viewportHeight + advance);
+    const ScrollFrame previous = crop(
+        document, 0, 0, viewportWidth, viewportHeight);
+    const ScrollFrame current = crop(
+        document, 0, advance, viewportWidth, viewportHeight);
+
+    QElapsedTimer timer;
+    timer.start();
+    const auto result = VerticalOverlapMatcher().match(previous, current, {});
+    const auto elapsed = timer.elapsed();
+
+    QVERIFY2(result.kind == OverlapKind::Reliable,
+        qPrintable(QStringLiteral("advance=%1 confidence=%2 error=%3")
+            .arg(result.verticalAdvance)
+            .arg(result.confidence)
+            .arg(result.normalizedError)));
+    QCOMPARE(result.verticalAdvance, advance);
+    QCOMPARE(result.overlapHeight, viewportHeight - advance);
+    // The live pipeline samples every 100 ms. Matching must stay below that
+    // budget or the FIFO eventually loses the continuous overlap chain.
+    QVERIFY2(elapsed < 100,
+        qPrintable(QStringLiteral("large viewport match took %1 ms").arg(elapsed)));
+}
+
+void TestVerticalOverlapMatcher::preservesHorizontalDetailWhenReducingLargeViewportHeight()
+{
+    constexpr int viewportWidth = 1'482;
+    constexpr int viewportHeight = 3'491;
+    constexpr int advance = 620;
+    const ScrollFrame document = detailSkippedByAspectScalingDocument(
+        viewportWidth, viewportHeight, viewportHeight + advance);
+    const ScrollFrame previous = crop(
+        document, 0, 0, viewportWidth, viewportHeight);
+    const ScrollFrame current = crop(
+        document, 0, advance, viewportWidth, viewportHeight);
+
+    const auto result = VerticalOverlapMatcher().match(previous, current, {});
+
+    QVERIFY2(result.kind == OverlapKind::Reliable,
+        qPrintable(QStringLiteral("advance=%1 confidence=%2 error=%3")
+            .arg(result.verticalAdvance)
+            .arg(result.confidence)
+            .arg(result.normalizedError)));
+    QCOMPARE(result.verticalAdvance, advance);
+}
+
+void TestVerticalOverlapMatcher::isolatesChangedScrollingRegionFromLargeFixedHeader()
+{
+    constexpr int viewportWidth = 1'482;
+    constexpr int viewportHeight = 3'491;
+    constexpr int fixedHeaderHeight = 1'500;
+    constexpr int advance = 620;
+    const ScrollFrame document = sparseListDocument(
+        viewportWidth, viewportHeight + advance);
+    ScrollFrame previous = crop(document, 0, 0, viewportWidth, viewportHeight);
+    ScrollFrame current = crop(document, 0, advance, viewportWidth, viewportHeight);
+    paintFixedHeader(previous, fixedHeaderHeight);
+    paintFixedHeader(current, fixedHeaderHeight);
+
+    const auto result = VerticalOverlapMatcher().match(previous, current, {});
+
+    QVERIFY2(result.kind == OverlapKind::Reliable,
+        qPrintable(QStringLiteral("advance=%1 confidence=%2 error=%3")
+            .arg(result.verticalAdvance)
+            .arg(result.confidence)
+            .arg(result.normalizedError)));
+    QCOMPARE(result.verticalAdvance, advance);
+}
+
+void TestVerticalOverlapMatcher::ignoresStationaryPixelsInsideChangedRegion()
+{
+    constexpr int viewportWidth = 900;
+    constexpr int viewportHeight = 800;
+    constexpr int advance = 100;
+    const ScrollFrame document = sparseListDocument(
+        viewportWidth, viewportHeight + advance);
+    ScrollFrame previous = crop(document, 0, 0, viewportWidth, viewportHeight);
+    ScrollFrame current = crop(document, 0, advance, viewportWidth, viewportHeight);
+
+    // A fixed browser/sidebar surface sits inside the outer bounds of the
+    // moving article. PixPin's changed-pixel mask excludes it from scoring.
+    paintFixedMiddleBand(previous, 190, 520);
+    paintFixedMiddleBand(current, 190, 520);
+
+    OverlapConfig config;
+    config.allowChangedPixelFallback = true;
+    const auto result = VerticalOverlapMatcher().match(previous, current, config);
+
+    QVERIFY2(result.kind == OverlapKind::Reliable,
+        qPrintable(QStringLiteral("advance=%1 confidence=%2 error=%3")
+            .arg(result.verticalAdvance)
+            .arg(result.confidence)
+            .arg(result.normalizedError)));
+    QCOMPARE(result.verticalAdvance, advance);
 }
 
 void TestVerticalOverlapMatcher::rejectsRepeatedPatternWithAmbiguousPlacement()
@@ -415,6 +653,31 @@ void TestVerticalOverlapMatcher::respectsMaximumAdvanceRatio()
     const ScrollFrame current = crop(document, 0, 72, 120, 180);
     OverlapConfig config;
     config.maximumAdvanceRatio = 0.30;
+
+    const auto result = VerticalOverlapMatcher().match(previous, current, config);
+
+    QCOMPARE(result.kind, OverlapKind::Insufficient);
+}
+
+void TestVerticalOverlapMatcher::defaultRejectsAdvanceBeyondTwoThirdsOfViewport()
+{
+    const ScrollFrame document = stripedDocument(120, 480);
+    const ScrollFrame previous = crop(document, 0, 0, 120, 180);
+    const ScrollFrame current = crop(document, 0, 130, 120, 180);
+
+    const auto result = VerticalOverlapMatcher().match(previous, current, {});
+
+    QCOMPARE(result.kind, OverlapKind::Insufficient);
+}
+
+void TestVerticalOverlapMatcher::expectedAdvanceCannotBypassTwoThirdsSafetyLimit()
+{
+    const ScrollFrame document = stripedDocument(120, 480);
+    const ScrollFrame previous = crop(document, 0, 0, 120, 180);
+    const ScrollFrame current = crop(document, 0, 130, 120, 180);
+    OverlapConfig config;
+    config.expectedAdvance = 130;
+    config.expectedAdvanceTolerance = 2;
 
     const auto result = VerticalOverlapMatcher().match(previous, current, config);
 

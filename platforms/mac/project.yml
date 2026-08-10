@@ -54,6 +54,7 @@ targets:
         CODE_SIGNING_ALLOWED: YES
         CODE_SIGNING_REQUIRED: YES
         CODE_SIGN_IDENTITY: "xxsnap Local Dev"
+        OTHER_LDFLAGS: "$(inherited) -lz"
       configs:
         Debug:
           XX_COMMERCIAL_SIGNING_PUBLIC_KEY_2025_01: "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo="

@@ -5,14 +5,31 @@ import UniformTypeIdentifiers
 
 @MainActor
 protocol ScrollCaptureSessionRunning: AnyObject {
+    var requiresSaveOnlyCompletion: Bool { get }
     func start() async throws
     func performStep(direction: ScrollCaptureDirection) async throws
     func finish() async throws -> NSImage
+    func finishSaving(to url: URL) async throws
+    func finishSaving(
+        to url: URL,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws
     @discardableResult func cancel() -> ScrollCaptureSeed
 }
 
 extension ScrollCaptureSessionRunning {
+    var requiresSaveOnlyCompletion: Bool { false }
     func performStep(direction: ScrollCaptureDirection) async throws {}
+    func finishSaving(to url: URL) async throws {
+        throw ScrollCaptureSessionError.directPNGExportUnavailable
+    }
+    func finishSaving(
+        to url: URL,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws {
+        try await finishSaving(to: url)
+        progress(1)
+    }
 }
 
 extension ScrollCaptureSession: ScrollCaptureSessionRunning {}
@@ -31,14 +48,34 @@ protocol ScrollCapturePresenting: AnyObject {
     func clearWarning()
     func updatePlacement(selectionFrame: NSRect, visibleFrame: NSRect)
     func resetTerminalActionsForRetry()
+    func hideForSaving()
+    func restoreAfterSaveFailure()
     func updateLanguage(_ language: AppLanguage)
 }
 
 extension ScrollCapturePresenting {
+    func hideForSaving() { stop() }
+    func restoreAfterSaveFailure() {}
     func updateLanguage(_ language: AppLanguage) {}
 }
 
 extension ScrollCapturePresentationController: ScrollCapturePresenting {}
+
+@MainActor
+protocol SuperLongSaveProgressPresenting: AnyObject {
+    func show()
+    func updateProgress(_ progress: Double)
+    func dismiss()
+}
+
+extension SuperLongCaptureSaveProgressWindowController: SuperLongSaveProgressPresenting {}
+
+struct SuperLongSaveProgressContext {
+    let destination: URL
+    let selectionFrame: NSRect
+    let language: AppLanguage
+    let onCancel: @MainActor () -> Void
+}
 
 @MainActor
 protocol LongImageEditorPresenting: AnyObject {
@@ -129,6 +166,12 @@ final class CaptureCoordinator {
     private let longImageFallbackPresenter: @MainActor (NSImage) -> LongImageFallbackChoice
     private let longImageCopyHandler: (@MainActor (NSImage) -> Bool)?
     private let longImageSaveHandler: (@MainActor (NSImage) -> Bool)?
+    private let superLongSaveDestinationProvider: @MainActor () -> URL?
+    private let superLongSaveCompletionHandler: @MainActor (URL) -> Void
+    private let superLongModePresenter: (@MainActor (Int) -> Void)?
+    private let superLongSaveProgressFactory: @MainActor (
+        SuperLongSaveProgressContext
+    ) -> any SuperLongSaveProgressPresenting
     private let ocrTextRecognizer: any OCRTextRecognizing
     private let qrCodeRecognizer: any QRCodeRecognizing
     private let textCopyHandler: @MainActor (String) -> Bool
@@ -153,6 +196,9 @@ final class CaptureCoordinator {
     private var scrollCaptureSeed: ScrollCaptureSeed?
     private var scrollCaptureFinishPending = false
     private var scrollCaptureMessageKey: L10n.Key?
+    private var scrollCaptureSuperLongModePresented = false
+    private var superLongWarning: SuperLongCaptureWarningWindowController?
+    private var superLongSaveProgress: (any SuperLongSaveProgressPresenting)?
     private var scrollCapturePhase: ScrollCaptureLifecyclePhase = .idle
     private var scrollCaptureGeneration: UInt64 = 0
     private var captureTargetApplication: NSRunningApplication?
@@ -179,6 +225,12 @@ final class CaptureCoordinator {
         longImageFallbackPresenter: (@MainActor (NSImage) -> LongImageFallbackChoice)? = nil,
         longImageCopyHandler: (@MainActor (NSImage) -> Bool)? = nil,
         longImageSaveHandler: (@MainActor (NSImage) -> Bool)? = nil,
+        superLongSaveDestinationProvider: (@MainActor () -> URL?)? = nil,
+        superLongSaveCompletionHandler: (@MainActor (URL) -> Void)? = nil,
+        superLongModePresenter: (@MainActor (Int) -> Void)? = nil,
+        superLongSaveProgressFactory: (@MainActor (
+            SuperLongSaveProgressContext
+        ) -> any SuperLongSaveProgressPresenting)? = nil,
         ocrTextRecognizer: any OCRTextRecognizing = OCRTextRecognitionService(),
         qrCodeRecognizer: any QRCodeRecognizing = QRCodeRecognitionService(),
         textCopyHandler: (@MainActor (String) -> Bool)? = nil,
@@ -245,6 +297,21 @@ final class CaptureCoordinator {
         }
         self.longImageCopyHandler = longImageCopyHandler
         self.longImageSaveHandler = longImageSaveHandler
+        self.superLongSaveDestinationProvider = superLongSaveDestinationProvider ?? {
+            Self.presentSuperLongSavePanel(filename: filenameProvider.suggestedFilename())
+        }
+        self.superLongSaveCompletionHandler = superLongSaveCompletionHandler ?? { url in
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        }
+        self.superLongModePresenter = superLongModePresenter
+        self.superLongSaveProgressFactory = superLongSaveProgressFactory ?? { context in
+            SuperLongCaptureSaveProgressWindowController(
+                destination: context.destination,
+                selectionFrame: context.selectionFrame,
+                language: context.language,
+                onCancel: context.onCancel
+            )
+        }
         self.ocrTextRecognizer = ocrTextRecognizer
         self.qrCodeRecognizer = qrCodeRecognizer
         self.textCopyHandler = textCopyHandler ?? Self.copyTextToPasteboard
@@ -711,6 +778,9 @@ final class CaptureCoordinator {
         else { return }
 
         scrollCaptureFinishPending = false
+        superLongWarning?.dismiss()
+        superLongWarning = nil
+        scrollCaptureSuperLongModePresented = false
         scrollCapturePhase = .starting
         overlay.setScrollCaptureCapturing()
         scrollCaptureGeneration &+= 1
@@ -897,6 +967,7 @@ final class CaptureCoordinator {
             let key: L10n.Key
             switch reason {
             case .resourceLimit: key = .scrollCaptureResourceLimit
+            case .maximumHeightReached: key = .scrollCaptureMaximumHeight
             case .captureFailure: key = .scrollCaptureFailure
             }
             let message = l10n.text(key)
@@ -916,6 +987,25 @@ final class CaptureCoordinator {
             presentation.clearWarning()
         case .stepState:
             break
+        case .enteredSuperLongMode(let outputHeight):
+            guard !scrollCaptureSuperLongModePresented else { break }
+            scrollCaptureSuperLongModePresented = true
+            scrollCaptureMessageKey = nil
+            presentation.clearWarning()
+            if let superLongModePresenter {
+                superLongModePresenter(outputHeight)
+            } else {
+                let warning = SuperLongCaptureWarningWindowController(
+                    language: languageSnapshot.language
+                )
+                superLongWarning = warning
+                warning.show()
+            }
+            if let targetApplication = captureTargetApplication {
+                applicationActivator(targetApplication)
+            } else {
+                NSApp.deactivate()
+            }
         case .state:
             break
         }
@@ -951,48 +1041,142 @@ final class CaptureCoordinator {
               scrollCapturePresentation != nil,
               scrollCaptureTask == nil
         else { return }
+        superLongWarning?.dismiss()
+        superLongWarning = nil
+        let directSaveURL: URL?
+        if session.requiresSaveOnlyCompletion {
+            guard let destination = superLongSaveDestinationProvider() else {
+                scrollCapturePresentation?.resetTerminalActionsForRetry()
+                overlayWindow?.resetScrollCaptureTerminalActionsForRetry()
+                return
+            }
+            directSaveURL = destination
+        } else {
+            directSaveURL = nil
+        }
         NSLog("xxsnap scroll-capture coordinator entering finishing")
         scrollCapturePhase = .finishing
         scrollCaptureFinishPending = false
         let generation = scrollCaptureGeneration
+        if let directSaveURL {
+            let progress = superLongSaveProgressFactory(SuperLongSaveProgressContext(
+                destination: directSaveURL,
+                selectionFrame: seed.screenRect,
+                language: languageSnapshot.language,
+                onCancel: { [weak self] in
+                    self?.scrollCaptureTask?.cancel()
+                }
+            ))
+            superLongSaveProgress = progress
+            retireScrollCaptureVisualsForSaving()
+            progress.show()
+        }
         scrollCaptureTask = Task { @MainActor [weak self, weak session] in
             do {
-                guard let image = try await session?.finish() else { return }
-                NSLog("xxsnap scroll-capture session returned final image size=%@", NSStringFromSize(image.size))
+                let image: NSImage?
+                if let directSaveURL {
+                    try await session?.finishSaving(to: directSaveURL) { [weak self] value in
+                        Task { @MainActor [weak self] in
+                            guard let self,
+                                  self.scrollCaptureGeneration == generation,
+                                  self.scrollCaptureSession === session
+                            else { return }
+                            self.superLongSaveProgress?.updateProgress(value)
+                        }
+                    }
+                    NSLog("xxsnap scroll-capture saved PNG to %@", directSaveURL.path)
+                    image = nil
+                } else {
+                    guard let completedImage = try await session?.finish() else { return }
+                    image = completedImage
+                    NSLog("xxsnap scroll-capture session returned final image size=%@", NSStringFromSize(completedImage.size))
+                }
                 guard let self, self.scrollCaptureGeneration == generation,
                       self.scrollCaptureSession === session else { return }
+                if directSaveURL != nil {
+                    self.superLongSaveProgress?.updateProgress(1)
+                }
+                self.superLongSaveProgress?.dismiss()
+                self.superLongSaveProgress = nil
                 self.scrollCapturePresentation?.stop()
                 self.scrollCapturePresentation = nil
                 self.scrollCaptureSession = nil
                 self.scrollCaptureSeed = nil
                 self.scrollCaptureMessageKey = nil
+                self.scrollCaptureSuperLongModePresented = false
                 self.scrollCaptureTask = nil
                 if let overlay = self.overlayWindow {
                     overlay.finishScrollCaptureAndDismiss()
                     self.overlayWindow = nil
                 }
                 self.frozenDesktopImage = nil
-                self.lastCapture = image
                 self.scrollCaptureFinishPending = false
                 self.scrollCapturePhase = .idle
-                if let longImageHandoff = self.longImageHandoff {
-                    longImageHandoff(image, seed)
+                if let image {
+                    self.lastCapture = image
+                    if let longImageHandoff = self.longImageHandoff {
+                        longImageHandoff(image, seed)
+                    } else {
+                        self.presentLongImageEditor(image: image, seed: seed)
+                    }
                     self.captureSessionDidEnd?()
                 } else {
-                    self.presentLongImageEditor(image: image, seed: seed)
+                    self.lastCapture = nil
+                    if let directSaveURL {
+                        self.superLongSaveCompletionHandler(directSaveURL)
+                    }
                     self.captureSessionDidEnd?()
                 }
             } catch {
                 NSLog("xxsnap scroll-capture finish failed: %@", String(describing: error))
                 guard let self, self.scrollCaptureGeneration == generation,
                       self.scrollCaptureSession === session else { return }
+                self.superLongSaveProgress?.dismiss()
+                self.superLongSaveProgress = nil
+                if error is CancellationError || Task.isCancelled {
+                    self.finishCancelledSuperLongSave()
+                    return
+                }
                 self.scrollCaptureTask = nil
                 self.scrollCaptureFinishPending = false
                 self.scrollCapturePhase = .active
+                if directSaveURL != nil {
+                    self.overlayWindow?.present()
+                    self.scrollCapturePresentation?.restoreAfterSaveFailure()
+                }
                 self.scrollCapturePresentation?.resetTerminalActionsForRetry()
                 self.overlayWindow?.resetScrollCaptureTerminalActionsForRetry()
             }
         }
+    }
+
+    private func retireScrollCaptureVisualsForSaving() {
+        scrollCapturePresentation?.hideForSaving()
+        overlayWindow?.hideForScrollCaptureSave()
+        frozenDesktopImage = nil
+    }
+
+    private func finishCancelledSuperLongSave() {
+        scrollCaptureGeneration &+= 1
+        scrollCaptureTask = nil
+        scrollCapturePresentation?.stop()
+        scrollCapturePresentation = nil
+        _ = scrollCaptureSession?.cancel()
+        scrollCaptureSession = nil
+        scrollCaptureSeed = nil
+        scrollCaptureMessageKey = nil
+        scrollCaptureSuperLongModePresented = false
+        superLongWarning?.dismiss()
+        superLongWarning = nil
+        scrollCaptureFinishPending = false
+        if let overlay = overlayWindow {
+            overlay.finishScrollCaptureAndDismiss()
+            overlayWindow = nil
+        }
+        frozenDesktopImage = nil
+        lastCapture = nil
+        scrollCapturePhase = .idle
+        captureSessionDidEnd?()
     }
 
     private func cancelScrollCapture() {
@@ -1006,12 +1190,17 @@ final class CaptureCoordinator {
         scrollCaptureGeneration &+= 1
         scrollCaptureTask?.cancel()
         scrollCaptureTask = nil
+        superLongSaveProgress?.dismiss()
+        superLongSaveProgress = nil
         _ = scrollCaptureSession?.cancel()
         scrollCapturePresentation?.stop()
         scrollCapturePresentation = nil
         scrollCaptureSession = nil
         scrollCaptureSeed = nil
         scrollCaptureMessageKey = nil
+        scrollCaptureSuperLongModePresented = false
+        superLongWarning?.dismiss()
+        superLongWarning = nil
         scrollCaptureFinishPending = false
         overlayWindow?.restoreAfterScrollCaptureCancellation()
         overlayWindow?.present()
@@ -1022,12 +1211,17 @@ final class CaptureCoordinator {
         guard scrollCaptureGeneration == generation else { return }
         scrollCaptureGeneration &+= 1
         scrollCaptureTask = nil
+        superLongSaveProgress?.dismiss()
+        superLongSaveProgress = nil
         scrollCapturePresentation?.stop()
         scrollCapturePresentation = nil
         _ = scrollCaptureSession?.cancel()
         scrollCaptureSession = nil
         scrollCaptureSeed = nil
         scrollCaptureMessageKey = nil
+        scrollCaptureSuperLongModePresented = false
+        superLongWarning?.dismiss()
+        superLongWarning = nil
         scrollCaptureFinishPending = false
         overlayWindow?.restoreAfterScrollCaptureCancellation()
         overlayWindow?.present()
@@ -1151,6 +1345,15 @@ final class CaptureCoordinator {
         alert.addButton(withTitle: l10n.text(.longImageSave))
         alert.addButton(withTitle: l10n.text(.cancel))
         return alert.runModal() == .alertFirstButtonReturn ? .save : .cancel
+    }
+
+    private static func presentSuperLongSavePanel(filename: String) -> URL? {
+        let savePanel = NSSavePanel()
+        savePanel.allowedContentTypes = [.png]
+        savePanel.nameFieldStringValue = filename
+        savePanel.level = .modalPanel
+        NSApp.activate(ignoringOtherApps: true)
+        return savePanel.runModal() == .OK ? savePanel.url : nil
     }
 
     private func presentPinnedImage(_ image: NSImage, screenRect: NSRect) {

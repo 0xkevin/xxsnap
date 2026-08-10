@@ -122,6 +122,7 @@ struct ContinuousScrollCaptureClock: ScrollCaptureClock {
     }
 }
 
+@MainActor
 protocol ScrollStitching: AnyObject {
     func append(_ image: NSImage) async throws -> ScrollCaptureAppendUpdate
     func append(
@@ -133,12 +134,21 @@ protocol ScrollStitching: AnyObject {
         preferredDirection: ScrollCaptureDirection,
         expectedAdvance: CGFloat
     ) async throws -> ScrollCaptureAppendUpdate
+    func rebase(_ image: NSImage) async throws -> Bool
     func preview(maximumHeight: Int) async throws -> NSImage
     func preview(maximumWidth: Int) async throws -> NSImage
     func finalImage() async throws -> NSImage
+    func writePNG(to url: URL) async throws
+    func writePNG(
+        to url: URL,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws
+    func cancelPNGWrite()
 }
 
 extension ScrollStitching {
+    func rebase(_ image: NSImage) async throws -> Bool { false }
+
     func append(
         _ image: NSImage,
         preferredDirection: ScrollCaptureDirection
@@ -157,6 +167,20 @@ extension ScrollStitching {
     func preview(maximumWidth: Int) async throws -> NSImage {
         try await preview(maximumHeight: maximumWidth)
     }
+
+    func writePNG(to url: URL) async throws {
+        throw ScrollCaptureSessionError.directPNGExportUnavailable
+    }
+
+    func writePNG(
+        to url: URL,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws {
+        try await writePNG(to: url)
+        progress(1)
+    }
+
+    func cancelPNGWrite() {}
 }
 
 final class ScrollCaptureBridgeWorker: ScrollStitching, @unchecked Sendable {
@@ -172,6 +196,12 @@ final class ScrollCaptureBridgeWorker: ScrollStitching, @unchecked Sendable {
     func append(_ image: NSImage) async throws -> ScrollCaptureAppendUpdate {
         try await Task.detached(priority: .userInitiated) { [bridge] in
             try bridge.append(image)
+        }.value
+    }
+
+    func rebase(_ image: NSImage) async throws -> Bool {
+        try await Task.detached(priority: .userInitiated) { [bridge] in
+            try bridge.rebase(image).boolValue
         }.value
     }
 
@@ -215,10 +245,38 @@ final class ScrollCaptureBridgeWorker: ScrollStitching, @unchecked Sendable {
             try bridge.finalImage()
         }.value
     }
+
+    func writePNG(to url: URL) async throws {
+        try await writePNG(to: url, progress: { _ in })
+    }
+
+    func writePNG(
+        to url: URL,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws {
+        let bridge = self.bridge
+        let exportTask = Task.detached(priority: .userInitiated) { [bridge] in
+            try Task.checkCancellation()
+            try bridge.writePNG(to: url, progress: progress)
+            try Task.checkCancellation()
+        }
+        try await withTaskCancellationHandler {
+            try await exportTask.value
+            try Task.checkCancellation()
+        } onCancel: {
+            exportTask.cancel()
+            bridge.cancelPNGWrite()
+        }
+    }
+
+    func cancelPNGWrite() {
+        bridge.cancelPNGWrite()
+    }
 }
 
 enum ScrollCapturePauseReason: Equatable {
     case resourceLimit
+    case maximumHeightReached
     case captureFailure
 }
 
@@ -271,6 +329,7 @@ enum ScrollCapturePresentationUpdate {
     case warning(ScrollCaptureMatchWarning?)
     case terminalCommand(ScrollCaptureTerminalCommand)
     case stepState(ScrollCaptureStepControlState)
+    case enteredSuperLongMode(outputHeight: Int)
 }
 
 enum ScrollCaptureTerminalCommand: Equatable {
@@ -283,15 +342,17 @@ enum ScrollCaptureSessionError: Error, Equatable {
     case initialFrameRejected(ScrollCaptureAppendKind)
     case operationCancelled
     case acceptedAppendWithoutDirection
+    case directPNGExportUnavailable
 }
 
 @MainActor
 final class ScrollCaptureSession {
+    private static let superLongPixelHeightThreshold = 29_000
+    private static let maximumPixelHeight = 200_000
     private static let largeViewportThreshold: CGFloat = 600
     private static let compactViewportRatio: CGFloat = 0.40
     private static let largeViewportRatio: CGFloat = 0.50
     private static let lowConfidenceVisualBoundaryThreshold = 2
-    private static let stableSamplingFrameThreshold = 3
 
     static func stepDistance(forViewportHeight height: CGFloat) -> CGFloat {
         guard height.isFinite else { return 1 }
@@ -302,6 +363,7 @@ final class ScrollCaptureSession {
     let seed: ScrollCaptureSeed
     private(set) var state: ScrollCaptureSessionState = .idle
     private(set) var isSamplingArmed = false
+    private(set) var requiresSaveOnlyCompletion = false
 
     private let capturer: any ScrollRegionCapturing
     private var stitcher: (any ScrollStitching)?
@@ -315,10 +377,11 @@ final class ScrollCaptureSession {
     private var currentSamplingLoopID: UInt64?
     private var nextSamplingLoopID: UInt64 = 0
     private var tickInProgress = false
+    private var stitchAppendInProgress = false
+    private var stitchAppendCompletionWaiters: [CheckedContinuation<Void, Never>] = []
     private var generation = 0
     private var currentWarning: ScrollCaptureMatchWarning?
     private var preferredDirection: ScrollCaptureDirection = .unknown
-    private var consecutiveStableSamplingFrames = 0
     private var captureViewportPixelHeight = 1
     private var lockedStepDirection: ScrollCaptureDirection?
     private var lockedContentDirection: ScrollCaptureDirection?
@@ -339,7 +402,10 @@ final class ScrollCaptureSession {
         clock: any ScrollCaptureClock,
         activityMonitor: any ScrollActivityMonitoring,
         stepController: (any ScrollCaptureStepControlling)? = nil,
-        samplingInterval: Duration = .milliseconds(180),
+        // The frame stream already limits capture cadence. Keep this poll delay
+        // short so matching immediately drains the next retained frame instead of
+        // adding another 80 ms of latency after every serial match.
+        samplingInterval: Duration = .milliseconds(10),
         diagnosticLogger: any DiagnosticLogging = NoopDiagnosticLogger.shared,
         presentation: @escaping @MainActor (ScrollCapturePresentationUpdate) -> Void
     ) {
@@ -382,6 +448,11 @@ final class ScrollCaptureSession {
             guard update.kind == .acceptedInitial else {
                 throw ScrollCaptureSessionError.initialFrameRejected(update.kind)
             }
+            emitSuperLongModeIfNeeded(
+                outputHeight: update.outputHeight,
+                operationGeneration: operationGeneration,
+                expectedState: .preparing
+            )
             captureViewportPixelHeight = update.outputHeight > 0
                 ? update.outputHeight
                 : Self.pixelHeight(of: seed.frozenImage)
@@ -926,7 +997,6 @@ final class ScrollCaptureSession {
     private func armSampling(direction: ScrollCaptureDirection) {
         guard state == .capturing else { return }
         if direction != .unknown { preferredDirection = direction }
-        consecutiveStableSamplingFrames = 0
         if !isSamplingArmed {
             (capturer as? any ScrollRegionCaptureBuffering)?.discardBufferedFrames()
         }
@@ -968,13 +1038,16 @@ final class ScrollCaptureSession {
         guard let stitcher else { throw ScrollCaptureSessionError.invalidState(state) }
         generation += 1
         let operationGeneration = generation
-        disarmSampling()
+        let inFlightSampling = disarmSampling()
         activityMonitor.stop()
         stepController?.stop()
         guard setState(.finishing, operationGeneration: operationGeneration) else {
             throw ScrollCaptureSessionError.operationCancelled
         }
         do {
+            await inFlightSampling?.value
+            await waitForStitchAppendToFinish()
+            try Task.checkCancellation()
             let image = try await stitcher.finalImage()
             NSLog("xxsnap scroll-capture stitcher produced final image size=%@", NSStringFromSize(image.size))
             self.stitcher = nil
@@ -1000,6 +1073,81 @@ final class ScrollCaptureSession {
                 level: .error,
                 event: "scroll_session_finish_failed",
                 metadata: ["error_type": String(describing: type(of: error))]
+            )
+            throw error
+        }
+    }
+
+    func finishSaving(to url: URL) async throws {
+        try await finishSaving(to: url, progress: { _ in })
+    }
+
+    func finishSaving(
+        to url: URL,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws {
+        NSLog("xxsnap scroll-capture session direct PNG finish requested state=%@", String(describing: state))
+        switch state {
+        case .capturing, .paused:
+            break
+        default:
+            throw ScrollCaptureSessionError.invalidState(state)
+        }
+        guard let stitcher else { throw ScrollCaptureSessionError.invalidState(state) }
+        generation += 1
+        let operationGeneration = generation
+        let inFlightSampling = disarmSampling()
+        activityMonitor.stop()
+        stepController?.stop()
+        guard setState(.finishing, operationGeneration: operationGeneration) else {
+            throw ScrollCaptureSessionError.operationCancelled
+        }
+        do {
+            await inFlightSampling?.value
+            await waitForStitchAppendToFinish()
+            try Task.checkCancellation()
+            try await stitcher.writePNG(to: url, progress: progress)
+            self.stitcher = nil
+            guard setState(.finished, operationGeneration: operationGeneration) else {
+                throw ScrollCaptureSessionError.operationCancelled
+            }
+            endDiagnosticSession(
+                event: "scroll_session_finished",
+                level: .info,
+                metadata: ["completion_mode": "direct_png"]
+            )
+        } catch {
+            let cocoaError = error as NSError
+            let wasCancelled = error is CancellationError
+                || Task.isCancelled
+                || (cocoaError.domain == NSCocoaErrorDomain
+                    && cocoaError.code == NSUserCancelledError)
+            if wasCancelled {
+                stitcher.cancelPNGWrite()
+                self.stitcher = nil
+                guard generation == operationGeneration, state == .finishing else {
+                    throw CancellationError()
+                }
+                _ = setState(.cancelled, operationGeneration: operationGeneration)
+                endDiagnosticSession(
+                    event: "scroll_session_cancelled",
+                    level: .info,
+                    metadata: ["completion_mode": "direct_png"]
+                )
+                throw CancellationError()
+            }
+            guard generation == operationGeneration, state == .finishing else { throw error }
+            if setState(.paused(.captureFailure), operationGeneration: operationGeneration) {
+                if stepController == nil { startActivityMonitor() }
+            }
+            diagnosticLogger.record(
+                category: .scrollCapture,
+                level: .error,
+                event: "scroll_session_finish_failed",
+                metadata: [
+                    "completion_mode": "direct_png",
+                    "error_type": String(describing: type(of: error)),
+                ]
             )
             throw error
         }
@@ -1053,19 +1201,29 @@ final class ScrollCaptureSession {
         guard state == .capturing else { return }
         let tickGeneration = generation
         tickInProgress = true
-        defer { tickInProgress = false }
+        defer {
+            tickInProgress = false
+            stitchAppendDidFinish()
+        }
 
         do {
-            NSLog("xxsnap scroll-capture sampling request direction=%@", String(describing: preferredDirection))
+            NSLog("xxsnap scroll-capture sampling awaiting changed frame")
             // ScreenCaptureService accepts AppKit global screen coordinates. snapshotRect is
             // image-local geometry and is therefore intentionally not used for live sampling.
             let image = try await capturer.captureImage(in: seed.screenRect)
             guard generation == tickGeneration, isSamplingArmed else { return }
             guard state == .capturing else { return }
             guard let stitcher else { return }
+            let samplingDirection = preferredDirection
+            NSLog(
+                "xxsnap scroll-capture sampling frame direction=%@",
+                String(describing: samplingDirection)
+            )
+            stitchAppendInProgress = true
             let update = try await stitcher.append(
                 image,
-                preferredDirection: preferredDirection
+                preferredDirection: samplingDirection,
+                expectedAdvance: 0
             )
             NSLog(
                 "xxsnap scroll-capture append kind=%@ direction=%@ confidence=%.3f appendedHeight=%ld",
@@ -1081,7 +1239,6 @@ final class ScrollCaptureSession {
                 operationGeneration: tickGeneration,
                 expectedState: appendState
             ) else { return }
-            updateSamplingStability(for: update.kind)
             try await handle(update, stitcher: stitcher, operationGeneration: tickGeneration)
         } catch {
             NSLog("xxsnap scroll-capture sampling failed: %@", String(describing: error))
@@ -1154,6 +1311,11 @@ final class ScrollCaptureSession {
         stitcher: any ScrollStitching,
         operationGeneration: Int
     ) async throws {
+        emitSuperLongModeIfNeeded(
+            outputHeight: update.outputHeight,
+            operationGeneration: operationGeneration,
+            expectedState: .capturing
+        )
         switch update.kind {
         case .acceptedAppend:
             guard update.direction == .down || update.direction == .up else {
@@ -1170,7 +1332,7 @@ final class ScrollCaptureSession {
             }
             guard clearCurrentWarning(operationGeneration: operationGeneration) else { return }
             let preview = try await stitcher.preview(maximumHeight: 1_200)
-            _ = emit(
+            guard emit(
                 .preview(
                     preview,
                     edge: edge,
@@ -1178,6 +1340,10 @@ final class ScrollCaptureSession {
                 ),
                 operationGeneration: operationGeneration,
                 expectedState: .capturing
+            ) else { return }
+            pauseAfterMaximumHeightIfNeeded(
+                outputHeight: update.outputHeight,
+                operationGeneration: operationGeneration
             )
         case .duplicateDiscarded, .reviewDiscarded:
             if currentWarning == .lowConfidence {
@@ -1195,7 +1361,7 @@ final class ScrollCaptureSession {
             @unknown default: return
             }
             let preview = try await stitcher.preview(maximumHeight: 1_200)
-            _ = emit(
+            guard emit(
                 .preview(
                     preview,
                     edge: edge,
@@ -1203,6 +1369,10 @@ final class ScrollCaptureSession {
                 ),
                 operationGeneration: operationGeneration,
                 expectedState: .capturing
+            ) else { return }
+            pauseAfterMaximumHeightIfNeeded(
+                outputHeight: update.outputHeight,
+                operationGeneration: operationGeneration
             )
         case .lowConfidenceDiscarded:
             if currentWarning != .lowConfidence {
@@ -1253,20 +1423,32 @@ final class ScrollCaptureSession {
         )
     }
 
-    private func updateSamplingStability(for kind: ScrollCaptureAppendKind) {
-        switch kind {
-        case .duplicateDiscarded, .reviewDiscarded:
-            consecutiveStableSamplingFrames += 1
-            if consecutiveStableSamplingFrames >= Self.stableSamplingFrameThreshold {
-                disarmSampling()
-            }
-        case .acceptedAppend, .awaitingEvidence, .lowConfidenceDiscarded:
-            consecutiveStableSamplingFrames = 0
-        case .acceptedInitial, .resourceLimit:
-            break
-        @unknown default:
-            consecutiveStableSamplingFrames = 0
-        }
+    private func pauseAfterMaximumHeightIfNeeded(
+        outputHeight: Int,
+        operationGeneration: Int
+    ) {
+        guard outputHeight > Self.maximumPixelHeight else { return }
+        disarmSampling()
+        _ = setState(
+            .paused(.maximumHeightReached),
+            operationGeneration: operationGeneration
+        )
+    }
+
+    private func emitSuperLongModeIfNeeded(
+        outputHeight: Int,
+        operationGeneration: Int,
+        expectedState: ScrollCaptureSessionState
+    ) {
+        guard !requiresSaveOnlyCompletion,
+              outputHeight > Self.superLongPixelHeightThreshold,
+              emit(
+                  .enteredSuperLongMode(outputHeight: outputHeight),
+                  operationGeneration: operationGeneration,
+                  expectedState: expectedState
+              )
+        else { return }
+        requiresSaveOnlyCompletion = true
     }
 
     private static func pixelHeight(of image: NSImage) -> Int {
@@ -1276,12 +1458,32 @@ final class ScrollCaptureSession {
         return max(1, Int(image.size.height.rounded()))
     }
 
-    private func disarmSampling() {
+    @discardableResult
+    private func disarmSampling() -> Task<Void, Never>? {
+        let inFlightTask = samplingTask
         isSamplingArmed = false
-        consecutiveStableSamplingFrames = 0
         currentSamplingLoopID = nil
-        samplingTask?.cancel()
+        inFlightTask?.cancel()
         samplingTask = nil
+        return inFlightTask
+    }
+
+    private func waitForStitchAppendToFinish() async {
+        guard stitchAppendInProgress else { return }
+        await withCheckedContinuation { continuation in
+            if stitchAppendInProgress {
+                stitchAppendCompletionWaiters.append(continuation)
+            } else {
+                continuation.resume()
+            }
+        }
+    }
+
+    private func stitchAppendDidFinish() {
+        stitchAppendInProgress = false
+        let waiters = stitchAppendCompletionWaiters
+        stitchAppendCompletionWaiters.removeAll(keepingCapacity: true)
+        waiters.forEach { $0.resume() }
     }
 
 

@@ -140,7 +140,19 @@ struct L10n {
         case scrollCaptureLowConfidence
         case scrollCaptureNoMovement
         case scrollCaptureResourceLimit
+        case scrollCaptureMaximumHeight
         case scrollCaptureFailure
+        case scrollCaptureSuperLongTitle
+        case scrollCaptureSuperLongDetail
+        case scrollCaptureSuperLongBody
+        case scrollCaptureSuperLongNote
+        case scrollCaptureSuperLongLimit
+        case scrollCaptureSuperLongContinue
+        case scrollCaptureSaveTitle
+        case scrollCaptureSaveStage
+        case scrollCaptureSaveEscapeNote
+        case scrollCaptureSaveCancel
+        case scrollCaptureSaveCancelling
         case longImageCopy
         case longImageSave
         case longImagePin
@@ -175,13 +187,37 @@ struct L10n {
         case (.zhHans, .cancel):
             return "取消"
         case (.zhHans, .scrollCaptureLowConfidence):
-            return "暂无法识别到拼接位置，将继续尝试拼接"
+            return "当前画面无法与上一次成功截图可靠匹配，请滚回最后成功位置后缓慢滚动"
         case (.zhHans, .scrollCaptureNoMovement):
             return "未检测到滚动，正在自动切换选区内的滚动位置"
         case (.zhHans, .scrollCaptureResourceLimit):
-            return "已达到资源限制，滚动截图已暂停"
+            return "已达到长截图的尺寸或内存上限，请完成并保存已拼接内容"
+        case (.zhHans, .scrollCaptureMaximumHeight):
+            return "滚动截图已达到最大高度 200,000 像素，已停止继续拼接，请完成并保存当前截图。"
         case (.zhHans, .scrollCaptureFailure):
             return "截图失败，请重试"
+        case (.zhHans, .scrollCaptureSuperLongTitle):
+            return "即将进入超长截图模式"
+        case (.zhHans, .scrollCaptureSuperLongDetail):
+            return """
+            当前截图高度已超过 29,000 像素。继续截图后，将仅支持保存为 PNG。
+
+            图片仍按原始像素无损保存。部分图片查看器可能只显示低清预览，或无法完整处理超长图片。
+
+            截图不会缩放或降低清晰度；当高度超过 200,000 像素后将停止继续拼接。
+            """
+        case (.zhHans, .scrollCaptureSuperLongBody):
+            return "当前截图高度已超过 29,000 像素。继续截图后，将仅支持保存为 PNG。"
+        case (.zhHans, .scrollCaptureSuperLongNote):
+            return "图片仍按原始像素无损保存。部分图片查看器可能只显示低清预览，或无法完整处理超长图片。"
+        case (.zhHans, .scrollCaptureSuperLongLimit):
+            return "截图不会缩放或降低清晰度；当高度超过 200,000 像素后将停止继续拼接。"
+        case (.zhHans, .scrollCaptureSuperLongContinue): return "继续截图"
+        case (.zhHans, .scrollCaptureSaveTitle): return "正在保存长截图"
+        case (.zhHans, .scrollCaptureSaveStage): return "正在写入 PNG"
+        case (.zhHans, .scrollCaptureSaveEscapeNote): return "保存期间按 Esc 不会取消"
+        case (.zhHans, .scrollCaptureSaveCancel): return "取消保存"
+        case (.zhHans, .scrollCaptureSaveCancelling): return "正在取消…"
         case (.zhHans, .longImageCopy): return "复制"
         case (.zhHans, .longImageSave): return "保存"
         case (.zhHans, .longImagePin): return "贴图"
@@ -215,13 +251,37 @@ struct L10n {
         case (.english, .cancel):
             return "Cancel"
         case (.english, .scrollCaptureLowConfidence):
-            return "Overlap not found yet. Continuing to stitch."
+            return "The current frame cannot be matched reliably. Scroll back to the last successful position, then continue slowly."
         case (.english, .scrollCaptureNoMovement):
             return "No movement detected. Trying another point inside the selection."
         case (.english, .scrollCaptureResourceLimit):
-            return "Resource limit reached. Scroll capture is paused."
+            return "The capture has reached its size or memory limit. Finish and save the stitched content."
+        case (.english, .scrollCaptureMaximumHeight):
+            return "The scroll capture exceeded the maximum height of 200,000 pixels and has stopped stitching. Finish and save the current capture."
         case (.english, .scrollCaptureFailure):
             return "Capture failed. Please try again."
+        case (.english, .scrollCaptureSuperLongTitle):
+            return "Entering Extra-Long Capture Mode"
+        case (.english, .scrollCaptureSuperLongDetail):
+            return """
+            This capture is over 29,000 pixels tall. Continuing will allow PNG saving only.
+
+            The image is saved losslessly at its original pixel size. Some viewers may show only a low-resolution preview or may not fully process extra-long images.
+
+            The capture is never downscaled as it grows. It stops stitching after the height exceeds 200,000 pixels.
+            """
+        case (.english, .scrollCaptureSuperLongBody):
+            return "This capture is over 29,000 pixels tall. Continuing will allow PNG saving only."
+        case (.english, .scrollCaptureSuperLongNote):
+            return "The image is saved losslessly at its original pixel size. Some viewers may show only a low-resolution preview or may not fully process extra-long images."
+        case (.english, .scrollCaptureSuperLongLimit):
+            return "The capture is never downscaled as it grows. It stops stitching after the height exceeds 200,000 pixels."
+        case (.english, .scrollCaptureSuperLongContinue): return "Continue Capture"
+        case (.english, .scrollCaptureSaveTitle): return "Saving Long Capture"
+        case (.english, .scrollCaptureSaveStage): return "Writing PNG"
+        case (.english, .scrollCaptureSaveEscapeNote): return "Pressing Esc does not cancel saving"
+        case (.english, .scrollCaptureSaveCancel): return "Cancel Saving"
+        case (.english, .scrollCaptureSaveCancelling): return "Cancelling…"
         case (.english, .longImageCopy): return "Copy"
         case (.english, .longImageSave): return "Save"
         case (.english, .longImagePin): return "Pin"

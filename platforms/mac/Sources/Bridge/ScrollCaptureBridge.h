@@ -18,6 +18,8 @@ typedef NS_ENUM(NSInteger, ScrollCaptureDirection) {
     ScrollCaptureDirectionUp,
 };
 
+typedef void (^ScrollCapturePNGProgressHandler)(double progress);
+
 @interface ScrollCaptureAppendUpdate : NSObject
 - (instancetype)init NS_UNAVAILABLE;
 + (instancetype)new NS_UNAVAILABLE;
@@ -32,6 +34,10 @@ typedef NS_ENUM(NSInteger, ScrollCaptureDirection) {
 + (instancetype)testValueWithKind:(ScrollCaptureAppendKind)kind
                          direction:(ScrollCaptureDirection)direction
     NS_SWIFT_NAME(testValue(kind:direction:));
++ (instancetype)testValueWithKind:(ScrollCaptureAppendKind)kind
+                         direction:(ScrollCaptureDirection)direction
+                      outputHeight:(NSInteger)outputHeight
+    NS_SWIFT_NAME(testValue(kind:direction:outputHeight:));
 #endif
 @end
 
@@ -52,6 +58,9 @@ typedef NS_ENUM(NSInteger, ScrollCaptureDirection) {
                                      expectedAdvance:(CGFloat)expectedAdvance
                                                error:(NSError * _Nullable * _Nullable)error
     NS_SWIFT_NAME(append(_:preferredDirection:expectedAdvance:));
+- (nullable NSNumber *)rebaseImage:(NSImage *)image
+                              error:(NSError * _Nullable * _Nullable)error
+    NS_SWIFT_NAME(rebase(_:));
 - (nullable NSImage *)previewImageWithMaximumHeight:(NSInteger)maximumHeight
                                               error:(NSError * _Nullable * _Nullable)error
     NS_SWIFT_NAME(preview(maximumHeight:));
@@ -60,6 +69,14 @@ typedef NS_ENUM(NSInteger, ScrollCaptureDirection) {
     NS_SWIFT_NAME(preview(maximumWidth:));
 - (nullable NSImage *)finalImageAndReturnError:(NSError * _Nullable * _Nullable)error
     NS_SWIFT_NAME(finalImage());
+- (BOOL)writePNGToURL:(NSURL *)url
+                error:(NSError * _Nullable * _Nullable)error
+    NS_SWIFT_NAME(writePNG(to:));
+- (BOOL)writePNGToURL:(NSURL *)url
+             progress:(nullable ScrollCapturePNGProgressHandler)progress
+                error:(NSError * _Nullable * _Nullable)error
+    NS_SWIFT_NAME(writePNG(to:progress:));
+- (void)cancelPNGWrite NS_SWIFT_NAME(cancelPNGWrite());
 @end
 
 NS_ASSUME_NONNULL_END

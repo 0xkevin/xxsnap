@@ -214,6 +214,10 @@
         { "type": "heading", "level": 3, "text": "Pauses and Resource Limits" },
         { "type": "paragraph", "text": "Page animation or too little overlap can pause stitching. Wait for the page to settle and continue scrolling. If no new content appears, finish the image you have, or cancel, make the selection smaller, and try again." },
         { "type": "paragraph", "text": "When XxSnap reaches the resource limit, it pauses the capture and stops accepting new frames. Everything already captured is kept. Finish with the current image or cancel." },
+        { "type": "heading", "level": 3, "text": "Extra-Long Captures and Saving" },
+        { "type": "paragraph", "text": "The complete image enters extra-long mode when it is over 29,000 pixels tall. This mode supports PNG saving only; it does not open the Long Capture Editor or offer Copy or Pin. The image is written losslessly at its original pixel size." },
+        { "type": "paragraph", "text": "Capture continues at exactly 200,000 pixels and stops only after an accepted stitch exceeds 200,000 pixels. The complete accepted stitch is retained, so the final image may be slightly taller than 200,000 pixels." },
+        { "type": "paragraph", "text": "After you choose a save location, the capture selection, overlay, and preview exit immediately. The normal desktop returns and only the save progress window remains. Esc does not cancel saving; to abandon it, click Cancel Saving. If saving fails, the capture interface returns so you can try again." },
         {
           "type": "image",
           "name": "capture-long-editor",

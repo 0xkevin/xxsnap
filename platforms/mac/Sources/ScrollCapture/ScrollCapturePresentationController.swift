@@ -70,8 +70,8 @@ final class ScrollCapturePresentationController: NSObject {
     private var currentPreviewViewport: ScrollCapturePreviewViewport?
     private var indicatorPositionIsWheelDriven = false
     private var viewportTopPixel: CGFloat?
+    private var lastViewportDirection: ScrollCaptureDirection = .unknown
     private var previewOutputHeight = 0
-    private var lastWheelDirection: ScrollCaptureDirection = .unknown
     private var initialVerticalAnchor: ScrollCapturePreviewVerticalAnchor?
     private var placementSelectionFrame: NSRect
     private var placementVisibleFrame: NSRect
@@ -379,6 +379,17 @@ final class ScrollCapturePresentationController: NSObject {
         cleanup()
     }
 
+    func hideForSaving() {
+        guard hasStarted, !stopped else { return }
+        [controlPanel, previewPanel, warningPanel, boundaryPanel].forEach { $0.orderOut(nil) }
+    }
+
+    func restoreAfterSaveFailure() {
+        guard hasStarted, !stopped else { return }
+        controlPanel.orderFrontRegardless()
+        previewPanel.orderFrontRegardless()
+    }
+
     private func cleanup() {
         if let boundsObserver {
             NotificationCenter.default.removeObserver(boundsObserver)
@@ -472,10 +483,8 @@ final class ScrollCapturePresentationController: NSObject {
             var retainedTopPixel = viewportTopPixel ?? 0
             if previousOutputHeight > 0, outputHeight > previousOutputHeight {
                 let growth = CGFloat(outputHeight - previousOutputHeight)
-                if edge == .bottom, lastWheelDirection == .down {
+                if edge == .bottom, lastViewportDirection == .down {
                     retainedTopPixel = maximumTopPixel
-                } else if edge == .top, lastWheelDirection == .up {
-                    retainedTopPixel = 0
                 } else if edge == .top {
                     retainedTopPixel += growth
                 }
@@ -543,7 +552,7 @@ final class ScrollCapturePresentationController: NSObject {
             maximumTopPixel
         )
         viewportTopPixel = visibleTopPixel
-        lastWheelDirection = activity.direction
+        lastViewportDirection = activity.viewportDirection
         frame.origin.y = minimumY + visibleTopPixel * previewPointsPerPixel
         viewportIndicatorView.frame = frame
         indicatorPositionIsWheelDriven = true

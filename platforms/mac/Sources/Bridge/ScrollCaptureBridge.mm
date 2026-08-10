@@ -3,12 +3,18 @@
 #include "snipory/core/scroll/ScrollStitchSession.h"
 
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 #include <memory>
 #include <new>
+#include <string>
 #include <vector>
+
+#include <zlib.h>
 
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -54,7 +60,361 @@ struct BridgeImplementation final {
     std::unique_ptr<ScrollStitchSession> session;
     CGFloat sourceScale = 1.0;
     bool acceptedImage = false;
+    std::atomic_bool pngCancellationRequested = false;
+    std::atomic_bool pngExportActive = false;
 };
+
+void setCancelledError(NSError **error)
+{
+    if (error != nullptr) {
+        *error = [NSError errorWithDomain:NSCocoaErrorDomain
+                                     code:NSUserCancelledError
+                                 userInfo:@{
+                                     NSLocalizedDescriptionKey: @"PNG export was cancelled."
+                                 }];
+    }
+}
+
+std::array<std::uint8_t, 4> bigEndian(std::uint32_t value)
+{
+    return {
+        static_cast<std::uint8_t>((value >> 24U) & 0xffU),
+        static_cast<std::uint8_t>((value >> 16U) & 0xffU),
+        static_cast<std::uint8_t>((value >> 8U) & 0xffU),
+        static_cast<std::uint8_t>(value & 0xffU),
+    };
+}
+
+bool writeBytes(std::FILE* file, const void* bytes, std::size_t size)
+{
+    return file != nullptr && (size == 0U || std::fwrite(bytes, 1U, size, file) == size);
+}
+
+bool writePNGChunk(
+    std::FILE* file,
+    const char type[4],
+    const std::uint8_t* bytes,
+    std::size_t size)
+{
+    if (size > std::numeric_limits<std::uint32_t>::max()) {
+        return false;
+    }
+    const auto length = bigEndian(static_cast<std::uint32_t>(size));
+    uLong checksum = crc32(0L, Z_NULL, 0);
+    checksum = crc32(
+        checksum,
+        reinterpret_cast<const Bytef*>(type),
+        4U);
+    if (size > 0U) {
+        checksum = crc32(checksum, bytes, static_cast<uInt>(size));
+    }
+    const auto crc = bigEndian(static_cast<std::uint32_t>(checksum));
+    return writeBytes(file, length.data(), length.size())
+        && writeBytes(file, type, 4U)
+        && writeBytes(file, bytes, size)
+        && writeBytes(file, crc.data(), crc.size());
+}
+
+std::uint8_t unpremultiply(std::uint8_t channel, std::uint8_t alpha)
+{
+    if (alpha == 0U) {
+        return 0U;
+    }
+    if (alpha == 255U) {
+        return channel;
+    }
+    const auto value = (static_cast<unsigned>(channel) * 255U
+        + static_cast<unsigned>(alpha) / 2U)
+        / static_cast<unsigned>(alpha);
+    return static_cast<std::uint8_t>(std::min(value, 255U));
+}
+
+std::uint8_t paethPredictor(std::uint8_t left, std::uint8_t above, std::uint8_t upperLeft)
+{
+    const int prediction = static_cast<int>(left)
+        + static_cast<int>(above) - static_cast<int>(upperLeft);
+    const int leftDistance = std::abs(prediction - static_cast<int>(left));
+    const int aboveDistance = std::abs(prediction - static_cast<int>(above));
+    const int upperLeftDistance = std::abs(prediction - static_cast<int>(upperLeft));
+    if (leftDistance <= aboveDistance && leftDistance <= upperLeftDistance) {
+        return left;
+    }
+    return aboveDistance <= upperLeftDistance ? above : upperLeft;
+}
+
+std::uint64_t filterCost(const std::vector<std::uint8_t>& row)
+{
+    std::uint64_t cost = 0;
+    for (std::size_t index = 1U; index < row.size(); ++index) {
+        cost += static_cast<unsigned>(std::abs(
+            static_cast<int>(static_cast<std::int8_t>(row[index]))));
+    }
+    return cost;
+}
+
+const std::vector<std::uint8_t>& selectFilteredRow(
+    const std::vector<std::uint8_t>& rgba,
+    const std::vector<std::uint8_t>& previous,
+    std::array<std::vector<std::uint8_t>, 5>& candidates)
+{
+    for (std::size_t filter = 0; filter < candidates.size(); ++filter) {
+        candidates[filter].resize(rgba.size() + 1U);
+        candidates[filter][0] = static_cast<std::uint8_t>(filter);
+    }
+    for (std::size_t index = 0; index < rgba.size(); ++index) {
+        const std::uint8_t value = rgba[index];
+        const std::uint8_t left = index >= 4U ? rgba[index - 4U] : 0U;
+        const std::uint8_t above = previous.empty() ? 0U : previous[index];
+        const std::uint8_t upperLeft = index >= 4U && !previous.empty()
+            ? previous[index - 4U]
+            : 0U;
+        candidates[0][index + 1U] = value;
+        candidates[1][index + 1U] = static_cast<std::uint8_t>(value - left);
+        candidates[2][index + 1U] = static_cast<std::uint8_t>(value - above);
+        candidates[3][index + 1U] = static_cast<std::uint8_t>(
+            value - static_cast<std::uint8_t>(
+                (static_cast<unsigned>(left) + static_cast<unsigned>(above)) / 2U));
+        candidates[4][index + 1U] = static_cast<std::uint8_t>(
+            value - paethPredictor(left, above, upperLeft));
+    }
+    std::size_t best = 0U;
+    auto bestCost = filterCost(candidates[0]);
+    for (std::size_t filter = 1U; filter < candidates.size(); ++filter) {
+        const auto cost = filterCost(candidates[filter]);
+        if (cost < bestCost) {
+            best = filter;
+            bestCost = cost;
+        }
+    }
+    return candidates[best];
+}
+
+bool finishDeflate(
+    z_stream& stream,
+    std::FILE* file,
+    std::atomic_bool& cancelled,
+    const std::uint8_t* input,
+    std::size_t inputSize,
+    int flush)
+{
+    constexpr std::size_t outputCapacity = 256U * 1024U;
+    std::array<std::uint8_t, outputCapacity> output{};
+    stream.next_in = const_cast<Bytef*>(input);
+    stream.avail_in = static_cast<uInt>(inputSize);
+    int result = Z_OK;
+    do {
+        if (cancelled.load(std::memory_order_relaxed)) {
+            return false;
+        }
+        stream.next_out = output.data();
+        stream.avail_out = static_cast<uInt>(output.size());
+        result = deflate(&stream, flush);
+        if (result != Z_OK && result != Z_STREAM_END) {
+            return false;
+        }
+        const auto produced = output.size() - stream.avail_out;
+        if (produced > 0U
+            && !writePNGChunk(file, "IDAT", output.data(), produced)) {
+            return false;
+        }
+    } while (stream.avail_in > 0U
+        || (flush == Z_FINISH && result != Z_STREAM_END));
+    return flush != Z_FINISH || result == Z_STREAM_END;
+}
+
+struct TemporaryMappedPixels final {
+    void *address = MAP_FAILED;
+    std::size_t length = 0;
+    int descriptor = -1;
+
+    TemporaryMappedPixels(void *address, std::size_t length, int descriptor)
+        : address(address), length(length), descriptor(descriptor)
+    {
+    }
+
+    ~TemporaryMappedPixels()
+    {
+        if (address != MAP_FAILED) {
+            munmap(address, length);
+        }
+        if (descriptor >= 0) {
+            close(descriptor);
+        }
+    }
+};
+
+std::unique_ptr<TemporaryMappedPixels> makeTemporaryMappedPixels(
+    std::size_t byteCount)
+{
+    NSString *pathTemplate = [NSTemporaryDirectory()
+        stringByAppendingPathComponent:@"xxsnap-scroll-png-XXXXXX"];
+    const char *fileSystemPath = pathTemplate.fileSystemRepresentation;
+    std::vector<char> mutablePath(
+        fileSystemPath, fileSystemPath + std::strlen(fileSystemPath) + 1U);
+    const int descriptor = mkstemp(mutablePath.data());
+    if (descriptor < 0) {
+        return nullptr;
+    }
+    unlink(mutablePath.data());
+    if (byteCount > static_cast<std::size_t>(std::numeric_limits<off_t>::max())
+        || ftruncate(descriptor, static_cast<off_t>(byteCount)) != 0) {
+        close(descriptor);
+        return nullptr;
+    }
+    void *address = mmap(
+        nullptr, byteCount, PROT_READ | PROT_WRITE, MAP_SHARED, descriptor, 0);
+    if (address == MAP_FAILED) {
+        close(descriptor);
+        return nullptr;
+    }
+    return std::make_unique<TemporaryMappedPixels>(address, byteCount, descriptor);
+}
+
+bool encodeStreamingPNG(
+    const ScrollStitchSession& session,
+    std::FILE* file,
+    std::atomic_bool& cancelled,
+    ScrollCapturePNGProgressHandler progress,
+    NSError **error)
+{
+    const int width = session.outputWidth();
+    const int height = session.previewOutputHeight();
+    if (width <= 0 || height <= 0) {
+        setError(error, BridgeError::NoOutput, @"No stitched image is available.");
+        return false;
+    }
+    const auto rowBytes = static_cast<std::size_t>(width) * 4U;
+    if (rowBytes / 4U != static_cast<std::size_t>(width)
+        || static_cast<std::size_t>(height) > std::numeric_limits<std::size_t>::max() / rowBytes) {
+        setError(error, BridgeError::ConversionFailed, @"The stitched image is too large.");
+        return false;
+    }
+    const auto byteCount = rowBytes * static_cast<std::size_t>(height);
+    auto pixels = makeTemporaryMappedPixels(byteCount);
+    if (pixels == nullptr) {
+        setError(error, BridgeError::ConversionFailed, @"Unable to create temporary image storage.");
+        return false;
+    }
+    int progressBucket = -1;
+    if (progress != nil) {
+        progress(0.0);
+        progressBucket = 0;
+    }
+    const bool composed = session.visitFinalRows(
+        true,
+        [&](const std::uint8_t* bgra, std::size_t bytes, int row, int totalRows) {
+            if (cancelled.load(std::memory_order_relaxed)
+                || bytes != rowBytes || totalRows != height) {
+                return false;
+            }
+            const auto destinationRow = static_cast<std::size_t>(height - 1 - row);
+            std::memcpy(
+                static_cast<std::uint8_t *>(pixels->address) + destinationRow * rowBytes,
+                bgra,
+                rowBytes);
+            if (progress != nil) {
+                const int nextBucket = std::min(
+                    30,
+                    static_cast<int>(std::floor(
+                        static_cast<double>(row + 1) / static_cast<double>(height) * 30.0)));
+                if (nextBucket > progressBucket) {
+                    progressBucket = nextBucket;
+                    progress(static_cast<double>(progressBucket) / 200.0);
+                }
+            }
+            return true;
+        });
+    if (!composed || cancelled.load(std::memory_order_relaxed)) {
+        if (cancelled.load(std::memory_order_relaxed)) {
+            setCancelledError(error);
+        } else {
+            setError(error, BridgeError::ConversionFailed, @"Unable to compose the stitched image.");
+        }
+        return false;
+    }
+    (void)msync(pixels->address, byteCount, MS_ASYNC);
+    (void)madvise(pixels->address, byteCount, MADV_SEQUENTIAL);
+
+    static constexpr std::array<std::uint8_t, 8> signature{
+        0x89U, 0x50U, 0x4eU, 0x47U, 0x0dU, 0x0aU, 0x1aU, 0x0aU,
+    };
+    std::array<std::uint8_t, 13> header{};
+    const auto widthBytes = bigEndian(static_cast<std::uint32_t>(width));
+    const auto heightBytes = bigEndian(static_cast<std::uint32_t>(height));
+    std::copy(widthBytes.cbegin(), widthBytes.cend(), header.begin());
+    std::copy(heightBytes.cbegin(), heightBytes.cend(), header.begin() + 4);
+    header[8] = 8U;
+    header[9] = 6U;
+    if (!writeBytes(file, signature.data(), signature.size())
+        || !writePNGChunk(file, "IHDR", header.data(), header.size())) {
+        setError(error, BridgeError::ConversionFailed, @"Unable to write the PNG header.");
+        return false;
+    }
+
+    z_stream stream{};
+    if (deflateInit(&stream, Z_DEFAULT_COMPRESSION) != Z_OK) {
+        setError(error, BridgeError::ConversionFailed, @"Unable to initialize PNG compression.");
+        return false;
+    }
+    bool succeeded = false;
+    std::vector<std::uint8_t> rgba(static_cast<std::size_t>(width) * 4U);
+    std::vector<std::uint8_t> previous;
+    std::array<std::vector<std::uint8_t>, 5> candidates;
+    bool rowsEncoded = true;
+    for (int row = 0; row < height; ++row) {
+        if (cancelled.load(std::memory_order_relaxed)) {
+            rowsEncoded = false;
+            break;
+        }
+        const auto *bgra = static_cast<const std::uint8_t *>(pixels->address)
+            + static_cast<std::size_t>(row) * rowBytes;
+        for (int x = 0; x < width; ++x) {
+            const auto offset = static_cast<std::size_t>(x) * 4U;
+            const auto alpha = bgra[offset + 3U];
+            rgba[offset] = unpremultiply(bgra[offset + 2U], alpha);
+            rgba[offset + 1U] = unpremultiply(bgra[offset + 1U], alpha);
+            rgba[offset + 2U] = unpremultiply(bgra[offset], alpha);
+            rgba[offset + 3U] = alpha;
+        }
+        const auto& filtered = selectFilteredRow(rgba, previous, candidates);
+        if (!finishDeflate(
+                stream,
+                file,
+                cancelled,
+                filtered.data(),
+                filtered.size(),
+                Z_NO_FLUSH)) {
+            rowsEncoded = false;
+            break;
+        }
+        previous = rgba;
+        if (progress != nil) {
+            const double rowProgress = static_cast<double>(row + 1)
+                / static_cast<double>(height);
+            const int nextBucket = std::min(
+                198,
+                30 + static_cast<int>(std::floor(rowProgress * 168.0)));
+            if (nextBucket > progressBucket) {
+                progressBucket = nextBucket;
+                progress(static_cast<double>(progressBucket) / 200.0);
+            }
+        }
+    }
+    if (rowsEncoded && !cancelled.load(std::memory_order_relaxed)) {
+        succeeded = finishDeflate(stream, file, cancelled, nullptr, 0U, Z_FINISH)
+            && writePNGChunk(file, "IEND", nullptr, 0U);
+    }
+    deflateEnd(&stream);
+    if (!succeeded) {
+        if (cancelled.load(std::memory_order_relaxed)) {
+            setCancelledError(error);
+        } else {
+            setError(error, BridgeError::ConversionFailed, @"Unable to encode the stitched PNG.");
+        }
+        return false;
+    }
+    return true;
+}
 
 std::unique_ptr<ScrollStitchSession> makeSession(
     std::size_t maximumAcceptedBytes)
@@ -223,14 +583,11 @@ void releaseMappedImageStorage(void *info, const void *, std::size_t)
     delete storage;
 }
 
-NSImage *mappedFinalImage(
-    const ScrollStitchSession& session,
-    CGFloat scale,
-    NSError **error)
+CGImageRef mappedFinalCGImage(const ScrollStitchSession& session, NSError **error)
 {
     const int width = session.outputWidth();
     const int height = session.previewOutputHeight();
-    if (width <= 0 || height <= 0 || !std::isfinite(scale) || scale <= 0) {
+    if (width <= 0 || height <= 0) {
         setError(error, BridgeError::NoOutput, @"No stitched image is available.");
         return nil;
     }
@@ -309,7 +666,25 @@ NSImage *mappedFinalImage(
         setError(error, BridgeError::ConversionFailed, @"Unable to create the stitched image.");
         return nil;
     }
+    return cgImage;
+}
+
+NSImage *mappedFinalImage(
+    const ScrollStitchSession& session,
+    CGFloat scale,
+    NSError **error)
+{
+    if (!std::isfinite(scale) || scale <= 0) {
+        setError(error, BridgeError::NoOutput, @"No stitched image is available.");
+        return nil;
+    }
+    CGImageRef cgImage = mappedFinalCGImage(session, error);
+    if (cgImage == nullptr) {
+        return nil;
+    }
     NSBitmapImageRep *representation = [[NSBitmapImageRep alloc] initWithCGImage:cgImage];
+    const auto width = static_cast<CGFloat>(CGImageGetWidth(cgImage));
+    const auto height = static_cast<CGFloat>(CGImageGetHeight(cgImage));
     CGImageRelease(cgImage);
     const NSSize pointSize = NSMakeSize(width / scale, height / scale);
     representation.size = pointSize;
@@ -366,7 +741,8 @@ BridgeImplementation *implementationOrError(void *pointer, NSError **error)
 @interface ScrollCaptureAppendUpdate ()
 - (instancetype)initWithResult:(const AppendResult&)result;
 - (instancetype)initWithKind:(ScrollCaptureAppendKind)kind
-                    direction:(ScrollCaptureDirection)direction;
+                    direction:(ScrollCaptureDirection)direction
+                 outputHeight:(NSInteger)outputHeight;
 @end
 
 @implementation ScrollCaptureAppendUpdate
@@ -391,13 +767,14 @@ BridgeImplementation *implementationOrError(void *pointer, NSError **error)
 
 - (instancetype)initWithKind:(ScrollCaptureAppendKind)kind
                     direction:(ScrollCaptureDirection)direction
+                 outputHeight:(NSInteger)outputHeight
 {
     self = [super init];
     if (self != nil) {
         _kind = kind;
         _direction = direction;
         _appendedHeight = 0;
-        _outputHeight = 0;
+        _outputHeight = outputHeight;
         _confidence = 1;
     }
     return self;
@@ -406,13 +783,24 @@ BridgeImplementation *implementationOrError(void *pointer, NSError **error)
 #if DEBUG
 + (instancetype)testValueWithKind:(ScrollCaptureAppendKind)kind
 {
-    return [[self alloc] initWithKind:kind direction:ScrollCaptureDirectionUnknown];
+    return [[self alloc] initWithKind:kind
+                           direction:ScrollCaptureDirectionUnknown
+                        outputHeight:0];
 }
 
 + (instancetype)testValueWithKind:(ScrollCaptureAppendKind)kind
                          direction:(ScrollCaptureDirection)direction
 {
-    return [[self alloc] initWithKind:kind direction:direction];
+    return [[self alloc] initWithKind:kind direction:direction outputHeight:0];
+}
+
++ (instancetype)testValueWithKind:(ScrollCaptureAppendKind)kind
+                         direction:(ScrollCaptureDirection)direction
+                      outputHeight:(NSInteger)outputHeight
+{
+    return [[self alloc] initWithKind:kind
+                           direction:direction
+                        outputHeight:outputHeight];
 }
 #endif
 
@@ -501,7 +889,7 @@ BridgeImplementation *implementationOrError(void *pointer, NSError **error)
                 return nil;
             }
             AppendResult result = candidate->append(
-                frame, coreDirection(preferredDirection), expectedAdvancePixels);
+                std::move(frame), coreDirection(preferredDirection), expectedAdvancePixels);
             if (result.kind == AppendKind::AcceptedInitial) {
                 implementation->session = std::move(candidate);
                 implementation->sourceScale = sourceScale;
@@ -510,10 +898,37 @@ BridgeImplementation *implementationOrError(void *pointer, NSError **error)
             return [[ScrollCaptureAppendUpdate alloc] initWithResult:result];
         }
         AppendResult result = implementation->session->append(
-            frame, coreDirection(preferredDirection), expectedAdvancePixels);
+            std::move(frame), coreDirection(preferredDirection), expectedAdvancePixels);
         return [[ScrollCaptureAppendUpdate alloc] initWithResult:result];
     } catch (...) {
         setError(error, BridgeError::InternalFailure, @"The scroll stitch engine failed to append the image.");
+        return nil;
+    }
+}
+
+- (nullable NSNumber *)rebaseImage:(NSImage *)image error:(NSError **)error
+{
+    auto *implementation = implementationOrError(_implementation, error);
+    if (implementation == nullptr) {
+        return nil;
+    }
+    if (implementation->session == nullptr || !implementation->acceptedImage) {
+        setError(error, BridgeError::NoOutput, @"Append an image before rebasing the matcher.");
+        return nil;
+    }
+    ScrollFrame frame;
+    CGFloat sourceScale = 1;
+    if (!frameFromImage(image, frame, sourceScale, error)) {
+        return nil;
+    }
+    if (std::abs(sourceScale - implementation->sourceScale) > 0.01) {
+        setError(error, BridgeError::InvalidImage, @"The rebase image scale changed.");
+        return nil;
+    }
+    try {
+        return [NSNumber numberWithBool:implementation->session->rebase(frame)];
+    } catch (...) {
+        setError(error, BridgeError::InternalFailure, @"The scroll stitch engine failed to rebase the matcher.");
         return nil;
     }
 }
@@ -584,6 +999,125 @@ BridgeImplementation *implementationOrError(void *pointer, NSError **error)
     } catch (...) {
         setError(error, BridgeError::InternalFailure, @"The scroll stitch engine failed to create the final image.");
         return nil;
+    }
+}
+
+- (BOOL)writePNGToURL:(NSURL *)url error:(NSError **)error
+{
+    return [self writePNGToURL:url progress:nil error:error];
+}
+
+- (BOOL)writePNGToURL:(NSURL *)url
+             progress:(ScrollCapturePNGProgressHandler)progress
+                error:(NSError **)error
+{
+    auto *implementation = implementationOrError(_implementation, error);
+    if (implementation == nullptr) {
+        return NO;
+    }
+    if (!implementation->acceptedImage) {
+        setError(error, BridgeError::NoOutput, @"Append an image before exporting PNG.");
+        return NO;
+    }
+    if (url == nil || !url.isFileURL) {
+        setError(error, BridgeError::InvalidConfiguration, @"The PNG destination must be a file URL.");
+        return NO;
+    }
+    bool expectedInactive = false;
+    if (!implementation->pngExportActive.compare_exchange_strong(
+            expectedInactive, true, std::memory_order_acq_rel)) {
+        setError(error, BridgeError::InvalidConfiguration, @"A PNG export is already running.");
+        return NO;
+    }
+    implementation->pngCancellationRequested.store(false, std::memory_order_relaxed);
+    const auto finishExport = [&]() {
+        implementation->pngExportActive.store(false, std::memory_order_release);
+    };
+
+    NSURL *directory = url.URLByDeletingLastPathComponent;
+    NSString *temporaryName = [NSString stringWithFormat:
+        @".%@.%@.part", url.lastPathComponent, NSUUID.UUID.UUIDString];
+    NSURL *temporaryURL = [directory URLByAppendingPathComponent:temporaryName];
+    std::FILE *file = std::fopen(temporaryURL.fileSystemRepresentation, "wb");
+    if (file == nullptr) {
+        finishExport();
+        setError(error, BridgeError::ConversionFailed, @"Unable to create temporary PNG storage.");
+        return NO;
+    }
+    bool encoded = false;
+    try {
+        encoded = encodeStreamingPNG(
+            *implementation->session,
+            file,
+            implementation->pngCancellationRequested,
+            progress,
+            error);
+    } catch (...) {
+        encoded = false;
+        setError(error, BridgeError::InternalFailure, @"The scroll stitch engine failed to export PNG.");
+    }
+    const bool flushed = encoded && std::fflush(file) == 0;
+    const bool synchronized = flushed && fsync(fileno(file)) == 0;
+    const bool closed = std::fclose(file) == 0;
+    if (!encoded || !flushed || !synchronized || !closed) {
+        [[NSFileManager defaultManager] removeItemAtURL:temporaryURL error:nil];
+        if (encoded && error != nullptr && *error == nil) {
+            setError(error, BridgeError::ConversionFailed, @"Unable to finish writing the PNG.");
+        }
+        finishExport();
+        return NO;
+    }
+
+    if (progress != nil) {
+        progress(0.995);
+    }
+    if (implementation->pngCancellationRequested.load(std::memory_order_relaxed)) {
+        [[NSFileManager defaultManager] removeItemAtURL:temporaryURL error:nil];
+        setCancelledError(error);
+        finishExport();
+        return NO;
+    }
+
+    NSFileManager *fileManager = NSFileManager.defaultManager;
+    NSError *publicationError = nil;
+    BOOL published = NO;
+    if ([fileManager fileExistsAtPath:url.path]) {
+        published = [fileManager replaceItemAtURL:url
+                                    withItemAtURL:temporaryURL
+                                   backupItemName:nil
+                                          options:0
+                                 resultingItemURL:nil
+                                            error:&publicationError];
+    } else {
+        published = [fileManager moveItemAtURL:temporaryURL
+                                         toURL:url
+                                         error:&publicationError];
+    }
+    if (!published) {
+        [fileManager removeItemAtURL:temporaryURL error:nil];
+        if (error != nullptr) {
+            *error = publicationError ?: [NSError errorWithDomain:ScrollCaptureBridgeErrorDomain
+                                                              code:static_cast<NSInteger>(BridgeError::ConversionFailed)
+                                                          userInfo:@{
+                                                              NSLocalizedDescriptionKey:
+                                                                  @"Unable to publish the completed PNG."
+                                                          }];
+        }
+        finishExport();
+        return NO;
+    }
+    if (progress != nil) {
+        progress(1.0);
+    }
+    finishExport();
+    return YES;
+}
+
+- (void)cancelPNGWrite
+{
+    auto *implementation = static_cast<BridgeImplementation *>(_implementation);
+    if (implementation != nullptr) {
+        implementation->pngCancellationRequested.store(true, std::memory_order_relaxed);
     }
 }
 

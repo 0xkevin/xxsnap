@@ -1068,6 +1068,10 @@ final class SelectionOverlayWindow: NSWindow {
         (contentView as? SelectionOverlayView)?.restoreAfterScrollCaptureCancellation()
     }
 
+    func hideForScrollCaptureSave() {
+        orderOut(nil)
+    }
+
     func finishScrollCaptureAndDismiss() {
         leaveScrollCapturePassiveMode()
         (contentView as? SelectionOverlayView)?.clearScrollCaptureTargetResolution()
@@ -5358,7 +5362,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         selectedAnnotationIndex = annotations.indices.last
         interactionMode = .placingNumberMark
         revealedNumberControlsIndex = nil
-        selectedNumberAnnotationCanFollowTypeDropdown = true
+        selectedNumberAnnotationCanFollowTypeDropdown = false
         numberStyle = style
         clearRedoAnnotationHistory()
         invalidateCursorRectsAndRefresh(at: point)
@@ -9639,7 +9643,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             isCustomColorSwatchActive = false
         }
         rememberCurrentStyleForActiveTool()
-        applyCurrentStyleToSelectedAnnotation()
+        if selectedNumberAnnotationCanFollowTypeDropdown {
+            applyCurrentStyleToSelectedAnnotation()
+        }
         applyCurrentNumberMarkTypeToSelectedAnnotation(type)
         invalidateCursorRectsAndRefresh()
     }

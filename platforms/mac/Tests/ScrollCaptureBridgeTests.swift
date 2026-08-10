@@ -1,9 +1,164 @@
 import AppKit
+import ImageIO
 import ObjectiveC.runtime
 import XCTest
 @testable import xxsnap
 
 final class ScrollCaptureBridgeTests: XCTestCase {
+    func testDirectPNGExportPreservesRetinaPixelsWithoutResampling() throws {
+        let bridge = try XCTUnwrap(ScrollCaptureBridge(maximumAcceptedBytes: 16 * 1024 * 1024))
+        let image = TestImageFactory.verticalDocumentViewport(
+            offset: 0,
+            width: 64,
+            height: 96,
+            scale: 2
+        )
+        XCTAssertEqual(try bridge.append(image).kind, .acceptedInitial)
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("xxsnap-lossless-\(UUID().uuidString).png")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        try bridge.writePNG(to: url)
+
+        let decoded = try XCTUnwrap(NSImage(contentsOf: url))
+        XCTAssertEqual(decoded.representations.first?.pixelsWide, 128)
+        XCTAssertEqual(decoded.representations.first?.pixelsHigh, 192)
+        let actual = renderedBGRAPixels(decoded)
+        let expected = renderedBGRAPixels(image)
+        XCTAssertEqual(actual, expected)
+    }
+
+    func testDirectPNGExportReportsMonotonicRowProgressThroughCompletion() throws {
+        let bridge = try XCTUnwrap(ScrollCaptureBridge(maximumAcceptedBytes: 16 * 1024 * 1024))
+        let image = TestImageFactory.verticalDocument(width: 32, height: 4_096)
+        XCTAssertEqual(try bridge.append(image).kind, .acceptedInitial)
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("xxsnap-progress-\(UUID().uuidString).png")
+        defer { try? FileManager.default.removeItem(at: url) }
+        var values: [Double] = []
+
+        try bridge.writePNG(to: url) { values.append($0) }
+
+        XCTAssertGreaterThan(values.count, 3)
+        XCTAssertEqual(values.first, 0)
+        XCTAssertEqual(values.last, 1)
+        XCTAssertEqual(values, values.sorted())
+    }
+
+    func testCancellingDirectPNGExportKeepsExistingTargetAndRemovesPartFile() throws {
+        let bridge = try XCTUnwrap(ScrollCaptureBridge(maximumAcceptedBytes: 32 * 1024 * 1024))
+        let image = TestImageFactory.verticalDocument(width: 64, height: 100_538)
+        XCTAssertEqual(try bridge.append(image).kind, .acceptedInitial)
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("xxsnap-cancel-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("existing.png")
+        let original = Data("existing target".utf8)
+        try original.write(to: url)
+
+        XCTAssertThrowsError(
+            try bridge.writePNG(to: url) { progress in
+                if progress >= 0.02 { bridge.cancelPNGWrite() }
+            }
+        ) { error in
+            let cocoa = error as NSError
+            XCTAssertEqual(cocoa.domain, NSCocoaErrorDomain)
+            XCTAssertEqual(cocoa.code, NSUserCancelledError)
+        }
+
+        XCTAssertEqual(try Data(contentsOf: url), original)
+        let leftovers = try FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        ).filter { $0.lastPathComponent.hasSuffix(".part") }
+        XCTAssertTrue(leftovers.isEmpty)
+    }
+
+    @MainActor
+    func testCancellingBridgeWorkerStopsDetachedExportAndKeepsExistingTarget() async throws {
+        let worker = try XCTUnwrap(ScrollCaptureBridgeWorker(maximumAcceptedBytes: 32 * 1024 * 1024))
+        let image = TestImageFactory.verticalDocument(width: 16, height: 100_538)
+        let append = try await worker.append(image)
+        XCTAssertEqual(append.kind, .acceptedInitial)
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("xxsnap-worker-cancel-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("existing.png")
+        let original = Data("existing target".utf8)
+        try original.write(to: url)
+        let started = expectation(description: "PNG export started")
+
+        let task = Task {
+            try await worker.writePNG(to: url) { progress in
+                if progress == 0 { started.fulfill() }
+            }
+        }
+        await fulfillment(of: [started], timeout: 5)
+        task.cancel()
+
+        do {
+            try await task.value
+            XCTFail("Cancelling the caller must stop the detached PNG export")
+        } catch {
+            let cocoa = error as NSError
+            XCTAssertTrue(
+                error is CancellationError
+                    || (cocoa.domain == NSCocoaErrorDomain && cocoa.code == NSUserCancelledError)
+            )
+        }
+        XCTAssertEqual(try Data(contentsOf: url), original)
+        let leftovers = try FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        ).filter { $0.lastPathComponent.hasSuffix(".part") }
+        XCTAssertTrue(leftovers.isEmpty)
+    }
+
+    func testCancellingAtPNGPublicationBoundaryKeepsExistingTarget() throws {
+        let bridge = try XCTUnwrap(ScrollCaptureBridge(maximumAcceptedBytes: 16 * 1024 * 1024))
+        let image = TestImageFactory.verticalDocument(width: 16, height: 4_096)
+        XCTAssertEqual(try bridge.append(image).kind, .acceptedInitial)
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("xxsnap-publication-cancel-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("existing.png")
+        let original = Data("existing target".utf8)
+        try original.write(to: url)
+
+        XCTAssertThrowsError(
+            try bridge.writePNG(to: url) { progress in
+                if progress > 0.99, progress < 1 { bridge.cancelPNGWrite() }
+            }
+        ) { error in
+            let cocoa = error as NSError
+            XCTAssertEqual(cocoa.domain, NSCocoaErrorDomain)
+            XCTAssertEqual(cocoa.code, NSUserCancelledError)
+        }
+
+        XCTAssertEqual(try Data(contentsOf: url), original)
+    }
+
+    func testDirectPNGExportSupportsOneHundredThousandPixelHeightWithoutFinalImage() throws {
+        let bridge = try XCTUnwrap(ScrollCaptureBridge(maximumAcceptedBytes: 32 * 1024 * 1024))
+        let image = TestImageFactory.verticalDocument(width: 16, height: 100_538)
+        XCTAssertEqual(try bridge.append(image).kind, .acceptedInitial)
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("xxsnap-super-long-\(UUID().uuidString).png")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        try bridge.writePNG(to: url)
+
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil))
+        let properties = try XCTUnwrap(
+            CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        )
+        XCTAssertEqual(properties[kCGImagePropertyPixelWidth] as? Int, 16)
+        XCTAssertEqual(properties[kCGImagePropertyPixelHeight] as? Int, 100_538)
+    }
+
     func testAppendKindRawValueMatrixMatchesCoreContract() {
         XCTAssertEqual(
             [
@@ -227,6 +382,28 @@ final class ScrollCaptureBridgeTests: XCTestCase {
             ).kind,
             .lowConfidenceDiscarded
         )
+    }
+
+    func testRebaseAfterLowConfidenceAllowsTheNextOverlappingFrameToRecover() throws {
+        let bridge = try XCTUnwrap(
+            ScrollCaptureBridge(maximumAcceptedBytes: 16 * 1024 * 1024)
+        )
+        let initial = TestImageFactory.verticalDocumentViewport(offset: 0)
+        let skipped = TestImageFactory.verticalDocumentViewport(offset: 500)
+        let next = TestImageFactory.verticalDocumentViewport(offset: 532)
+
+        XCTAssertEqual(try bridge.append(initial).kind, .acceptedInitial)
+        XCTAssertEqual(
+            try bridge.append(skipped, preferredDirection: .down).kind,
+            .lowConfidenceDiscarded
+        )
+        XCTAssertTrue(try bridge.rebase(skipped).boolValue)
+
+        let recovered = try bridge.append(next, preferredDirection: .down)
+
+        XCTAssertEqual(recovered.kind, .acceptedAppend)
+        XCTAssertEqual(recovered.appendedHeight, 32)
+        XCTAssertEqual(recovered.outputHeight, 128)
     }
 
     func testFirstReliableUpwardMovementPrependsInNaturalOrder() throws {
