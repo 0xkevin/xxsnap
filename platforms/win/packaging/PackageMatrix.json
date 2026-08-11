@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "win7Prerequisites": {
+    "platformUpdateD2DMinVersion": "6.2.9200.16492",
+    "sha2Update": "KB4474419",
+    "sha2WinTrustMinVersion": "6.1.7601.24382"
+  },
+  "packages": [
+    {
+      "name": "XxSnap-Modern-x64",
+      "productName": "XxSnap-Modern-x64",
+      "family": "modern",
+      "architecture": "x64",
+      "buildDirectory": "xxsnap-modern-x64",
+      "installFolder": "XxSnap Modern x64",
+      "upgradeCode": "BC64D3F0-051A-4FDF-990D-D197E36E2091",
+      "launchCondition": "ACTION = \"ADMIN\" OR Installed OR (MsiNTProductType = 1 AND XXSNAP_WINDOWS_MAJOR AND VersionNT64)",
+      "launchMessage": "XxSnap Modern x64 requires 64-bit Windows 10 or Windows 11.",
+      "requirements": {
+        "minimumMajor": 10,
+        "maximumMajor": 10,
+        "exactMinor": null,
+        "minimumServicePack": 0,
+        "platformUpdate": false,
+        "sha2": false
+      }
+    },
+    {
+      "name": "XxSnap-Modern-x86",
+      "productName": "XxSnap-Modern-x86",
+      "family": "modern",
+      "architecture": "x86",
+      "buildDirectory": "xxsnap-modern-x86",
+      "installFolder": "XxSnap Modern x86",
+      "upgradeCode": "664877FD-5E9B-4624-AD4E-35CB7357152F",
+      "launchCondition": "ACTION = \"ADMIN\" OR Installed OR (MsiNTProductType = 1 AND XXSNAP_WINDOWS_MAJOR AND NOT VersionNT64)",
+      "launchMessage": "XxSnap Modern x86 requires 32-bit Windows 10.",
+      "requirements": {
+        "minimumMajor": 10,
+        "maximumMajor": 10,
+        "exactMinor": null,
+        "minimumServicePack": 0,
+        "platformUpdate": false,
+        "sha2": false
+      }
+    },
+    {
+      "name": "XxSnap-Legacy-x64",
+      "productName": "XxSnap-Legacy-x64",
+      "family": "legacy",
+      "architecture": "x64",
+      "buildDirectory": "xxsnap-legacy-x64",
+      "installFolder": "XxSnap Legacy x64",
+      "upgradeCode": "206FD13F-A1AF-4FB3-8EBF-0AA6FD9657B5",
+      "launchCondition": "ACTION = \"ADMIN\" OR Installed OR (MsiNTProductType = 1 AND VersionNT = 601 AND ServicePackLevel >= 1 AND VersionNT64 AND XXSNAP_PLATFORM_UPDATE AND XXSNAP_SHA2)",
+      "launchMessage": "XxSnap Legacy x64 requires 64-bit Windows 7 SP1 with the Platform Update and SHA-2 support installed.",
+      "requirements": {
+        "minimumMajor": 6,
+        "maximumMajor": 6,
+        "exactMinor": 1,
+        "minimumServicePack": 1,
+        "platformUpdate": true,
+        "sha2": true
+      }
+    },
+    {
+      "name": "XxSnap-Legacy-x86",
+      "productName": "XxSnap-Legacy-x86",
+      "family": "legacy",
+      "architecture": "x86",
+      "buildDirectory": "xxsnap-legacy-x86",
+      "installFolder": "XxSnap Legacy x86",
+      "upgradeCode": "1B140DB0-35BE-42E5-A9FF-090451063059",
+      "launchCondition": "ACTION = \"ADMIN\" OR Installed OR (MsiNTProductType = 1 AND VersionNT = 601 AND ServicePackLevel >= 1 AND NOT VersionNT64 AND XXSNAP_PLATFORM_UPDATE AND XXSNAP_SHA2)",
+      "launchMessage": "XxSnap Legacy x86 requires 32-bit Windows 7 SP1 with the Platform Update and SHA-2 support installed.",
+      "requirements": {
+        "minimumMajor": 6,
+        "maximumMajor": 6,
+        "exactMinor": 1,
+        "minimumServicePack": 1,
+        "platformUpdate": true,
+        "sha2": true
+      }
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 # XxSnap Windows 区域截图 MVP 设计
 
 日期：2026-08-04  
-状态：已完成对话评审，待书面规格确认
+状态：已确认，进入实施
 
 ## 1. 背景与目标
 
@@ -76,6 +76,10 @@ Windows 10 和 Windows 7 已结束微软常规支持，但属于用户明确要�
 主要开发环境为 Apple Silicon Mac 上的 Parallels Windows 11 ARM64。该虚拟机已安装 ARM64 Visual Studio、Windows SDK 10.0.26100.0，以及 HostARM64→x64 和 HostARM64→x86 编译器。
 
 本机可以交叉编译并通过 Windows 11 模拟层运行 x64/x86 程序，但不能替代真实 x64、Windows 10 32 位或 Windows 7 的发布验证。
+
+### 3.4 Windows 快捷键映射
+
+Windows 保持 macOS 快捷键的主键与 Shift 组合，只把 Command 修饰键映射为 Ctrl。四个主要功能的默认组合固定为：区域截图 `Ctrl+\``、全屏截图 `Ctrl+Shift+1`、OCR `Ctrl+3`、教笔 `Ctrl+2`。MVP 只注册范围内的区域截图快捷键，其余三个随对应功能分期实现，不提前注册无行为入口。
 
 ## 4. MVP 范围
 

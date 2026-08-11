@@ -1,0 +1,80 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="$(ProductName)"
+      Manufacturer="Snipory"
+      Version="$(Version)"
+      UpgradeCode="$(UpgradeCode)"
+      Language="1033"
+      Codepage="1252"
+      Scope="perMachine"
+      InstallerVersion="500"
+      Compressed="yes">
+    <SummaryInformation Description="$(ProductName) installer" />
+    <MajorUpgrade
+        DowngradeErrorMessage="A newer version of $(ProductName) is already installed."
+        AllowSameVersionUpgrades="no" />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="SniporyIcon" SourceFile="$(StageDir)\Snipory.ico" />
+    <Property Id="ARPPRODUCTICON" Value="SniporyIcon" />
+
+    <Property Id="XXSNAP_WINDOWS_MAJOR">
+      <RegistrySearch
+          Id="FindWindowsMajorVersion"
+          Root="HKLM"
+          Key="SOFTWARE\Microsoft\Windows NT\CurrentVersion"
+          Name="CurrentMajorVersionNumber"
+          Type="raw" />
+    </Property>
+    <Property Id="XXSNAP_PLATFORM_UPDATE">
+      <DirectorySearch Id="FindSystemD2DDirectory" Path="[SystemFolder]" Depth="0">
+        <FileSearch
+            Id="FindCompatibleD2D"
+            Name="d2d1.dll"
+            MinVersion="$(PlatformUpdateD2DMinVersion)" />
+      </DirectorySearch>
+    </Property>
+    <Property Id="XXSNAP_SHA2">
+      <DirectorySearch Id="FindSystemWinTrustDirectory" Path="[SystemFolder]" Depth="0">
+        <FileSearch
+            Id="FindSha2WinTrust"
+            Name="wintrust.dll"
+            MinVersion="$(Sha2WinTrustMinVersion)" />
+      </DirectorySearch>
+    </Property>
+
+    <Launch Condition='$(LaunchCondition)' Message="$(LaunchMessage)" />
+
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="SNIPORYFOLDER" Name="Snipory">
+        <Directory Id="INSTALLFOLDER" Name="$(InstallFolder)" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="XXSNAPMENUFOLDER" Name="XxSnap" />
+    </StandardDirectory>
+
+    <Component Id="StartMenuShortcut" Directory="XXSNAPMENUFOLDER" Guid="*">
+      <Shortcut
+          Id="XxSnapStartMenuShortcut"
+          Name="$(ProductName)"
+          Description="$(ProductName)"
+          Target="[INSTALLFOLDER]xxsnap_windows.exe"
+          WorkingDirectory="INSTALLFOLDER"
+          Icon="SniporyIcon" />
+      <RemoveFolder Id="RemoveXxSnapMenuFolder" On="uninstall" />
+      <RegistryValue
+          Root="HKLM"
+          Key="Software\Snipory\XxSnap\$(InstallFolder)"
+          Name="installed"
+          Type="integer"
+          Value="1"
+          KeyPath="yes" />
+    </Component>
+
+    <Feature Id="MainFeature" Title="$(ProductName)" Level="1">
+      <ComponentGroupRef Id="PayloadComponents" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+  </Package>
+</Wix>

@@ -1,0 +1,291 @@
+{
+  "assets" : [
+    {
+      "fixedColor" : false,
+      "generated" : {
+        "100" : "platforms/win/resources/toolbar/100/arrow.png",
+        "125" : "platforms/win/resources/toolbar/125/arrow.png",
+        "150" : "platforms/win/resources/toolbar/150/arrow.png",
+        "200" : "platforms/win/resources/toolbar/200/arrow.png"
+      },
+      "insetDip" : 0,
+      "logicalSizeDip" : 20,
+      "name" : "arrow",
+      "sha256" : "19aff97eee2a89cf5a06db6cb597579cb7a63a88a53dcf94e7dddeb14c3e8654",
+      "source" : "platforms/mac/Resources/Icons/arrow.svg"
+    },
+    {
+      "fixedColor" : false,
+      "generated" : {
+        "100" : "platforms/win/resources/toolbar/100/cancel-capture.png",
+        "125" : "platforms/win/resources/toolbar/125/cancel-capture.png",
+        "150" : "platforms/win/resources/toolbar/150/cancel-capture.png",
+        "200" : "platforms/win/resources/toolbar/200/cancel-capture.png"
+      },
+      "insetDip" : 2,
+      "logicalSizeDip" : 20,
+      "name" : "cancel-capture",
+      "sha256" : "7bb0a6c50a2abc74531cd87be3074aa3151b6d5885eec68259ed97701144a871",
+      "source" : "platforms/mac/Resources/Icons/cancel-capture.svg"
+    },
+    {
+      "fixedColor" : false,
+      "generated" : {
+        "100" : "platforms/win/resources/toolbar/100/copy-to-clipboard.png",
+        "125" : "platforms/win/resources/toolbar/125/copy-to-clipboard.png",
+        "150" : "platforms/win/resources/toolbar/150/copy-to-clipboard.png",
+        "200" : "platforms/win/resources/toolbar/200/copy-to-clipboard.png"
+      },
+      "insetDip" : 2,
+      "logicalSizeDip" : 20,
+      "name" : "copy-to-clipboard",
+      "sha256" : "8e9ae10c98c2eb92f0ef9e61bde90bf76bd08eff2acbc4f336eddd88b63922ae",
+      "source" : "platforms/mac/Resources/Icons/copy-to-clipboard.svg"
+    },
+    {
+      "fixedColor" : false,
+      "generated" : {
+        "100" : "platforms/win/resources/toolbar/100/eraser-tool.png",
+        "125" : "platforms/win/resources/toolbar/125/eraser-tool.png",
+        "150" : "platforms/win/resources/toolbar/150/eraser-tool.png",
+        "200" : "platforms/win/resources/toolbar/200/eraser-tool.png"
+      },
+      "insetDip" : 2,
+      "logicalSizeDip" : 20,
+      "name" : "eraser-tool",
+      "sha256" : "4489e7a47bb61fd8f8ddf0ab22c8470c7f7ea453944ebeb849d6a84cfe5e304f",
+      "source" : "platforms/mac/Resources/Icons/eraser-tool.svg"
+    },
+    {
+      "fixedColor" : false,
+      "generated" : {
+        "100" : "platforms/win/resources/toolbar/100/highlighter-tool.png",
+        "125" : "platforms/win/resources/toolbar/125/highlighter-tool.png",
+        "150" : "platforms/win/resources/toolbar/150/highlighter-tool.png",
+        "200" : "platforms/win/resources/toolbar/200/highlighter-tool.png"
+      },
+      "insetDip" : 2,
+      "logicalSizeDip" : 20,
+      "name" : "highlighter-tool",
+      "sha256" : "6c123f51131e10aefa48c72121ef49b82693b25bc7790c81f111b953662973d3",
+      "source" : "platforms/mac/Resources/Icons/highlighter-tool.svg"
+    },
+    {
+      "fixedColor" : false,
+      "generated" : {
+        "100" : "platforms/win/resources/toolbar/100/masaike2.png",
+        "125" : "platforms/win/resources/toolbar/125/masaike2.png",
+        "150" : "platforms/win/resources/toolbar/150/masaike2.png",
+        "200" : "platforms/win/resources/toolbar/200/masaike2.png"
+      },
+      "insetDip" : 0,
+      "logicalSizeDip" : 20,
+      "name" : "masaike2",
+      "sha256" : "b853a63cce1c7bd212547cae6473e7b48346bcff5d848cf345f1bdf871a77c25",
+      "source" : "platforms/mac/Resources/Icons/masaike2.svg"
+    },
+    {
+      "fixedColor" : false,
+      "generated" : {
+        "100" : "platforms/win/resources/toolbar/100/number-sequence.png",
+        "125" : "platforms/win/resources/toolbar/125/number-sequence.png",
+        "150" : "platforms/win/resources/toolbar/150/number-sequence.png",
+        "200" : "platforms/win/resources/toolbar/200/number-sequence.png"
+      },
+      "insetDip" : 3,
+      "logicalSizeDip" : 20,
+      "name" : "number-sequence",
+      "sha256" : "c237aceb61f77e66bc34dbebc89c7209cfb6ae1263156716d91a5aa02e03d51f",
+      "source" : "platforms/mac/Resources/Icons/number-sequence.svg"
+    },
+    {
+      "fixedColor" : false,
+      "generated" : {
+        "100" : "platforms/win/resources/toolbar/100/pencil-tool.png",
+        "125" : "platforms/win/resources/toolbar/125/pencil-tool.png",
+        "150" : "platforms/win/resources/toolbar/150/pencil-tool.png",
+        "200" : "platforms/win/resources/toolbar/200/pencil-tool.png"
+      },
+      "insetDip" : 2,
+      "logicalSizeDip" : 20,
+      "name" : "pencil-tool",
+      "sha256" : "94815b7f70f8e29f2e99f863439b087746b6f47c82c649dc6fb27ba144919aed",
+      "source" : "platforms/mac/Resources/Icons/pencil-tool.svg"
+    },
+    {
+      "fixedColor" : false,
+      "generated" : {
+        "100" : "platforms/win/resources/toolbar/100/pin-to-screen.png",
+        "125" : "platforms/win/resources/toolbar/125/pin-to-screen.png",
+        "150" : "platforms/win/resources/toolbar/150/pin-to-screen.png",
+        "200" : "platforms/win/resources/toolbar/200/pin-to-screen.png"
+      },
+      "insetDip" : 2,
+      "logicalSizeDip" : 20,
+      "name" : "pin-to-screen",
+      "sha256" : "104c26794409ae953f30cfaa785ee814de09aa7d61302f49a8dceea0832c31b0",
+      "source" : "platforms/mac/Resources/Icons/pin-to-screen.svg"
+    },
+    {
+      "fixedColor" : true,
+      "generated" : {
+        "100" : "platforms/win/resources/toolbar/100/redo-disabled.png",
+        "125" : "platforms/win/resources/toolbar/125/redo-disabled.png",
+        "150" : "platforms/win/resources/toolbar/150/redo-disabled.png",
+        "200" : "platforms/win/resources/toolbar/200/redo-disabled.png"
+      },
+      "insetDip" : 0,
+      "logicalSizeDip" : 20,
+      "name" : "redo-disabled",
+      "sha256" : "0ee422fdf117bde0cc4c853cdfd0047d77c6a9b4dca50b1b97b9569932fa6ccc",
+      "source" : "platforms/mac/Resources/Icons/redo-disabled.svg"
+    },
+    {
+      "fixedColor" : true,
+      "generated" : {
+        "100" : "platforms/win/resources/toolbar/100/redo-enabled.png",
+        "125" : "platforms/win/resources/toolbar/125/redo-enabled.png",
+        "150" : "platforms/win/resources/toolbar/150/redo-enabled.png",
+        "200" : "platforms/win/resources/toolbar/200/redo-enabled.png"
+      },
+      "insetDip" : 0,
+      "logicalSizeDip" : 20,
+      "name" : "redo-enabled",
+      "sha256" : "d4caabb0e4d2633f9e238d00201bf849454c21cf7bbb57cef7e07f2007c35381",
+      "source" : "platforms/mac/Resources/Icons/redo-enabled.svg"
+    },
+    {
+      "fixedColor" : false,
+      "generated" : {
+        "100" : "platforms/win/resources/toolbar/100/save-to-file.png",
+        "125" : "platforms/win/resources/toolbar/125/save-to-file.png",
+        "150" : "platforms/win/resources/toolbar/150/save-to-file.png",
+        "200" : "platforms/win/resources/toolbar/200/save-to-file.png"
+      },
+      "insetDip" : 2,
+      "logicalSizeDip" : 20,
+      "name" : "save-to-file",
+      "sha256" : "d8a43559fad27626ec2bcced105f7f59e083b0a29c1b1c3cc7acd05f46091be5",
+      "source" : "platforms/mac/Resources/Icons/save-to-file.svg"
+    },
+    {
+      "fixedColor" : false,
+      "generated" : {
+        "100" : "platforms/win/resources/toolbar/100/screenshot.png",
+        "125" : "platforms/win/resources/toolbar/125/screenshot.png",
+        "150" : "platforms/win/resources/toolbar/150/screenshot.png",
+        "200" : "platforms/win/resources/toolbar/200/screenshot.png"
+      },
+      "insetDip" : -1,
+      "logicalSizeDip" : 20,
+      "name" : "screenshot",
+      "sha256" : "74162a63e5b459aa4ede961c6c958597bbc8bd7d55a0bc1820bc0fe02e0558b2",
+      "source" : "platforms/mac/Resources/Icons/screenshot.svg"
+    },
+    {
+      "fixedColor" : false,
+      "generated" : {
+        "100" : "platforms/win/resources/toolbar/100/scroll-screen2.png",
+        "125" : "platforms/win/resources/toolbar/125/scroll-screen2.png",
+        "150" : "platforms/win/resources/toolbar/150/scroll-screen2.png",
+        "200" : "platforms/win/resources/toolbar/200/scroll-screen2.png"
+      },
+      "insetDip" : 0,
+      "logicalSizeDip" : 20,
+      "name" : "scroll-screen2",
+      "sha256" : "58f52951592be488bc995aa4ce1328c9be866851d8470eaec43efb42baaa8acc",
+      "source" : "platforms/mac/Resources/Icons/scroll-screen2.svg"
+    },
+    {
+      "fixedColor" : false,
+      "generated" : {
+        "100" : "platforms/win/resources/toolbar/100/settings-more.png",
+        "125" : "platforms/win/resources/toolbar/125/settings-more.png",
+        "150" : "platforms/win/resources/toolbar/150/settings-more.png",
+        "200" : "platforms/win/resources/toolbar/200/settings-more.png"
+      },
+      "insetDip" : 2,
+      "logicalSizeDip" : 20,
+      "name" : "settings-more",
+      "sha256" : "00633f51ca59dbae0f7f2a01b7246a2749097b46c7d38da7f9602391e43a1974",
+      "source" : "platforms/mac/Resources/Icons/settings-more.svg"
+    },
+    {
+      "fixedColor" : false,
+      "generated" : {
+        "100" : "platforms/win/resources/toolbar/100/straw-ranging.png",
+        "125" : "platforms/win/resources/toolbar/125/straw-ranging.png",
+        "150" : "platforms/win/resources/toolbar/150/straw-ranging.png",
+        "200" : "platforms/win/resources/toolbar/200/straw-ranging.png"
+      },
+      "insetDip" : 0,
+      "logicalSizeDip" : 20,
+      "name" : "straw-ranging",
+      "sha256" : "fa9e0fc9fddcd934bbbbc8ba400e5f78e71375353a8ef4269f45c30ea9ccb2a2",
+      "source" : "platforms/mac/Resources/Icons/straw-ranging.svg"
+    },
+    {
+      "fixedColor" : false,
+      "generated" : {
+        "100" : "platforms/win/resources/toolbar/100/text-tool.png",
+        "125" : "platforms/win/resources/toolbar/125/text-tool.png",
+        "150" : "platforms/win/resources/toolbar/150/text-tool.png",
+        "200" : "platforms/win/resources/toolbar/200/text-tool.png"
+      },
+      "insetDip" : 0,
+      "logicalSizeDip" : 20,
+      "name" : "text-tool",
+      "sha256" : "0dca7b1ce6b289f5ef33b43d15a137fd796f9483edad20f0fc991ca42cf1c21c",
+      "source" : "platforms/mac/Resources/Icons/text-tool.svg"
+    },
+    {
+      "fixedColor" : true,
+      "generated" : {
+        "100" : "platforms/win/resources/toolbar/100/undo-disabled.png",
+        "125" : "platforms/win/resources/toolbar/125/undo-disabled.png",
+        "150" : "platforms/win/resources/toolbar/150/undo-disabled.png",
+        "200" : "platforms/win/resources/toolbar/200/undo-disabled.png"
+      },
+      "insetDip" : 0,
+      "logicalSizeDip" : 20,
+      "name" : "undo-disabled",
+      "sha256" : "3c5c892c8e69b26ed5208e7c923a29238ae5b7874d4b7d9b34a32f26fdb87688",
+      "source" : "platforms/mac/Resources/Icons/undo-disabled.svg"
+    },
+    {
+      "fixedColor" : true,
+      "generated" : {
+        "100" : "platforms/win/resources/toolbar/100/undo-enabled.png",
+        "125" : "platforms/win/resources/toolbar/125/undo-enabled.png",
+        "150" : "platforms/win/resources/toolbar/150/undo-enabled.png",
+        "200" : "platforms/win/resources/toolbar/200/undo-enabled.png"
+      },
+      "insetDip" : 0,
+      "logicalSizeDip" : 20,
+      "name" : "undo-enabled",
+      "sha256" : "ba21531e203229f3d5233af279669ce7b73e7e7f72c0902e16e8869dc5393e5c",
+      "source" : "platforms/mac/Resources/Icons/undo-enabled.svg"
+    },
+    {
+      "fixedColor" : false,
+      "generated" : {
+        "100" : "platforms/win/resources/toolbar/100/zoom-in-tool.png",
+        "125" : "platforms/win/resources/toolbar/125/zoom-in-tool.png",
+        "150" : "platforms/win/resources/toolbar/150/zoom-in-tool.png",
+        "200" : "platforms/win/resources/toolbar/200/zoom-in-tool.png"
+      },
+      "insetDip" : 2,
+      "logicalSizeDip" : 20,
+      "name" : "zoom-in-tool",
+      "sha256" : "4fba1014fb1a65f78f44ea0ec0ce186d4944c5e4adeb63db192b8e87b449d989",
+      "source" : "platforms/mac/Resources/Icons/zoom-in-tool.svg"
+    }
+  ],
+  "scales" : [
+    100,
+    125,
+    150,
+    200
+  ],
+  "version" : 1
+}
