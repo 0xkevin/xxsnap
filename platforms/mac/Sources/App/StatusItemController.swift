@@ -8,6 +8,7 @@ final class StatusItemController: NSObject {
     private let updateChecker: any UpdateChecking
     private let showPreferences: (PreferencesSection) -> Void
     private let showHelp: @MainActor () -> Void
+    private let openURL: @MainActor (URL) -> Void
     private let exportDiagnosticsHandler: @MainActor () -> Void
     private let terminationHandler: @MainActor () -> Void
     private let statusItem: NSStatusItem
@@ -20,6 +21,9 @@ final class StatusItemController: NSObject {
         updateChecker: any UpdateChecking,
         showPreferences: @escaping (PreferencesSection) -> Void,
         showHelp: @escaping @MainActor () -> Void,
+        openURL: @escaping @MainActor (URL) -> Void = { url in
+            _ = NSWorkspace.shared.open(url)
+        },
         exportDiagnostics: @escaping @MainActor () -> Void = {},
         commercialAccess: (any CommercialAccessProviding)? = nil,
         terminationHandler: @escaping @MainActor () -> Void = {
@@ -32,6 +36,7 @@ final class StatusItemController: NSObject {
         self.updateChecker = updateChecker
         self.showPreferences = showPreferences
         self.showHelp = showHelp
+        self.openURL = openURL
         self.exportDiagnosticsHandler = exportDiagnostics
         self.commercialAccess = commercialAccess ?? UnrestrictedCommercialAccess.shared
         self.terminationHandler = terminationHandler
@@ -78,6 +83,13 @@ final class StatusItemController: NSObject {
 
     @objc func openHelp() {
         showHelp()
+    }
+
+    @objc func openGitHubFeedback() {
+        guard let url = URL(string: "https://github.com/0xkevin/xxsnap/issues/new/choose") else {
+            return
+        }
+        openURL(url)
     }
 
     @objc func exportDiagnostics() {
@@ -154,6 +166,11 @@ final class StatusItemController: NSObject {
         menu.addItem(NSMenuItem(
             title: strings.help,
             action: #selector(openHelp),
+            keyEquivalent: ""
+        ))
+        menu.addItem(NSMenuItem(
+            title: strings.githubFeedback,
+            action: #selector(openGitHubFeedback),
             keyEquivalent: ""
         ))
         menu.addItem(NSMenuItem(
