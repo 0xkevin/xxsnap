@@ -1667,6 +1667,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(chinese.checkForUpdates, "检查更新…")
         XCTAssertEqual(chinese.supportDeveloper, "支持开发者 ☕️")
         XCTAssertEqual(chinese.help, "帮助…")
+        XCTAssertEqual(chinese.githubFeedback, "GitHub 反馈…")
         XCTAssertEqual(chinese.exportDiagnostics, "导出诊断日志…")
         XCTAssertEqual(chinese.helpWindowTitle, "XxSnap 帮助")
         XCTAssertEqual(chinese.helpLoadFailed, "帮助内容暂时无法打开")
@@ -1679,6 +1680,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(english.checkForUpdates, "Check for Updates…")
         XCTAssertEqual(english.supportDeveloper, "Support the Developer ☕️")
         XCTAssertEqual(english.help, "Help...")
+        XCTAssertEqual(english.githubFeedback, "GitHub Feedback…")
         XCTAssertEqual(english.exportDiagnostics, "Export Diagnostic Logs…")
         XCTAssertEqual(english.helpWindowTitle, "XxSnap Help")
         XCTAssertEqual(
@@ -1775,6 +1777,7 @@ final class AppSettingsTests: XCTestCase {
         )
         var shownSections: [PreferencesSection] = []
         var showHelpCount = 0
+        var openedURLs: [URL] = []
         var exportDiagnosticsCount = 0
         var quitCount = 0
         let controller = StatusItemController(
@@ -1787,11 +1790,12 @@ final class AppSettingsTests: XCTestCase {
             updateChecker: FakeUpdateChecker(),
             showPreferences: { shownSections.append($0) },
             showHelp: { showHelpCount += 1 },
+            openURL: { openedURLs.append($0) },
             exportDiagnostics: { exportDiagnosticsCount += 1 },
             terminationHandler: { quitCount += 1 }
         )
 
-        let lowerItems = Array(controller.test_menuItems.suffix(7))
+        let lowerItems = Array(controller.test_menuItems.suffix(8))
         XCTAssertEqual(controller.test_statusItemLength, NSStatusItem.squareLength)
         XCTAssertTrue(controller.test_statusButtonIsEnabled)
         XCTAssertEqual(
@@ -1801,6 +1805,7 @@ final class AppSettingsTests: XCTestCase {
                 "检查更新…",
                 "支持开发者 ☕️",
                 "帮助…",
+                "GitHub 反馈…",
                 "导出诊断日志…",
                 "关于…",
                 "退出"
@@ -1821,6 +1826,20 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertTrue(helpItem.target === controller)
         controller.openHelp()
         XCTAssertEqual(showHelpCount, 1)
+
+        let feedbackItem = try XCTUnwrap(
+            lowerItems.first { $0.title == "GitHub 反馈…" }
+        )
+        XCTAssertEqual(
+            feedbackItem.action,
+            #selector(StatusItemController.openGitHubFeedback)
+        )
+        XCTAssertTrue(feedbackItem.target === controller)
+        controller.openGitHubFeedback()
+        XCTAssertEqual(
+            openedURLs,
+            [URL(string: "https://github.com/0xkevin/xxsnap/issues/new/choose")!]
+        )
 
         XCTAssertFalse(
             controller.test_menuItems.contains {

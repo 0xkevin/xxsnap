@@ -244,6 +244,7 @@ struct PreferencesStrings {
         isEnglish ? "Support the Developer ☕️" : "支持开发者 ☕️"
     }
     var help: String { isEnglish ? "Help..." : "帮助…" }
+    var githubFeedback: String { isEnglish ? "GitHub Feedback…" : "GitHub 反馈…" }
     var exportDiagnostics: String {
         isEnglish ? "Export Diagnostic Logs…" : "导出诊断日志…"
     }
