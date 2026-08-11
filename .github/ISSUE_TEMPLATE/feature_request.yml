@@ -1,0 +1,59 @@
+name: 功能建议 / Feature request
+description: 提议新的功能或体验改进 / Suggest a feature or experience improvement
+title: "[Feature] "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先描述真实使用场景和当前困难，再说明期望的解决方式。
+
+        Start with the real use case and current difficulty, then describe the desired outcome.
+
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 使用场景 / Use case
+      description: 你在什么情况下需要这个功能？/ When would you need this feature?
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 当前问题 / Current problem
+      description: 现有操作有什么困难？/ What is difficult with the current experience?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 期望方案 / Desired solution
+      description: 你希望 XxSnap 如何解决？/ How should XxSnap address it?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 其他方案 / Alternatives considered
+      description: 你目前如何解决，或参考过哪些产品？/ How do you handle this today, or which products have you referenced?
+
+  - type: textarea
+    id: context
+    attributes:
+      label: 补充信息 / Additional context
+      description: 可添加经过脱敏的示意图或使用流程 / Add redacted mockups or workflow details
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: 提交确认 / Checklist
+      options:
+        - label: 我已经搜索过现有 Issues，没有发现相同建议。/ I searched existing issues and found no duplicate.
+          required: true
+        - label: 我没有在内容中包含敏感或私人信息。/ I did not include sensitive or private information.
+          required: true
+

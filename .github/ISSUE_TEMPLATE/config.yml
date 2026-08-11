@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: XxSnap 官方网站 / Official website
+    url: https://xxsnap.xxsofts.com/
+    about: 查看产品介绍和官方信息 / Product information and official updates
+  - name: 下载 XxSnap / Download XxSnap
+    url: https://xxsnap.xxsofts.com/zh-CN/download/
+    about: 获取最新正式版本 / Get the latest production release
+  - name: 安装指南 / Installation guide
+    url: https://xxsnap.xxsofts.com/zh-CN/install/
+    about: 查看下载、安装和首次运行说明 / Download, installation, and first-launch help
