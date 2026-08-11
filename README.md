@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/xxsnap-logo.png" alt="XxSnap Logo" width="144" height="144">
+
 # XxSnap
 
 **简单、顺手的 macOS 截图工具**  
@@ -89,4 +91,3 @@ Before submitting a report, search the [existing issues](https://github.com/0xke
 - [Request a feature](https://github.com/0xkevin/xxsnap/issues/new?template=feature_request.yml)
 
 Do not include passwords, private content, API keys, or other sensitive information in public issues.
-
