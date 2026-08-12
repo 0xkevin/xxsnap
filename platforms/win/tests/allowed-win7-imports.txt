@@ -32,6 +32,7 @@ USER32.dll!EmptyClipboard
 USER32.dll!EndPaint
 USER32.dll!EnumDisplayMonitors
 USER32.dll!FillRect
+USER32.dll!FrameRect
 USER32.dll!GetCapture
 USER32.dll!GetClientRect
 USER32.dll!GetClipboardData
@@ -42,6 +43,7 @@ USER32.dll!GetForegroundWindow
 USER32.dll!GetKeyState
 USER32.dll!GetMessageW
 USER32.dll!GetMonitorInfoW
+USER32.dll!GetSystemMetrics
 USER32.dll!GetWindowThreadProcessId
 USER32.dll!GetWindowLongPtrW
 USER32.dll!GetWindowLongW
@@ -53,6 +55,7 @@ USER32.dll!LoadCursorW
 USER32.dll!LoadImageW
 USER32.dll!MessageBoxW
 USER32.dll!MonitorFromRect
+USER32.dll!MonitorFromPoint
 USER32.dll!OpenClipboard
 USER32.dll!PostMessageW
 USER32.dll!PostQuitMessage

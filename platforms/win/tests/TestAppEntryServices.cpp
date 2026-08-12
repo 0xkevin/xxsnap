@@ -163,7 +163,7 @@ public:
 
     std::optional<TrayCommand> showContextMenu(
         HWND,
-        const std::array<TrayMenuItem, 2>& items,
+        const std::array<TrayMenuItem, 3>& items,
         DWORD& error) noexcept override
     {
         ++menuCalls;
@@ -184,7 +184,7 @@ public:
     std::wstring taskbarMessageName;
     std::vector<NotifyCall> calls;
     int menuCalls = 0;
-    std::array<TrayMenuItem, 2> menuItems{};
+    std::array<TrayMenuItem, 3> menuItems{};
     std::function<void()> onShowContextMenu;
 };
 
@@ -226,8 +226,10 @@ void testTrayLifecycleMenuAndExplorerRestart()
     CHECK(api.menuCalls == 1);
     CHECK(api.menuItems[0].command == TrayCommand::regionCapture);
     CHECK(std::wstring(api.menuItems[0].label) == L"\u533a\u57df\u622a\u56fe");
-    CHECK(api.menuItems[1].command == TrayCommand::exit);
-    CHECK(std::wstring(api.menuItems[1].label) == L"\u9000\u51fa");
+    CHECK(api.menuItems[1].command == TrayCommand::fullScreenCapture);
+    CHECK(std::wstring(api.menuItems[1].label) == L"\u5168\u5c4f\u622a\u56fe");
+    CHECK(api.menuItems[2].command == TrayCommand::exit);
+    CHECK(std::wstring(api.menuItems[2].label) == L"\u9000\u51fa");
     CHECK(api.calls.back().operation == NIM_DELETE);
 }
 
@@ -368,13 +370,26 @@ void testAllDefaultMappingsAndMvpRegistration()
     CHECK(api.registrations[0].modifiers == MOD_CONTROL);
     CHECK(api.registrations[0].virtualKey == VK_OEM_3);
     int restoreCalls = 0;
-    CHECK(registrar->registerRestorePinnedImage(
-        window, [&] { ++restoreCalls; }));
+    int fullScreenCalls = 0;
+    CHECK(registrar->registerFullScreenCapture(
+        window, [&] { ++fullScreenCalls; }));
     CHECK(api.registrations.size() == 2U);
     CHECK(api.registrations[1].identifier
-        == xxsnap::win::restorePinnedImageHotKeyIdentifier);
-    CHECK(api.registrations[1].modifiers == MOD_CONTROL);
+        == xxsnap::win::fullScreenCaptureHotKeyIdentifier);
+    CHECK(api.registrations[1].modifiers == (MOD_CONTROL | MOD_SHIFT));
     CHECK(api.registrations[1].virtualKey == '1');
+    CHECK(registrar->handleMessage(
+        WM_HOTKEY,
+        static_cast<WPARAM>(
+            xxsnap::win::fullScreenCaptureHotKeyIdentifier)));
+    CHECK(fullScreenCalls == 1);
+    CHECK(registrar->registerRestorePinnedImage(
+        window, [&] { ++restoreCalls; }));
+    CHECK(api.registrations.size() == 3U);
+    CHECK(api.registrations[2].identifier
+        == xxsnap::win::restorePinnedImageHotKeyIdentifier);
+    CHECK(api.registrations[2].modifiers == MOD_CONTROL);
+    CHECK(api.registrations[2].virtualKey == '1');
     CHECK(registrar->handleMessage(
         WM_HOTKEY,
         static_cast<WPARAM>(
@@ -386,7 +401,7 @@ void testAllDefaultMappingsAndMvpRegistration()
         static_cast<WPARAM>(xxsnap::win::regionCaptureHotKeyIdentifier)));
     CHECK(callbackCalls == 1);
     CHECK(registrar == nullptr);
-    CHECK(api.unregisterCalls == 2);
+    CHECK(api.unregisterCalls == 3);
 }
 
 void testHotKeyConflictAndCleanupAreExplicit()

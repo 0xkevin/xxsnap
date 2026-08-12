@@ -16,7 +16,8 @@ namespace xxsnap::win {
 
 enum class TrayCommand : UINT {
     regionCapture = 0x5801,
-    exit = 0x5802,
+    fullScreenCapture = 0x5802,
+    exit = 0x5803,
 };
 
 struct TrayMenuItem {
@@ -27,10 +28,11 @@ struct TrayMenuItem {
 inline constexpr UINT trayCallbackMessage = WM_APP + 0x58;
 inline constexpr UINT trayIconIdentifier = 1;
 
-constexpr std::array<TrayMenuItem, 2> mvpTrayMenuItems() noexcept
+constexpr std::array<TrayMenuItem, 3> mvpTrayMenuItems() noexcept
 {
     return {{
         {TrayCommand::regionCapture, L"\u533a\u57df\u622a\u56fe"},
+        {TrayCommand::fullScreenCapture, L"\u5168\u5c4f\u622a\u56fe"},
         {TrayCommand::exit, L"\u9000\u51fa"},
     }};
 }
@@ -46,7 +48,7 @@ public:
         DWORD& error) noexcept = 0;
     virtual std::optional<TrayCommand> showContextMenu(
         HWND owner,
-        const std::array<TrayMenuItem, 2>& items,
+        const std::array<TrayMenuItem, 3>& items,
         DWORD& error) noexcept = 0;
 };
 

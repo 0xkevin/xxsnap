@@ -504,6 +504,24 @@ target_link_libraries(
             xxsnap_display_topology
 )
 
+add_library(
+    xxsnap_full_screen_capture_preview_host
+    src/fullscreen/FullScreenCapturePreviewHost.cpp
+)
+target_compile_features(
+    xxsnap_full_screen_capture_preview_host PUBLIC cxx_std_17
+)
+target_include_directories(
+    xxsnap_full_screen_capture_preview_host
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_full_screen_capture_preview_host
+    PUBLIC xxsnap_pinned_image_host xxsnap_overlay_host
+    PRIVATE xxsnap_annotation_composer xxsnap_display_topology
+            xxsnap_windows_build_configuration user32 gdi32 comdlg32
+)
+
 add_library(xxsnap_single_instance src/app/SingleInstance.cpp)
 target_compile_features(xxsnap_single_instance PUBLIC cxx_std_17)
 target_include_directories(
@@ -575,6 +593,7 @@ target_link_libraries(
         xxsnap_fallback_capture_backend
         xxsnap_scroll_capture_host
         xxsnap_pinned_image_host
+        xxsnap_full_screen_capture_preview_host
         xxsnap_selection_composer
         xxsnap_annotation_composer
         xxsnap_png_writer
@@ -652,7 +671,9 @@ if(BUILD_TESTING)
         xxsnap_pinned_image_geometry_test PRIVATE cxx_std_17
     )
     target_link_libraries(
-        xxsnap_pinned_image_geometry_test PRIVATE xxsnap_pinned_image_host
+        xxsnap_pinned_image_geometry_test
+        PRIVATE xxsnap_pinned_image_host
+                xxsnap_full_screen_capture_preview_host
     )
     add_test(
         NAME pinned_image_geometry
@@ -1065,6 +1086,17 @@ if(BUILD_TESTING)
     )
     target_compile_features(xxsnap_interactive_pin_verifier PRIVATE cxx_std_17)
     target_link_libraries(xxsnap_interactive_pin_verifier PRIVATE user32)
+
+    add_executable(
+        xxsnap_interactive_fullscreen_verifier EXCLUDE_FROM_ALL
+        ${CMAKE_SOURCE_DIR}/tools/windows/verify-interactive-fullscreen.cpp
+    )
+    target_compile_features(
+        xxsnap_interactive_fullscreen_verifier PRIVATE cxx_std_17
+    )
+    target_link_libraries(
+        xxsnap_interactive_fullscreen_verifier PRIVATE user32 gdi32
+    )
 endif()
 
 set(xxsnap_capture_session_targets
@@ -1092,6 +1124,8 @@ set(xxsnap_capture_session_targets
     xxsnap_overlay_renderer
     xxsnap_overlay_window
     xxsnap_overlay_host
+    xxsnap_pinned_image_host
+    xxsnap_full_screen_capture_preview_host
     xxsnap_single_instance
     xxsnap_tray_icon
     xxsnap_hot_key_registrar
@@ -1132,6 +1166,7 @@ if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_interactive_session_launcher)
     list(APPEND xxsnap_capture_session_targets xxsnap_interactive_startup_verifier)
     list(APPEND xxsnap_capture_session_targets xxsnap_interactive_pin_verifier)
+    list(APPEND xxsnap_capture_session_targets xxsnap_interactive_fullscreen_verifier)
 endif()
 
 if(MSVC)

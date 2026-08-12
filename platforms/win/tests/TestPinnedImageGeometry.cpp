@@ -1,4 +1,5 @@
 #include "pin/PinnedImageGeometry.h"
+#include "fullscreen/FullScreenCapturePreviewHost.h"
 
 #include <cstdlib>
 #include <iostream>
@@ -7,6 +8,7 @@ namespace {
 
 using xxsnap::win::PinnedImageSize;
 using xxsnap::win::fittedPinnedImageSize;
+using xxsnap::win::fullScreenPreviewRect;
 using xxsnap::win::initialPinnedImageRect;
 using xxsnap::win::scaledPinnedImageSize;
 
@@ -58,11 +60,27 @@ void testInitialPlacementUsesSourceOrCentersFittedLongImage()
     CHECK(longImage.y == 120);
 }
 
+void testFullScreenPreviewMatchesMacBottomRightPlacement()
+{
+    const auto wide = fullScreenPreviewRect(2'000, 1'000, {0, 0, 1'000, 800});
+    CHECK(wide.width == 320);
+    CHECK(wide.height == 160);
+    CHECK(wide.x == 660);
+    CHECK(wide.y == 620);
+
+    const auto tall = fullScreenPreviewRect(1'000, 2'000, {-500, 40, 900, 700});
+    CHECK(tall.width == 110);
+    CHECK(tall.height == 220);
+    CHECK(tall.x == 270);
+    CHECK(tall.y == 500);
+}
+
 } // namespace
 
 int main()
 {
     testMacSizingContract();
     testInitialPlacementUsesSourceOrCentersFittedLongImage();
+    testFullScreenPreviewMatchesMacBottomRightPlacement();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

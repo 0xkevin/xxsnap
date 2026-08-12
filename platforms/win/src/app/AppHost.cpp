@@ -11,9 +11,11 @@
 #include "export/ClipboardWriter.h"
 #include "export/PngWriter.h"
 #include "export/SelectionComposer.h"
+#include "fullscreen/FullScreenCapturePreviewHost.h"
 #include "pin/PinnedImageHost.h"
 #include "resource.h"
 #include "session/CaptureSessionCoordinator.h"
+#include "session/CaptureMemoryPlan.h"
 #include "scroll/ScrollCaptureHost.h"
 #include "support/RuntimeApis.h"
 
@@ -40,6 +42,8 @@ constexpr wchar_t hotKeyConflictText[] =
     L"Ctrl+` \u5df2\u88ab\u5176\u4ed6\u7a0b\u5e8f\u5360\u7528\uff0c\u4ecd\u53ef\u4ece\u6258\u76d8\u542f\u52a8\u533a\u57df\u622a\u56fe\u3002";
 constexpr wchar_t restorePinHotKeyConflictText[] =
     L"Ctrl+1 \u5df2\u88ab\u5176\u4ed6\u7a0b\u5e8f\u5360\u7528\uff0c\u4ecd\u53ef\u53cc\u51fb\u6216\u53f3\u952e\u8d34\u56fe\u7ee7\u7eed\u64cd\u4f5c\u3002";
+constexpr wchar_t fullScreenHotKeyConflictText[] =
+    L"Ctrl+Shift+1 \u5df2\u88ab\u5176\u4ed6\u7a0b\u5e8f\u5360\u7528\uff0c\u4ecd\u53ef\u4ece\u6258\u76d8\u542f\u52a8\u5168\u5c4f\u622a\u56fe\u3002";
 constexpr wchar_t topologyChangedText[] =
     L"\u663e\u793a\u5668\u914d\u7f6e\u8fde\u7eed\u53d8\u5316\uff0c\u672c\u6b21\u622a\u56fe\u5df2\u53d6\u6d88\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002";
 constexpr wchar_t clipboardFailureText[] =
@@ -323,6 +327,11 @@ public:
         return pinnedImages_.restoreMostRecentlyHidden();
     }
 
+    PinnedImageHost& pinnedImages() noexcept
+    {
+        return pinnedImages_;
+    }
+
 private:
     HINSTANCE instance_ = nullptr;
     HWND owner_ = nullptr;
@@ -349,6 +358,7 @@ public:
     {
         hotKey_.reset();
         tray_.reset();
+        fullScreenPreview_.reset();
         coordinator_.reset();
         sessionServices_.reset();
         singleInstance_.reset();
@@ -413,6 +423,14 @@ public:
         })) {
             if (!tray_->showHotKeyConflict(restorePinHotKeyConflictText)) {
                 MessageBoxW(window_, restorePinHotKeyConflictText,
+                    applicationName,
+                    MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
+            }
+        }
+        if (!hotKey_->registerFullScreenCapture(
+                window_, [this] { startFullScreenCapture(); })) {
+            if (!tray_->showHotKeyConflict(fullScreenHotKeyConflictText)) {
+                MessageBoxW(window_, fullScreenHotKeyConflictText,
                     applicationName,
                     MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
             }
@@ -535,8 +553,58 @@ private:
     {
         if (command == TrayCommand::regionCapture) {
             startRegionCapture("tray");
+        } else if (command == TrayCommand::fullScreenCapture) {
+            startFullScreenCapture();
         } else if (command == TrayCommand::exit && window_ != nullptr) {
             PostMessageW(window_, WM_CLOSE, 0, 0);
+        }
+    }
+
+    void startFullScreenCapture() noexcept
+    {
+        if (!coordinator_ || !sessionServices_
+            || coordinator_->state() != CaptureSessionState::idle) {
+            return;
+        }
+        try {
+            auto topologyResult = sessionServices_->snapshotTopology();
+            const auto* topology = topologyResult.value();
+            if (topology == nullptr) {
+                showSessionError(CaptureSessionErrorCode::topologyFailed);
+                return;
+            }
+            const auto memoryPlan = planFrozenDesktopMemory(
+                topology->displays(), defaultCaptureSessionMemoryLimit);
+            if (memoryPlan.status != CaptureMemoryPlanStatus::fits) {
+                showSessionError(CaptureSessionErrorCode::memoryLimitExceeded);
+                return;
+            }
+            MemoryBudget captureBudget(defaultCaptureSessionMemoryLimit);
+            auto captured = sessionServices_->capture(*topology, captureBudget);
+            auto* desktop = std::get_if<FrozenDesktop>(&captured);
+            if (desktop == nullptr) {
+                showSessionError(CaptureSessionErrorCode::captureFailed);
+                return;
+            }
+            const auto bounds = topology->virtualBounds();
+            MemoryBudget compositionBudget(defaultCaptureSessionMemoryLimit);
+            auto composition = composeSelection(
+                bounds, *desktop, compositionBudget);
+            auto* pixels = std::get_if<PixelBuffer>(&composition);
+            if (pixels == nullptr) {
+                showSessionError(CaptureSessionErrorCode::compositionFailed);
+                return;
+            }
+            if (!fullScreenPreview_) {
+                fullScreenPreview_ =
+                    std::make_unique<FullScreenCapturePreviewHost>(
+                        instance_, window_, sessionServices_->pinnedImages());
+            }
+            if (!fullScreenPreview_->show(std::move(*pixels), bounds)) {
+                showSessionError(CaptureSessionErrorCode::overlayFailed);
+            }
+        } catch (...) {
+            showSessionError(CaptureSessionErrorCode::allocationFailed);
         }
     }
 
@@ -564,6 +632,7 @@ private:
     std::unique_ptr<CaptureSessionCoordinator> coordinator_;
     std::unique_ptr<TrayIcon> tray_;
     std::unique_ptr<HotKeyRegistrar> hotKey_;
+    std::unique_ptr<FullScreenCapturePreviewHost> fullScreenPreview_;
 };
 
 } // namespace
