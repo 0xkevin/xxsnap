@@ -269,6 +269,70 @@ void testPinnedImageEditorEscapeFinishesInsteadOfCancelling()
     CHECK(router.status() == OverlayInputStatus::completed);
 }
 
+void testPinnedImageEditorStandaloneShiftRequestsToolbarHideOnRelease()
+{
+    FakePlatform platform;
+    std::vector<OverlayInputAction> actions;
+    const auto window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(3));
+    OverlayInputRouter router(
+        PixelRect{40, 60, 500, 300},
+        {{window, PixelRect{40, 60, 500, 300}, 96, 96}},
+        platform,
+        [&actions](OverlayInputAction action) { actions.push_back(action); },
+        true, nullptr, OverlayMode::pinnedImageEditor);
+    router.lockSelection({40, 60, 500, 300});
+
+    CHECK(router.pinnedImageShiftChanged(true, false, false));
+    CHECK(actions.empty());
+    CHECK(router.pinnedImageShiftChanged(false, false, false));
+    CHECK(actions == std::vector<OverlayInputAction>{
+        OverlayInputAction::hideEditingToolbar});
+    CHECK(router.status() == OverlayInputStatus::active);
+}
+
+void testPinnedImageEditorShiftToggleCancelsForMixedInput()
+{
+    FakePlatform platform;
+    std::vector<OverlayInputAction> actions;
+    const auto window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(3));
+    OverlayInputRouter router(
+        PixelRect{40, 60, 500, 300},
+        {{window, PixelRect{40, 60, 500, 300}, 96, 96}},
+        platform,
+        [&actions](OverlayInputAction action) { actions.push_back(action); },
+        true, nullptr, OverlayMode::pinnedImageEditor);
+    router.lockSelection({40, 60, 500, 300});
+
+    CHECK(router.pinnedImageShiftChanged(true, false, false));
+    CHECK(!router.pinnedImageShiftChanged(true, false, true));
+    CHECK(!router.pinnedImageShiftChanged(false, false, false));
+    CHECK(actions.empty());
+
+    CHECK(router.pinnedImageShiftChanged(true, false, false));
+    router.cancelPinnedImageShiftShortcut();
+    CHECK(!router.pinnedImageShiftChanged(false, false, false));
+    CHECK(actions.empty());
+}
+
+void testPinnedImageEditorAlwaysOnTopShortcutIsNonTerminal()
+{
+    FakePlatform platform;
+    std::vector<OverlayInputAction> actions;
+    const auto window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(3));
+    OverlayInputRouter router(
+        PixelRect{40, 60, 500, 300},
+        {{window, PixelRect{40, 60, 500, 300}, 96, 96}},
+        platform,
+        [&actions](OverlayInputAction action) { actions.push_back(action); },
+        true, nullptr, OverlayMode::pinnedImageEditor);
+    router.lockSelection({40, 60, 500, 300});
+
+    CHECK(router.togglePinnedImageAlwaysOnTop());
+    CHECK(actions == std::vector<OverlayInputAction>{
+        OverlayInputAction::togglePinnedImageAlwaysOnTop});
+    CHECK(router.status() == OverlayInputStatus::active);
+}
+
 PixelPoint dipCenterAt144Dpi(AnnotationRect rect)
 {
     return {
@@ -1230,6 +1294,9 @@ int main()
     testCtrlOnePinsTheReadySelection();
     testPinnedImageEditorLocksSelectionAndFinishesWithoutCaptureActions();
     testPinnedImageEditorEscapeFinishesInsteadOfCancelling();
+    testPinnedImageEditorStandaloneShiftRequestsToolbarHideOnRelease();
+    testPinnedImageEditorShiftToggleCancelsForMixedInput();
+    testPinnedImageEditorAlwaysOnTopShortcutIsNonTerminal();
     testToolbarPresentationUsesSharedPhysicalRects();
     testOnePixelOutsideToolbarItemsDoesNotFireAction();
     testCancelSourcesAreIdempotentAndCaptureFailureFailsClosed();

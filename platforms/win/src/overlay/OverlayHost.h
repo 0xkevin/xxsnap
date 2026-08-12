@@ -31,6 +31,8 @@ enum class OverlayInputAction {
     copy,
     scrollCapture,
     finishEditing,
+    hideEditingToolbar,
+    togglePinnedImageAlwaysOnTop,
 };
 
 enum class OverlayInputStatus {
@@ -225,6 +227,10 @@ public:
     bool mouseWheel(int delta) noexcept;
     bool isEditingInlineValue() const noexcept;
     bool eyedropperShiftPressed() noexcept;
+    bool pinnedImageShiftChanged(
+        bool pressed, bool control, bool alt) noexcept;
+    void cancelPinnedImageShiftShortcut() noexcept;
+    bool togglePinnedImageAlwaysOnTop() noexcept;
     void shutdownForRestart() noexcept;
 
     OverlayInputStatus status() const noexcept;
@@ -311,6 +317,7 @@ private:
     std::optional<PixelPoint> eyedropperMeasurementStart_;
     std::optional<PixelPoint> eyedropperMeasurementEnd_;
     bool eyedropperMeasurementInProgress_ = false;
+    bool pinnedImageShiftShortcutCandidate_ = false;
     EyedropperCopyMode eyedropperCopyMode_ = EyedropperCopyMode::hex;
     std::optional<std::chrono::steady_clock::time_point>
         eyedropperCopySuccessUntil_;
@@ -356,9 +363,11 @@ public:
     static OverlayHostCreateResult createPinnedImageEditor(
         HINSTANCE instance,
         const FrozenDesktop& desktop,
-        ActionCallback actionCallback);
+        ActionCallback actionCallback,
+        bool alwaysOnTop = true);
 
     void show() noexcept;
+    void setAlwaysOnTop(bool enabled) noexcept;
     bool suspendForScrollCapture() noexcept;
     bool resumeAfterScrollCapture() noexcept;
     std::optional<PixelRect> selection() const noexcept;

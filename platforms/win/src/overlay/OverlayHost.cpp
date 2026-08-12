@@ -1386,6 +1386,7 @@ bool OverlayInputRouter::pointerDown(
     PixelPoint clientPoint,
     int clickCount) noexcept
 {
+    cancelPinnedImageShiftShortcut();
     if (status_ != OverlayInputStatus::active || dragging_) {
         return false;
     }
@@ -1888,6 +1889,7 @@ OverlayCursorStyle OverlayInputRouter::cursorStyle(
 
 void OverlayInputRouter::pointerMove(HWND source, PixelPoint clientPoint) noexcept
 {
+    if (dragging_) cancelPinnedImageShiftShortcut();
     if (status_ == OverlayInputStatus::active
         && editor_ != nullptr && editor_->isEyedropperToolActive()) {
         if (const auto* surface = surfaceFor(source)) {
@@ -2082,6 +2084,7 @@ bool OverlayInputRouter::textInput(std::wstring text)
 
 bool OverlayInputRouter::mouseWheel(int delta) noexcept
 {
+    cancelPinnedImageShiftShortcut();
     if (status_ != OverlayInputStatus::active || editor_ == nullptr
         || (!editor_->textPopupMenu().has_value()
             && !editor_->numberPopupMenu().has_value())
@@ -2104,6 +2107,47 @@ bool OverlayInputRouter::eyedropperShiftPressed() noexcept
     }
     eyedropperCopyMode_ = eyedropperCopyMode_ == EyedropperCopyMode::hex
         ? EyedropperCopyMode::rgb : EyedropperCopyMode::hex;
+    return true;
+}
+
+bool OverlayInputRouter::pinnedImageShiftChanged(
+    bool pressed, bool control, bool alt) noexcept
+{
+    if (mode_ != OverlayMode::pinnedImageEditor
+        || status_ != OverlayInputStatus::active) {
+        pinnedImageShiftShortcutCandidate_ = false;
+        return false;
+    }
+    const auto colorSamplerOwnsShift = eyedropperSampleColor_.has_value()
+        || eyedropperSamplePoint_.has_value();
+    if (pressed && !control && !alt && !dragging_
+        && !colorSamplerOwnsShift) {
+        pinnedImageShiftShortcutCandidate_ = true;
+        return true;
+    }
+    if (!pressed && !control && !alt
+        && pinnedImageShiftShortcutCandidate_) {
+        pinnedImageShiftShortcutCandidate_ = false;
+        emitTerminal(OverlayInputAction::hideEditingToolbar);
+        return true;
+    }
+    pinnedImageShiftShortcutCandidate_ = false;
+    return false;
+}
+
+void OverlayInputRouter::cancelPinnedImageShiftShortcut() noexcept
+{
+    pinnedImageShiftShortcutCandidate_ = false;
+}
+
+bool OverlayInputRouter::togglePinnedImageAlwaysOnTop() noexcept
+{
+    if (mode_ != OverlayMode::pinnedImageEditor
+        || status_ != OverlayInputStatus::active) {
+        return false;
+    }
+    cancelPinnedImageShiftShortcut();
+    emitTerminal(OverlayInputAction::togglePinnedImageAlwaysOnTop);
     return true;
 }
 
@@ -2265,7 +2309,9 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
 
     void dispatchAction(OverlayInputAction action)
     {
-        closeWindows();
+        if (action != OverlayInputAction::togglePinnedImageAlwaysOnTop) {
+            closeWindows();
+        }
         ActionCallback callback = actionCallback;
         if (callback) {
             callback(action);
@@ -2318,9 +2364,22 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
         case OverlayWindowInputKind::mouseWheel:
             router->mouseWheel(input.wheelDelta);
             break;
+        case OverlayWindowInputKind::cancelShiftShortcut:
+            router->cancelPinnedImageShiftShortcut();
+            break;
         case OverlayWindowInputKind::keyDown: {
             if (input.virtualKey == VK_SHIFT) {
+                if (router->pinnedImageShiftChanged(
+                        true, input.control, input.alt)) {
+                    break;
+                }
                 router->eyedropperShiftPressed();
+                break;
+            }
+            router->cancelPinnedImageShiftShortcut();
+            if (input.virtualKey == 'T' && input.control && !input.shift
+                && !input.alt
+                && router->togglePinnedImageAlwaysOnTop()) {
                 break;
             }
             ShapeEditorKey key;
@@ -2394,6 +2453,14 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
             router->keyPressed(key, input.control, input.shift);
             break;
         }
+        case OverlayWindowInputKind::keyUp:
+            if (input.virtualKey == VK_SHIFT) {
+                router->pinnedImageShiftChanged(
+                    false, input.control, input.alt);
+            } else {
+                router->cancelPinnedImageShiftShortcut();
+            }
+            break;
         }
         if (router
             && (input.kind == OverlayWindowInputKind::pointerDown
@@ -2679,7 +2746,8 @@ OverlayHostCreateResult OverlayHost::create(
 OverlayHostCreateResult OverlayHost::createPinnedImageEditor(
     HINSTANCE instance,
     const FrozenDesktop& desktop,
-    ActionCallback actionCallback)
+    ActionCallback actionCallback,
+    bool alwaysOnTop)
 {
     if (desktop.displays.size() != 1U) {
         return {nullptr, OverlayHostError{OverlayHostErrorCode::noDisplays}};
@@ -2706,6 +2774,8 @@ OverlayHostCreateResult OverlayHost::createPinnedImageEditor(
                 created.error}};
         }
         impl->windows.push_back(std::move(created.value));
+        impl->windows.front()->setAlwaysOnTop(alwaysOnTop);
+        impl->windows.front()->setKeyboardInputAlwaysEnabled(true);
         const auto& descriptor = desktop.displays.front().descriptor;
         std::vector<OverlaySurface> surfaces{{
             impl->windows.front()->handle(),
@@ -2751,6 +2821,15 @@ void OverlayHost::show() noexcept
             break;
         }
         window->show();
+    }
+}
+
+void OverlayHost::setAlwaysOnTop(bool enabled) noexcept
+{
+    const auto impl = impl_;
+    if (!impl) return;
+    for (const auto& window : impl->windows) {
+        window->setAlwaysOnTop(enabled);
     }
 }
 

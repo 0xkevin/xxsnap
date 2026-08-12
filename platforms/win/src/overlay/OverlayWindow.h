@@ -112,8 +112,10 @@ enum class OverlayWindowInputKind {
     cancelMode,
     escape,
     keyDown,
+    keyUp,
     textInput,
     mouseWheel,
+    cancelShiftShortcut,
 };
 
 struct OverlayWindowInput {
@@ -122,6 +124,7 @@ struct OverlayWindowInput {
     WPARAM virtualKey = 0;
     bool control = false;
     bool shift = false;
+    bool alt = false;
     std::wstring text;
     int wheelDelta = 0;
     int clickCount = 1;
@@ -150,6 +153,8 @@ public:
     HWND handle() const noexcept;
     void show() noexcept;
     void hide() noexcept;
+    void setAlwaysOnTop(bool enabled) noexcept;
+    void setKeyboardInputAlwaysEnabled(bool enabled) noexcept;
     void setSelection(
         std::optional<PixelRect> selection,
         bool showActions = true) noexcept;
@@ -196,6 +201,8 @@ private:
     OverlayRenderState renderState_;
     OverlayCursorStyle cursorStyle_ = OverlayCursorStyle::crosshair;
     HCURSOR markerCursor_ = nullptr;
+    bool alwaysOnTop_ = true;
+    bool keyboardInputAlwaysEnabled_ = false;
     AnnotationColor markerCursorColor_{};
     float markerCursorStrokeWidthDip_ = 0.0F;
     bool markerCursorIsMosaic_ = false;

@@ -140,11 +140,36 @@ int wmain(int argc, wchar_t** argv)
                     if (IsWindowVisible(pin)) {
                         SendMessageTimeoutW(pin, WM_KEYDOWN, VK_SHIFT, 0,
                             SMTO_ABORTIFHUNG, 2000, &messageResult);
+                        SendMessageTimeoutW(pin, WM_KEYUP, VK_SHIFT, 0,
+                            SMTO_ABORTIFHUNG, 2000, &messageResult);
                         const auto editor = waitForWindow(
                             process.dwProcessId, overlayClassName, 3000);
                         if (editor != nullptr && !IsWindowVisible(pin)) {
+                            SendMessageTimeoutW(editor, WM_KEYDOWN, VK_SHIFT, 0,
+                                SMTO_ABORTIFHUNG, 2000, &messageResult);
+                            SendMessageTimeoutW(editor, WM_KEYUP, VK_SHIFT, 0,
+                                SMTO_ABORTIFHUNG, 2000, &messageResult);
+                            const auto hiddenDeadline = GetTickCount64() + 2000;
+                            while (!IsWindowVisible(pin)
+                                && GetTickCount64() < hiddenDeadline) {
+                                Sleep(50);
+                            }
+                            if (!IsWindowVisible(pin)) {
+                                result = ERROR_INVALID_STATE;
+                                goto cleanup;
+                            }
+                            SendMessageTimeoutW(pin, WM_KEYDOWN, VK_SHIFT, 0,
+                                SMTO_ABORTIFHUNG, 2000, &messageResult);
+                            SendMessageTimeoutW(pin, WM_KEYUP, VK_SHIFT, 0,
+                                SMTO_ABORTIFHUNG, 2000, &messageResult);
+                            const auto reopened = waitForWindow(
+                                process.dwProcessId, overlayClassName, 3000);
+                            if (reopened == nullptr || IsWindowVisible(pin)) {
+                                result = ERROR_INVALID_STATE;
+                                goto cleanup;
+                            }
                             RECT editorRect{};
-                            GetWindowRect(editor, &editorRect);
+                            GetWindowRect(reopened, &editorRect);
                             const auto width = editorRect.right - editorRect.left;
                             const auto height = editorRect.bottom - editorRect.top;
                             const auto toolbarX = editorRect.left
@@ -168,10 +193,10 @@ int wmain(int argc, wchar_t** argv)
                             sendMouse(MOUSEEVENTF_MOVE | MOUSEEVENTF_LEFTUP,
                                 drawEndX, drawEndY);
                             Sleep(100);
-                            SendMessageTimeoutW(editor, WM_KEYDOWN, VK_ESCAPE, 0,
+                            SendMessageTimeoutW(reopened, WM_KEYDOWN, VK_ESCAPE, 0,
                                 SMTO_ABORTIFHUNG, 2000, &messageResult);
                             Sleep(100);
-                            SendMessageTimeoutW(editor, WM_KEYDOWN, VK_ESCAPE, 0,
+                            SendMessageTimeoutW(reopened, WM_KEYDOWN, VK_ESCAPE, 0,
                                 SMTO_ABORTIFHUNG, 2000, &messageResult);
                             const auto finishDeadline = GetTickCount64() + 2000;
                             while (!IsWindowVisible(pin)
@@ -195,6 +220,7 @@ int wmain(int argc, wchar_t** argv)
         }
     }
 
+cleanup:
     if (WaitForSingleObject(process.hProcess, 0) == WAIT_TIMEOUT) {
         TerminateProcess(process.hProcess, static_cast<UINT>(result));
         WaitForSingleObject(process.hProcess, 5000);

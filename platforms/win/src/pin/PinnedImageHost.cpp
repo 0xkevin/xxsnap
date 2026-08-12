@@ -80,6 +80,7 @@ struct PinnedImageHost::Impl final {
         BYTE opacity = 255U;
         bool dragging = false;
         bool alwaysOnTop = true;
+        bool shiftToolbarShortcutCandidate = false;
         std::optional<std::uint64_t> hiddenOrder;
         std::unique_ptr<MemoryBudget> editorBudget;
         std::unique_ptr<FrozenDesktop> editorDesktop;
@@ -411,8 +412,15 @@ struct PinnedImageHost::Impl final {
             auto created = OverlayHost::createPinnedImageEditor(
                 instance, *pin.editorDesktop,
                 [this, &pin](OverlayInputAction action) {
-                    finishEditing(pin, action);
-                });
+                    if (action == OverlayInputAction::hideEditingToolbar) {
+                        hideEditor(pin);
+                    } else if (action
+                        == OverlayInputAction::togglePinnedImageAlwaysOnTop) {
+                        toggleAlwaysOnTop(pin);
+                    } else {
+                        finishEditing(pin, action);
+                    }
+                }, pin.alwaysOnTop);
             pin.editor = std::move(created.value);
             if (pin.editor == nullptr) {
                 pin.editorDesktop.reset();
@@ -425,6 +433,26 @@ struct PinnedImageHost::Impl final {
             pin.editor.reset();
             pin.editorDesktop.reset();
             pin.editorBudget.reset();
+        }
+    }
+
+    void hideEditor(Pin& pin) noexcept
+    {
+        pin.editor.reset();
+        pin.editorDesktop.reset();
+        pin.editorBudget.reset();
+        ShowWindow(pin.window, SW_SHOWNORMAL);
+        SetForegroundWindow(pin.window);
+    }
+
+    void toggleAlwaysOnTop(Pin& pin) noexcept
+    {
+        pin.alwaysOnTop = !pin.alwaysOnTop;
+        SetWindowPos(pin.window,
+            pin.alwaysOnTop ? HWND_TOPMOST : HWND_NOTOPMOST,
+            0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+        if (pin.editor != nullptr) {
+            pin.editor->setAlwaysOnTop(pin.alwaysOnTop);
         }
     }
 
@@ -531,7 +559,13 @@ struct PinnedImageHost::Impl final {
     void perform(Pin& pin, UINT command) noexcept
     {
         switch (command) {
-        case commandToolbar: showEditor(pin); break;
+        case commandToolbar:
+            if (pin.editor != nullptr) {
+                hideEditor(pin);
+            } else {
+                showEditor(pin);
+            }
+            break;
         case commandCopy: copy(pin); break;
         case commandSave: save(pin); break;
         case commandReset: applyImageRect(pin, pin.initialImageRect); break;
@@ -539,12 +573,7 @@ struct PinnedImageHost::Impl final {
         case commandOpacity80: setOpacity(pin, 204U); break;
         case commandOpacity60: setOpacity(pin, 153U); break;
         case commandOpacity40: setOpacity(pin, 102U); break;
-        case commandAlwaysOnTop:
-            pin.alwaysOnTop = !pin.alwaysOnTop;
-            SetWindowPos(pin.window,
-                pin.alwaysOnTop ? HWND_TOPMOST : HWND_NOTOPMOST,
-                0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-            break;
+        case commandAlwaysOnTop: toggleAlwaysOnTop(pin); break;
         case commandClose: DestroyWindow(pin.window); break;
         case commandCloseAll: closeAll(); break;
         default: break;
@@ -561,6 +590,7 @@ struct PinnedImageHost::Impl final {
         case WM_ERASEBKGND:
             return 1;
         case WM_LBUTTONDOWN: {
+            pin.shiftToolbarShortcutCandidate = false;
             SetForegroundWindow(pin.window);
             SetCapture(pin.window);
             pin.dragging = true;
@@ -573,6 +603,7 @@ struct PinnedImageHost::Impl final {
         }
         case WM_MOUSEMOVE:
             if (pin.dragging && (wParam & MK_LBUTTON) != 0U) {
+                pin.shiftToolbarShortcutCandidate = false;
                 POINT cursor{};
                 if (GetCursorPos(&cursor)) {
                     const auto x = cursor.x - pin.dragOffset.x;
@@ -587,6 +618,7 @@ struct PinnedImageHost::Impl final {
             }
             return 0;
         case WM_LBUTTONUP:
+            pin.shiftToolbarShortcutCandidate = false;
             if (pin.dragging) {
                 pin.dragging = false;
                 ReleaseCapture();
@@ -594,28 +626,39 @@ struct PinnedImageHost::Impl final {
             return 0;
         case WM_CAPTURECHANGED:
             pin.dragging = false;
+            pin.shiftToolbarShortcutCandidate = false;
             return 0;
         case WM_RBUTTONUP:
         case WM_CONTEXTMENU:
+            pin.shiftToolbarShortcutCandidate = false;
             showContextMenu(pin);
             return 0;
         case WM_MOUSEWHEEL:
+            pin.shiftToolbarShortcutCandidate = false;
             scale(pin, GET_WHEEL_DELTA_WPARAM(wParam) > 0 ? 1.08 : 0.92);
             return 0;
+        case WM_SYSKEYDOWN:
         case WM_KEYDOWN: {
             const auto control = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
             const auto shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
-            if (control && !shift && wParam == 'C') perform(pin, commandCopy);
-            else if (control && !shift && wParam == 'S') perform(pin, commandSave);
-            else if (control && !shift && wParam == 'R') perform(pin, commandReset);
-            else if (control && !shift && wParam == 'T') perform(pin, commandAlwaysOnTop);
-            else if (control && !shift && wParam == 'W') perform(pin, commandClose);
-            else if (control && shift && wParam == 'W') perform(pin, commandCloseAll);
+            const auto alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
+            if (wParam != VK_SHIFT || control || alt) {
+                pin.shiftToolbarShortcutCandidate = false;
+            }
+            if (control && !shift && !alt && wParam == 'C') perform(pin, commandCopy);
+            else if (control && !shift && !alt && wParam == 'S') perform(pin, commandSave);
+            else if (control && !shift && !alt && wParam == 'R') perform(pin, commandReset);
+            else if (control && !shift && !alt && wParam == 'T') perform(pin, commandAlwaysOnTop);
+            else if (control && !shift && !alt && wParam == 'W') perform(pin, commandClose);
+            else if (control && shift && !alt && wParam == 'W') perform(pin, commandCloseAll);
             else if (!control && !shift && wParam == VK_ESCAPE) {
                 pin.hiddenOrder = nextHiddenOrder++;
                 ShowWindow(pin.window, SW_HIDE);
             }
-            else if (!control && !shift && wParam == VK_SHIFT) showEditor(pin);
+            else if (!control && !alt && wParam == VK_SHIFT
+                && !pin.dragging) {
+                pin.shiftToolbarShortcutCandidate = true;
+            }
             else if (!control && !shift
                 && (wParam == VK_DELETE || wParam == VK_BACK)) {
                 perform(pin, commandClose);
@@ -624,6 +667,17 @@ struct PinnedImageHost::Impl final {
             }
             return 0;
         }
+        case WM_SYSKEYUP:
+        case WM_KEYUP:
+            if (wParam == VK_SHIFT && pin.shiftToolbarShortcutCandidate
+                && (GetKeyState(VK_CONTROL) & 0x8000) == 0
+                && (GetKeyState(VK_MENU) & 0x8000) == 0) {
+                pin.shiftToolbarShortcutCandidate = false;
+                perform(pin, commandToolbar);
+                return 0;
+            }
+            pin.shiftToolbarShortcutCandidate = false;
+            break;
         case WM_NCDESTROY:
             {
             const auto window = pin.window;

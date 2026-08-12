@@ -228,15 +228,21 @@ void OverlayWindow::show() noexcept
     }
     const auto bounds = snipory::core::portable::standardized(
         display_->descriptor.pixelBounds);
-    ShowWindow(window_, SW_SHOWNOACTIVATE);
+    ShowWindow(window_, keyboardInputAlwaysEnabled_
+        ? SW_SHOWNORMAL : SW_SHOWNOACTIVATE);
     SetWindowPos(
         window_,
-        HWND_TOPMOST,
+        alwaysOnTop_ ? HWND_TOPMOST : HWND_NOTOPMOST,
         static_cast<int>(bounds.x),
         static_cast<int>(bounds.y),
         static_cast<int>(bounds.width),
         static_cast<int>(bounds.height),
-        SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        (keyboardInputAlwaysEnabled_ ? 0U : SWP_NOACTIVATE)
+            | SWP_SHOWWINDOW);
+    if (keyboardInputAlwaysEnabled_) {
+        SetForegroundWindow(window_);
+        SetFocus(window_);
+    }
     UpdateWindow(window_);
 }
 
@@ -245,6 +251,23 @@ void OverlayWindow::hide() noexcept
     if (window_ != nullptr) {
         ShowWindow(window_, SW_HIDE);
     }
+}
+
+void OverlayWindow::setAlwaysOnTop(bool enabled) noexcept
+{
+    alwaysOnTop_ = enabled;
+    if (window_ != nullptr) {
+        SetWindowPos(window_, enabled ? HWND_TOPMOST : HWND_NOTOPMOST,
+            0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+}
+
+void OverlayWindow::setKeyboardInputAlwaysEnabled(bool enabled) noexcept
+{
+    keyboardInputAlwaysEnabled_ = enabled;
+    updateTextInputActivation(enabled
+        || renderState_.selectedToolbarAction == ToolbarAction::text);
 }
 
 void OverlayWindow::setSelection(
@@ -284,7 +307,7 @@ void OverlayWindow::updateTextInputActivation(bool enabled) noexcept
         return;
     }
     const auto current = GetWindowLongPtrW(window_, GWL_EXSTYLE);
-    const auto desired = enabled
+    const auto desired = (enabled || keyboardInputAlwaysEnabled_)
         ? current & ~static_cast<LONG_PTR>(WS_EX_NOACTIVATE)
         : current | static_cast<LONG_PTR>(WS_EX_NOACTIVATE);
     if (desired != current) {
@@ -688,6 +711,7 @@ LRESULT OverlayWindow::handleMessage(
         return 0;
     }
     case WM_LBUTTONDOWN:
+        dispatchInput({OverlayWindowInputKind::cancelShiftShortcut, {}});
         if (renderState_.selectedToolbarAction == ToolbarAction::text
             || renderState_.selectedToolbarAction == ToolbarAction::number) {
             SetForegroundWindow(window_);
@@ -702,6 +726,7 @@ LRESULT OverlayWindow::handleMessage(
         });
         return 0;
     case WM_LBUTTONDBLCLK: {
+        dispatchInput({OverlayWindowInputKind::cancelShiftShortcut, {}});
         if (renderState_.selectedToolbarAction == ToolbarAction::text
             || renderState_.selectedToolbarAction == ToolbarAction::number) {
             SetForegroundWindow(window_);
@@ -718,6 +743,11 @@ LRESULT OverlayWindow::handleMessage(
         dispatchInput(input);
         return 0;
     }
+    case WM_RBUTTONDOWN:
+    case WM_RBUTTONUP:
+    case WM_CONTEXTMENU:
+        dispatchInput({OverlayWindowInputKind::cancelShiftShortcut, {}});
+        return DefWindowProcW(window_, message, wParam, lParam);
     case WM_MOUSEMOVE:
         dispatchInput({
             OverlayWindowInputKind::pointerMove,
@@ -728,6 +758,7 @@ LRESULT OverlayWindow::handleMessage(
         });
         return 0;
     case WM_MOUSEWHEEL: {
+        dispatchInput({OverlayWindowInputKind::cancelShiftShortcut, {}});
         OverlayWindowInput input{OverlayWindowInputKind::mouseWheel, {}};
         input.wheelDelta = GET_WHEEL_DELTA_WPARAM(wParam);
         dispatchInput(input);
@@ -812,6 +843,7 @@ LRESULT OverlayWindow::handleMessage(
             break;
         }
         return DefWindowProcW(window_, message, wParam, lParam);
+    case WM_SYSKEYDOWN:
     case WM_KEYDOWN:
         if (wParam == VK_ESCAPE) {
             dispatchInput({OverlayWindowInputKind::escape, {}});
@@ -842,6 +874,18 @@ LRESULT OverlayWindow::handleMessage(
             wParam,
             (GetKeyState(VK_CONTROL) & 0x8000) != 0,
             (GetKeyState(VK_SHIFT) & 0x8000) != 0,
+            (GetKeyState(VK_MENU) & 0x8000) != 0,
+        });
+        return 0;
+    case WM_SYSKEYUP:
+    case WM_KEYUP:
+        dispatchInput({
+            OverlayWindowInputKind::keyUp,
+            {},
+            wParam,
+            (GetKeyState(VK_CONTROL) & 0x8000) != 0,
+            (GetKeyState(VK_SHIFT) & 0x8000) != 0,
+            (GetKeyState(VK_MENU) & 0x8000) != 0,
         });
         return 0;
     case WM_CHAR:
