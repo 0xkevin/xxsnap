@@ -1,5 +1,6 @@
 #include "capture/FallbackCaptureBackend.h"
 
+#include <cstddef>
 #include <utility>
 #include <variant>
 
@@ -24,6 +25,42 @@ bool isTerminal(CaptureErrorCode code) noexcept
     return true;
 }
 
+#if !defined(XXSNAP_LEGACY)
+bool isSuspiciouslyBlack(const PixelBuffer& pixels) noexcept
+{
+    const auto pixelCount = pixels.byteCount() / 4U;
+    if (pixelCount == 0U) {
+        return false;
+    }
+
+    const auto maximumNonBlackPixels = pixelCount / 10U;
+    std::size_t nonBlackPixels = 0U;
+    for (std::size_t offset = 0U; offset + 2U < pixels.byteCount(); offset += 4U) {
+        if (pixels.data()[offset + 0U] != std::byte{0U}
+            || pixels.data()[offset + 1U] != std::byte{0U}
+            || pixels.data()[offset + 2U] != std::byte{0U}) {
+            ++nonBlackPixels;
+            if (nonBlackPixels > maximumNonBlackPixels) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool hasSuspiciouslyBlackDisplay(const FrozenDesktop& desktop) noexcept
+{
+    for (const auto& display : desktop.displays) {
+        if (isSuspiciouslyBlack(display.pixels)) {
+            // Some virtual display drivers report DXGI success after copying only
+            // a small strip of the desktop, leaving the rest of the frame black.
+            return true;
+        }
+    }
+    return false;
+}
+#endif
+
 } // namespace
 
 FallbackCaptureBackend::FallbackCaptureBackend(
@@ -43,20 +80,30 @@ CaptureResult FallbackCaptureBackend::capture(
     lastBackend_ = CaptureBackendKind::fallback;
     return fallbackResult;
 #else
-    auto preferredResult = preferred_.capture(snapshot, budget);
-    auto* preferredError = std::get_if<CaptureError>(&preferredResult);
-    if (preferredError == nullptr || isTerminal(preferredError->code)) {
-        lastBackend_ = CaptureBackendKind::preferred;
-        return preferredResult;
-    }
-
-    if (preferredError->code == CaptureErrorCode::deviceLost) {
-        preferred_.reset();
-        auto retryResult = preferred_.capture(snapshot, budget);
-        const auto* retryError = std::get_if<CaptureError>(&retryResult);
-        if (retryError == nullptr || isTerminal(retryError->code)) {
+    {
+        auto preferredResult = preferred_.capture(snapshot, budget);
+        auto* preferredError = std::get_if<CaptureError>(&preferredResult);
+        if (preferredError == nullptr) {
+            if (!hasSuspiciouslyBlackDisplay(std::get<FrozenDesktop>(preferredResult))) {
+                lastBackend_ = CaptureBackendKind::preferred;
+                return preferredResult;
+            }
+        } else if (isTerminal(preferredError->code)) {
             lastBackend_ = CaptureBackendKind::preferred;
-            return retryResult;
+            return preferredResult;
+        } else if (preferredError->code == CaptureErrorCode::deviceLost) {
+            preferred_.reset();
+            auto retryResult = preferred_.capture(snapshot, budget);
+            const auto* retryError = std::get_if<CaptureError>(&retryResult);
+            if (retryError == nullptr) {
+                if (!hasSuspiciouslyBlackDisplay(std::get<FrozenDesktop>(retryResult))) {
+                    lastBackend_ = CaptureBackendKind::preferred;
+                    return retryResult;
+                }
+            } else if (isTerminal(retryError->code)) {
+                lastBackend_ = CaptureBackendKind::preferred;
+                return retryResult;
+            }
         }
     }
 

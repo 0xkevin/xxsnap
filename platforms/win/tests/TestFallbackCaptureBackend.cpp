@@ -50,7 +50,8 @@ DisplayTopologySnapshot snapshotFor(std::int64_t width = 1, std::int64_t height 
 
 CaptureResult successfulCapture(
     const DisplayTopologySnapshot& snapshot,
-    MemoryBudget& budget)
+    MemoryBudget& budget,
+    std::byte blue = std::byte{1U})
 {
     const auto& descriptor = snapshot.displays().front();
     auto allocation = PixelBuffer::allocate(
@@ -58,6 +59,12 @@ CaptureResult successfulCapture(
         descriptor.pixelBounds.height,
         budget);
     CHECK(allocation.value != nullptr);
+    for (std::size_t offset = 0U; offset < allocation.value->byteCount(); offset += 4U) {
+        allocation.value->data()[offset + 0U] = blue;
+        allocation.value->data()[offset + 1U] = std::byte{0U};
+        allocation.value->data()[offset + 2U] = std::byte{0U};
+        allocation.value->data()[offset + 3U] = std::byte{255U};
+    }
     std::vector<FrozenDisplay> displays;
     displays.emplace_back(descriptor, std::move(*allocation.value));
     return FrozenDesktop{
@@ -65,6 +72,20 @@ CaptureResult successfulCapture(
         std::move(displays),
         std::chrono::steady_clock::time_point{},
     };
+}
+
+CaptureResult mostlyBlackCapture(
+    const DisplayTopologySnapshot& snapshot,
+    MemoryBudget& budget)
+{
+    auto result = successfulCapture(snapshot, budget, std::byte{0U});
+    auto& desktop = std::get<FrozenDesktop>(result);
+    auto& pixels = desktop.displays.front().pixels;
+    const auto nonBlackPixels = pixels.byteCount() / 4U / 20U;
+    for (std::size_t index = 0U; index < nonBlackPixels; ++index) {
+        pixels.data()[index * 4U] = std::byte{1U};
+    }
+    return result;
 }
 
 enum class Event {
@@ -85,6 +106,13 @@ public:
         MemoryBudget& budget) noexcept override
     {
         events_.push_back(Event::dxgiCapture);
+        ++captureCalls;
+        if (returnMostlyBlackFrame) {
+            return mostlyBlackCapture(snapshot, budget);
+        }
+        if (returnBlackFrame) {
+            return successfulCapture(snapshot, budget, std::byte{0U});
+        }
         if (results.empty()) {
             return successfulCapture(snapshot, budget);
         }
@@ -103,6 +131,9 @@ public:
     }
 
     std::vector<std::optional<CaptureError>> results;
+    bool returnMostlyBlackFrame = false;
+    bool returnBlackFrame = false;
+    int captureCalls = 0;
     int resetCalls = 0;
 
 private:
@@ -157,6 +188,42 @@ void testDxgiSuccessReturnsWithoutResetOrFallback()
     CHECK(dxgi.resetCalls == 0);
     CHECK(gdi.captureCalls == 0);
     CHECK(backend.lastBackend() == CaptureBackendKind::preferred);
+}
+
+void testAllBlackDxgiSuccessFallsBackToGdi()
+{
+    std::vector<Event> events;
+    FakeDxgi dxgi(events);
+    dxgi.returnBlackFrame = true;
+    FakeGdi gdi(events);
+    FallbackCaptureBackend backend(dxgi, gdi);
+    MemoryBudget budget(4U);
+
+    const auto result = backend.capture(snapshotFor(), budget);
+
+    CHECK(std::holds_alternative<FrozenDesktop>(result));
+    CHECK((events == std::vector{Event::dxgiCapture, Event::gdiCapture}));
+    CHECK(dxgi.captureCalls == 1);
+    CHECK(dxgi.resetCalls == 0);
+    CHECK(gdi.captureCalls == 1);
+    CHECK(backend.lastBackend() == CaptureBackendKind::fallback);
+}
+
+void testMostlyBlackDxgiSuccessFallsBackToGdi()
+{
+    std::vector<Event> events;
+    FakeDxgi dxgi(events);
+    dxgi.returnMostlyBlackFrame = true;
+    FakeGdi gdi(events);
+    FallbackCaptureBackend backend(dxgi, gdi);
+    MemoryBudget budget(400U);
+
+    const auto result = backend.capture(snapshotFor(10, 10), budget);
+
+    CHECK(std::holds_alternative<FrozenDesktop>(result));
+    CHECK((events == std::vector{Event::dxgiCapture, Event::gdiCapture}));
+    CHECK(gdi.captureCalls == 1);
+    CHECK(backend.lastBackend() == CaptureBackendKind::fallback);
 }
 
 void testDeviceLostResetsOnceAndRetriesDxgiOnce()
@@ -643,6 +710,8 @@ int main(int argumentCount, char* arguments[])
     }
 
     testDxgiSuccessReturnsWithoutResetOrFallback();
+    testAllBlackDxgiSuccessFallsBackToGdi();
+    testMostlyBlackDxgiSuccessFallsBackToGdi();
     testDeviceLostResetsOnceAndRetriesDxgiOnce();
     testFailedRetryFallsBackToGdiAndReturnsItsResultUnchanged();
     testSecondDeviceLostDoesNotResetTwice();

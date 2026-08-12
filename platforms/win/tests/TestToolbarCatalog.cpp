@@ -72,7 +72,7 @@ void testCatalogContract()
 
     static_assert(arraysEqual(fullToolbarActions(), expected));
     static_assert(terminalToolbarActions().size() == 3);
-    static_assert(toolbarIcon(ToolbarAction::rectangle).insetDip == -1.0F);
+    CHECK(toolbarIcon(ToolbarAction::rectangle).insetDip == 0.0F);
     static_assert(toolbarIcon(ToolbarAction::number).insetDip == 3.0F);
     static_assert(toolbarIcon(ToolbarAction::scroll).insetDip == 0.0F);
     static_assert(toolbarIcon(ToolbarAction::undo).fixedColor);
@@ -82,8 +82,14 @@ void testCatalogContract()
     static_assert(extraGapAfter(ToolbarAction::redo) == 8.0F);
     static_assert(extraGapAfter(ToolbarAction::copy) == 0.0F);
 
-    static_assert(toolbarImageResources().size() == 20);
+    CHECK(toolbarImageResources().size() == 21U);
     static_assert(dragHandleIcon().resourceIdAt96Dpi > 0);
+    const auto& rotationHandle = toolbarImageResources().back();
+    CHECK(rotationHandle.insetDip == 4.0F);
+    CHECK(rotationHandle.fixedColor);
+    CHECK(rotationHandle.resourceIdAt96Dpi > 0);
+    CHECK(std::wstring_view(rotationHandle.resourceName)
+        == L"refresh-svgrepo-com3");
     static_assert(toolbarResourceId(dragHandleIcon(), 72) == dragHandleIcon().resourceIdAt96Dpi);
     static_assert(toolbarResourceId(dragHandleIcon(), 97) == dragHandleIcon().resourceIdAt120Dpi);
     static_assert(toolbarResourceId(dragHandleIcon(), 121) == dragHandleIcon().resourceIdAt144Dpi);
@@ -171,19 +177,41 @@ void testAllEmbeddedResourcesDecode()
         IID_PPV_ARGS(&factory))));
     if (factory) {
         for (const auto& icon : toolbarImageResources()) {
-            checkEmbeddedPng(factory.Get(), icon.resourceIdAt96Dpi, 20);
-            checkEmbeddedPng(factory.Get(), icon.resourceIdAt120Dpi, 25);
-            checkEmbeddedPng(factory.Get(), icon.resourceIdAt144Dpi, 30);
-            checkEmbeddedPng(factory.Get(), icon.resourceIdAt192Dpi, 40);
+            const auto expectedEdge = [&icon](UINT scalePercent) {
+                const auto logicalEdge = ToolbarMetrics::buttonSizeDip
+                    - icon.insetDip * 2.0F;
+                return static_cast<UINT>(
+                    logicalEdge * static_cast<float>(scalePercent) / 100.0F
+                    + 0.5F);
+            };
+            checkEmbeddedPng(
+                factory.Get(), icon.resourceIdAt96Dpi, expectedEdge(100U));
+            checkEmbeddedPng(
+                factory.Get(), icon.resourceIdAt120Dpi, expectedEdge(125U));
+            checkEmbeddedPng(
+                factory.Get(), icon.resourceIdAt144Dpi, expectedEdge(150U));
+            checkEmbeddedPng(
+                factory.Get(), icon.resourceIdAt192Dpi, expectedEdge(200U));
         }
     }
     factory.Reset();
     CoUninitialize();
 }
 
+void testCustomCursorResourcesLoad()
+{
+    const auto module = GetModuleHandleW(nullptr);
+    CHECK(module != nullptr);
+    CHECK(LoadCursorW(
+        module, MAKEINTRESOURCEW(IDC_XXSNAP_CROSSHAIR)) != nullptr);
+    CHECK(LoadCursorW(
+        module, MAKEINTRESOURCEW(IDC_XXSNAP_ROTATION)) != nullptr);
+}
+
 int main()
 {
     testCatalogContract();
     testAllEmbeddedResourcesDecode();
+    testCustomCursorResourcesLoad();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

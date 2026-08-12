@@ -35,6 +35,15 @@ std::vector<float> strokeDashPattern(
     AnnotationStrokePattern pattern,
     float strokeWidthDip);
 
+std::vector<float> normalizedStrokeDashPattern(
+    AnnotationStrokePattern pattern,
+    float strokeWidthDip);
+
+std::vector<AnnotationPoint> sketchStrokeSamplePoints(
+    AnnotationPoint start,
+    AnnotationPoint end,
+    float lineWidthDip);
+
 class AnnotationRenderer final {
 public:
     explicit AnnotationRenderer(ID2D1Factory* factory) noexcept;

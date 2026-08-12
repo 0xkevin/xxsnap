@@ -2,6 +2,7 @@
 # Format: DLL!symbol. Matching is case-insensitive.
 # The Legacy installers must package the VC++ v142 runtime and Universal CRT.
 
+COMDLG32.dll!ChooseColorW
 COMDLG32.dll!CommDlgExtendedError
 COMDLG32.dll!GetSaveFileNameW
 
@@ -33,6 +34,7 @@ USER32.dll!GetDC
 USER32.dll!GetDisplayConfigBufferSizes
 USER32.dll!GetMessageW
 USER32.dll!GetMonitorInfoW
+USER32.dll!GetKeyState
 USER32.dll!GetWindowLongPtrW
 USER32.dll!GetWindowLongW
 USER32.dll!InvalidateRect
@@ -52,6 +54,7 @@ USER32.dll!ReleaseCapture
 USER32.dll!ReleaseDC
 USER32.dll!SetCapture
 USER32.dll!SetClipboardData
+USER32.dll!SetCursor
 USER32.dll!SetForegroundWindow
 USER32.dll!SetWindowLongPtrW
 USER32.dll!SetWindowLongW
@@ -64,6 +67,7 @@ USER32.dll!UnregisterHotKey
 USER32.dll!UpdateWindow
 
 d2d1.dll!#1
+d2d1.dll!#2
 DWrite.dll!DWriteCreateFactory
 d3d11.dll!D3D11CreateDevice
 dxgi.dll!CreateDXGIFactory1
@@ -159,10 +163,14 @@ api-ms-win-crt-heap-l1-1-0.dll!free
 api-ms-win-crt-heap-l1-1-0.dll!malloc
 api-ms-win-crt-locale-l1-1-0.dll!_configthreadlocale
 api-ms-win-crt-math-l1-1-0.dll!__setusermatherr
+api-ms-win-crt-math-l1-1-0.dll!_libm_sse2_sin_precise
 api-ms-win-crt-math-l1-1-0.dll!ceil
 api-ms-win-crt-math-l1-1-0.dll!ceilf
+api-ms-win-crt-math-l1-1-0.dll!floor
+api-ms-win-crt-math-l1-1-0.dll!hypot
 api-ms-win-crt-math-l1-1-0.dll!llround
 api-ms-win-crt-math-l1-1-0.dll!llroundl
+api-ms-win-crt-math-l1-1-0.dll!sin
 api-ms-win-crt-runtime-l1-1-0.dll!_c_exit
 api-ms-win-crt-runtime-l1-1-0.dll!_cexit
 api-ms-win-crt-runtime-l1-1-0.dll!_configure_wide_argv

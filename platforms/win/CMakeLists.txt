@@ -1,6 +1,10 @@
 set(XXSNAP_WINDOWS_FAMILY "modern" CACHE STRING "Windows target family (modern or legacy)")
 set_property(CACHE XXSNAP_WINDOWS_FAMILY PROPERTY STRINGS modern legacy)
 
+if(MSVC)
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/utf-8>)
+endif()
+
 set(XXSNAP_VERSION "0.1.0" CACHE STRING "XxSnap executable version (major.minor.patch)")
 string(REGEX MATCH "^([0-9]+)\\.([0-9]+)\\.([0-9]+)$" XXSNAP_VERSION_MATCH "${XXSNAP_VERSION}")
 if(NOT XXSNAP_VERSION_MATCH)
@@ -53,6 +57,8 @@ set_property(
     SOURCE resources/xxsnap.rc
     APPEND PROPERTY OBJECT_DEPENDS
         "${PROJECT_SOURCE_DIR}/platforms/win/resources/icons/Snipory.ico"
+        "${PROJECT_SOURCE_DIR}/platforms/win/resources/cursors/xxsnap-crosshair.cur"
+        "${PROJECT_SOURCE_DIR}/platforms/win/resources/cursors/xxsnap-rotation.cur"
         "${PROJECT_SOURCE_DIR}/platforms/mac/Resources/Icons/palette-tool.png"
         ${XXSNAP_TOOLBAR_ASSET_FILES}
 )
@@ -473,6 +479,18 @@ if(XXSNAP_WINDOWS_FAMILY STREQUAL "legacy")
 endif()
 
 if(BUILD_TESTING)
+    add_executable(
+        xxsnap_windows_source_encoding_test
+        tests/TestWindowsSourceEncoding.cpp
+    )
+    target_compile_features(
+        xxsnap_windows_source_encoding_test PRIVATE cxx_std_17
+    )
+    add_test(
+        NAME windows_source_encoding
+        COMMAND xxsnap_windows_source_encoding_test
+    )
+
     add_executable(xxsnap_build_configuration_test tests/TestBuildConfiguration.cpp)
     target_compile_features(xxsnap_build_configuration_test PRIVATE cxx_std_20)
     target_link_libraries(xxsnap_build_configuration_test
@@ -834,6 +852,26 @@ if(BUILD_TESTING)
                 windowscodecs ole32
     )
     add_test(NAME png_writer COMMAND xxsnap_png_writer_test)
+
+    add_executable(
+        xxsnap_interactive_session_launcher EXCLUDE_FROM_ALL
+        ${CMAKE_SOURCE_DIR}/tools/windows/launch-interactive.cpp
+    )
+    target_compile_features(
+        xxsnap_interactive_session_launcher PRIVATE cxx_std_17
+    )
+    target_link_libraries(
+        xxsnap_interactive_session_launcher PRIVATE advapi32 userenv wtsapi32
+    )
+
+    add_executable(
+        xxsnap_interactive_startup_verifier EXCLUDE_FROM_ALL
+        ${CMAKE_SOURCE_DIR}/tools/windows/verify-interactive-startup.cpp
+    )
+    target_compile_features(
+        xxsnap_interactive_startup_verifier PRIVATE cxx_std_17
+    )
+    target_link_libraries(xxsnap_interactive_startup_verifier PRIVATE user32)
 endif()
 
 set(xxsnap_capture_session_targets
@@ -890,6 +928,8 @@ if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_annotation_composer_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_clipboard_writer_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_png_writer_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_interactive_session_launcher)
+    list(APPEND xxsnap_capture_session_targets xxsnap_interactive_startup_verifier)
 endif()
 
 if(MSVC)

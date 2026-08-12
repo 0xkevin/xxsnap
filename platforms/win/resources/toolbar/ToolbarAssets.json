@@ -23,7 +23,7 @@
         "200" : "platforms/win/resources/toolbar/200/cancel-capture.png"
       },
       "insetDip" : 2,
-      "logicalSizeDip" : 20,
+      "logicalSizeDip" : 16,
       "name" : "cancel-capture",
       "sha256" : "7bb0a6c50a2abc74531cd87be3074aa3151b6d5885eec68259ed97701144a871",
       "source" : "platforms/mac/Resources/Icons/cancel-capture.svg"
@@ -37,7 +37,7 @@
         "200" : "platforms/win/resources/toolbar/200/copy-to-clipboard.png"
       },
       "insetDip" : 2,
-      "logicalSizeDip" : 20,
+      "logicalSizeDip" : 16,
       "name" : "copy-to-clipboard",
       "sha256" : "8e9ae10c98c2eb92f0ef9e61bde90bf76bd08eff2acbc4f336eddd88b63922ae",
       "source" : "platforms/mac/Resources/Icons/copy-to-clipboard.svg"
@@ -51,7 +51,7 @@
         "200" : "platforms/win/resources/toolbar/200/eraser-tool.png"
       },
       "insetDip" : 2,
-      "logicalSizeDip" : 20,
+      "logicalSizeDip" : 16,
       "name" : "eraser-tool",
       "sha256" : "4489e7a47bb61fd8f8ddf0ab22c8470c7f7ea453944ebeb849d6a84cfe5e304f",
       "source" : "platforms/mac/Resources/Icons/eraser-tool.svg"
@@ -65,7 +65,7 @@
         "200" : "platforms/win/resources/toolbar/200/highlighter-tool.png"
       },
       "insetDip" : 2,
-      "logicalSizeDip" : 20,
+      "logicalSizeDip" : 16,
       "name" : "highlighter-tool",
       "sha256" : "6c123f51131e10aefa48c72121ef49b82693b25bc7790c81f111b953662973d3",
       "source" : "platforms/mac/Resources/Icons/highlighter-tool.svg"
@@ -93,7 +93,7 @@
         "200" : "platforms/win/resources/toolbar/200/number-sequence.png"
       },
       "insetDip" : 3,
-      "logicalSizeDip" : 20,
+      "logicalSizeDip" : 14,
       "name" : "number-sequence",
       "sha256" : "c237aceb61f77e66bc34dbebc89c7209cfb6ae1263156716d91a5aa02e03d51f",
       "source" : "platforms/mac/Resources/Icons/number-sequence.svg"
@@ -107,7 +107,7 @@
         "200" : "platforms/win/resources/toolbar/200/pencil-tool.png"
       },
       "insetDip" : 2,
-      "logicalSizeDip" : 20,
+      "logicalSizeDip" : 16,
       "name" : "pencil-tool",
       "sha256" : "94815b7f70f8e29f2e99f863439b087746b6f47c82c649dc6fb27ba144919aed",
       "source" : "platforms/mac/Resources/Icons/pencil-tool.svg"
@@ -121,7 +121,7 @@
         "200" : "platforms/win/resources/toolbar/200/pin-to-screen.png"
       },
       "insetDip" : 2,
-      "logicalSizeDip" : 20,
+      "logicalSizeDip" : 16,
       "name" : "pin-to-screen",
       "sha256" : "104c26794409ae953f30cfaa785ee814de09aa7d61302f49a8dceea0832c31b0",
       "source" : "platforms/mac/Resources/Icons/pin-to-screen.svg"
@@ -155,6 +155,20 @@
       "source" : "platforms/mac/Resources/Icons/redo-enabled.svg"
     },
     {
+      "fixedColor" : true,
+      "generated" : {
+        "100" : "platforms/win/resources/toolbar/100/refresh-svgrepo-com3.png",
+        "125" : "platforms/win/resources/toolbar/125/refresh-svgrepo-com3.png",
+        "150" : "platforms/win/resources/toolbar/150/refresh-svgrepo-com3.png",
+        "200" : "platforms/win/resources/toolbar/200/refresh-svgrepo-com3.png"
+      },
+      "insetDip" : 4,
+      "logicalSizeDip" : 12,
+      "name" : "refresh-svgrepo-com3",
+      "sha256" : "b53d3576032af3d159365965338f4974f061154cf5fb51f57edc0adedb04baf1",
+      "source" : "platforms/mac/Resources/Icons/refresh-svgrepo-com3.svg"
+    },
+    {
       "fixedColor" : false,
       "generated" : {
         "100" : "platforms/win/resources/toolbar/100/save-to-file.png",
@@ -163,7 +177,7 @@
         "200" : "platforms/win/resources/toolbar/200/save-to-file.png"
       },
       "insetDip" : 2,
-      "logicalSizeDip" : 20,
+      "logicalSizeDip" : 16,
       "name" : "save-to-file",
       "sha256" : "d8a43559fad27626ec2bcced105f7f59e083b0a29c1b1c3cc7acd05f46091be5",
       "source" : "platforms/mac/Resources/Icons/save-to-file.svg"
@@ -176,7 +190,7 @@
         "150" : "platforms/win/resources/toolbar/150/screenshot.png",
         "200" : "platforms/win/resources/toolbar/200/screenshot.png"
       },
-      "insetDip" : -1,
+      "insetDip" : 0,
       "logicalSizeDip" : 20,
       "name" : "screenshot",
       "sha256" : "74162a63e5b459aa4ede961c6c958597bbc8bd7d55a0bc1820bc0fe02e0558b2",
@@ -205,7 +219,7 @@
         "200" : "platforms/win/resources/toolbar/200/settings-more.png"
       },
       "insetDip" : 2,
-      "logicalSizeDip" : 20,
+      "logicalSizeDip" : 16,
       "name" : "settings-more",
       "sha256" : "00633f51ca59dbae0f7f2a01b7246a2749097b46c7d38da7f9602391e43a1974",
       "source" : "platforms/mac/Resources/Icons/settings-more.svg"
@@ -275,7 +289,7 @@
         "200" : "platforms/win/resources/toolbar/200/zoom-in-tool.png"
       },
       "insetDip" : 2,
-      "logicalSizeDip" : 20,
+      "logicalSizeDip" : 16,
       "name" : "zoom-in-tool",
       "sha256" : "4fba1014fb1a65f78f44ea0ec0ce186d4944c5e4adeb63db192b8e87b449d989",
       "source" : "platforms/mac/Resources/Icons/zoom-in-tool.svg"

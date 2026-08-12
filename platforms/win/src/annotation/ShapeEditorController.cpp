@@ -131,6 +131,26 @@ bool shapeBorderContains(
             || !containsRect(inner, point));
 }
 
+ShapeCursorStyle cursorStyleForResizeHandle(
+    ShapeResizeHandle handle) noexcept
+{
+    switch (handle) {
+    case ShapeResizeHandle::left:
+    case ShapeResizeHandle::right:
+        return ShapeCursorStyle::resizeLeftRight;
+    case ShapeResizeHandle::top:
+    case ShapeResizeHandle::bottom:
+        return ShapeCursorStyle::resizeUpDown;
+    case ShapeResizeHandle::topLeft:
+    case ShapeResizeHandle::bottomRight:
+        return ShapeCursorStyle::resizeTopLeftBottomRight;
+    case ShapeResizeHandle::topRight:
+    case ShapeResizeHandle::bottomLeft:
+        return ShapeCursorStyle::resizeTopRightBottomLeft;
+    }
+    return ShapeCursorStyle::arrow;
+}
+
 } // namespace
 
 ShapeEditorController::ShapeEditorController(
@@ -378,6 +398,42 @@ bool ShapeEditorController::pointerUp(AnnotationPoint point)
 void ShapeEditorController::cancelInteraction() noexcept
 {
     interaction_.cancel();
+}
+
+ShapeCursorStyle ShapeEditorController::cursorStyleAt(
+    AnnotationPoint point) const noexcept
+{
+    switch (interaction_.mode()) {
+    case ShapeInteractionMode::drawing:
+        return ShapeCursorStyle::crosshair;
+    case ShapeInteractionMode::moving:
+        return ShapeCursorStyle::move;
+    case ShapeInteractionMode::resizing:
+        if (const auto handle = interaction_.activeResizeHandle()) {
+            return cursorStyleForResizeHandle(*handle);
+        }
+        return ShapeCursorStyle::arrow;
+    case ShapeInteractionMode::rotating:
+        return ShapeCursorStyle::rotation;
+    case ShapeInteractionMode::idle:
+        break;
+    }
+
+    if (const auto selected = document_.selectedId(); selected.has_value()) {
+        if (interaction_.hitTestRotationHandle(*selected, point)) {
+            return ShapeCursorStyle::rotation;
+        }
+        if (const auto handle = interaction_.hitTestResizeHandle(
+                *selected, point)) {
+            return cursorStyleForResizeHandle(*handle);
+        }
+    }
+    if (annotationAtBorder(point).has_value()) {
+        return ShapeCursorStyle::move;
+    }
+    return shapeToolActive_
+        ? ShapeCursorStyle::crosshair
+        : ShapeCursorStyle::arrow;
 }
 
 ShapeEditorKeyResult ShapeEditorController::handleKey(

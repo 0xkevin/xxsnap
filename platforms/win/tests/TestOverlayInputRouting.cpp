@@ -14,11 +14,15 @@ using xxsnap::win::OverlayInputAction;
 using xxsnap::win::OverlayInputPlatform;
 using xxsnap::win::OverlayInputRouter;
 using xxsnap::win::OverlayInputStatus;
+using xxsnap::win::OverlayCursorStyle;
 using xxsnap::win::OverlaySurface;
 using xxsnap::win::SelectionPhase;
 using xxsnap::win::ShapeEditorKey;
 using xxsnap::win::AnnotationColor;
 using xxsnap::win::AnnotationRect;
+using xxsnap::win::ToolbarAction;
+using xxsnap::win::computeOverlayLayout;
+using xxsnap::win::fullToolbarActions;
 
 int failureCount = 0;
 
@@ -484,6 +488,117 @@ void testShapeToolIsNonTerminalAndEditsThroughSharedPresentation()
     CHECK(actions[0] == OverlayInputAction::copy);
 }
 
+void testShapeCanBeCreatedOutsideLockedSelectionOnOverlay()
+{
+    FakePlatform platform;
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform, {}, true);
+    createReadySelection(router);
+
+    auto owner = router.presentations()[1];
+    CHECK(router.pointerDown(
+        rightWindow, owner.toolbarItems[0].centerPhysical));
+    CHECK(router.cursorStyle(rightWindow, PixelPoint{200, 20})
+        == OverlayCursorStyle::crosshair);
+
+    CHECK(router.pointerDown(rightWindow, PixelPoint{200, 20}));
+    CHECK(router.cursorStyle(rightWindow, PixelPoint{320, 60})
+        == OverlayCursorStyle::crosshair);
+    router.platformPointerMove(PixelPoint{320, 60});
+    router.platformPointerUp(PixelPoint{320, 60});
+
+    CHECK(router.annotationDocument().annotations().size() == 1U);
+    if (!router.annotationDocument().annotations().empty()) {
+        const auto rect = router.annotationDocument().annotations()[0].rect;
+        CHECK(rect.y < 0.0F);
+        CHECK(rect.width > 70.0F);
+        CHECK(rect.height > 20.0F);
+    }
+
+    CHECK(router.cursorStyle(rightWindow, PixelPoint{235, 20})
+        == OverlayCursorStyle::move);
+    CHECK(router.pointerDown(rightWindow, PixelPoint{235, 20}));
+    CHECK(router.cursorStyle(rightWindow, PixelPoint{400, 100})
+        == OverlayCursorStyle::move);
+    router.platformPointerUp(PixelPoint{235, 20});
+}
+
+void testShapeCanvasAndCursorChromeSpanTheFullOverlay()
+{
+    FakePlatform platform;
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform, {}, true);
+    createReadySelection(router);
+
+    CHECK(router.cursorStyle(rightWindow, PixelPoint{60, 120})
+        == OverlayCursorStyle::crosshair);
+    CHECK(router.pointerDown(rightWindow, PixelPoint{60, 120}));
+    CHECK(router.cursorStyle(rightWindow, PixelPoint{60, 120})
+        == OverlayCursorStyle::move);
+    router.platformPointerUp(PixelPoint{60, 120});
+    CHECK(router.cursorStyle(rightWindow, PixelPoint{60, 120})
+        == OverlayCursorStyle::crosshair);
+
+    auto owner = router.presentations()[1];
+    CHECK(router.pointerDown(
+        rightWindow, owner.toolbarItems[0].centerPhysical));
+
+    const auto mainToolbar = computeOverlayLayout({
+        PixelRect{0, 0, 640, 360},
+        *router.selection(),
+        144,
+        144,
+        0.0F,
+        true,
+        std::vector<ToolbarAction>{
+            fullToolbarActions().begin(), fullToolbarActions().end()},
+    }).toolbar;
+    const PixelPoint dragHandlePoint{
+        static_cast<std::int64_t>(
+            (mainToolbar.leadingDragHandle.x
+                + mainToolbar.leadingDragHandle.width / 2.0F) * 1.5F),
+        static_cast<std::int64_t>(
+            (mainToolbar.leadingDragHandle.y
+                + mainToolbar.leadingDragHandle.height / 2.0F) * 1.5F),
+    };
+    CHECK(router.cursorStyle(rightWindow, dragHandlePoint)
+        == OverlayCursorStyle::arrow);
+
+    auto options = *router.presentations()[1].shapeOptions;
+    CHECK(router.pointerDown(
+        rightWindow, dipCenterAt144Dpi(options.layout.strokeStyle)));
+    const auto menu = router.presentations()[1]
+        .shapeOptions->strokePatternMenu;
+    CHECK(menu.has_value());
+    if (menu.has_value()) {
+        CHECK(router.cursorStyle(
+            rightWindow, dipCenterAt144Dpi(menu->menu))
+            == OverlayCursorStyle::arrow);
+        CHECK(router.pointerDown(
+            rightWindow, dipCenterAt144Dpi(menu->items[0])));
+    }
+
+    options = *router.presentations()[1].shapeOptions;
+    CHECK(router.pointerDown(
+        rightWindow, dipCenterAt144Dpi(options.layout.rectangleDisclosure)));
+    const auto panel = router.presentations()[1]
+        .shapeOptions->cornerRadiusPanel;
+    CHECK(panel.has_value());
+    if (panel.has_value()) {
+        CHECK(router.cursorStyle(
+            rightWindow, dipCenterAt144Dpi(panel->panel))
+            == OverlayCursorStyle::arrow);
+    }
+
+    CHECK(router.pointerDown(leftWindow, PixelPoint{100, 140}));
+    router.platformPointerMove(PixelPoint{-420, 220});
+    router.platformPointerUp(PixelPoint{-420, 220});
+    CHECK(router.annotationDocument().annotations().size() == 1U);
+    if (!router.annotationDocument().annotations().empty()) {
+        CHECK(router.annotationDocument().annotations()[0].rect.x < -100.0F);
+    }
+}
+
 } // namespace
 
 int main()
@@ -499,5 +614,7 @@ int main()
     testTerminalCallbackMaySynchronouslyDestroyRouter();
     testRestartShutdownReleasesCaptureAndHotKeyWithoutCancelAction();
     testShapeToolIsNonTerminalAndEditsThroughSharedPresentation();
+    testShapeCanBeCreatedOutsideLockedSelectionOnOverlay();
+    testShapeCanvasAndCursorChromeSpanTheFullOverlay();
     return failureCount == 0 ? 0 : 1;
 }

@@ -121,6 +121,43 @@ void testSelectedShapeMoveResizeRotateAndEscapeCancel()
     CHECK(editor.document().find(id)->rect == original);
 }
 
+void testCursorFollowsMacShapeInteractionSemantics()
+{
+    ShapeEditorController editor({-100, -80, 500, 360});
+    CHECK(editor.cursorStyleAt({150, 120}) == ShapeCursorStyle::arrow);
+    CHECK(editor.handleToolbarAction(ToolbarAction::rectangle));
+    CHECK(editor.cursorStyleAt({-40, -20}) == ShapeCursorStyle::crosshair);
+
+    CHECK(editor.pointerDown({20, 20}));
+    CHECK(editor.cursorStyleAt({100, 80}) == ShapeCursorStyle::crosshair);
+    editor.pointerMove({100, 80});
+    CHECK(editor.pointerUp({100, 80}));
+    const auto id = editor.document().annotations()[0].id;
+
+    const AnnotationPoint border{35, 20};
+    CHECK(editor.cursorStyleAt(border) == ShapeCursorStyle::move);
+    CHECK(editor.pointerDown(border));
+    CHECK(editor.cursorStyleAt({180, 140}) == ShapeCursorStyle::move);
+    CHECK(editor.pointerUp(border));
+
+    const auto bottomRight = editor.resizeHandlePoint(
+        id, ShapeResizeHandle::bottomRight);
+    CHECK(bottomRight.has_value());
+    CHECK(editor.cursorStyleAt(*bottomRight)
+        == ShapeCursorStyle::resizeTopLeftBottomRight);
+    CHECK(editor.pointerDown(*bottomRight));
+    CHECK(editor.cursorStyleAt({180, 140})
+        == ShapeCursorStyle::resizeTopLeftBottomRight);
+    CHECK(editor.pointerUp(*bottomRight));
+
+    const auto rotation = editor.rotationHandlePoint(id);
+    CHECK(rotation.has_value());
+    CHECK(editor.cursorStyleAt(*rotation) == ShapeCursorStyle::rotation);
+    CHECK(editor.pointerDown(*rotation));
+    CHECK(editor.cursorStyleAt({180, 140}) == ShapeCursorStyle::rotation);
+    CHECK(editor.pointerUp(*rotation));
+}
+
 void testCtrlShortcutsDeleteAndTerminalRequests()
 {
     ShapeEditorController editor({0, 0, 300, 200});
@@ -156,6 +193,7 @@ int main()
     testToolbarCapabilityAndPrimaryToolToggle();
     testDrawOptionsHistoryAndKindSwitch();
     testSelectedShapeMoveResizeRotateAndEscapeCancel();
+    testCursorFollowsMacShapeInteractionSemantics();
     testCtrlShortcutsDeleteAndTerminalRequests();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

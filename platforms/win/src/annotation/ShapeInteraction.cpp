@@ -290,6 +290,14 @@ ShapeInteractionMode ShapeInteraction::mode() const noexcept
     return mode_;
 }
 
+std::optional<ShapeResizeHandle>
+ShapeInteraction::activeResizeHandle() const noexcept
+{
+    return mode_ == ShapeInteractionMode::resizing
+        ? std::optional<ShapeResizeHandle>{resizeHandle_}
+        : std::nullopt;
+}
+
 const std::optional<ShapeAnnotation>& ShapeInteraction::preview() const noexcept
 {
     return preview_;

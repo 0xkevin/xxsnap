@@ -109,6 +109,8 @@ public:
     bool pointerDown(HWND source, PixelPoint clientPoint) noexcept;
     void pointerMove(HWND source, PixelPoint clientPoint) noexcept;
     void pointerUp(HWND source, PixelPoint clientPoint) noexcept;
+    OverlayCursorStyle cursorStyle(
+        HWND source, PixelPoint clientPoint) const noexcept;
     void platformPointerMove(PixelPoint virtualPoint) noexcept;
     void platformPointerUp(PixelPoint virtualPoint) noexcept;
     void captureChanged() noexcept;
@@ -148,6 +150,7 @@ private:
     void emitTerminal(OverlayInputAction action) noexcept;
     void releaseInteraction() noexcept;
 
+    PixelRect virtualBounds_{};
     SelectionModel model_;
     std::vector<OverlaySurface> surfaces_;
     OverlayInputPlatform& platform_;

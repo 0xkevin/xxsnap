@@ -46,9 +46,8 @@ struct VisualStyleCatalog {
     inline static constexpr float selectionHandleStrokeAlpha = 0.95f;
     inline static constexpr Rgba8 selectionHandleStrokeColor{255, 255, 255, 255};
 
-    // macOS samplerInfoFont selects Arial at medium weight, falling back to
-    // the platform system font. DirectWrite uses the same family and fallback policy.
-    inline static constexpr const wchar_t* sizeLabelFontFamily = L"Arial";
+    inline static constexpr const wchar_t* sizeLabelFontFamily =
+        L"Microsoft YaHei";
     inline static constexpr const wchar_t* sizeLabelLocaleName = L"en-US";
     inline static constexpr float sizeLabelFontSizeDip = 12.0f;
     inline static constexpr VisualFontWeight sizeLabelFontWeight =
