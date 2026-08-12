@@ -83,6 +83,9 @@ public:
     virtual CaptureExportResult exportSelection(
         const PixelBuffer& pixels,
         OverlayInputAction action) noexcept = 0;
+    virtual CaptureExportResult pinSelection(
+        PixelBuffer pixels,
+        PixelRect sourceRect) noexcept = 0;
     virtual void reportError(CaptureSessionErrorCode error) noexcept = 0;
 };
 
@@ -135,6 +138,7 @@ private:
     bool restarting_ = false;
     bool topologyRetryUsed_ = false;
     bool scrollCaptureMayBeOpen_ = false;
+    std::optional<PixelRect> scrollCaptureSelection_;
     std::uint64_t generation_ = 0;
 };
 

@@ -799,6 +799,15 @@ LRESULT OverlayWindow::handleMessage(
                 false,
             });
             return 0;
+        case overlayPinHotKeyIdentifier:
+            dispatchInput({
+                OverlayWindowInputKind::keyDown,
+                {},
+                '1',
+                true,
+                false,
+            });
+            return 0;
         default:
             break;
         }

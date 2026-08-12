@@ -175,6 +175,44 @@ void createReadySelection(OverlayInputRouter& router)
     CHECK((router.selection() == PixelRect{-140, 80, 260, 200}));
 }
 
+void testPinToolbarTransfersTheReadySelection()
+{
+    FakePlatform platform;
+    std::vector<OverlayInputAction> actions;
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform,
+        [&actions](OverlayInputAction action) { actions.push_back(action); },
+        true);
+    createReadySelection(router);
+    const auto owner = router.presentations()[1];
+    const auto pin = std::find_if(
+        owner.toolbarItems.begin(), owner.toolbarItems.end(),
+        [](const auto& item) {
+            return item.action == xxsnap::win::ToolbarAction::pin;
+        });
+    CHECK(pin != owner.toolbarItems.end());
+    if (pin != owner.toolbarItems.end()) {
+        CHECK(router.pointerDown(rightWindow, pin->centerPhysical));
+    }
+    CHECK(actions.size() == 1U);
+    CHECK(actions.front() == OverlayInputAction::pin);
+    CHECK(router.status() == OverlayInputStatus::completed);
+}
+
+void testCtrlOnePinsTheReadySelection()
+{
+    FakePlatform platform;
+    std::vector<OverlayInputAction> actions;
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform,
+        [&actions](OverlayInputAction action) { actions.push_back(action); },
+        true);
+    createReadySelection(router);
+    CHECK(router.keyPressed(ShapeEditorKey::pin, true, false));
+    CHECK(actions.size() == 1U);
+    CHECK(actions.front() == OverlayInputAction::pin);
+}
+
 PixelPoint dipCenterAt144Dpi(AnnotationRect rect)
 {
     return {
@@ -474,7 +512,7 @@ void testScrollToolbarSuspendsOverlayWithoutCompletingRouter()
     CHECK(router.activateEscapeHotKey(leftWindow));
     createReadySelection(router);
     const auto owner = router.presentations()[1];
-    CHECK(owner.toolbarItems.size() == 16U);
+    CHECK(owner.toolbarItems.size() == 17U);
     CHECK(owner.toolbarItems[10].action
         == xxsnap::win::ToolbarAction::scroll);
     CHECK(router.pointerDown(
@@ -498,7 +536,7 @@ void testShapeToolIsNonTerminalAndEditsThroughSharedPresentation()
     createReadySelection(router);
 
     auto owner = router.presentations()[1];
-    CHECK(owner.toolbarItems.size() == 16U);
+    CHECK(owner.toolbarItems.size() == 17U);
     const auto rectangle = owner.toolbarItems[0];
     CHECK(rectangle.action == xxsnap::win::ToolbarAction::rectangle);
     const auto capturesBeforeTool = platform.captureCalls;
@@ -576,7 +614,7 @@ void testArrowToolUsesMacOptionsMenuAndCreatesEditableCurve()
     createReadySelection(router);
 
     auto owner = router.presentations()[1];
-    CHECK(owner.toolbarItems.size() == 16U);
+    CHECK(owner.toolbarItems.size() == 17U);
     CHECK(owner.toolbarItems[1].action == xxsnap::win::ToolbarAction::polyline);
     CHECK(router.pointerDown(
         rightWindow, owner.toolbarItems[1].centerPhysical));
@@ -1001,7 +1039,7 @@ void testMagnifierToolbarMatchesMacOptionsAndUsesComposite()
     createReadySelection(router);
     CHECK(router.keyPressed(ShapeEditorKey::magnifier, false, false));
     auto owner = router.presentations()[1];
-    CHECK(owner.toolbarItems.size() == 16U);
+    CHECK(owner.toolbarItems.size() == 17U);
     CHECK(owner.toolbarItems[8].action
         == xxsnap::win::ToolbarAction::magnifier);
     CHECK(owner.toolbarItems[8].selected);
@@ -1132,6 +1170,8 @@ int main()
     testCrossWindowRoutingUsesVirtualPhysicalCoordinates();
     testActionHandleBodyAndBlankPriority();
     testAllToolbarActionsFireExactlyOnceWithoutStartingCapture();
+    testPinToolbarTransfersTheReadySelection();
+    testCtrlOnePinsTheReadySelection();
     testToolbarPresentationUsesSharedPhysicalRects();
     testOnePixelOutsideToolbarItemsDoesNotFireAction();
     testCancelSourcesAreIdempotentAndCaptureFailureFailsClosed();

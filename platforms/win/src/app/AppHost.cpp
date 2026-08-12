@@ -11,6 +11,7 @@
 #include "export/ClipboardWriter.h"
 #include "export/PngWriter.h"
 #include "export/SelectionComposer.h"
+#include "pin/PinnedImageHost.h"
 #include "resource.h"
 #include "session/CaptureSessionCoordinator.h"
 #include "scroll/ScrollCaptureHost.h"
@@ -118,6 +119,7 @@ public:
         , owner_(owner)
         , runtimeApis_(runtimeApis)
         , fallback_(dxgi_, gdi_)
+        , pinnedImages_(instance, owner)
         , errorCallback_(std::move(errorCallback))
     {
     }
@@ -189,6 +191,8 @@ public:
                     completion.action = result.action
                             == ScrollCaptureHostExportAction::save
                         ? OverlayInputAction::save
+                        : result.action == ScrollCaptureHostExportAction::pin
+                        ? OverlayInputAction::pin
                         : OverlayInputAction::copy;
                     break;
                 case ScrollCaptureHostStatus::cancelled:
@@ -282,6 +286,15 @@ public:
             : CaptureExportResult::completed;
     }
 
+    CaptureExportResult pinSelection(
+        PixelBuffer pixels,
+        PixelRect sourceRect) noexcept override
+    {
+        return pinnedImages_.pin(std::move(pixels), sourceRect)
+            ? CaptureExportResult::completed
+            : CaptureExportResult::failed;
+    }
+
     void reportError(CaptureSessionErrorCode error) noexcept override
     {
         ErrorCallback callback;
@@ -310,6 +323,7 @@ private:
     DxgiCaptureBackend dxgi_;
     GdiCaptureBackend gdi_;
     FallbackCaptureBackend fallback_;
+    PinnedImageHost pinnedImages_;
     std::unique_ptr<OverlayHost> overlay_;
     std::unique_ptr<ScrollCaptureHost> scrollCapture_;
     DWORD targetProcessId_ = 0U;

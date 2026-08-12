@@ -260,6 +260,7 @@ add_library(
     xxsnap_scroll_capture_host
     src/scroll/ScrollCaptureHost.cpp
 )
+
 target_compile_features(xxsnap_scroll_capture_host PUBLIC cxx_std_17)
 target_include_directories(
     xxsnap_scroll_capture_host
@@ -317,6 +318,22 @@ target_link_libraries(
     xxsnap_clipboard_writer
     PUBLIC xxsnap_png_writer snipory_core_portable
     PRIVATE xxsnap_windows_build_configuration user32
+)
+
+add_library(
+    xxsnap_pinned_image_host
+    src/pin/PinnedImageGeometry.cpp
+    src/pin/PinnedImageHost.cpp
+)
+target_compile_features(xxsnap_pinned_image_host PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_pinned_image_host
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_pinned_image_host
+    PUBLIC xxsnap_clipboard_writer xxsnap_png_writer snipory_core_portable
+    PRIVATE xxsnap_windows_build_configuration user32 gdi32 comdlg32
 )
 
 add_library(
@@ -552,6 +569,7 @@ target_link_libraries(
         xxsnap_gdi_capture_backend
         xxsnap_fallback_capture_backend
         xxsnap_scroll_capture_host
+        xxsnap_pinned_image_host
         xxsnap_selection_composer
         xxsnap_annotation_composer
         xxsnap_png_writer
@@ -620,6 +638,21 @@ if(BUILD_TESTING)
         PRIVATE xxsnap_selection_model
     )
     add_test(NAME selection_model COMMAND xxsnap_selection_model_test)
+
+    add_executable(
+        xxsnap_pinned_image_geometry_test
+        tests/TestPinnedImageGeometry.cpp
+    )
+    target_compile_features(
+        xxsnap_pinned_image_geometry_test PRIVATE cxx_std_17
+    )
+    target_link_libraries(
+        xxsnap_pinned_image_geometry_test PRIVATE xxsnap_pinned_image_host
+    )
+    add_test(
+        NAME pinned_image_geometry
+        COMMAND xxsnap_pinned_image_geometry_test
+    )
 
     add_executable(
         xxsnap_display_topology_test
@@ -1020,6 +1053,13 @@ if(BUILD_TESTING)
         xxsnap_interactive_startup_verifier PRIVATE cxx_std_17
     )
     target_link_libraries(xxsnap_interactive_startup_verifier PRIVATE user32)
+
+    add_executable(
+        xxsnap_interactive_pin_verifier EXCLUDE_FROM_ALL
+        ${CMAKE_SOURCE_DIR}/tools/windows/verify-interactive-pin.cpp
+    )
+    target_compile_features(xxsnap_interactive_pin_verifier PRIVATE cxx_std_17)
+    target_link_libraries(xxsnap_interactive_pin_verifier PRIVATE user32)
 endif()
 
 set(xxsnap_capture_session_targets
@@ -1056,6 +1096,7 @@ set(xxsnap_capture_session_targets
 if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_capture_session_state_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_selection_model_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_pinned_image_geometry_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_display_topology_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_gdi_capture_test)
     if(XXSNAP_WINDOWS_FAMILY STREQUAL "modern")
@@ -1085,6 +1126,7 @@ if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_png_writer_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_interactive_session_launcher)
     list(APPEND xxsnap_capture_session_targets xxsnap_interactive_startup_verifier)
+    list(APPEND xxsnap_capture_session_targets xxsnap_interactive_pin_verifier)
 endif()
 
 if(MSVC)

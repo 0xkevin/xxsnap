@@ -24,6 +24,7 @@ enum class ScrollCaptureHostStatus {
 
 enum class ScrollCaptureHostExportAction {
     copy,
+    pin,
     save,
 };
 

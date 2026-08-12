@@ -34,6 +34,7 @@ inline constexpr int overlayRedoHotKeyIdentifier = 0x5855;
 inline constexpr int overlaySaveHotKeyIdentifier = 0x5856;
 inline constexpr int overlayCopyHotKeyIdentifier = 0x5857;
 inline constexpr int overlayDeleteHotKeyIdentifier = 0x5858;
+inline constexpr int overlayPinHotKeyIdentifier = 0x5859;
 
 constexpr bool isOverlayEscapeHotKey(WPARAM identifier) noexcept
 {

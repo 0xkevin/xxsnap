@@ -27,6 +27,7 @@ enum class ShapeEditorKey : std::uint8_t {
     z,
     save,
     copy,
+    pin,
     eyedropper,
     mosaic,
     text,
@@ -41,6 +42,7 @@ enum class ShapeEditorKeyResult : std::uint8_t {
     requestCancel,
     requestSave,
     requestCopy,
+    requestPin,
 };
 
 enum class ShapeCursorStyle : std::uint8_t {

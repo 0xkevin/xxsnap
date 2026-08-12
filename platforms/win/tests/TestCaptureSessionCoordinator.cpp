@@ -179,6 +179,16 @@ public:
         return exportResult;
     }
 
+    CaptureExportResult pinSelection(
+        PixelBuffer pixels,
+        PixelRect sourceRect) noexcept override
+    {
+        ++pinCalls;
+        pinnedWidth = pixels.width();
+        pinnedRect = sourceRect;
+        return pinResult;
+    }
+
     void reportError(CaptureSessionErrorCode error) noexcept override
     {
         reportedErrors.push_back(error);
@@ -214,6 +224,7 @@ public:
     bool resumeOverlaySucceeds = true;
     std::vector<std::int64_t> topologyWidths;
     CaptureExportResult exportResult = CaptureExportResult::completed;
+    CaptureExportResult pinResult = CaptureExportResult::completed;
     std::optional<PixelRect> selectedRect = PixelRect{1, 1, 3, 2};
     RestartCallback restartCallback;
     ActionCallback actionCallback;
@@ -227,6 +238,7 @@ public:
     int closeCalls = 0;
     int composeCalls = 0;
     int exportCalls = 0;
+    int pinCalls = 0;
     int beginScrollCalls = 0;
     int cancelScrollCalls = 0;
     int resumeOverlayCalls = 0;
@@ -234,6 +246,8 @@ public:
     std::size_t scrollMaximumBytes = 0U;
     std::optional<OverlayInputAction> exportedAction;
     std::int64_t exportedWidth = 0;
+    std::int64_t pinnedWidth = 0;
+    std::optional<PixelRect> pinnedRect;
     std::vector<CaptureSessionErrorCode> reportedErrors;
 };
 
@@ -308,6 +322,42 @@ void testCopyCompletesAndBusyStartIsIgnored()
     CHECK(services.exportedAction == OverlayInputAction::copy);
     CHECK(services.exportedWidth == 3);
     CHECK(services.closeCalls == 1);
+}
+
+void testPinComposesAndTransfersPixelsToPinnedWindow()
+{
+    FakeServices services;
+    CaptureSessionCoordinator coordinator(services);
+    CHECK(coordinator.start() == CaptureSessionStartResult::started);
+
+    services.emit(OverlayInputAction::pin);
+
+    CHECK(coordinator.state() == CaptureSessionState::idle);
+    CHECK(services.composeCalls == 1);
+    CHECK(services.pinCalls == 1);
+    CHECK(services.exportCalls == 0);
+    CHECK(services.pinnedWidth == 3);
+    CHECK(services.pinnedRect == services.selectedRect);
+}
+
+void testScrollCaptureCanPinCompleteLongImage()
+{
+    FakeServices services;
+    CaptureSessionCoordinator coordinator(services);
+    CHECK(coordinator.start() == CaptureSessionStartResult::started);
+    services.emit(OverlayInputAction::scrollCapture);
+
+    MemoryBudget outputBudget(64U);
+    ScrollCaptureCompletion completion;
+    completion.status = ScrollCaptureCompletionStatus::completed;
+    completion.pixels.emplace(allocatePixels(3, 2, outputBudget));
+    completion.action = OverlayInputAction::pin;
+    services.completeScroll(std::move(completion));
+
+    CHECK(coordinator.state() == CaptureSessionState::idle);
+    CHECK(services.pinCalls == 1);
+    CHECK(services.exportCalls == 0);
+    CHECK(services.pinnedRect == services.selectedRect);
 }
 
 void testArchitectureDefaultMemoryLimit()
@@ -481,6 +531,17 @@ void testFailuresAreExplicitAndRecoverable()
     CHECK(saveFailureCoordinator.recentCapture() == nullptr);
     CHECK(saveFailureCoordinator.state() == CaptureSessionState::idle);
     CHECK(saveFailure.closeCalls == 1);
+
+    FakeServices pinFailure;
+    pinFailure.pinResult = CaptureExportResult::failed;
+    CaptureSessionCoordinator pinFailureCoordinator(pinFailure);
+    CHECK(pinFailureCoordinator.start() == CaptureSessionStartResult::started);
+    pinFailure.emit(OverlayInputAction::pin);
+    CHECK(pinFailureCoordinator.lastError()
+          == CaptureSessionErrorCode::exportFailed);
+    CHECK(pinFailureCoordinator.recentCapture() == nullptr);
+    CHECK(pinFailureCoordinator.state() == CaptureSessionState::idle);
+    CHECK(pinFailure.closeCalls == 1);
 }
 
 void testCallbacksDoNotOutliveCoordinator()
@@ -544,6 +605,8 @@ int main()
 {
     testArchitectureDefaultMemoryLimit();
     testCopyCompletesAndBusyStartIsIgnored();
+    testPinComposesAndTransfersPixelsToPinnedWindow();
+    testScrollCaptureCanPinCompleteLongImage();
     testScrollCaptureCanCancelBackToSelectionAndCompleteToExport();
     testScrollCaptureStartAndRuntimeFailuresAreReported();
     testCancelAndCancelledSaveReturnToIdle();

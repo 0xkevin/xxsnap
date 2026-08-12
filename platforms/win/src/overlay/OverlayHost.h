@@ -26,6 +26,7 @@ namespace xxsnap::win {
 
 enum class OverlayInputAction {
     cancel,
+    pin,
     save,
     copy,
     scrollCapture,

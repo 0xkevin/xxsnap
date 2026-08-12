@@ -270,6 +270,7 @@ ShapeEditorController::ShapeEditorController(
     toolbarState_.setCapability(ToolbarAction::scroll, true);
     toolbarState_.setCapability(ToolbarAction::undo, true);
     toolbarState_.setCapability(ToolbarAction::redo, true);
+    toolbarState_.setCapability(ToolbarAction::pin, true);
     syncHistory();
 }
 
@@ -2323,6 +2324,9 @@ ShapeEditorKeyResult ShapeEditorController::handleKey(
     }
     if (control && !shift && key == ShapeEditorKey::save) {
         return ShapeEditorKeyResult::requestSave;
+    }
+    if (control && !shift && key == ShapeEditorKey::pin) {
+        return ShapeEditorKeyResult::requestPin;
     }
     return ShapeEditorKeyResult::ignored;
 }

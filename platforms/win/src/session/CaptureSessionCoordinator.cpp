@@ -187,6 +187,7 @@ void CaptureSessionCoordinator::handleAction(OverlayInputAction action) noexcept
         const auto generation = generation_;
         const std::weak_ptr<CallbackState> weak = callbacks_;
         scrollCaptureMayBeOpen_ = true;
+        scrollCaptureSelection_ = *selected;
         bool started = false;
         try {
             started = services_.beginScrollCapture(
@@ -206,6 +207,7 @@ void CaptureSessionCoordinator::handleAction(OverlayInputAction action) noexcept
         }
         if (!started) {
             scrollCaptureMayBeOpen_ = false;
+            scrollCaptureSelection_.reset();
             fail(CaptureSessionErrorCode::scrollCaptureFailed);
         }
         return;
@@ -222,7 +224,9 @@ void CaptureSessionCoordinator::handleAction(OverlayInputAction action) noexcept
         return;
     }
     auto pixels = std::move(std::get<PixelBuffer>(composition));
-    const auto exportResult = services_.exportSelection(pixels, action);
+    const auto exportResult = action == OverlayInputAction::pin
+        ? services_.pinSelection(std::move(pixels), *selected)
+        : services_.exportSelection(pixels, action);
     if (exportResult == CaptureExportResult::failed) {
         if (action == OverlayInputAction::copy) {
             recentCapture_.emplace(std::move(pixels));
@@ -247,11 +251,13 @@ void CaptureSessionCoordinator::handleScrollCaptureCompletion(
             || !services_.resumeOverlayAfterScrollCapture()) {
             fail(CaptureSessionErrorCode::scrollCaptureFailed);
         }
+        scrollCaptureSelection_.reset();
         return;
     }
     if (completion.status != ScrollCaptureCompletionStatus::completed
         || !completion.pixels.has_value()
         || (completion.action != OverlayInputAction::copy
+            && completion.action != OverlayInputAction::pin
             && completion.action != OverlayInputAction::save)) {
         fail(CaptureSessionErrorCode::scrollCaptureFailed);
         return;
@@ -262,8 +268,13 @@ void CaptureSessionCoordinator::handleScrollCaptureCompletion(
         return;
     }
     auto pixels = std::move(*completion.pixels);
-    const auto exportResult = services_.exportSelection(
-        pixels, completion.action);
+    const auto sourceRect = scrollCaptureSelection_.value_or(PixelRect{
+        0, 0, pixels.width(), pixels.height(),
+    });
+    scrollCaptureSelection_.reset();
+    const auto exportResult = completion.action == OverlayInputAction::pin
+        ? services_.pinSelection(std::move(pixels), sourceRect)
+        : services_.exportSelection(pixels, completion.action);
     if (exportResult == CaptureExportResult::failed) {
         if (completion.action == OverlayInputAction::copy) {
             recentCapture_.emplace(std::move(pixels));
@@ -318,6 +329,7 @@ void CaptureSessionCoordinator::releaseSession() noexcept
         services_.cancelScrollCapture();
         scrollCaptureMayBeOpen_ = false;
     }
+    scrollCaptureSelection_.reset();
     if (overlayMayBeOpen_) {
         closingOverlay_ = true;
         services_.closeOverlay();

@@ -393,6 +393,7 @@ public:
         RegisterHotKey(window, overlaySaveHotKeyIdentifier, MOD_CONTROL, 'S');
         RegisterHotKey(window, overlayCopyHotKeyIdentifier, MOD_CONTROL, 'C');
         RegisterHotKey(window, overlayDeleteHotKeyIdentifier, 0, VK_DELETE);
+        RegisterHotKey(window, overlayPinHotKeyIdentifier, MOD_CONTROL, '1');
         return true;
     }
 
@@ -403,7 +404,8 @@ public:
                  overlayRedoHotKeyIdentifier,
                  overlaySaveHotKeyIdentifier,
                  overlayCopyHotKeyIdentifier,
-                 overlayDeleteHotKeyIdentifier}) {
+                 overlayDeleteHotKeyIdentifier,
+                 overlayPinHotKeyIdentifier}) {
             UnregisterHotKey(window, identifier);
         }
         return true;
@@ -1423,6 +1425,8 @@ bool OverlayInputRouter::pointerDown(
         }
         if (*action == ToolbarAction::cancel) {
             cancelOnce();
+        } else if (*action == ToolbarAction::pin) {
+            completeOnce(OverlayInputAction::pin);
         } else if (*action == ToolbarAction::save) {
             completeOnce(OverlayInputAction::save);
         } else if (*action == ToolbarAction::copy) {
@@ -2028,6 +2032,9 @@ bool OverlayInputRouter::keyPressed(
     case ShapeEditorKeyResult::requestCopy:
         completeOnce(OverlayInputAction::copy);
         return true;
+    case ShapeEditorKeyResult::requestPin:
+        completeOnce(OverlayInputAction::pin);
+        return true;
     }
     return false;
 }
@@ -2314,6 +2321,9 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
                 break;
             case 'C':
                 key = ShapeEditorKey::copy;
+                break;
+            case '1':
+                key = ShapeEditorKey::pin;
                 break;
             case 'P':
                 key = ShapeEditorKey::eyedropper;

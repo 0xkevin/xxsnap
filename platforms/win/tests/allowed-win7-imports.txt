@@ -45,6 +45,7 @@ USER32.dll!GetMonitorInfoW
 USER32.dll!GetWindowThreadProcessId
 USER32.dll!GetWindowLongPtrW
 USER32.dll!GetWindowLongW
+USER32.dll!GetWindowRect
 USER32.dll!InvalidateRect
 USER32.dll!IsWindow
 USER32.dll!KillTimer
@@ -71,6 +72,7 @@ USER32.dll!SetForegroundWindow
 USER32.dll!SetTimer
 USER32.dll!SetWindowLongPtrW
 USER32.dll!SetWindowLongW
+USER32.dll!SetLayeredWindowAttributes
 USER32.dll!SetWindowPos
 USER32.dll!SetWindowRgn
 USER32.dll!SetWindowsHookExW

@@ -38,6 +38,7 @@ void testToolbarCapabilityAndPrimaryToolToggle()
         ToolbarAction::undo,
         ToolbarAction::redo,
         ToolbarAction::cancel,
+        ToolbarAction::pin,
         ToolbarAction::save,
         ToolbarAction::copy,
     };
@@ -397,6 +398,8 @@ void testCtrlShortcutsDeleteAndTerminalRequests()
         == ShapeEditorKeyResult::requestCopy);
     CHECK(editor.handleKey(ShapeEditorKey::save, true, false)
         == ShapeEditorKeyResult::requestSave);
+    CHECK(editor.handleKey(ShapeEditorKey::pin, true, false)
+        == ShapeEditorKeyResult::requestPin);
 
     CHECK(editor.handleKey(ShapeEditorKey::deleteKey, false, false)
         == ShapeEditorKeyResult::consumed);

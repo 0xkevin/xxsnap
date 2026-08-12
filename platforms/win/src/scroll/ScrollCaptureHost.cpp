@@ -254,6 +254,7 @@ struct ScrollCaptureHost::Impl final {
     RECT cancelButton{};
     RECT saveButton{};
     RECT copyButton{};
+    RECT pinButton{};
     int pendingWheelDelta = 0;
     snipory::core::scroll::ScrollDirection direction =
         snipory::core::scroll::ScrollDirection::Undetermined;
@@ -361,6 +362,8 @@ struct ScrollCaptureHost::Impl final {
                     complete({ScrollCaptureHostStatus::cancelled, std::nullopt});
                 } else if (reviewing && PtInRect(&copyButton, point)) {
                     exportFinal(ScrollCaptureHostExportAction::copy);
+                } else if (reviewing && PtInRect(&pinButton, point)) {
+                    exportFinal(ScrollCaptureHostExportAction::pin);
                 } else if (reviewing && PtInRect(&saveButton, point)) {
                     exportFinal(ScrollCaptureHostExportAction::save);
                 }
@@ -543,6 +546,7 @@ struct ScrollCaptureHost::Impl final {
             if (action == ToolbarAction::cancel) cancelButton = actionButton;
             if (action == ToolbarAction::save) saveButton = actionButton;
             if (action == ToolbarAction::copy) copyButton = actionButton;
+            if (action == ToolbarAction::pin) pinButton = actionButton;
             x += step;
             if (action == ToolbarAction::scroll) {
                 finishButton = {x, y, x + side, y + side};
@@ -824,6 +828,7 @@ struct ScrollCaptureHost::Impl final {
                 drawIcon(dc, icons[iconIndex], button,
                     (!reviewing && action == ToolbarAction::scroll)
                         || (reviewing && (action == ToolbarAction::cancel
+                            || action == ToolbarAction::pin
                             || action == ToolbarAction::save
                             || action == ToolbarAction::copy))
                     ? 255U : 64U);
