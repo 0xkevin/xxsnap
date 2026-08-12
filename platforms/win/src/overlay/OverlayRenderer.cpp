@@ -2592,9 +2592,11 @@ struct OverlayRenderer::Impl final {
             renderTarget->FillRectangle(d2dRect(overlayBounds), dimBrush.get());
         } else {
             const auto& layout = *chromeLayout;
-            for (const auto mask : layout.mask) {
-                if (mask.width > 0.0F && mask.height > 0.0F) {
-                    renderTarget->FillRectangle(d2dRect(mask), dimBrush.get());
+            if (!state.pinnedImageEditor) {
+                for (const auto mask : layout.mask) {
+                    if (mask.width > 0.0F && mask.height > 0.0F) {
+                        renderTarget->FillRectangle(d2dRect(mask), dimBrush.get());
+                    }
                 }
             }
 
@@ -2675,29 +2677,29 @@ struct OverlayRenderer::Impl final {
             }
 
             if (layout.showActions) {
-                const auto labelRounded = D2D1::RoundedRect(
-                    d2dRect(layout.sizeLabel),
-                    VisualStyleCatalog::sizeLabelCornerRadiusDip,
-                    VisualStyleCatalog::sizeLabelCornerRadiusDip);
-                renderTarget->FillRoundedRectangle(
-                    &labelRounded, labelBackgroundBrush.get());
-                const DipRect labelTextRect{
-                    layout.sizeLabel.x
-                        + VisualStyleCatalog::sizeLabelHorizontalTextInsetDip,
-                    layout.sizeLabel.y
-                        + VisualStyleCatalog::sizeLabelVerticalTextInsetDip,
-                    (std::max)(0.0F, layout.sizeLabel.width
-                        - VisualStyleCatalog::sizeLabelHorizontalTextInsetDip * 2.0F),
-                    (std::max)(0.0F, layout.sizeLabel.height
-                        - VisualStyleCatalog::sizeLabelVerticalTextInsetDip * 2.0F),
-                };
-                renderTarget->DrawText(
-                    layout.sizeLabelText.data(),
-                    static_cast<UINT32>(layout.sizeLabelText.size()),
-                    textFormat.get(),
-                    d2dRect(labelTextRect),
-                    labelTextBrush.get(),
-                    D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                if (!state.pinnedImageEditor) {
+                    const auto labelRounded = D2D1::RoundedRect(
+                        d2dRect(layout.sizeLabel),
+                        VisualStyleCatalog::sizeLabelCornerRadiusDip,
+                        VisualStyleCatalog::sizeLabelCornerRadiusDip);
+                    renderTarget->FillRoundedRectangle(
+                        &labelRounded, labelBackgroundBrush.get());
+                    const DipRect labelTextRect{
+                        layout.sizeLabel.x
+                            + VisualStyleCatalog::sizeLabelHorizontalTextInsetDip,
+                        layout.sizeLabel.y
+                            + VisualStyleCatalog::sizeLabelVerticalTextInsetDip,
+                        (std::max)(0.0F, layout.sizeLabel.width
+                            - VisualStyleCatalog::sizeLabelHorizontalTextInsetDip * 2.0F),
+                        (std::max)(0.0F, layout.sizeLabel.height
+                            - VisualStyleCatalog::sizeLabelVerticalTextInsetDip * 2.0F),
+                    };
+                    renderTarget->DrawText(
+                        layout.sizeLabelText.data(),
+                        static_cast<UINT32>(layout.sizeLabelText.size()),
+                        textFormat.get(), d2dRect(labelTextRect),
+                        labelTextBrush.get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                }
 
                 const auto toolbarRounded = D2D1::RoundedRect(
                     d2dRect(layout.toolbar.bounds),
@@ -2718,6 +2720,21 @@ struct OverlayRenderer::Impl final {
                     false);
                 for (std::size_t index = 0; index < layout.toolbarItems.size(); ++index) {
                     const auto& item = layout.toolbarItems[index];
+                    if (toolbarIcon(item.action).kind
+                        == ToolbarIconSpec::Kind::checkmark) {
+                        const auto left = item.rect.x + 4.5F;
+                        const auto middleX = item.rect.x + 9.0F;
+                        const auto middleY = item.rect.y + 14.0F;
+                        renderTarget->DrawLine(
+                            D2D1::Point2F(left, item.rect.y + 10.5F),
+                            D2D1::Point2F(middleX, middleY),
+                            labelTextBrush.get(), 2.4F);
+                        renderTarget->DrawLine(
+                            D2D1::Point2F(middleX, middleY),
+                            D2D1::Point2F(item.rect.x + 16.5F, item.rect.y + 6.0F),
+                            labelTextBrush.get(), 2.4F);
+                        continue;
+                    }
                     const auto iconIndex = item.enabled
                         ? toolbarIconIndex(item.action)
                         : disabledToolbarIconIndex(item.action);
@@ -2816,18 +2833,20 @@ struct OverlayRenderer::Impl final {
                 }
             }
 
-            for (const auto handle : layout.handles) {
-                const auto ellipse = D2D1::Ellipse(
-                    D2D1::Point2F(
-                        handle.x + handle.width / 2.0F,
-                        handle.y + handle.height / 2.0F),
-                    handle.width / 2.0F,
-                    handle.height / 2.0F);
-                renderTarget->FillEllipse(&ellipse, selectionBrush.get());
-                renderTarget->DrawEllipse(
-                    &ellipse,
-                    handleStrokeBrush.get(),
-                    VisualStyleCatalog::selectionHandleStrokeDip);
+            if (!state.pinnedImageEditor) {
+                for (const auto handle : layout.handles) {
+                    const auto ellipse = D2D1::Ellipse(
+                        D2D1::Point2F(
+                            handle.x + handle.width / 2.0F,
+                            handle.y + handle.height / 2.0F),
+                        handle.width / 2.0F,
+                        handle.height / 2.0F);
+                    renderTarget->FillEllipse(&ellipse, selectionBrush.get());
+                    renderTarget->DrawEllipse(
+                        &ellipse,
+                        handleStrokeBrush.get(),
+                        VisualStyleCatalog::selectionHandleStrokeDip);
+                }
             }
             if (state.eyedropper.has_value()) {
                 if (const auto eyedropperError = drawEyedropper(

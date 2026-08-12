@@ -498,6 +498,11 @@ target_link_libraries(
     PRIVATE xxsnap_selection_composer xxsnap_annotation_composer
             xxsnap_windows_build_configuration user32 comdlg32
 )
+target_link_libraries(
+    xxsnap_pinned_image_host
+    PRIVATE xxsnap_overlay_host xxsnap_annotation_composer
+            xxsnap_display_topology
+)
 
 add_library(xxsnap_single_instance src/app/SingleInstance.cpp)
 target_compile_features(xxsnap_single_instance PUBLIC cxx_std_17)

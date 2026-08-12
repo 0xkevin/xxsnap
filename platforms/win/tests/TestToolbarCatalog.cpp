@@ -73,6 +73,11 @@ void testCatalogContract()
 
     static_assert(arraysEqual(fullToolbarActions(), expected));
     static_assert(terminalToolbarActions().size() == 3);
+    static_assert(pinnedEditorToolbarActions().size() == 15);
+    static_assert(pinnedEditorToolbarActions().back()
+        == ToolbarAction::finishEditing);
+    static_assert(toolbarIcon(ToolbarAction::finishEditing).kind
+        == ToolbarIconSpec::Kind::checkmark);
     CHECK(toolbarIcon(ToolbarAction::rectangle).insetDip == 0.0F);
     static_assert(toolbarIcon(ToolbarAction::number).insetDip == 3.0F);
     static_assert(toolbarIcon(ToolbarAction::scroll).insetDip == 0.0F);

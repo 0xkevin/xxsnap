@@ -17,6 +17,7 @@ enum class HotKeyCommand {
     fullScreen,
     ocr,
     teachingPen,
+    restoreMostRecentlyHiddenPinnedImage,
 };
 
 struct HotKeyBinding {
@@ -34,17 +35,19 @@ constexpr bool operator==(HotKeyBinding lhs, HotKeyBinding rhs) noexcept
 
 using AppHotKey = HotKeyBinding;
 
-constexpr std::array<HotKeyBinding, 4> defaultAppHotKeys() noexcept
+constexpr std::array<HotKeyBinding, 5> defaultAppHotKeys() noexcept
 {
     return {{
         {HotKeyCommand::regionCapture, MOD_CONTROL, VK_OEM_3},
         {HotKeyCommand::fullScreen, MOD_CONTROL | MOD_SHIFT, '1'},
         {HotKeyCommand::ocr, MOD_CONTROL, '3'},
         {HotKeyCommand::teachingPen, MOD_CONTROL, '2'},
+        {HotKeyCommand::restoreMostRecentlyHiddenPinnedImage, MOD_CONTROL, '1'},
     }};
 }
 
 inline constexpr int regionCaptureHotKeyIdentifier = 0x5852;
+inline constexpr int restorePinnedImageHotKeyIdentifier = 0x585A;
 
 class HotKeyApi {
 public:
@@ -83,6 +86,7 @@ public:
     HotKeyRegistrar& operator=(const HotKeyRegistrar&) = delete;
 
     bool registerMvpRegionCapture(HWND window) noexcept;
+    bool registerRestorePinnedImage(HWND window, Callback callback) noexcept;
     bool unregister() noexcept;
     bool handleMessage(UINT message, WPARAM wParam) noexcept;
     const std::optional<HotKeyError>& lastError() const noexcept;
@@ -90,8 +94,10 @@ public:
 private:
     HotKeyApi& api_;
     Callback callback_;
+    Callback restorePinnedImageCallback_;
     HWND window_ = nullptr;
     bool registered_ = false;
+    bool restorePinnedImageRegistered_ = false;
     std::optional<HotKeyError> lastError_;
 };
 

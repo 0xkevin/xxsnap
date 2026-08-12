@@ -38,6 +38,8 @@ constexpr wchar_t receiverClassName[] = L"XxSnap.HiddenTopLevelWindow.v1";
 constexpr wchar_t applicationName[] = L"XxSnap";
 constexpr wchar_t hotKeyConflictText[] =
     L"Ctrl+` \u5df2\u88ab\u5176\u4ed6\u7a0b\u5e8f\u5360\u7528\uff0c\u4ecd\u53ef\u4ece\u6258\u76d8\u542f\u52a8\u533a\u57df\u622a\u56fe\u3002";
+constexpr wchar_t restorePinHotKeyConflictText[] =
+    L"Ctrl+1 \u5df2\u88ab\u5176\u4ed6\u7a0b\u5e8f\u5360\u7528\uff0c\u4ecd\u53ef\u53cc\u51fb\u6216\u53f3\u952e\u8d34\u56fe\u7ee7\u7eed\u64cd\u4f5c\u3002";
 constexpr wchar_t topologyChangedText[] =
     L"\u663e\u793a\u5668\u914d\u7f6e\u8fde\u7eed\u53d8\u5316\uff0c\u672c\u6b21\u622a\u56fe\u5df2\u53d6\u6d88\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002";
 constexpr wchar_t clipboardFailureText[] =
@@ -316,6 +318,11 @@ public:
         return fallback_.lastBackend();
     }
 
+    bool restoreMostRecentlyHiddenPinnedImage() noexcept
+    {
+        return pinnedImages_.restoreMostRecentlyHidden();
+    }
+
 private:
     HINSTANCE instance_ = nullptr;
     HWND owner_ = nullptr;
@@ -394,6 +401,19 @@ public:
             if (!tray_->showHotKeyConflict(hotKeyConflictText)) {
                 MessageBoxW(
                     window_, hotKeyConflictText, applicationName,
+                    MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
+            }
+        }
+        if (!hotKey_->registerRestorePinnedImage(window_, [this] {
+            if (!coordinator_ || !coordinator_->pinCurrentSelection()) {
+                if (sessionServices_) {
+                    sessionServices_->restoreMostRecentlyHiddenPinnedImage();
+                }
+            }
+        })) {
+            if (!tray_->showHotKeyConflict(restorePinHotKeyConflictText)) {
+                MessageBoxW(window_, restorePinHotKeyConflictText,
+                    applicationName,
                     MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
             }
         }

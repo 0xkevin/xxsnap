@@ -30,6 +30,7 @@ enum class OverlayInputAction {
     save,
     copy,
     scrollCapture,
+    finishEditing,
 };
 
 enum class OverlayInputStatus {
@@ -51,6 +52,11 @@ struct OverlaySurface {
     PixelRect physicalBounds{};
     UINT dpiX = 96;
     UINT dpiY = 96;
+};
+
+enum class OverlayMode {
+    capture,
+    pinnedImageEditor,
 };
 
 struct NumberCursorState {
@@ -140,6 +146,7 @@ struct OverlayPresentationEyedropper {
 struct OverlayPresentation {
     std::optional<PixelRect> selection;
     bool showActions = false;
+    bool pinnedImageEditor = false;
     std::vector<OverlayPresentationToolbarItem> toolbarItems;
     AnnotationRenderPlan annotationPlan;
     std::shared_ptr<const PixelBuffer> annotationComposite;
@@ -188,7 +195,9 @@ public:
         OverlayInputPlatform& platform,
         ActionCallback actionCallback,
         bool shapeAnnotationsEnabled = false,
-        const FrozenDesktop* desktop = nullptr);
+        const FrozenDesktop* desktop = nullptr,
+        OverlayMode mode = OverlayMode::capture);
+    void lockSelection(PixelRect selection) noexcept;
     ~OverlayInputRouter();
 
     OverlayInputRouter(const OverlayInputRouter&) = delete;
@@ -285,6 +294,7 @@ private:
     bool mosaicValueDragging_ = false;
     bool releasingCapture_ = false;
     bool shapeAnnotationsEnabled_ = false;
+    OverlayMode mode_ = OverlayMode::capture;
     std::optional<std::size_t> editorOwnerIndex_;
     std::unique_ptr<ShapeEditorController> editor_;
     const FrozenDesktop* desktop_ = nullptr;
@@ -342,6 +352,10 @@ public:
         HINSTANCE instance,
         const FrozenDesktop& desktop,
         RestartCallback restartCallback,
+        ActionCallback actionCallback);
+    static OverlayHostCreateResult createPinnedImageEditor(
+        HINSTANCE instance,
+        const FrozenDesktop& desktop,
         ActionCallback actionCallback);
 
     void show() noexcept;

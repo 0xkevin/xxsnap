@@ -34,6 +34,16 @@ CaptureSessionStartResult CaptureSessionCoordinator::start() noexcept
     return startSession(true);
 }
 
+bool CaptureSessionCoordinator::pinCurrentSelection() noexcept
+{
+    if (stateMachine_.state() != CaptureSessionState::selecting
+        || !services_.selection().has_value()) {
+        return false;
+    }
+    handleAction(OverlayInputAction::pin);
+    return true;
+}
+
 void CaptureSessionCoordinator::displayConfigurationChanged() noexcept
 {
     restart();

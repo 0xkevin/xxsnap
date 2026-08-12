@@ -22,6 +22,7 @@ public:
 
     bool pin(PixelBuffer pixels, PixelRect sourceRect) noexcept;
     std::size_t count() const noexcept;
+    bool restoreMostRecentlyHidden() noexcept;
 
 private:
     struct Impl;

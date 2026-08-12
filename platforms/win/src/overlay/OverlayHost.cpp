@@ -472,12 +472,14 @@ OverlayInputRouter::OverlayInputRouter(
     OverlayInputPlatform& platform,
     ActionCallback actionCallback,
     bool shapeAnnotationsEnabled,
-    const FrozenDesktop* desktop)
+    const FrozenDesktop* desktop,
+    OverlayMode mode)
     : model_(snipory::core::portable::standardized(virtualBounds))
     , surfaces_(std::move(surfaces))
     , platform_(platform)
     , actionCallback_(std::move(actionCallback))
     , shapeAnnotationsEnabled_(shapeAnnotationsEnabled)
+    , mode_(mode)
     , desktop_(desktop)
 {
     for (auto& surface : surfaces_) {
@@ -492,8 +494,27 @@ OverlayInputRouter::OverlayInputRouter(
     }
 }
 
+void OverlayInputRouter::lockSelection(PixelRect selection) noexcept
+{
+    selection = snipory::core::portable::standardized(selection);
+    if (selection.width <= 0 || selection.height <= 0) return;
+    model_.beginCreation({selection.x, selection.y});
+    model_.updateInteraction({
+        selection.x + selection.width,
+        selection.y + selection.height,
+    });
+    model_.finishInteraction();
+    ensureEditor();
+}
+
 std::vector<ToolbarAction> OverlayInputRouter::toolbarActions() const
 {
+    if (mode_ == OverlayMode::pinnedImageEditor) {
+        return {
+            pinnedEditorToolbarActions().begin(),
+            pinnedEditorToolbarActions().end(),
+        };
+    }
     return editor_ != nullptr
         ? editor_->toolbarState().visibleActions()
         : std::vector<ToolbarAction>{
@@ -505,6 +526,10 @@ std::vector<ToolbarAction> OverlayInputRouter::toolbarActions() const
 bool OverlayInputRouter::toolbarActionEnabled(
     ToolbarAction action) const noexcept
 {
+    if (mode_ == OverlayMode::pinnedImageEditor
+        && action == ToolbarAction::finishEditing) {
+        return true;
+    }
     return editor_ == nullptr || editor_->toolbarState().isEnabled(action);
 }
 
@@ -1067,6 +1092,8 @@ std::vector<OverlayPresentation> OverlayInputRouter::presentations() const
         auto& presentation = result[index];
         presentation.selection = model_.selection();
         presentation.showActions = owner.has_value() && *owner == index;
+        presentation.pinnedImageEditor
+            = mode_ == OverlayMode::pinnedImageEditor;
         if (!presentation.showActions || !presentation.selection.has_value()) {
             continue;
         }
@@ -1431,6 +1458,8 @@ bool OverlayInputRouter::pointerDown(
             completeOnce(OverlayInputAction::save);
         } else if (*action == ToolbarAction::copy) {
             completeOnce(OverlayInputAction::copy);
+        } else if (*action == ToolbarAction::finishEditing) {
+            completeOnce(OverlayInputAction::finishEditing);
         } else if (*action == ToolbarAction::scroll) {
             releaseInteraction();
             deactivateEscapeHotKey();
@@ -1981,7 +2010,11 @@ void OverlayInputRouter::escapePressed() noexcept
             return;
         }
     }
-    cancelOnce();
+    if (mode_ == OverlayMode::pinnedImageEditor) {
+        completeOnce(OverlayInputAction::finishEditing);
+    } else {
+        cancelOnce();
+    }
 }
 
 void OverlayInputRouter::cancelPressed() noexcept
@@ -2414,6 +2447,7 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
                 OverlayRenderState state;
                 state.selection = current[index].selection;
                 state.showActions = current[index].showActions;
+                state.pinnedImageEditor = current[index].pinnedImageEditor;
                 state.annotationPlan = current[index].annotationPlan;
                 state.annotationComposite
                     = current[index].annotationComposite;
@@ -2639,6 +2673,68 @@ OverlayHostCreateResult OverlayHost::create(
                 std::nullopt,
             },
         };
+    }
+}
+
+OverlayHostCreateResult OverlayHost::createPinnedImageEditor(
+    HINSTANCE instance,
+    const FrozenDesktop& desktop,
+    ActionCallback actionCallback)
+{
+    if (desktop.displays.size() != 1U) {
+        return {nullptr, OverlayHostError{OverlayHostErrorCode::noDisplays}};
+    }
+    try {
+        auto impl = std::make_shared<Impl>();
+        impl->instance = instance;
+        impl->desktop = &desktop;
+        impl->actionCallback = std::move(actionCallback);
+        impl->platform = std::make_unique<SystemOverlayInputPlatform>();
+        const std::weak_ptr<Impl> weak = impl;
+        auto created = OverlayWindow::create(
+            instance, desktop.displays.front(), [] {},
+            [weak](HWND source, const OverlayWindowInput& input) {
+                if (const auto locked = weak.lock()) {
+                    locked->handleInput(source, input);
+                }
+            });
+        if (!created.value) {
+            return {nullptr, OverlayHostError{
+                OverlayHostErrorCode::windowCreationFailed,
+                created.error.has_value() ? created.error->systemError
+                                          : ERROR_GEN_FAILURE,
+                created.error}};
+        }
+        impl->windows.push_back(std::move(created.value));
+        const auto& descriptor = desktop.displays.front().descriptor;
+        std::vector<OverlaySurface> surfaces{{
+            impl->windows.front()->handle(),
+            descriptor.pixelBounds,
+            descriptor.dpiX,
+            descriptor.dpiY,
+        }};
+        impl->router = std::make_unique<OverlayInputRouter>(
+            descriptor.pixelBounds, std::move(surfaces), *impl->platform,
+            [weak](OverlayInputAction action) {
+                if (const auto locked = weak.lock()) {
+                    locked->dispatchAction(action);
+                }
+            },
+            true, &desktop, OverlayMode::pinnedImageEditor);
+        impl->router->lockSelection(descriptor.pixelBounds);
+        if (!impl->router->activateEscapeHotKey(
+                impl->windows.front()->handle())
+            || !impl->refresh()) {
+            return {nullptr, OverlayHostError{
+                OverlayHostErrorCode::escapeHotKeyRegistrationFailed,
+                GetLastError(), std::nullopt}};
+        }
+        return {std::unique_ptr<OverlayHost>(
+            new OverlayHost(std::move(impl))), std::nullopt};
+    } catch (const std::bad_alloc&) {
+        return {nullptr, OverlayHostError{
+            OverlayHostErrorCode::outOfMemory,
+            ERROR_NOT_ENOUGH_MEMORY, std::nullopt}};
     }
 }
 

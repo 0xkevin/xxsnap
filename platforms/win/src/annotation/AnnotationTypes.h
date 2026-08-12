@@ -515,4 +515,55 @@ inline bool operator!=(
     return !(left == right);
 }
 
+inline ShapeAnnotation scaled(
+    ShapeAnnotation annotation,
+    float xScale,
+    float yScale)
+{
+    const auto scalePoint = [xScale, yScale](AnnotationPoint point) {
+        return AnnotationPoint{point.x * xScale, point.y * yScale};
+    };
+    annotation.rect = {
+        annotation.rect.x * xScale,
+        annotation.rect.y * yScale,
+        annotation.rect.width * xScale,
+        annotation.rect.height * yScale,
+    };
+    const auto styleScale = (xScale + yScale) / 2.0F;
+    annotation.style.strokeWidthDip *= styleScale;
+    annotation.style.cornerRadiusDip *= styleScale;
+    annotation.style.textSize *= styleScale;
+    if (annotation.arrowLine) {
+        annotation.arrowLine->start = scalePoint(annotation.arrowLine->start);
+        annotation.arrowLine->end = scalePoint(annotation.arrowLine->end);
+        annotation.arrowLine->control = scalePoint(annotation.arrowLine->control);
+    }
+    if (annotation.brushPath) {
+        for (auto& point : annotation.brushPath->points) {
+            point = scalePoint(point);
+        }
+    }
+    if (annotation.markerLine) {
+        annotation.markerLine->start = scalePoint(annotation.markerLine->start);
+        annotation.markerLine->end = scalePoint(annotation.markerLine->end);
+    }
+    if (annotation.mosaicStroke) {
+        for (auto& point : annotation.mosaicStroke->points) {
+            point = scalePoint(point);
+        }
+    }
+    return annotation;
+}
+
+inline EraserMask scaled(EraserMask mask, float xScale, float yScale)
+{
+    mask.rect = {
+        mask.rect.x * xScale,
+        mask.rect.y * yScale,
+        mask.rect.width * xScale,
+        mask.rect.height * yScale,
+    };
+    return mask;
+}
+
 } // namespace xxsnap::win

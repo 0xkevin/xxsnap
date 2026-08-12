@@ -26,9 +26,15 @@ enum class ToolbarAction : std::uint8_t {
     pin,
     save,
     copy,
+    finishEditing,
 };
 
 struct ToolbarIconSpec {
+    enum class Kind : std::uint8_t {
+        image,
+        checkmark,
+    };
+
     const wchar_t* resourceName;
     float insetDip;
     bool fixedColor;
@@ -36,6 +42,7 @@ struct ToolbarIconSpec {
     int resourceIdAt120Dpi;
     int resourceIdAt144Dpi;
     int resourceIdAt192Dpi;
+    Kind kind = Kind::image;
 };
 
 struct ToolbarMetrics {
@@ -73,6 +80,24 @@ inline constexpr std::array terminalActions{
     ToolbarAction::cancel,
     ToolbarAction::save,
     ToolbarAction::copy,
+};
+
+inline constexpr std::array pinnedEditorActions{
+    ToolbarAction::rectangle,
+    ToolbarAction::polyline,
+    ToolbarAction::pen,
+    ToolbarAction::marker,
+    ToolbarAction::eyedropper,
+    ToolbarAction::mosaic,
+    ToolbarAction::text,
+    ToolbarAction::number,
+    ToolbarAction::magnifier,
+    ToolbarAction::eraser,
+    ToolbarAction::undo,
+    ToolbarAction::redo,
+    ToolbarAction::save,
+    ToolbarAction::copy,
+    ToolbarAction::finishEditing,
 };
 
 inline constexpr std::array imageResources{
@@ -232,8 +257,13 @@ inline constexpr std::array imageResources{
     },
 };
 
-inline constexpr std::array<std::size_t, fullActions.size()> actionIconIndices{
-    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 17, 18, 19,
+inline constexpr std::array<std::size_t, fullActions.size() + 1U> actionIconIndices{
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 17, 18, 19, 16,
+};
+
+inline constexpr ToolbarIconSpec finishEditingIcon{
+    L"finish-editing", 0.0F, true, 0, 0, 0, 0,
+    ToolbarIconSpec::Kind::checkmark,
 };
 
 } // namespace toolbar_catalog_detail
@@ -248,8 +278,16 @@ constexpr const auto& terminalToolbarActions() noexcept
     return toolbar_catalog_detail::terminalActions;
 }
 
+constexpr const auto& pinnedEditorToolbarActions() noexcept
+{
+    return toolbar_catalog_detail::pinnedEditorActions;
+}
+
 constexpr const ToolbarIconSpec& toolbarIcon(ToolbarAction action) noexcept
 {
+    if (action == ToolbarAction::finishEditing) {
+        return toolbar_catalog_detail::finishEditingIcon;
+    }
     const auto index = toolbar_catalog_detail::actionIconIndices[
         static_cast<std::size_t>(action)];
     return toolbar_catalog_detail::imageResources[index];

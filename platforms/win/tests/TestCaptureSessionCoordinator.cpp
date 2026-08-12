@@ -340,6 +340,33 @@ void testPinComposesAndTransfersPixelsToPinnedWindow()
     CHECK(services.pinnedRect == services.selectedRect);
 }
 
+void testGlobalPinShortcutUsesTheCurrentSelection()
+{
+    FakeServices services;
+    CaptureSessionCoordinator coordinator(services);
+    CHECK(coordinator.start() == CaptureSessionStartResult::started);
+    CHECK(coordinator.pinCurrentSelection());
+    CHECK(services.pinCalls == 1);
+    CHECK(services.closeCalls == 1);
+    CHECK(coordinator.state() == CaptureSessionState::idle);
+    CHECK(!coordinator.pinCurrentSelection());
+}
+
+void testGlobalPinShortcutWithoutASelectionAllowsRestoreFallback()
+{
+    FakeServices services;
+    services.selectedRect.reset();
+    CaptureSessionCoordinator coordinator(services);
+    CHECK(coordinator.start() == CaptureSessionStartResult::started);
+
+    CHECK(!coordinator.pinCurrentSelection());
+
+    CHECK(services.pinCalls == 0);
+    CHECK(services.closeCalls == 0);
+    CHECK(services.reportedErrors.empty());
+    CHECK(coordinator.state() == CaptureSessionState::selecting);
+}
+
 void testScrollCaptureCanPinCompleteLongImage()
 {
     FakeServices services;
@@ -606,6 +633,8 @@ int main()
     testArchitectureDefaultMemoryLimit();
     testCopyCompletesAndBusyStartIsIgnored();
     testPinComposesAndTransfersPixelsToPinnedWindow();
+    testGlobalPinShortcutUsesTheCurrentSelection();
+    testGlobalPinShortcutWithoutASelectionAllowsRestoreFallback();
     testScrollCaptureCanPinCompleteLongImage();
     testScrollCaptureCanCancelBackToSelectionAndCompleteToExport();
     testScrollCaptureStartAndRuntimeFailuresAreReported();

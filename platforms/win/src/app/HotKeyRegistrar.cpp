@@ -81,33 +81,84 @@ bool HotKeyRegistrar::registerMvpRegionCapture(HWND window) noexcept
     return true;
 }
 
-bool HotKeyRegistrar::unregister() noexcept
+bool HotKeyRegistrar::registerRestorePinnedImage(
+    HWND window, Callback callback) noexcept
 {
-    if (!registered_) {
-        return true;
-    }
-    DWORD error = ERROR_SUCCESS;
-    if (!api_.unregisterHotKey(
-            window_, regionCaptureHotKeyIdentifier, error)) {
+    if (restorePinnedImageRegistered_) return window_ == window;
+    if (window == nullptr || (window_ != nullptr && window_ != window)) {
         lastError_ = HotKeyError{
-            HotKeyErrorCode::unregistrationFailed, error};
+            HotKeyErrorCode::invalidWindow, ERROR_INVALID_WINDOW_HANDLE};
         return false;
     }
-    registered_ = false;
-    window_ = nullptr;
+    constexpr auto binding = defaultAppHotKeys()[4];
+    DWORD error = ERROR_SUCCESS;
+    if (!api_.registerHotKey(window, restorePinnedImageHotKeyIdentifier,
+            binding.modifiers, binding.virtualKey, error)) {
+        lastError_ = HotKeyError{
+            HotKeyErrorCode::registrationFailed, error};
+        return false;
+    }
+    window_ = window;
+    restorePinnedImageRegistered_ = true;
+    try {
+        restorePinnedImageCallback_ = std::move(callback);
+    } catch (...) {
+        api_.unregisterHotKey(window, restorePinnedImageHotKeyIdentifier, error);
+        restorePinnedImageRegistered_ = false;
+        lastError_ = HotKeyError{
+            HotKeyErrorCode::registrationFailed, ERROR_NOT_ENOUGH_MEMORY};
+        return false;
+    }
     lastError_.reset();
     return true;
 }
 
+bool HotKeyRegistrar::unregister() noexcept
+{
+    if (!registered_ && !restorePinnedImageRegistered_) {
+        return true;
+    }
+    DWORD error = ERROR_SUCCESS;
+    bool succeeded = true;
+    if (registered_ && !api_.unregisterHotKey(
+            window_, regionCaptureHotKeyIdentifier, error)) {
+        lastError_ = HotKeyError{
+            HotKeyErrorCode::unregistrationFailed, error};
+        succeeded = false;
+    } else {
+        registered_ = false;
+    }
+    if (restorePinnedImageRegistered_ && !api_.unregisterHotKey(
+            window_, restorePinnedImageHotKeyIdentifier, error)) {
+        lastError_ = HotKeyError{
+            HotKeyErrorCode::unregistrationFailed, error};
+        succeeded = false;
+    } else {
+        restorePinnedImageRegistered_ = false;
+    }
+    if (succeeded) {
+        window_ = nullptr;
+        lastError_.reset();
+    }
+    return succeeded;
+}
+
 bool HotKeyRegistrar::handleMessage(UINT message, WPARAM wParam) noexcept
 {
-    if (!registered_ || message != WM_HOTKEY
-        || wParam != static_cast<WPARAM>(regionCaptureHotKeyIdentifier)) {
+    if (message != WM_HOTKEY) {
         return false;
     }
     Callback callback;
     try {
-        callback = callback_;
+        if (registered_
+            && wParam == static_cast<WPARAM>(regionCaptureHotKeyIdentifier)) {
+            callback = callback_;
+        } else if (restorePinnedImageRegistered_
+            && wParam == static_cast<WPARAM>(restorePinnedImageHotKeyIdentifier)) {
+            callback = restorePinnedImageCallback_;
+        } else {
+            return false;
+        }
     } catch (...) {
         return true;
     }

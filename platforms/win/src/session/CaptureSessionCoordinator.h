@@ -108,6 +108,7 @@ public:
     CaptureSessionCoordinator& operator=(const CaptureSessionCoordinator&) = delete;
 
     CaptureSessionStartResult start() noexcept;
+    bool pinCurrentSelection() noexcept;
     void displayConfigurationChanged() noexcept;
     CaptureSessionState state() const noexcept;
     const std::optional<CaptureSessionErrorCode>& lastError() const noexcept;

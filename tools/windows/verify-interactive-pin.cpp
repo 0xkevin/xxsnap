@@ -128,7 +128,67 @@ int wmain(int argc, wchar_t** argv)
                 SendMessageTimeoutW(pin, WM_KEYDOWN, VK_ESCAPE, 0,
                     SMTO_ABORTIFHUNG, 2000, &messageResult);
                 Sleep(100);
-                result = !IsWindowVisible(pin) ? ERROR_SUCCESS : ERROR_INVALID_STATE;
+                if (!IsWindowVisible(pin)) {
+                    sendKey(VK_CONTROL);
+                    sendKey('1');
+                    sendKey('1', true);
+                    sendKey(VK_CONTROL, true);
+                    const auto deadline = GetTickCount64() + 2000;
+                    while (!IsWindowVisible(pin) && GetTickCount64() < deadline) {
+                        Sleep(50);
+                    }
+                    if (IsWindowVisible(pin)) {
+                        SendMessageTimeoutW(pin, WM_KEYDOWN, VK_SHIFT, 0,
+                            SMTO_ABORTIFHUNG, 2000, &messageResult);
+                        const auto editor = waitForWindow(
+                            process.dwProcessId, overlayClassName, 3000);
+                        if (editor != nullptr && !IsWindowVisible(pin)) {
+                            RECT editorRect{};
+                            GetWindowRect(editor, &editorRect);
+                            const auto width = editorRect.right - editorRect.left;
+                            const auto height = editorRect.bottom - editorRect.top;
+                            const auto toolbarX = editorRect.left
+                                + (std::min)(42L, (std::max)(10L, width / 8));
+                            const auto toolbarY = editorRect.bottom - 18;
+                            sendMouse(MOUSEEVENTF_MOVE, toolbarX, toolbarY);
+                            sendMouse(MOUSEEVENTF_MOVE | MOUSEEVENTF_LEFTDOWN,
+                                toolbarX, toolbarY);
+                            sendMouse(MOUSEEVENTF_MOVE | MOUSEEVENTF_LEFTUP,
+                                toolbarX, toolbarY);
+                            const auto drawStartX = editorRect.left + width / 4;
+                            const auto drawStartY = editorRect.top + height / 4;
+                            const auto drawEndX = editorRect.left
+                                + width * 3 / 4;
+                            const auto drawEndY = editorRect.top
+                                + height * 2 / 3;
+                            sendMouse(MOUSEEVENTF_MOVE, drawStartX, drawStartY);
+                            sendMouse(MOUSEEVENTF_MOVE | MOUSEEVENTF_LEFTDOWN,
+                                drawStartX, drawStartY);
+                            sendMouse(MOUSEEVENTF_MOVE, drawEndX, drawEndY);
+                            sendMouse(MOUSEEVENTF_MOVE | MOUSEEVENTF_LEFTUP,
+                                drawEndX, drawEndY);
+                            Sleep(100);
+                            SendMessageTimeoutW(editor, WM_KEYDOWN, VK_ESCAPE, 0,
+                                SMTO_ABORTIFHUNG, 2000, &messageResult);
+                            Sleep(100);
+                            SendMessageTimeoutW(editor, WM_KEYDOWN, VK_ESCAPE, 0,
+                                SMTO_ABORTIFHUNG, 2000, &messageResult);
+                            const auto finishDeadline = GetTickCount64() + 2000;
+                            while (!IsWindowVisible(pin)
+                                && GetTickCount64() < finishDeadline) {
+                                Sleep(50);
+                            }
+                            result = IsWindowVisible(pin)
+                                ? ERROR_SUCCESS : ERROR_INVALID_STATE;
+                        } else {
+                            result = ERROR_INVALID_STATE;
+                        }
+                    } else {
+                        result = ERROR_INVALID_STATE;
+                    }
+                } else {
+                    result = ERROR_INVALID_STATE;
+                }
             } else {
                 result = ERROR_INVALID_DATA;
             }

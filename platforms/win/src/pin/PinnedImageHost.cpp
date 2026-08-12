@@ -3,12 +3,16 @@
 #include "export/ClipboardWriter.h"
 #include "export/PngWriter.h"
 #include "pin/PinnedImageGeometry.h"
+#include "capture/DisplayTopology.h"
+#include "export/AnnotationComposer.h"
+#include "overlay/OverlayHost.h"
 
 #include <commdlg.h>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <new>
 #include <utility>
@@ -19,6 +23,8 @@ namespace {
 
 constexpr wchar_t pinnedImageWindowClass[] = L"XxSnapPinnedImageWindow";
 constexpr COLORREF transparentColor = RGB(1, 2, 3);
+constexpr wchar_t editCompositionFailureText[] =
+    L"\u65e0\u6cd5\u5e94\u7528\u8d34\u56fe\u7f16\u8f91\uff0c\u539f\u56fe\u5df2\u4fdd\u7559\u3002";
 
 enum PinCommand : UINT {
     commandToolbar = 100,
@@ -74,6 +80,10 @@ struct PinnedImageHost::Impl final {
         BYTE opacity = 255U;
         bool dragging = false;
         bool alwaysOnTop = true;
+        std::optional<std::uint64_t> hiddenOrder;
+        std::unique_ptr<MemoryBudget> editorBudget;
+        std::unique_ptr<FrozenDesktop> editorDesktop;
+        std::unique_ptr<OverlayHost> editor;
 
         Pin(Impl* host, PixelBuffer source) noexcept
             : owner(host), pixels(std::move(source))
@@ -84,6 +94,7 @@ struct PinnedImageHost::Impl final {
     HINSTANCE instance = nullptr;
     HWND dialogOwner = nullptr;
     std::vector<std::unique_ptr<Pin>> pins;
+    std::uint64_t nextHiddenOrder = 1U;
 
     Impl(HINSTANCE module, HWND owner) noexcept
         : instance(module != nullptr ? module : GetModuleHandleW(nullptr))
@@ -285,6 +296,138 @@ struct PinnedImageHost::Impl final {
         writeClipboard(pin.pixels, pin.window);
     }
 
+    void finishEditing(Pin& pin, OverlayInputAction action) noexcept
+    {
+        bool compositionSucceeded = true;
+        if (pin.editor != nullptr) {
+            auto annotations = pin.editor->annotationSnapshot();
+            const auto xScale = static_cast<float>(pin.pixels.width())
+                / static_cast<float>((std::max)(1LL, pin.imageRect.width));
+            const auto yScale = static_cast<float>(pin.pixels.height())
+                / static_cast<float>((std::max)(1LL, pin.imageRect.height));
+            for (auto& item : annotations.plan.items) {
+                item.annotation = scaled(
+                    std::move(item.annotation), xScale, yScale);
+            }
+            for (auto& mask : annotations.eraserMasks) {
+                mask = scaled(std::move(mask), xScale, yScale);
+            }
+            MemoryBudget compositionBudget(pin.pixels.byteCount());
+            auto staged = PixelBuffer::allocate(
+                pin.pixels.width(), pin.pixels.height(), compositionBudget);
+            if (!staged.value) {
+                compositionSucceeded = false;
+            } else {
+                std::memcpy(staged.value->data(), pin.pixels.data(),
+                    pin.pixels.byteCount());
+                compositionSucceeded = !composeAnnotations(
+                    *staged.value, annotations.plan, 96U, 96U,
+                    0, 0, &pin.pixels, annotations.eraserMasks).has_value();
+                if (compositionSucceeded) {
+                    pin.pixels = std::move(*staged.value);
+                }
+            }
+            if (compositionSucceeded) {
+                if (action == OverlayInputAction::copy) copy(pin);
+                else if (action == OverlayInputAction::save) save(pin);
+            }
+        }
+        pin.editor.reset();
+        pin.editorDesktop.reset();
+        pin.editorBudget.reset();
+        ShowWindow(pin.window, SW_SHOWNORMAL);
+        SetForegroundWindow(pin.window);
+        InvalidateRect(pin.window, nullptr, FALSE);
+        if (!compositionSucceeded) {
+            MessageBoxW(pin.window, editCompositionFailureText, L"XxSnap",
+                MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
+        }
+    }
+
+    void showEditor(Pin& pin) noexcept
+    {
+        if (pin.editor != nullptr) {
+            pin.editor->show();
+            return;
+        }
+        try {
+            const auto bytes = static_cast<std::uint64_t>(pin.pixels.byteCount());
+            pin.editorBudget = std::make_unique<MemoryBudget>((std::max)(
+                bytes * 2U, 64ULL * 1024ULL * 1024ULL));
+            const DisplayDescriptor descriptor{
+                L"XXSNAP_PINNED_IMAGE_EDITOR",
+                {pin.imageRect.x, pin.imageRect.y,
+                    pin.imageRect.width, pin.imageRect.height},
+                96U, 96U, DISPLAYCONFIG_ROTATION_IDENTITY,
+            };
+            const auto topology = buildDisplayTopologySnapshot({descriptor});
+            if (!topology.hasValue()) {
+                pin.editorBudget.reset();
+                return;
+            }
+            std::vector<FrozenDisplay> displays;
+            auto displayPixels = PixelBuffer::allocate(
+                pin.imageRect.width, pin.imageRect.height, *pin.editorBudget);
+            if (!displayPixels.value) {
+                pin.editorBudget.reset();
+                return;
+            }
+            if (pin.imageRect.width == pin.pixels.width()
+                && pin.imageRect.height == pin.pixels.height()) {
+                std::memcpy(displayPixels.value->data(), pin.pixels.data(),
+                    pin.pixels.byteCount());
+            } else {
+                std::vector<std::uint64_t> sourceOffsets(
+                    static_cast<std::size_t>(pin.imageRect.width));
+                for (std::int64_t column = 0;
+                     column < pin.imageRect.width; ++column) {
+                    const auto sourceX = (std::min)(pin.pixels.width() - 1,
+                        column * pin.pixels.width() / pin.imageRect.width);
+                    sourceOffsets[static_cast<std::size_t>(column)]
+                        = static_cast<std::uint64_t>(sourceX) * 4U;
+                }
+                for (std::int64_t row = 0; row < pin.imageRect.height; ++row) {
+                    auto* destination = displayPixels.value->data()
+                        + static_cast<std::uint64_t>(row)
+                            * displayPixels.value->stride();
+                    const auto sourceY = (std::min)(pin.pixels.height() - 1,
+                        row * pin.pixels.height() / pin.imageRect.height);
+                    const auto* source = pin.pixels.data()
+                        + static_cast<std::uint64_t>(sourceY)
+                            * pin.pixels.stride();
+                    for (std::int64_t column = 0;
+                         column < pin.imageRect.width; ++column) {
+                        std::memcpy(destination + column * 4,
+                            source + sourceOffsets[
+                                static_cast<std::size_t>(column)],
+                            4U);
+                    }
+                }
+            }
+            displays.emplace_back(descriptor, std::move(*displayPixels.value));
+            pin.editorDesktop = std::make_unique<FrozenDesktop>(
+                *topology.value(), std::move(displays),
+                std::chrono::steady_clock::now());
+            auto created = OverlayHost::createPinnedImageEditor(
+                instance, *pin.editorDesktop,
+                [this, &pin](OverlayInputAction action) {
+                    finishEditing(pin, action);
+                });
+            pin.editor = std::move(created.value);
+            if (pin.editor == nullptr) {
+                pin.editorDesktop.reset();
+                pin.editorBudget.reset();
+                return;
+            }
+            ShowWindow(pin.window, SW_HIDE);
+            pin.editor->show();
+        } catch (...) {
+            pin.editor.reset();
+            pin.editorDesktop.reset();
+            pin.editorBudget.reset();
+        }
+    }
+
     void save(Pin& pin) noexcept
     {
         wchar_t path[MAX_PATH] = L"XxSnap.png";
@@ -318,6 +461,28 @@ struct PinnedImageHost::Impl final {
         for (const auto window : windows) DestroyWindow(window);
     }
 
+    bool restoreMostRecentlyHidden() noexcept
+    {
+        Pin* found = nullptr;
+        for (const auto& pin : pins) {
+            if (pin->window != nullptr && pin->editor == nullptr
+                && pin->hiddenOrder.has_value()
+                && (found == nullptr
+                    || *pin->hiddenOrder > *found->hiddenOrder)) {
+                found = pin.get();
+            }
+        }
+        if (found == nullptr) return false;
+        found->hiddenOrder.reset();
+        ShowWindow(found->window, SW_SHOWNORMAL);
+        SetWindowPos(found->window,
+            found->alwaysOnTop ? HWND_TOPMOST : HWND_NOTOPMOST,
+            0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+        SetForegroundWindow(found->window);
+        return true;
+    }
+
     void showContextMenu(Pin& pin) noexcept
     {
         const auto menu = CreatePopupMenu();
@@ -327,7 +492,7 @@ struct PinnedImageHost::Impl final {
             if (menu != nullptr) DestroyMenu(menu);
             return;
         }
-        AppendMenuW(menu, MF_STRING | MF_GRAYED, commandToolbar,
+        AppendMenuW(menu, MF_STRING, commandToolbar,
             L"显示工具条 (Shift)");
         AppendMenuW(menu, MF_STRING, commandCopy, L"复制图片\tCtrl+C");
         AppendMenuW(menu, MF_STRING, commandSave, L"保存图片\tCtrl+S");
@@ -366,6 +531,7 @@ struct PinnedImageHost::Impl final {
     void perform(Pin& pin, UINT command) noexcept
     {
         switch (command) {
+        case commandToolbar: showEditor(pin); break;
         case commandCopy: copy(pin); break;
         case commandSave: save(pin); break;
         case commandReset: applyImageRect(pin, pin.initialImageRect); break;
@@ -445,7 +611,11 @@ struct PinnedImageHost::Impl final {
             else if (control && !shift && wParam == 'T') perform(pin, commandAlwaysOnTop);
             else if (control && !shift && wParam == 'W') perform(pin, commandClose);
             else if (control && shift && wParam == 'W') perform(pin, commandCloseAll);
-            else if (!control && !shift && wParam == VK_ESCAPE) ShowWindow(pin.window, SW_HIDE);
+            else if (!control && !shift && wParam == VK_ESCAPE) {
+                pin.hiddenOrder = nextHiddenOrder++;
+                ShowWindow(pin.window, SW_HIDE);
+            }
+            else if (!control && !shift && wParam == VK_SHIFT) showEditor(pin);
             else if (!control && !shift
                 && (wParam == VK_DELETE || wParam == VK_BACK)) {
                 perform(pin, commandClose);
@@ -486,6 +656,11 @@ std::size_t PinnedImageHost::count() const noexcept
     return static_cast<std::size_t>(std::count_if(
         impl_->pins.begin(), impl_->pins.end(),
         [](const auto& pin) { return pin->window != nullptr; }));
+}
+
+bool PinnedImageHost::restoreMostRecentlyHidden() noexcept
+{
+    return impl_ != nullptr && impl_->restoreMostRecentlyHidden();
 }
 
 } // namespace xxsnap::win

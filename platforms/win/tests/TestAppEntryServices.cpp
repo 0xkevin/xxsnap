@@ -342,7 +342,7 @@ public:
 void testAllDefaultMappingsAndMvpRegistration()
 {
     constexpr auto bindings = xxsnap::win::defaultAppHotKeys();
-    static_assert(bindings.size() == 4U);
+    static_assert(bindings.size() == 5U);
     CHECK((bindings[0] == HotKeyBinding{
         HotKeyCommand::regionCapture, MOD_CONTROL, VK_OEM_3}));
     CHECK((bindings[1] == HotKeyBinding{
@@ -351,6 +351,9 @@ void testAllDefaultMappingsAndMvpRegistration()
         HotKeyCommand::ocr, MOD_CONTROL, '3'}));
     CHECK((bindings[3] == HotKeyBinding{
         HotKeyCommand::teachingPen, MOD_CONTROL, '2'}));
+    CHECK((bindings[4] == HotKeyBinding{
+        HotKeyCommand::restoreMostRecentlyHiddenPinnedImage,
+        MOD_CONTROL, '1'}));
 
     FakeHotKeyApi api;
     int callbackCalls = 0;
@@ -364,13 +367,26 @@ void testAllDefaultMappingsAndMvpRegistration()
     CHECK(api.registrations.size() == 1U);
     CHECK(api.registrations[0].modifiers == MOD_CONTROL);
     CHECK(api.registrations[0].virtualKey == VK_OEM_3);
+    int restoreCalls = 0;
+    CHECK(registrar->registerRestorePinnedImage(
+        window, [&] { ++restoreCalls; }));
+    CHECK(api.registrations.size() == 2U);
+    CHECK(api.registrations[1].identifier
+        == xxsnap::win::restorePinnedImageHotKeyIdentifier);
+    CHECK(api.registrations[1].modifiers == MOD_CONTROL);
+    CHECK(api.registrations[1].virtualKey == '1');
+    CHECK(registrar->handleMessage(
+        WM_HOTKEY,
+        static_cast<WPARAM>(
+            xxsnap::win::restorePinnedImageHotKeyIdentifier)));
+    CHECK(restoreCalls == 1);
     auto* registrarDuringCallback = registrar.get();
     CHECK(registrarDuringCallback->handleMessage(
         WM_HOTKEY,
         static_cast<WPARAM>(xxsnap::win::regionCaptureHotKeyIdentifier)));
     CHECK(callbackCalls == 1);
     CHECK(registrar == nullptr);
-    CHECK(api.unregisterCalls == 1);
+    CHECK(api.unregisterCalls == 2);
 }
 
 void testHotKeyConflictAndCleanupAreExplicit()
@@ -384,6 +400,18 @@ void testHotKeyConflictAndCleanupAreExplicit()
     CHECK(failed.lastError()->nativeCode == ERROR_HOTKEY_ALREADY_REGISTERED);
     CHECK(conflict.registrations.size() == 1U);
     CHECK(conflict.unregisterCalls == 0);
+
+    FakeHotKeyApi restoreConflict;
+    HotKeyRegistrar restoreFailed(restoreConflict, [] {});
+    const auto restoreWindow = reinterpret_cast<HWND>(0x312);
+    CHECK(restoreFailed.registerMvpRegionCapture(restoreWindow));
+    restoreConflict.registerSucceeds = false;
+    restoreConflict.registerError = ERROR_HOTKEY_ALREADY_REGISTERED;
+    CHECK(!restoreFailed.registerRestorePinnedImage(
+        restoreWindow, [] {}));
+    CHECK(restoreFailed.lastError().has_value());
+    CHECK(restoreFailed.lastError()->nativeCode
+        == ERROR_HOTKEY_ALREADY_REGISTERED);
 
     FakeHotKeyApi api;
     {

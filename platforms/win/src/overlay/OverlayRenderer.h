@@ -131,6 +131,7 @@ struct OverlayEyedropperRenderState {
 struct OverlayRenderState {
     std::optional<PixelRect> selection;
     bool showActions = true;
+    bool pinnedImageEditor = false;
     std::vector<ToolbarAction> toolbarActions{
         terminalToolbarActions().begin(),
         terminalToolbarActions().end(),

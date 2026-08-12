@@ -17,6 +17,7 @@ using snipory::core::portable::PixelRect;
 using xxsnap::win::OverlayInputAction;
 using xxsnap::win::OverlayInputPlatform;
 using xxsnap::win::OverlayInputRouter;
+using xxsnap::win::OverlayMode;
 using xxsnap::win::OverlayInputStatus;
 using xxsnap::win::OverlayCursorStyle;
 using xxsnap::win::OverlaySurface;
@@ -211,6 +212,61 @@ void testCtrlOnePinsTheReadySelection()
     CHECK(router.keyPressed(ShapeEditorKey::pin, true, false));
     CHECK(actions.size() == 1U);
     CHECK(actions.front() == OverlayInputAction::pin);
+}
+
+void testPinnedImageEditorLocksSelectionAndFinishesWithoutCaptureActions()
+{
+    FakePlatform platform;
+    std::vector<OverlayInputAction> actions;
+    const auto window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(3));
+    OverlayInputRouter router(
+        PixelRect{40, 60, 500, 300},
+        {{window, PixelRect{40, 60, 500, 300}, 96, 96}},
+        platform,
+        [&actions](OverlayInputAction action) { actions.push_back(action); },
+        true, nullptr, OverlayMode::pinnedImageEditor);
+    router.lockSelection({40, 60, 500, 300});
+    CHECK(router.phase() == SelectionPhase::ready);
+    const auto presentation = router.presentations().front();
+    CHECK(presentation.pinnedImageEditor);
+    CHECK(presentation.toolbarItems.size()
+        == xxsnap::win::pinnedEditorToolbarActions().size());
+    CHECK(std::none_of(presentation.toolbarItems.begin(),
+        presentation.toolbarItems.end(), [](const auto& item) {
+            return item.action == xxsnap::win::ToolbarAction::scroll
+                || item.action == xxsnap::win::ToolbarAction::cancel
+                || item.action == xxsnap::win::ToolbarAction::pin;
+        }));
+    const auto finish = std::find_if(presentation.toolbarItems.begin(),
+        presentation.toolbarItems.end(), [](const auto& item) {
+            return item.action == xxsnap::win::ToolbarAction::finishEditing;
+        });
+    CHECK(finish != presentation.toolbarItems.end());
+    if (finish != presentation.toolbarItems.end()) {
+        CHECK(router.pointerDown(window, finish->centerPhysical));
+    }
+    CHECK(actions.size() == 1U);
+    CHECK(actions.front() == OverlayInputAction::finishEditing);
+}
+
+void testPinnedImageEditorEscapeFinishesInsteadOfCancelling()
+{
+    FakePlatform platform;
+    std::vector<OverlayInputAction> actions;
+    const auto window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(3));
+    OverlayInputRouter router(
+        PixelRect{40, 60, 500, 300},
+        {{window, PixelRect{40, 60, 500, 300}, 96, 96}},
+        platform,
+        [&actions](OverlayInputAction action) { actions.push_back(action); },
+        true, nullptr, OverlayMode::pinnedImageEditor);
+    router.lockSelection({40, 60, 500, 300});
+
+    router.escapePressed();
+
+    CHECK(actions.size() == 1U);
+    CHECK(actions.front() == OverlayInputAction::finishEditing);
+    CHECK(router.status() == OverlayInputStatus::completed);
 }
 
 PixelPoint dipCenterAt144Dpi(AnnotationRect rect)
@@ -1172,6 +1228,8 @@ int main()
     testAllToolbarActionsFireExactlyOnceWithoutStartingCapture();
     testPinToolbarTransfersTheReadySelection();
     testCtrlOnePinsTheReadySelection();
+    testPinnedImageEditorLocksSelectionAndFinishesWithoutCaptureActions();
+    testPinnedImageEditorEscapeFinishesInsteadOfCancelling();
     testToolbarPresentationUsesSharedPhysicalRects();
     testOnePixelOutsideToolbarItemsDoesNotFireAction();
     testCancelSourcesAreIdempotentAndCaptureFailureFailsClosed();
