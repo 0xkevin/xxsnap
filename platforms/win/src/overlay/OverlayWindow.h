@@ -77,6 +77,7 @@ enum class OverlayCursorStyle : std::uint8_t {
     rotation,
     brush,
     marker,
+    mosaic,
     eyedropper,
     eyedropperLight,
 };
@@ -142,6 +143,7 @@ public:
     void setRenderState(OverlayRenderState state) noexcept;
     void setCursorStyle(OverlayCursorStyle style) noexcept;
     void setMarkerCursor(AnnotationColor color, float strokeWidthDip) noexcept;
+    void setMosaicCursor(float strokeWidthDip) noexcept;
     DpiRestartState dpiRestartState() const noexcept;
     const std::optional<OverlayWindowError>& lastWindowError() const noexcept;
     const std::optional<OverlayRendererError>& lastRendererError() const noexcept;
@@ -162,6 +164,11 @@ private:
     void paint() noexcept;
     HCURSOR cursor() const noexcept;
     void discardMarkerCursor() noexcept;
+    void setDotCursor(
+        AnnotationColor color,
+        float strokeWidthDip,
+        int diameter,
+        bool mosaic) noexcept;
 
     HINSTANCE instance_ = nullptr;
     HWND window_ = nullptr;
@@ -175,6 +182,7 @@ private:
     HCURSOR markerCursor_ = nullptr;
     AnnotationColor markerCursorColor_{};
     float markerCursorStrokeWidthDip_ = 0.0F;
+    bool markerCursorIsMosaic_ = false;
     std::optional<OverlayRendererError> lastRendererError_;
 };
 

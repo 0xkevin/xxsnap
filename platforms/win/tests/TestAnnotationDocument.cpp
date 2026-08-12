@@ -193,6 +193,27 @@ void testMarkerLineHistoryAndZeroLengthDot()
         == MarkerLine{{35, 37}, {35, 37}}));
 }
 
+void testMosaicSliderDragCreatesOneUndoEntry()
+{
+    AnnotationDocument document;
+    const auto id = document.addMosaicRectangle(
+        {10, 20, 80, 40}, {MosaicRedactionType::pixelMosaic, 8});
+    CHECK(id != invalidAnnotationId);
+    document.beginMosaicRedactionEdit();
+    CHECK(document.updateMosaicRedaction(
+        id, {MosaicRedactionType::pixelMosaic, 10}));
+    CHECK(document.updateMosaicRedaction(
+        id, {MosaicRedactionType::pixelMosaic, 15}));
+    CHECK(document.updateMosaicRedaction(
+        id, {MosaicRedactionType::pixelMosaic, 20}));
+    document.endMosaicRedactionEdit();
+    CHECK(document.find(id)->mosaicRedaction->value == 20);
+    CHECK(document.undo());
+    CHECK(document.find(id)->mosaicRedaction->value == 8);
+    CHECK(document.undo());
+    CHECK(document.find(id) == nullptr);
+}
+
 } // namespace
 
 int main()
@@ -204,5 +225,6 @@ int main()
     testArrowLineCommandsPreserveCurveGeometryAndHistory();
     testBrushPathHistoryAndBounds();
     testMarkerLineHistoryAndZeroLengthDot();
+    testMosaicSliderDragCreatesOneUndoEntry();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

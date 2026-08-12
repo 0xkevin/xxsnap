@@ -381,6 +381,10 @@ AnnotationRenderPlan buildAnnotationRenderPlan(
             annotation.markerLine = translated(
                 *annotation.markerLine, selectionOriginDip);
         }
+        if (annotation.mosaicStroke.has_value()) {
+            annotation.mosaicStroke = translated(
+                *annotation.mosaicStroke, selectionOriginDip);
+        }
         plan.items.push_back({annotation, false});
     }
     if (preview.has_value()) {
@@ -398,6 +402,10 @@ AnnotationRenderPlan buildAnnotationRenderPlan(
         if (annotation.markerLine.has_value()) {
             annotation.markerLine = translated(
                 *annotation.markerLine, selectionOriginDip);
+        }
+        if (annotation.mosaicStroke.has_value()) {
+            annotation.mosaicStroke = translated(
+                *annotation.mosaicStroke, selectionOriginDip);
         }
         plan.items.push_back({annotation, true});
     }
@@ -479,6 +487,9 @@ AnnotationRenderPlan buildAnnotationRenderPlan(
                     line.end, line.start, markerMetrics::endpointInsetDip),
             };
         }
+        return plan;
+    }
+    if (editing->mosaicStroke.has_value()) {
         return plan;
     }
 

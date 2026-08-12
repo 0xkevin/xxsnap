@@ -17,6 +17,7 @@ const std::array<float, 3>& macArrowStrokeWidths() noexcept;
 const std::array<float, 3>& macBrushStrokeWidths() noexcept;
 const std::array<AnnotationStrokePattern, 4>& macBrushStrokePatterns() noexcept;
 const std::array<float, 3>& macMarkerStrokeWidths() noexcept;
+const std::array<float, 3>& macMosaicStrokeWidths() noexcept;
 
 class ShapeOptionsState {
 public:
@@ -176,6 +177,63 @@ MarkerOptionsLayout markerOptionsLayout(
 
 std::optional<MarkerOptionHit> markerOptionHitTest(
     const MarkerOptionsLayout& layout,
+    AnnotationPoint point) noexcept;
+
+class MosaicOptionsState {
+public:
+    MosaicOptionsState() noexcept;
+    const AnnotationStyle& style() const noexcept;
+    AnnotationKind kind() const noexcept;
+    MosaicRedaction redaction() const noexcept;
+    bool load(const ShapeAnnotation& annotation) noexcept;
+    bool setStrokeWidth(float strokeWidthDip) noexcept;
+    bool setKind(AnnotationKind kind) noexcept;
+    bool toggleRedactionType() noexcept;
+    bool setRedactionValue(int value) noexcept;
+
+private:
+    AnnotationStyle style_{};
+    AnnotationKind kind_ = AnnotationKind::mosaicStroke;
+    MosaicRedactionType redactionType_ = MosaicRedactionType::pixelMosaic;
+    std::array<int, 2> redactionValues_{8, 8};
+};
+
+enum class MosaicOptionControl : std::uint8_t {
+    strokeWidth,
+    rectangleMode,
+    redactionType,
+    redactionValue,
+};
+
+struct MosaicOptionHit {
+    MosaicOptionControl control = MosaicOptionControl::strokeWidth;
+    std::size_t index = 0;
+};
+
+constexpr bool operator==(
+    MosaicOptionHit left,
+    MosaicOptionHit right) noexcept
+{
+    return left.control == right.control && left.index == right.index;
+}
+
+struct MosaicOptionsLayout {
+    AnnotationRect toolbar{};
+    std::vector<AnnotationRect> strokeWidths;
+    std::vector<AnnotationRect> strokeWidthHits;
+    AnnotationRect rectangleMode{};
+    AnnotationRect redactionType{};
+    AnnotationRect redactionValue{};
+    AnnotationRect valueTrack{};
+    AnnotationRect valueLabel{};
+};
+
+MosaicOptionsLayout mosaicOptionsLayout(AnnotationPoint origin);
+std::optional<MosaicOptionHit> mosaicOptionHitTest(
+    const MosaicOptionsLayout& layout,
+    AnnotationPoint point) noexcept;
+int mosaicValueForPoint(
+    const MosaicOptionsLayout& layout,
     AnnotationPoint point) noexcept;
 
 enum class ShapeOptionControl : std::uint8_t {

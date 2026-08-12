@@ -29,6 +29,7 @@ void testToolbarCapabilityAndPrimaryToolToggle()
         ToolbarAction::pen,
         ToolbarAction::marker,
         ToolbarAction::eyedropper,
+        ToolbarAction::mosaic,
         ToolbarAction::undo,
         ToolbarAction::redo,
         ToolbarAction::cancel,
@@ -424,6 +425,48 @@ void testEyedropperMatchesMacToolSelectionAndEscape()
     CHECK(editor.isMarkerToolActive());
 }
 
+void testMosaicCreatesStrokeAndRotatableRectangle()
+{
+    ShapeEditorController editor({0, 0, 300, 200});
+    CHECK(editor.handleKey(ShapeEditorKey::mosaic, false, false)
+        == ShapeEditorKeyResult::consumed);
+    CHECK(editor.isMosaicToolActive());
+    CHECK(editor.mosaicOptions().style().strokeWidthDip == 15.0F);
+    CHECK(editor.cursorStyleAt({30, 30}) == ShapeCursorStyle::mosaic);
+    CHECK(editor.pointerDown({20, 20}));
+    editor.pointerMove({45, 27}, true);
+    CHECK(editor.pointerUp({70, 30}, true));
+    CHECK(editor.document().annotations().size() == 1U);
+    const auto& stroke = editor.document().annotations()[0];
+    CHECK(isMosaicStrokeAnnotation(stroke));
+    CHECK(stroke.mosaicStroke->points.front().y
+        == stroke.mosaicStroke->points.back().y);
+    CHECK(stroke.mosaicRedaction->value == 8);
+
+    CHECK(editor.applyMosaicOptionHit({
+        MosaicOptionControl::rectangleMode, 0}));
+    CHECK(editor.applyMosaicOptionHit({
+        MosaicOptionControl::redactionType, 0}));
+    CHECK(editor.setMosaicRedactionValue(16));
+    CHECK(editor.pointerDown({120, 60}));
+    editor.pointerMove({220, 140});
+    CHECK(editor.pointerUp({220, 140}));
+    CHECK(editor.document().annotations().size() == 2U);
+    const auto rectangleId = editor.document().annotations()[1].id;
+    const auto* rectangle = editor.document().find(rectangleId);
+    CHECK(rectangle != nullptr && isMosaicRectangleAnnotation(*rectangle));
+    CHECK(rectangle->mosaicRedaction->type
+        == MosaicRedactionType::gaussianBlur);
+    CHECK(rectangle->mosaicRedaction->value == 16);
+    const auto rotation = editor.rotationHandlePoint(rectangleId);
+    CHECK(rotation.has_value());
+    CHECK(editor.pointerDown(*rotation));
+    editor.pointerMove({230, 100});
+    CHECK(editor.pointerUp({230, 100}));
+    CHECK(editor.document().find(rectangleId)->rotationDegrees != 0.0F);
+    CHECK(!editor.pointerDown({-20, -20}));
+}
+
 } // namespace
 
 int main()
@@ -438,5 +481,6 @@ int main()
     testBrushDrawsFreehandPath();
     testMarkerDrawsSnappedLineDotAndEditsEndpoints();
     testEyedropperMatchesMacToolSelectionAndEscape();
+    testMosaicCreatesStrokeAndRotatableRectangle();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

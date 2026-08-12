@@ -43,6 +43,11 @@ public:
         AnnotationPoint point,
         AnnotationStyle style = {},
         float rotationDegrees = 0.0F) noexcept;
+    bool beginMosaicRectangleDrawing(
+        AnnotationPoint point,
+        AnnotationStyle style,
+        MosaicRedaction redaction,
+        float rotationDegrees = 0.0F) noexcept;
     bool beginMove(AnnotationId id, AnnotationPoint point) noexcept;
     bool beginResize(AnnotationId id, ShapeResizeHandle handle) noexcept;
     bool beginRotation(AnnotationId id, AnnotationPoint point) noexcept;
@@ -68,6 +73,12 @@ public:
         AnnotationPoint point) const noexcept;
 
 private:
+    bool beginDrawingInternal(
+        AnnotationKind kind,
+        AnnotationPoint point,
+        AnnotationStyle style,
+        float rotationDegrees,
+        std::optional<MosaicRedaction> mosaicRedaction) noexcept;
     static AnnotationPoint handlePoint(
         AnnotationRect rect,
         ShapeResizeHandle handle) noexcept;

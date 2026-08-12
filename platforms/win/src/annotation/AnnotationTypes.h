@@ -177,6 +177,44 @@ struct BrushPath {
     std::vector<AnnotationPoint> points;
 };
 
+enum class MosaicRedactionType : std::uint8_t {
+    gaussianBlur,
+    pixelMosaic,
+};
+
+inline constexpr int mosaicMinimumRedactionValue = 5;
+inline constexpr int mosaicMaximumRedactionValue = 20;
+
+constexpr int clampedMosaicRedactionValue(int value) noexcept
+{
+    return value < mosaicMinimumRedactionValue
+        ? mosaicMinimumRedactionValue
+        : value > mosaicMaximumRedactionValue
+            ? mosaicMaximumRedactionValue : value;
+}
+
+constexpr float mosaicRedactionProgress(int value) noexcept
+{
+    return static_cast<float>(
+        clampedMosaicRedactionValue(value) - mosaicMinimumRedactionValue)
+        / static_cast<float>(
+            mosaicMaximumRedactionValue - mosaicMinimumRedactionValue);
+}
+
+struct MosaicRedaction {
+    MosaicRedactionType type = MosaicRedactionType::pixelMosaic;
+    int value = 8;
+};
+
+constexpr bool operator==(
+    MosaicRedaction left,
+    MosaicRedaction right) noexcept
+{
+    return left.type == right.type && left.value == right.value;
+}
+
+using MosaicStroke = BrushPath;
+
 struct MarkerLine {
     AnnotationPoint start{};
     AnnotationPoint end{};
@@ -295,6 +333,8 @@ struct ShapeAnnotation {
     std::optional<ArrowLine> arrowLine;
     std::optional<BrushPath> brushPath;
     std::optional<MarkerLine> markerLine;
+    std::optional<MosaicStroke> mosaicStroke;
+    std::optional<MosaicRedaction> mosaicRedaction;
 };
 
 constexpr bool isArrowLineAnnotation(
@@ -318,6 +358,28 @@ constexpr bool isMarkerAnnotation(
         && annotation.markerLine.has_value();
 }
 
+constexpr bool isMosaicStrokeAnnotation(
+    const ShapeAnnotation& annotation) noexcept
+{
+    return annotation.kind == AnnotationKind::mosaicStroke
+        && annotation.mosaicStroke.has_value()
+        && annotation.mosaicRedaction.has_value();
+}
+
+constexpr bool isMosaicRectangleAnnotation(
+    const ShapeAnnotation& annotation) noexcept
+{
+    return annotation.kind == AnnotationKind::mosaicRectangle
+        && annotation.mosaicRedaction.has_value();
+}
+
+constexpr bool isMosaicAnnotation(
+    const ShapeAnnotation& annotation) noexcept
+{
+    return isMosaicStrokeAnnotation(annotation)
+        || isMosaicRectangleAnnotation(annotation);
+}
+
 inline bool operator==(
     const ShapeAnnotation& left,
     const ShapeAnnotation& right) noexcept
@@ -329,7 +391,9 @@ inline bool operator==(
         && left.rotationDegrees == right.rotationDegrees
         && left.arrowLine == right.arrowLine
         && left.brushPath == right.brushPath
-        && left.markerLine == right.markerLine;
+        && left.markerLine == right.markerLine
+        && left.mosaicStroke == right.mosaicStroke
+        && left.mosaicRedaction == right.mosaicRedaction;
 }
 
 } // namespace xxsnap::win

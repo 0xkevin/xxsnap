@@ -475,7 +475,7 @@ void testShapeToolIsNonTerminalAndEditsThroughSharedPresentation()
     createReadySelection(router);
 
     auto owner = router.presentations()[1];
-    CHECK(owner.toolbarItems.size() == 10U);
+    CHECK(owner.toolbarItems.size() == 11U);
     const auto rectangle = owner.toolbarItems[0];
     CHECK(rectangle.action == xxsnap::win::ToolbarAction::rectangle);
     const auto capturesBeforeTool = platform.captureCalls;
@@ -528,9 +528,9 @@ void testShapeToolIsNonTerminalAndEditsThroughSharedPresentation()
 
     owner = router.presentations()[1];
     CHECK(owner.annotationPlan.items.size() == 1U);
-    CHECK(owner.toolbarItems[5].action == xxsnap::win::ToolbarAction::undo);
-    CHECK(owner.toolbarItems[5].enabled);
-    CHECK(router.pointerDown(rightWindow, owner.toolbarItems[5].centerPhysical));
+    CHECK(owner.toolbarItems[6].action == xxsnap::win::ToolbarAction::undo);
+    CHECK(owner.toolbarItems[6].enabled);
+    CHECK(router.pointerDown(rightWindow, owner.toolbarItems[6].centerPhysical));
     CHECK(router.annotationDocument().annotations().empty());
     CHECK(actions.empty());
 
@@ -549,7 +549,7 @@ void testArrowToolUsesMacOptionsMenuAndCreatesEditableCurve()
     createReadySelection(router);
 
     auto owner = router.presentations()[1];
-    CHECK(owner.toolbarItems.size() == 10U);
+    CHECK(owner.toolbarItems.size() == 11U);
     CHECK(owner.toolbarItems[1].action == xxsnap::win::ToolbarAction::polyline);
     CHECK(router.pointerDown(
         rightWindow, owner.toolbarItems[1].centerPhysical));
@@ -796,7 +796,7 @@ void testEyedropperSamplesCopiesAndMeasuresLikeMac()
     CHECK(!router.presentations()[1].eyedropper.has_value());
 }
 
-void testShapeCanBeCreatedOutsideLockedSelectionOnOverlay()
+void testShapeCannotBeCreatedOutsideLockedSelectionOnOverlay()
 {
     FakePlatform platform;
     OverlayInputRouter router(
@@ -806,29 +806,70 @@ void testShapeCanBeCreatedOutsideLockedSelectionOnOverlay()
     auto owner = router.presentations()[1];
     CHECK(router.pointerDown(
         rightWindow, owner.toolbarItems[0].centerPhysical));
-    CHECK(router.cursorStyle(rightWindow, PixelPoint{200, 20})
-        == OverlayCursorStyle::crosshair);
-
     CHECK(router.pointerDown(rightWindow, PixelPoint{200, 20}));
-    CHECK(router.cursorStyle(rightWindow, PixelPoint{320, 60})
-        == OverlayCursorStyle::crosshair);
-    router.platformPointerMove(PixelPoint{320, 60});
-    router.platformPointerUp(PixelPoint{320, 60});
+    CHECK(router.annotationDocument().annotations().empty());
+}
 
-    CHECK(router.annotationDocument().annotations().size() == 1U);
-    if (!router.annotationDocument().annotations().empty()) {
-        const auto rect = router.annotationDocument().annotations()[0].rect;
-        CHECK(rect.y < 0.0F);
-        CHECK(rect.width > 70.0F);
-        CHECK(rect.height > 20.0F);
+void testMosaicToolbarOptionsAndLiveComposite()
+{
+    FakePlatform platform;
+    auto desktop = solidDesktop({40, 90, 140, 255});
+    CHECK(desktop != nullptr);
+    if (!desktop) {
+        return;
     }
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform, {}, true,
+        desktop.get());
+    createReadySelection(router);
 
-    CHECK(router.cursorStyle(rightWindow, PixelPoint{235, 20})
-        == OverlayCursorStyle::move);
-    CHECK(router.pointerDown(rightWindow, PixelPoint{235, 20}));
-    CHECK(router.cursorStyle(rightWindow, PixelPoint{400, 100})
-        == OverlayCursorStyle::move);
-    router.platformPointerUp(PixelPoint{235, 20});
+    auto owner = router.presentations()[1];
+    CHECK(owner.toolbarItems[5].action
+        == xxsnap::win::ToolbarAction::mosaic);
+    CHECK(router.pointerDown(
+        rightWindow, owner.toolbarItems[5].centerPhysical));
+    owner = router.presentations()[1];
+    CHECK(owner.mosaicOptions.has_value());
+    CHECK(owner.mosaicOptions->layout.toolbar.width == 252.0F);
+    CHECK(owner.mosaicOptions->state.redaction().type
+        == xxsnap::win::MosaicRedactionType::pixelMosaic);
+
+    CHECK(router.pointerDown(rightWindow, PixelPoint{20, 100}));
+    platform.cursor = PixelPoint{90, 150};
+    router.pointerMove(rightWindow, PixelPoint{90, 150});
+    router.pointerUp(rightWindow, PixelPoint{90, 150});
+    CHECK(router.annotationDocument().annotations().size() == 1U);
+    owner = router.presentations()[1];
+    CHECK(owner.annotationComposite != nullptr);
+    CHECK(owner.annotationPlan.items.empty());
+
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.mosaicOptions->layout.redactionType)));
+    owner = router.presentations()[1];
+    CHECK(owner.mosaicOptions->state.redaction().type
+        == xxsnap::win::MosaicRedactionType::gaussianBlur);
+    const auto valueLayout = owner.mosaicOptions->layout;
+    const PixelPoint valueStart{
+        static_cast<std::int64_t>(
+            valueLayout.valueTrack.x * 1.5F + 0.5F),
+        static_cast<std::int64_t>(
+            (valueLayout.valueTrack.y + 2.0F) * 1.5F + 0.5F),
+    };
+    CHECK(router.pointerDown(rightWindow, valueStart));
+    platform.cursor = PixelPoint{
+        static_cast<std::int64_t>((valueLayout.valueTrack.x
+            + valueLayout.valueTrack.width) * 1.5F + 0.5F),
+        valueStart.y,
+    };
+    router.pointerMove(rightWindow, platform.cursor.value());
+    router.pointerUp(rightWindow, platform.cursor.value());
+    owner = router.presentations()[1];
+    CHECK(owner.mosaicOptions->state.redaction().value == 20);
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.mosaicOptions->layout.rectangleMode)));
+    owner = router.presentations()[1];
+    CHECK(owner.mosaicOptions->state.kind()
+        == xxsnap::win::AnnotationKind::mosaicRectangle);
 }
 
 } // namespace
@@ -850,6 +891,7 @@ int main()
     testBrushToolUsesMacOptionsAndShiftStraightLine();
     testMarkerToolUsesMacOptionsAndShiftSnapping();
     testEyedropperSamplesCopiesAndMeasuresLikeMac();
-    testShapeCanBeCreatedOutsideLockedSelectionOnOverlay();
+    testShapeCannotBeCreatedOutsideLockedSelectionOnOverlay();
+    testMosaicToolbarOptionsAndLiveComposite();
     return failureCount == 0 ? 0 : 1;
 }

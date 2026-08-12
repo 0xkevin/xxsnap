@@ -326,6 +326,7 @@ add_library(
     src/annotation/ArrowLineInteraction.cpp
     src/annotation/BrushInteraction.cpp
     src/annotation/MarkerInteraction.cpp
+    src/annotation/MosaicInteraction.cpp
     src/annotation/ShapeEditorController.cpp
 )
 target_compile_features(xxsnap_shape_editor_controller PUBLIC cxx_std_17)

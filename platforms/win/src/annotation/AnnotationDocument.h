@@ -24,6 +24,15 @@ public:
     AnnotationId addMarkerLine(
         MarkerLine line,
         AnnotationStyle style = {});
+    AnnotationId addMosaicStroke(
+        MosaicStroke stroke,
+        MosaicRedaction redaction,
+        AnnotationStyle style = {});
+    AnnotationId addMosaicRectangle(
+        AnnotationRect rect,
+        MosaicRedaction redaction,
+        AnnotationStyle style = {},
+        float rotationDegrees = 0.0F);
 
     bool remove(AnnotationId id);
     bool updateRect(AnnotationId id, AnnotationRect rect);
@@ -34,6 +43,10 @@ public:
     bool updateArrowLine(AnnotationId id, ArrowLine line);
     bool updateBrushPath(AnnotationId id, BrushPath path);
     bool updateMarkerLine(AnnotationId id, MarkerLine line);
+    bool updateMosaicStroke(AnnotationId id, MosaicStroke stroke);
+    bool updateMosaicRedaction(AnnotationId id, MosaicRedaction redaction);
+    void beginMosaicRedactionEdit();
+    void endMosaicRedactionEdit();
 
     bool select(AnnotationId id) noexcept;
     void clearSelection() noexcept;
@@ -69,6 +82,8 @@ private:
     std::optional<AnnotationId> selectedId_;
     std::vector<HistoryEntry> undoHistory_;
     std::vector<HistoryEntry> redoHistory_;
+    std::optional<Snapshot> mosaicRedactionEditBefore_;
+    bool mosaicRedactionEditChanged_ = false;
     AnnotationId nextId_ = 1;
     std::uint64_t revision_ = 0;
 };

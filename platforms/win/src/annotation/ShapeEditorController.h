@@ -4,6 +4,7 @@
 #include "annotation/ArrowLineInteraction.h"
 #include "annotation/BrushInteraction.h"
 #include "annotation/MarkerInteraction.h"
+#include "annotation/MosaicInteraction.h"
 #include "annotation/ShapeInteraction.h"
 #include "annotation/ShapeOptions.h"
 #include "toolbar/ToolbarState.h"
@@ -21,6 +22,7 @@ enum class ShapeEditorKey : std::uint8_t {
     save,
     copy,
     eyedropper,
+    mosaic,
 };
 
 enum class ShapeEditorKeyResult : std::uint8_t {
@@ -42,6 +44,7 @@ enum class ShapeCursorStyle : std::uint8_t {
     rotation,
     brush,
     marker,
+    mosaic,
     eyedropper,
 };
 
@@ -55,8 +58,10 @@ public:
     const ArrowLineOptionsState& arrowLineOptions() const noexcept;
     const BrushOptionsState& brushOptions() const noexcept;
     const MarkerOptionsState& markerOptions() const noexcept;
+    const MosaicOptionsState& mosaicOptions() const noexcept;
     const AnnotationDocument& document() const noexcept;
     AnnotationDocument& document() noexcept;
+    std::uint64_t interactionRevision() const noexcept;
     const std::optional<ShapeAnnotation>& preview() const noexcept;
 
     bool isShapeToolActive() const noexcept;
@@ -64,6 +69,7 @@ public:
     bool isBrushToolActive() const noexcept;
     bool isMarkerToolActive() const noexcept;
     bool isEyedropperToolActive() const noexcept;
+    bool isMosaicToolActive() const noexcept;
     bool strokePatternMenuVisible() const noexcept;
     bool cornerRadiusPanelVisible() const noexcept;
     std::optional<ArrowEndpoint> arrowTypeMenuEndpoint() const noexcept;
@@ -72,6 +78,10 @@ public:
     bool applyArrowLineOptionHit(ArrowLineOptionHit hit);
     bool applyBrushOptionHit(BrushOptionHit hit);
     bool applyMarkerOptionHit(MarkerOptionHit hit);
+    bool applyMosaicOptionHit(MosaicOptionHit hit);
+    void beginMosaicRedactionEdit();
+    void endMosaicRedactionEdit();
+    bool setMosaicRedactionValue(int value);
     bool applyArrowType(ArrowEndpoint endpoint, std::size_t index);
     bool applyStrokePattern(std::size_t index);
     bool setCornerRadius(float cornerRadiusDip);
@@ -119,10 +129,12 @@ private:
     ArrowLineOptionsState arrowLineOptions_;
     BrushOptionsState brushOptions_;
     MarkerOptionsState markerOptions_;
+    MosaicOptionsState mosaicOptions_;
     ShapeInteraction interaction_;
     ArrowLineInteraction arrowInteraction_;
     BrushInteraction brushInteraction_;
     MarkerInteraction markerInteraction_;
+    MosaicInteraction mosaicInteraction_;
     AnnotationRect canvasBounds_{};
     ToolbarState toolbarState_;
     bool shapeToolActive_ = false;
@@ -131,6 +143,7 @@ private:
     bool markerToolActive_ = false;
     bool strokePatternMenuVisible_ = false;
     bool cornerRadiusPanelVisible_ = false;
+    std::uint64_t interactionRevision_ = 0;
     std::optional<ArrowEndpoint> arrowTypeMenuEndpoint_;
 };
 

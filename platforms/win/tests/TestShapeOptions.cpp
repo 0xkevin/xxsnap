@@ -240,6 +240,39 @@ void testMarkerOptionsMatchMacGeometry()
         == MarkerOptionHit{MarkerOptionControl::palette, 0}));
 }
 
+void testMosaicOptionsMatchMacGeometryAndRanges()
+{
+    MosaicOptionsState state;
+    CHECK(state.kind() == AnnotationKind::mosaicStroke);
+    CHECK(state.style().strokeWidthDip == 15.0F);
+    CHECK(state.redaction().type == MosaicRedactionType::pixelMosaic);
+    CHECK(state.redaction().value == 8);
+    CHECK(state.setStrokeWidth(35.0F));
+    CHECK(!state.setStrokeWidth(22.0F));
+    CHECK(state.setKind(AnnotationKind::mosaicRectangle));
+    CHECK(state.toggleRedactionType());
+    CHECK(state.redaction().type == MosaicRedactionType::gaussianBlur);
+    CHECK(state.setRedactionValue(100));
+    CHECK(state.redaction().value == 20);
+    CHECK(state.setRedactionValue(1));
+    CHECK(state.redaction().value == 5);
+    CHECK(state.toggleRedactionType());
+    CHECK(state.redaction().type == MosaicRedactionType::pixelMosaic);
+    CHECK(state.redaction().value == 8);
+
+    const auto layout = mosaicOptionsLayout({100, 200});
+    CHECK((layout.toolbar == AnnotationRect{100, 200, 252, 28}));
+    CHECK((layout.strokeWidths[0] == AnnotationRect{110, 204, 20, 20}));
+    CHECK((layout.rectangleMode == AnnotationRect{188, 204, 20, 20}));
+    CHECK((layout.redactionType == AnnotationRect{218, 204, 20, 20}));
+    CHECK((layout.redactionValue == AnnotationRect{248, 204, 94, 20}));
+    CHECK((mosaicOptionHitTest(layout, {190, 210})
+        == MosaicOptionHit{MosaicOptionControl::rectangleMode, 0}));
+    CHECK(mosaicValueForPoint(layout, {layout.valueTrack.x, 210}) == 5);
+    CHECK(mosaicValueForPoint(layout,
+        {layout.valueTrack.x + layout.valueTrack.width, 210}) == 20);
+}
+
 } // namespace
 
 int main()
@@ -253,5 +286,6 @@ int main()
     testArrowLineOptionsMatchMacGeometryAndEndpointRules();
     testBrushOptionsMatchMacGeometry();
     testMarkerOptionsMatchMacGeometry();
+    testMosaicOptionsMatchMacGeometryAndRanges();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

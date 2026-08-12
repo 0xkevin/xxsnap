@@ -183,7 +183,9 @@ public:
                 *pixels,
                 annotations.plan,
                 annotations.dpiX,
-                annotations.dpiY)) {
+                annotations.dpiY,
+                selectionRect.x,
+                selectionRect.y)) {
             return *compositionError;
         }
         return composition;

@@ -84,6 +84,11 @@ struct OverlayMarkerOptionsRenderState {
     MarkerOptionsState state;
 };
 
+struct OverlayMosaicOptionsRenderState {
+    MosaicOptionsLayout layout;
+    MosaicOptionsState state;
+};
+
 struct OverlayEyedropperRenderState {
     AnnotationPoint pointer{};
     AnnotationColor color{};
@@ -106,10 +111,12 @@ struct OverlayRenderState {
     bool canUndo = false;
     bool canRedo = false;
     AnnotationRenderPlan annotationPlan;
+    std::shared_ptr<const PixelBuffer> annotationComposite;
     std::optional<OverlayShapeOptionsRenderState> shapeOptions;
     std::optional<OverlayArrowLineOptionsRenderState> arrowLineOptions;
     std::optional<OverlayBrushOptionsRenderState> brushOptions;
     std::optional<OverlayMarkerOptionsRenderState> markerOptions;
+    std::optional<OverlayMosaicOptionsRenderState> mosaicOptions;
     std::optional<OverlayEyedropperRenderState> eyedropper;
 };
 

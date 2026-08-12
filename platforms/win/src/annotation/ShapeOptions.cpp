@@ -1,5 +1,7 @@
 #include "annotation/ShapeOptions.h"
 
+#include <algorithm>
+
 namespace xxsnap::win {
 namespace {
 
@@ -30,6 +32,7 @@ constexpr std::array<float, 3> strokeWidths{2.0F, 4.0F, 7.0F};
 constexpr std::array<float, 3> arrowStrokeWidths{3.0F, 4.0F, 6.0F};
 constexpr std::array<float, 3> brushStrokeWidths{3.0F, 5.0F, 7.0F};
 constexpr std::array<float, 3> markerStrokeWidths{14.0F, 18.0F, 22.0F};
+constexpr std::array<float, 3> mosaicStrokeWidths{15.0F, 25.0F, 35.0F};
 
 constexpr std::array<AnnotationStrokePattern, 6> strokePatterns{
     AnnotationStrokePattern::solid,
@@ -145,6 +148,11 @@ const std::array<AnnotationStrokePattern, 4>& macBrushStrokePatterns() noexcept
 const std::array<float, 3>& macMarkerStrokeWidths() noexcept
 {
     return markerStrokeWidths;
+}
+
+const std::array<float, 3>& macMosaicStrokeWidths() noexcept
+{
+    return mosaicStrokeWidths;
 }
 
 ShapeOptionsState::ShapeOptionsState() noexcept
@@ -746,6 +754,163 @@ std::optional<MarkerOptionHit> markerOptionHitTest(
             layout.colorSwatches.size() - 1U};
     }
     return std::nullopt;
+}
+
+MosaicOptionsState::MosaicOptionsState() noexcept
+{
+    style_.strokeWidthDip = mosaicStrokeWidths.front();
+    style_.strokePattern = AnnotationStrokePattern::solid;
+    style_.fillEnabled = false;
+    style_.strokeColor = palette.front();
+    style_.fillColor = palette.front();
+}
+
+const AnnotationStyle& MosaicOptionsState::style() const noexcept
+{
+    return style_;
+}
+
+AnnotationKind MosaicOptionsState::kind() const noexcept
+{
+    return kind_;
+}
+
+MosaicRedaction MosaicOptionsState::redaction() const noexcept
+{
+    const auto index = redactionType_ == MosaicRedactionType::gaussianBlur
+        ? 0U : 1U;
+    return {redactionType_, redactionValues_[index]};
+}
+
+bool MosaicOptionsState::load(const ShapeAnnotation& annotation) noexcept
+{
+    if (!isMosaicAnnotation(annotation)) {
+        return false;
+    }
+    auto style = annotation.style;
+    style.fillEnabled = false;
+    style.strokePattern = AnnotationStrokePattern::solid;
+    const auto redaction = *annotation.mosaicRedaction;
+    const auto current = this->redaction();
+    const auto changed = style_ != style || kind_ != annotation.kind
+        || !(current == redaction);
+    style_ = style;
+    kind_ = annotation.kind;
+    redactionType_ = redaction.type;
+    setRedactionValue(redaction.value);
+    return changed;
+}
+
+bool MosaicOptionsState::setStrokeWidth(float strokeWidthDip) noexcept
+{
+    auto supported = false;
+    for (const auto candidate : mosaicStrokeWidths) {
+        supported = supported || candidate == strokeWidthDip;
+    }
+    if (!supported) {
+        return false;
+    }
+    const auto changed = style_.strokeWidthDip != strokeWidthDip
+        || kind_ != AnnotationKind::mosaicStroke;
+    style_.strokeWidthDip = strokeWidthDip;
+    kind_ = AnnotationKind::mosaicStroke;
+    return changed;
+}
+
+bool MosaicOptionsState::setKind(AnnotationKind kind) noexcept
+{
+    if ((kind != AnnotationKind::mosaicStroke
+            && kind != AnnotationKind::mosaicRectangle)
+        || kind_ == kind) {
+        return false;
+    }
+    kind_ = kind;
+    return true;
+}
+
+bool MosaicOptionsState::toggleRedactionType() noexcept
+{
+    redactionType_ = redactionType_ == MosaicRedactionType::pixelMosaic
+        ? MosaicRedactionType::gaussianBlur
+        : MosaicRedactionType::pixelMosaic;
+    return true;
+}
+
+bool MosaicOptionsState::setRedactionValue(int value) noexcept
+{
+    value = clampedMosaicRedactionValue(value);
+    const auto index = redactionType_ == MosaicRedactionType::gaussianBlur
+        ? 0U : 1U;
+    if (redactionValues_[index] == value) {
+        return false;
+    }
+    redactionValues_[index] = value;
+    return true;
+}
+
+MosaicOptionsLayout mosaicOptionsLayout(AnnotationPoint origin)
+{
+    MosaicOptionsLayout layout;
+    layout.toolbar = {origin.x, origin.y, 252.0F, 28.0F};
+    const auto controlY = origin.y + 4.0F;
+    for (std::size_t index = 0; index < mosaicStrokeWidths.size(); ++index) {
+        const AnnotationRect control{
+            origin.x + 10.0F + static_cast<float>(index) * 24.0F,
+            controlY, 20.0F, 20.0F};
+        layout.strokeWidths.push_back(control);
+        layout.strokeWidthHits.push_back(inset(control, -3.0F, -4.0F));
+    }
+    layout.rectangleMode = {origin.x + 88.0F, controlY, 20.0F, 20.0F};
+    layout.redactionType = {origin.x + 118.0F, controlY, 20.0F, 20.0F};
+    layout.redactionValue = {origin.x + 148.0F, controlY, 94.0F, 20.0F};
+    layout.valueTrack = {
+        layout.redactionValue.x + 8.0F,
+        layout.redactionValue.y + 8.0F,
+        54.0F,
+        4.0F,
+    };
+    layout.valueLabel = {
+        layout.redactionValue.x + 70.0F,
+        layout.redactionValue.y,
+        24.0F,
+        20.0F,
+    };
+    return layout;
+}
+
+std::optional<MosaicOptionHit> mosaicOptionHitTest(
+    const MosaicOptionsLayout& layout,
+    AnnotationPoint point) noexcept
+{
+    for (std::size_t index = 0; index < layout.strokeWidthHits.size(); ++index) {
+        if (contains(layout.strokeWidthHits[index], point)) {
+            return MosaicOptionHit{MosaicOptionControl::strokeWidth, index};
+        }
+    }
+    if (contains(layout.rectangleMode, point)) {
+        return MosaicOptionHit{MosaicOptionControl::rectangleMode, 0};
+    }
+    if (contains(layout.redactionType, point)) {
+        return MosaicOptionHit{MosaicOptionControl::redactionType, 0};
+    }
+    if (contains(layout.redactionValue, point)) {
+        return MosaicOptionHit{MosaicOptionControl::redactionValue, 0};
+    }
+    return std::nullopt;
+}
+
+int mosaicValueForPoint(
+    const MosaicOptionsLayout& layout,
+    AnnotationPoint point) noexcept
+{
+    const auto progress = clampValue(
+        (point.x - layout.valueTrack.x)
+            / maximum(1.0F, layout.valueTrack.width),
+        0.0F,
+        1.0F);
+    return mosaicMinimumRedactionValue + static_cast<int>(progress
+        * static_cast<float>(mosaicMaximumRedactionValue
+            - mosaicMinimumRedactionValue) + 0.5F);
 }
 
 ArrowLineOptionsLayout arrowLineOptionsLayout(

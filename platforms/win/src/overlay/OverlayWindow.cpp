@@ -273,14 +273,32 @@ void OverlayWindow::setMarkerCursor(
     AnnotationColor color,
     float strokeWidthDip) noexcept
 {
+    const auto diameter = strokeWidthDip < 16.0F
+        ? 10 : strokeWidthDip < 20.0F ? 13 : 16;
+    setDotCursor(color, strokeWidthDip, diameter, false);
+}
+
+void OverlayWindow::setMosaicCursor(float strokeWidthDip) noexcept
+{
+    const auto diameter = static_cast<int>(
+        (std::max)(6.0F, strokeWidthDip * 0.52F) + 0.5F);
+    setDotCursor({211, 211, 211, 255},
+        strokeWidthDip, diameter, true);
+}
+
+void OverlayWindow::setDotCursor(
+    AnnotationColor color,
+    float strokeWidthDip,
+    int diameter,
+    bool mosaic) noexcept
+{
     if (markerCursor_ != nullptr
         && markerCursorColor_ == color
-        && markerCursorStrokeWidthDip_ == strokeWidthDip) {
+        && markerCursorStrokeWidthDip_ == strokeWidthDip
+        && markerCursorIsMosaic_ == mosaic) {
         return;
     }
     constexpr int side = 24;
-    const auto diameter = strokeWidthDip < 16.0F
-        ? 10 : strokeWidthDip < 20.0F ? 13 : 16;
     BITMAPV5HEADER header{};
     header.bV5Size = sizeof(header);
     header.bV5Width = side;
@@ -315,15 +333,16 @@ void OverlayWindow::setMarkerCursor(
             const auto distanceSquared = dx * dx + dy * dy;
             std::uint32_t pixel = 0;
             if (distanceSquared <= innerRadius * innerRadius) {
-                constexpr std::uint32_t alpha = 0xF2U;
-                pixel = 0xF2000000U
+                const auto alpha = mosaic ? 0xFFU : 0xF2U;
+                pixel = alpha << 24U
                     | (static_cast<std::uint32_t>(color.red) * alpha / 255U)
                         << 16U
                     | (static_cast<std::uint32_t>(color.green) * alpha / 255U)
                         << 8U
                     | static_cast<std::uint32_t>(color.blue) * alpha / 255U;
             } else if (distanceSquared <= outerRadius * outerRadius) {
-                pixel = 0xEBEBEBEBU;
+                const auto alpha = mosaic ? 0xE6U : 0xEBU;
+                pixel = alpha << 24U | alpha << 16U | alpha << 8U | alpha;
             }
             pixels[y * side + x] = pixel;
         }
@@ -343,6 +362,7 @@ void OverlayWindow::setMarkerCursor(
         markerCursor_ = cursor;
         markerCursorColor_ = color;
         markerCursorStrokeWidthDip_ = strokeWidthDip;
+        markerCursorIsMosaic_ = mosaic;
     }
 }
 
@@ -388,6 +408,7 @@ HCURSOR OverlayWindow::cursor() const noexcept
             instance_, MAKEINTRESOURCEW(IDC_XXSNAP_BRUSH));
         break;
     case OverlayCursorStyle::marker:
+    case OverlayCursorStyle::mosaic:
         result = markerCursor_;
         break;
     case OverlayCursorStyle::eyedropper:

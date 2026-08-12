@@ -108,6 +108,54 @@ AnnotationId AnnotationDocument::addMarkerLine(
     return id;
 }
 
+AnnotationId AnnotationDocument::addMosaicStroke(
+    MosaicStroke stroke,
+    MosaicRedaction redaction,
+    AnnotationStyle style)
+{
+    if (stroke.points.empty() || nextId_ == invalidAnnotationId) {
+        return invalidAnnotationId;
+    }
+    redaction.value = (std::max)(1, redaction.value);
+    style.fillEnabled = false;
+    style.strokePattern = AnnotationStrokePattern::solid;
+    auto before = snapshot();
+    const auto id = nextId_++;
+    annotations_.push_back({
+        id, AnnotationKind::mosaicStroke, brushPathBounds(stroke), style,
+        0.0F, std::nullopt, std::nullopt, std::nullopt,
+        std::move(stroke), redaction,
+    });
+    selectedId_ = id;
+    commit(std::move(before));
+    return id;
+}
+
+AnnotationId AnnotationDocument::addMosaicRectangle(
+    AnnotationRect rect,
+    MosaicRedaction redaction,
+    AnnotationStyle style,
+    float rotationDegrees)
+{
+    rect = standardized(rect);
+    if (rect.width <= 0.0F || rect.height <= 0.0F
+        || nextId_ == invalidAnnotationId) {
+        return invalidAnnotationId;
+    }
+    redaction.value = (std::max)(1, redaction.value);
+    style.fillEnabled = false;
+    style.strokePattern = AnnotationStrokePattern::solid;
+    auto before = snapshot();
+    const auto id = nextId_++;
+    annotations_.push_back({
+        id, AnnotationKind::mosaicRectangle, rect, style, rotationDegrees,
+        std::nullopt, std::nullopt, std::nullopt, std::nullopt, redaction,
+    });
+    selectedId_ = id;
+    commit(std::move(before));
+    return id;
+}
+
 bool AnnotationDocument::remove(AnnotationId id)
 {
     const auto index = indexOf(id);
@@ -130,7 +178,8 @@ bool AnnotationDocument::updateRect(AnnotationId id, AnnotationRect rect)
     auto* annotation = findMutable(id);
     rect = standardized(rect);
     if (annotation == nullptr
-        || !isShapeKind(annotation->kind)
+        || (!isShapeKind(annotation->kind)
+            && annotation->kind != AnnotationKind::mosaicRectangle)
         || rect.width <= 0.0F
         || rect.height <= 0.0F
         || annotation->rect == rect) {
@@ -156,6 +205,10 @@ bool AnnotationDocument::move(AnnotationId id, AnnotationPoint offset)
     }
     if (isMarkerAnnotation(*annotation)) {
         return updateMarkerLine(id, translated(*annotation->markerLine, offset));
+    }
+    if (isMosaicStrokeAnnotation(*annotation)) {
+        return updateMosaicStroke(
+            id, translated(*annotation->mosaicStroke, offset));
     }
     return updateRect(id, translated(annotation->rect, offset));
 }
@@ -246,6 +299,65 @@ bool AnnotationDocument::updateMarkerLine(AnnotationId id, MarkerLine line)
     annotation->rect = markerLineBounds(line);
     commit(std::move(before));
     return true;
+}
+
+bool AnnotationDocument::updateMosaicStroke(
+    AnnotationId id,
+    MosaicStroke stroke)
+{
+    auto* annotation = findMutable(id);
+    if (annotation == nullptr || !isMosaicStrokeAnnotation(*annotation)
+        || stroke.points.empty() || *annotation->mosaicStroke == stroke) {
+        return false;
+    }
+    auto before = snapshot();
+    annotation->mosaicStroke = std::move(stroke);
+    annotation->rect = brushPathBounds(*annotation->mosaicStroke);
+    commit(std::move(before));
+    return true;
+}
+
+bool AnnotationDocument::updateMosaicRedaction(
+    AnnotationId id,
+    MosaicRedaction redaction)
+{
+    auto* annotation = findMutable(id);
+    redaction.value = clampedMosaicRedactionValue(redaction.value);
+    if (annotation == nullptr || !isMosaicAnnotation(*annotation)
+        || annotation->mosaicRedaction == redaction) {
+        return false;
+    }
+    auto before = snapshot();
+    annotation->mosaicRedaction = redaction;
+    if (mosaicRedactionEditBefore_.has_value()) {
+        mosaicRedactionEditChanged_ = true;
+        ++revision_;
+        return true;
+    }
+    commit(std::move(before));
+    return true;
+}
+
+void AnnotationDocument::beginMosaicRedactionEdit()
+{
+    if (!mosaicRedactionEditBefore_.has_value()) {
+        mosaicRedactionEditBefore_ = snapshot();
+        mosaicRedactionEditChanged_ = false;
+    }
+}
+
+void AnnotationDocument::endMosaicRedactionEdit()
+{
+    if (!mosaicRedactionEditBefore_.has_value()) {
+        return;
+    }
+    if (mosaicRedactionEditChanged_) {
+        undoHistory_.push_back({
+            std::move(*mosaicRedactionEditBefore_), snapshot()});
+        redoHistory_.clear();
+    }
+    mosaicRedactionEditBefore_.reset();
+    mosaicRedactionEditChanged_ = false;
 }
 
 bool AnnotationDocument::select(AnnotationId id) noexcept

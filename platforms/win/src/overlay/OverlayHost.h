@@ -85,6 +85,11 @@ struct OverlayPresentationMarkerOptions {
     MarkerOptionsState state;
 };
 
+struct OverlayPresentationMosaicOptions {
+    MosaicOptionsLayout layout;
+    MosaicOptionsState state;
+};
+
 struct OverlayPresentationEyedropper {
     AnnotationPoint pointer{};
     AnnotationColor color{};
@@ -101,10 +106,12 @@ struct OverlayPresentation {
     bool showActions = false;
     std::vector<OverlayPresentationToolbarItem> toolbarItems;
     AnnotationRenderPlan annotationPlan;
+    std::shared_ptr<const PixelBuffer> annotationComposite;
     std::optional<OverlayPresentationShapeOptions> shapeOptions;
     std::optional<OverlayPresentationArrowLineOptions> arrowLineOptions;
     std::optional<OverlayPresentationBrushOptions> brushOptions;
     std::optional<OverlayPresentationMarkerOptions> markerOptions;
+    std::optional<OverlayPresentationMosaicOptions> mosaicOptions;
     std::optional<OverlayPresentationEyedropper> eyedropper;
 };
 
@@ -175,6 +182,7 @@ public:
     const AnnotationDocument& annotationDocument() const noexcept;
     std::pair<UINT, UINT> annotationDpi() const noexcept;
     std::optional<AnnotationStyle> markerCursorStyle() const noexcept;
+    std::optional<AnnotationStyle> mosaicCursorStyle() const noexcept;
 
 private:
     const OverlaySurface* surfaceFor(HWND window) const noexcept;
@@ -196,10 +204,13 @@ private:
         const OverlaySurface& surface) const;
     std::optional<MarkerOptionsLayout> currentMarkerOptionsLayout(
         const OverlaySurface& surface) const;
+    std::optional<MosaicOptionsLayout> currentMosaicOptionsLayout(
+        const OverlaySurface& surface) const;
     void cancelOnce() noexcept;
     void completeOnce(OverlayInputAction action) noexcept;
     void emitTerminal(OverlayInputAction action) noexcept;
     void releaseInteraction() noexcept;
+    std::optional<PixelBuffer> composeCurrentSelection() const noexcept;
     void refreshEyedropperComposite() noexcept;
     void clearEyedropperState() noexcept;
     void updateEyedropper(PixelPoint virtualPoint, bool shift) noexcept;
@@ -215,12 +226,17 @@ private:
     HWND captureWindow_ = nullptr;
     bool dragging_ = false;
     bool annotationDragging_ = false;
+    bool mosaicValueDragging_ = false;
     bool releasingCapture_ = false;
     bool shapeAnnotationsEnabled_ = false;
     std::optional<std::size_t> editorOwnerIndex_;
     std::unique_ptr<ShapeEditorController> editor_;
     const FrozenDesktop* desktop_ = nullptr;
     std::unique_ptr<PixelBuffer> eyedropperComposite_;
+    mutable std::shared_ptr<const PixelBuffer> mosaicCompositeCache_;
+    mutable std::optional<PixelRect> mosaicCompositeSelection_;
+    mutable std::uint64_t mosaicCompositeDocumentRevision_ = 0;
+    mutable std::uint64_t mosaicCompositeInteractionRevision_ = 0;
     std::optional<PixelPoint> eyedropperSamplePoint_;
     std::optional<AnnotationColor> eyedropperSampleColor_;
     std::array<AnnotationColor, 81> eyedropperMagnifier_{};

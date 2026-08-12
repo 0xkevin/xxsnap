@@ -193,6 +193,96 @@ void testMarkerBatchingPreservesAnnotationOrder()
     CHECK(markerOverRectangleRed < 230U);
 }
 
+void fillTestGradient(PixelBuffer& pixels)
+{
+    for (std::int64_t y = 0; y < pixels.height(); ++y) {
+        for (std::int64_t x = 0; x < pixels.width(); ++x) {
+            auto* pixel = pixels.data()
+                + static_cast<std::uint64_t>(y) * pixels.stride()
+                + static_cast<std::uint64_t>(x) * 4U;
+            pixel[0] = static_cast<std::byte>((x * 7 + y * 3) % 256);
+            pixel[1] = static_cast<std::byte>((x * 2 + y * 9) % 256);
+            pixel[2] = static_cast<std::byte>((x * 11 + y) % 256);
+            pixel[3] = std::byte{0xFF};
+        }
+    }
+}
+
+void testMosaicPixelAndGaussianRespectMasksAndOrder()
+{
+    MemoryBudget budget(4U * 1024U * 1024U);
+    auto pixelated = PixelBuffer::allocate(80, 60, budget);
+    CHECK(pixelated.value != nullptr);
+    if (!pixelated.value) {
+        return;
+    }
+    fillTestGradient(*pixelated.value);
+    std::vector<std::byte> original(
+        pixelated.value->data(),
+        pixelated.value->data() + pixelated.value->byteCount());
+
+    ShapeAnnotation rectangle;
+    rectangle.id = 1;
+    rectangle.kind = AnnotationKind::mosaicRectangle;
+    rectangle.rect = {20, 15, 35, 25};
+    rectangle.mosaicRedaction = MosaicRedaction{
+        MosaicRedactionType::pixelMosaic, 8};
+    AnnotationRenderPlan plan;
+    plan.items.push_back({rectangle, false});
+    CHECK(!composeAnnotations(*pixelated.value, plan, 96, 96).has_value());
+    const auto outsideOffset = 4U * pixelated.value->stride() + 4U * 4U;
+    CHECK(std::memcmp(pixelated.value->data() + outsideOffset,
+        original.data() + outsideOffset, 4U) == 0);
+    const auto insideOffset = 25U * pixelated.value->stride() + 30U * 4U;
+    CHECK(std::memcmp(pixelated.value->data() + insideOffset,
+        original.data() + insideOffset, 4U) != 0);
+
+    auto blurred = PixelBuffer::allocate(80, 60, budget);
+    CHECK(blurred.value != nullptr);
+    if (!blurred.value) {
+        return;
+    }
+    fillTestGradient(*blurred.value);
+    MosaicStroke stroke{{{10, 30}, {70, 30}}};
+    ShapeAnnotation brush;
+    brush.id = 2;
+    brush.kind = AnnotationKind::mosaicStroke;
+    brush.rect = brushPathBounds(stroke);
+    brush.style.strokeWidthDip = 15.0F;
+    brush.mosaicStroke = stroke;
+    brush.mosaicRedaction = MosaicRedaction{
+        MosaicRedactionType::gaussianBlur, 8};
+    plan.items = {{brush, false}};
+    CHECK(!composeAnnotations(*blurred.value, plan, 96, 96).has_value());
+    const auto strokeOffset = 30U * blurred.value->stride() + 40U * 4U;
+    const auto untouchedOffset = 5U * blurred.value->stride() + 40U * 4U;
+    CHECK(std::memcmp(blurred.value->data() + strokeOffset,
+        original.data() + strokeOffset, 4U) != 0);
+    CHECK(std::memcmp(blurred.value->data() + untouchedOffset,
+        original.data() + untouchedOffset, 4U) == 0);
+
+    auto ordered = PixelBuffer::allocate(80, 60, budget);
+    CHECK(ordered.value != nullptr);
+    if (!ordered.value) {
+        return;
+    }
+    fillTestGradient(*ordered.value);
+    AnnotationStyle red;
+    red.fillEnabled = true;
+    red.fillColor = {255, 0, 0, 255};
+    red.strokeColor = red.fillColor;
+    ShapeAnnotation redRectangle;
+    redRectangle.id = 3;
+    redRectangle.kind = AnnotationKind::rectangle;
+    redRectangle.rect = {20, 15, 35, 25};
+    redRectangle.style = red;
+    plan.items = {{redRectangle, false}, {rectangle, false}};
+    CHECK(!composeAnnotations(*ordered.value, plan, 96, 96).has_value());
+    const auto* orderedPixel = ordered.value->data() + insideOffset;
+    const auto* pixelOnly = pixelated.value->data() + insideOffset;
+    CHECK(std::memcmp(orderedPixel, pixelOnly, 4U) != 0);
+}
+
 } // namespace
 
 int main()
@@ -201,5 +291,6 @@ int main()
     testEmptyPlanLeavesPixelsUntouched();
     testMarkerUsesMultiplyAndDarkBackgroundFallback();
     testMarkerBatchingPreservesAnnotationOrder();
+    testMosaicPixelAndGaussianRespectMasksAndOrder();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

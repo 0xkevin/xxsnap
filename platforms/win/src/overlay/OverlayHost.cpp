@@ -152,6 +152,8 @@ OverlayCursorStyle cursorStyleForShape(ShapeCursorStyle style) noexcept
         return OverlayCursorStyle::brush;
     case ShapeCursorStyle::marker:
         return OverlayCursorStyle::marker;
+    case ShapeCursorStyle::mosaic:
+        return OverlayCursorStyle::mosaic;
     case ShapeCursorStyle::eyedropper:
         return OverlayCursorStyle::eyedropper;
     }
@@ -355,12 +357,10 @@ void OverlayInputRouter::ensureEditor() noexcept
         *model_.selection());
     const auto& surface = surfaces_[*owner];
     const AnnotationRect bounds{
-        physicalPixelsToDip(
-            surface.physicalBounds.x - selection.x, surface.dpiX),
-        physicalPixelsToDip(
-            surface.physicalBounds.y - selection.y, surface.dpiY),
-        physicalPixelsToDip(surface.physicalBounds.width, surface.dpiX),
-        physicalPixelsToDip(surface.physicalBounds.height, surface.dpiY),
+        0.0F,
+        0.0F,
+        physicalPixelsToDip(selection.width, surface.dpiX),
+        physicalPixelsToDip(selection.height, surface.dpiY),
     };
     if (!editor_) {
         try {
@@ -413,11 +413,11 @@ void OverlayInputRouter::clearEyedropperState() noexcept
     eyedropperCopySuccessUntil_.reset();
 }
 
-void OverlayInputRouter::refreshEyedropperComposite() noexcept
+std::optional<PixelBuffer>
+OverlayInputRouter::composeCurrentSelection() const noexcept
 {
-    eyedropperComposite_.reset();
     if (desktop_ == nullptr || !model_.selection().has_value()) {
-        return;
+        return std::nullopt;
     }
     try {
         MemoryBudget budget(512U * 1024U * 1024U);
@@ -425,20 +425,30 @@ void OverlayInputRouter::refreshEyedropperComposite() noexcept
             *model_.selection(), *desktop_, budget);
         auto* pixels = std::get_if<PixelBuffer>(&composition);
         if (pixels == nullptr) {
-            return;
+            return std::nullopt;
         }
         if (editor_ != nullptr && editorOwnerIndex_.has_value()) {
             const auto& owner = surfaces_[*editorOwnerIndex_];
             const auto plan = editor_->renderPlan({}, false);
             if (composeAnnotations(
-                    *pixels, plan, owner.dpiX, owner.dpiY).has_value()) {
-                return;
+                    *pixels, plan, owner.dpiX, owner.dpiY,
+                    model_.selection()->x,
+                    model_.selection()->y).has_value()) {
+                return std::nullopt;
             }
         }
-        eyedropperComposite_ = std::make_unique<PixelBuffer>(
-            std::move(*pixels));
+        return std::move(*pixels);
     } catch (...) {
-        eyedropperComposite_.reset();
+        return std::nullopt;
+    }
+}
+
+void OverlayInputRouter::refreshEyedropperComposite() noexcept
+{
+    eyedropperComposite_.reset();
+    if (auto composition = composeCurrentSelection()) {
+        eyedropperComposite_ = std::make_unique<PixelBuffer>(
+            std::move(*composition));
     }
 }
 
@@ -594,6 +604,28 @@ OverlayInputRouter::currentMarkerOptionsLayout(
         optionsToolbarOrigin(chrome, initial.toolbar), macShapePalette().size());
 }
 
+std::optional<MosaicOptionsLayout>
+OverlayInputRouter::currentMosaicOptionsLayout(
+    const OverlaySurface& surface) const
+{
+    if (!editor_ || !editor_->isMosaicToolActive()
+        || !model_.selection().has_value()) {
+        return std::nullopt;
+    }
+    const auto chrome = computeOverlayLayout({
+        surface.physicalBounds,
+        *model_.selection(),
+        surface.dpiX,
+        surface.dpiY,
+        0.0F,
+        true,
+        toolbarActions(),
+    });
+    const auto initial = mosaicOptionsLayout({});
+    return mosaicOptionsLayout(
+        optionsToolbarOrigin(chrome, initial.toolbar));
+}
+
 OverlayInputRouter::~OverlayInputRouter()
 {
     if (dragging_) {
@@ -744,6 +776,45 @@ std::vector<OverlayPresentation> OverlayInputRouter::presentations() const
                 physicalPixelsToDip(
                     selection.y - surface.physicalBounds.y, surface.dpiY),
             });
+            const auto containsMosaic = std::any_of(
+                presentation.annotationPlan.items.begin(),
+                presentation.annotationPlan.items.end(),
+                [](const auto& item) {
+                    return isMosaicAnnotation(item.annotation);
+                });
+            if (containsMosaic && desktop_ != nullptr) {
+                const auto cachedSelectionMatches
+                    = mosaicCompositeSelection_.has_value()
+                    && mosaicCompositeSelection_->x == selection.x
+                    && mosaicCompositeSelection_->y == selection.y
+                    && mosaicCompositeSelection_->width == selection.width
+                    && mosaicCompositeSelection_->height == selection.height;
+                const auto documentRevision = editor_->document().revision();
+                const auto interactionRevision
+                    = editor_->interactionRevision();
+                if (!cachedSelectionMatches
+                    || mosaicCompositeDocumentRevision_ != documentRevision
+                    || mosaicCompositeInteractionRevision_
+                        != interactionRevision
+                    || mosaicCompositeCache_ == nullptr) {
+                    mosaicCompositeCache_.reset();
+                    if (auto composition = composeCurrentSelection()) {
+                        mosaicCompositeCache_ = std::make_shared<PixelBuffer>(
+                            std::move(*composition));
+                    }
+                    mosaicCompositeSelection_ = selection;
+                    mosaicCompositeDocumentRevision_ = documentRevision;
+                    mosaicCompositeInteractionRevision_
+                        = interactionRevision;
+                }
+                if (mosaicCompositeCache_ != nullptr) {
+                    presentation.annotationComposite = mosaicCompositeCache_;
+                    presentation.annotationPlan.items.clear();
+                }
+            } else {
+                mosaicCompositeCache_.reset();
+                mosaicCompositeSelection_.reset();
+            }
             if (const auto options = currentShapeOptionsLayout(surface)) {
                 OverlayPresentationShapeOptions shapeOptions{
                     *options,
@@ -807,6 +878,12 @@ std::vector<OverlayPresentation> OverlayInputRouter::presentations() const
                 presentation.markerOptions = OverlayPresentationMarkerOptions{
                     *options,
                     editor_->markerOptions(),
+                };
+            }
+            if (const auto options = currentMosaicOptionsLayout(surface)) {
+                presentation.mosaicOptions = OverlayPresentationMosaicOptions{
+                    *options,
+                    editor_->mosaicOptions(),
                 };
             }
             if (editor_->isEyedropperToolActive()
@@ -1079,6 +1156,29 @@ bool OverlayInputRouter::pointerDown(HWND source, PixelPoint clientPoint) noexce
             }
             editor_->dismissPopovers();
         }
+        if (const auto options = currentMosaicOptionsLayout(*surface);
+            options.has_value()) {
+            const AnnotationPoint point{x, y};
+            if (const auto hit = mosaicOptionHitTest(*options, point)) {
+                if (hit->control == MosaicOptionControl::redactionValue) {
+                    editor_->beginMosaicRedactionEdit();
+                    editor_->setMosaicRedactionValue(
+                        mosaicValueForPoint(*options, point));
+                    if (platform_.captureMouse(source)) {
+                        captureWindow_ = source;
+                        dragging_ = true;
+                        annotationDragging_ = false;
+                        mosaicValueDragging_ = true;
+                    } else {
+                        editor_->endMosaicRedactionEdit();
+                    }
+                } else {
+                    editor_->applyMosaicOptionHit(*hit);
+                }
+                return true;
+            }
+            editor_->dismissPopovers();
+        }
     }
 
     const auto virtualPoint = toVirtual(*surface, clientPoint);
@@ -1118,6 +1218,11 @@ bool OverlayInputRouter::pointerDown(HWND source, PixelPoint clientPoint) noexce
             captureWindow_ = source;
             dragging_ = true;
             annotationDragging_ = true;
+            return true;
+        }
+        if (editor_->toolbarState().selectedAction().has_value()
+            && model_.selection().has_value()
+            && !contains(*model_.selection(), virtualPoint)) {
             return true;
         }
     }
@@ -1189,6 +1294,10 @@ OverlayCursorStyle OverlayInputRouter::cursorStyle(
             return OverlayCursorStyle::arrow;
         }
         if (const auto options = currentMarkerOptionsLayout(*surface);
+            options.has_value() && contains(options->toolbar, surfacePoint)) {
+            return OverlayCursorStyle::arrow;
+        }
+        if (const auto options = currentMosaicOptionsLayout(*surface);
             options.has_value() && contains(options->toolbar, surfacePoint)) {
             return OverlayCursorStyle::arrow;
         }
@@ -1273,7 +1382,22 @@ void OverlayInputRouter::pointerUp(HWND, PixelPoint) noexcept
 void OverlayInputRouter::platformPointerMove(PixelPoint virtualPoint) noexcept
 {
     if (dragging_ && status_ == OverlayInputStatus::active) {
-        if (annotationDragging_ && editor_ != nullptr) {
+        if (mosaicValueDragging_ && editor_ != nullptr
+            && editorOwnerIndex_.has_value()) {
+            const auto& surface = surfaces_[*editorOwnerIndex_];
+            if (const auto options = currentMosaicOptionsLayout(surface)) {
+                const AnnotationPoint point{
+                    physicalPixelsToDip(
+                        virtualPoint.x - surface.physicalBounds.x,
+                        surface.dpiX),
+                    physicalPixelsToDip(
+                        virtualPoint.y - surface.physicalBounds.y,
+                        surface.dpiY),
+                };
+                editor_->setMosaicRedactionValue(
+                    mosaicValueForPoint(*options, point));
+            }
+        } else if (annotationDragging_ && editor_ != nullptr) {
             if (const auto local = annotationPoint(virtualPoint)) {
                 editor_->pointerMove(*local, platform_.shiftPressed());
             }
@@ -1288,7 +1412,12 @@ void OverlayInputRouter::platformPointerUp(PixelPoint virtualPoint) noexcept
     if (!dragging_ || status_ != OverlayInputStatus::active) {
         return;
     }
-    if (annotationDragging_ && editor_ != nullptr) {
+    if (mosaicValueDragging_) {
+        platformPointerMove(virtualPoint);
+        if (editor_ != nullptr) {
+            editor_->endMosaicRedactionEdit();
+        }
+    } else if (annotationDragging_ && editor_ != nullptr) {
         if (const auto local = annotationPoint(virtualPoint)) {
             editor_->pointerUp(*local, platform_.shiftPressed());
         } else {
@@ -1301,6 +1430,7 @@ void OverlayInputRouter::platformPointerUp(PixelPoint virtualPoint) noexcept
     }
     dragging_ = false;
     annotationDragging_ = false;
+    mosaicValueDragging_ = false;
     captureWindow_ = nullptr;
     releasingCapture_ = true;
     const auto released = platform_.releaseMouse();
@@ -1423,7 +1553,11 @@ void OverlayInputRouter::releaseInteraction() noexcept
     if (annotationDragging_ && editor_ != nullptr) {
         editor_->cancelInteraction();
     }
+    if (mosaicValueDragging_ && editor_ != nullptr) {
+        editor_->endMosaicRedactionEdit();
+    }
     annotationDragging_ = false;
+    mosaicValueDragging_ = false;
     captureWindow_ = nullptr;
     releasingCapture_ = true;
     if (!platform_.releaseMouse()) {
@@ -1511,6 +1645,14 @@ OverlayInputRouter::markerCursorStyle() const noexcept
 {
     return editor_ != nullptr && editor_->isMarkerToolActive()
         ? std::optional<AnnotationStyle>{editor_->markerOptions().style()}
+        : std::nullopt;
+}
+
+std::optional<AnnotationStyle>
+OverlayInputRouter::mosaicCursorStyle() const noexcept
+{
+    return editor_ != nullptr && editor_->isMosaicToolActive()
+        ? std::optional<AnnotationStyle>{editor_->mosaicOptions().style()}
         : std::nullopt;
 }
 
@@ -1606,6 +1748,9 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
             case 'P':
                 key = ShapeEditorKey::eyedropper;
                 break;
+            case 'M':
+                key = ShapeEditorKey::mosaic;
+                break;
             default:
                 return;
             }
@@ -1624,10 +1769,18 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
                     return window != nullptr && window->handle() == source;
                 });
             if (found != windows.end()) {
-                if (style == OverlayCursorStyle::marker) {
-                    if (const auto marker = router->markerCursorStyle()) {
-                        (*found)->setMarkerCursor(
-                            marker->strokeColor, marker->strokeWidthDip);
+                if (style == OverlayCursorStyle::marker
+                    || style == OverlayCursorStyle::mosaic) {
+                    const auto dotStyle = style == OverlayCursorStyle::marker
+                        ? router->markerCursorStyle()
+                        : router->mosaicCursorStyle();
+                    if (const auto marker = dotStyle) {
+                        if (style == OverlayCursorStyle::mosaic) {
+                            (*found)->setMosaicCursor(marker->strokeWidthDip);
+                        } else {
+                            (*found)->setMarkerCursor(
+                                marker->strokeColor, marker->strokeWidthDip);
+                        }
                     }
                 }
                 (*found)->setCursorStyle(style);
@@ -1651,6 +1804,8 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
                 state.selection = current[index].selection;
                 state.showActions = current[index].showActions;
                 state.annotationPlan = current[index].annotationPlan;
+                state.annotationComposite
+                    = current[index].annotationComposite;
                 state.toolbarActions.clear();
                 state.toolbarActions.reserve(current[index].toolbarItems.size());
                 for (const auto& item : current[index].toolbarItems) {
@@ -1694,6 +1849,13 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
                 if (current[index].markerOptions.has_value()) {
                     const auto& options = *current[index].markerOptions;
                     state.markerOptions = OverlayMarkerOptionsRenderState{
+                        options.layout,
+                        options.state,
+                    };
+                }
+                if (current[index].mosaicOptions.has_value()) {
+                    const auto& options = *current[index].mosaicOptions;
+                    state.mosaicOptions = OverlayMosaicOptionsRenderState{
                         options.layout,
                         options.state,
                     };

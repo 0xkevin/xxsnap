@@ -135,9 +135,32 @@ bool ShapeInteraction::beginDrawing(
     AnnotationStyle style,
     float rotationDegrees) noexcept
 {
+    if (!isShapeKind(kind)) {
+        return false;
+    }
+    return beginDrawingInternal(
+        kind, point, style, rotationDegrees, std::nullopt);
+}
+
+bool ShapeInteraction::beginMosaicRectangleDrawing(
+    AnnotationPoint point,
+    AnnotationStyle style,
+    MosaicRedaction redaction,
+    float rotationDegrees) noexcept
+{
+    return beginDrawingInternal(AnnotationKind::mosaicRectangle,
+        point, style, rotationDegrees, redaction);
+}
+
+bool ShapeInteraction::beginDrawingInternal(
+    AnnotationKind kind,
+    AnnotationPoint point,
+    AnnotationStyle style,
+    float rotationDegrees,
+    std::optional<MosaicRedaction> mosaicRedaction) noexcept
+{
     cancel();
-    if (!isShapeKind(kind)
-        || bounds_.width <= 0.0F
+    if (bounds_.width <= 0.0F
         || bounds_.height <= 0.0F) {
         return false;
     }
@@ -149,6 +172,11 @@ bool ShapeInteraction::beginDrawing(
         {startPoint_.x, startPoint_.y, 0.0F, 0.0F},
         style,
         rotationDegrees,
+        std::nullopt,
+        std::nullopt,
+        std::nullopt,
+        std::nullopt,
+        mosaicRedaction,
     };
     mode_ = ShapeInteractionMode::drawing;
     return true;
@@ -250,11 +278,17 @@ bool ShapeInteraction::commit()
     case ShapeInteractionMode::drawing:
         if (preview_->rect.width >= minimumShapeSizeDip
             && preview_->rect.height >= minimumShapeSizeDip) {
-            changed = document_.addShape(
-                preview_->kind,
-                preview_->rect,
-                preview_->style,
-                preview_->rotationDegrees) != invalidAnnotationId;
+            changed = preview_->kind == AnnotationKind::mosaicRectangle
+                ? document_.addMosaicRectangle(
+                    preview_->rect,
+                    *preview_->mosaicRedaction,
+                    preview_->style,
+                    preview_->rotationDegrees) != invalidAnnotationId
+                : document_.addShape(
+                    preview_->kind,
+                    preview_->rect,
+                    preview_->style,
+                    preview_->rotationDegrees) != invalidAnnotationId;
         }
         break;
     case ShapeInteractionMode::moving:
