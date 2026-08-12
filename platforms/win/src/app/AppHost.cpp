@@ -321,6 +321,7 @@ public:
                     MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
             }
         }
+        startRegionCapture("launch");
         return HostInitializationResult::primary;
     }
 

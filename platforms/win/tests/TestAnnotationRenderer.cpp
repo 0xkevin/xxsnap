@@ -6,6 +6,7 @@
 #include <wincodec.h>
 
 #include <array>
+#include <cmath>
 #include <cstdlib>
 #include <iostream>
 
@@ -58,6 +59,27 @@ void testPlanUsesSelectionLocalCoordinatesAndLivePreview()
     CHECK((plan.rotationHandle.value() == AnnotationPoint{250, 106}));
 }
 
+void testEditingPreviewReplacesCommittedShape()
+{
+    AnnotationDocument document;
+    const auto rectangle = document.addShape(
+        AnnotationKind::rectangle, {10, 20, 80, 40});
+    CHECK(document.select(rectangle));
+
+    auto preview = *document.find(rectangle);
+    preview.rect = {30, 40, 80, 40};
+    const auto plan = buildAnnotationRenderPlan(
+        document, preview, {200, 100}, true);
+
+    CHECK(plan.items.size() == 1U);
+    CHECK(plan.items[0].isPreview);
+    CHECK(plan.items[0].annotation.id == rectangle);
+    CHECK((plan.items[0].annotation.rect == AnnotationRect{230, 140, 80, 40}));
+    CHECK(plan.resizeHandles.size() == 8U);
+    CHECK((plan.resizeHandles[0] == AnnotationPoint{230, 140}));
+    CHECK((plan.resizeHandles[7] == AnnotationPoint{310, 180}));
+}
+
 void testMacDashPatternsAreAbsoluteDips()
 {
     CHECK(strokeDashPattern(AnnotationStrokePattern::solid, 4).empty());
@@ -70,6 +92,23 @@ void testMacDashPatternsAreAbsoluteDips()
         == std::vector<float>({8.0F, 4.0F, 0.1F, 4.0F}));
     CHECK(strokeDashPattern(AnnotationStrokePattern::sketchDashed, 7)
         == std::vector<float>({21.0F, 11.2F}));
+
+    CHECK(normalizedStrokeDashPattern(AnnotationStrokePattern::dashLong, 2)
+        == std::vector<float>({4.0F, 2.0F}));
+    CHECK(normalizedStrokeDashPattern(AnnotationStrokePattern::dashNarrow, 2)
+        == std::vector<float>({0.05F, 2.5F}));
+}
+
+void testStrokeMenuSketchSampleUsesExactMacJitter()
+{
+    const auto points = sketchStrokeSamplePoints({10, 10}, {80, 10}, 2.0F);
+    CHECK(points.size() == 11U);
+    CHECK(std::fabs(points[0].x - 10.036321F) < 0.0001F);
+    CHECK(std::fabs(points[0].y - 9.558242F) < 0.0001F);
+    CHECK(std::fabs(points[1].x - 16.986456F) < 0.0001F);
+    CHECK(std::fabs(points[1].y - 10.640533F) < 0.0001F);
+    CHECK(std::fabs(points[10].x - 80.354240F) < 0.0001F);
+    CHECK(std::fabs(points[10].y - 10.536848F) < 0.0001F);
 }
 
 struct SnapshotResources {
@@ -185,6 +224,68 @@ bool sampleCenterAtDpi(std::uint32_t dpi)
     return matches;
 }
 
+bool genericRendererLeavesRotationHandleForMacIconLayer()
+{
+    SnapshotResources resources;
+    if (FAILED(D2D1CreateFactory(
+            D2D1_FACTORY_TYPE_SINGLE_THREADED,
+            &resources.d2dFactory))) {
+        return false;
+    }
+    if (FAILED(CoCreateInstance(
+            CLSID_WICImagingFactory,
+            nullptr,
+            CLSCTX_INPROC_SERVER,
+            IID_PPV_ARGS(&resources.wicFactory)))) {
+        return false;
+    }
+    if (FAILED(resources.wicFactory->CreateBitmap(
+            40U,
+            40U,
+            GUID_WICPixelFormat32bppPBGRA,
+            WICBitmapCacheOnLoad,
+            &resources.bitmap))) {
+        return false;
+    }
+    const auto properties = D2D1::RenderTargetProperties(
+        D2D1_RENDER_TARGET_TYPE_SOFTWARE,
+        D2D1::PixelFormat(
+            DXGI_FORMAT_B8G8R8A8_UNORM,
+            D2D1_ALPHA_MODE_PREMULTIPLIED),
+        96.0F,
+        96.0F);
+    if (FAILED(resources.d2dFactory->CreateWicBitmapRenderTarget(
+            resources.bitmap,
+            properties,
+            &resources.target))) {
+        return false;
+    }
+
+    AnnotationRenderPlan plan;
+    plan.rotationHandle = AnnotationPoint{20.0F, 20.0F};
+    resources.target->BeginDraw();
+    resources.target->Clear(D2D1::ColorF(0, 0));
+    AnnotationRenderer renderer(resources.d2dFactory);
+    if (FAILED(renderer.draw(resources.target, plan))
+        || FAILED(resources.target->EndDraw())) {
+        return false;
+    }
+
+    const WICRect lockRect{20, 20, 1, 1};
+    IWICBitmapLock* lock = nullptr;
+    if (FAILED(resources.bitmap->Lock(&lockRect, WICBitmapLockRead, &lock))) {
+        return false;
+    }
+    UINT byteCount = 0U;
+    BYTE* bytes = nullptr;
+    const auto result = lock->GetDataPointer(&byteCount, &bytes);
+    const auto transparent = SUCCEEDED(result)
+        && byteCount >= 4U
+        && bytes[3] == 0U;
+    lock->Release();
+    return transparent;
+}
+
 void testDirect2DSnapshotsAtAllSupportedDpis()
 {
     const auto comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
@@ -198,12 +299,26 @@ void testDirect2DSnapshotsAtAllSupportedDpis()
     }
 }
 
+void testRotationHandleIsReservedForMacIconLayer()
+{
+    const auto comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    const auto shouldUninitialize = SUCCEEDED(comResult);
+    CHECK(comResult == S_OK || comResult == S_FALSE || comResult == RPC_E_CHANGED_MODE);
+    CHECK(genericRendererLeavesRotationHandleForMacIconLayer());
+    if (shouldUninitialize) {
+        CoUninitialize();
+    }
+}
+
 } // namespace
 
 int main()
 {
     testPlanUsesSelectionLocalCoordinatesAndLivePreview();
+    testEditingPreviewReplacesCommittedShape();
     testMacDashPatternsAreAbsoluteDips();
+    testStrokeMenuSketchSampleUsesExactMacJitter();
     testDirect2DSnapshotsAtAllSupportedDpis();
+    testRotationHandleIsReservedForMacIconLayer();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

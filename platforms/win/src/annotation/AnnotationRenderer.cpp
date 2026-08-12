@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <utility>
 
@@ -323,15 +324,9 @@ HRESULT createStrokeStyle(
     if (factory == nullptr || destination == nullptr) {
         return E_INVALIDARG;
     }
-    const auto absoluteDashes = strokeDashPattern(
+    const auto normalizedDashes = normalizedStrokeDashPattern(
         style.strokePattern,
         style.strokeWidthDip);
-    std::vector<float> normalizedDashes;
-    const auto divisor = maximum(1.0F, style.strokeWidthDip);
-    normalizedDashes.reserve(absoluteDashes.size());
-    for (const auto dash : absoluteDashes) {
-        normalizedDashes.push_back(dash / divisor);
-    }
     const D2D1_STROKE_STYLE_PROPERTIES properties{
         D2D1_CAP_STYLE_ROUND,
         D2D1_CAP_STYLE_ROUND,
@@ -361,6 +356,11 @@ AnnotationRenderPlan buildAnnotationRenderPlan(
     AnnotationRenderPlan plan;
     plan.items.reserve(document.annotations().size() + (preview.has_value() ? 1U : 0U));
     for (const auto& source : document.annotations()) {
+        if (preview.has_value()
+            && preview->id != invalidAnnotationId
+            && source.id == preview->id) {
+            continue;
+        }
         auto annotation = source;
         annotation.rect.x += selectionOriginDip.x;
         annotation.rect.y += selectionOriginDip.y;
@@ -377,11 +377,18 @@ AnnotationRenderPlan buildAnnotationRenderPlan(
         return plan;
     }
     const ShapeAnnotation* editing = nullptr;
+    if (preview.has_value()
+        && preview->id != invalidAnnotationId
+        && !plan.items.empty()) {
+        editing = &plan.items.back().annotation;
+    }
     if (const auto selected = document.selectedId(); selected.has_value()) {
-        for (const auto& item : plan.items) {
-            if (!item.isPreview && item.annotation.id == *selected) {
-                editing = &item.annotation;
-                break;
+        if (editing == nullptr) {
+            for (const auto& item : plan.items) {
+                if (!item.isPreview && item.annotation.id == *selected) {
+                    editing = &item.annotation;
+                    break;
+                }
             }
         }
     }
@@ -425,6 +432,57 @@ std::vector<float> strokeDashPattern(
         return {longDash, gap, 0.1F, gap};
     }
     return {};
+}
+
+std::vector<float> normalizedStrokeDashPattern(
+    AnnotationStrokePattern pattern,
+    float strokeWidthDip)
+{
+    const auto absoluteDashes = strokeDashPattern(pattern, strokeWidthDip);
+    const auto divisor = maximum(1.0F, strokeWidthDip);
+    std::vector<float> normalizedDashes;
+    normalizedDashes.reserve(absoluteDashes.size());
+    for (const auto dash : absoluteDashes) {
+        normalizedDashes.push_back(dash / divisor);
+    }
+    return normalizedDashes;
+}
+
+std::vector<AnnotationPoint> sketchStrokeSamplePoints(
+    AnnotationPoint start,
+    AnnotationPoint end,
+    float lineWidthDip)
+{
+    const auto dx = static_cast<double>(end.x - start.x);
+    const auto dy = static_cast<double>(end.y - start.y);
+    const auto count = (std::max)(
+        1,
+        static_cast<int>(std::ceil(std::hypot(dx, dy) / 7.0)));
+    const auto amplitude = (std::min)(
+        2.2,
+        (std::max)(0.7, static_cast<double>(lineWidthDip) * 0.35));
+    const auto noise = [](int index, double salt) {
+        const auto raw = std::sin(
+            (static_cast<double>(index) + 1.0) * 12.9898
+            + salt * 78.233) * 43758.5453;
+        return (raw - std::floor(raw)) * 2.0 - 1.0;
+    };
+
+    std::vector<AnnotationPoint> points;
+    points.reserve(static_cast<std::size_t>(count + 1));
+    for (int index = 0; index <= count; ++index) {
+        const auto progress = static_cast<double>(index)
+            / static_cast<double>(count);
+        points.push_back({
+            static_cast<float>(
+                static_cast<double>(start.x) + dx * progress
+                + noise(index, 0.19) * amplitude * 0.55),
+            static_cast<float>(
+                static_cast<double>(start.y) + dy * progress
+                + noise(index, 0.73) * amplitude),
+        });
+    }
+    return points;
 }
 
 AnnotationRenderer::AnnotationRenderer(ID2D1Factory* factory) noexcept
@@ -548,7 +606,7 @@ HRESULT AnnotationRenderer::draw(
         renderTarget->SetTransform(previousTransform);
     }
 
-    if (!plan.resizeHandles.empty() || plan.rotationHandle.has_value()) {
+    if (!plan.resizeHandles.empty()) {
         ComPtr<ID2D1SolidColorBrush> blueBrush;
         auto result = renderTarget->CreateSolidColorBrush(
             D2D1::ColorF(0.0F, 122.0F / 255.0F, 1.0F, 1.0F),
@@ -572,9 +630,6 @@ HRESULT AnnotationRenderer::draw(
         };
         for (const auto point : plan.resizeHandles) {
             drawHandle(point);
-        }
-        if (plan.rotationHandle.has_value()) {
-            drawHandle(*plan.rotationHandle);
         }
     }
     return S_OK;

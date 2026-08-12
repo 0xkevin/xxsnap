@@ -14,6 +14,7 @@ using xxsnap::win::OverlayInputAction;
 using xxsnap::win::OverlayInputPlatform;
 using xxsnap::win::OverlayInputRouter;
 using xxsnap::win::OverlayInputStatus;
+using xxsnap::win::OverlayCursorStyle;
 using xxsnap::win::OverlaySurface;
 using xxsnap::win::SelectionPhase;
 using xxsnap::win::ShapeEditorKey;
@@ -484,6 +485,41 @@ void testShapeToolIsNonTerminalAndEditsThroughSharedPresentation()
     CHECK(actions[0] == OverlayInputAction::copy);
 }
 
+void testShapeCanBeCreatedOutsideLockedSelectionOnOverlay()
+{
+    FakePlatform platform;
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform, {}, true);
+    createReadySelection(router);
+
+    auto owner = router.presentations()[1];
+    CHECK(router.pointerDown(
+        rightWindow, owner.toolbarItems[0].centerPhysical));
+    CHECK(router.cursorStyle(rightWindow, PixelPoint{200, 20})
+        == OverlayCursorStyle::crosshair);
+
+    CHECK(router.pointerDown(rightWindow, PixelPoint{200, 20}));
+    CHECK(router.cursorStyle(rightWindow, PixelPoint{320, 60})
+        == OverlayCursorStyle::crosshair);
+    router.platformPointerMove(PixelPoint{320, 60});
+    router.platformPointerUp(PixelPoint{320, 60});
+
+    CHECK(router.annotationDocument().annotations().size() == 1U);
+    if (!router.annotationDocument().annotations().empty()) {
+        const auto rect = router.annotationDocument().annotations()[0].rect;
+        CHECK(rect.y < 0.0F);
+        CHECK(rect.width > 70.0F);
+        CHECK(rect.height > 20.0F);
+    }
+
+    CHECK(router.cursorStyle(rightWindow, PixelPoint{235, 20})
+        == OverlayCursorStyle::move);
+    CHECK(router.pointerDown(rightWindow, PixelPoint{235, 20}));
+    CHECK(router.cursorStyle(rightWindow, PixelPoint{400, 100})
+        == OverlayCursorStyle::move);
+    router.platformPointerUp(PixelPoint{235, 20});
+}
+
 } // namespace
 
 int main()
@@ -499,5 +535,6 @@ int main()
     testTerminalCallbackMaySynchronouslyDestroyRouter();
     testRestartShutdownReleasesCaptureAndHotKeyWithoutCancelAction();
     testShapeToolIsNonTerminalAndEditsThroughSharedPresentation();
+    testShapeCanBeCreatedOutsideLockedSelectionOnOverlay();
     return failureCount == 0 ? 0 : 1;
 }

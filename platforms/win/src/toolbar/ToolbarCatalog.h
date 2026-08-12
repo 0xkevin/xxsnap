@@ -84,7 +84,7 @@ inline constexpr std::array imageResources{
         IDR_TOOLBAR_200_SETTINGS_MORE_PNG,
     },
     ToolbarIconSpec{
-        L"screenshot", -1.0F, false,
+        L"screenshot", 0.0F, false,
         IDR_TOOLBAR_100_SCREENSHOT_PNG,
         IDR_TOOLBAR_125_SCREENSHOT_PNG,
         IDR_TOOLBAR_150_SCREENSHOT_PNG,
@@ -216,6 +216,13 @@ inline constexpr std::array imageResources{
         IDR_TOOLBAR_150_COPY_TO_CLIPBOARD_PNG,
         IDR_TOOLBAR_200_COPY_TO_CLIPBOARD_PNG,
     },
+    ToolbarIconSpec{
+        L"refresh-svgrepo-com3", 4.0F, true,
+        IDR_TOOLBAR_100_REFRESH_SVGREPO_COM3_PNG,
+        IDR_TOOLBAR_125_REFRESH_SVGREPO_COM3_PNG,
+        IDR_TOOLBAR_150_REFRESH_SVGREPO_COM3_PNG,
+        IDR_TOOLBAR_200_REFRESH_SVGREPO_COM3_PNG,
+    },
 };
 
 inline constexpr std::array<std::size_t, fullActions.size()> actionIconIndices{
@@ -273,6 +280,16 @@ constexpr const ToolbarIconSpec& disabledToolbarIcon(
 constexpr const ToolbarIconSpec& dragHandleIcon() noexcept
 {
     return toolbar_catalog_detail::imageResources[0];
+}
+
+constexpr const ToolbarIconSpec& rotationHandleIcon() noexcept
+{
+    return toolbar_catalog_detail::imageResources.back();
+}
+
+constexpr std::size_t rotationHandleIconIndex() noexcept
+{
+    return toolbar_catalog_detail::imageResources.size() - 1U;
 }
 
 constexpr const auto& toolbarImageResources() noexcept

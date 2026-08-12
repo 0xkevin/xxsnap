@@ -66,6 +66,17 @@ enum class DpiRestartResult {
     closeOverlay,
 };
 
+enum class OverlayCursorStyle : std::uint8_t {
+    arrow,
+    crosshair,
+    move,
+    resizeLeftRight,
+    resizeUpDown,
+    resizeTopLeftBottomRight,
+    resizeTopRightBottomLeft,
+    rotation,
+};
+
 class DpiRestartDecision final {
 public:
     DpiRestartDecision();
@@ -125,6 +136,7 @@ public:
         std::optional<PixelRect> selection,
         bool showActions = true) noexcept;
     void setRenderState(OverlayRenderState state) noexcept;
+    void setCursorStyle(OverlayCursorStyle style) noexcept;
     DpiRestartState dpiRestartState() const noexcept;
     const std::optional<OverlayWindowError>& lastWindowError() const noexcept;
     const std::optional<OverlayRendererError>& lastRendererError() const noexcept;
@@ -143,6 +155,7 @@ private:
         LPARAM lParam) noexcept;
     LRESULT handleMessage(UINT message, WPARAM wParam, LPARAM lParam) noexcept;
     void paint() noexcept;
+    HCURSOR cursor() const noexcept;
 
     HINSTANCE instance_ = nullptr;
     HWND window_ = nullptr;
@@ -152,6 +165,7 @@ private:
     DpiRestartDecision dpiRestartDecision_;
     OverlayRenderer renderer_;
     OverlayRenderState renderState_;
+    OverlayCursorStyle cursorStyle_ = OverlayCursorStyle::crosshair;
     std::optional<OverlayRendererError> lastRendererError_;
 };
 

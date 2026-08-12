@@ -42,6 +42,53 @@ bool contains(AnnotationRect rect, AnnotationPoint point) noexcept
         && point.y <= rect.y + rect.height;
 }
 
+OverlayCursorStyle cursorStyleForSelectionHandle(
+    SelectionHandle handle) noexcept
+{
+    switch (handle) {
+    case SelectionHandle::body:
+        return OverlayCursorStyle::move;
+    case SelectionHandle::north:
+    case SelectionHandle::south:
+        return OverlayCursorStyle::resizeUpDown;
+    case SelectionHandle::east:
+    case SelectionHandle::west:
+        return OverlayCursorStyle::resizeLeftRight;
+    case SelectionHandle::northWest:
+    case SelectionHandle::southEast:
+        return OverlayCursorStyle::resizeTopLeftBottomRight;
+    case SelectionHandle::northEast:
+    case SelectionHandle::southWest:
+        return OverlayCursorStyle::resizeTopRightBottomLeft;
+    case SelectionHandle::none:
+        return OverlayCursorStyle::crosshair;
+    }
+    return OverlayCursorStyle::crosshair;
+}
+
+OverlayCursorStyle cursorStyleForShape(ShapeCursorStyle style) noexcept
+{
+    switch (style) {
+    case ShapeCursorStyle::arrow:
+        return OverlayCursorStyle::arrow;
+    case ShapeCursorStyle::crosshair:
+        return OverlayCursorStyle::crosshair;
+    case ShapeCursorStyle::move:
+        return OverlayCursorStyle::move;
+    case ShapeCursorStyle::resizeLeftRight:
+        return OverlayCursorStyle::resizeLeftRight;
+    case ShapeCursorStyle::resizeUpDown:
+        return OverlayCursorStyle::resizeUpDown;
+    case ShapeCursorStyle::resizeTopLeftBottomRight:
+        return OverlayCursorStyle::resizeTopLeftBottomRight;
+    case ShapeCursorStyle::resizeTopRightBottomLeft:
+        return OverlayCursorStyle::resizeTopRightBottomLeft;
+    case ShapeCursorStyle::rotation:
+        return OverlayCursorStyle::rotation;
+    }
+    return OverlayCursorStyle::arrow;
+}
+
 PixelRect buttonRectPhysical(DipRect rect, const OverlaySurface& surface) noexcept
 {
     const auto left = dipLengthToPhysicalPixels(rect.x, surface.dpiX);
@@ -207,10 +254,12 @@ void OverlayInputRouter::ensureEditor() noexcept
         *model_.selection());
     const auto& surface = surfaces_[*owner];
     const AnnotationRect bounds{
-        0.0F,
-        0.0F,
-        physicalPixelsToDip(selection.width, surface.dpiX),
-        physicalPixelsToDip(selection.height, surface.dpiY),
+        physicalPixelsToDip(
+            surface.physicalBounds.x - selection.x, surface.dpiX),
+        physicalPixelsToDip(
+            surface.physicalBounds.y - selection.y, surface.dpiY),
+        physicalPixelsToDip(surface.physicalBounds.width, surface.dpiX),
+        physicalPixelsToDip(surface.physicalBounds.height, surface.dpiY),
     };
     if (!editor_) {
         try {
@@ -648,6 +697,61 @@ bool OverlayInputRouter::pointerDown(HWND source, PixelPoint clientPoint) noexce
     return true;
 }
 
+OverlayCursorStyle OverlayInputRouter::cursorStyle(
+    HWND source, PixelPoint clientPoint) const noexcept
+{
+    if (status_ != OverlayInputStatus::active) {
+        return OverlayCursorStyle::arrow;
+    }
+    const auto* surface = surfaceFor(source);
+    if (surface == nullptr) {
+        return OverlayCursorStyle::arrow;
+    }
+    if (hitToolbarAction(*surface, clientPoint).has_value()) {
+        return OverlayCursorStyle::arrow;
+    }
+
+    const AnnotationPoint surfacePoint{
+        static_cast<float>(clientPoint.x) * 96.0F
+            / static_cast<float>(surface->dpiX),
+        static_cast<float>(clientPoint.y) * 96.0F
+            / static_cast<float>(surface->dpiY),
+    };
+    if (editorOwnerIndex_.has_value()
+        && &surfaces_[*editorOwnerIndex_] == surface) {
+        if (const auto options = currentShapeOptionsLayout(*surface);
+            options.has_value() && contains(options->toolbar, surfacePoint)) {
+            return OverlayCursorStyle::arrow;
+        }
+    }
+
+    const auto virtualPoint = toVirtual(*surface, clientPoint);
+    if (editor_ != nullptr) {
+        if (const auto local = annotationPoint(virtualPoint)) {
+            const auto shapeStyle = editor_->cursorStyleAt(*local);
+            if (shapeStyle != ShapeCursorStyle::arrow) {
+                return cursorStyleForShape(shapeStyle);
+            }
+        }
+    }
+
+    if (model_.phase() == SelectionPhase::moving) {
+        return OverlayCursorStyle::move;
+    }
+    if (model_.phase() == SelectionPhase::resizing) {
+        return cursorStyleForSelectionHandle(model_.activeHandle());
+    }
+    if (model_.phase() == SelectionPhase::ready) {
+        const auto radius = (std::max<std::int64_t>)(
+            1, dipLengthToPhysicalPixels(
+                VisualStyleCatalog::selectionHandleDiameterDip / 2.0F,
+                (std::max)(surface->dpiX, surface->dpiY)));
+        return cursorStyleForSelectionHandle(
+            model_.hitTest(virtualPoint, radius));
+    }
+    return OverlayCursorStyle::crosshair;
+}
+
 void OverlayInputRouter::pointerMove(HWND, PixelPoint) noexcept
 {
     if (!dragging_ || status_ != OverlayInputStatus::active) {
@@ -969,6 +1073,20 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
             router->keyPressed(key, input.control, input.shift);
             break;
         }
+        }
+        if (router
+            && (input.kind == OverlayWindowInputKind::pointerDown
+                || input.kind == OverlayWindowInputKind::pointerMove
+                || input.kind == OverlayWindowInputKind::pointerUp)) {
+            const auto style = router->cursorStyle(source, input.clientPoint);
+            const auto found = std::find_if(
+                windows.begin(), windows.end(),
+                [source](const auto& window) {
+                    return window != nullptr && window->handle() == source;
+                });
+            if (found != windows.end()) {
+                (*found)->setCursorStyle(style);
+            }
         }
         if (!refresh()) {
             router->cancelMode();

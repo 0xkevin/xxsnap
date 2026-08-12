@@ -284,6 +284,20 @@ ShapeOptionsLayout shapeOptionsLayout(
     layout.ellipseModeBackground = inset(
         layout.ellipseMode, -3.0F, -5.0F);
     layout.strokeStyle = {origin.x + 204.0F, controlY, 102.0F, 20.0F};
+    layout.strokeStyleSampleStart = {
+        layout.strokeStyle.x + 10.0F,
+        layout.strokeStyle.y + layout.strokeStyle.height / 2.0F,
+    };
+    layout.strokeStyleSampleEnd = {
+        layout.strokeStyle.x + layout.strokeStyle.width - 22.0F,
+        layout.strokeStyle.y + layout.strokeStyle.height / 2.0F,
+    };
+    layout.strokeStyleDisclosure = {
+        layout.strokeStyle.x + layout.strokeStyle.width - 16.0F,
+        layout.strokeStyle.y + layout.strokeStyle.height / 2.0F - 2.0F,
+        7.0F,
+        5.0F,
+    };
 
     for (std::size_t index = 0; index < layout.paletteCount; ++index) {
         const auto column = index % columns;
@@ -378,11 +392,20 @@ StrokePatternMenuLayout strokePatternMenuLayout(AnnotationRect menu)
     layout.menu = standardized(menu);
     constexpr std::size_t itemCount = 6U;
     for (std::size_t index = 0; index < itemCount; ++index) {
-        layout.items.push_back({
+        const AnnotationRect item{
             layout.menu.x + 4.0F,
             layout.menu.y + 4.0F + static_cast<float>(index) * 24.0F,
             layout.menu.width - 8.0F,
             20.0F,
+        };
+        layout.items.push_back(item);
+        layout.sampleStarts.push_back({
+            item.x + 10.0F,
+            item.y + item.height / 2.0F,
+        });
+        layout.sampleEnds.push_back({
+            item.x + item.width - 10.0F,
+            item.y + item.height / 2.0F,
         });
     }
     return layout;

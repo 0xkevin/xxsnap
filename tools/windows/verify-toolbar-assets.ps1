@@ -10,7 +10,8 @@ $expectedNames = @(
     "straw-ranging", "masaike2", "text-tool", "number-sequence",
     "zoom-in-tool", "eraser-tool", "scroll-screen2",
     "undo-enabled", "undo-disabled", "redo-enabled", "redo-disabled",
-    "cancel-capture", "pin-to-screen", "save-to-file", "copy-to-clipboard"
+    "cancel-capture", "pin-to-screen", "save-to-file", "copy-to-clipboard",
+    "refresh-svgrepo-com3"
 )
 $expectedScales = @("100", "125", "150", "200")
 
