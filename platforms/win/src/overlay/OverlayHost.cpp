@@ -330,6 +330,41 @@ OverlayInputRouter::currentShapeOptionsLayout(
     return shapeOptionsLayout({x, y}, macShapePalette().size());
 }
 
+std::optional<ArrowLineOptionsLayout>
+OverlayInputRouter::currentArrowLineOptionsLayout(
+    const OverlaySurface& surface) const
+{
+    if (!editor_ || !editor_->isArrowLineToolActive()
+        || !model_.selection().has_value()) {
+        return std::nullopt;
+    }
+    const auto chrome = computeOverlayLayout({
+        surface.physicalBounds,
+        *model_.selection(),
+        surface.dpiX,
+        surface.dpiY,
+        0.0F,
+        true,
+        toolbarActions(),
+    });
+    const auto initial = arrowLineOptionsLayout({}, macShapePalette().size());
+    const AnnotationRect safe{
+        8.0F, 8.0F,
+        (std::max)(0.0F, chrome.overlayBounds.width - 16.0F),
+        (std::max)(0.0F, chrome.overlayBounds.height - 16.0F),
+    };
+    const auto x = (std::max)(safe.x, (std::min)(
+        chrome.toolbar.bounds.x,
+        safe.x + (std::max)(0.0F, safe.width - initial.toolbar.width)));
+    auto y = chrome.toolbar.bounds.y + chrome.toolbar.bounds.height + 8.0F;
+    if (y + initial.toolbar.height > safe.y + safe.height) {
+        y = chrome.toolbar.bounds.y - 8.0F - initial.toolbar.height;
+    }
+    y = (std::max)(safe.y, (std::min)(
+        y, safe.y + (std::max)(0.0F, safe.height - initial.toolbar.height)));
+    return arrowLineOptionsLayout({x, y}, macShapePalette().size());
+}
+
 OverlayInputRouter::~OverlayInputRouter()
 {
     if (dragging_) {
@@ -515,6 +550,48 @@ std::vector<OverlayPresentation> OverlayInputRouter::presentations() const
                 }
                 presentation.shapeOptions = std::move(shapeOptions);
             }
+            if (const auto options = currentArrowLineOptionsLayout(surface)) {
+                OverlayPresentationArrowLineOptions arrowOptions{
+                    *options,
+                    editor_->arrowLineOptions(),
+                    std::nullopt,
+                };
+                if (editor_->strokePatternMenuVisible()) {
+                    constexpr float menuHeight = 6.0F * 24.0F + 8.0F;
+                    auto menuRect = AnnotationRect{
+                        options->strokeStyle.x,
+                        options->strokeStyle.y + options->strokeStyle.height + 8.0F,
+                        options->strokeStyle.width,
+                        menuHeight,
+                    };
+                    const auto safeHeight = physicalPixelsToDip(
+                        surface.physicalBounds.height, surface.dpiY);
+                    if (menuRect.y + menuRect.height > safeHeight - 8.0F) {
+                        menuRect.y = options->strokeStyle.y - 8.0F - menuHeight;
+                    }
+                    arrowOptions.strokePatternMenu =
+                        strokePatternMenuLayout(menuRect);
+                }
+                if (const auto endpoint = editor_->arrowTypeMenuEndpoint()) {
+                    const auto field = *endpoint == ArrowEndpoint::start
+                        ? options->startArrowType
+                        : options->endArrowType;
+                    auto menuRect = AnnotationRect{
+                        field.x,
+                        options->toolbar.y + options->toolbar.height + 8.0F,
+                        58.0F,
+                        176.0F,
+                    };
+                    const auto safeHeight = physicalPixelsToDip(
+                        surface.physicalBounds.height, surface.dpiY);
+                    if (menuRect.y + menuRect.height > safeHeight - 8.0F) {
+                        menuRect.y = options->toolbar.y - 8.0F - menuRect.height;
+                    }
+                    arrowOptions.arrowTypeMenu = arrowTypeMenuLayout(menuRect);
+                    arrowOptions.arrowTypeMenuEndpoint = endpoint;
+                }
+                presentation.arrowLineOptions = std::move(arrowOptions);
+            }
         }
     }
     return result;
@@ -647,6 +724,71 @@ bool OverlayInputRouter::pointerDown(HWND source, PixelPoint clientPoint) noexce
             }
             editor_->dismissPopovers();
         }
+        if (const auto options = currentArrowLineOptionsLayout(*surface);
+            options.has_value()) {
+            const AnnotationPoint point{x, y};
+            if (editor_->strokePatternMenuVisible()) {
+                constexpr float menuHeight = 6.0F * 24.0F + 8.0F;
+                auto menuRect = AnnotationRect{
+                    options->strokeStyle.x,
+                    options->strokeStyle.y + options->strokeStyle.height + 8.0F,
+                    options->strokeStyle.width,
+                    menuHeight,
+                };
+                const auto safeHeight = physicalPixelsToDip(
+                    surface->physicalBounds.height, surface->dpiY);
+                if (menuRect.y + menuRect.height > safeHeight - 8.0F) {
+                    menuRect.y = options->strokeStyle.y - 8.0F - menuHeight;
+                }
+                if (const auto pattern = hitTestStrokePatternMenu(
+                        strokePatternMenuLayout(menuRect), point)) {
+                    editor_->applyStrokePattern(*pattern);
+                    return true;
+                }
+            }
+            if (const auto endpoint = editor_->arrowTypeMenuEndpoint()) {
+                const auto field = *endpoint == ArrowEndpoint::start
+                    ? options->startArrowType
+                    : options->endArrowType;
+                auto menuRect = AnnotationRect{
+                    field.x,
+                    options->toolbar.y + options->toolbar.height + 8.0F,
+                    58.0F,
+                    176.0F,
+                };
+                const auto safeHeight = physicalPixelsToDip(
+                    surface->physicalBounds.height, surface->dpiY);
+                if (menuRect.y + menuRect.height > safeHeight - 8.0F) {
+                    menuRect.y = options->toolbar.y - 8.0F - menuRect.height;
+                }
+                const auto menu = arrowTypeMenuLayout(menuRect);
+                if (const auto type = hitTestArrowTypeMenu(menu, point)) {
+                    editor_->applyArrowType(*endpoint, *type);
+                    return true;
+                }
+                if (contains(menu.menu, point)) {
+                    return true;
+                }
+            }
+            if (const auto hit = arrowLineOptionHitTest(*options, point)) {
+                if (hit->control == ArrowLineOptionControl::customColor) {
+                    if (const auto chosen = platform_.chooseColor(
+                            source,
+                            editor_->arrowLineOptions().style().strokeColor)) {
+                        editor_->selectCustomColor(*chosen);
+                    }
+                    return true;
+                }
+                if (hit->control == ArrowLineOptionControl::startArrowType
+                    || hit->control == ArrowLineOptionControl::endArrowType) {
+                    editor_->applyArrowLineOptionHit(*hit);
+                    return true;
+                }
+                editor_->applyArrowLineOptionHit(*hit);
+                return true;
+            }
+            editor_->dismissPopovers();
+        }
     }
 
     const auto virtualPoint = toVirtual(*surface, clientPoint);
@@ -771,6 +913,48 @@ OverlayCursorStyle OverlayInputRouter::cursorStyle(
                 if (contains(
                         cornerRadiusPanelLayout(*options, safe).panel,
                         surfacePoint)) {
+                    return OverlayCursorStyle::arrow;
+                }
+            }
+        }
+        if (const auto options = currentArrowLineOptionsLayout(*surface);
+            options.has_value()) {
+            if (contains(options->toolbar, surfacePoint)) {
+                return OverlayCursorStyle::arrow;
+            }
+            if (editor_->strokePatternMenuVisible()) {
+                constexpr float menuHeight = 6.0F * 24.0F + 8.0F;
+                auto menuRect = AnnotationRect{
+                    options->strokeStyle.x,
+                    options->strokeStyle.y + options->strokeStyle.height + 8.0F,
+                    options->strokeStyle.width,
+                    menuHeight,
+                };
+                const auto safeHeight = physicalPixelsToDip(
+                    surface->physicalBounds.height, surface->dpiY);
+                if (menuRect.y + menuRect.height > safeHeight - 8.0F) {
+                    menuRect.y = options->strokeStyle.y - 8.0F - menuHeight;
+                }
+                if (contains(strokePatternMenuLayout(menuRect).menu, surfacePoint)) {
+                    return OverlayCursorStyle::arrow;
+                }
+            }
+            if (const auto endpoint = editor_->arrowTypeMenuEndpoint()) {
+                const auto field = *endpoint == ArrowEndpoint::start
+                    ? options->startArrowType
+                    : options->endArrowType;
+                auto menuRect = AnnotationRect{
+                    field.x,
+                    options->toolbar.y + options->toolbar.height + 8.0F,
+                    58.0F,
+                    176.0F,
+                };
+                const auto safeHeight = physicalPixelsToDip(
+                    surface->physicalBounds.height, surface->dpiY);
+                if (menuRect.y + menuRect.height > safeHeight - 8.0F) {
+                    menuRect.y = options->toolbar.y - 8.0F - menuRect.height;
+                }
+                if (contains(arrowTypeMenuLayout(menuRect).menu, surfacePoint)) {
                     return OverlayCursorStyle::arrow;
                 }
             }
@@ -1180,6 +1364,16 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
                         options.state,
                         options.strokePatternMenu,
                         options.cornerRadiusPanel,
+                    };
+                }
+                if (current[index].arrowLineOptions.has_value()) {
+                    const auto& options = *current[index].arrowLineOptions;
+                    state.arrowLineOptions = OverlayArrowLineOptionsRenderState{
+                        options.layout,
+                        options.state,
+                        options.strokePatternMenu,
+                        options.arrowTypeMenu,
+                        options.arrowTypeMenuEndpoint,
                     };
                 }
                 windows[index]->setRenderState(std::move(state));

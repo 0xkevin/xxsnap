@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 
 namespace xxsnap::win {
 
@@ -56,6 +57,15 @@ constexpr AnnotationRect translated(
     rect.x += offset.x;
     rect.y += offset.y;
     return rect;
+}
+
+constexpr AnnotationPoint translated(
+    AnnotationPoint point,
+    AnnotationPoint offset) noexcept
+{
+    point.x += offset.x;
+    point.y += offset.y;
+    return point;
 }
 
 struct AnnotationColor {
@@ -139,12 +149,54 @@ constexpr bool isShapeKind(AnnotationKind kind) noexcept
         || kind == AnnotationKind::ellipse;
 }
 
+enum class ArrowType : std::uint8_t {
+    none,
+    bar,
+    dot,
+    diamond,
+    normal,
+    solidArrow,
+    hollowArrow,
+};
+
+enum class ArrowEndpoint : std::uint8_t {
+    start,
+    end,
+};
+
+struct ArrowLine {
+    AnnotationPoint start{};
+    AnnotationPoint end{};
+    AnnotationPoint control{};
+    ArrowType startArrowType = ArrowType::none;
+    ArrowType endArrowType = ArrowType::normal;
+};
+
+constexpr bool operator==(
+    const ArrowLine& left,
+    const ArrowLine& right) noexcept
+{
+    return left.start == right.start
+        && left.end == right.end
+        && left.control == right.control
+        && left.startArrowType == right.startArrowType
+        && left.endArrowType == right.endArrowType;
+}
+
+constexpr bool operator!=(
+    const ArrowLine& left,
+    const ArrowLine& right) noexcept
+{
+    return !(left == right);
+}
+
 struct ShapeAnnotation {
     AnnotationId id = invalidAnnotationId;
     AnnotationKind kind = AnnotationKind::rectangle;
     AnnotationRect rect{};
     AnnotationStyle style{};
     float rotationDegrees = 0.0F;
+    std::optional<ArrowLine> arrowLine;
 };
 
 constexpr bool operator==(
@@ -155,7 +207,8 @@ constexpr bool operator==(
         && left.kind == right.kind
         && left.rect == right.rect
         && left.style == right.style
-        && left.rotationDegrees == right.rotationDegrees;
+        && left.rotationDegrees == right.rotationDegrees
+        && left.arrowLine == right.arrowLine;
 }
 
 } // namespace xxsnap::win

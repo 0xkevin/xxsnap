@@ -544,6 +544,178 @@ struct OverlayRenderer::Impl final {
         return std::nullopt;
     }
 
+    std::optional<OverlayRendererError> drawArrowLineOptions(
+        const OverlayArrowLineOptionsRenderState& options) noexcept
+    {
+        ComPtr<ID2D1SolidColorBrush> panelBrush;
+        ComPtr<ID2D1SolidColorBrush> borderBrush;
+        ComPtr<ID2D1SolidColorBrush> selectionBrush;
+        ComPtr<ID2D1SolidColorBrush> textBrush;
+        ComPtr<ID2D1SolidColorBrush> whiteBrush;
+        const std::array results{
+            createBrush(colorWithMultipliedAlpha(
+                VisualStyleCatalog::toolbarBackgroundColor, 0.96F), panelBrush),
+            createBrush(D2D1::ColorF(0.0F, 0.0F, 0.0F, 0.16F), borderBrush),
+            createBrush(D2D1::ColorF(0.0F, 0.48F, 1.0F, 1.0F), selectionBrush),
+            createBrush(D2D1::ColorF(0.12F, 0.12F, 0.12F, 1.0F), textBrush),
+            createBrush(D2D1::ColorF(D2D1::ColorF::White), whiteBrush),
+        };
+        for (const auto& result : results) {
+            if (result.has_value()) {
+                return result;
+            }
+        }
+        const auto drawPanel = [this, &panelBrush, &borderBrush](
+                                   AnnotationRect bounds) {
+            const auto rounded = D2D1::RoundedRect(d2dRect(bounds), 6.0F, 6.0F);
+            renderTarget->FillRoundedRectangle(&rounded, panelBrush.get());
+            renderTarget->DrawRoundedRectangle(&rounded, borderBrush.get(), 1.0F);
+        };
+        drawPanel(options.layout.toolbar);
+
+        constexpr std::array<float, 3> widths{3.0F, 4.0F, 6.0F};
+        for (std::size_t index = 0;
+             index < options.layout.strokeWidths.size() && index < widths.size();
+             ++index) {
+            const auto rect = options.layout.strokeWidths[index];
+            auto* brush = options.state.style().strokeWidthDip == widths[index]
+                ? selectionBrush.get()
+                : textBrush.get();
+            renderTarget->DrawLine(
+                D2D1::Point2F(rect.x + 4.0F, rect.y + 10.0F),
+                D2D1::Point2F(rect.x + rect.width - 4.0F, rect.y + 10.0F),
+                brush, widths[index]);
+        }
+
+        const auto field = D2D1::RoundedRect(
+            d2dRect(options.layout.strokeStyle), 4.0F, 4.0F);
+        renderTarget->FillRoundedRectangle(&field, whiteBrush.get());
+        renderTarget->DrawRoundedRectangle(&field, borderBrush.get(), 1.0F);
+        auto result = drawStrokeSample(
+            options.layout.strokeStyleSampleStart,
+            options.layout.strokeStyleSampleEnd,
+            options.state.style().strokePattern,
+            2.0F,
+            textBrush.get());
+        if (FAILED(result)) {
+            return error(OverlayRendererErrorCode::drawFailed, result);
+        }
+
+        const auto drawEndpointField = [this, &borderBrush, &whiteBrush, &textBrush](
+            AnnotationRect rect, ArrowType type, bool pointsLeft) {
+            const auto rounded = D2D1::RoundedRect(d2dRect(rect), 4.0F, 4.0F);
+            renderTarget->FillRoundedRectangle(&rounded, whiteBrush.get());
+            renderTarget->DrawRoundedRectangle(&rounded, borderBrush.get(), 1.0F);
+            const auto centerY = rect.y + rect.height / 2.0F;
+            const auto startX = rect.x + 9.0F;
+            const auto endX = rect.x + rect.width - 12.0F;
+            renderTarget->DrawLine(
+                D2D1::Point2F(startX, centerY),
+                D2D1::Point2F(endX, centerY), textBrush.get(), 1.5F);
+            if (type != ArrowType::none) {
+                const auto tipX = pointsLeft ? startX : endX;
+                const auto bodyX = pointsLeft ? tipX + 7.0F : tipX - 7.0F;
+                if (type == ArrowType::dot) {
+                    const auto dot = D2D1::Ellipse(
+                        D2D1::Point2F(tipX, centerY), 2.5F, 2.5F);
+                    renderTarget->FillEllipse(&dot, textBrush.get());
+                } else if (type == ArrowType::bar) {
+                    renderTarget->DrawLine(
+                        D2D1::Point2F(tipX, centerY - 4.0F),
+                        D2D1::Point2F(tipX, centerY + 4.0F),
+                        textBrush.get(), 1.5F);
+                } else {
+                    renderTarget->DrawLine(
+                        D2D1::Point2F(tipX, centerY),
+                        D2D1::Point2F(bodyX, centerY - 4.0F),
+                        textBrush.get(), 1.5F);
+                    renderTarget->DrawLine(
+                        D2D1::Point2F(tipX, centerY),
+                        D2D1::Point2F(bodyX, centerY + 4.0F),
+                        textBrush.get(), 1.5F);
+                }
+            }
+        };
+        drawEndpointField(options.layout.startArrowType,
+            options.state.startArrowType(), true);
+        drawEndpointField(options.layout.endArrowType,
+            options.state.endArrowType(), false);
+
+        const auto& palette = macShapePalette();
+        for (std::size_t index = 0;
+             index < options.layout.paletteCount && index < palette.size();
+             ++index) {
+            auto swatch = options.layout.colorSwatches[index];
+            const auto selected = options.state.selectedPaletteIndex() == index;
+            if (selected) {
+                swatch = {swatch.x - 3.0F, swatch.y - 3.0F,
+                    swatch.width + 6.0F, swatch.height + 6.0F};
+            }
+            ComPtr<ID2D1SolidColorBrush> swatchBrush;
+            if (const auto brushError = createBrush(
+                    annotationColor(palette[index]), swatchBrush)) {
+                return brushError;
+            }
+            const auto rounded = D2D1::RoundedRect(
+                d2dRect(swatch), selected ? 4.0F : 2.5F,
+                selected ? 4.0F : 2.5F);
+            renderTarget->FillRoundedRectangle(&rounded, swatchBrush.get());
+            renderTarget->DrawRoundedRectangle(&rounded,
+                selected ? selectionBrush.get() : borderBrush.get(),
+                selected ? 1.5F : 1.0F);
+        }
+        if (!options.layout.colorSwatches.empty()) {
+            renderTarget->DrawBitmap(paletteBitmap.get(),
+                d2dRect(options.layout.colorSwatches.back()), 1.0F,
+                D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+        }
+        if (options.strokePatternMenu.has_value()) {
+            drawPanel(options.strokePatternMenu->menu);
+            const auto& patterns = macShapeStrokePatterns();
+            for (std::size_t index = 0;
+                 index < options.strokePatternMenu->items.size()
+                    && index < patterns.size(); ++index) {
+                result = drawStrokeSample(
+                    options.strokePatternMenu->sampleStarts[index],
+                    options.strokePatternMenu->sampleEnds[index],
+                    patterns[index], 2.0F,
+                    patterns[index] == options.state.style().strokePattern
+                        ? selectionBrush.get()
+                        : textBrush.get());
+                if (FAILED(result)) {
+                    return error(OverlayRendererErrorCode::drawFailed, result);
+                }
+            }
+        }
+        if (options.arrowTypeMenu.has_value()
+            && options.arrowTypeMenuEndpoint.has_value()) {
+            drawPanel(options.arrowTypeMenu->menu);
+            const auto& types = macArrowTypes();
+            const auto selectedType = *options.arrowTypeMenuEndpoint
+                == ArrowEndpoint::start
+                ? options.state.startArrowType()
+                : options.state.endArrowType();
+            for (std::size_t index = 0;
+                 index < options.arrowTypeMenu->items.size()
+                    && index < types.size(); ++index) {
+                auto item = options.arrowTypeMenu->items[index];
+                if (types[index] == selectedType) {
+                    const auto selected = D2D1::RoundedRect(
+                        d2dRect(item), 4.0F, 4.0F);
+                    renderTarget->DrawRoundedRectangle(
+                        &selected, selectionBrush.get(), 1.5F);
+                }
+                item.x += 4.0F;
+                item.width -= 8.0F;
+                drawEndpointField(
+                    item,
+                    types[index],
+                    *options.arrowTypeMenuEndpoint == ArrowEndpoint::start);
+            }
+        }
+        return std::nullopt;
+    }
+
     std::optional<OverlayRendererError> createIconBitmap(
         int resourceId,
         ID2D1Bitmap** destination) noexcept
@@ -1330,6 +1502,13 @@ struct OverlayRenderer::Impl final {
 
             if (state.shapeOptions.has_value()) {
                 if (const auto optionsError = drawShapeOptions(*state.shapeOptions)) {
+                    renderTarget->EndDraw();
+                    return optionsError;
+                }
+            }
+            if (state.arrowLineOptions.has_value()) {
+                if (const auto optionsError = drawArrowLineOptions(
+                        *state.arrowLineOptions)) {
                     renderTarget->EndDraw();
                     return optionsError;
                 }

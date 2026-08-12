@@ -24,6 +24,7 @@ void testToolbarCapabilityAndPrimaryToolToggle()
     ShapeEditorController editor({0, 0, 300, 200});
     const std::vector expected{
         ToolbarAction::rectangle,
+        ToolbarAction::polyline,
         ToolbarAction::undo,
         ToolbarAction::redo,
         ToolbarAction::cancel,
@@ -41,6 +42,51 @@ void testToolbarCapabilityAndPrimaryToolToggle()
     CHECK(editor.handleToolbarAction(ToolbarAction::rectangle));
     CHECK(!editor.isShapeToolActive());
     CHECK(!editor.toolbarState().selectedAction().has_value());
+}
+
+void testArrowLineDrawMoveControlEditAndOptions()
+{
+    ShapeEditorController editor({0, 0, 400, 300});
+    CHECK(editor.handleToolbarAction(ToolbarAction::polyline));
+    CHECK(editor.isArrowLineToolActive());
+    CHECK(editor.toolbarState().selectedAction() == ToolbarAction::polyline);
+    CHECK(editor.arrowLineOptions().style().strokeWidthDip == 4.0F);
+
+    CHECK(editor.pointerDown({20, 30}));
+    editor.pointerMove({180, 110});
+    CHECK(editor.pointerUp({180, 110}));
+    CHECK(editor.document().annotations().size() == 1U);
+    const auto id = editor.document().annotations()[0].id;
+    const auto created = *editor.document().find(id);
+    CHECK(created.kind == AnnotationKind::arrowLine);
+    CHECK(created.arrowLine.has_value());
+    CHECK((created.arrowLine->start == AnnotationPoint{20, 30}));
+    CHECK((created.arrowLine->end == AnnotationPoint{180, 110}));
+    CHECK((created.arrowLine->control == AnnotationPoint{100, 70}));
+    CHECK(created.arrowLine->startArrowType == ArrowType::none);
+    CHECK(created.arrowLine->endArrowType == ArrowType::normal);
+
+    CHECK(editor.pointerDown({100, 70}));
+    editor.pointerMove({100, 20});
+    CHECK(editor.pointerUp({100, 20}));
+    CHECK((editor.document().find(id)->arrowLine->control
+        == AnnotationPoint{100, 20}));
+
+    CHECK(editor.applyArrowType(ArrowEndpoint::start, 5));
+    CHECK(editor.document().find(id)->arrowLine->startArrowType
+        == ArrowType::bar);
+    CHECK(editor.applyArrowLineOptionHit(
+        {ArrowLineOptionControl::strokeWidth, 2}));
+    CHECK(editor.document().find(id)->style.strokeWidthDip == 6.0F);
+
+    CHECK(editor.pointerDown({100, 20}));
+    editor.pointerMove({120, 40});
+    CHECK(editor.pointerUp({120, 40}));
+    CHECK((editor.document().find(id)->arrowLine->control
+        == AnnotationPoint{120, 40}));
+    CHECK(editor.handleToolbarAction(ToolbarAction::undo));
+    CHECK((editor.document().find(id)->arrowLine->control
+        == AnnotationPoint{100, 20}));
 }
 
 void testDrawOptionsHistoryAndKindSwitch()
@@ -195,5 +241,6 @@ int main()
     testSelectedShapeMoveResizeRotateAndEscapeCancel();
     testCursorFollowsMacShapeInteractionSemantics();
     testCtrlShortcutsDeleteAndTerminalRequests();
+    testArrowLineDrawMoveControlEditAndOptions();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

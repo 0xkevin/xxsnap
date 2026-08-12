@@ -126,6 +126,36 @@ void testNewCommandInvalidatesRedoAndSelectionIsSafe()
     CHECK(!document.selectedId().has_value());
 }
 
+void testArrowLineCommandsPreserveCurveGeometryAndHistory()
+{
+    AnnotationDocument document;
+    const ArrowLine line{
+        {10, 20}, {110, 80}, {55, 25},
+        ArrowType::none, ArrowType::normal};
+    const auto id = document.addArrowLine(line);
+    CHECK(id != invalidAnnotationId);
+    CHECK(document.find(id)->kind == AnnotationKind::arrowLine);
+    CHECK(document.find(id)->arrowLine == line);
+    CHECK((document.find(id)->rect == AnnotationRect{10, 20, 100, 60}));
+
+    CHECK(document.move(id, {15, -5}));
+    const ArrowLine moved{
+        {25, 15}, {125, 75}, {70, 20},
+        ArrowType::none, ArrowType::normal};
+    CHECK(document.find(id)->arrowLine == moved);
+    CHECK(document.undo());
+    CHECK(document.find(id)->arrowLine == line);
+
+    auto edited = line;
+    edited.control = {70, 5};
+    edited.startArrowType = ArrowType::dot;
+    edited.endArrowType = ArrowType::bar;
+    CHECK(document.updateArrowLine(id, edited));
+    CHECK(document.find(id)->arrowLine == edited);
+    CHECK(document.undo());
+    CHECK(document.find(id)->arrowLine == line);
+}
+
 } // namespace
 
 int main()
@@ -134,5 +164,6 @@ int main()
     testAllShapeEditsAreReversible();
     testInvalidAndNoOpEditsDoNotPolluteHistory();
     testNewCommandInvalidatesRedoAndSelectionIsSafe();
+    testArrowLineCommandsPreserveCurveGeometryAndHistory();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
