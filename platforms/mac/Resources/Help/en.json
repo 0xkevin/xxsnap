@@ -298,7 +298,7 @@
         { "type": "heading", "level": 2, "text": "Initial Position and Content" },
         { "type": "paragraph", "text": "A Pin created from Region Capture appears near the original selection. Large images are scaled down to fit the available space on the current screen, but their content is not cropped. Choose Reset Size from the right-click menu to return to the screen-fitted size used when the Pin was created." },
         { "type": "heading", "level": 2, "text": "Move and Scale" },
-        { "type": "paragraph", "text": "Hold and drag a Pin to move it. Scroll up to enlarge it or down to shrink it. A two-finger pinch on a trackpad also scales the Pin around the pointer." },
+        { "type": "paragraph", "text": "Hold and drag a Pin to move it. Scroll up to enlarge it or down to shrink it. A two-finger pinch on a trackpad also scales the Pin around the pointer. A Pin can grow to four times the current screen's usable size; when it extends past the screen, drag it to inspect the hidden areas." },
         {
           "type": "image",
           "name": "pin-scale-opacity",
