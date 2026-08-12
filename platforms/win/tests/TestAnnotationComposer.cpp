@@ -88,6 +88,67 @@ void testEmptyPlanLeavesPixelsUntouched()
     }
 }
 
+void testNumberMarksAreBurnedIntoExportPixels()
+{
+    MemoryBudget budget(1024U * 1024U);
+    auto allocation = PixelBuffer::allocate(220, 80, budget);
+    CHECK(allocation.value != nullptr);
+    if (!allocation.value) return;
+    std::memset(allocation.value->data(), 0xFF, allocation.value->byteCount());
+    AnnotationStyle style;
+    style.strokeColor = {255, 0, 0, 255};
+    style.textSize = 10.0F;
+    AnnotationRenderPlan plan;
+    ShapeAnnotation number;
+    number.id = 1;
+    number.kind = AnnotationKind::numberSequence;
+    number.rect = numberMarkRect({40, 40}, 10.0F);
+    number.style = style;
+    number.numberMarkType = NumberMarkType::number;
+    number.numberSequenceIndex = 123;
+    number.numberSequenceGroupId = 1;
+    plan.items.push_back({number, false});
+    ShapeAnnotation checkMark = number;
+    checkMark.id = 2;
+    checkMark.rect = numberMarkRect({100, 40}, 10.0F);
+    checkMark.numberMarkType = NumberMarkType::check;
+    checkMark.numberSequenceIndex.reset();
+    checkMark.numberSequenceGroupId = 0;
+    plan.items.push_back({checkMark, false});
+    ShapeAnnotation crossMark = checkMark;
+    crossMark.id = 3;
+    crossMark.rect = numberMarkRect({170, 40}, 10.0F);
+    crossMark.numberMarkType = NumberMarkType::cross;
+    plan.items.push_back({crossMark, false});
+    CHECK(!composeAnnotations(*allocation.value, plan, 96, 96).has_value());
+    std::size_t coloredPixels = 0U;
+    for (std::int64_t y = 0; y < allocation.value->height(); ++y) {
+        const auto* row = allocation.value->data()
+            + static_cast<std::uint64_t>(y) * allocation.value->stride();
+        for (std::int64_t x = 0; x < allocation.value->width(); ++x) {
+            const auto offset = static_cast<std::size_t>(x * 4);
+            if (std::to_integer<unsigned>(row[offset + 2U]) > 0xC0U
+                && std::to_integer<unsigned>(row[offset + 1U]) < 0x80U) {
+                ++coloredPixels;
+            }
+        }
+    }
+    CHECK(coloredPixels > 500U);
+    std::size_t crossPixels = 0U;
+    for (std::int64_t y = 15; y < 65; ++y) {
+        const auto* row = allocation.value->data()
+            + static_cast<std::uint64_t>(y) * allocation.value->stride();
+        for (std::int64_t x = 145; x < 195; ++x) {
+            const auto offset = static_cast<std::size_t>(x * 4);
+            if (std::to_integer<unsigned>(row[offset + 2U]) > 0xC0U
+                && std::to_integer<unsigned>(row[offset + 1U]) < 0x80U) {
+                ++crossPixels;
+            }
+        }
+    }
+    CHECK(crossPixels > 30U);
+}
+
 void testMarkerUsesMultiplyAndDarkBackgroundFallback()
 {
     MemoryBudget budget(1024U * 1024U);
@@ -289,6 +350,7 @@ int main()
 {
     testAnnotationsAreBurnedIntoExportPixels();
     testEmptyPlanLeavesPixelsUntouched();
+    testNumberMarksAreBurnedIntoExportPixels();
     testMarkerUsesMultiplyAndDarkBackgroundFallback();
     testMarkerBatchingPreservesAnnotationOrder();
     testMosaicPixelAndGaussianRespectMasksAndOrder();

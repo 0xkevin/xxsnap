@@ -38,6 +38,13 @@ public:
         std::wstring text,
         AnnotationStyle style = {},
         float rotationDegrees = 0.0F);
+    AnnotationId addNumberMark(
+        AnnotationRect rect,
+        NumberMarkType type,
+        std::optional<int> sequenceIndex,
+        bool manualSequence,
+        std::uint64_t groupId,
+        AnnotationStyle style = {});
 
     bool remove(AnnotationId id);
     bool updateRect(AnnotationId id, AnnotationRect rect);
@@ -58,10 +65,22 @@ public:
         AnnotationId id,
         AnnotationRect rect,
         AnnotationStyle style);
+    bool updateNumberMark(
+        AnnotationId id,
+        NumberMarkType type,
+        std::optional<int> sequenceIndex,
+        bool manualSequence,
+        std::uint64_t groupId);
+    bool updateNumberGeometry(
+        AnnotationId id,
+        AnnotationRect rect,
+        AnnotationStyle style);
     void beginMosaicRedactionEdit();
     void endMosaicRedactionEdit();
     void beginTextEdit();
     void endTextEdit(bool keepChanges);
+    void beginNumberEdit();
+    void endNumberEdit(bool keepChanges = true);
 
     bool select(AnnotationId id) noexcept;
     void clearSelection() noexcept;
@@ -101,6 +120,8 @@ private:
     bool mosaicRedactionEditChanged_ = false;
     std::optional<Snapshot> textEditBefore_;
     bool textEditChanged_ = false;
+    std::optional<Snapshot> numberEditBefore_;
+    bool numberEditChanged_ = false;
     AnnotationId nextId_ = 1;
     std::uint64_t revision_ = 0;
 };

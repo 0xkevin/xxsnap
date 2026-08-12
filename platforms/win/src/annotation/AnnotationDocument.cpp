@@ -1,4 +1,5 @@
 #include "annotation/AnnotationDocument.h"
+#include "annotation/NumberAnnotationMetrics.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -188,20 +189,72 @@ AnnotationId AnnotationDocument::addText(
     return id;
 }
 
+AnnotationId AnnotationDocument::addNumberMark(
+    AnnotationRect rect,
+    NumberMarkType type,
+    std::optional<int> sequenceIndex,
+    bool manualSequence,
+    std::uint64_t groupId,
+    AnnotationStyle style)
+{
+    rect = standardized(rect);
+    if (rect.width <= 0.0F || rect.height <= 0.0F
+        || nextId_ == invalidAnnotationId) {
+        return invalidAnnotationId;
+    }
+    if (type == NumberMarkType::number) {
+        sequenceIndex = clampedNumberValue(sequenceIndex.value_or(1));
+    } else {
+        sequenceIndex.reset();
+        manualSequence = false;
+        groupId = 0;
+    }
+    style.strokeWidthDip = 0.0F;
+    style.strokePattern = AnnotationStrokePattern::solid;
+    style.fillEnabled = false;
+    style.textSize = clampedNumberSize(style.textSize);
+    auto before = snapshot();
+    const auto id = nextId_++;
+    ShapeAnnotation annotation;
+    annotation.id = id;
+    annotation.kind = AnnotationKind::numberSequence;
+    annotation.rect = rect;
+    annotation.style = std::move(style);
+    annotation.numberMarkType = type;
+    annotation.numberSequenceIndex = sequenceIndex;
+    annotation.numberSequenceIsManual = manualSequence;
+    annotation.numberSequenceGroupId = groupId;
+    annotations_.push_back(std::move(annotation));
+    selectedId_ = id;
+    if (numberEditBefore_.has_value()) {
+        numberEditChanged_ = true;
+        ++revision_;
+        return id;
+    }
+    commit(std::move(before));
+    return id;
+}
+
 bool AnnotationDocument::remove(AnnotationId id)
 {
     const auto index = indexOf(id);
     if (!index.has_value()) {
         return false;
     }
-    auto before = snapshot();
+    std::optional<Snapshot> before;
+    if (!numberEditBefore_.has_value()) before = snapshot();
     annotations_.erase(annotations_.begin() + static_cast<std::ptrdiff_t>(*index));
     if (selectedId_ == id) {
         selectedId_ = annotations_.empty()
             ? std::nullopt
             : std::optional<AnnotationId>{annotations_.back().id};
     }
-    commit(std::move(before));
+    if (numberEditBefore_.has_value()) {
+        numberEditChanged_ = true;
+        ++revision_;
+    } else {
+        commit(std::move(*before));
+    }
     return true;
 }
 
@@ -212,7 +265,8 @@ bool AnnotationDocument::updateRect(AnnotationId id, AnnotationRect rect)
     if (annotation == nullptr
         || (!isShapeKind(annotation->kind)
             && annotation->kind != AnnotationKind::mosaicRectangle
-            && annotation->kind != AnnotationKind::text)
+            && annotation->kind != AnnotationKind::text
+            && annotation->kind != AnnotationKind::numberSequence)
         || rect.width <= 0.0F
         || rect.height <= 0.0F
         || annotation->rect == rect) {
@@ -421,6 +475,74 @@ bool AnnotationDocument::updateTextGeometry(
     return true;
 }
 
+bool AnnotationDocument::updateNumberMark(
+    AnnotationId id,
+    NumberMarkType type,
+    std::optional<int> sequenceIndex,
+    bool manualSequence,
+    std::uint64_t groupId)
+{
+    auto* annotation = findMutable(id);
+    if (annotation == nullptr || !isNumberAnnotation(*annotation)) {
+        return false;
+    }
+    if (type == NumberMarkType::number) {
+        sequenceIndex = clampedNumberValue(sequenceIndex.value_or(1));
+    } else {
+        sequenceIndex.reset();
+        manualSequence = false;
+        groupId = 0;
+    }
+    if (annotation->numberMarkType == type
+        && annotation->numberSequenceIndex == sequenceIndex
+        && annotation->numberSequenceIsManual == manualSequence
+        && annotation->numberSequenceGroupId == groupId) {
+        return false;
+    }
+    std::optional<Snapshot> before;
+    if (!numberEditBefore_.has_value()) before = snapshot();
+    annotation->numberMarkType = type;
+    annotation->numberSequenceIndex = sequenceIndex;
+    annotation->numberSequenceIsManual = manualSequence;
+    annotation->numberSequenceGroupId = groupId;
+    if (numberEditBefore_.has_value()) {
+        numberEditChanged_ = true;
+        ++revision_;
+    } else {
+        commit(std::move(*before));
+    }
+    return true;
+}
+
+bool AnnotationDocument::updateNumberGeometry(
+    AnnotationId id,
+    AnnotationRect rect,
+    AnnotationStyle style)
+{
+    auto* annotation = findMutable(id);
+    rect = standardized(rect);
+    style.textSize = clampedNumberSize(style.textSize);
+    style.strokeWidthDip = 0.0F;
+    style.strokePattern = AnnotationStrokePattern::solid;
+    style.fillEnabled = false;
+    if (annotation == nullptr || !isNumberAnnotation(*annotation)
+        || rect.width <= 0.0F || rect.height <= 0.0F
+        || (annotation->rect == rect && annotation->style == style)) {
+        return false;
+    }
+    std::optional<Snapshot> before;
+    if (!numberEditBefore_.has_value()) before = snapshot();
+    annotation->rect = rect;
+    annotation->style = std::move(style);
+    if (numberEditBefore_.has_value()) {
+        numberEditChanged_ = true;
+        ++revision_;
+    } else {
+        commit(std::move(*before));
+    }
+    return true;
+}
+
 void AnnotationDocument::beginMosaicRedactionEdit()
 {
     if (!mosaicRedactionEditBefore_.has_value()) {
@@ -465,6 +587,30 @@ void AnnotationDocument::endTextEdit(bool keepChanges)
     }
     textEditBefore_.reset();
     textEditChanged_ = false;
+}
+
+void AnnotationDocument::beginNumberEdit()
+{
+    if (!numberEditBefore_.has_value()) {
+        numberEditBefore_ = snapshot();
+        numberEditChanged_ = false;
+    }
+}
+
+void AnnotationDocument::endNumberEdit(bool keepChanges)
+{
+    if (!numberEditBefore_.has_value()) {
+        return;
+    }
+    if (!keepChanges) {
+        restore(*numberEditBefore_);
+        ++revision_;
+    } else if (numberEditChanged_) {
+        undoHistory_.push_back({std::move(*numberEditBefore_), snapshot()});
+        redoHistory_.clear();
+    }
+    numberEditBefore_.reset();
+    numberEditChanged_ = false;
 }
 
 bool AnnotationDocument::select(AnnotationId id) noexcept

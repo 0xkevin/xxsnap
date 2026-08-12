@@ -88,7 +88,7 @@ const std::vector<std::wstring>& systemFontFamilies()
 }
 
 struct TextPopupData {
-    TextPopupMenuLayout layout;
+    PopupMenuLayout layout;
     std::vector<std::wstring> labels;
     std::size_t firstIndex = 0U;
     std::optional<std::size_t> selectedIndex;
@@ -135,7 +135,7 @@ TextPopupData textPopupDataFor(
     if (data.firstIndex + count > totalCount) {
         data.firstIndex = totalCount - count;
     }
-    data.layout = textPopupMenuLayout(field, count, safeHeight);
+    data.layout = popupMenuLayout(field, count, safeHeight);
     data.labels.reserve(count);
     for (std::size_t offset = 0; offset < count; ++offset) {
         const auto index = data.firstIndex + offset;
@@ -145,6 +145,56 @@ TextPopupData textPopupDataFor(
             data.labels.push_back(std::to_wstring(
                 index + static_cast<std::size_t>(textMinimumSize)));
         }
+        if (index == selected) data.selectedIndex = offset;
+    }
+    return data;
+}
+
+TextPopupData numberPopupDataFor(
+    NumberPopupMenu menu,
+    const NumberOptionsLayout& options,
+    const NumberOptionsState& state,
+    float safeHeight,
+    int scrollOffset)
+{
+    TextPopupData data;
+    if (menu == NumberPopupMenu::markType) {
+        data.layout = numberTypeMenuLayout(options.markType, safeHeight);
+        data.labels.reserve(numberMarkTypes.size());
+        for (const auto& descriptor : numberMarkTypes) {
+            data.labels.emplace_back(descriptor.glyph);
+        }
+        data.selectedIndex = numberMarkTypeIndex(state.type());
+        return data;
+    }
+    const auto selectedIterator = std::find(
+        numberSizeValues.begin(), numberSizeValues.end(),
+        state.style().textSize);
+    const auto selected = selectedIterator == numberSizeValues.end()
+        ? 0U : static_cast<std::size_t>(std::distance(
+            numberSizeValues.begin(), selectedIterator));
+    constexpr std::size_t visibleMaximum = 10U;
+    const auto heightLimitedCount = static_cast<std::size_t>((std::max)(
+        1.0F, std::floor((safeHeight - 24.0F) / 24.0F)));
+    const auto count = (std::min)(visibleMaximum,
+        (std::min)(heightLimitedCount, numberSizeValues.size()));
+    data.firstIndex = selected > count / 2U ? selected - count / 2U : 0U;
+    if (scrollOffset < 0) {
+        const auto amount = static_cast<std::size_t>(-scrollOffset);
+        data.firstIndex = amount > data.firstIndex
+            ? 0U : data.firstIndex - amount;
+    } else {
+        data.firstIndex += static_cast<std::size_t>(scrollOffset);
+    }
+    if (data.firstIndex + count > numberSizeValues.size()) {
+        data.firstIndex = numberSizeValues.size() - count;
+    }
+    data.layout = popupMenuLayout(options.size, count, safeHeight);
+    data.labels.reserve(count);
+    for (std::size_t offset = 0; offset < count; ++offset) {
+        const auto index = data.firstIndex + offset;
+        data.labels.push_back(std::to_wstring(
+            static_cast<int>(numberSizeValues[index])));
         if (index == selected) data.selectedIndex = offset;
     }
     return data;
@@ -258,6 +308,12 @@ OverlayCursorStyle cursorStyleForShape(ShapeCursorStyle style) noexcept
         return OverlayCursorStyle::marker;
     case ShapeCursorStyle::mosaic:
         return OverlayCursorStyle::mosaic;
+    case ShapeCursorStyle::numberMark:
+        return OverlayCursorStyle::numberMark;
+    case ShapeCursorStyle::numberCheck:
+        return OverlayCursorStyle::numberCheck;
+    case ShapeCursorStyle::numberCross:
+        return OverlayCursorStyle::numberCross;
     case ShapeCursorStyle::textInput:
         return OverlayCursorStyle::textInput;
     case ShapeCursorStyle::eyedropper:
@@ -755,6 +811,29 @@ OverlayInputRouter::currentTextOptionsLayout(
         macShapePalette().size());
 }
 
+std::optional<NumberOptionsLayout>
+OverlayInputRouter::currentNumberOptionsLayout(
+    const OverlaySurface& surface) const
+{
+    if (!editor_ || !editor_->isNumberToolActive()
+        || !model_.selection().has_value()) {
+        return std::nullopt;
+    }
+    const auto chrome = computeOverlayLayout({
+        surface.physicalBounds,
+        *model_.selection(),
+        surface.dpiX,
+        surface.dpiY,
+        0.0F,
+        true,
+        toolbarActions(),
+    });
+    const auto initial = numberOptionsLayout({}, macShapePalette().size());
+    return numberOptionsLayout(
+        optionsToolbarOrigin(chrome, initial.toolbar),
+        macShapePalette().size());
+}
+
 OverlayInputRouter::~OverlayInputRouter()
 {
     if (dragging_) {
@@ -1028,12 +1107,34 @@ std::vector<OverlayPresentation> OverlayInputRouter::presentations() const
                         surface.physicalBounds.height, surface.dpiY);
                     const auto data = textPopupDataFor(
                         *menu, *options, editor_->textOptions(), safeHeight,
-                        editor_->textPopupScrollOffset());
+                        editor_->popupScrollOffset());
                     textOptions.popupMenu = data.layout;
                     textOptions.popupLabels = data.labels;
                     textOptions.selectedPopupIndex = data.selectedIndex;
                 }
                 presentation.textOptions = std::move(textOptions);
+            }
+            if (const auto options = currentNumberOptionsLayout(surface)) {
+                OverlayPresentationNumberOptions numberOptions{
+                    *options,
+                    editor_->numberOptions(),
+                    std::nullopt,
+                    std::nullopt,
+                    {},
+                    std::nullopt,
+                };
+                if (const auto menu = editor_->numberPopupMenu()) {
+                    const auto safeHeight = physicalPixelsToDip(
+                        surface.physicalBounds.height, surface.dpiY);
+                    const auto data = numberPopupDataFor(
+                        *menu, *options, editor_->numberOptions(), safeHeight,
+                        editor_->popupScrollOffset());
+                    numberOptions.popupMenu = data.layout;
+                    numberOptions.popupKind = menu;
+                    numberOptions.popupLabels = data.labels;
+                    numberOptions.selectedPopupIndex = data.selectedIndex;
+                }
+                presentation.numberOptions = std::move(numberOptions);
             }
             if (editor_->isEyedropperToolActive()
                 && eyedropperSamplePoint_.has_value()
@@ -1109,7 +1210,10 @@ std::optional<ToolbarAction> OverlayInputRouter::hitToolbarAction(
     return toolbarActionAt(layout.toolbar, {x, y});
 }
 
-bool OverlayInputRouter::pointerDown(HWND source, PixelPoint clientPoint) noexcept
+bool OverlayInputRouter::pointerDown(
+    HWND source,
+    PixelPoint clientPoint,
+    int clickCount) noexcept
 {
     if (status_ != OverlayInputStatus::active || dragging_) {
         return false;
@@ -1336,8 +1440,8 @@ bool OverlayInputRouter::pointerDown(HWND source, PixelPoint clientPoint) noexce
                     surface->physicalBounds.height, surface->dpiY);
                 const auto data = textPopupDataFor(
                     *menu, *options, editor_->textOptions(), safeHeight,
-                    editor_->textPopupScrollOffset());
-                if (const auto item = textPopupMenuHitTest(
+                    editor_->popupScrollOffset());
+                if (const auto item = popupMenuHitTest(
                         data.layout, point)) {
                     const auto index = data.firstIndex + *item;
                     if (*menu == TextPopupMenu::fontFamily) {
@@ -1373,6 +1477,48 @@ bool OverlayInputRouter::pointerDown(HWND source, PixelPoint clientPoint) noexce
             }
             editor_->dismissPopovers();
         }
+        if (const auto options = currentNumberOptionsLayout(*surface);
+            options.has_value()) {
+            const AnnotationPoint point{x, y};
+            if (const auto menu = editor_->numberPopupMenu()) {
+                const auto safeHeight = physicalPixelsToDip(
+                    surface->physicalBounds.height, surface->dpiY);
+                const auto data = numberPopupDataFor(
+                    *menu, *options, editor_->numberOptions(), safeHeight,
+                    editor_->popupScrollOffset());
+                if (const auto item = popupMenuHitTest(
+                        data.layout, point)) {
+                    const auto index = data.firstIndex + *item;
+                    if (*menu == NumberPopupMenu::markType) {
+                        if (index < numberMarkTypes.size()) {
+                            editor_->selectNumberType(
+                                numberMarkTypes[index].type);
+                        }
+                    } else if (index < numberSizeValues.size()) {
+                        editor_->setNumberSize(numberSizeValues[index]);
+                    }
+                    editor_->dismissPopovers();
+                    return true;
+                }
+            }
+            if (const auto hit = numberOptionHitTest(*options, point)) {
+                if (hit->control == NumberOptionControl::customColor) {
+                    if (const auto chosen = platform_.chooseColor(source,
+                            editor_->numberOptions().style().strokeColor)) {
+                        editor_->selectCustomColor(*chosen);
+                    }
+                } else if (hit->control == NumberOptionControl::markType) {
+                    editor_->toggleNumberPopupMenu(
+                        NumberPopupMenu::markType);
+                } else if (hit->control == NumberOptionControl::size) {
+                    editor_->toggleNumberPopupMenu(NumberPopupMenu::size);
+                } else {
+                    editor_->applyNumberOptionHit(*hit);
+                }
+                return true;
+            }
+            editor_->dismissPopovers();
+        }
     }
 
     const auto virtualPoint = toVirtual(*surface, clientPoint);
@@ -1402,8 +1548,9 @@ bool OverlayInputRouter::pointerDown(HWND source, PixelPoint clientPoint) noexce
     if (editor_ != nullptr) {
         if (const auto local = annotationPoint(virtualPoint);
             local.has_value()
-                && editor_->pointerDown(*local, platform_.shiftPressed())) {
-            if (editor_->isEditingText()) {
+                && editor_->pointerDown(
+                    *local, platform_.shiftPressed(), clickCount)) {
+            if (editor_->isEditingInlineValue()) {
                 return true;
             }
             if (!platform_.captureMouse(source)) {
@@ -1499,6 +1646,10 @@ OverlayCursorStyle OverlayInputRouter::cursorStyle(
             return OverlayCursorStyle::arrow;
         }
         if (const auto options = currentTextOptionsLayout(*surface);
+            options.has_value() && contains(options->toolbar, surfacePoint)) {
+            return OverlayCursorStyle::arrow;
+        }
+        if (const auto options = currentNumberOptionsLayout(*surface);
             options.has_value() && contains(options->toolbar, surfacePoint)) {
             return OverlayCursorStyle::arrow;
         }
@@ -1728,22 +1879,24 @@ bool OverlayInputRouter::textInput(std::wstring text)
 {
     return status_ == OverlayInputStatus::active
         && editor_ != nullptr
-        && editor_->isEditingText()
+        && editor_->isEditingInlineValue()
         && editor_->insertText(std::move(text));
 }
 
 bool OverlayInputRouter::mouseWheel(int delta) noexcept
 {
     if (status_ != OverlayInputStatus::active || editor_ == nullptr
-        || !editor_->textPopupMenu().has_value() || delta == 0) {
+        || (!editor_->textPopupMenu().has_value()
+            && !editor_->numberPopupMenu().has_value())
+        || delta == 0) {
         return false;
     }
-    return editor_->scrollTextPopupMenu(delta > 0 ? -3 : 3);
+    return editor_->scrollPopupMenu(delta > 0 ? -3 : 3);
 }
 
-bool OverlayInputRouter::isEditingText() const noexcept
+bool OverlayInputRouter::isEditingInlineValue() const noexcept
 {
-    return editor_ != nullptr && editor_->isEditingText();
+    return editor_ != nullptr && editor_->isEditingInlineValue();
 }
 
 bool OverlayInputRouter::eyedropperShiftPressed() noexcept
@@ -1879,6 +2032,19 @@ OverlayInputRouter::mosaicCursorStyle() const noexcept
         : std::nullopt;
 }
 
+std::optional<NumberCursorState>
+OverlayInputRouter::numberCursorState() const noexcept
+{
+    if (editor_ == nullptr || !editor_->isNumberToolActive()) {
+        return std::nullopt;
+    }
+    return NumberCursorState{
+        editor_->numberOptions().type(),
+        editor_->nextNumberSequenceValue(),
+        editor_->numberOptions().style().strokeColor,
+    };
+}
+
 struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl> {
     HINSTANCE instance = nullptr;
     const FrozenDesktop* desktop = nullptr;
@@ -1932,7 +2098,7 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
         }
         switch (input.kind) {
         case OverlayWindowInputKind::pointerDown:
-            router->pointerDown(source, input.clientPoint);
+            router->pointerDown(source, input.clientPoint, input.clickCount);
             break;
         case OverlayWindowInputKind::pointerMove:
             router->pointerMove(source, input.clientPoint);
@@ -1999,10 +2165,16 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
                 key = ShapeEditorKey::mosaic;
                 break;
             case 'T':
-                if (router->isEditingText()) {
+                if (router->isEditingInlineValue()) {
                     return;
                 }
                 key = ShapeEditorKey::text;
+                break;
+            case 'N':
+                if (router->isEditingInlineValue()) {
+                    return;
+                }
+                key = ShapeEditorKey::number;
                 break;
             default:
                 return;
@@ -2034,6 +2206,13 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
                             (*found)->setMarkerCursor(
                                 marker->strokeColor, marker->strokeWidthDip);
                         }
+                    }
+                } else if (style == OverlayCursorStyle::numberMark
+                    || style == OverlayCursorStyle::numberCheck
+                    || style == OverlayCursorStyle::numberCross) {
+                    if (const auto number = router->numberCursorState()) {
+                        (*found)->setNumberCursor(
+                            number->type, number->value, number->color);
                     }
                 }
                 (*found)->setCursorStyle(style);
@@ -2119,6 +2298,17 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
                         options.layout,
                         options.state,
                         options.popupMenu,
+                        options.popupLabels,
+                        options.selectedPopupIndex,
+                    };
+                }
+                if (current[index].numberOptions.has_value()) {
+                    const auto& options = *current[index].numberOptions;
+                    state.numberOptions = OverlayNumberOptionsRenderState{
+                        options.layout,
+                        options.state,
+                        options.popupMenu,
+                        options.popupKind,
                         options.popupLabels,
                         options.selectedPopupIndex,
                     };

@@ -5,12 +5,14 @@
 #endif
 
 #include "annotation/AnnotationDocument.h"
+#include "annotation/NumberAnnotationMetrics.h"
 
 #include <Windows.h>
 #include <d2d1.h>
 #include <dwrite.h>
 
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace xxsnap::win {
@@ -18,6 +20,7 @@ namespace xxsnap::win {
 struct AnnotationRenderItem {
     ShapeAnnotation annotation{};
     bool isPreview = false;
+    std::optional<std::wstring> numberDraft;
 };
 
 struct AnnotationRenderPlan {
@@ -29,6 +32,17 @@ struct AnnotationRenderPlan {
     float textCaretRotationDegrees = 0.0F;
     std::optional<AnnotationPoint> textCaretRotationCenter;
     std::optional<AnnotationPoint> textDeleteHandle;
+    std::optional<AnnotationRect> numberOutline;
+    std::vector<std::pair<NumberHandleKind, AnnotationRect>> numberHandles;
+    bool numberIncrementEnabled = false;
+    bool numberDecrementEnabled = false;
+    std::optional<AnnotationRect> numberCaret;
+};
+
+struct AnnotationEditingState {
+    AnnotationId id = invalidAnnotationId;
+    std::size_t caretPosition = 0U;
+    std::optional<std::wstring> draftText;
 };
 
 AnnotationRenderPlan buildAnnotationRenderPlan(
@@ -36,8 +50,7 @@ AnnotationRenderPlan buildAnnotationRenderPlan(
     const std::optional<ShapeAnnotation>& preview,
     AnnotationPoint selectionOriginDip,
     bool showEditingAffordances,
-    std::optional<AnnotationId> editingTextId = std::nullopt,
-    std::size_t textCaretPosition = 0U);
+    std::optional<AnnotationEditingState> editingState = std::nullopt);
 
 std::vector<float> strokeDashPattern(
     AnnotationStrokePattern pattern,

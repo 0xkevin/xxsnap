@@ -149,6 +149,34 @@ void testMarkerPlanTranslatesLineAndUsesInsetEndpointHandles()
     CHECK(!plan.rotationHandle.has_value());
 }
 
+void testNumberPlanUsesDedicatedMacControlsAndCaret()
+{
+    AnnotationDocument document;
+    AnnotationStyle style;
+    style.textSize = 3.0F;
+    const auto first = document.addNumberMark(numberMarkRect({30, 40}, 3),
+        NumberMarkType::number, 1, false, 9, style);
+    const auto second = document.addNumberMark(numberMarkRect({70, 40}, 3),
+        NumberMarkType::number, 2, false, 9, style);
+    document.addNumberMark(numberMarkRect({110, 40}, 3),
+        NumberMarkType::number, 3, false, 9, style);
+    CHECK(first != invalidAnnotationId && second != invalidAnnotationId);
+    CHECK(document.select(second));
+    const auto plan = buildAnnotationRenderPlan(document, std::nullopt,
+        {10, 20}, true, AnnotationEditingState{second, 0U, L""});
+    CHECK(plan.items.size() == 3U);
+    CHECK((plan.items[1].annotation.rect == numberMarkRect({80, 60}, 3)));
+    CHECK(plan.numberOutline.has_value());
+    CHECK(plan.numberHandles.size() == 5U);
+    CHECK(plan.numberIncrementEnabled);
+    CHECK(plan.numberDecrementEnabled);
+    CHECK(plan.numberCaret.has_value());
+    CHECK(plan.items[1].numberDraft == L"");
+    CHECK(plan.numberCaret->x > 79.0F && plan.numberCaret->x < 81.0F);
+    CHECK(plan.resizeHandles.empty());
+    CHECK(!plan.rotationHandle.has_value());
+}
+
 void testMacDashPatternsAreAbsoluteDips()
 {
     CHECK(strokeDashPattern(AnnotationStrokePattern::solid, 4).empty());
@@ -811,6 +839,7 @@ int main()
     testArrowLinePlanTranslatesCurveAndUsesThreeEditingHandles();
     testBrushPlanTranslatesPathAndUsesInsetEndpointHandles();
     testMarkerPlanTranslatesLineAndUsesInsetEndpointHandles();
+    testNumberPlanUsesDedicatedMacControlsAndCaret();
     testMacDashPatternsAreAbsoluteDips();
     testStrokeMenuSketchSampleUsesExactMacJitter();
     testDirect2DSnapshotsAtAllSupportedDpis();

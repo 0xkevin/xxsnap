@@ -1276,6 +1276,144 @@ struct OverlayRenderer::Impl final {
         return std::nullopt;
     }
 
+    std::optional<OverlayRendererError> drawNumberOptions(
+        const OverlayNumberOptionsRenderState& options) noexcept
+    {
+        if (const auto resourceError = ensureTextResources()) {
+            return resourceError;
+        }
+        auto& panelBrush = textPanelBrush;
+        auto& borderBrush = textBorderBrush;
+        auto& selectionBrush = textSelectionBrush;
+        auto& textBrush = textForegroundBrush;
+        auto& whiteBrush = textWhiteBrush;
+        const auto panel = D2D1::RoundedRect(
+            d2dRect(options.layout.toolbar), 6.0F, 6.0F);
+        renderTarget->FillRoundedRectangle(&panel, panelBrush.get());
+        renderTarget->DrawRoundedRectangle(&panel, borderBrush.get(), 1.0F);
+
+        const auto drawField = [&](AnnotationRect rect) {
+            const auto field = D2D1::RoundedRect(d2dRect(rect), 4.0F, 4.0F);
+            renderTarget->FillRoundedRectangle(&field, whiteBrush.get());
+            renderTarget->DrawRoundedRectangle(&field, borderBrush.get(), 1.0F);
+            const auto centerX = rect.x + rect.width - 9.0F;
+            const auto centerY = rect.y + rect.height / 2.0F + 1.0F;
+            renderTarget->DrawLine(
+                {centerX - 3.0F, centerY - 2.0F},
+                {centerX, centerY + 1.0F}, textBrush.get(), 1.0F);
+            renderTarget->DrawLine(
+                {centerX, centerY + 1.0F},
+                {centerX + 3.0F, centerY - 2.0F}, textBrush.get(), 1.0F);
+        };
+        const auto drawMark = [&](NumberMarkType type,
+                                  AnnotationRect rect,
+                                  ID2D1Brush* brush) {
+            rect.width -= 13.0F;
+            if (type == NumberMarkType::number) {
+                const auto center = D2D1::Point2F(
+                    rect.x + rect.width / 2.0F,
+                    rect.y + rect.height / 2.0F);
+                const auto circle = D2D1::Ellipse(center, 7.0F, 7.0F);
+                renderTarget->FillEllipse(&circle, brush);
+                const std::wstring label = L"1";
+                renderTarget->DrawText(label.data(), 1U, textFormat.get(),
+                    d2dRect(AnnotationRect{center.x - 6.0F,
+                        center.y - 7.0F, 12.0F, 14.0F}), whiteBrush.get(),
+                    D2D1_DRAW_TEXT_OPTIONS_CLIP);
+            } else {
+                const std::wstring label = type == NumberMarkType::check
+                    ? L"✓" : L"×";
+                renderTarget->DrawText(
+                    label.data(), static_cast<UINT32>(label.size()),
+                    textFormat.get(), d2dRect(rect), brush,
+                    D2D1_DRAW_TEXT_OPTIONS_CLIP);
+            }
+        };
+        drawField(options.layout.markType);
+        textVariableBrush->SetColor(annotationColor(
+            options.state.style().strokeColor));
+        drawMark(options.state.type(), options.layout.markType,
+            textVariableBrush.get());
+        drawField(options.layout.size);
+        const auto sizeLabel = std::to_wstring(static_cast<int>(
+            options.state.style().textSize + 0.5F));
+        auto sizeRect = options.layout.size;
+        sizeRect.x += 6.0F;
+        sizeRect.width -= 20.0F;
+        renderTarget->DrawText(sizeLabel.data(),
+            static_cast<UINT32>(sizeLabel.size()), textFormat.get(),
+            d2dRect(sizeRect), textBrush.get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+
+        for (const auto separator : options.layout.separators) {
+            const auto rounded = D2D1::RoundedRect(
+                d2dRect(separator), 0.75F, 0.75F);
+            renderTarget->FillRoundedRectangle(&rounded, borderBrush.get());
+        }
+        const auto& palette = macShapePalette();
+        for (std::size_t index = 0;
+             index < options.layout.paletteCount && index < palette.size();
+             ++index) {
+            auto swatch = options.layout.colorSwatches[index];
+            const auto selected
+                = options.state.selectedPaletteIndex() == index;
+            if (selected) {
+                swatch = {swatch.x - 3.0F, swatch.y - 3.0F,
+                    swatch.width + 6.0F, swatch.height + 6.0F};
+            }
+            textVariableBrush->SetColor(annotationColor(palette[index]));
+            const auto rounded = D2D1::RoundedRect(d2dRect(swatch),
+                selected ? 4.0F : 2.5F, selected ? 4.0F : 2.5F);
+            renderTarget->FillRoundedRectangle(
+                &rounded, textVariableBrush.get());
+            renderTarget->DrawRoundedRectangle(&rounded,
+                selected ? selectionBrush.get() : borderBrush.get(),
+                selected ? 1.5F : 1.0F);
+        }
+        if (!options.layout.colorSwatches.empty()) {
+            renderTarget->DrawBitmap(paletteBitmap.get(),
+                d2dRect(options.layout.colorSwatches.back()), 1.0F,
+                D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+        }
+        if (options.popupMenu.has_value()) {
+            const auto popup = D2D1::RoundedRect(
+                d2dRect(options.popupMenu->menu), 6.0F, 6.0F);
+            renderTarget->FillRoundedRectangle(&popup, panelBrush.get());
+            renderTarget->DrawRoundedRectangle(&popup, borderBrush.get(), 1.0F);
+            const auto count = (std::min)(
+                options.popupMenu->items.size(), options.popupLabels.size());
+            for (std::size_t index = 0; index < count; ++index) {
+                auto item = options.popupMenu->items[index];
+                const auto selected = options.selectedPopupIndex == index;
+                if (selected) {
+                    const auto highlight = D2D1::RoundedRect(
+                        d2dRect(item), 4.0F, 4.0F);
+                    renderTarget->FillRoundedRectangle(
+                        &highlight, selectionBrush.get());
+                }
+                if (options.popupKind == NumberPopupMenu::markType) {
+                    if (index < numberMarkTypes.size()) {
+                        const auto& descriptor = numberMarkTypes[index];
+                        textVariableBrush->SetColor(annotationColor(
+                            descriptor.type == NumberMarkType::number
+                                ? options.state.style().strokeColor
+                                : descriptor.defaultColor));
+                        drawMark(descriptor.type, item,
+                            textVariableBrush.get());
+                    }
+                } else {
+                    item.x += 6.0F;
+                    item.width -= 12.0F;
+                    const auto& label = options.popupLabels[index];
+                    renderTarget->DrawText(label.data(),
+                        static_cast<UINT32>(label.size()), textFormat.get(),
+                        d2dRect(item), selected ? whiteBrush.get()
+                            : textBrush.get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                }
+            }
+        }
+        return std::nullopt;
+    }
+
     std::optional<OverlayRendererError> drawEyedropper(
         const OverlayEyedropperRenderState& state,
         AnnotationRect safeBounds) noexcept
@@ -2463,6 +2601,13 @@ struct OverlayRenderer::Impl final {
             if (state.textOptions.has_value()) {
                 if (const auto optionsError = drawTextOptions(
                         *state.textOptions)) {
+                    renderTarget->EndDraw();
+                    return optionsError;
+                }
+            }
+            if (state.numberOptions.has_value()) {
+                if (const auto optionsError = drawNumberOptions(
+                        *state.numberOptions)) {
                     renderTarget->EndDraw();
                     return optionsError;
                 }

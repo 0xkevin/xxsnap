@@ -330,6 +330,7 @@ add_library(
     src/annotation/ArrowLineRenderer.cpp
     src/annotation/BrushRenderer.cpp
     src/annotation/MarkerRenderer.cpp
+    src/annotation/NumberAnnotationRenderer.cpp
 )
 target_compile_features(xxsnap_annotation_renderer PUBLIC cxx_std_17)
 target_include_directories(

@@ -1,7 +1,9 @@
 #include "annotation/ShapeInteraction.h"
+#include "annotation/NumberAnnotationMetrics.h"
 #include "annotation/TextAnnotationRenderer.h"
 
 #include <array>
+#include <cmath>
 
 namespace xxsnap::win {
 namespace {
@@ -296,7 +298,10 @@ bool ShapeInteraction::commit()
         changed = document_.updateRect(targetId_, preview_->rect);
         break;
     case ShapeInteractionMode::resizing:
-        changed = isTextAnnotation(*preview_)
+        changed = isNumberAnnotation(*preview_)
+            ? document_.updateNumberGeometry(
+                targetId_, preview_->rect, preview_->style)
+            : isTextAnnotation(*preview_)
             ? document_.updateTextGeometry(
                 targetId_, preview_->rect, preview_->style)
             : document_.updateRect(targetId_, preview_->rect);
@@ -562,7 +567,26 @@ void ShapeInteraction::updateResizing(AnnotationPoint point) noexcept
     const auto resized = standardized({left, top, right - left, bottom - top});
     if (resized.width >= minimumShapeSizeDip
         && resized.height >= minimumShapeSizeDip) {
-        if (isTextAnnotation(*preview_)) {
+        if (isNumberAnnotation(*preview_)) {
+            const AnnotationPoint center{
+                startRect_.x + startRect_.width / 2.0F,
+                startRect_.y + startRect_.height / 2.0F,
+            };
+            const auto startDx = startRect_.width / 2.0F;
+            const auto startDy = startRect_.height / 2.0F;
+            const auto startDistance = maximum(
+                1.0F, static_cast<float>(std::hypot(startDx, startDy)));
+            const auto currentDistance = maximum(
+                1.0F, static_cast<float>(std::hypot(
+                    point.x - center.x, point.y - center.y)));
+            const auto* original = document_.find(targetId_);
+            const auto originalSize = original != nullptr
+                ? original->style.textSize : preview_->style.textSize;
+            preview_->style.textSize = clampedNumberSize(
+                originalSize * currentDistance / startDistance);
+            preview_->rect = numberMarkRect(
+                center, preview_->style.textSize);
+        } else if (isTextAnnotation(*preview_)) {
             const auto widthScale = resized.width
                 / (std::max)(minimumShapeSizeDip, startRect_.width);
             const auto heightScale = resized.height

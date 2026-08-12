@@ -92,7 +92,16 @@ struct OverlayMosaicOptionsRenderState {
 struct OverlayTextOptionsRenderState {
     TextOptionsLayout layout;
     TextOptionsState state;
-    std::optional<TextPopupMenuLayout> popupMenu;
+    std::optional<PopupMenuLayout> popupMenu;
+    std::vector<std::wstring> popupLabels;
+    std::optional<std::size_t> selectedPopupIndex;
+};
+
+struct OverlayNumberOptionsRenderState {
+    NumberOptionsLayout layout;
+    NumberOptionsState state;
+    std::optional<PopupMenuLayout> popupMenu;
+    std::optional<NumberPopupMenu> popupKind;
     std::vector<std::wstring> popupLabels;
     std::optional<std::size_t> selectedPopupIndex;
 };
@@ -126,6 +135,7 @@ struct OverlayRenderState {
     std::optional<OverlayMarkerOptionsRenderState> markerOptions;
     std::optional<OverlayMosaicOptionsRenderState> mosaicOptions;
     std::optional<OverlayTextOptionsRenderState> textOptions;
+    std::optional<OverlayNumberOptionsRenderState> numberOptions;
     std::optional<OverlayEyedropperRenderState> eyedropper;
 };
 

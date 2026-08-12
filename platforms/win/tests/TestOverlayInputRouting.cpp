@@ -20,6 +20,7 @@ using xxsnap::win::OverlayInputRouter;
 using xxsnap::win::OverlayInputStatus;
 using xxsnap::win::OverlayCursorStyle;
 using xxsnap::win::OverlaySurface;
+using xxsnap::win::NumberMarkType;
 using xxsnap::win::SelectionPhase;
 using xxsnap::win::ShapeEditorKey;
 using xxsnap::win::AnnotationColor;
@@ -475,7 +476,7 @@ void testShapeToolIsNonTerminalAndEditsThroughSharedPresentation()
     createReadySelection(router);
 
     auto owner = router.presentations()[1];
-    CHECK(owner.toolbarItems.size() == 12U);
+    CHECK(owner.toolbarItems.size() == 13U);
     const auto rectangle = owner.toolbarItems[0];
     CHECK(rectangle.action == xxsnap::win::ToolbarAction::rectangle);
     const auto capturesBeforeTool = platform.captureCalls;
@@ -553,7 +554,7 @@ void testArrowToolUsesMacOptionsMenuAndCreatesEditableCurve()
     createReadySelection(router);
 
     auto owner = router.presentations()[1];
-    CHECK(owner.toolbarItems.size() == 12U);
+    CHECK(owner.toolbarItems.size() == 13U);
     CHECK(owner.toolbarItems[1].action == xxsnap::win::ToolbarAction::polyline);
     CHECK(router.pointerDown(
         rightWindow, owner.toolbarItems[1].centerPhysical));
@@ -921,6 +922,51 @@ void testTextToolbarAcceptsUnicodeAndUsesRealPopupMenus()
     }
 }
 
+void testNumberToolbarCreatesSequenceAndSupportsDoubleClickEditing()
+{
+    FakePlatform platform;
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform, {}, true);
+    createReadySelection(router);
+    CHECK(router.keyPressed(ShapeEditorKey::number, false, false));
+    auto owner = router.presentations()[1];
+    CHECK(owner.numberOptions.has_value());
+    CHECK(owner.numberOptions->state.style().textSize == 3.0F);
+    auto cursor = router.numberCursorState();
+    CHECK(cursor.has_value());
+    CHECK(cursor->type == NumberMarkType::number);
+    CHECK(cursor->value == 1);
+    CHECK(cursor->color == owner.numberOptions->state.style().strokeColor);
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.numberOptions->layout.markType)));
+    owner = router.presentations()[1];
+    CHECK(owner.numberOptions->popupMenu.has_value());
+    CHECK(owner.numberOptions->popupLabels.size() == 3U);
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.numberOptions->layout.markType)));
+
+    platform.cursor = PixelPoint{30, 100};
+    CHECK(router.pointerDown(rightWindow, PixelPoint{30, 100}));
+    router.pointerUp(rightWindow, PixelPoint{30, 100});
+    cursor = router.numberCursorState();
+    CHECK(cursor.has_value());
+    CHECK(cursor->value == 2);
+    platform.cursor = PixelPoint{100, 100};
+    CHECK(router.pointerDown(rightWindow, PixelPoint{100, 100}));
+    router.pointerUp(rightWindow, PixelPoint{100, 100});
+    CHECK(router.annotationDocument().annotations().size() == 2U);
+    CHECK(router.annotationDocument().annotations()[0].numberSequenceIndex == 1);
+    CHECK(router.annotationDocument().annotations()[1].numberSequenceIndex == 2);
+
+    CHECK(router.pointerDown(rightWindow, PixelPoint{30, 100}, 2));
+    CHECK(router.isEditingInlineValue());
+    CHECK(router.keyPressed(ShapeEditorKey::backspace, false, false));
+    CHECK(router.textInput(L"9"));
+    CHECK(router.keyPressed(ShapeEditorKey::enter, false, false));
+    CHECK(router.annotationDocument().annotations()[0].numberSequenceIndex == 9);
+    CHECK(router.annotationDocument().annotations()[0].numberSequenceIsManual);
+}
+
 } // namespace
 
 int main()
@@ -943,5 +989,6 @@ int main()
     testShapeCannotBeCreatedOutsideLockedSelectionOnOverlay();
     testMosaicToolbarOptionsAndLiveComposite();
     testTextToolbarAcceptsUnicodeAndUsesRealPopupMenus();
+    testNumberToolbarCreatesSequenceAndSupportsDoubleClickEditing();
     return failureCount == 0 ? 0 : 1;
 }

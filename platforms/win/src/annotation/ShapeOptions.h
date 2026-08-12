@@ -1,6 +1,7 @@
 #pragma once
 
 #include "annotation/AnnotationTypes.h"
+#include "annotation/NumberAnnotationMetrics.h"
 
 #include <array>
 #include <cstddef>
@@ -290,18 +291,18 @@ struct TextOptionsLayout {
     std::vector<AnnotationRect> separators;
 };
 
-struct TextPopupMenuLayout {
+struct PopupMenuLayout {
     AnnotationRect menu{};
     std::vector<AnnotationRect> items;
 };
 
-TextPopupMenuLayout textPopupMenuLayout(
+PopupMenuLayout popupMenuLayout(
     AnnotationRect field,
     std::size_t itemCount,
     float safeHeight) noexcept;
 
-std::optional<std::size_t> textPopupMenuHitTest(
-    const TextPopupMenuLayout& layout,
+std::optional<std::size_t> popupMenuHitTest(
+    const PopupMenuLayout& layout,
     AnnotationPoint point) noexcept;
 
 TextOptionsLayout textOptionsLayout(
@@ -311,6 +312,68 @@ TextOptionsLayout textOptionsLayout(
 std::optional<TextOptionHit> textOptionHitTest(
     const TextOptionsLayout& layout,
     AnnotationPoint point) noexcept;
+
+class NumberOptionsState {
+public:
+    NumberOptionsState() noexcept;
+    NumberMarkType type() const noexcept;
+    const AnnotationStyle& style() const noexcept;
+    std::optional<std::size_t> selectedPaletteIndex() const noexcept;
+    bool load(const ShapeAnnotation& annotation) noexcept;
+    bool setType(NumberMarkType type) noexcept;
+    bool setSize(float size) noexcept;
+    bool selectPalette(std::size_t index) noexcept;
+    bool selectCustomColor(AnnotationColor color) noexcept;
+
+private:
+    void refreshPaletteSelection() noexcept;
+    NumberMarkType type_ = NumberMarkType::number;
+    AnnotationStyle style_{};
+    std::optional<std::size_t> selectedPaletteIndex_;
+};
+
+enum class NumberPopupMenu : std::uint8_t {
+    markType,
+    size,
+};
+
+enum class NumberOptionControl : std::uint8_t {
+    markType,
+    size,
+    palette,
+    customColor,
+};
+
+struct NumberOptionHit {
+    NumberOptionControl control = NumberOptionControl::markType;
+    std::size_t index = 0;
+};
+
+constexpr bool operator==(
+    NumberOptionHit left,
+    NumberOptionHit right) noexcept
+{
+    return left.control == right.control && left.index == right.index;
+}
+
+struct NumberOptionsLayout {
+    AnnotationRect toolbar{};
+    AnnotationRect markType{};
+    AnnotationRect size{};
+    std::size_t paletteCount = 0;
+    std::vector<AnnotationRect> colorSwatches;
+    std::vector<AnnotationRect> separators;
+};
+
+NumberOptionsLayout numberOptionsLayout(
+    AnnotationPoint origin,
+    std::size_t paletteCount);
+std::optional<NumberOptionHit> numberOptionHitTest(
+    const NumberOptionsLayout& layout,
+    AnnotationPoint point) noexcept;
+PopupMenuLayout numberTypeMenuLayout(
+    AnnotationRect field,
+    float safeHeight) noexcept;
 
 enum class ShapeOptionControl : std::uint8_t {
     strokeWidth,

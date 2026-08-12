@@ -26,6 +26,7 @@ USER32.dll!DestroyMenu
 USER32.dll!DestroyWindow
 USER32.dll!DispatchMessageW
 USER32.dll!DisplayConfigGetDeviceInfo
+USER32.dll!DrawTextW
 USER32.dll!EmptyClipboard
 USER32.dll!EndPaint
 USER32.dll!EnumDisplayMonitors
@@ -83,12 +84,15 @@ GDI32.dll!CreateBitmap
 GDI32.dll!CreateCompatibleDC
 GDI32.dll!CreateDCW
 GDI32.dll!CreateDIBSection
+GDI32.dll!CreateFontW
 GDI32.dll!DeleteDC
 GDI32.dll!DeleteObject
 GDI32.dll!EnumFontFamiliesExW
 GDI32.dll!GdiFlush
 GDI32.dll!GetDeviceCaps
 GDI32.dll!SelectObject
+GDI32.dll!SetBkMode
+GDI32.dll!SetTextColor
 
 SHELL32.dll!Shell_NotifyIconW
 

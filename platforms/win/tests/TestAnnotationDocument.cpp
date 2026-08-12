@@ -1,4 +1,5 @@
 #include "annotation/AnnotationDocument.h"
+#include "annotation/NumberAnnotationMetrics.h"
 
 #include <cstdlib>
 #include <iostream>
@@ -240,6 +241,43 @@ void testTextEditTransactionKeepsUnicodeAndCancelsAtomically()
     CHECK(*document.find(id)->text == L"中文");
 }
 
+void testNumberMarksClampPayloadAndEditAsOneUndoStep()
+{
+    AnnotationDocument document;
+    AnnotationStyle style;
+    style.textSize = 100.0F;
+    const auto first = document.addNumberMark(
+        {10, 20, 21, 21}, NumberMarkType::number, 0, false, 7, style);
+    CHECK(first != invalidAnnotationId);
+    CHECK(document.find(first)->numberSequenceIndex == 1);
+    CHECK(document.find(first)->style.textSize == 72.0F);
+    const auto checkId = document.addNumberMark(
+        {40, 20, 21, 21}, NumberMarkType::check, 99, true, 7, style);
+    CHECK(checkId != invalidAnnotationId);
+    CHECK(!document.find(checkId)->numberSequenceIndex.has_value());
+    CHECK(document.find(checkId)->numberSequenceGroupId == 0U);
+
+    document.beginNumberEdit();
+    CHECK(document.updateNumberMark(
+        first, NumberMarkType::number, 9999, true, 7));
+    auto resized = document.find(first)->style;
+    resized.textSize = 24.0F;
+    CHECK(document.updateNumberGeometry(
+        first, numberMarkRect({80, 80}, 24.0F), resized));
+    document.endNumberEdit(true);
+    CHECK(document.find(first)->numberSequenceIndex == 999);
+    CHECK(document.find(first)->style.textSize == 24.0F);
+    CHECK(document.undo());
+    CHECK(document.find(first)->numberSequenceIndex == 1);
+    CHECK(document.find(first)->style.textSize == 72.0F);
+
+    document.beginNumberEdit();
+    CHECK(document.updateNumberMark(
+        first, NumberMarkType::cross, std::nullopt, false, 0));
+    document.endNumberEdit(false);
+    CHECK(document.find(first)->numberMarkType == NumberMarkType::number);
+}
+
 } // namespace
 
 int main()
@@ -253,5 +291,6 @@ int main()
     testMarkerLineHistoryAndZeroLengthDot();
     testMosaicSliderDragCreatesOneUndoEntry();
     testTextEditTransactionKeepsUnicodeAndCancelsAtomically();
+    testNumberMarksClampPayloadAndEditAsOneUndoStep();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

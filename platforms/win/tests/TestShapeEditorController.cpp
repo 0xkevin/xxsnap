@@ -31,6 +31,7 @@ void testToolbarCapabilityAndPrimaryToolToggle()
         ToolbarAction::eyedropper,
         ToolbarAction::mosaic,
         ToolbarAction::text,
+        ToolbarAction::number,
         ToolbarAction::undo,
         ToolbarAction::redo,
         ToolbarAction::cancel,
@@ -478,7 +479,7 @@ void testTextCreatesUnicodeAndEditsAtCaret()
         == L"Microsoft YaHei");
     CHECK(editor.textOptions().style().textSize == 8.0F);
     CHECK(editor.pointerDown({60, 80}));
-    CHECK(editor.isEditingText());
+    CHECK(editor.isEditingInlineValue());
     CHECK(editor.insertText(L"中文AB"));
     CHECK(editor.handleKey(ShapeEditorKey::left, false, false)
         == ShapeEditorKeyResult::consumed);
@@ -501,7 +502,7 @@ void testTextCreatesUnicodeAndEditsAtCaret()
 
     CHECK(editor.pointerDown({text->rect.x + 10.0F,
         text->rect.y + text->rect.height / 2.0F}));
-    CHECK(editor.isEditingText());
+    CHECK(editor.isEditingInlineValue());
     const auto plan = editor.renderPlan({0, 0});
     CHECK(plan.textCaret.has_value());
     CHECK(plan.textDeleteHandle.has_value());
@@ -514,6 +515,163 @@ void testTextCreatesUnicodeAndEditsAtCaret()
     CHECK(editor.document().find(id)->style.textSize == 12.0F);
     CHECK(editor.cancelTextEdit());
     CHECK(editor.document().find(id)->style.textSize == 8.0F);
+}
+
+void testNumberToolMatchesMacSequenceEditingAndControls()
+{
+    ShapeEditorController editor({0, 0, 500, 400});
+    CHECK(editor.handleKey(ShapeEditorKey::number, false, false)
+        == ShapeEditorKeyResult::consumed);
+    CHECK(editor.isNumberToolActive());
+    CHECK(editor.cursorStyleAt({40, 40}) == ShapeCursorStyle::numberMark);
+    CHECK(editor.numberOptions().type() == NumberMarkType::number);
+    CHECK(editor.numberOptions().style().textSize == 3.0F);
+
+    CHECK(editor.pointerDown({80, 80}));
+    CHECK(editor.pointerDown({80, 80}));
+    CHECK(editor.pointerUp({80, 80}));
+    const auto firstMarkId = editor.document().selectedId().value();
+    const auto disabledDecrement = editor.numberHandle(
+        firstMarkId, NumberHandleKind::decrement);
+    CHECK(disabledDecrement.has_value());
+    CHECK(editor.pointerDown({
+        disabledDecrement->x + disabledDecrement->width / 2.0F,
+        disabledDecrement->y + disabledDecrement->height / 2.0F}));
+    CHECK(editor.document().find(firstMarkId)->numberSequenceIndex == 1);
+    CHECK(editor.pointerDown({130, 80}));
+    CHECK(editor.pointerDown({180, 80}));
+    CHECK(editor.document().annotations().size() == 3U);
+    CHECK(editor.document().annotations()[0].numberSequenceIndex == 1);
+    CHECK(editor.document().annotations()[1].numberSequenceIndex == 2);
+    CHECK(editor.document().annotations()[2].numberSequenceIndex == 3);
+
+    const auto middleId = editor.document().annotations()[1].id;
+    CHECK(editor.pointerDown({130, 80}));
+    CHECK(editor.pointerUp({130, 80}));
+    const auto decrement = editor.numberHandle(
+        middleId, NumberHandleKind::decrement);
+    CHECK(decrement.has_value());
+    CHECK(editor.pointerDown({decrement->x + decrement->width / 2.0F,
+        decrement->y + decrement->height / 2.0F}));
+    CHECK(editor.document().find(middleId)->numberSequenceIndex == 1);
+    CHECK(editor.document().annotations()[0].numberSequenceIndex == 2);
+
+    CHECK(editor.pointerDown({130, 80}, false, 2));
+    CHECK(editor.isEditingNumber());
+    CHECK(editor.handleKey(ShapeEditorKey::backspace, false, false)
+        == ShapeEditorKeyResult::consumed);
+    CHECK(editor.insertText(L"99"));
+    CHECK(editor.handleKey(ShapeEditorKey::enter, false, false)
+        == ShapeEditorKeyResult::consumed);
+    CHECK(editor.document().find(middleId)->numberSequenceIndex == 99);
+    CHECK(editor.document().find(middleId)->numberSequenceIsManual);
+
+    CHECK(editor.pointerDown({180, 80}));
+    CHECK(editor.pointerUp({180, 80}));
+    const auto reset = editor.numberHandle(
+        editor.document().selectedId().value(), NumberHandleKind::reset);
+    CHECK(reset.has_value());
+    CHECK(editor.pointerDown({reset->x + reset->width / 2.0F,
+        reset->y + reset->height / 2.0F}));
+    CHECK(editor.document().find(editor.document().selectedId().value())
+        ->numberSequenceIndex == 1);
+    CHECK(editor.pointerDown({230, 80}));
+    CHECK(editor.document().annotations().back().numberSequenceIndex == 2);
+
+    CHECK(editor.selectNumberType(NumberMarkType::check));
+    CHECK(editor.cursorStyleAt({40, 40}) == ShapeCursorStyle::numberCheck);
+    CHECK(editor.pointerDown({280, 80}));
+    CHECK(editor.document().annotations().back().numberMarkType
+        == NumberMarkType::check);
+    CHECK(!editor.document().annotations().back().numberSequenceIndex.has_value());
+    CHECK(editor.setNumberSize(24.0F));
+    CHECK(editor.numberOptions().style().textSize == 24.0F);
+    CHECK(editor.selectNumberType(NumberMarkType::cross));
+    CHECK(editor.cursorStyleAt({40, 40}) == ShapeCursorStyle::numberCross);
+}
+
+void testNumberSequenceGroupsManualMarksResizeAndHistory()
+{
+    ShapeEditorController editor({0, 0, 600, 400});
+    CHECK(editor.handleKey(ShapeEditorKey::number, false, false)
+        == ShapeEditorKeyResult::consumed);
+    CHECK(editor.pointerDown({80, 80}));
+    CHECK(editor.pointerDown({130, 80}));
+    CHECK(editor.pointerDown({180, 80}));
+    const auto firstGroup = editor.document().annotations()[0]
+        .numberSequenceGroupId;
+    const auto thirdId = editor.document().annotations()[2].id;
+
+    CHECK(editor.pointerDown({180, 80}));
+    CHECK(editor.pointerUp({180, 80}));
+    const auto reset = editor.numberHandle(thirdId, NumberHandleKind::reset);
+    CHECK(reset.has_value());
+    CHECK(editor.pointerDown({reset->x + reset->width / 2.0F,
+        reset->y + reset->height / 2.0F}));
+    CHECK(editor.pointerDown({230, 80}));
+    CHECK(editor.document().annotations().back().numberSequenceIndex == 2);
+
+    CHECK(editor.pointerDown({130, 80}));
+    CHECK(editor.pointerUp({130, 80}));
+    CHECK(editor.pointerDown({280, 80}));
+    CHECK(editor.document().annotations().back().numberSequenceGroupId
+        == firstGroup);
+    CHECK(editor.document().annotations().back().numberSequenceIndex == 3);
+
+    ShapeEditorController manualEditor({0, 0, 600, 400});
+    CHECK(manualEditor.handleKey(ShapeEditorKey::number, false, false)
+        == ShapeEditorKeyResult::consumed);
+    CHECK(manualEditor.pointerDown({80, 80}));
+    CHECK(manualEditor.pointerDown({130, 80}));
+    const auto firstId = manualEditor.document().annotations()[0].id;
+    CHECK(manualEditor.pointerDown({80, 80}, false, 2));
+    CHECK(manualEditor.handleKey(ShapeEditorKey::backspace, false, false)
+        == ShapeEditorKeyResult::consumed);
+    CHECK(manualEditor.insertText(L"17"));
+    CHECK(manualEditor.commitNumberEdit());
+    CHECK(manualEditor.pointerDown({180, 80}));
+    const auto eighteenId = manualEditor.document().annotations().back().id;
+    CHECK(manualEditor.document().find(eighteenId)->numberSequenceIndex == 18);
+    CHECK(manualEditor.document().find(eighteenId)->numberSequenceIsManual);
+    CHECK(manualEditor.pointerDown({230, 80}));
+    const auto nineteenId = manualEditor.document().annotations().back().id;
+    CHECK(manualEditor.document().find(nineteenId)->numberSequenceIndex == 19);
+    CHECK(manualEditor.document().find(nineteenId)->numberSequenceIsManual);
+
+    CHECK(manualEditor.pointerDown({180, 80}));
+    CHECK(manualEditor.pointerUp({180, 80}));
+    CHECK(manualEditor.handleKey(ShapeEditorKey::deleteKey, false, false)
+        == ShapeEditorKeyResult::consumed);
+    CHECK(manualEditor.document().find(eighteenId) == nullptr);
+    CHECK(manualEditor.document().find(firstId)->numberSequenceIndex == 17);
+    CHECK(manualEditor.document().find(nineteenId)->numberSequenceIndex == 19);
+    CHECK(manualEditor.handleKey(ShapeEditorKey::z, true, false)
+        == ShapeEditorKeyResult::consumed);
+    CHECK(manualEditor.document().find(eighteenId) != nullptr);
+    CHECK(manualEditor.handleKey(ShapeEditorKey::z, true, true)
+        == ShapeEditorKeyResult::consumed);
+    CHECK(manualEditor.document().find(eighteenId) == nullptr);
+
+    CHECK(manualEditor.pointerDown({230, 80}));
+    CHECK(manualEditor.pointerUp({230, 80}));
+    const auto before = standardized(manualEditor.document().find(nineteenId)->rect);
+    const auto resize = manualEditor.numberHandle(
+        nineteenId, NumberHandleKind::resize);
+    CHECK(resize.has_value());
+    const AnnotationPoint resizeCenter{
+        resize->x + resize->width / 2.0F,
+        resize->y + resize->height / 2.0F,
+    };
+    CHECK(manualEditor.pointerDown(resizeCenter));
+    manualEditor.pointerMove({resizeCenter.x + 60.0F, resizeCenter.y + 60.0F});
+    CHECK(manualEditor.pointerUp(
+        {resizeCenter.x + 60.0F, resizeCenter.y + 60.0F}));
+    const auto after = standardized(manualEditor.document().find(nineteenId)->rect);
+    CHECK(after.width > before.width);
+    CHECK(std::abs((after.x + after.width / 2.0F)
+        - (before.x + before.width / 2.0F)) < 0.01F);
+    CHECK(std::abs((after.y + after.height / 2.0F)
+        - (before.y + before.height / 2.0F)) < 0.01F);
 }
 
 } // namespace
@@ -532,5 +690,7 @@ int main()
     testEyedropperMatchesMacToolSelectionAndEscape();
     testMosaicCreatesStrokeAndRotatableRectangle();
     testTextCreatesUnicodeAndEditsAtCaret();
+    testNumberToolMatchesMacSequenceEditingAndControls();
+    testNumberSequenceGroupsManualMarksResizeAndHistory();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

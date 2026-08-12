@@ -1089,7 +1089,7 @@ std::optional<TextOptionHit> textOptionHitTest(
     return std::nullopt;
 }
 
-TextPopupMenuLayout textPopupMenuLayout(
+PopupMenuLayout popupMenuLayout(
     AnnotationRect field,
     std::size_t itemCount,
     float safeHeight) noexcept
@@ -1109,7 +1109,7 @@ TextPopupMenuLayout textPopupMenuLayout(
     }
     menu.y = (std::max)(8.0F,
         (std::min)(menu.y, safeHeight - 8.0F - menu.height));
-    TextPopupMenuLayout layout{menu, {}};
+    PopupMenuLayout layout{menu, {}};
     layout.items.reserve(itemCount);
     for (std::size_t index = 0; index < itemCount; ++index) {
         layout.items.push_back({
@@ -1122,14 +1122,224 @@ TextPopupMenuLayout textPopupMenuLayout(
     return layout;
 }
 
-std::optional<std::size_t> textPopupMenuHitTest(
-    const TextPopupMenuLayout& layout,
+std::optional<std::size_t> popupMenuHitTest(
+    const PopupMenuLayout& layout,
     AnnotationPoint point) noexcept
 {
     for (std::size_t index = 0; index < layout.items.size(); ++index) {
         if (contains(layout.items[index], point)) return index;
     }
     return std::nullopt;
+}
+
+NumberOptionsState::NumberOptionsState() noexcept
+    : selectedPaletteIndex_(0U)
+{
+    style_.strokeColor = palette.front();
+    style_.fillColor = palette.front();
+    style_.strokeWidthDip = 0.0F;
+    style_.strokePattern = AnnotationStrokePattern::solid;
+    style_.fillEnabled = false;
+    style_.textSize = numberDefaultSize;
+}
+
+NumberMarkType NumberOptionsState::type() const noexcept
+{
+    return type_;
+}
+
+const AnnotationStyle& NumberOptionsState::style() const noexcept
+{
+    return style_;
+}
+
+std::optional<std::size_t>
+NumberOptionsState::selectedPaletteIndex() const noexcept
+{
+    return selectedPaletteIndex_;
+}
+
+bool NumberOptionsState::load(const ShapeAnnotation& annotation) noexcept
+{
+    if (!isNumberAnnotation(annotation)) {
+        return false;
+    }
+    auto style = annotation.style;
+    style.strokeWidthDip = 0.0F;
+    style.strokePattern = AnnotationStrokePattern::solid;
+    style.fillEnabled = false;
+    style.textSize = clampedNumberSize(style.textSize);
+    const auto type = annotation.numberMarkType.value_or(
+        NumberMarkType::number);
+    const auto changed = type_ != type || style_ != style;
+    type_ = type;
+    style_ = std::move(style);
+    refreshPaletteSelection();
+    return changed;
+}
+
+bool NumberOptionsState::setType(NumberMarkType type) noexcept
+{
+    if (type_ == type) {
+        return false;
+    }
+    const auto previous = type_;
+    type_ = type;
+    if (type == NumberMarkType::number) {
+        if (previous != NumberMarkType::number) {
+            style_.strokeColor = palette.front();
+            style_.fillColor = palette.front();
+            selectedPaletteIndex_ = 0U;
+        }
+    } else {
+        const auto descriptor = std::find_if(numberMarkTypes.begin(),
+            numberMarkTypes.end(), [type](const auto& candidate) {
+                return candidate.type == type;
+            });
+        style_.strokeColor = descriptor != numberMarkTypes.end()
+            ? descriptor->defaultColor : numberMarkTypes.front().defaultColor;
+        style_.fillColor = style_.strokeColor;
+        selectedPaletteIndex_.reset();
+    }
+    return true;
+}
+
+bool NumberOptionsState::setSize(float size) noexcept
+{
+    size = clampedNumberSize(size);
+    if (style_.textSize == size) {
+        return false;
+    }
+    style_.textSize = size;
+    return true;
+}
+
+bool NumberOptionsState::selectPalette(std::size_t index) noexcept
+{
+    if (index >= palette.size()) {
+        return false;
+    }
+    const auto changed = style_.strokeColor != palette[index]
+        || selectedPaletteIndex_ != index;
+    style_.strokeColor = palette[index];
+    style_.fillColor = palette[index];
+    selectedPaletteIndex_ = index;
+    return changed;
+}
+
+bool NumberOptionsState::selectCustomColor(AnnotationColor color) noexcept
+{
+    color.alpha = 255;
+    const auto changed = style_.strokeColor != color
+        || selectedPaletteIndex_.has_value();
+    style_.strokeColor = color;
+    style_.fillColor = color;
+    selectedPaletteIndex_.reset();
+    return changed;
+}
+
+void NumberOptionsState::refreshPaletteSelection() noexcept
+{
+    selectedPaletteIndex_.reset();
+    for (std::size_t index = 0; index < palette.size(); ++index) {
+        if (palette[index] == style_.strokeColor) {
+            selectedPaletteIndex_ = index;
+            return;
+        }
+    }
+}
+
+NumberOptionsLayout numberOptionsLayout(
+    AnnotationPoint origin,
+    std::size_t paletteCount)
+{
+    NumberOptionsLayout layout;
+    layout.paletteCount = clampedPaletteCount(paletteCount);
+    const auto rows = layout.paletteCount <= 10U ? 1U : 2U;
+    const auto columns = (layout.paletteCount + rows - 1U) / rows;
+    const auto customSize = rows == 1U ? 20.0F : 32.0F;
+    const auto height = rows == 1U ? 30.0F : 40.0F;
+    const auto width = 148.0F + static_cast<float>(columns) * 16.0F
+        + 2.0F + customSize + 10.0F;
+    layout.toolbar = {origin.x, origin.y, width, height};
+    const auto y = origin.y + (height - 20.0F) / 2.0F;
+    layout.markType = {origin.x + 10.0F, y, 48.0F, 20.0F};
+    layout.size = {origin.x + 78.0F, y, 48.0F, 20.0F};
+    const auto paletteX = origin.x + 148.0F;
+    for (std::size_t index = 0; index < layout.paletteCount; ++index) {
+        const auto column = index % columns;
+        const auto row = rows == 1U ? 0U : index / columns;
+        const auto firstRowY = rows == 1U
+            ? origin.y + height / 2.0F - 6.0F : origin.y + 23.0F;
+        layout.colorSwatches.push_back({
+            paletteX + static_cast<float>(column) * 16.0F,
+            firstRowY - static_cast<float>(row) * 16.0F,
+            12.0F, 12.0F,
+        });
+    }
+    layout.colorSwatches.push_back({
+        paletteX + static_cast<float>(columns) * 16.0F + 2.0F,
+        origin.y + (height - customSize) / 2.0F,
+        customSize, customSize,
+    });
+    layout.separators = {
+        {origin.x + 68.0F, origin.y + height / 2.0F - 6.0F,
+            1.5F, 12.0F},
+        {origin.x + 137.0F, origin.y + height / 2.0F - 6.0F,
+            1.5F, 12.0F},
+    };
+    return layout;
+}
+
+std::optional<NumberOptionHit> numberOptionHitTest(
+    const NumberOptionsLayout& layout,
+    AnnotationPoint point) noexcept
+{
+    if (contains(layout.markType, point)) {
+        return NumberOptionHit{NumberOptionControl::markType, 0U};
+    }
+    if (contains(layout.size, point)) {
+        return NumberOptionHit{NumberOptionControl::size, 0U};
+    }
+    for (std::size_t index = 0; index + 1U < layout.colorSwatches.size(); ++index) {
+        if (contains(inset(layout.colorSwatches[index], -3.0F, -3.0F), point)) {
+            return NumberOptionHit{NumberOptionControl::palette, index};
+        }
+    }
+    if (!layout.colorSwatches.empty()
+        && contains(inset(layout.colorSwatches.back(), -2.0F, -2.0F), point)) {
+        return NumberOptionHit{NumberOptionControl::customColor,
+            layout.colorSwatches.size() - 1U};
+    }
+    return std::nullopt;
+}
+
+PopupMenuLayout numberTypeMenuLayout(
+    AnnotationRect field,
+    float safeHeight) noexcept
+{
+    constexpr float itemHeight = 26.0F;
+    constexpr float insetValue = 4.0F;
+    constexpr auto itemCount = numberMarkTypes.size();
+    const auto height = insetValue * 2.0F
+        + itemHeight * static_cast<float>(itemCount);
+    AnnotationRect menu{field.x, field.y + field.height + 8.0F,
+        56.0F, height};
+    if (menu.y + menu.height > safeHeight - 8.0F) {
+        menu.y = field.y - 8.0F - menu.height;
+    }
+    menu.y = (std::max)(8.0F,
+        (std::min)(menu.y, safeHeight - 8.0F - menu.height));
+    PopupMenuLayout layout{menu, {}};
+    for (std::size_t index = 0; index < itemCount; ++index) {
+        layout.items.push_back({
+            menu.x + insetValue,
+            menu.y + insetValue + itemHeight * static_cast<float>(index),
+            menu.width - insetValue * 2.0F,
+            itemHeight,
+        });
+    }
+    return layout;
 }
 
 ArrowLineOptionsLayout arrowLineOptionsLayout(

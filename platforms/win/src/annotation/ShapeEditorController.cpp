@@ -1,4 +1,5 @@
 #include "annotation/ShapeEditorController.h"
+#include "annotation/NumberAnnotationRenderer.h"
 #include "annotation/TextAnnotationRenderer.h"
 #include "annotation/AnnotationGeometry.h"
 
@@ -186,6 +187,7 @@ ShapeEditorController::ShapeEditorController(
     toolbarState_.setCapability(ToolbarAction::eyedropper, true);
     toolbarState_.setCapability(ToolbarAction::mosaic, true);
     toolbarState_.setCapability(ToolbarAction::text, true);
+    toolbarState_.setCapability(ToolbarAction::number, true);
     toolbarState_.setCapability(ToolbarAction::undo, true);
     toolbarState_.setCapability(ToolbarAction::redo, true);
     syncHistory();
@@ -235,6 +237,11 @@ const MosaicOptionsState& ShapeEditorController::mosaicOptions() const noexcept
 const TextOptionsState& ShapeEditorController::textOptions() const noexcept
 {
     return textOptions_;
+}
+
+const NumberOptionsState& ShapeEditorController::numberOptions() const noexcept
+{
+    return numberOptions_;
 }
 
 const AnnotationDocument& ShapeEditorController::document() const noexcept
@@ -303,9 +310,24 @@ bool ShapeEditorController::isTextToolActive() const noexcept
     return toolbarState_.selectedAction() == ToolbarAction::text;
 }
 
-bool ShapeEditorController::isEditingText() const noexcept
+bool ShapeEditorController::isNumberToolActive() const noexcept
 {
-    return editingTextId_.has_value();
+    return toolbarState_.selectedAction() == ToolbarAction::number;
+}
+
+int ShapeEditorController::nextNumberSequenceValue() const noexcept
+{
+    return nextNumberValue(currentNumberGroupId_);
+}
+
+bool ShapeEditorController::isEditingInlineValue() const noexcept
+{
+    return editingTextId_.has_value() || editingNumberId_.has_value();
+}
+
+bool ShapeEditorController::isEditingNumber() const noexcept
+{
+    return editingNumberId_.has_value();
 }
 
 std::optional<TextPopupMenu>
@@ -314,9 +336,15 @@ ShapeEditorController::textPopupMenu() const noexcept
     return textPopupMenu_;
 }
 
-int ShapeEditorController::textPopupScrollOffset() const noexcept
+int ShapeEditorController::popupScrollOffset() const noexcept
 {
-    return textPopupScrollOffset_;
+    return popupScrollOffset_;
+}
+
+std::optional<NumberPopupMenu>
+ShapeEditorController::numberPopupMenu() const noexcept
+{
+    return numberPopupMenu_;
 }
 
 bool ShapeEditorController::strokePatternMenuVisible() const noexcept
@@ -339,6 +367,9 @@ bool ShapeEditorController::handleToolbarAction(ToolbarAction action)
 {
     if (action != ToolbarAction::text && editingTextId_.has_value()) {
         commitTextEdit();
+    }
+    if (action != ToolbarAction::number && editingNumberId_.has_value()) {
+        commitNumberEdit();
     }
     if (action == ToolbarAction::rectangle) {
         if (shapeToolActive_) {
@@ -442,6 +473,26 @@ bool ShapeEditorController::handleToolbarAction(ToolbarAction action)
             if (toolbarState_.selectTool(action)) {
                 TextOptionsState activated;
                 textOptions_ = std::move(activated);
+                document_.clearSelection();
+                dismissPopovers();
+            }
+        }
+        return true;
+    }
+    if (action == ToolbarAction::number) {
+        if (isNumberToolActive()) {
+            commitNumberEdit();
+            deactivateTool();
+        } else {
+            cancelInteraction();
+            shapeToolActive_ = false;
+            arrowLineToolActive_ = false;
+            brushToolActive_ = false;
+            markerToolActive_ = false;
+            if (toolbarState_.selectTool(action)) {
+                NumberOptionsState activated;
+                numberOptions_ = activated;
+                currentNumberGroupId_ = nextNumberGroupId_++;
                 document_.clearSelection();
                 dismissPopovers();
             }
@@ -679,6 +730,15 @@ bool ShapeEditorController::applyTextOptionHit(TextOptionHit hit)
     return changed;
 }
 
+bool ShapeEditorController::applyNumberOptionHit(NumberOptionHit hit)
+{
+    if (hit.control != NumberOptionControl::palette) {
+        return false;
+    }
+    const auto changed = numberOptions_.selectPalette(hit.index);
+    return changed && applyNumberStyleToSelection();
+}
+
 bool ShapeEditorController::setTextFontFamily(std::wstring family)
 {
     const auto changed = textOptions_.setFontFamily(std::move(family));
@@ -696,23 +756,91 @@ bool ShapeEditorController::toggleTextPopupMenu(
 {
     textPopupMenu_ = textPopupMenu_ == menu
         ? std::nullopt : std::optional<TextPopupMenu>{menu};
-    textPopupScrollOffset_ = 0;
+    numberPopupMenu_.reset();
+    popupScrollOffset_ = 0;
     strokePatternMenuVisible_ = false;
     cornerRadiusPanelVisible_ = false;
     arrowTypeMenuEndpoint_.reset();
     return true;
 }
 
-bool ShapeEditorController::scrollTextPopupMenu(int delta) noexcept
+bool ShapeEditorController::scrollPopupMenu(int delta) noexcept
 {
-    if (!textPopupMenu_.has_value() || delta == 0) return false;
-    textPopupScrollOffset_ = (std::max)(-10000,
-        (std::min)(10000, textPopupScrollOffset_ + delta));
+    if ((!textPopupMenu_.has_value() && !numberPopupMenu_.has_value())
+        || delta == 0) return false;
+    popupScrollOffset_ = (std::max)(-10000,
+        (std::min)(10000, popupScrollOffset_ + delta));
     return true;
+}
+
+bool ShapeEditorController::toggleNumberPopupMenu(
+    NumberPopupMenu menu) noexcept
+{
+    numberPopupMenu_ = numberPopupMenu_ == menu
+        ? std::nullopt : std::optional<NumberPopupMenu>{menu};
+    popupScrollOffset_ = 0;
+    textPopupMenu_.reset();
+    strokePatternMenuVisible_ = false;
+    cornerRadiusPanelVisible_ = false;
+    arrowTypeMenuEndpoint_.reset();
+    return true;
+}
+
+bool ShapeEditorController::selectNumberType(NumberMarkType type)
+{
+    const auto optionChanged = numberOptions_.setType(type);
+    const auto selected = document_.selectedId();
+    const auto* annotation = selected.has_value()
+        ? document_.find(*selected) : nullptr;
+    if (annotation == nullptr || !isNumberAnnotation(*annotation)) {
+        numberPopupMenu_.reset();
+        return optionChanged;
+    }
+    const auto oldGroup = annotation->numberSequenceGroupId;
+    const auto wasAutomatic = annotation->numberMarkType
+        == NumberMarkType::number && !annotation->numberSequenceIsManual;
+    document_.beginNumberEdit();
+    bool changed = false;
+    if (type == NumberMarkType::number) {
+        if (currentNumberGroupId_ == 0) {
+            currentNumberGroupId_ = nextNumberGroupId_++;
+        }
+        const auto manual = numberGroupIsManual(currentNumberGroupId_);
+        changed = document_.updateNumberMark(
+            *selected, type, nextNumberValue(currentNumberGroupId_), manual,
+            currentNumberGroupId_);
+    } else {
+        changed = document_.updateNumberMark(
+            *selected, type, std::nullopt, false, 0);
+        if (wasAutomatic && oldGroup != 0) {
+            renumberAutomaticGroup(oldGroup);
+        }
+    }
+    changed = applyNumberStyleToSelection() || changed;
+    document_.endNumberEdit(true);
+    numberPopupMenu_.reset();
+    syncHistory();
+    return optionChanged || changed;
+}
+
+bool ShapeEditorController::setNumberSize(float size)
+{
+    const auto changed = numberOptions_.setSize(size);
+    numberPopupMenu_.reset();
+    return changed && applyNumberStyleToSelection();
 }
 
 bool ShapeEditorController::insertText(std::wstring text)
 {
+    if (editingNumberId_.has_value()) {
+        text.erase(std::remove_if(text.begin(), text.end(),
+            [](wchar_t character) {
+                return character < L'0' || character > L'9';
+            }), text.end());
+        if (text.empty()) return false;
+        return replaceEditingNumber(
+            numberCaretPosition_, 0U, std::move(text));
+    }
     if (!editingTextId_.has_value() || text.empty()) {
         return false;
     }
@@ -737,6 +865,11 @@ bool ShapeEditorController::insertText(std::wstring text)
 
 bool ShapeEditorController::deleteTextBackward()
 {
+    if (editingNumberId_.has_value()) {
+        if (numberCaretPosition_ == 0U) return false;
+        return replaceEditingNumber(
+            numberCaretPosition_ - 1U, 1U, L"");
+    }
     if (!editingTextId_.has_value()) {
         return false;
     }
@@ -771,6 +904,10 @@ bool ShapeEditorController::deleteTextBackward()
 
 bool ShapeEditorController::deleteTextForward()
 {
+    if (editingNumberId_.has_value()) {
+        if (numberCaretPosition_ >= numberEditBuffer_.size()) return false;
+        return replaceEditingNumber(numberCaretPosition_, 1U, L"");
+    }
     if (!editingTextId_.has_value()) return false;
     const auto* annotation = document_.find(*editingTextId_);
     if (annotation == nullptr || !isTextAnnotation(*annotation)) return false;
@@ -825,6 +962,86 @@ bool ShapeEditorController::cancelTextEdit()
     return true;
 }
 
+bool ShapeEditorController::commitNumberEdit()
+{
+    if (!editingNumberId_.has_value()) return false;
+    const auto id = *editingNumberId_;
+    const auto* annotation = document_.find(id);
+    if (annotation != nullptr && isNumberAnnotation(*annotation)
+        && numberEditBuffer_.empty()) {
+        markNumberGroupManual(annotation->numberSequenceGroupId);
+        document_.updateNumberMark(id, NumberMarkType::number, 1, true,
+            annotation->numberSequenceGroupId);
+    }
+    document_.endNumberEdit(true);
+    editingNumberId_.reset();
+    numberEditBuffer_.clear();
+    numberCaretPosition_ = 0U;
+    ++interactionRevision_;
+    syncHistory();
+    return true;
+}
+
+bool ShapeEditorController::cancelNumberEdit()
+{
+    if (!editingNumberId_.has_value()) return false;
+    document_.endNumberEdit(false);
+    editingNumberId_.reset();
+    numberEditBuffer_.clear();
+    numberCaretPosition_ = 0U;
+    ++interactionRevision_;
+    syncHistory();
+    return true;
+}
+
+bool ShapeEditorController::replaceEditingNumber(
+    std::size_t start,
+    std::size_t length,
+    std::wstring replacement)
+{
+    if (!editingNumberId_.has_value()) return false;
+    if (std::any_of(replacement.begin(), replacement.end(),
+            [](wchar_t character) {
+                return character < L'0' || character > L'9';
+            })) {
+        return false;
+    }
+    start = (std::min)(start, numberEditBuffer_.size());
+    length = (std::min)(length, numberEditBuffer_.size() - start);
+    if (numberEditBuffer_.size() - length + replacement.size() > 3U) {
+        return false;
+    }
+    auto updated = numberEditBuffer_;
+    updated.replace(start, length, replacement);
+    if (updated == numberEditBuffer_) return false;
+    const auto id = *editingNumberId_;
+    const auto* annotation = document_.find(id);
+    if (annotation == nullptr || !isNumberAnnotation(*annotation)
+        || annotation->numberMarkType != NumberMarkType::number) {
+        return false;
+    }
+    const auto groupId = annotation->numberSequenceGroupId;
+    numberEditBuffer_ = std::move(updated);
+    numberCaretPosition_ = start + replacement.size();
+    if (!annotation->numberSequenceIsManual) {
+        markNumberGroupManual(groupId);
+    }
+    if (!numberEditBuffer_.empty()) {
+        auto value = 0;
+        for (const auto digit : numberEditBuffer_) {
+            value = value * 10 + static_cast<int>(digit - L'0');
+        }
+        value = clampedNumberValue(value);
+        numberEditBuffer_ = std::to_wstring(value);
+        numberCaretPosition_ = (std::min)(
+            numberCaretPosition_, numberEditBuffer_.size());
+        document_.updateNumberMark(
+            id, NumberMarkType::number, value, true, groupId);
+    }
+    ++interactionRevision_;
+    return true;
+}
+
 bool ShapeEditorController::beginTextEdit(AnnotationId id) noexcept
 {
     const auto* annotation = document_.find(id);
@@ -839,6 +1056,27 @@ bool ShapeEditorController::beginTextEdit(AnnotationId id) noexcept
     }
     document_.select(id);
     textOptions_.load(annotation->style);
+    ++interactionRevision_;
+    return true;
+}
+
+bool ShapeEditorController::beginNumberEdit(AnnotationId id) noexcept
+{
+    const auto* annotation = document_.find(id);
+    if (annotation == nullptr || !isNumberAnnotation(*annotation)
+        || annotation->numberMarkType != NumberMarkType::number) {
+        return false;
+    }
+    if (editingNumberId_ != id) {
+        commitNumberEdit();
+        document_.beginNumberEdit();
+        editingNumberId_ = id;
+        numberEditBuffer_ = std::to_wstring(clampedNumberValue(
+            annotation->numberSequenceIndex.value_or(1)));
+        numberCaretPosition_ = numberEditBuffer_.size();
+    }
+    document_.select(id);
+    numberOptions_.load(*annotation);
     ++interactionRevision_;
     return true;
 }
@@ -861,6 +1099,174 @@ bool ShapeEditorController::applyTextStyleToSelection()
         *selected, measuredTextRect(anchor, text, style), style);
     syncHistory();
     return changed;
+}
+
+bool ShapeEditorController::applyNumberStyleToSelection()
+{
+    const auto selected = document_.selectedId();
+    const auto* annotation = selected.has_value()
+        ? document_.find(*selected) : nullptr;
+    if (annotation == nullptr || !isNumberAnnotation(*annotation)) {
+        return true;
+    }
+    const auto rect = standardized(annotation->rect);
+    const AnnotationPoint center{
+        rect.x + rect.width / 2.0F,
+        rect.y + rect.height / 2.0F,
+    };
+    const auto changed = document_.updateNumberGeometry(
+        *selected,
+        numberMarkRect(center, numberOptions_.style().textSize),
+        numberOptions_.style());
+    syncHistory();
+    return changed;
+}
+
+void ShapeEditorController::markNumberGroupManual(std::uint64_t groupId)
+{
+    if (groupId == 0) return;
+    std::vector<AnnotationId> ids;
+    for (const auto& annotation : document_.annotations()) {
+        if (isNumberAnnotation(annotation)
+            && annotation.numberMarkType == NumberMarkType::number
+            && annotation.numberSequenceGroupId == groupId) {
+            ids.push_back(annotation.id);
+        }
+    }
+    for (const auto id : ids) {
+        const auto* annotation = document_.find(id);
+        if (annotation != nullptr) {
+            document_.updateNumberMark(id, NumberMarkType::number,
+                annotation->numberSequenceIndex, true, groupId);
+        }
+    }
+}
+
+bool ShapeEditorController::numberGroupIsManual(
+    std::uint64_t groupId) const noexcept
+{
+    return groupId != 0 && std::any_of(
+        document_.annotations().begin(), document_.annotations().end(),
+        [groupId](const auto& annotation) {
+            return isNumberAnnotation(annotation)
+                && annotation.numberMarkType == NumberMarkType::number
+                && annotation.numberSequenceGroupId == groupId
+                && annotation.numberSequenceIsManual;
+        });
+}
+
+void ShapeEditorController::renumberAutomaticGroup(std::uint64_t groupId)
+{
+    if (groupId == 0) return;
+    int value = numberMinimumValue;
+    std::vector<AnnotationId> ids;
+    for (const auto& annotation : document_.annotations()) {
+        if (isNumberAnnotation(annotation)
+            && annotation.numberMarkType == NumberMarkType::number
+            && annotation.numberSequenceGroupId == groupId
+            && !annotation.numberSequenceIsManual) {
+            ids.push_back(annotation.id);
+        }
+    }
+    for (const auto id : ids) {
+        document_.updateNumberMark(
+            id, NumberMarkType::number, value++, false, groupId);
+    }
+}
+
+int ShapeEditorController::nextNumberValue(
+    std::uint64_t groupId) const noexcept
+{
+    int maximumValue = 0;
+    for (const auto& annotation : document_.annotations()) {
+        if (isNumberAnnotation(annotation)
+            && annotation.numberMarkType == NumberMarkType::number
+            && annotation.numberSequenceGroupId == groupId) {
+            maximumValue = (std::max)(maximumValue,
+                annotation.numberSequenceIndex.value_or(0));
+        }
+    }
+    return clampedNumberValue(maximumValue + 1);
+}
+
+bool ShapeEditorController::removeNumberAndRenumber(AnnotationId id)
+{
+    const auto* annotation = document_.find(id);
+    if (annotation == nullptr || !isNumberAnnotation(*annotation)) {
+        return false;
+    }
+    const auto groupId = annotation->numberSequenceGroupId;
+    const auto automatic = annotation->numberMarkType == NumberMarkType::number
+        && !numberGroupIsManual(groupId);
+    document_.beginNumberEdit();
+    const auto removed = document_.remove(id);
+    if (removed && automatic) renumberAutomaticGroup(groupId);
+    document_.endNumberEdit(true);
+    syncHistory();
+    return removed;
+}
+
+bool ShapeEditorController::adjustSelectedNumber(int delta)
+{
+    const auto selected = document_.selectedId();
+    const auto* selectedAnnotation = selected.has_value()
+        ? document_.find(*selected) : nullptr;
+    if (selectedAnnotation == nullptr
+        || selectedAnnotation->numberMarkType != NumberMarkType::number) {
+        return false;
+    }
+    const auto current = selectedAnnotation->numberSequenceIndex.value_or(1);
+    const auto candidate = clampedNumberValue(current + delta);
+    if (candidate == current) return false;
+    const auto groupId = selectedAnnotation->numberSequenceGroupId;
+    const auto manual = numberGroupIsManual(groupId);
+    std::optional<AnnotationId> collision;
+    for (const auto& annotation : document_.annotations()) {
+        if (annotation.id != *selected
+            && isNumberAnnotation(annotation)
+            && annotation.numberMarkType == NumberMarkType::number
+            && annotation.numberSequenceGroupId == groupId
+            && annotation.numberSequenceIndex == candidate) {
+            collision = annotation.id;
+            break;
+        }
+    }
+    if (!manual && !collision.has_value()) return false;
+    document_.beginNumberEdit();
+    if (collision.has_value()) {
+        document_.updateNumberMark(*collision, NumberMarkType::number,
+            current, manual, groupId);
+    }
+    document_.updateNumberMark(*selected, NumberMarkType::number,
+        candidate, manual, groupId);
+    document_.endNumberEdit(true);
+    syncHistory();
+    ++interactionRevision_;
+    return true;
+}
+
+bool ShapeEditorController::resetSelectedNumber()
+{
+    const auto selected = document_.selectedId();
+    const auto* annotation = selected.has_value()
+        ? document_.find(*selected) : nullptr;
+    if (annotation == nullptr
+        || annotation->numberMarkType != NumberMarkType::number
+        || annotation->numberSequenceIndex.value_or(1) <= 1) {
+        return false;
+    }
+    const auto oldGroup = annotation->numberSequenceGroupId;
+    const auto automatic = !numberGroupIsManual(oldGroup);
+    const auto newGroup = nextNumberGroupId_++;
+    document_.beginNumberEdit();
+    document_.updateNumberMark(*selected, NumberMarkType::number,
+        1, false, newGroup);
+    if (automatic) renumberAutomaticGroup(oldGroup);
+    document_.endNumberEdit(true);
+    currentNumberGroupId_ = newGroup;
+    syncHistory();
+    ++interactionRevision_;
+    return true;
 }
 
 bool ShapeEditorController::applyOptionHit(ShapeOptionHit hit)
@@ -973,7 +1379,9 @@ bool ShapeEditorController::adjustCornerRadius(float deltaDip)
 
 bool ShapeEditorController::selectCustomColor(AnnotationColor color)
 {
-    const auto optionChanged = isTextToolActive()
+    const auto optionChanged = isNumberToolActive()
+        ? numberOptions_.selectCustomColor(color)
+        : isTextToolActive()
         ? textOptions_.selectCustomColor(color)
         : markerToolActive_
         ? markerOptions_.selectCustomColor(color)
@@ -986,7 +1394,9 @@ bool ShapeEditorController::selectCustomColor(AnnotationColor color)
         return false;
     }
     auto changed = false;
-    if (isTextToolActive()) {
+    if (isNumberToolActive()) {
+        changed = applyNumberStyleToSelection();
+    } else if (isTextToolActive()) {
         changed = applyTextStyleToSelection();
     } else if (markerToolActive_) {
         const auto selected = document_.selectedId();
@@ -1009,12 +1419,14 @@ void ShapeEditorController::dismissPopovers() noexcept
     cornerRadiusPanelVisible_ = false;
     arrowTypeMenuEndpoint_.reset();
     textPopupMenu_.reset();
-    textPopupScrollOffset_ = 0;
+    popupScrollOffset_ = 0;
+    numberPopupMenu_.reset();
 }
 
 bool ShapeEditorController::pointerDown(
     AnnotationPoint point,
-    bool shift) noexcept
+    bool shift,
+    int clickCount) noexcept
 {
     ++interactionRevision_;
     static_cast<void>(shift);
@@ -1047,8 +1459,53 @@ bool ShapeEditorController::pointerDown(
         }
         commitTextEdit();
     }
+    if (editingNumberId_.has_value()) {
+        const auto* editing = document_.find(*editingNumberId_);
+        if (editing != nullptr
+            && containsRect(standardized(editing->rect), point)) {
+            const auto rect = standardized(editing->rect);
+            const auto progress = rect.width <= 0.0F ? 1.0F
+                : (std::max)(0.0F, (std::min)(1.0F,
+                    (point.x - rect.x) / rect.width));
+            numberCaretPosition_ = (std::min)(numberEditBuffer_.size(),
+                static_cast<std::size_t>(progress
+                    * static_cast<float>(numberEditBuffer_.size()) + 0.5F));
+            return true;
+        }
+        commitNumberEdit();
+    }
     if (const auto selected = document_.selectedId(); selected.has_value()) {
         const auto* annotation = document_.find(*selected);
+        if (annotation != nullptr && isNumberAnnotation(*annotation)) {
+            for (const auto kind : {
+                    NumberHandleKind::deleteHandle,
+                    NumberHandleKind::resize,
+                    NumberHandleKind::increment,
+                    NumberHandleKind::decrement,
+                    NumberHandleKind::reset}) {
+                const auto handle = numberHandleRect(*annotation, kind);
+                if (!handle.has_value() || !containsRect(*handle, point)) {
+                    continue;
+                }
+                if (kind == NumberHandleKind::deleteHandle) {
+                    return removeNumberAndRenumber(*selected);
+                }
+                if (kind == NumberHandleKind::resize) {
+                    return interaction_.beginResize(
+                        *selected, ShapeResizeHandle::bottomRight);
+                }
+                if (kind == NumberHandleKind::increment) {
+                    adjustSelectedNumber(1);
+                    return true;
+                }
+                if (kind == NumberHandleKind::decrement) {
+                    adjustSelectedNumber(-1);
+                    return true;
+                }
+                resetSelectedNumber();
+                return true;
+            }
+        }
         if (annotation != nullptr && isTextAnnotation(*annotation)) {
             if (const auto handle = textDeleteHandlePoint(*selected);
                 handle.has_value()
@@ -1075,6 +1532,8 @@ bool ShapeEditorController::pointerDown(
                     *annotation, point)) {
                 return markerInteraction_.beginResize(*selected, *handle);
             }
+        } else if (annotation != nullptr && isNumberAnnotation(*annotation)) {
+            // Number marks expose only the dedicated bottom-right size handle.
         } else if (annotation != nullptr
             && !isMosaicStrokeAnnotation(*annotation)) {
             if (interaction_.hitTestRotationHandle(*selected, point)) {
@@ -1105,6 +1564,16 @@ bool ShapeEditorController::pointerDown(
                 }
             }
             return true;
+        }
+    }
+    if (isNumberToolActive()) {
+        if (const auto number = numberAnnotationAt(point)) {
+            document_.select(*number);
+            loadSelectedOptions();
+            if (clickCount >= 2) {
+                return beginNumberEdit(*number);
+            }
+            return interaction_.beginMove(*number, point);
         }
     }
     if (const auto hit = annotationAtBorder(point); hit.has_value()) {
@@ -1151,6 +1620,25 @@ bool ShapeEditorController::pointerDown(
         editingTextId_ = id;
         textCaretPosition_ = 0U;
         return true;
+    }
+    if (isNumberToolActive()) {
+        document_.clearSelection();
+        if (currentNumberGroupId_ == 0) {
+            currentNumberGroupId_ = nextNumberGroupId_++;
+        }
+        const auto type = numberOptions_.type();
+        const auto value = type == NumberMarkType::number
+            ? std::optional<int>{nextNumberValue(currentNumberGroupId_)}
+            : std::nullopt;
+        const auto manual = type == NumberMarkType::number
+            && numberGroupIsManual(currentNumberGroupId_);
+        const auto id = document_.addNumberMark(
+            numberMarkRect(point, numberOptions_.style().textSize),
+            type, value, manual,
+            type == NumberMarkType::number ? currentNumberGroupId_ : 0,
+            numberOptions_.style());
+        syncHistory();
+        return id != invalidAnnotationId;
     }
     if (arrowLineToolActive_) {
         document_.clearSelection();
@@ -1285,7 +1773,21 @@ ShapeCursorStyle ShapeEditorController::cursorStyleAt(
 
     if (const auto selected = document_.selectedId(); selected.has_value()) {
         const auto* annotation = document_.find(*selected);
-        if (annotation != nullptr && annotation->arrowLine.has_value()) {
+        if (annotation != nullptr && isNumberAnnotation(*annotation)) {
+            for (const auto kind : {
+                    NumberHandleKind::deleteHandle,
+                    NumberHandleKind::resize,
+                    NumberHandleKind::increment,
+                    NumberHandleKind::decrement,
+                    NumberHandleKind::reset}) {
+                const auto handle = numberHandleRect(*annotation, kind);
+                if (handle.has_value() && containsRect(*handle, point)) {
+                    return kind == NumberHandleKind::resize
+                        ? ShapeCursorStyle::resizeTopLeftBottomRight
+                        : ShapeCursorStyle::arrow;
+                }
+            }
+        } else if (annotation != nullptr && annotation->arrowLine.has_value()) {
             if (arrowInteraction_.hitTestHandle(*selected, point)) {
                 return ShapeCursorStyle::move;
             }
@@ -1331,6 +1833,16 @@ ShapeCursorStyle ShapeEditorController::cursorStyleAt(
         return mosaicOptions_.kind() == AnnotationKind::mosaicStroke
             ? ShapeCursorStyle::mosaic : ShapeCursorStyle::crosshair;
     }
+    if (isNumberToolActive()) {
+        switch (numberOptions_.type()) {
+        case NumberMarkType::number:
+            return ShapeCursorStyle::numberMark;
+        case NumberMarkType::check:
+            return ShapeCursorStyle::numberCheck;
+        case NumberMarkType::cross:
+            return ShapeCursorStyle::numberCross;
+        }
+    }
     return shapeToolActive_ || arrowLineToolActive_ || isTextToolActive()
         ? ShapeCursorStyle::crosshair : ShapeCursorStyle::arrow;
 }
@@ -1340,6 +1852,36 @@ ShapeEditorKeyResult ShapeEditorController::handleKey(
     bool control,
     bool shift)
 {
+    if (editingNumberId_.has_value()) {
+        if (key == ShapeEditorKey::escapeKey) {
+            cancelNumberEdit();
+            return ShapeEditorKeyResult::consumed;
+        }
+        if (!control && key == ShapeEditorKey::backspace) {
+            deleteTextBackward();
+            return ShapeEditorKeyResult::consumed;
+        }
+        if (!control && key == ShapeEditorKey::deleteKey) {
+            deleteTextForward();
+            return ShapeEditorKeyResult::consumed;
+        }
+        if (!control && key == ShapeEditorKey::enter) {
+            commitNumberEdit();
+            return ShapeEditorKeyResult::consumed;
+        }
+        if (!control && key == ShapeEditorKey::left) {
+            if (numberCaretPosition_ > 0U) --numberCaretPosition_;
+            ++interactionRevision_;
+            return ShapeEditorKeyResult::consumed;
+        }
+        if (!control && key == ShapeEditorKey::right) {
+            if (numberCaretPosition_ < numberEditBuffer_.size()) {
+                ++numberCaretPosition_;
+            }
+            ++interactionRevision_;
+            return ShapeEditorKeyResult::consumed;
+        }
+    }
     if (editingTextId_.has_value()) {
         if (key == ShapeEditorKey::escapeKey) {
             cancelTextEdit();
@@ -1417,6 +1959,10 @@ ShapeEditorKeyResult ShapeEditorController::handleKey(
         handleToolbarAction(ToolbarAction::text);
         return ShapeEditorKeyResult::consumed;
     }
+    if (!control && key == ShapeEditorKey::number) {
+        handleToolbarAction(ToolbarAction::number);
+        return ShapeEditorKeyResult::consumed;
+    }
     if (key == ShapeEditorKey::escapeKey) {
         if (interaction_.mode() != ShapeInteractionMode::idle
             || arrowInteraction_.mode() != ArrowLineInteractionMode::idle
@@ -1428,7 +1974,8 @@ ShapeEditorKeyResult ShapeEditorController::handleKey(
         }
         if (shapeToolActive_ || arrowLineToolActive_ || brushToolActive_
             || markerToolActive_ || isMosaicToolActive()
-            || isTextToolActive() || isEyedropperToolActive()) {
+            || isTextToolActive() || isNumberToolActive()
+            || isEyedropperToolActive()) {
             deactivateTool();
             return ShapeEditorKeyResult::consumed;
         }
@@ -1436,9 +1983,15 @@ ShapeEditorKeyResult ShapeEditorController::handleKey(
     }
     if (key == ShapeEditorKey::deleteKey) {
         const auto selected = document_.selectedId();
-        if (!selected.has_value() || !document_.remove(*selected)) {
+        if (!selected.has_value()) {
             return ShapeEditorKeyResult::ignored;
         }
+        const auto* annotation = document_.find(*selected);
+        const auto removed = annotation != nullptr
+            && isNumberAnnotation(*annotation)
+            ? removeNumberAndRenumber(*selected)
+            : document_.remove(*selected);
+        if (!removed) return ShapeEditorKeyResult::ignored;
         syncHistory();
         return ShapeEditorKeyResult::consumed;
     }
@@ -1484,13 +2037,30 @@ std::optional<AnnotationPoint> ShapeEditorController::textDeleteHandlePoint(
     return interaction_.resizeHandlePoint(id, ShapeResizeHandle::topRight);
 }
 
+std::optional<AnnotationRect> ShapeEditorController::numberHandle(
+    AnnotationId id,
+    NumberHandleKind kind) const noexcept
+{
+    const auto* annotation = document_.find(id);
+    return annotation == nullptr
+        ? std::nullopt : numberHandleRect(*annotation, kind);
+}
+
 AnnotationRenderPlan ShapeEditorController::renderPlan(
     AnnotationPoint selectionOriginDip,
     bool showEditingAffordances) const
 {
     return buildAnnotationRenderPlan(
         document_, preview(), selectionOriginDip,
-        showEditingAffordances, editingTextId_, textCaretPosition_);
+        showEditingAffordances,
+        editingTextId_.has_value()
+            ? std::optional<AnnotationEditingState>{{
+                *editingTextId_, textCaretPosition_}}
+            : editingNumberId_.has_value()
+                ? std::optional<AnnotationEditingState>{{
+                    *editingNumberId_, numberCaretPosition_,
+                    numberEditBuffer_}}
+                : std::nullopt);
 }
 
 std::optional<AnnotationId> ShapeEditorController::annotationAtBorder(
@@ -1507,10 +2077,26 @@ std::optional<AnnotationId> ShapeEditorController::annotationAtBorder(
             contains = markerInteraction_.hitTestLine(*iterator, point);
         } else if (isMosaicStrokeAnnotation(*iterator)) {
             contains = mosaicInteraction_.hitTestStroke(iterator->id, point);
+        } else if (isNumberAnnotation(*iterator)) {
+            contains = ellipseContains(iterator->rect, point);
         } else {
             contains = shapeBorderContains(*iterator, point);
         }
         if (contains) {
+            return iterator->id;
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<AnnotationId> ShapeEditorController::numberAnnotationAt(
+    AnnotationPoint point) const noexcept
+{
+    const auto& annotations = document_.annotations();
+    for (auto iterator = annotations.rbegin(); iterator != annotations.rend();
+         ++iterator) {
+        if (isNumberAnnotation(*iterator)
+            && ellipseContains(iterator->rect, point)) {
             return iterator->id;
         }
     }
@@ -1559,6 +2145,14 @@ void ShapeEditorController::loadSelectedOptions() noexcept
             mosaicOptions_.load(*annotation);
         } else if (isTextAnnotation(*annotation)) {
             textOptions_.load(annotation->style);
+        } else if (isNumberAnnotation(*annotation)) {
+            numberOptions_.load(*annotation);
+            if (annotation->numberMarkType == NumberMarkType::number
+                && annotation->numberSequenceGroupId != 0) {
+                currentNumberGroupId_ = annotation->numberSequenceGroupId;
+                nextNumberGroupId_ = (std::max)(nextNumberGroupId_,
+                    currentNumberGroupId_ + 1U);
+            }
         } else {
             options_.load(annotation->kind, annotation->style);
         }
@@ -1602,6 +2196,9 @@ void ShapeEditorController::deactivateTool()
     if (editingTextId_.has_value()) {
         commitTextEdit();
     }
+    if (editingNumberId_.has_value()) {
+        commitNumberEdit();
+    }
     cancelInteraction();
     shapeToolActive_ = false;
     arrowLineToolActive_ = false;
@@ -1612,7 +2209,8 @@ void ShapeEditorController::deactivateTool()
     cornerRadiusPanelVisible_ = false;
     arrowTypeMenuEndpoint_.reset();
     textPopupMenu_.reset();
-    textPopupScrollOffset_ = 0;
+    popupScrollOffset_ = 0;
+    numberPopupMenu_.reset();
 }
 
 } // namespace xxsnap::win

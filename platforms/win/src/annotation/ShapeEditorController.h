@@ -30,6 +30,7 @@ enum class ShapeEditorKey : std::uint8_t {
     eyedropper,
     mosaic,
     text,
+    number,
 };
 
 enum class ShapeEditorKeyResult : std::uint8_t {
@@ -52,6 +53,9 @@ enum class ShapeCursorStyle : std::uint8_t {
     brush,
     marker,
     mosaic,
+    numberMark,
+    numberCheck,
+    numberCross,
     textInput,
     eyedropper,
 };
@@ -73,6 +77,7 @@ public:
     const MarkerOptionsState& markerOptions() const noexcept;
     const MosaicOptionsState& mosaicOptions() const noexcept;
     const TextOptionsState& textOptions() const noexcept;
+    const NumberOptionsState& numberOptions() const noexcept;
     const AnnotationDocument& document() const noexcept;
     AnnotationDocument& document() noexcept;
     std::uint64_t interactionRevision() const noexcept;
@@ -85,9 +90,13 @@ public:
     bool isEyedropperToolActive() const noexcept;
     bool isMosaicToolActive() const noexcept;
     bool isTextToolActive() const noexcept;
-    bool isEditingText() const noexcept;
+    bool isNumberToolActive() const noexcept;
+    int nextNumberSequenceValue() const noexcept;
+    bool isEditingInlineValue() const noexcept;
+    bool isEditingNumber() const noexcept;
     std::optional<TextPopupMenu> textPopupMenu() const noexcept;
-    int textPopupScrollOffset() const noexcept;
+    int popupScrollOffset() const noexcept;
+    std::optional<NumberPopupMenu> numberPopupMenu() const noexcept;
     bool strokePatternMenuVisible() const noexcept;
     bool cornerRadiusPanelVisible() const noexcept;
     std::optional<ArrowEndpoint> arrowTypeMenuEndpoint() const noexcept;
@@ -98,15 +107,21 @@ public:
     bool applyMarkerOptionHit(MarkerOptionHit hit);
     bool applyMosaicOptionHit(MosaicOptionHit hit);
     bool applyTextOptionHit(TextOptionHit hit);
+    bool applyNumberOptionHit(NumberOptionHit hit);
     bool setTextFontFamily(std::wstring family);
     bool setTextSize(float size);
     bool toggleTextPopupMenu(TextPopupMenu menu) noexcept;
-    bool scrollTextPopupMenu(int delta) noexcept;
+    bool scrollPopupMenu(int delta) noexcept;
+    bool toggleNumberPopupMenu(NumberPopupMenu menu) noexcept;
+    bool selectNumberType(NumberMarkType type);
+    bool setNumberSize(float size);
     bool insertText(std::wstring text);
     bool deleteTextBackward();
     bool deleteTextForward();
     bool commitTextEdit();
     bool cancelTextEdit();
+    bool commitNumberEdit();
+    bool cancelNumberEdit();
     void beginMosaicRedactionEdit();
     void endMosaicRedactionEdit();
     bool setMosaicRedactionValue(int value);
@@ -119,7 +134,8 @@ public:
 
     bool pointerDown(
         AnnotationPoint point,
-        bool shift = false) noexcept;
+        bool shift = false,
+        int clickCount = 1) noexcept;
     void pointerMove(
         AnnotationPoint point,
         bool shift = false);
@@ -141,6 +157,9 @@ public:
         AnnotationId id) const noexcept;
     std::optional<AnnotationPoint> textDeleteHandlePoint(
         AnnotationId id) const noexcept;
+    std::optional<AnnotationRect> numberHandle(
+        AnnotationId id,
+        NumberHandleKind kind) const noexcept;
     AnnotationRenderPlan renderPlan(
         AnnotationPoint selectionOriginDip,
         bool showEditingAffordances = true) const;
@@ -150,8 +169,21 @@ private:
         AnnotationPoint point) const noexcept;
     std::optional<AnnotationId> textAnnotationAt(
         AnnotationPoint point) const noexcept;
+    std::optional<AnnotationId> numberAnnotationAt(
+        AnnotationPoint point) const noexcept;
     bool beginTextEdit(AnnotationId id) noexcept;
+    bool beginNumberEdit(AnnotationId id) noexcept;
     bool applyTextStyleToSelection();
+    bool applyNumberStyleToSelection();
+    bool replaceEditingNumber(std::size_t start,
+        std::size_t length, std::wstring replacement);
+    bool adjustSelectedNumber(int delta);
+    bool resetSelectedNumber();
+    bool removeNumberAndRenumber(AnnotationId id);
+    void markNumberGroupManual(std::uint64_t groupId);
+    bool numberGroupIsManual(std::uint64_t groupId) const noexcept;
+    void renumberAutomaticGroup(std::uint64_t groupId);
+    int nextNumberValue(std::uint64_t groupId) const noexcept;
     bool applyArrowOptionsToSelection();
     void loadSelectedOptions() noexcept;
     bool applyOptionsStyleToSelection();
@@ -165,6 +197,7 @@ private:
     MarkerOptionsState markerOptions_;
     MosaicOptionsState mosaicOptions_;
     TextOptionsState textOptions_;
+    NumberOptionsState numberOptions_;
     ShapeInteraction interaction_;
     ArrowLineInteraction arrowInteraction_;
     BrushInteraction brushInteraction_;
@@ -183,7 +216,13 @@ private:
     std::optional<AnnotationId> editingTextId_;
     std::size_t textCaretPosition_ = 0U;
     std::optional<TextPopupMenu> textPopupMenu_;
-    int textPopupScrollOffset_ = 0;
+    int popupScrollOffset_ = 0;
+    std::optional<NumberPopupMenu> numberPopupMenu_;
+    std::optional<AnnotationId> editingNumberId_;
+    std::wstring numberEditBuffer_;
+    std::size_t numberCaretPosition_ = 0U;
+    std::uint64_t currentNumberGroupId_ = 0;
+    std::uint64_t nextNumberGroupId_ = 1;
 };
 
 } // namespace xxsnap::win

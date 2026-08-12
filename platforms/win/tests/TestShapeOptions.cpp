@@ -300,12 +300,45 @@ void testTextOptionsMatchMacGeometryAndMenus()
     CHECK((textOptionHitTest(layout, {400, 220})
         == TextOptionHit{TextOptionControl::textSize, 0U}));
 
-    const auto popup = textPopupMenuLayout(layout.textSize, 10U, 800.0F);
+    const auto popup = popupMenuLayout(layout.textSize, 10U, 800.0F);
     CHECK(popup.items.size() == 10U);
     CHECK(popup.menu.width == layout.textSize.width);
     CHECK(popup.menu.height == 248.0F);
-    CHECK(textPopupMenuHitTest(popup, {
+    CHECK(popupMenuHitTest(popup, {
         popup.items[4].x + 2.0F, popup.items[4].y + 2.0F}) == 4U);
+}
+
+void testNumberOptionsMatchMacGeometryTypesAndSizes()
+{
+    NumberOptionsState state;
+    CHECK(state.type() == NumberMarkType::number);
+    CHECK(state.style().textSize == 3.0F);
+    CHECK(state.selectedPaletteIndex() == 0U);
+    CHECK(numberMarkDiameter(1.0F) == 15.0F);
+    CHECK(numberMarkDiameter(3.0F) == 21.0F);
+    CHECK(numberMarkDiameter(14.0F) == 47.0F);
+    CHECK(numberMarkDiameter(72.0F) == 221.0F);
+    CHECK(state.setType(NumberMarkType::check));
+    CHECK((state.style().strokeColor == AnnotationColor{52, 199, 89, 255}));
+    CHECK(state.setType(NumberMarkType::cross));
+    CHECK((state.style().strokeColor == AnnotationColor{255, 59, 48, 255}));
+    CHECK(state.setSize(100.0F));
+    CHECK(state.style().textSize == 72.0F);
+
+    const auto layout = numberOptionsLayout({100, 200}, 20U);
+    CHECK((layout.toolbar == AnnotationRect{100, 200, 352, 40}));
+    CHECK((layout.markType == AnnotationRect{110, 210, 48, 20}));
+    CHECK((layout.size == AnnotationRect{178, 210, 48, 20}));
+    CHECK((numberOptionHitTest(layout, {120, 220})
+        == NumberOptionHit{NumberOptionControl::markType, 0U}));
+    CHECK((numberOptionHitTest(layout, {190, 220})
+        == NumberOptionHit{NumberOptionControl::size, 0U}));
+    const auto typeMenu = numberTypeMenuLayout(
+        layout.markType, 800.0F);
+    CHECK(typeMenu.items.size() == 3U);
+    CHECK(typeMenu.menu.width == 56.0F);
+    CHECK(typeMenu.menu.height == 86.0F);
+    CHECK(numberSizeValues.size() == 20U);
 }
 
 } // namespace
@@ -323,5 +356,6 @@ int main()
     testMarkerOptionsMatchMacGeometry();
     testMosaicOptionsMatchMacGeometryAndRanges();
     testTextOptionsMatchMacGeometryAndMenus();
+    testNumberOptionsMatchMacGeometryTypesAndSizes();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

@@ -79,6 +79,9 @@ enum class OverlayCursorStyle : std::uint8_t {
     brush,
     marker,
     mosaic,
+    numberMark,
+    numberCheck,
+    numberCross,
     textInput,
     eyedropper,
     eyedropperLight,
@@ -119,6 +122,7 @@ struct OverlayWindowInput {
     bool shift = false;
     std::wstring text;
     int wheelDelta = 0;
+    int clickCount = 1;
 };
 
 struct OverlayWindowCreateResult;
@@ -150,6 +154,8 @@ public:
     void setCursorStyle(OverlayCursorStyle style) noexcept;
     void setMarkerCursor(AnnotationColor color, float strokeWidthDip) noexcept;
     void setMosaicCursor(float strokeWidthDip) noexcept;
+    void setNumberCursor(
+        NumberMarkType type, int value, AnnotationColor color) noexcept;
     DpiRestartState dpiRestartState() const noexcept;
     const std::optional<OverlayWindowError>& lastWindowError() const noexcept;
     const std::optional<OverlayRendererError>& lastRendererError() const noexcept;
@@ -190,6 +196,9 @@ private:
     AnnotationColor markerCursorColor_{};
     float markerCursorStrokeWidthDip_ = 0.0F;
     bool markerCursorIsMosaic_ = false;
+    bool markerCursorIsNumber_ = false;
+    NumberMarkType numberCursorType_ = NumberMarkType::number;
+    int numberCursorValue_ = 1;
     std::optional<OverlayRendererError> lastRendererError_;
 };
 

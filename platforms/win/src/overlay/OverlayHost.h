@@ -51,6 +51,12 @@ struct OverlaySurface {
     UINT dpiY = 96;
 };
 
+struct NumberCursorState {
+    NumberMarkType type = NumberMarkType::number;
+    int value = 1;
+    AnnotationColor color{};
+};
+
 struct OverlayPresentationToolbarItem {
     ToolbarAction action;
     PixelRect rectPhysical{};
@@ -93,7 +99,16 @@ struct OverlayPresentationMosaicOptions {
 struct OverlayPresentationTextOptions {
     TextOptionsLayout layout;
     TextOptionsState state;
-    std::optional<TextPopupMenuLayout> popupMenu;
+    std::optional<PopupMenuLayout> popupMenu;
+    std::vector<std::wstring> popupLabels;
+    std::optional<std::size_t> selectedPopupIndex;
+};
+
+struct OverlayPresentationNumberOptions {
+    NumberOptionsLayout layout;
+    NumberOptionsState state;
+    std::optional<PopupMenuLayout> popupMenu;
+    std::optional<NumberPopupMenu> popupKind;
     std::vector<std::wstring> popupLabels;
     std::optional<std::size_t> selectedPopupIndex;
 };
@@ -121,6 +136,7 @@ struct OverlayPresentation {
     std::optional<OverlayPresentationMarkerOptions> markerOptions;
     std::optional<OverlayPresentationMosaicOptions> mosaicOptions;
     std::optional<OverlayPresentationTextOptions> textOptions;
+    std::optional<OverlayPresentationNumberOptions> numberOptions;
     std::optional<OverlayPresentationEyedropper> eyedropper;
 };
 
@@ -165,7 +181,8 @@ public:
 
     bool activateEscapeHotKey(HWND owner) noexcept;
     bool deactivateEscapeHotKey() noexcept;
-    bool pointerDown(HWND source, PixelPoint clientPoint) noexcept;
+    bool pointerDown(HWND source, PixelPoint clientPoint,
+        int clickCount = 1) noexcept;
     void pointerMove(HWND source, PixelPoint clientPoint) noexcept;
     void pointerUp(HWND source, PixelPoint clientPoint) noexcept;
     OverlayCursorStyle cursorStyle(
@@ -182,7 +199,7 @@ public:
         bool shift) noexcept;
     bool textInput(std::wstring text);
     bool mouseWheel(int delta) noexcept;
-    bool isEditingText() const noexcept;
+    bool isEditingInlineValue() const noexcept;
     bool eyedropperShiftPressed() noexcept;
     void shutdownForRestart() noexcept;
 
@@ -195,6 +212,7 @@ public:
     std::pair<UINT, UINT> annotationDpi() const noexcept;
     std::optional<AnnotationStyle> markerCursorStyle() const noexcept;
     std::optional<AnnotationStyle> mosaicCursorStyle() const noexcept;
+    std::optional<NumberCursorState> numberCursorState() const noexcept;
 
 private:
     const OverlaySurface* surfaceFor(HWND window) const noexcept;
@@ -219,6 +237,8 @@ private:
     std::optional<MosaicOptionsLayout> currentMosaicOptionsLayout(
         const OverlaySurface& surface) const;
     std::optional<TextOptionsLayout> currentTextOptionsLayout(
+        const OverlaySurface& surface) const;
+    std::optional<NumberOptionsLayout> currentNumberOptionsLayout(
         const OverlaySurface& surface) const;
     void cancelOnce() noexcept;
     void completeOnce(OverlayInputAction action) noexcept;

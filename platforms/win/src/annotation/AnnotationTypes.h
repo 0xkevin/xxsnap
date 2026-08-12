@@ -175,6 +175,12 @@ enum class AnnotationKind : std::uint8_t {
     mosaicRectangle,
 };
 
+enum class NumberMarkType : std::uint8_t {
+    number,
+    check,
+    cross,
+};
+
 constexpr bool isShapeKind(AnnotationKind kind) noexcept
 {
     return kind == AnnotationKind::rectangle
@@ -367,6 +373,10 @@ struct ShapeAnnotation {
     std::optional<MosaicStroke> mosaicStroke;
     std::optional<MosaicRedaction> mosaicRedaction;
     std::optional<std::wstring> text;
+    std::optional<NumberMarkType> numberMarkType;
+    std::optional<int> numberSequenceIndex;
+    bool numberSequenceIsManual = false;
+    std::uint64_t numberSequenceGroupId = 0;
 };
 
 constexpr bool isArrowLineAnnotation(
@@ -418,6 +428,13 @@ inline bool isTextAnnotation(const ShapeAnnotation& annotation) noexcept
         && annotation.text.has_value();
 }
 
+constexpr bool isNumberAnnotation(
+    const ShapeAnnotation& annotation) noexcept
+{
+    return annotation.kind == AnnotationKind::numberSequence
+        && annotation.numberMarkType.has_value();
+}
+
 inline bool operator==(
     const ShapeAnnotation& left,
     const ShapeAnnotation& right) noexcept
@@ -432,7 +449,11 @@ inline bool operator==(
         && left.markerLine == right.markerLine
         && left.mosaicStroke == right.mosaicStroke
         && left.mosaicRedaction == right.mosaicRedaction
-        && left.text == right.text;
+        && left.text == right.text
+        && left.numberMarkType == right.numberMarkType
+        && left.numberSequenceIndex == right.numberSequenceIndex
+        && left.numberSequenceIsManual == right.numberSequenceIsManual
+        && left.numberSequenceGroupId == right.numberSequenceGroupId;
 }
 
 } // namespace xxsnap::win

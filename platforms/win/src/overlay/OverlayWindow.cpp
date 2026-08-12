@@ -1,12 +1,16 @@
 #include "overlay/OverlayWindow.h"
 
+#include "annotation/NumberAnnotationMetrics.h"
+#include "annotation/NumberAnnotationRenderer.h"
 #include "resource.h"
 
 #include <imm.h>
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <new>
+#include <string>
 #include <utility>
 
 namespace xxsnap::win {
@@ -138,7 +142,7 @@ OverlayWindowCreateResult OverlayWindow::create(
 
     WNDCLASSEXW windowClass{};
     windowClass.cbSize = sizeof(windowClass);
-    windowClass.style = CS_HREDRAW | CS_VREDRAW;
+    windowClass.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
     windowClass.lpfnWndProc = &OverlayWindow::windowProcedure;
     windowClass.hInstance = instance;
     windowClass.hCursor = nullptr;
@@ -307,6 +311,138 @@ void OverlayWindow::setMosaicCursor(float strokeWidthDip) noexcept
         strokeWidthDip, diameter, true);
 }
 
+void OverlayWindow::setNumberCursor(
+    NumberMarkType type,
+    int value,
+    AnnotationColor color) noexcept
+{
+    value = clampedNumberValue(value);
+    if (markerCursor_ != nullptr && markerCursorIsNumber_
+        && numberCursorType_ == type && numberCursorValue_ == value
+        && markerCursorColor_ == color) {
+        return;
+    }
+    constexpr int side = 30;
+    BITMAPV5HEADER header{};
+    header.bV5Size = sizeof(header);
+    header.bV5Width = side;
+    header.bV5Height = -side;
+    header.bV5Planes = 1;
+    header.bV5BitCount = 32;
+    header.bV5Compression = BI_BITFIELDS;
+    header.bV5RedMask = 0x00FF0000;
+    header.bV5GreenMask = 0x0000FF00;
+    header.bV5BlueMask = 0x000000FF;
+    header.bV5AlphaMask = 0xFF000000;
+    void* bits = nullptr;
+    const auto screen = GetDC(nullptr);
+    const auto colorBitmap = CreateDIBSection(
+        screen, reinterpret_cast<BITMAPINFO*>(&header),
+        DIB_RGB_COLORS, &bits, nullptr, 0);
+    ReleaseDC(nullptr, screen);
+    if (colorBitmap == nullptr || bits == nullptr) {
+        if (colorBitmap != nullptr) DeleteObject(colorBitmap);
+        return;
+    }
+    auto* pixels = static_cast<std::uint32_t*>(bits);
+    const auto opaquePixel = [color]() {
+        return 0xFF000000U
+            | static_cast<std::uint32_t>(color.red) << 16U
+            | static_cast<std::uint32_t>(color.green) << 8U
+            | static_cast<std::uint32_t>(color.blue);
+    }();
+    if (type == NumberMarkType::number) {
+        constexpr float center = 14.5F;
+        constexpr float radius = 12.0F;
+        for (int y = 0; y < side; ++y) {
+            for (int x = 0; x < side; ++x) {
+                const auto dx = static_cast<float>(x) - center;
+                const auto dy = static_cast<float>(y) - center;
+                pixels[y * side + x] = dx * dx + dy * dy <= radius * radius
+                    ? opaquePixel : 0U;
+            }
+        }
+        const auto dc = CreateCompatibleDC(nullptr);
+        const auto previousBitmap = SelectObject(dc, colorBitmap);
+        SetBkMode(dc, TRANSPARENT);
+        const auto foreground = readableNumberForeground(color);
+        SetTextColor(dc, RGB(
+            foreground.red, foreground.green, foreground.blue));
+        const auto text = std::to_wstring(value);
+        const auto fontHeight = text.size() == 1U
+            ? 18 : text.size() == 2U ? 15 : 12;
+        const auto font = CreateFontW(
+            -fontHeight, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+            ANTIALIASED_QUALITY, FIXED_PITCH | FF_MODERN, L"Consolas");
+        const auto previousFont = SelectObject(dc, font);
+        RECT rect{3, 3, 27, 27};
+        DrawTextW(dc, text.c_str(), static_cast<int>(text.size()), &rect,
+            DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        SelectObject(dc, previousFont);
+        SelectObject(dc, previousBitmap);
+        DeleteObject(font);
+        DeleteDC(dc);
+        for (int y = 0; y < side; ++y) {
+            for (int x = 0; x < side; ++x) {
+                const auto dx = static_cast<float>(x) - center;
+                const auto dy = static_cast<float>(y) - center;
+                if (dx * dx + dy * dy <= radius * radius) {
+                    pixels[y * side + x] |= 0xFF000000U;
+                }
+            }
+        }
+    } else {
+        const auto paintSegment = [&](float x1, float y1, float x2, float y2) {
+            const auto dx = x2 - x1;
+            const auto dy = y2 - y1;
+            const auto lengthSquared = dx * dx + dy * dy;
+            for (int y = 0; y < side; ++y) {
+                for (int x = 0; x < side; ++x) {
+                    const auto px = static_cast<float>(x) - x1;
+                    const auto py = static_cast<float>(y) - y1;
+                    const auto progress = (std::max)(0.0F, (std::min)(1.0F,
+                        (px * dx + py * dy) / lengthSquared));
+                    const auto nearestX = x1 + progress * dx;
+                    const auto nearestY = y1 + progress * dy;
+                    const auto distanceX = static_cast<float>(x) - nearestX;
+                    const auto distanceY = static_cast<float>(y) - nearestY;
+                    if (distanceX * distanceX + distanceY * distanceY <= 2.25F) {
+                        pixels[y * side + x] = opaquePixel;
+                    }
+                }
+            }
+        };
+        if (type == NumberMarkType::check) {
+            paintSegment(6.5F, 15.0F, 12.0F, 20.5F);
+            paintSegment(12.0F, 20.5F, 23.5F, 8.5F);
+        } else {
+            paintSegment(7.5F, 7.5F, 22.5F, 22.5F);
+            paintSegment(22.5F, 7.5F, 7.5F, 22.5F);
+        }
+    }
+    const auto maskBitmap = CreateBitmap(side, side, 1, 1, nullptr);
+    ICONINFO info{};
+    info.fIcon = FALSE;
+    info.xHotspot = side / 2;
+    info.yHotspot = side / 2;
+    info.hbmMask = maskBitmap;
+    info.hbmColor = colorBitmap;
+    const auto cursor = CreateIconIndirect(&info);
+    DeleteObject(maskBitmap);
+    DeleteObject(colorBitmap);
+    if (cursor != nullptr) {
+        discardMarkerCursor();
+        markerCursor_ = cursor;
+        markerCursorColor_ = color;
+        markerCursorStrokeWidthDip_ = 0.0F;
+        markerCursorIsMosaic_ = false;
+        markerCursorIsNumber_ = true;
+        numberCursorType_ = type;
+        numberCursorValue_ = value;
+    }
+}
+
 void OverlayWindow::setDotCursor(
     AnnotationColor color,
     float strokeWidthDip,
@@ -314,6 +450,7 @@ void OverlayWindow::setDotCursor(
     bool mosaic) noexcept
 {
     if (markerCursor_ != nullptr
+        && !markerCursorIsNumber_
         && markerCursorColor_ == color
         && markerCursorStrokeWidthDip_ == strokeWidthDip
         && markerCursorIsMosaic_ == mosaic) {
@@ -384,6 +521,7 @@ void OverlayWindow::setDotCursor(
         markerCursorColor_ = color;
         markerCursorStrokeWidthDip_ = strokeWidthDip;
         markerCursorIsMosaic_ = mosaic;
+        markerCursorIsNumber_ = false;
     }
 }
 
@@ -430,6 +568,9 @@ HCURSOR OverlayWindow::cursor() const noexcept
         break;
     case OverlayCursorStyle::marker:
     case OverlayCursorStyle::mosaic:
+    case OverlayCursorStyle::numberMark:
+    case OverlayCursorStyle::numberCheck:
+    case OverlayCursorStyle::numberCross:
         result = markerCursor_;
         break;
     case OverlayCursorStyle::textInput:
@@ -536,7 +677,8 @@ LRESULT OverlayWindow::handleMessage(
         return 0;
     }
     case WM_LBUTTONDOWN:
-        if (renderState_.selectedToolbarAction == ToolbarAction::text) {
+        if (renderState_.selectedToolbarAction == ToolbarAction::text
+            || renderState_.selectedToolbarAction == ToolbarAction::number) {
             SetForegroundWindow(window_);
             SetFocus(window_);
         }
@@ -548,6 +690,23 @@ LRESULT OverlayWindow::handleMessage(
             },
         });
         return 0;
+    case WM_LBUTTONDBLCLK: {
+        if (renderState_.selectedToolbarAction == ToolbarAction::text
+            || renderState_.selectedToolbarAction == ToolbarAction::number) {
+            SetForegroundWindow(window_);
+            SetFocus(window_);
+        }
+        OverlayWindowInput input{
+            OverlayWindowInputKind::pointerDown,
+            PixelPoint{
+                static_cast<short>(LOWORD(lParam)),
+                static_cast<short>(HIWORD(lParam)),
+            },
+        };
+        input.clickCount = 2;
+        dispatchInput(input);
+        return 0;
+    }
     case WM_MOUSEMOVE:
         dispatchInput({
             OverlayWindowInputKind::pointerMove,
@@ -667,7 +826,9 @@ LRESULT OverlayWindow::handleMessage(
         return 0;
     case WM_CHAR:
         if (wParam >= 0x20U && wParam != 0x7FU
-            && renderState_.selectedToolbarAction == ToolbarAction::text) {
+            && (renderState_.selectedToolbarAction == ToolbarAction::text
+                || (renderState_.selectedToolbarAction == ToolbarAction::number
+                    && wParam >= L'0' && wParam <= L'9'))) {
             OverlayWindowInput input{OverlayWindowInputKind::textInput, {}};
             input.text.push_back(static_cast<wchar_t>(wParam));
             dispatchInput(input);
