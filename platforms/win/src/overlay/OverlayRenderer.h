@@ -64,6 +64,14 @@ struct OverlayShapeOptionsRenderState {
     std::optional<CornerRadiusPanelLayout> cornerRadiusPanel;
 };
 
+struct OverlayArrowLineOptionsRenderState {
+    ArrowLineOptionsLayout layout;
+    ArrowLineOptionsState state;
+    std::optional<StrokePatternMenuLayout> strokePatternMenu;
+    std::optional<ArrowTypeMenuLayout> arrowTypeMenu;
+    std::optional<ArrowEndpoint> arrowTypeMenuEndpoint;
+};
+
 struct OverlayRenderState {
     std::optional<PixelRect> selection;
     bool showActions = true;
@@ -76,6 +84,7 @@ struct OverlayRenderState {
     bool canRedo = false;
     AnnotationRenderPlan annotationPlan;
     std::optional<OverlayShapeOptionsRenderState> shapeOptions;
+    std::optional<OverlayArrowLineOptionsRenderState> arrowLineOptions;
 };
 
 float physicalPixelsToDip(std::int64_t pixels, std::uint32_t dpi) noexcept;

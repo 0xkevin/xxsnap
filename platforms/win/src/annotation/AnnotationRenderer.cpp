@@ -1,4 +1,5 @@
 #include "annotation/AnnotationRenderer.h"
+#include "annotation/ArrowLineRenderer.h"
 
 #include <d2d1helper.h>
 
@@ -364,12 +365,20 @@ AnnotationRenderPlan buildAnnotationRenderPlan(
         auto annotation = source;
         annotation.rect.x += selectionOriginDip.x;
         annotation.rect.y += selectionOriginDip.y;
+        if (annotation.arrowLine.has_value()) {
+            annotation.arrowLine = translated(
+                *annotation.arrowLine, selectionOriginDip);
+        }
         plan.items.push_back({annotation, false});
     }
     if (preview.has_value()) {
         auto annotation = *preview;
         annotation.rect.x += selectionOriginDip.x;
         annotation.rect.y += selectionOriginDip.y;
+        if (annotation.arrowLine.has_value()) {
+            annotation.arrowLine = translated(
+                *annotation.arrowLine, selectionOriginDip);
+        }
         plan.items.push_back({annotation, true});
     }
 
@@ -396,6 +405,15 @@ AnnotationRenderPlan buildAnnotationRenderPlan(
         editing = &plan.items.back().annotation;
     }
     if (editing == nullptr) {
+        return plan;
+    }
+
+    if (editing->arrowLine.has_value()) {
+        plan.lineHandles = {
+            editing->arrowLine->start,
+            editing->arrowLine->end,
+            editing->arrowLine->control,
+        };
         return plan;
     }
 
@@ -510,6 +528,15 @@ HRESULT AnnotationRenderer::draw(
 
     for (const auto& item : plan.items) {
         const auto& annotation = item.annotation;
+        if (annotation.kind == AnnotationKind::arrowLine
+            && annotation.arrowLine.has_value()) {
+            const auto result = drawArrowLine(
+                factory_, renderTarget, annotation);
+            if (FAILED(result)) {
+                return result;
+            }
+            continue;
+        }
         if (!isShapeKind(annotation.kind)) {
             continue;
         }
@@ -606,7 +633,7 @@ HRESULT AnnotationRenderer::draw(
         renderTarget->SetTransform(previousTransform);
     }
 
-    if (!plan.resizeHandles.empty()) {
+    if (!plan.resizeHandles.empty() || !plan.lineHandles.empty()) {
         ComPtr<ID2D1SolidColorBrush> blueBrush;
         auto result = renderTarget->CreateSolidColorBrush(
             D2D1::ColorF(0.0F, 122.0F / 255.0F, 1.0F, 1.0F),
@@ -629,6 +656,9 @@ HRESULT AnnotationRenderer::draw(
             renderTarget->DrawEllipse(&ellipse, whiteBrush.get(), 1.0F);
         };
         for (const auto point : plan.resizeHandles) {
+            drawHandle(point);
+        }
+        for (const auto point : plan.lineHandles) {
             drawHandle(point);
         }
     }

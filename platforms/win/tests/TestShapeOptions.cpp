@@ -151,6 +151,46 @@ void testSharedHitGeometryAndMenus()
     CHECK(hitTestStrokePatternMenu(menu, {20, 150}) == 5U);
 }
 
+void testArrowLineOptionsMatchMacGeometryAndEndpointRules()
+{
+    ArrowLineOptionsState state;
+    CHECK(state.style().strokeWidthDip == 4.0F);
+    CHECK(state.startArrowType() == ArrowType::none);
+    CHECK(state.endArrowType() == ArrowType::normal);
+    CHECK(state.setStrokeWidth(6.0F));
+    CHECK(!state.setStrokeWidth(7.0F));
+    CHECK(state.selectArrowType(ArrowEndpoint::start, ArrowType::solidArrow));
+    CHECK(state.startArrowType() == ArrowType::solidArrow);
+    CHECK(state.endArrowType() == ArrowType::none);
+    CHECK(state.selectArrowType(ArrowEndpoint::end, ArrowType::hollowArrow));
+    CHECK(state.startArrowType() == ArrowType::none);
+    CHECK(state.endArrowType() == ArrowType::hollowArrow);
+    CHECK(!state.selectArrowType(ArrowEndpoint::start, ArrowType::none));
+    CHECK(state.startArrowType() == ArrowType::none);
+    CHECK(state.endArrowType() == ArrowType::hollowArrow);
+    CHECK(state.selectArrowType(ArrowEndpoint::start, ArrowType::solidArrow));
+    CHECK(!state.selectArrowType(ArrowEndpoint::end, ArrowType::none));
+    CHECK(state.startArrowType() == ArrowType::solidArrow);
+    CHECK(state.endArrowType() == ArrowType::none);
+
+    const auto layout = arrowLineOptionsLayout({100, 200}, 20);
+    CHECK((layout.toolbar == AnnotationRect{100, 200, 526, 40}));
+    CHECK((layout.strokeWidths[0] == AnnotationRect{110, 210, 20, 20}));
+    CHECK((layout.strokeStyle == AnnotationRect{196, 210, 94, 20}));
+    CHECK((layout.startArrowType == AnnotationRect{308, 210, 42, 20}));
+    CHECK((layout.endArrowType == AnnotationRect{356, 210, 42, 20}));
+    CHECK((layout.colorSwatches[0] == AnnotationRect{422, 205, 12, 12}));
+    CHECK((layout.colorSwatches[20] == AnnotationRect{584, 204, 32, 32}));
+    CHECK((arrowLineOptionHitTest(layout, {309, 220})
+        == ArrowLineOptionHit{ArrowLineOptionControl::startArrowType, 0}));
+
+    const auto menu = arrowTypeMenuLayout({10, 20, 58, 176});
+    CHECK(menu.items.size() == 7U);
+    CHECK((menu.items[0] == AnnotationRect{14, 24, 50, 20}));
+    CHECK((menu.items[6] == AnnotationRect{14, 168, 50, 20}));
+    CHECK(hitTestArrowTypeMenu(menu, {20, 170}) == 6U);
+}
+
 } // namespace
 
 int main()
@@ -161,5 +201,6 @@ int main()
     testTwoRowDefaultLayoutUsesExactMacDips();
     testOneRowAndClampedPaletteLayouts();
     testSharedHitGeometryAndMenus();
+    testArrowLineOptionsMatchMacGeometryAndEndpointRules();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

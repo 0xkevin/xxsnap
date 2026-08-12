@@ -15,6 +15,9 @@ public:
         AnnotationRect rect,
         AnnotationStyle style = {},
         float rotationDegrees = 0.0F);
+    AnnotationId addArrowLine(
+        ArrowLine line,
+        AnnotationStyle style = {});
 
     bool remove(AnnotationId id);
     bool updateRect(AnnotationId id, AnnotationRect rect);
@@ -22,6 +25,7 @@ public:
     bool updateKind(AnnotationId id, AnnotationKind kind);
     bool updateRotation(AnnotationId id, float rotationDegrees);
     bool updateStyle(AnnotationId id, AnnotationStyle style);
+    bool updateArrowLine(AnnotationId id, ArrowLine line);
 
     bool select(AnnotationId id) noexcept;
     void clearSelection() noexcept;

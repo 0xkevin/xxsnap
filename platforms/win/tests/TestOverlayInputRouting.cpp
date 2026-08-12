@@ -419,7 +419,7 @@ void testShapeToolIsNonTerminalAndEditsThroughSharedPresentation()
     createReadySelection(router);
 
     auto owner = router.presentations()[1];
-    CHECK(owner.toolbarItems.size() == 6U);
+    CHECK(owner.toolbarItems.size() == 7U);
     const auto rectangle = owner.toolbarItems[0];
     CHECK(rectangle.action == xxsnap::win::ToolbarAction::rectangle);
     const auto capturesBeforeTool = platform.captureCalls;
@@ -472,9 +472,9 @@ void testShapeToolIsNonTerminalAndEditsThroughSharedPresentation()
 
     owner = router.presentations()[1];
     CHECK(owner.annotationPlan.items.size() == 1U);
-    CHECK(owner.toolbarItems[1].action == xxsnap::win::ToolbarAction::undo);
-    CHECK(owner.toolbarItems[1].enabled);
-    CHECK(router.pointerDown(rightWindow, owner.toolbarItems[1].centerPhysical));
+    CHECK(owner.toolbarItems[2].action == xxsnap::win::ToolbarAction::undo);
+    CHECK(owner.toolbarItems[2].enabled);
+    CHECK(router.pointerDown(rightWindow, owner.toolbarItems[2].centerPhysical));
     CHECK(router.annotationDocument().annotations().empty());
     CHECK(actions.empty());
 
@@ -483,6 +483,104 @@ void testShapeToolIsNonTerminalAndEditsThroughSharedPresentation()
     CHECK(router.keyPressed(ShapeEditorKey::copy, true, false));
     CHECK(actions.size() == 1U);
     CHECK(actions[0] == OverlayInputAction::copy);
+}
+
+void testArrowToolUsesMacOptionsMenuAndCreatesEditableCurve()
+{
+    FakePlatform platform;
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform, {}, true);
+    createReadySelection(router);
+
+    auto owner = router.presentations()[1];
+    CHECK(owner.toolbarItems.size() == 7U);
+    CHECK(owner.toolbarItems[1].action == xxsnap::win::ToolbarAction::polyline);
+    CHECK(router.pointerDown(
+        rightWindow, owner.toolbarItems[1].centerPhysical));
+    owner = router.presentations()[1];
+    CHECK(owner.toolbarItems[1].selected);
+    CHECK(owner.arrowLineOptions.has_value());
+    CHECK(owner.arrowLineOptions->state.style().strokeWidthDip == 4.0F);
+
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.arrowLineOptions->layout.startArrowType)));
+    owner = router.presentations()[1];
+    CHECK(owner.arrowLineOptions->arrowTypeMenu.has_value());
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.arrowLineOptions->arrowTypeMenu->items[5])));
+    owner = router.presentations()[1];
+    CHECK(owner.arrowLineOptions->state.startArrowType()
+        == xxsnap::win::ArrowType::bar);
+    CHECK(!owner.arrowLineOptions->arrowTypeMenu.has_value());
+
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.arrowLineOptions->layout.startArrowType)));
+    owner = router.presentations()[1];
+    CHECK(owner.arrowLineOptions->arrowTypeMenu.has_value());
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.arrowLineOptions->arrowTypeMenu->items[5])));
+    CHECK(!router.presentations()[1]
+        .arrowLineOptions->arrowTypeMenu.has_value());
+
+    owner = router.presentations()[1];
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.arrowLineOptions->layout.strokeStyle)));
+    owner = router.presentations()[1];
+    CHECK(owner.arrowLineOptions->strokePatternMenu.has_value());
+    if (!owner.arrowLineOptions->strokePatternMenu.has_value()) {
+        return;
+    }
+    const auto strokeItem = owner.arrowLineOptions->strokePatternMenu->items[5];
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        strokeItem)));
+    owner = router.presentations()[1];
+    if (!owner.arrowLineOptions.has_value()) {
+        CHECK(owner.arrowLineOptions.has_value());
+        return;
+    }
+    CHECK(owner.arrowLineOptions->state.style().strokePattern
+        == xxsnap::win::AnnotationStrokePattern::sketchDashed);
+
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.arrowLineOptions->layout.endArrowType)));
+    owner = router.presentations()[1];
+    CHECK(owner.arrowLineOptions->arrowTypeMenu.has_value());
+    CHECK(owner.arrowLineOptions->arrowTypeMenuEndpoint
+        == xxsnap::win::ArrowEndpoint::end);
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.arrowLineOptions->arrowTypeMenu->items[6])));
+    owner = router.presentations()[1];
+    CHECK(owner.arrowLineOptions->state.endArrowType()
+        == xxsnap::win::ArrowType::dot);
+    CHECK(!owner.arrowLineOptions->arrowTypeMenu.has_value());
+
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.arrowLineOptions->layout.colorSwatches[2])));
+    owner = router.presentations()[1];
+    CHECK(owner.arrowLineOptions->state.style().strokeColor
+        == xxsnap::win::macShapePalette()[2]);
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.arrowLineOptions->layout.colorSwatches.back())));
+    CHECK(platform.chooseColorCalls == 1);
+    owner = router.presentations()[1];
+    CHECK((owner.arrowLineOptions->state.style().strokeColor
+        == AnnotationColor{1, 2, 3, 255}));
+
+    CHECK(router.pointerDown(rightWindow, PixelPoint{40, 90}));
+    platform.cursor = PixelPoint{180, 190};
+    router.pointerMove(rightWindow, PixelPoint{180, 190});
+    CHECK(router.presentations()[1].annotationPlan.items.size() == 1U);
+    router.pointerUp(rightWindow, PixelPoint{180, 190});
+    CHECK(router.annotationDocument().annotations().size() == 1U);
+    const auto& created = router.annotationDocument().annotations().front();
+    CHECK(created.kind == xxsnap::win::AnnotationKind::arrowLine);
+    CHECK(created.arrowLine.has_value());
+    CHECK(created.arrowLine->startArrowType == xxsnap::win::ArrowType::bar);
+    CHECK(created.arrowLine->endArrowType == xxsnap::win::ArrowType::dot);
+    CHECK(created.style.strokePattern
+        == xxsnap::win::AnnotationStrokePattern::sketchDashed);
+    CHECK((created.style.strokeColor == AnnotationColor{1, 2, 3, 255}));
+    CHECK(router.presentations()[1].annotationPlan.lineHandles.size() == 3U);
 }
 
 void testShapeCanBeCreatedOutsideLockedSelectionOnOverlay()
@@ -535,6 +633,7 @@ int main()
     testTerminalCallbackMaySynchronouslyDestroyRouter();
     testRestartShutdownReleasesCaptureAndHotKeyWithoutCancelAction();
     testShapeToolIsNonTerminalAndEditsThroughSharedPresentation();
+    testArrowToolUsesMacOptionsMenuAndCreatesEditableCurve();
     testShapeCanBeCreatedOutsideLockedSelectionOnOverlay();
     return failureCount == 0 ? 0 : 1;
 }

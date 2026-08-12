@@ -12,6 +12,8 @@ namespace xxsnap::win {
 
 const std::array<AnnotationColor, 20>& macShapePalette() noexcept;
 const std::array<AnnotationStrokePattern, 6>& macShapeStrokePatterns() noexcept;
+const std::array<ArrowType, 7>& macArrowTypes() noexcept;
+const std::array<float, 3>& macArrowStrokeWidths() noexcept;
 
 class ShapeOptionsState {
 public:
@@ -36,6 +38,31 @@ private:
 
     AnnotationKind kind_ = AnnotationKind::rectangle;
     AnnotationStyle style_{};
+    std::optional<std::size_t> selectedPaletteIndex_;
+};
+
+class ArrowLineOptionsState {
+public:
+    ArrowLineOptionsState() noexcept;
+
+    const AnnotationStyle& style() const noexcept;
+    ArrowType startArrowType() const noexcept;
+    ArrowType endArrowType() const noexcept;
+    std::optional<std::size_t> selectedPaletteIndex() const noexcept;
+
+    bool load(AnnotationStyle style, const ArrowLine& line) noexcept;
+    bool setStrokeWidth(float strokeWidthDip) noexcept;
+    bool setStrokePattern(AnnotationStrokePattern pattern) noexcept;
+    bool selectArrowType(ArrowEndpoint endpoint, ArrowType type) noexcept;
+    bool selectPalette(std::size_t index) noexcept;
+    bool selectCustomColor(AnnotationColor color) noexcept;
+
+private:
+    void refreshPaletteSelection() noexcept;
+
+    AnnotationStyle style_{};
+    ArrowType startArrowType_ = ArrowType::none;
+    ArrowType endArrowType_ = ArrowType::normal;
     std::optional<std::size_t> selectedPaletteIndex_;
 };
 
@@ -81,6 +108,59 @@ struct ShapeOptionsLayout {
     std::vector<AnnotationRect> colorSwatches;
     std::vector<AnnotationRect> separators;
 };
+
+enum class ArrowLineOptionControl : std::uint8_t {
+    strokeWidth,
+    strokeStyle,
+    startArrowType,
+    endArrowType,
+    palette,
+    customColor,
+};
+
+struct ArrowLineOptionHit {
+    ArrowLineOptionControl control = ArrowLineOptionControl::strokeWidth;
+    std::size_t index = 0;
+};
+
+constexpr bool operator==(
+    ArrowLineOptionHit left,
+    ArrowLineOptionHit right) noexcept
+{
+    return left.control == right.control && left.index == right.index;
+}
+
+struct ArrowLineOptionsLayout {
+    AnnotationRect toolbar{};
+    std::size_t paletteCount = 0;
+    std::vector<AnnotationRect> strokeWidths;
+    std::vector<AnnotationRect> strokeWidthHits;
+    AnnotationRect strokeStyle{};
+    AnnotationPoint strokeStyleSampleStart{};
+    AnnotationPoint strokeStyleSampleEnd{};
+    AnnotationRect startArrowType{};
+    AnnotationRect endArrowType{};
+    std::vector<AnnotationRect> colorSwatches;
+};
+
+ArrowLineOptionsLayout arrowLineOptionsLayout(
+    AnnotationPoint origin,
+    std::size_t paletteCount);
+
+std::optional<ArrowLineOptionHit> arrowLineOptionHitTest(
+    const ArrowLineOptionsLayout& layout,
+    AnnotationPoint point) noexcept;
+
+struct ArrowTypeMenuLayout {
+    AnnotationRect menu{};
+    std::vector<AnnotationRect> items;
+};
+
+ArrowTypeMenuLayout arrowTypeMenuLayout(AnnotationRect menu);
+
+std::optional<std::size_t> hitTestArrowTypeMenu(
+    const ArrowTypeMenuLayout& layout,
+    AnnotationPoint point) noexcept;
 
 ShapeOptionsLayout shapeOptionsLayout(
     AnnotationPoint origin,

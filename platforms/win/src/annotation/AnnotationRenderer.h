@@ -22,6 +22,7 @@ struct AnnotationRenderItem {
 struct AnnotationRenderPlan {
     std::vector<AnnotationRenderItem> items;
     std::vector<AnnotationPoint> resizeHandles;
+    std::vector<AnnotationPoint> lineHandles;
     std::optional<AnnotationPoint> rotationHandle;
 };
 

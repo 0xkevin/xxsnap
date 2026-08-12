@@ -1,6 +1,7 @@
 #pragma once
 
 #include "annotation/AnnotationRenderer.h"
+#include "annotation/ArrowLineInteraction.h"
 #include "annotation/ShapeInteraction.h"
 #include "annotation/ShapeOptions.h"
 #include "toolbar/ToolbarState.h"
@@ -45,15 +46,20 @@ public:
     void setCanvasBounds(AnnotationRect canvasBounds) noexcept;
     const ToolbarState& toolbarState() const noexcept;
     const ShapeOptionsState& options() const noexcept;
+    const ArrowLineOptionsState& arrowLineOptions() const noexcept;
     const AnnotationDocument& document() const noexcept;
     AnnotationDocument& document() noexcept;
     const std::optional<ShapeAnnotation>& preview() const noexcept;
 
     bool isShapeToolActive() const noexcept;
+    bool isArrowLineToolActive() const noexcept;
     bool strokePatternMenuVisible() const noexcept;
     bool cornerRadiusPanelVisible() const noexcept;
+    std::optional<ArrowEndpoint> arrowTypeMenuEndpoint() const noexcept;
     bool handleToolbarAction(ToolbarAction action);
     bool applyOptionHit(ShapeOptionHit hit);
+    bool applyArrowLineOptionHit(ArrowLineOptionHit hit);
+    bool applyArrowType(ArrowEndpoint endpoint, std::size_t index);
     bool applyStrokePattern(std::size_t index);
     bool setCornerRadius(float cornerRadiusDip);
     bool adjustCornerRadius(float deltaDip);
@@ -83,6 +89,7 @@ public:
 private:
     std::optional<AnnotationId> annotationAtBorder(
         AnnotationPoint point) const noexcept;
+    bool applyArrowOptionsToSelection();
     void loadSelectedOptions() noexcept;
     bool applyOptionsStyleToSelection();
     void syncHistory() noexcept;
@@ -90,11 +97,16 @@ private:
 
     AnnotationDocument document_;
     ShapeOptionsState options_;
+    ArrowLineOptionsState arrowLineOptions_;
     ShapeInteraction interaction_;
+    ArrowLineInteraction arrowInteraction_;
+    AnnotationRect canvasBounds_{};
     ToolbarState toolbarState_;
     bool shapeToolActive_ = false;
+    bool arrowLineToolActive_ = false;
     bool strokePatternMenuVisible_ = false;
     bool cornerRadiusPanelVisible_ = false;
+    std::optional<ArrowEndpoint> arrowTypeMenuEndpoint_;
 };
 
 } // namespace xxsnap::win
