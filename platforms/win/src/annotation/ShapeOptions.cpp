@@ -27,6 +27,7 @@ constexpr std::array<AnnotationColor, 20> palette{
 };
 
 constexpr std::array<float, 3> strokeWidths{2.0F, 4.0F, 7.0F};
+constexpr std::array<float, 3> arrowStrokeWidths{3.0F, 4.0F, 6.0F};
 
 constexpr std::array<AnnotationStrokePattern, 6> strokePatterns{
     AnnotationStrokePattern::solid,
@@ -35,6 +36,16 @@ constexpr std::array<AnnotationStrokePattern, 6> strokePatterns{
     AnnotationStrokePattern::dashLongShort,
     AnnotationStrokePattern::sketchSolid,
     AnnotationStrokePattern::sketchDashed,
+};
+
+constexpr std::array<ArrowType, 7> arrowTypes{
+    ArrowType::none,
+    ArrowType::normal,
+    ArrowType::solidArrow,
+    ArrowType::hollowArrow,
+    ArrowType::diamond,
+    ArrowType::bar,
+    ArrowType::dot,
 };
 
 constexpr float minimum(float left, float right) noexcept
@@ -100,6 +111,11 @@ const std::array<AnnotationColor, 20>& macShapePalette() noexcept
 const std::array<AnnotationStrokePattern, 6>& macShapeStrokePatterns() noexcept
 {
     return strokePatterns;
+}
+
+const std::array<ArrowType, 7>& macArrowTypes() noexcept
+{
+    return arrowTypes;
 }
 
 ShapeOptionsState::ShapeOptionsState() noexcept
@@ -236,6 +252,244 @@ void ShapeOptionsState::refreshPaletteSelection() noexcept
             return;
         }
     }
+}
+
+ArrowLineOptionsState::ArrowLineOptionsState() noexcept
+    : selectedPaletteIndex_(0U)
+{
+    style_.strokeWidthDip = 4.0F;
+    style_.strokeColor = palette.front();
+}
+
+const AnnotationStyle& ArrowLineOptionsState::style() const noexcept
+{
+    return style_;
+}
+
+ArrowType ArrowLineOptionsState::startArrowType() const noexcept
+{
+    return startArrowType_;
+}
+
+ArrowType ArrowLineOptionsState::endArrowType() const noexcept
+{
+    return endArrowType_;
+}
+
+std::optional<std::size_t> ArrowLineOptionsState::selectedPaletteIndex() const noexcept
+{
+    return selectedPaletteIndex_;
+}
+
+bool ArrowLineOptionsState::load(
+    AnnotationStyle style,
+    const ArrowLine& line) noexcept
+{
+    const auto changed = style_ != style
+        || startArrowType_ != line.startArrowType
+        || endArrowType_ != line.endArrowType;
+    style_ = style;
+    startArrowType_ = line.startArrowType;
+    endArrowType_ = line.endArrowType;
+    refreshPaletteSelection();
+    return changed;
+}
+
+bool ArrowLineOptionsState::setStrokeWidth(float strokeWidthDip) noexcept
+{
+    bool supported = false;
+    for (const auto candidate : arrowStrokeWidths) {
+        supported = supported || candidate == strokeWidthDip;
+    }
+    if (!supported || style_.strokeWidthDip == strokeWidthDip) {
+        return false;
+    }
+    style_.strokeWidthDip = strokeWidthDip;
+    return true;
+}
+
+bool ArrowLineOptionsState::setStrokePattern(
+    AnnotationStrokePattern pattern) noexcept
+{
+    if (style_.strokePattern == pattern) {
+        return false;
+    }
+    style_.strokePattern = pattern;
+    return true;
+}
+
+bool ArrowLineOptionsState::selectArrowType(
+    ArrowEndpoint endpoint,
+    ArrowType type) noexcept
+{
+    auto start = startArrowType_;
+    auto end = endArrowType_;
+    if (endpoint == ArrowEndpoint::start) {
+        start = type;
+        if (type == ArrowType::solidArrow
+            || type == ArrowType::hollowArrow
+            || end == ArrowType::solidArrow
+            || end == ArrowType::hollowArrow) {
+            end = ArrowType::none;
+        }
+    } else {
+        end = type;
+        if (type == ArrowType::solidArrow
+            || type == ArrowType::hollowArrow
+            || start == ArrowType::solidArrow
+            || start == ArrowType::hollowArrow) {
+            start = ArrowType::none;
+        }
+    }
+    if (start == startArrowType_ && end == endArrowType_) {
+        return false;
+    }
+    startArrowType_ = start;
+    endArrowType_ = end;
+    return true;
+}
+
+bool ArrowLineOptionsState::selectPalette(std::size_t index) noexcept
+{
+    if (index >= palette.size()) {
+        return false;
+    }
+    const auto changed = !(style_.strokeColor == palette[index])
+        || selectedPaletteIndex_ != index;
+    style_.strokeColor = palette[index];
+    selectedPaletteIndex_ = index;
+    return changed;
+}
+
+bool ArrowLineOptionsState::selectCustomColor(AnnotationColor color) noexcept
+{
+    color.alpha = 255;
+    const auto changed = !(style_.strokeColor == color)
+        || selectedPaletteIndex_.has_value();
+    style_.strokeColor = color;
+    selectedPaletteIndex_.reset();
+    return changed;
+}
+
+void ArrowLineOptionsState::refreshPaletteSelection() noexcept
+{
+    selectedPaletteIndex_.reset();
+    for (std::size_t index = 0; index < palette.size(); ++index) {
+        if (palette[index] == style_.strokeColor) {
+            selectedPaletteIndex_ = index;
+            return;
+        }
+    }
+}
+
+ArrowLineOptionsLayout arrowLineOptionsLayout(
+    AnnotationPoint origin,
+    std::size_t paletteCount)
+{
+    ArrowLineOptionsLayout layout;
+    layout.paletteCount = clampedPaletteCount(paletteCount);
+    const auto rows = layout.paletteCount <= 10U ? 1U : 2U;
+    const auto columns = (layout.paletteCount + rows - 1U) / rows;
+    const auto customSize = rows == 1U ? 20.0F : 32.0F;
+    const auto height = rows == 1U ? 30.0F : 40.0F;
+    const auto width = 322.0F + static_cast<float>(columns) * 16.0F
+        + 2.0F + customSize + 10.0F;
+    layout.toolbar = {origin.x, origin.y, width, height};
+    const auto controlY = origin.y + (height - 20.0F) / 2.0F;
+
+    for (std::size_t index = 0; index < arrowStrokeWidths.size(); ++index) {
+        const AnnotationRect control{
+            origin.x + 10.0F + static_cast<float>(index) * 24.0F,
+            controlY, 20.0F, 20.0F};
+        layout.strokeWidths.push_back(control);
+        layout.strokeWidthHits.push_back(inset(control, -3.0F, -5.0F));
+    }
+    layout.strokeStyle = {origin.x + 96.0F, controlY, 94.0F, 20.0F};
+    layout.strokeStyleSampleStart = {
+        layout.strokeStyle.x + 10.0F, controlY + 10.0F};
+    layout.strokeStyleSampleEnd = {
+        layout.strokeStyle.x + 72.0F, controlY + 10.0F};
+    layout.startArrowType = {origin.x + 208.0F, controlY, 42.0F, 20.0F};
+    layout.endArrowType = {origin.x + 256.0F, controlY, 42.0F, 20.0F};
+    for (std::size_t index = 0; index < layout.paletteCount; ++index) {
+        const auto column = index % columns;
+        const auto row = rows == 1U ? 0U : index / columns;
+        const auto swatchY = rows == 1U
+            ? origin.y + (height - 12.0F) / 2.0F
+            : origin.y + 5.0F + static_cast<float>(row) * 16.0F;
+        layout.colorSwatches.push_back({
+            origin.x + 322.0F + static_cast<float>(column) * 16.0F,
+            swatchY, 12.0F, 12.0F});
+    }
+    layout.colorSwatches.push_back({
+        origin.x + 322.0F + static_cast<float>(columns) * 16.0F + 2.0F,
+        origin.y + (height - customSize) / 2.0F,
+        customSize,
+        customSize});
+    return layout;
+}
+
+std::optional<ArrowLineOptionHit> arrowLineOptionHitTest(
+    const ArrowLineOptionsLayout& layout,
+    AnnotationPoint point) noexcept
+{
+    for (std::size_t index = 0; index < layout.strokeWidthHits.size(); ++index) {
+        if (contains(layout.strokeWidthHits[index], point)) {
+            return ArrowLineOptionHit{ArrowLineOptionControl::strokeWidth, index};
+        }
+    }
+    if (contains(layout.strokeStyle, point)) {
+        return ArrowLineOptionHit{ArrowLineOptionControl::strokeStyle, 0};
+    }
+    if (contains(layout.startArrowType, point)) {
+        return ArrowLineOptionHit{ArrowLineOptionControl::startArrowType, 0};
+    }
+    if (contains(layout.endArrowType, point)) {
+        return ArrowLineOptionHit{ArrowLineOptionControl::endArrowType, 0};
+    }
+    if (layout.colorSwatches.empty()) {
+        return std::nullopt;
+    }
+    for (std::size_t index = 0; index + 1U < layout.colorSwatches.size(); ++index) {
+        if (contains(inset(layout.colorSwatches[index], -3.0F, -3.0F), point)) {
+            return ArrowLineOptionHit{ArrowLineOptionControl::palette, index};
+        }
+    }
+    if (contains(inset(layout.colorSwatches.back(), -2.0F, -2.0F), point)) {
+        return ArrowLineOptionHit{
+            ArrowLineOptionControl::customColor,
+            layout.colorSwatches.size() - 1U};
+    }
+    return std::nullopt;
+}
+
+ArrowTypeMenuLayout arrowTypeMenuLayout(AnnotationRect menu)
+{
+    ArrowTypeMenuLayout layout;
+    layout.menu = standardized(menu);
+    for (std::size_t index = 0; index < arrowTypes.size(); ++index) {
+        layout.items.push_back({
+            layout.menu.x + 4.0F,
+            layout.menu.y + 4.0F + static_cast<float>(index) * 24.0F,
+            layout.menu.width - 8.0F,
+            20.0F});
+    }
+    return layout;
+}
+
+std::optional<std::size_t> hitTestArrowTypeMenu(
+    const ArrowTypeMenuLayout& layout,
+    AnnotationPoint point) noexcept
+{
+    if (!contains(layout.menu, point)) {
+        return std::nullopt;
+    }
+    for (std::size_t index = 0; index < layout.items.size(); ++index) {
+        if (contains(layout.items[index], point)) {
+            return index;
+        }
+    }
+    return std::nullopt;
 }
 
 ShapeOptionsLayout shapeOptionsLayout(

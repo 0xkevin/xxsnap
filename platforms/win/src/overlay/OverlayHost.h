@@ -63,12 +63,21 @@ struct OverlayPresentationShapeOptions {
     std::optional<CornerRadiusPanelLayout> cornerRadiusPanel;
 };
 
+struct OverlayPresentationArrowLineOptions {
+    ArrowLineOptionsLayout layout;
+    ArrowLineOptionsState state;
+    std::optional<StrokePatternMenuLayout> strokePatternMenu;
+    std::optional<ArrowTypeMenuLayout> arrowTypeMenu;
+    std::optional<ArrowEndpoint> arrowTypeMenuEndpoint;
+};
+
 struct OverlayPresentation {
     std::optional<PixelRect> selection;
     bool showActions = false;
     std::vector<OverlayPresentationToolbarItem> toolbarItems;
     AnnotationRenderPlan annotationPlan;
     std::optional<OverlayPresentationShapeOptions> shapeOptions;
+    std::optional<OverlayPresentationArrowLineOptions> arrowLineOptions;
 };
 
 class OverlayInputPlatform {
@@ -144,6 +153,8 @@ private:
     std::optional<AnnotationPoint> annotationPoint(
         PixelPoint virtualPoint) const noexcept;
     std::optional<ShapeOptionsLayout> currentShapeOptionsLayout(
+        const OverlaySurface& surface) const;
+    std::optional<ArrowLineOptionsLayout> currentArrowLineOptionsLayout(
         const OverlaySurface& surface) const;
     void cancelOnce() noexcept;
     void completeOnce(OverlayInputAction action) noexcept;

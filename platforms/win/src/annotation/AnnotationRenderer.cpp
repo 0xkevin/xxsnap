@@ -345,6 +345,155 @@ HRESULT createStrokeStyle(
         destination);
 }
 
+HRESULT createArrowGeometry(
+    ID2D1Factory* factory,
+    const ArrowLine& line,
+    ID2D1PathGeometry** destination) noexcept
+{
+    if (factory == nullptr || destination == nullptr) {
+        return E_INVALIDARG;
+    }
+    ComPtr<ID2D1PathGeometry> geometry;
+    auto result = factory->CreatePathGeometry(geometry.put());
+    if (FAILED(result)) {
+        return result;
+    }
+    ComPtr<ID2D1GeometrySink> sink;
+    result = geometry->Open(sink.put());
+    if (FAILED(result)) {
+        return result;
+    }
+    sink->BeginFigure(
+        D2D1::Point2F(line.start.x, line.start.y),
+        D2D1_FIGURE_BEGIN_HOLLOW);
+    sink->AddQuadraticBezier(D2D1::QuadraticBezierSegment(
+        D2D1::Point2F(line.control.x, line.control.y),
+        D2D1::Point2F(line.end.x, line.end.y)));
+    sink->EndFigure(D2D1_FIGURE_END_OPEN);
+    result = sink->Close();
+    if (FAILED(result)) {
+        return result;
+    }
+    *destination = geometry.get();
+    (*destination)->AddRef();
+    return S_OK;
+}
+
+AnnotationPoint unitDirection(
+    AnnotationPoint from,
+    AnnotationPoint to) noexcept
+{
+    const auto dx = to.x - from.x;
+    const auto dy = to.y - from.y;
+    const auto length = static_cast<float>(std::hypot(
+        static_cast<double>(dx), static_cast<double>(dy)));
+    if (length <= 0.001F) {
+        return {1.0F, 0.0F};
+    }
+    return {dx / length, dy / length};
+}
+
+void drawArrowHead(
+    ID2D1Factory* factory,
+    ID2D1RenderTarget* target,
+    AnnotationPoint point,
+    AnnotationPoint towardBody,
+    ArrowType type,
+    float width,
+    ID2D1SolidColorBrush* brush) noexcept
+{
+    if (type == ArrowType::none || factory == nullptr
+        || target == nullptr || brush == nullptr) {
+        return;
+    }
+    const auto axis = unitDirection(point, towardBody);
+    const AnnotationPoint normal{-axis.y, axis.x};
+    const auto add = [](AnnotationPoint origin, AnnotationPoint first,
+                        float firstScale, AnnotationPoint second,
+                        float secondScale) noexcept {
+        return AnnotationPoint{
+            origin.x + first.x * firstScale + second.x * secondScale,
+            origin.y + first.y * firstScale + second.y * secondScale,
+        };
+    };
+    if (type == ArrowType::dot) {
+        const auto radius = maximum(3.5F, width * 1.45F);
+        const auto ellipse = D2D1::Ellipse(
+            D2D1::Point2F(point.x, point.y), radius, radius);
+        target->FillEllipse(&ellipse, brush);
+        return;
+    }
+    if (type == ArrowType::bar) {
+        const auto half = maximum(5.0F, width * 2.1F);
+        const auto first = add(point, normal, -half, axis, 0.0F);
+        const auto second = add(point, normal, half, axis, 0.0F);
+        target->DrawLine(
+            D2D1::Point2F(first.x, first.y),
+            D2D1::Point2F(second.x, second.y), brush, width);
+        return;
+    }
+
+    const auto length = type == ArrowType::diamond
+        ? maximum(10.0F, width * 3.3F)
+        : maximum(12.0F, width * 4.0F);
+    const auto half = type == ArrowType::diamond
+        ? maximum(4.0F, width * 1.5F)
+        : maximum(5.0F, width * 2.0F);
+    const auto left = add(point, axis, length, normal, -half);
+    const auto right = add(point, axis, length, normal, half);
+    if (type == ArrowType::diamond) {
+        const auto tail = add(point, axis, length * 2.0F, normal, 0.0F);
+        target->DrawLine(D2D1::Point2F(point.x, point.y),
+            D2D1::Point2F(left.x, left.y), brush, width);
+        target->DrawLine(D2D1::Point2F(left.x, left.y),
+            D2D1::Point2F(tail.x, tail.y), brush, width);
+        target->DrawLine(D2D1::Point2F(tail.x, tail.y),
+            D2D1::Point2F(right.x, right.y), brush, width);
+        target->DrawLine(D2D1::Point2F(right.x, right.y),
+            D2D1::Point2F(point.x, point.y), brush, width);
+        return;
+    }
+    if (type == ArrowType::normal) {
+        target->DrawLine(
+            D2D1::Point2F(left.x, left.y),
+            D2D1::Point2F(point.x, point.y), brush, width);
+        target->DrawLine(
+            D2D1::Point2F(point.x, point.y),
+            D2D1::Point2F(right.x, right.y), brush, width);
+        return;
+    }
+
+    ComPtr<ID2D1PathGeometry> geometry;
+    if (FAILED(factory->CreatePathGeometry(geometry.put()))) {
+        return;
+    }
+    ComPtr<ID2D1GeometrySink> sink;
+    if (FAILED(geometry->Open(sink.put()))) {
+        return;
+    }
+    const auto tailCenter = add(point, axis, length * 0.72F, normal, 0.0F);
+    const auto tailLeft = add(tailCenter, normal, -half * 0.34F, axis, 0.0F);
+    const auto tailRight = add(tailCenter, normal, half * 0.34F, axis, 0.0F);
+    sink->BeginFigure(
+        D2D1::Point2F(point.x, point.y),
+        type == ArrowType::solidArrow
+            ? D2D1_FIGURE_BEGIN_FILLED
+            : D2D1_FIGURE_BEGIN_HOLLOW);
+    sink->AddLine(D2D1::Point2F(left.x, left.y));
+    sink->AddLine(D2D1::Point2F(tailLeft.x, tailLeft.y));
+    sink->AddLine(D2D1::Point2F(tailRight.x, tailRight.y));
+    sink->AddLine(D2D1::Point2F(right.x, right.y));
+    sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+    if (FAILED(sink->Close())) {
+        return;
+    }
+    if (type == ArrowType::solidArrow) {
+        target->FillGeometry(geometry.get(), brush);
+    } else {
+        target->DrawGeometry(geometry.get(), brush, maximum(1.0F, width * 0.65F));
+    }
+}
+
 } // namespace
 
 AnnotationRenderPlan buildAnnotationRenderPlan(
@@ -364,12 +513,28 @@ AnnotationRenderPlan buildAnnotationRenderPlan(
         auto annotation = source;
         annotation.rect.x += selectionOriginDip.x;
         annotation.rect.y += selectionOriginDip.y;
+        if (annotation.arrowLine.has_value()) {
+            annotation.arrowLine->start = translated(
+                annotation.arrowLine->start, selectionOriginDip);
+            annotation.arrowLine->end = translated(
+                annotation.arrowLine->end, selectionOriginDip);
+            annotation.arrowLine->control = translated(
+                annotation.arrowLine->control, selectionOriginDip);
+        }
         plan.items.push_back({annotation, false});
     }
     if (preview.has_value()) {
         auto annotation = *preview;
         annotation.rect.x += selectionOriginDip.x;
         annotation.rect.y += selectionOriginDip.y;
+        if (annotation.arrowLine.has_value()) {
+            annotation.arrowLine->start = translated(
+                annotation.arrowLine->start, selectionOriginDip);
+            annotation.arrowLine->end = translated(
+                annotation.arrowLine->end, selectionOriginDip);
+            annotation.arrowLine->control = translated(
+                annotation.arrowLine->control, selectionOriginDip);
+        }
         plan.items.push_back({annotation, true});
     }
 
@@ -396,6 +561,15 @@ AnnotationRenderPlan buildAnnotationRenderPlan(
         editing = &plan.items.back().annotation;
     }
     if (editing == nullptr) {
+        return plan;
+    }
+
+    if (editing->arrowLine.has_value()) {
+        plan.lineHandles = {
+            editing->arrowLine->start,
+            editing->arrowLine->end,
+            editing->arrowLine->control,
+        };
         return plan;
     }
 
@@ -510,6 +684,38 @@ HRESULT AnnotationRenderer::draw(
 
     for (const auto& item : plan.items) {
         const auto& annotation = item.annotation;
+        if (annotation.kind == AnnotationKind::arrowLine
+            && annotation.arrowLine.has_value()) {
+            ComPtr<ID2D1SolidColorBrush> brush;
+            auto result = renderTarget->CreateSolidColorBrush(
+                d2dColor(annotation.style.strokeColor), brush.put());
+            if (FAILED(result)) {
+                return result;
+            }
+            ComPtr<ID2D1StrokeStyle> strokeStyle;
+            result = createStrokeStyle(
+                factory_, annotation.style, strokeStyle.put());
+            if (FAILED(result)) {
+                return result;
+            }
+            ComPtr<ID2D1PathGeometry> geometry;
+            result = createArrowGeometry(
+                factory_, *annotation.arrowLine, geometry.put());
+            if (FAILED(result)) {
+                return result;
+            }
+            renderTarget->DrawGeometry(
+                geometry.get(), brush.get(), annotation.style.strokeWidthDip,
+                strokeStyle.get());
+            const auto& line = *annotation.arrowLine;
+            drawArrowHead(factory_, renderTarget, line.start, line.control,
+                line.startArrowType, annotation.style.strokeWidthDip,
+                brush.get());
+            drawArrowHead(factory_, renderTarget, line.end, line.control,
+                line.endArrowType, annotation.style.strokeWidthDip,
+                brush.get());
+            continue;
+        }
         if (!isShapeKind(annotation.kind)) {
             continue;
         }
@@ -606,7 +812,7 @@ HRESULT AnnotationRenderer::draw(
         renderTarget->SetTransform(previousTransform);
     }
 
-    if (!plan.resizeHandles.empty()) {
+    if (!plan.resizeHandles.empty() || !plan.lineHandles.empty()) {
         ComPtr<ID2D1SolidColorBrush> blueBrush;
         auto result = renderTarget->CreateSolidColorBrush(
             D2D1::ColorF(0.0F, 122.0F / 255.0F, 1.0F, 1.0F),
@@ -629,6 +835,9 @@ HRESULT AnnotationRenderer::draw(
             renderTarget->DrawEllipse(&ellipse, whiteBrush.get(), 1.0F);
         };
         for (const auto point : plan.resizeHandles) {
+            drawHandle(point);
+        }
+        for (const auto point : plan.lineHandles) {
             drawHandle(point);
         }
     }

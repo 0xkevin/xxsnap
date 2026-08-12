@@ -80,6 +80,31 @@ void testEditingPreviewReplacesCommittedShape()
     CHECK((plan.resizeHandles[7] == AnnotationPoint{310, 180}));
 }
 
+void testArrowLinePlanTranslatesCurveAndUsesThreeEditingHandles()
+{
+    AnnotationDocument document;
+    const auto id = document.addArrowLine({
+        {10, 20}, {110, 80}, {60, 15},
+        ArrowType::dot, ArrowType::normal});
+    CHECK(id != invalidAnnotationId);
+    const auto plan = buildAnnotationRenderPlan(
+        document, std::nullopt, {200, 100}, true);
+    CHECK(plan.items.size() == 1U);
+    CHECK(plan.items[0].annotation.arrowLine.has_value());
+    CHECK((plan.items[0].annotation.arrowLine->start
+        == AnnotationPoint{210, 120}));
+    CHECK((plan.items[0].annotation.arrowLine->control
+        == AnnotationPoint{260, 115}));
+    CHECK((plan.items[0].annotation.arrowLine->end
+        == AnnotationPoint{310, 180}));
+    CHECK(plan.resizeHandles.empty());
+    CHECK(plan.lineHandles.size() == 3U);
+    CHECK((plan.lineHandles[0] == AnnotationPoint{210, 120}));
+    CHECK((plan.lineHandles[1] == AnnotationPoint{310, 180}));
+    CHECK((plan.lineHandles[2] == AnnotationPoint{260, 115}));
+    CHECK(!plan.rotationHandle.has_value());
+}
+
 void testMacDashPatternsAreAbsoluteDips()
 {
     CHECK(strokeDashPattern(AnnotationStrokePattern::solid, 4).empty());
@@ -316,6 +341,7 @@ int main()
 {
     testPlanUsesSelectionLocalCoordinatesAndLivePreview();
     testEditingPreviewReplacesCommittedShape();
+    testArrowLinePlanTranslatesCurveAndUsesThreeEditingHandles();
     testMacDashPatternsAreAbsoluteDips();
     testStrokeMenuSketchSampleUsesExactMacJitter();
     testDirect2DSnapshotsAtAllSupportedDpis();

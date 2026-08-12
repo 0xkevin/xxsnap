@@ -2,9 +2,29 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cmath>
 #include <utility>
 
 namespace xxsnap::win {
+namespace {
+
+AnnotationRect arrowLineBounds(const ArrowLine& line) noexcept
+{
+    const auto left = (std::min)({line.start.x, line.end.x, line.control.x});
+    const auto top = (std::min)({line.start.y, line.end.y, line.control.y});
+    const auto right = (std::max)({line.start.x, line.end.x, line.control.x});
+    const auto bottom = (std::max)({line.start.y, line.end.y, line.control.y});
+    return {left, top, right - left, bottom - top};
+}
+
+bool hasUsableArrowLine(const ArrowLine& line) noexcept
+{
+    return std::hypot(
+        static_cast<double>(line.end.x - line.start.x),
+        static_cast<double>(line.end.y - line.start.y)) >= 8.0;
+}
+
+} // namespace
 
 AnnotationId AnnotationDocument::addShape(
     AnnotationKind kind,
@@ -22,7 +42,29 @@ AnnotationId AnnotationDocument::addShape(
 
     auto before = snapshot();
     const auto id = nextId_++;
-    annotations_.push_back({id, kind, rect, style, rotationDegrees});
+    annotations_.push_back({id, kind, rect, style, rotationDegrees, std::nullopt});
+    selectedId_ = id;
+    commit(std::move(before));
+    return id;
+}
+
+AnnotationId AnnotationDocument::addArrowLine(
+    ArrowLine line,
+    AnnotationStyle style)
+{
+    if (!hasUsableArrowLine(line) || nextId_ == invalidAnnotationId) {
+        return invalidAnnotationId;
+    }
+    auto before = snapshot();
+    const auto id = nextId_++;
+    annotations_.push_back({
+        id,
+        AnnotationKind::arrowLine,
+        arrowLineBounds(line),
+        style,
+        0.0F,
+        line,
+    });
     selectedId_ = id;
     commit(std::move(before));
     return id;
@@ -50,6 +92,7 @@ bool AnnotationDocument::updateRect(AnnotationId id, AnnotationRect rect)
     auto* annotation = findMutable(id);
     rect = standardized(rect);
     if (annotation == nullptr
+        || !isShapeKind(annotation->kind)
         || rect.width <= 0.0F
         || rect.height <= 0.0F
         || annotation->rect == rect) {
@@ -66,6 +109,14 @@ bool AnnotationDocument::move(AnnotationId id, AnnotationPoint offset)
     const auto* annotation = find(id);
     if (annotation == nullptr || offset == AnnotationPoint{}) {
         return false;
+    }
+    if (annotation->kind == AnnotationKind::arrowLine
+        && annotation->arrowLine.has_value()) {
+        auto line = *annotation->arrowLine;
+        line.start = translated(line.start, offset);
+        line.end = translated(line.end, offset);
+        line.control = translated(line.control, offset);
+        return updateArrowLine(id, line);
     }
     return updateRect(id, translated(annotation->rect, offset));
 }
@@ -107,6 +158,23 @@ bool AnnotationDocument::updateStyle(AnnotationId id, AnnotationStyle style)
     }
     auto before = snapshot();
     annotation->style = style;
+    commit(std::move(before));
+    return true;
+}
+
+bool AnnotationDocument::updateArrowLine(AnnotationId id, ArrowLine line)
+{
+    auto* annotation = findMutable(id);
+    if (annotation == nullptr
+        || annotation->kind != AnnotationKind::arrowLine
+        || !annotation->arrowLine.has_value()
+        || !hasUsableArrowLine(line)
+        || *annotation->arrowLine == line) {
+        return false;
+    }
+    auto before = snapshot();
+    annotation->arrowLine = line;
+    annotation->rect = arrowLineBounds(line);
     commit(std::move(before));
     return true;
 }
