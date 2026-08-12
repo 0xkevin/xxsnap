@@ -78,6 +78,11 @@ struct OverlayBrushOptionsRenderState {
     std::optional<StrokePatternMenuLayout> strokePatternMenu;
 };
 
+struct OverlayMarkerOptionsRenderState {
+    MarkerOptionsLayout layout;
+    MarkerOptionsState state;
+};
+
 struct OverlayRenderState {
     std::optional<PixelRect> selection;
     bool showActions = true;
@@ -92,6 +97,7 @@ struct OverlayRenderState {
     std::optional<OverlayShapeOptionsRenderState> shapeOptions;
     std::optional<OverlayArrowLineOptionsRenderState> arrowLineOptions;
     std::optional<OverlayBrushOptionsRenderState> brushOptions;
+    std::optional<OverlayMarkerOptionsRenderState> markerOptions;
 };
 
 float physicalPixelsToDip(std::int64_t pixels, std::uint32_t dpi) noexcept;

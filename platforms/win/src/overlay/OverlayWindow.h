@@ -76,6 +76,7 @@ enum class OverlayCursorStyle : std::uint8_t {
     resizeTopRightBottomLeft,
     rotation,
     brush,
+    marker,
 };
 
 class DpiRestartDecision final {
@@ -138,6 +139,7 @@ public:
         bool showActions = true) noexcept;
     void setRenderState(OverlayRenderState state) noexcept;
     void setCursorStyle(OverlayCursorStyle style) noexcept;
+    void setMarkerCursor(AnnotationColor color, float strokeWidthDip) noexcept;
     DpiRestartState dpiRestartState() const noexcept;
     const std::optional<OverlayWindowError>& lastWindowError() const noexcept;
     const std::optional<OverlayRendererError>& lastRendererError() const noexcept;
@@ -157,6 +159,7 @@ private:
     LRESULT handleMessage(UINT message, WPARAM wParam, LPARAM lParam) noexcept;
     void paint() noexcept;
     HCURSOR cursor() const noexcept;
+    void discardMarkerCursor() noexcept;
 
     HINSTANCE instance_ = nullptr;
     HWND window_ = nullptr;
@@ -167,6 +170,9 @@ private:
     OverlayRenderer renderer_;
     OverlayRenderState renderState_;
     OverlayCursorStyle cursorStyle_ = OverlayCursorStyle::crosshair;
+    HCURSOR markerCursor_ = nullptr;
+    AnnotationColor markerCursorColor_{};
+    float markerCursorStrokeWidthDip_ = 0.0F;
     std::optional<OverlayRendererError> lastRendererError_;
 };
 

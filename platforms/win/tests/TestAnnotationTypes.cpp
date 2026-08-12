@@ -45,6 +45,10 @@ void testGeometryStandardization()
     CHECK((moved.control == AnnotationPoint{47, 2}));
     CHECK(moved.startArrowType == ArrowType::dot);
     CHECK(moved.endArrowType == ArrowType::normal);
+    const MarkerLine marker{{4, 8}, {20, 30}};
+    CHECK((markerLineBounds(marker) == AnnotationRect{4, 8, 16, 22}));
+    CHECK((translated(marker, {-2, 5})
+        == MarkerLine{{2, 13}, {18, 35}}));
 }
 
 void testPrimaryShapeActivationMatchesMac()

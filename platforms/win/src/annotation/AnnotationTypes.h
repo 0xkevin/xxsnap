@@ -177,6 +177,37 @@ struct BrushPath {
     std::vector<AnnotationPoint> points;
 };
 
+struct MarkerLine {
+    AnnotationPoint start{};
+    AnnotationPoint end{};
+};
+
+constexpr bool operator==(
+    MarkerLine left,
+    MarkerLine right) noexcept
+{
+    return left.start == right.start && left.end == right.end;
+}
+
+constexpr MarkerLine translated(
+    MarkerLine line,
+    AnnotationPoint offset) noexcept
+{
+    line.start = translated(line.start, offset);
+    line.end = translated(line.end, offset);
+    return line;
+}
+
+constexpr AnnotationRect markerLineBounds(const MarkerLine& line) noexcept
+{
+    return standardized({
+        line.start.x,
+        line.start.y,
+        line.end.x - line.start.x,
+        line.end.y - line.start.y,
+    });
+}
+
 inline bool operator==(
     const BrushPath& left,
     const BrushPath& right) noexcept
@@ -263,6 +294,7 @@ struct ShapeAnnotation {
     float rotationDegrees = 0.0F;
     std::optional<ArrowLine> arrowLine;
     std::optional<BrushPath> brushPath;
+    std::optional<MarkerLine> markerLine;
 };
 
 constexpr bool isArrowLineAnnotation(
@@ -279,6 +311,13 @@ constexpr bool isBrushAnnotation(
         && annotation.brushPath.has_value();
 }
 
+constexpr bool isMarkerAnnotation(
+    const ShapeAnnotation& annotation) noexcept
+{
+    return annotation.kind == AnnotationKind::marker
+        && annotation.markerLine.has_value();
+}
+
 inline bool operator==(
     const ShapeAnnotation& left,
     const ShapeAnnotation& right) noexcept
@@ -289,7 +328,8 @@ inline bool operator==(
         && left.style == right.style
         && left.rotationDegrees == right.rotationDegrees
         && left.arrowLine == right.arrowLine
-        && left.brushPath == right.brushPath;
+        && left.brushPath == right.brushPath
+        && left.markerLine == right.markerLine;
 }
 
 } // namespace xxsnap::win

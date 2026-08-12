@@ -1,57 +1,10 @@
 #include "annotation/BrushInteraction.h"
+#include "annotation/AnnotationGeometry.h"
 
 #include <algorithm>
 #include <cmath>
 
 namespace xxsnap::win {
-namespace {
-
-float distanceSquared(AnnotationPoint left, AnnotationPoint right) noexcept
-{
-    const auto dx = left.x - right.x;
-    const auto dy = left.y - right.y;
-    return dx * dx + dy * dy;
-}
-
-float distanceFromSegment(
-    AnnotationPoint point,
-    AnnotationPoint start,
-    AnnotationPoint end) noexcept
-{
-    const auto dx = end.x - start.x;
-    const auto dy = end.y - start.y;
-    const auto lengthSquared = dx * dx + dy * dy;
-    if (lengthSquared <= 0.0001F) {
-        return std::sqrt(distanceSquared(point, start));
-    }
-    const auto progress = (std::max)(0.0F, (std::min)(1.0F,
-        ((point.x - start.x) * dx + (point.y - start.y) * dy)
-            / lengthSquared));
-    return std::sqrt(distanceSquared(point, {
-        start.x + progress * dx,
-        start.y + progress * dy,
-    }));
-}
-
-AnnotationPoint insetEndpoint(
-    AnnotationPoint endpoint,
-    AnnotationPoint neighbour) noexcept
-{
-    constexpr float inset = 9.0F;
-    const auto dx = neighbour.x - endpoint.x;
-    const auto dy = neighbour.y - endpoint.y;
-    const auto length = std::sqrt(dx * dx + dy * dy);
-    if (length <= 0.001F) {
-        return endpoint;
-    }
-    const auto distance = (std::min)(inset, length / 2.0F);
-    return {
-        endpoint.x + dx / length * distance,
-        endpoint.y + dy / length * distance,
-    };
-}
-
-} // namespace
 
 BrushInteraction::BrushInteraction(
     AnnotationDocument& document,
@@ -140,7 +93,8 @@ void BrushInteraction::update(
             path.points = {start_, point};
         } else if (path.points.empty()) {
             path.points = {start_, point};
-        } else if (distanceSquared(path.points.back(), point) >= 2.25F) {
+        } else if (annotationDistanceSquared(path.points.back(), point)
+            >= 2.25F) {
             path.points.push_back(point);
         }
     } else if (mode_ == BrushInteractionMode::moving) {
@@ -231,7 +185,7 @@ std::optional<BrushHandle> BrushInteraction::hitTestHandle(
     for (const auto handle : {BrushHandle::start, BrushHandle::end}) {
         const auto center = handlePoint(id, handle);
         if (center.has_value()
-            && distanceSquared(point, *center) <= hitRadiusSquared) {
+            && annotationDistanceSquared(point, *center) <= hitRadiusSquared) {
             return handle;
         }
     }
@@ -250,13 +204,15 @@ bool BrushInteraction::hitTestPath(
     const auto hitOutset = (std::max)(
         8.0F, annotation->style.strokeWidthDip / 2.0F + 4.0F);
     for (std::size_t index = 1; index < points.size(); ++index) {
-        if (distanceFromSegment(point, points[index - 1U], points[index])
+        if (annotationDistanceFromSegment(
+                point, points[index - 1U], points[index])
             <= hitOutset) {
             return true;
         }
     }
     return points.size() == 1U
-        && std::sqrt(distanceSquared(point, points.front())) <= hitOutset;
+        && std::sqrt(annotationDistanceSquared(point, points.front()))
+            <= hitOutset;
 }
 
 std::optional<AnnotationPoint> BrushInteraction::handlePoint(
@@ -270,9 +226,10 @@ std::optional<AnnotationPoint> BrushInteraction::handlePoint(
     }
     const auto& points = annotation->brushPath->points;
     return handle == BrushHandle::start
-        ? std::optional<AnnotationPoint>{insetEndpoint(points[0], points[1])}
-        : std::optional<AnnotationPoint>{insetEndpoint(
-            points.back(), points[points.size() - 2U])};
+        ? std::optional<AnnotationPoint>{insetAnnotationEndpoint(
+            points[0], points[1], 9.0F)}
+        : std::optional<AnnotationPoint>{insetAnnotationEndpoint(
+            points.back(), points[points.size() - 2U], 9.0F)};
 }
 
 const std::optional<ShapeAnnotation>& BrushInteraction::preview() const noexcept

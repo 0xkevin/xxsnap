@@ -84,6 +84,30 @@ AnnotationId AnnotationDocument::addBrushPath(
     return id;
 }
 
+AnnotationId AnnotationDocument::addMarkerLine(
+    MarkerLine line,
+    AnnotationStyle style)
+{
+    if (nextId_ == invalidAnnotationId) {
+        return invalidAnnotationId;
+    }
+    auto before = snapshot();
+    const auto id = nextId_++;
+    annotations_.push_back({
+        id,
+        AnnotationKind::marker,
+        markerLineBounds(line),
+        style,
+        0.0F,
+        std::nullopt,
+        std::nullopt,
+        line,
+    });
+    selectedId_ = id;
+    commit(std::move(before));
+    return id;
+}
+
 bool AnnotationDocument::remove(AnnotationId id)
 {
     const auto index = indexOf(id);
@@ -129,6 +153,9 @@ bool AnnotationDocument::move(AnnotationId id, AnnotationPoint offset)
     }
     if (isBrushAnnotation(*annotation)) {
         return updateBrushPath(id, translated(*annotation->brushPath, offset));
+    }
+    if (isMarkerAnnotation(*annotation)) {
+        return updateMarkerLine(id, translated(*annotation->markerLine, offset));
     }
     return updateRect(id, translated(annotation->rect, offset));
 }
@@ -202,6 +229,21 @@ bool AnnotationDocument::updateBrushPath(AnnotationId id, BrushPath path)
     auto before = snapshot();
     annotation->brushPath = std::move(path);
     annotation->rect = brushPathBounds(*annotation->brushPath);
+    commit(std::move(before));
+    return true;
+}
+
+bool AnnotationDocument::updateMarkerLine(AnnotationId id, MarkerLine line)
+{
+    auto* annotation = findMutable(id);
+    if (annotation == nullptr
+        || !isMarkerAnnotation(*annotation)
+        || *annotation->markerLine == line) {
+        return false;
+    }
+    auto before = snapshot();
+    annotation->markerLine = line;
+    annotation->rect = markerLineBounds(line);
     commit(std::move(before));
     return true;
 }

@@ -77,6 +77,11 @@ struct OverlayPresentationBrushOptions {
     std::optional<StrokePatternMenuLayout> strokePatternMenu;
 };
 
+struct OverlayPresentationMarkerOptions {
+    MarkerOptionsLayout layout;
+    MarkerOptionsState state;
+};
+
 struct OverlayPresentation {
     std::optional<PixelRect> selection;
     bool showActions = false;
@@ -85,6 +90,7 @@ struct OverlayPresentation {
     std::optional<OverlayPresentationShapeOptions> shapeOptions;
     std::optional<OverlayPresentationArrowLineOptions> arrowLineOptions;
     std::optional<OverlayPresentationBrushOptions> brushOptions;
+    std::optional<OverlayPresentationMarkerOptions> markerOptions;
 };
 
 class OverlayInputPlatform {
@@ -150,6 +156,7 @@ public:
     std::vector<OverlayPresentation> presentations() const;
     const AnnotationDocument& annotationDocument() const noexcept;
     std::pair<UINT, UINT> annotationDpi() const noexcept;
+    std::optional<AnnotationStyle> markerCursorStyle() const noexcept;
 
 private:
     const OverlaySurface* surfaceFor(HWND window) const noexcept;
@@ -168,6 +175,8 @@ private:
     std::optional<ArrowLineOptionsLayout> currentArrowLineOptionsLayout(
         const OverlaySurface& surface) const;
     std::optional<BrushOptionsLayout> currentBrushOptionsLayout(
+        const OverlaySurface& surface) const;
+    std::optional<MarkerOptionsLayout> currentMarkerOptionsLayout(
         const OverlaySurface& surface) const;
     void cancelOnce() noexcept;
     void completeOnce(OverlayInputAction action) noexcept;

@@ -425,7 +425,7 @@ void testShapeToolIsNonTerminalAndEditsThroughSharedPresentation()
     createReadySelection(router);
 
     auto owner = router.presentations()[1];
-    CHECK(owner.toolbarItems.size() == 8U);
+    CHECK(owner.toolbarItems.size() == 9U);
     const auto rectangle = owner.toolbarItems[0];
     CHECK(rectangle.action == xxsnap::win::ToolbarAction::rectangle);
     const auto capturesBeforeTool = platform.captureCalls;
@@ -478,9 +478,9 @@ void testShapeToolIsNonTerminalAndEditsThroughSharedPresentation()
 
     owner = router.presentations()[1];
     CHECK(owner.annotationPlan.items.size() == 1U);
-    CHECK(owner.toolbarItems[3].action == xxsnap::win::ToolbarAction::undo);
-    CHECK(owner.toolbarItems[3].enabled);
-    CHECK(router.pointerDown(rightWindow, owner.toolbarItems[3].centerPhysical));
+    CHECK(owner.toolbarItems[4].action == xxsnap::win::ToolbarAction::undo);
+    CHECK(owner.toolbarItems[4].enabled);
+    CHECK(router.pointerDown(rightWindow, owner.toolbarItems[4].centerPhysical));
     CHECK(router.annotationDocument().annotations().empty());
     CHECK(actions.empty());
 
@@ -499,7 +499,7 @@ void testArrowToolUsesMacOptionsMenuAndCreatesEditableCurve()
     createReadySelection(router);
 
     auto owner = router.presentations()[1];
-    CHECK(owner.toolbarItems.size() == 8U);
+    CHECK(owner.toolbarItems.size() == 9U);
     CHECK(owner.toolbarItems[1].action == xxsnap::win::ToolbarAction::polyline);
     CHECK(router.pointerDown(
         rightWindow, owner.toolbarItems[1].centerPhysical));
@@ -643,6 +643,50 @@ void testBrushToolUsesMacOptionsAndShiftStraightLine()
     CHECK(router.presentations()[1].annotationPlan.lineHandles.empty());
 }
 
+void testMarkerToolUsesMacOptionsAndShiftSnapping()
+{
+    FakePlatform platform;
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform, {}, true);
+    createReadySelection(router);
+    auto owner = router.presentations()[1];
+    CHECK(owner.toolbarItems[3].action == xxsnap::win::ToolbarAction::marker);
+    CHECK(router.pointerDown(
+        rightWindow, owner.toolbarItems[3].centerPhysical));
+    owner = router.presentations()[1];
+    CHECK(owner.toolbarItems[3].selected);
+    CHECK(owner.markerOptions.has_value());
+    if (!owner.markerOptions.has_value()) {
+        return;
+    }
+    CHECK(owner.markerOptions->layout.toolbar.width == 306.0F);
+    CHECK(owner.markerOptions->state.style().strokeWidthDip == 18.0F);
+    CHECK((owner.markerOptions->state.style().strokeColor
+        == AnnotationColor{179, 235, 0, 255}));
+    CHECK(router.cursorStyle(rightWindow, PixelPoint{100, 100})
+        == OverlayCursorStyle::marker);
+    CHECK(router.markerCursorStyle().has_value());
+    CHECK((router.markerCursorStyle()->strokeColor
+        == AnnotationColor{179, 235, 0, 255}));
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.markerOptions->layout.strokeWidths[0])));
+    CHECK(router.presentations()[1]
+        .markerOptions->state.style().strokeWidthDip == 14.0F);
+
+    CHECK(router.pointerDown(rightWindow, PixelPoint{40, 90}));
+    platform.shiftDown = true;
+    platform.cursor = PixelPoint{180, 140};
+    router.pointerMove(rightWindow, PixelPoint{180, 140});
+    router.pointerUp(rightWindow, PixelPoint{180, 140});
+    CHECK(router.annotationDocument().annotations().size() == 1U);
+    const auto& created = router.annotationDocument().annotations().front();
+    CHECK(created.kind == xxsnap::win::AnnotationKind::marker);
+    CHECK(created.markerLine.has_value());
+    CHECK(created.style.strokeWidthDip == 14.0F);
+    CHECK(router.annotationDocument().selectedId() == created.id);
+    CHECK(router.presentations()[1].annotationPlan.lineHandles.size() == 2U);
+}
+
 void testShapeCanBeCreatedOutsideLockedSelectionOnOverlay()
 {
     FakePlatform platform;
@@ -695,6 +739,7 @@ int main()
     testShapeToolIsNonTerminalAndEditsThroughSharedPresentation();
     testArrowToolUsesMacOptionsMenuAndCreatesEditableCurve();
     testBrushToolUsesMacOptionsAndShiftStraightLine();
+    testMarkerToolUsesMacOptionsAndShiftSnapping();
     testShapeCanBeCreatedOutsideLockedSelectionOnOverlay();
     return failureCount == 0 ? 0 : 1;
 }

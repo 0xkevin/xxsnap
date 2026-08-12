@@ -170,11 +170,13 @@ ShapeEditorController::ShapeEditorController(
     : interaction_(document_, canvasBounds),
       arrowInteraction_(document_, canvasBounds),
       brushInteraction_(document_, canvasBounds),
+      markerInteraction_(document_, canvasBounds),
       canvasBounds_(standardized(canvasBounds))
 {
     toolbarState_.setCapability(ToolbarAction::rectangle, true);
     toolbarState_.setCapability(ToolbarAction::polyline, true);
     toolbarState_.setCapability(ToolbarAction::pen, true);
+    toolbarState_.setCapability(ToolbarAction::marker, true);
     toolbarState_.setCapability(ToolbarAction::undo, true);
     toolbarState_.setCapability(ToolbarAction::redo, true);
     syncHistory();
@@ -186,6 +188,7 @@ void ShapeEditorController::setCanvasBounds(
     interaction_.setBounds(canvasBounds);
     arrowInteraction_.setBounds(canvasBounds);
     brushInteraction_.setBounds(canvasBounds);
+    markerInteraction_.setBounds(canvasBounds);
     canvasBounds_ = standardized(canvasBounds);
 }
 
@@ -209,6 +212,11 @@ const BrushOptionsState& ShapeEditorController::brushOptions() const noexcept
     return brushOptions_;
 }
 
+const MarkerOptionsState& ShapeEditorController::markerOptions() const noexcept
+{
+    return markerOptions_;
+}
+
 const AnnotationDocument& ShapeEditorController::document() const noexcept
 {
     return document_;
@@ -223,6 +231,9 @@ const std::optional<ShapeAnnotation>& ShapeEditorController::preview() const noe
 {
     if (brushInteraction_.preview().has_value()) {
         return brushInteraction_.preview();
+    }
+    if (markerInteraction_.preview().has_value()) {
+        return markerInteraction_.preview();
     }
     return arrowInteraction_.preview().has_value()
         ? arrowInteraction_.preview()
@@ -242,6 +253,11 @@ bool ShapeEditorController::isArrowLineToolActive() const noexcept
 bool ShapeEditorController::isBrushToolActive() const noexcept
 {
     return brushToolActive_;
+}
+
+bool ShapeEditorController::isMarkerToolActive() const noexcept
+{
+    return markerToolActive_;
 }
 
 bool ShapeEditorController::strokePatternMenuVisible() const noexcept
@@ -269,6 +285,7 @@ bool ShapeEditorController::handleToolbarAction(ToolbarAction action)
             cancelInteraction();
             arrowLineToolActive_ = false;
             brushToolActive_ = false;
+            markerToolActive_ = false;
             arrowTypeMenuEndpoint_.reset();
             shapeToolActive_ = toolbarState_.selectTool(action);
             if (shapeToolActive_) {
@@ -286,6 +303,7 @@ bool ShapeEditorController::handleToolbarAction(ToolbarAction action)
             cancelInteraction();
             shapeToolActive_ = false;
             brushToolActive_ = false;
+            markerToolActive_ = false;
             arrowLineToolActive_ = toolbarState_.selectTool(action);
             if (arrowLineToolActive_) {
                 ArrowLineOptionsState activated;
@@ -302,12 +320,30 @@ bool ShapeEditorController::handleToolbarAction(ToolbarAction action)
             cancelInteraction();
             shapeToolActive_ = false;
             arrowLineToolActive_ = false;
+            markerToolActive_ = false;
             brushToolActive_ = toolbarState_.selectTool(action);
             strokePatternMenuVisible_ = false;
             arrowTypeMenuEndpoint_.reset();
             if (brushToolActive_) {
                 BrushOptionsState activated;
                 brushOptions_ = activated;
+            }
+        }
+        return true;
+    }
+    if (action == ToolbarAction::marker) {
+        if (markerToolActive_) {
+            deactivateTool();
+        } else {
+            cancelInteraction();
+            shapeToolActive_ = false;
+            arrowLineToolActive_ = false;
+            brushToolActive_ = false;
+            markerToolActive_ = toolbarState_.selectTool(action);
+            dismissPopovers();
+            if (markerToolActive_) {
+                MarkerOptionsState activated;
+                markerOptions_ = activated;
             }
         }
         return true;
@@ -408,6 +444,33 @@ bool ShapeEditorController::applyBrushOptionHit(BrushOptionHit hit)
         break;
     case BrushOptionControl::customColor:
         return false;
+    }
+    return changed;
+}
+
+bool ShapeEditorController::applyMarkerOptionHit(MarkerOptionHit hit)
+{
+    bool changed = false;
+    switch (hit.control) {
+    case MarkerOptionControl::strokeWidth: {
+        const auto& widths = macMarkerStrokeWidths();
+        if (hit.index < widths.size()) {
+            changed = markerOptions_.setStrokeWidth(widths[hit.index]);
+        }
+        break;
+    }
+    case MarkerOptionControl::palette:
+        changed = markerOptions_.selectPalette(hit.index);
+        break;
+    case MarkerOptionControl::customColor:
+        return false;
+    }
+    const auto selected = document_.selectedId();
+    const auto* annotation = selected.has_value()
+        ? document_.find(*selected) : nullptr;
+    if (changed && annotation != nullptr && isMarkerAnnotation(*annotation)) {
+        document_.updateStyle(*selected, markerOptions_.style());
+        syncHistory();
     }
     return changed;
 }
@@ -522,19 +585,28 @@ bool ShapeEditorController::adjustCornerRadius(float deltaDip)
 
 bool ShapeEditorController::selectCustomColor(AnnotationColor color)
 {
-    const auto optionChanged = brushToolActive_
-        ? brushOptions_.selectCustomColor(color)
-        : arrowLineToolActive_
-            ? arrowLineOptions_.selectCustomColor(color)
-            : options_.selectCustomColor(color);
+    const auto optionChanged = markerToolActive_
+        ? markerOptions_.selectCustomColor(color)
+        : brushToolActive_
+            ? brushOptions_.selectCustomColor(color)
+            : arrowLineToolActive_
+                ? arrowLineOptions_.selectCustomColor(color)
+                : options_.selectCustomColor(color);
     if (!optionChanged) {
         return false;
     }
-    const auto changed = brushToolActive_
-        ? false
-        : arrowLineToolActive_
-            ? applyArrowOptionsToSelection()
-            : applyOptionsStyleToSelection();
+    auto changed = false;
+    if (markerToolActive_) {
+        const auto selected = document_.selectedId();
+        const auto* annotation = selected.has_value()
+            ? document_.find(*selected) : nullptr;
+        changed = annotation != nullptr && isMarkerAnnotation(*annotation)
+            && document_.updateStyle(*selected, markerOptions_.style());
+    } else if (arrowLineToolActive_) {
+        changed = applyArrowOptionsToSelection();
+    } else if (!brushToolActive_) {
+        changed = applyOptionsStyleToSelection();
+    }
     syncHistory();
     return changed || !document_.selectedId().has_value();
 }
@@ -554,7 +626,8 @@ bool ShapeEditorController::pointerDown(
     point = clampedPoint(point, canvasBounds_);
     if (interaction_.mode() != ShapeInteractionMode::idle
         || arrowInteraction_.mode() != ArrowLineInteractionMode::idle
-        || brushInteraction_.active()) {
+        || brushInteraction_.active()
+        || markerInteraction_.mode() != MarkerInteractionMode::idle) {
         return false;
     }
     if (const auto selected = document_.selectedId(); selected.has_value()) {
@@ -570,6 +643,11 @@ bool ShapeEditorController::pointerDown(
                         *selected, point)) {
                     return brushInteraction_.beginRotate(*selected, *handle);
                 }
+            }
+        } else if (annotation != nullptr && isMarkerAnnotation(*annotation)) {
+            if (const auto handle = markerInteraction_.hitTestHandle(
+                    *annotation, point)) {
+                return markerInteraction_.beginResize(*selected, *handle);
             }
         } else {
             if (interaction_.hitTestRotationHandle(*selected, point)) {
@@ -596,6 +674,10 @@ bool ShapeEditorController::pointerDown(
             annotation != nullptr && isBrushAnnotation(*annotation)) {
             return brushInteraction_.beginMove(*hit, point);
         }
+        if (const auto* annotation = document_.find(*hit);
+            annotation != nullptr && isMarkerAnnotation(*annotation)) {
+            return markerInteraction_.beginMove(*hit, point);
+        }
         return interaction_.beginMove(*hit, point);
     }
     if (arrowLineToolActive_) {
@@ -605,6 +687,10 @@ bool ShapeEditorController::pointerDown(
             arrowLineOptions_.style(),
             arrowLineOptions_.startArrowType(),
             arrowLineOptions_.endArrowType());
+    }
+    if (markerToolActive_) {
+        document_.clearSelection();
+        return markerInteraction_.beginDrawing(point, markerOptions_.style());
     }
     if (shapeToolActive_) {
         document_.clearSelection();
@@ -622,6 +708,8 @@ void ShapeEditorController::pointerMove(
     point = clampedPoint(point, canvasBounds_);
     if (brushInteraction_.active()) {
         brushInteraction_.update(point, shift);
+    } else if (markerInteraction_.mode() != MarkerInteractionMode::idle) {
+        markerInteraction_.update(point, shift);
     } else if (arrowInteraction_.mode() != ArrowLineInteractionMode::idle) {
         arrowInteraction_.update(point);
     } else {
@@ -635,13 +723,17 @@ bool ShapeEditorController::pointerUp(
 {
     if (interaction_.mode() == ShapeInteractionMode::idle
         && arrowInteraction_.mode() == ArrowLineInteractionMode::idle
-        && !brushInteraction_.active()) {
+        && !brushInteraction_.active()
+        && markerInteraction_.mode() == MarkerInteractionMode::idle) {
         return false;
     }
     point = clampedPoint(point, canvasBounds_);
     if (brushInteraction_.active()) {
         brushInteraction_.update(point, shift);
         brushInteraction_.commit();
+    } else if (markerInteraction_.mode() != MarkerInteractionMode::idle) {
+        markerInteraction_.update(point, shift);
+        markerInteraction_.commit();
     } else if (arrowInteraction_.mode() != ArrowLineInteractionMode::idle) {
         arrowInteraction_.update(point);
         arrowInteraction_.commit();
@@ -659,6 +751,7 @@ void ShapeEditorController::cancelInteraction() noexcept
     interaction_.cancel();
     arrowInteraction_.cancel();
     brushInteraction_.cancel();
+    markerInteraction_.cancel();
 }
 
 ShapeCursorStyle ShapeEditorController::cursorStyleAt(
@@ -689,6 +782,15 @@ ShapeCursorStyle ShapeEditorController::cursorStyleAt(
     if (brushInteraction_.active()) {
         return ShapeCursorStyle::brush;
     }
+    if (markerInteraction_.mode() == MarkerInteractionMode::drawing) {
+        return ShapeCursorStyle::marker;
+    }
+    if (markerInteraction_.mode() == MarkerInteractionMode::resizing) {
+        return ShapeCursorStyle::resizeUpDown;
+    }
+    if (markerInteraction_.mode() == MarkerInteractionMode::moving) {
+        return ShapeCursorStyle::move;
+    }
 
     if (const auto selected = document_.selectedId(); selected.has_value()) {
         const auto* annotation = document_.find(*selected);
@@ -699,6 +801,10 @@ ShapeCursorStyle ShapeEditorController::cursorStyleAt(
         } else if (annotation != nullptr && isBrushAnnotation(*annotation)) {
             if (brushInteraction_.hitTestHandle(*selected, point)) {
                 return ShapeCursorStyle::rotation;
+            }
+        } else if (annotation != nullptr && isMarkerAnnotation(*annotation)) {
+            if (markerInteraction_.hitTestHandle(*annotation, point)) {
+                return ShapeCursorStyle::resizeUpDown;
             }
         } else {
             if (interaction_.hitTestRotationHandle(*selected, point)) {
@@ -716,6 +822,9 @@ ShapeCursorStyle ShapeEditorController::cursorStyleAt(
     if (brushToolActive_) {
         return ShapeCursorStyle::brush;
     }
+    if (markerToolActive_) {
+        return ShapeCursorStyle::marker;
+    }
     return shapeToolActive_ || arrowLineToolActive_
         ? ShapeCursorStyle::crosshair : ShapeCursorStyle::arrow;
 }
@@ -728,11 +837,13 @@ ShapeEditorKeyResult ShapeEditorController::handleKey(
     if (key == ShapeEditorKey::escapeKey) {
         if (interaction_.mode() != ShapeInteractionMode::idle
             || arrowInteraction_.mode() != ArrowLineInteractionMode::idle
-            || brushInteraction_.active()) {
+            || brushInteraction_.active()
+            || markerInteraction_.mode() != MarkerInteractionMode::idle) {
             cancelInteraction();
             return ShapeEditorKeyResult::consumed;
         }
-        if (shapeToolActive_ || arrowLineToolActive_ || brushToolActive_) {
+        if (shapeToolActive_ || arrowLineToolActive_ || brushToolActive_
+            || markerToolActive_) {
             deactivateTool();
             return ShapeEditorKeyResult::consumed;
         }
@@ -797,6 +908,8 @@ std::optional<AnnotationId> ShapeEditorController::annotationAtBorder(
             contains = arrowInteraction_.hitTestLine(iterator->id, point);
         } else if (isBrushAnnotation(*iterator)) {
             contains = brushInteraction_.hitTestPath(iterator->id, point);
+        } else if (isMarkerAnnotation(*iterator)) {
+            contains = markerInteraction_.hitTestLine(*iterator, point);
         } else {
             contains = shapeBorderContains(*iterator, point);
         }
@@ -818,6 +931,8 @@ void ShapeEditorController::loadSelectedOptions() noexcept
             arrowLineOptions_.load(annotation->style, *annotation->arrowLine);
         } else if (isBrushAnnotation(*annotation)) {
             brushOptions_.load(annotation->style);
+        } else if (isMarkerAnnotation(*annotation)) {
+            markerOptions_.load(annotation->style);
         } else {
             options_.load(annotation->kind, annotation->style);
         }
@@ -862,6 +977,7 @@ void ShapeEditorController::deactivateTool() noexcept
     shapeToolActive_ = false;
     arrowLineToolActive_ = false;
     brushToolActive_ = false;
+    markerToolActive_ = false;
     toolbarState_.clearSelectedTool();
     strokePatternMenuVisible_ = false;
     cornerRadiusPanelVisible_ = false;

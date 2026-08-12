@@ -1,6 +1,9 @@
 #include "annotation/AnnotationRenderer.h"
+#include "annotation/AnnotationGeometry.h"
+#include "annotation/MarkerMetrics.h"
 #include "annotation/ArrowLineRenderer.h"
 #include "annotation/BrushRenderer.h"
+#include "annotation/MarkerRenderer.h"
 
 #include <d2d1helper.h>
 
@@ -374,6 +377,10 @@ AnnotationRenderPlan buildAnnotationRenderPlan(
             annotation.brushPath = translated(
                 *annotation.brushPath, selectionOriginDip);
         }
+        if (annotation.markerLine.has_value()) {
+            annotation.markerLine = translated(
+                *annotation.markerLine, selectionOriginDip);
+        }
         plan.items.push_back({annotation, false});
     }
     if (preview.has_value()) {
@@ -387,6 +394,10 @@ AnnotationRenderPlan buildAnnotationRenderPlan(
         if (annotation.brushPath.has_value()) {
             annotation.brushPath = translated(
                 *annotation.brushPath, selectionOriginDip);
+        }
+        if (annotation.markerLine.has_value()) {
+            annotation.markerLine = translated(
+                *annotation.markerLine, selectionOriginDip);
         }
         plan.items.push_back({annotation, true});
     }
@@ -449,6 +460,23 @@ AnnotationRenderPlan buildAnnotationRenderPlan(
             plan.lineHandles = {
                 insetEndpoint(points[0], points[1]),
                 insetEndpoint(points.back(), points[points.size() - 2U]),
+            };
+        }
+        return plan;
+    }
+    if (editing->markerLine.has_value()) {
+        if (editing->id == invalidAnnotationId) {
+            return plan;
+        }
+        const auto line = *editing->markerLine;
+        if (annotationDistanceSquared(line.start, line.end)
+            >= markerMetrics::dotThresholdDip
+                * markerMetrics::dotThresholdDip) {
+            plan.lineHandles = {
+                insetAnnotationEndpoint(
+                    line.start, line.end, markerMetrics::endpointInsetDip),
+                insetAnnotationEndpoint(
+                    line.end, line.start, markerMetrics::endpointInsetDip),
             };
         }
         return plan;
@@ -578,6 +606,14 @@ HRESULT AnnotationRenderer::draw(
             && annotation.brushPath.has_value()) {
             const auto result = drawBrushPath(
                 factory_, renderTarget, annotation);
+            if (FAILED(result)) {
+                return result;
+            }
+            continue;
+        }
+        if (annotation.kind == AnnotationKind::marker
+            && annotation.markerLine.has_value()) {
+            const auto result = drawMarkerLine(renderTarget, annotation);
             if (FAILED(result)) {
                 return result;
             }

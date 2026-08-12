@@ -16,6 +16,7 @@ const std::array<ArrowType, 7>& macArrowTypes() noexcept;
 const std::array<float, 3>& macArrowStrokeWidths() noexcept;
 const std::array<float, 3>& macBrushStrokeWidths() noexcept;
 const std::array<AnnotationStrokePattern, 4>& macBrushStrokePatterns() noexcept;
+const std::array<float, 3>& macMarkerStrokeWidths() noexcept;
 
 class ShapeOptionsState {
 public:
@@ -124,6 +125,57 @@ BrushOptionsLayout brushOptionsLayout(
 
 std::optional<BrushOptionHit> brushOptionHitTest(
     const BrushOptionsLayout& layout,
+    AnnotationPoint point) noexcept;
+
+class MarkerOptionsState {
+public:
+    MarkerOptionsState() noexcept;
+    const AnnotationStyle& style() const noexcept;
+    std::optional<std::size_t> selectedPaletteIndex() const noexcept;
+    bool load(AnnotationStyle style) noexcept;
+    bool setStrokeWidth(float strokeWidthDip) noexcept;
+    bool selectPalette(std::size_t index) noexcept;
+    bool selectCustomColor(AnnotationColor color) noexcept;
+
+private:
+    void refreshPaletteSelection() noexcept;
+    AnnotationStyle style_{};
+    std::optional<std::size_t> selectedPaletteIndex_;
+};
+
+enum class MarkerOptionControl : std::uint8_t {
+    strokeWidth,
+    palette,
+    customColor,
+};
+
+struct MarkerOptionHit {
+    MarkerOptionControl control = MarkerOptionControl::strokeWidth;
+    std::size_t index = 0;
+};
+
+constexpr bool operator==(
+    MarkerOptionHit left,
+    MarkerOptionHit right) noexcept
+{
+    return left.control == right.control && left.index == right.index;
+}
+
+struct MarkerOptionsLayout {
+    AnnotationRect toolbar{};
+    std::size_t paletteCount = 0;
+    std::vector<AnnotationRect> strokeWidths;
+    std::vector<AnnotationRect> strokeWidthHits;
+    std::vector<AnnotationRect> colorSwatches;
+    std::vector<AnnotationRect> separators;
+};
+
+MarkerOptionsLayout markerOptionsLayout(
+    AnnotationPoint origin,
+    std::size_t paletteCount);
+
+std::optional<MarkerOptionHit> markerOptionHitTest(
+    const MarkerOptionsLayout& layout,
     AnnotationPoint point) noexcept;
 
 enum class ShapeOptionControl : std::uint8_t {

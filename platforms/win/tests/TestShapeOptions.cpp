@@ -217,6 +217,29 @@ void testBrushOptionsMatchMacGeometry()
         == BrushOptionHit{BrushOptionControl::strokeStyle, 0}));
 }
 
+void testMarkerOptionsMatchMacGeometry()
+{
+    MarkerOptionsState state;
+    CHECK(state.style().strokeWidthDip == 18.0F);
+    CHECK((state.style().strokeColor == AnnotationColor{179, 235, 0, 255}));
+    CHECK(state.style().strokePattern == AnnotationStrokePattern::solid);
+    CHECK(state.selectedPaletteIndex() == 16U);
+    CHECK(state.setStrokeWidth(14.0F));
+    CHECK(!state.setStrokeWidth(7.0F));
+
+    const auto layout = markerOptionsLayout({100, 200}, 20);
+    CHECK((layout.toolbar == AnnotationRect{100, 200, 306, 40}));
+    CHECK((layout.strokeWidths[0] == AnnotationRect{110, 210, 20, 20}));
+    CHECK((layout.colorSwatches[0] == AnnotationRect{202, 205, 12, 12}));
+    CHECK((layout.colorSwatches[20] == AnnotationRect{364, 204, 32, 32}));
+    CHECK(layout.separators.size() == 1U);
+    CHECK((layout.separators[0] == AnnotationRect{190.25F, 214, 1.5F, 12}));
+    CHECK((markerOptionHitTest(layout, {110, 220})
+        == MarkerOptionHit{MarkerOptionControl::strokeWidth, 0}));
+    CHECK((markerOptionHitTest(layout, {203, 210})
+        == MarkerOptionHit{MarkerOptionControl::palette, 0}));
+}
+
 } // namespace
 
 int main()
@@ -229,5 +252,6 @@ int main()
     testSharedHitGeometryAndMenus();
     testArrowLineOptionsMatchMacGeometryAndEndpointRules();
     testBrushOptionsMatchMacGeometry();
+    testMarkerOptionsMatchMacGeometry();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

@@ -21,6 +21,9 @@ public:
     AnnotationId addBrushPath(
         BrushPath path,
         AnnotationStyle style = {});
+    AnnotationId addMarkerLine(
+        MarkerLine line,
+        AnnotationStyle style = {});
 
     bool remove(AnnotationId id);
     bool updateRect(AnnotationId id, AnnotationRect rect);
@@ -30,6 +33,7 @@ public:
     bool updateStyle(AnnotationId id, AnnotationStyle style);
     bool updateArrowLine(AnnotationId id, ArrowLine line);
     bool updateBrushPath(AnnotationId id, BrushPath path);
+    bool updateMarkerLine(AnnotationId id, MarkerLine line);
 
     bool select(AnnotationId id) noexcept;
     void clearSelection() noexcept;

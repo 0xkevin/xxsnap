@@ -859,6 +859,81 @@ struct OverlayRenderer::Impl final {
         return std::nullopt;
     }
 
+    std::optional<OverlayRendererError> drawMarkerOptions(
+        const OverlayMarkerOptionsRenderState& options) noexcept
+    {
+        ComPtr<ID2D1SolidColorBrush> panelBrush;
+        ComPtr<ID2D1SolidColorBrush> borderBrush;
+        ComPtr<ID2D1SolidColorBrush> separatorBrush;
+        ComPtr<ID2D1SolidColorBrush> selectionBrush;
+        ComPtr<ID2D1SolidColorBrush> textBrush;
+        const std::array results{
+            createBrush(colorWithMultipliedAlpha(
+                VisualStyleCatalog::toolbarBackgroundColor, 0.96F), panelBrush),
+            createBrush(D2D1::ColorF(0.0F, 0.0F, 0.0F, 0.16F), borderBrush),
+            createBrush(D2D1::ColorF(0.0F, 0.0F, 0.0F, 0.15F), separatorBrush),
+            createBrush(D2D1::ColorF(0.0F, 0.48F, 1.0F, 1.0F), selectionBrush),
+            createBrush(D2D1::ColorF(0.12F, 0.12F, 0.12F, 1.0F), textBrush),
+        };
+        for (const auto& result : results) {
+            if (result.has_value()) {
+                return result;
+            }
+        }
+        const auto panel = D2D1::RoundedRect(
+            d2dRect(options.layout.toolbar), 6.0F, 6.0F);
+        renderTarget->FillRoundedRectangle(&panel, panelBrush.get());
+        renderTarget->DrawRoundedRectangle(&panel, borderBrush.get(), 1.0F);
+        for (const auto separator : options.layout.separators) {
+            const auto rounded = D2D1::RoundedRect(
+                d2dRect(separator), 0.75F, 0.75F);
+            renderTarget->FillRoundedRectangle(&rounded, separatorBrush.get());
+        }
+        const auto& widths = macMarkerStrokeWidths();
+        const auto& previews = macBrushStrokeWidths();
+        for (std::size_t index = 0;
+             index < options.layout.strokeWidths.size()
+                && index < widths.size() && index < previews.size(); ++index) {
+            const auto rect = options.layout.strokeWidths[index];
+            renderTarget->DrawLine(
+                D2D1::Point2F(rect.x + 4.0F, rect.y + rect.height / 2.0F),
+                D2D1::Point2F(
+                    rect.x + rect.width - 4.0F, rect.y + rect.height / 2.0F),
+                options.state.style().strokeWidthDip == widths[index]
+                    ? selectionBrush.get() : textBrush.get(),
+                previews[index]);
+        }
+        const auto& palette = macShapePalette();
+        for (std::size_t index = 0;
+             index < options.layout.paletteCount && index < palette.size();
+             ++index) {
+            auto swatch = options.layout.colorSwatches[index];
+            const auto selected = options.state.selectedPaletteIndex() == index;
+            if (selected) {
+                swatch = {swatch.x - 3.0F, swatch.y - 3.0F,
+                    swatch.width + 6.0F, swatch.height + 6.0F};
+            }
+            ComPtr<ID2D1SolidColorBrush> swatchBrush;
+            if (const auto brushError = createBrush(
+                    annotationColor(palette[index]), swatchBrush)) {
+                return brushError;
+            }
+            const auto rounded = D2D1::RoundedRect(
+                d2dRect(swatch), selected ? 4.0F : 2.5F,
+                selected ? 4.0F : 2.5F);
+            renderTarget->FillRoundedRectangle(&rounded, swatchBrush.get());
+            renderTarget->DrawRoundedRectangle(&rounded,
+                selected ? selectionBrush.get() : borderBrush.get(),
+                selected ? 1.5F : 1.0F);
+        }
+        if (!options.layout.colorSwatches.empty()) {
+            renderTarget->DrawBitmap(paletteBitmap.get(),
+                d2dRect(options.layout.colorSwatches.back()), 1.0F,
+                D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+        }
+        return std::nullopt;
+    }
+
     std::optional<OverlayRendererError> createIconBitmap(
         int resourceId,
         ID2D1Bitmap** destination) noexcept
@@ -1659,6 +1734,13 @@ struct OverlayRenderer::Impl final {
             if (state.brushOptions.has_value()) {
                 if (const auto optionsError = drawBrushOptions(
                         *state.brushOptions)) {
+                    renderTarget->EndDraw();
+                    return optionsError;
+                }
+            }
+            if (state.markerOptions.has_value()) {
+                if (const auto optionsError = drawMarkerOptions(
+                        *state.markerOptions)) {
                     renderTarget->EndDraw();
                     return optionsError;
                 }

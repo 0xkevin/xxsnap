@@ -102,6 +102,7 @@ OverlayWindow::OverlayWindow(
 
 OverlayWindow::~OverlayWindow()
 {
+    discardMarkerCursor();
     if (window_ != nullptr) {
         const auto window = std::exchange(window_, nullptr);
         SetWindowLongPtrW(window, GWLP_USERDATA, 0);
@@ -257,6 +258,90 @@ void OverlayWindow::setCursorStyle(OverlayCursorStyle style) noexcept
     SetCursor(cursor());
 }
 
+void OverlayWindow::setMarkerCursor(
+    AnnotationColor color,
+    float strokeWidthDip) noexcept
+{
+    if (markerCursor_ != nullptr
+        && markerCursorColor_ == color
+        && markerCursorStrokeWidthDip_ == strokeWidthDip) {
+        return;
+    }
+    constexpr int side = 24;
+    const auto diameter = strokeWidthDip < 16.0F
+        ? 10 : strokeWidthDip < 20.0F ? 13 : 16;
+    BITMAPV5HEADER header{};
+    header.bV5Size = sizeof(header);
+    header.bV5Width = side;
+    header.bV5Height = -side;
+    header.bV5Planes = 1;
+    header.bV5BitCount = 32;
+    header.bV5Compression = BI_BITFIELDS;
+    header.bV5RedMask = 0x00FF0000;
+    header.bV5GreenMask = 0x0000FF00;
+    header.bV5BlueMask = 0x000000FF;
+    header.bV5AlphaMask = 0xFF000000;
+    void* bits = nullptr;
+    const auto screen = GetDC(nullptr);
+    const auto colorBitmap = CreateDIBSection(
+        screen, reinterpret_cast<BITMAPINFO*>(&header),
+        DIB_RGB_COLORS, &bits, nullptr, 0);
+    ReleaseDC(nullptr, screen);
+    if (colorBitmap == nullptr || bits == nullptr) {
+        if (colorBitmap != nullptr) {
+            DeleteObject(colorBitmap);
+        }
+        return;
+    }
+    auto* pixels = static_cast<std::uint32_t*>(bits);
+    const auto center = 11.5F;
+    const auto innerRadius = static_cast<float>(diameter) / 2.0F;
+    const auto outerRadius = innerRadius + 1.0F;
+    for (int y = 0; y < side; ++y) {
+        for (int x = 0; x < side; ++x) {
+            const auto dx = static_cast<float>(x) - center;
+            const auto dy = static_cast<float>(y) - center;
+            const auto distanceSquared = dx * dx + dy * dy;
+            std::uint32_t pixel = 0;
+            if (distanceSquared <= innerRadius * innerRadius) {
+                constexpr std::uint32_t alpha = 0xF2U;
+                pixel = 0xF2000000U
+                    | (static_cast<std::uint32_t>(color.red) * alpha / 255U)
+                        << 16U
+                    | (static_cast<std::uint32_t>(color.green) * alpha / 255U)
+                        << 8U
+                    | static_cast<std::uint32_t>(color.blue) * alpha / 255U;
+            } else if (distanceSquared <= outerRadius * outerRadius) {
+                pixel = 0xEBEBEBEBU;
+            }
+            pixels[y * side + x] = pixel;
+        }
+    }
+    const auto maskBitmap = CreateBitmap(side, side, 1, 1, nullptr);
+    ICONINFO info{};
+    info.fIcon = FALSE;
+    info.xHotspot = side / 2;
+    info.yHotspot = side / 2;
+    info.hbmMask = maskBitmap;
+    info.hbmColor = colorBitmap;
+    const auto cursor = CreateIconIndirect(&info);
+    DeleteObject(maskBitmap);
+    DeleteObject(colorBitmap);
+    if (cursor != nullptr) {
+        discardMarkerCursor();
+        markerCursor_ = cursor;
+        markerCursorColor_ = color;
+        markerCursorStrokeWidthDip_ = strokeWidthDip;
+    }
+}
+
+void OverlayWindow::discardMarkerCursor() noexcept
+{
+    if (markerCursor_ != nullptr) {
+        DestroyIcon(std::exchange(markerCursor_, nullptr));
+    }
+}
+
 HCURSOR OverlayWindow::cursor() const noexcept
 {
     HCURSOR result = nullptr;
@@ -290,6 +375,9 @@ HCURSOR OverlayWindow::cursor() const noexcept
     case OverlayCursorStyle::brush:
         result = LoadCursorW(
             instance_, MAKEINTRESOURCEW(IDC_XXSNAP_BRUSH));
+        break;
+    case OverlayCursorStyle::marker:
+        result = markerCursor_;
         break;
     }
     return result != nullptr

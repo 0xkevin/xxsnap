@@ -146,6 +146,8 @@ OverlayCursorStyle cursorStyleForShape(ShapeCursorStyle style) noexcept
         return OverlayCursorStyle::rotation;
     case ShapeCursorStyle::brush:
         return OverlayCursorStyle::brush;
+    case ShapeCursorStyle::marker:
+        return OverlayCursorStyle::marker;
     }
     return OverlayCursorStyle::arrow;
 }
@@ -420,6 +422,28 @@ OverlayInputRouter::currentBrushOptionsLayout(
         optionsToolbarOrigin(chrome, initial.toolbar), macShapePalette().size());
 }
 
+std::optional<MarkerOptionsLayout>
+OverlayInputRouter::currentMarkerOptionsLayout(
+    const OverlaySurface& surface) const
+{
+    if (!editor_ || !editor_->isMarkerToolActive()
+        || !model_.selection().has_value()) {
+        return std::nullopt;
+    }
+    const auto chrome = computeOverlayLayout({
+        surface.physicalBounds,
+        *model_.selection(),
+        surface.dpiX,
+        surface.dpiY,
+        0.0F,
+        true,
+        toolbarActions(),
+    });
+    const auto initial = markerOptionsLayout({}, macShapePalette().size());
+    return markerOptionsLayout(
+        optionsToolbarOrigin(chrome, initial.toolbar), macShapePalette().size());
+}
+
 OverlayInputRouter::~OverlayInputRouter()
 {
     if (dragging_) {
@@ -629,6 +653,12 @@ std::vector<OverlayPresentation> OverlayInputRouter::presentations() const
                 }
                 presentation.brushOptions = std::move(brushOptions);
             }
+            if (const auto options = currentMarkerOptionsLayout(surface)) {
+                presentation.markerOptions = OverlayPresentationMarkerOptions{
+                    *options,
+                    editor_->markerOptions(),
+                };
+            }
         }
     }
     return result;
@@ -831,6 +861,23 @@ bool OverlayInputRouter::pointerDown(HWND source, PixelPoint clientPoint) noexce
             }
             editor_->dismissPopovers();
         }
+        if (const auto options = currentMarkerOptionsLayout(*surface);
+            options.has_value()) {
+            const AnnotationPoint point{x, y};
+            if (const auto hit = markerOptionHitTest(*options, point)) {
+                if (hit->control == MarkerOptionControl::customColor) {
+                    if (const auto chosen = platform_.chooseColor(
+                            source,
+                            editor_->markerOptions().style().strokeColor)) {
+                        editor_->selectCustomColor(*chosen);
+                    }
+                    return true;
+                }
+                editor_->applyMarkerOptionHit(*hit);
+                return true;
+            }
+            editor_->dismissPopovers();
+        }
     }
 
     const auto virtualPoint = toVirtual(*surface, clientPoint);
@@ -914,6 +961,10 @@ OverlayCursorStyle OverlayInputRouter::cursorStyle(
             return OverlayCursorStyle::arrow;
         }
         if (const auto options = currentBrushOptionsLayout(*surface);
+            options.has_value() && contains(options->toolbar, surfacePoint)) {
+            return OverlayCursorStyle::arrow;
+        }
+        if (const auto options = currentMarkerOptionsLayout(*surface);
             options.has_value() && contains(options->toolbar, surfacePoint)) {
             return OverlayCursorStyle::arrow;
         }
@@ -1176,6 +1227,14 @@ std::pair<UINT, UINT> OverlayInputRouter::annotationDpi() const noexcept
     return {surface.dpiX, surface.dpiY};
 }
 
+std::optional<AnnotationStyle>
+OverlayInputRouter::markerCursorStyle() const noexcept
+{
+    return editor_ != nullptr && editor_->isMarkerToolActive()
+        ? std::optional<AnnotationStyle>{editor_->markerOptions().style()}
+        : std::nullopt;
+}
+
 struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl> {
     HINSTANCE instance = nullptr;
     const FrozenDesktop* desktop = nullptr;
@@ -1279,6 +1338,12 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
                     return window != nullptr && window->handle() == source;
                 });
             if (found != windows.end()) {
+                if (style == OverlayCursorStyle::marker) {
+                    if (const auto marker = router->markerCursorStyle()) {
+                        (*found)->setMarkerCursor(
+                            marker->strokeColor, marker->strokeWidthDip);
+                    }
+                }
                 (*found)->setCursorStyle(style);
             }
         }
@@ -1338,6 +1403,13 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
                         options.layout,
                         options.state,
                         options.strokePatternMenu,
+                    };
+                }
+                if (current[index].markerOptions.has_value()) {
+                    const auto& options = *current[index].markerOptions;
+                    state.markerOptions = OverlayMarkerOptionsRenderState{
+                        options.layout,
+                        options.state,
                     };
                 }
                 windows[index]->setRenderState(std::move(state));

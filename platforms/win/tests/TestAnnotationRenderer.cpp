@@ -130,6 +130,25 @@ void testBrushPlanTranslatesPathAndUsesInsetEndpointHandles()
     CHECK(!plan.rotationHandle.has_value());
 }
 
+void testMarkerPlanTranslatesLineAndUsesInsetEndpointHandles()
+{
+    AnnotationDocument document;
+    AnnotationStyle style;
+    style.strokeWidthDip = 18.0F;
+    const auto id = document.addMarkerLine({{10, 20}, {110, 20}}, style);
+    CHECK(id != invalidAnnotationId);
+    const auto plan = buildAnnotationRenderPlan(
+        document, std::nullopt, {200, 100}, true);
+    CHECK(plan.items.size() == 1U);
+    CHECK((plan.items[0].annotation.markerLine.value()
+        == MarkerLine{{210, 120}, {310, 120}}));
+    CHECK(plan.resizeHandles.empty());
+    CHECK(plan.lineHandles.size() == 2U);
+    CHECK((plan.lineHandles[0] == AnnotationPoint{224, 120}));
+    CHECK((plan.lineHandles[1] == AnnotationPoint{296, 120}));
+    CHECK(!plan.rotationHandle.has_value());
+}
+
 void testMacDashPatternsAreAbsoluteDips()
 {
     CHECK(strokeDashPattern(AnnotationStrokePattern::solid, 4).empty());
@@ -321,8 +340,9 @@ bool renderArrowSnapshot(
     return snapshot.opaquePixels > 0U;
 }
 
-bool renderBrushSnapshot(
+bool renderStrokeSnapshot(
     std::uint32_t dpi,
+    AnnotationKind kind,
     AnnotationStrokePattern pattern,
     ArrowSnapshot& snapshot)
 {
@@ -364,25 +384,26 @@ bool renderBrushSnapshot(
 
     AnnotationStyle style;
     style.strokeColor = {255, 0, 0, 255};
-    style.strokeWidthDip = 5.0F;
+    style.strokeWidthDip = kind == AnnotationKind::marker ? 18.0F : 5.0F;
     style.strokePattern = pattern;
     const BrushPath path{{
         {20, 110}, {50, 70}, {85, 100}, {120, 45},
         {155, 90}, {190, 55}, {220, 85},
     }};
+    const MarkerLine marker{{20, 110}, {220, 50}};
+    ShapeAnnotation annotation;
+    annotation.id = 1;
+    annotation.kind = kind;
+    annotation.style = style;
+    if (kind == AnnotationKind::marker) {
+        annotation.rect = markerLineBounds(marker);
+        annotation.markerLine = marker;
+    } else {
+        annotation.rect = brushPathBounds(path);
+        annotation.brushPath = path;
+    }
     AnnotationRenderPlan plan;
-    plan.items.push_back({
-        ShapeAnnotation{
-            1,
-            AnnotationKind::brush,
-            brushPathBounds(path),
-            style,
-            0.0F,
-            std::nullopt,
-            path,
-        },
-        false,
-    });
+    plan.items.push_back({annotation, false});
     resources.target->BeginDraw();
     resources.target->Clear(D2D1::ColorF(0, 0));
     AnnotationRenderer renderer(resources.d2dFactory);
@@ -666,13 +687,35 @@ void testBrushPatternsRenderAtSupportedDpis()
         std::array<std::uint64_t, patterns.size()> checksums{};
         for (std::size_t index = 0U; index < patterns.size(); ++index) {
             ArrowSnapshot snapshot;
-            CHECK(renderBrushSnapshot(dpi, patterns[index], snapshot));
+            CHECK(renderStrokeSnapshot(
+                dpi, AnnotationKind::brush, patterns[index], snapshot));
             CHECK(snapshot.opaquePixels > 100U * dpi / 96U);
             checksums[index] = snapshot.checksum;
         }
         CHECK(checksums[0] != checksums[1]);
         CHECK(checksums[1] != checksums[2]);
         CHECK(checksums[2] != checksums[3]);
+    }
+    if (shouldUninitialize) {
+        CoUninitialize();
+    }
+}
+
+void testMarkerRendersWithMacOpacityAtSupportedDpis()
+{
+    const auto comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    const auto shouldUninitialize = SUCCEEDED(comResult);
+    CHECK(comResult == S_OK || comResult == S_FALSE
+        || comResult == RPC_E_CHANGED_MODE);
+    for (const auto dpi : std::array<std::uint32_t, 2>{96U, 144U}) {
+        ArrowSnapshot snapshot;
+        CHECK(renderStrokeSnapshot(
+            dpi,
+            AnnotationKind::marker,
+            AnnotationStrokePattern::solid,
+            snapshot));
+        CHECK(snapshot.opaquePixels > 1000U * dpi / 96U);
+        CHECK(snapshot.checksum > 0U);
     }
     if (shouldUninitialize) {
         CoUninitialize();
@@ -698,11 +741,13 @@ int main()
     testEditingPreviewReplacesCommittedShape();
     testArrowLinePlanTranslatesCurveAndUsesThreeEditingHandles();
     testBrushPlanTranslatesPathAndUsesInsetEndpointHandles();
+    testMarkerPlanTranslatesLineAndUsesInsetEndpointHandles();
     testMacDashPatternsAreAbsoluteDips();
     testStrokeMenuSketchSampleUsesExactMacJitter();
     testDirect2DSnapshotsAtAllSupportedDpis();
     testArrowEndpointsAndPatternsRenderAtSupportedDpis();
     testBrushPatternsRenderAtSupportedDpis();
+    testMarkerRendersWithMacOpacityAtSupportedDpis();
     testRotationHandleIsReservedForMacIconLayer();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

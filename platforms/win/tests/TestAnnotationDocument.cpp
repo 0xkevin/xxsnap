@@ -174,6 +174,25 @@ void testBrushPathHistoryAndBounds()
     CHECK(document.find(id)->brushPath == path);
 }
 
+void testMarkerLineHistoryAndZeroLengthDot()
+{
+    AnnotationDocument document;
+    const MarkerLine dot{{30, 40}, {30, 40}};
+    const auto id = document.addMarkerLine(dot);
+    CHECK(id != invalidAnnotationId);
+    CHECK(document.find(id)->kind == AnnotationKind::marker);
+    CHECK(document.find(id)->markerLine == dot);
+    CHECK((document.find(id)->rect == AnnotationRect{30, 40, 0, 0}));
+    CHECK(document.move(id, {5, -3}));
+    CHECK((document.find(id)->markerLine
+        == MarkerLine{{35, 37}, {35, 37}}));
+    CHECK(document.updateMarkerLine(id, {{10, 20}, {90, 60}}));
+    CHECK((document.find(id)->rect == AnnotationRect{10, 20, 80, 40}));
+    CHECK(document.undo());
+    CHECK((document.find(id)->markerLine
+        == MarkerLine{{35, 37}, {35, 37}}));
+}
+
 } // namespace
 
 int main()
@@ -184,5 +203,6 @@ int main()
     testNewCommandInvalidatesRedoAndSelectionIsSafe();
     testArrowLineCommandsPreserveCurveGeometryAndHistory();
     testBrushPathHistoryAndBounds();
+    testMarkerLineHistoryAndZeroLengthDot();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

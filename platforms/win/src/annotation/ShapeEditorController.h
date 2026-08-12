@@ -3,6 +3,7 @@
 #include "annotation/AnnotationRenderer.h"
 #include "annotation/ArrowLineInteraction.h"
 #include "annotation/BrushInteraction.h"
+#include "annotation/MarkerInteraction.h"
 #include "annotation/ShapeInteraction.h"
 #include "annotation/ShapeOptions.h"
 #include "toolbar/ToolbarState.h"
@@ -39,6 +40,7 @@ enum class ShapeCursorStyle : std::uint8_t {
     resizeTopRightBottomLeft,
     rotation,
     brush,
+    marker,
 };
 
 class ShapeEditorController final {
@@ -50,6 +52,7 @@ public:
     const ShapeOptionsState& options() const noexcept;
     const ArrowLineOptionsState& arrowLineOptions() const noexcept;
     const BrushOptionsState& brushOptions() const noexcept;
+    const MarkerOptionsState& markerOptions() const noexcept;
     const AnnotationDocument& document() const noexcept;
     AnnotationDocument& document() noexcept;
     const std::optional<ShapeAnnotation>& preview() const noexcept;
@@ -57,6 +60,7 @@ public:
     bool isShapeToolActive() const noexcept;
     bool isArrowLineToolActive() const noexcept;
     bool isBrushToolActive() const noexcept;
+    bool isMarkerToolActive() const noexcept;
     bool strokePatternMenuVisible() const noexcept;
     bool cornerRadiusPanelVisible() const noexcept;
     std::optional<ArrowEndpoint> arrowTypeMenuEndpoint() const noexcept;
@@ -64,6 +68,7 @@ public:
     bool applyOptionHit(ShapeOptionHit hit);
     bool applyArrowLineOptionHit(ArrowLineOptionHit hit);
     bool applyBrushOptionHit(BrushOptionHit hit);
+    bool applyMarkerOptionHit(MarkerOptionHit hit);
     bool applyArrowType(ArrowEndpoint endpoint, std::size_t index);
     bool applyStrokePattern(std::size_t index);
     bool setCornerRadius(float cornerRadiusDip);
@@ -110,14 +115,17 @@ private:
     ShapeOptionsState options_;
     ArrowLineOptionsState arrowLineOptions_;
     BrushOptionsState brushOptions_;
+    MarkerOptionsState markerOptions_;
     ShapeInteraction interaction_;
     ArrowLineInteraction arrowInteraction_;
     BrushInteraction brushInteraction_;
+    MarkerInteraction markerInteraction_;
     AnnotationRect canvasBounds_{};
     ToolbarState toolbarState_;
     bool shapeToolActive_ = false;
     bool arrowLineToolActive_ = false;
     bool brushToolActive_ = false;
+    bool markerToolActive_ = false;
     bool strokePatternMenuVisible_ = false;
     bool cornerRadiusPanelVisible_ = false;
     std::optional<ArrowEndpoint> arrowTypeMenuEndpoint_;

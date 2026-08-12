@@ -1,6 +1,7 @@
 #include "annotation/ShapeEditorController.h"
 
 #include <cstdlib>
+#include <cmath>
 #include <iostream>
 
 namespace {
@@ -26,6 +27,7 @@ void testToolbarCapabilityAndPrimaryToolToggle()
         ToolbarAction::rectangle,
         ToolbarAction::polyline,
         ToolbarAction::pen,
+        ToolbarAction::marker,
         ToolbarAction::undo,
         ToolbarAction::redo,
         ToolbarAction::cancel,
@@ -91,6 +93,49 @@ void testBrushDrawsFreehandPath()
         CHECK(!(editor.document().find(id)->brushPath->points.front()
             == AnnotationPoint{60, 70}));
     }
+}
+
+void testMarkerDrawsSnappedLineDotAndEditsEndpoints()
+{
+    ShapeEditorController editor({0, 0, 400, 300});
+    CHECK(editor.handleToolbarAction(ToolbarAction::marker));
+    CHECK(editor.isMarkerToolActive());
+    CHECK(editor.markerOptions().style().strokeWidthDip == 18.0F);
+    CHECK((editor.markerOptions().style().strokeColor
+        == AnnotationColor{179, 235, 0, 255}));
+    CHECK(editor.applyMarkerOptionHit(
+        {MarkerOptionControl::strokeWidth, 2}));
+
+    CHECK(editor.pointerDown({20, 30}));
+    editor.pointerMove({120, 70}, true);
+    CHECK(editor.pointerUp({120, 70}, true));
+    CHECK(editor.document().annotations().size() == 1U);
+    const auto id = editor.document().annotations()[0].id;
+    const auto line = *editor.document().find(id)->markerLine;
+    const auto dx = line.end.x - line.start.x;
+    const auto dy = line.end.y - line.start.y;
+    CHECK(std::fabs(dy) < 0.001F
+        || std::fabs(dx) < 0.001F
+        || std::fabs(std::fabs(dx) - std::fabs(dy)) < 0.001F);
+    CHECK(editor.document().find(id)->style.strokeWidthDip == 22.0F);
+    CHECK(editor.document().selectedId() == id);
+    CHECK(editor.renderPlan({}, true).lineHandles.size() == 2U);
+
+    CHECK(editor.handleKey(ShapeEditorKey::escapeKey, false, false)
+        == ShapeEditorKeyResult::consumed);
+    const auto handles = editor.renderPlan({}, true).lineHandles;
+    CHECK(editor.pointerDown(handles.back()));
+    editor.pointerMove({200, 140});
+    CHECK(editor.pointerUp({200, 140}));
+    CHECK((editor.document().find(id)->markerLine->end
+        == AnnotationPoint{200, 140}));
+
+    CHECK(editor.handleToolbarAction(ToolbarAction::marker));
+    CHECK(editor.pointerDown({250, 100}));
+    CHECK(editor.pointerUp({250, 100}));
+    CHECK(editor.document().annotations().size() == 2U);
+    CHECK((editor.document().annotations()[1].markerLine.value()
+        == MarkerLine{{250, 100}, {250, 100}}));
 }
 
 void testArrowLineDrawMoveControlEditAndOptions()
@@ -368,5 +413,6 @@ int main()
     testArrowLineDrawMoveControlEditAndOptions();
     testArrowToolSwitchingMenusCursorsAndEditCancellation();
     testBrushDrawsFreehandPath();
+    testMarkerDrawsSnappedLineDotAndEditsEndpoints();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

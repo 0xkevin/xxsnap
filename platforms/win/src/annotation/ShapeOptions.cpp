@@ -29,6 +29,7 @@ constexpr std::array<AnnotationColor, 20> palette{
 constexpr std::array<float, 3> strokeWidths{2.0F, 4.0F, 7.0F};
 constexpr std::array<float, 3> arrowStrokeWidths{3.0F, 4.0F, 6.0F};
 constexpr std::array<float, 3> brushStrokeWidths{3.0F, 5.0F, 7.0F};
+constexpr std::array<float, 3> markerStrokeWidths{14.0F, 18.0F, 22.0F};
 
 constexpr std::array<AnnotationStrokePattern, 6> strokePatterns{
     AnnotationStrokePattern::solid,
@@ -139,6 +140,11 @@ const std::array<float, 3>& macBrushStrokeWidths() noexcept
 const std::array<AnnotationStrokePattern, 4>& macBrushStrokePatterns() noexcept
 {
     return brushStrokePatterns;
+}
+
+const std::array<float, 3>& macMarkerStrokeWidths() noexcept
+{
+    return markerStrokeWidths;
 }
 
 ShapeOptionsState::ShapeOptionsState() noexcept
@@ -500,6 +506,86 @@ void BrushOptionsState::refreshPaletteSelection() noexcept
     }
 }
 
+MarkerOptionsState::MarkerOptionsState() noexcept
+    : selectedPaletteIndex_(16U)
+{
+    style_.strokeColor = {179, 235, 0, 255};
+    style_.fillColor = style_.strokeColor;
+    style_.strokeWidthDip = markerStrokeWidths[1];
+    style_.strokePattern = AnnotationStrokePattern::solid;
+    style_.fillEnabled = false;
+}
+
+const AnnotationStyle& MarkerOptionsState::style() const noexcept
+{
+    return style_;
+}
+
+std::optional<std::size_t> MarkerOptionsState::selectedPaletteIndex() const noexcept
+{
+    return selectedPaletteIndex_;
+}
+
+bool MarkerOptionsState::load(AnnotationStyle style) noexcept
+{
+    style.strokePattern = AnnotationStrokePattern::solid;
+    style.fillEnabled = false;
+    style.strokeColor.alpha = 255;
+    style.fillColor = style.strokeColor;
+    const auto changed = style_ != style;
+    style_ = style;
+    refreshPaletteSelection();
+    return changed;
+}
+
+bool MarkerOptionsState::setStrokeWidth(float strokeWidthDip) noexcept
+{
+    bool supported = false;
+    for (const auto candidate : markerStrokeWidths) {
+        supported = supported || candidate == strokeWidthDip;
+    }
+    if (!supported || style_.strokeWidthDip == strokeWidthDip) {
+        return false;
+    }
+    style_.strokeWidthDip = strokeWidthDip;
+    return true;
+}
+
+bool MarkerOptionsState::selectPalette(std::size_t index) noexcept
+{
+    if (index >= palette.size()) {
+        return false;
+    }
+    const auto changed = !(style_.strokeColor == palette[index])
+        || selectedPaletteIndex_ != index;
+    style_.strokeColor = palette[index];
+    style_.fillColor = palette[index];
+    selectedPaletteIndex_ = index;
+    return changed;
+}
+
+bool MarkerOptionsState::selectCustomColor(AnnotationColor color) noexcept
+{
+    color.alpha = 255;
+    const auto changed = !(style_.strokeColor == color)
+        || selectedPaletteIndex_.has_value();
+    style_.strokeColor = color;
+    style_.fillColor = color;
+    selectedPaletteIndex_.reset();
+    return changed;
+}
+
+void MarkerOptionsState::refreshPaletteSelection() noexcept
+{
+    selectedPaletteIndex_.reset();
+    for (std::size_t index = 0; index < palette.size(); ++index) {
+        if (palette[index] == style_.strokeColor) {
+            selectedPaletteIndex_ = index;
+            return;
+        }
+    }
+}
+
 BrushOptionsLayout brushOptionsLayout(
     AnnotationPoint origin,
     std::size_t paletteCount)
@@ -583,6 +669,80 @@ std::optional<BrushOptionHit> brushOptionHitTest(
     if (contains(inset(layout.colorSwatches.back(), -2.0F, -2.0F), point)) {
         return BrushOptionHit{
             BrushOptionControl::customColor,
+            layout.colorSwatches.size() - 1U};
+    }
+    return std::nullopt;
+}
+
+MarkerOptionsLayout markerOptionsLayout(
+    AnnotationPoint origin,
+    std::size_t paletteCount)
+{
+    MarkerOptionsLayout layout;
+    layout.paletteCount = clampedPaletteCount(paletteCount);
+    const auto rows = layout.paletteCount <= 10U ? 1U : 2U;
+    const auto columns = (layout.paletteCount + rows - 1U) / rows;
+    const auto customSize = rows == 1U ? 20.0F : 32.0F;
+    const auto height = rows == 1U ? 30.0F : 40.0F;
+    const auto width = 102.0F + static_cast<float>(columns) * 16.0F
+        + 2.0F + customSize + 10.0F;
+    layout.toolbar = {origin.x, origin.y, width, height};
+    const auto controlY = origin.y + (height - 20.0F) / 2.0F;
+    for (std::size_t index = 0; index < markerStrokeWidths.size(); ++index) {
+        const AnnotationRect control{
+            origin.x + 10.0F + static_cast<float>(index) * 24.0F,
+            controlY, 20.0F, 20.0F};
+        layout.strokeWidths.push_back(control);
+        layout.strokeWidthHits.push_back(inset(control, -3.0F, -5.0F));
+    }
+    for (std::size_t index = 0; index < layout.paletteCount; ++index) {
+        const auto column = index % columns;
+        const auto row = rows == 1U ? 0U : index / columns;
+        const auto swatchY = rows == 1U
+            ? origin.y + (height - 12.0F) / 2.0F
+            : origin.y + 5.0F + static_cast<float>(row) * 16.0F;
+        layout.colorSwatches.push_back({
+            origin.x + 102.0F + static_cast<float>(column) * 16.0F,
+            swatchY, 12.0F, 12.0F});
+    }
+    layout.colorSwatches.push_back({
+        origin.x + 102.0F + static_cast<float>(columns) * 16.0F + 2.0F,
+        origin.y + (height - customSize) / 2.0F,
+        customSize,
+        customSize});
+    const auto lastStrokeWidth = layout.strokeWidths.back();
+    const auto separatorX = lastStrokeWidth.x + lastStrokeWidth.width
+        + (layout.colorSwatches.front().x
+            - lastStrokeWidth.x - lastStrokeWidth.width) / 2.0F;
+    layout.separators.push_back({
+        floorWithoutRuntime(separatorX) + 0.25F,
+        origin.y + height / 2.0F - 6.0F,
+        1.5F,
+        12.0F,
+    });
+    return layout;
+}
+
+std::optional<MarkerOptionHit> markerOptionHitTest(
+    const MarkerOptionsLayout& layout,
+    AnnotationPoint point) noexcept
+{
+    for (std::size_t index = 0; index < layout.strokeWidthHits.size(); ++index) {
+        if (contains(layout.strokeWidthHits[index], point)) {
+            return MarkerOptionHit{MarkerOptionControl::strokeWidth, index};
+        }
+    }
+    if (layout.colorSwatches.empty()) {
+        return std::nullopt;
+    }
+    for (std::size_t index = 0; index + 1U < layout.colorSwatches.size(); ++index) {
+        if (contains(inset(layout.colorSwatches[index], -3.0F, -3.0F), point)) {
+            return MarkerOptionHit{MarkerOptionControl::palette, index};
+        }
+    }
+    if (contains(inset(layout.colorSwatches.back(), -2.0F, -2.0F), point)) {
+        return MarkerOptionHit{
+            MarkerOptionControl::customColor,
             layout.colorSwatches.size() - 1U};
     }
     return std::nullopt;
