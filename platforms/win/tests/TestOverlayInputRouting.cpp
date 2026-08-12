@@ -476,7 +476,7 @@ void testShapeToolIsNonTerminalAndEditsThroughSharedPresentation()
     createReadySelection(router);
 
     auto owner = router.presentations()[1];
-    CHECK(owner.toolbarItems.size() == 14U);
+    CHECK(owner.toolbarItems.size() == 15U);
     const auto rectangle = owner.toolbarItems[0];
     CHECK(rectangle.action == xxsnap::win::ToolbarAction::rectangle);
     const auto capturesBeforeTool = platform.captureCalls;
@@ -554,7 +554,7 @@ void testArrowToolUsesMacOptionsMenuAndCreatesEditableCurve()
     createReadySelection(router);
 
     auto owner = router.presentations()[1];
-    CHECK(owner.toolbarItems.size() == 14U);
+    CHECK(owner.toolbarItems.size() == 15U);
     CHECK(owner.toolbarItems[1].action == xxsnap::win::ToolbarAction::polyline);
     CHECK(router.pointerDown(
         rightWindow, owner.toolbarItems[1].centerPhysical));
@@ -979,7 +979,7 @@ void testMagnifierToolbarMatchesMacOptionsAndUsesComposite()
     createReadySelection(router);
     CHECK(router.keyPressed(ShapeEditorKey::magnifier, false, false));
     auto owner = router.presentations()[1];
-    CHECK(owner.toolbarItems.size() == 14U);
+    CHECK(owner.toolbarItems.size() == 15U);
     CHECK(owner.toolbarItems[8].action
         == xxsnap::win::ToolbarAction::magnifier);
     CHECK(owner.toolbarItems[8].selected);
@@ -1035,6 +1035,74 @@ void testMagnifierToolbarMatchesMacOptionsAndUsesComposite()
     CHECK(!owner.annotationPlan.rotationHandle.has_value());
 }
 
+void testEraserToolbarUsesMacLayoutAndModes()
+{
+    FakePlatform platform;
+    auto desktop = solidDesktop({40, 90, 140, 255});
+    CHECK(desktop != nullptr);
+    if (!desktop) return;
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform, {}, true,
+        desktop.get());
+    createReadySelection(router);
+    CHECK(router.keyPressed(ShapeEditorKey::eraser, false, false));
+    auto owner = router.presentations()[1];
+    CHECK(owner.toolbarItems[9].action
+        == xxsnap::win::ToolbarAction::eraser);
+    CHECK(owner.toolbarItems[9].selected);
+    CHECK(owner.eraserOptions.has_value());
+    CHECK((owner.eraserOptions->layout.toolbar
+        == AnnotationRect{owner.eraserOptions->layout.toolbar.x,
+            owner.eraserOptions->layout.toolbar.y, 100, 28}));
+    CHECK(owner.eraserOptions->mode == xxsnap::win::EraserMode::point);
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.eraserOptions->layout.rectangleMode)));
+    owner = router.presentations()[1];
+    CHECK(owner.eraserOptions->mode == xxsnap::win::EraserMode::rectangle);
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.eraserOptions->layout.pointMode)));
+    CHECK(router.presentations()[1].eraserOptions->mode
+        == xxsnap::win::EraserMode::point);
+}
+
+void testRectangleEraserRoutesFromOutsideLockedSelection()
+{
+    FakePlatform platform;
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform, {}, true);
+    createReadySelection(router);
+    const auto lockedSelection = router.selection();
+
+    auto owner = router.presentations()[1];
+    CHECK(router.pointerDown(rightWindow, owner.toolbarItems[0].centerPhysical));
+    CHECK(router.pointerDown(rightWindow, PixelPoint{10, 100}));
+    platform.cursor = PixelPoint{100, 180};
+    router.pointerMove(rightWindow, PixelPoint{100, 180});
+    router.pointerUp(rightWindow, PixelPoint{100, 180});
+    CHECK(router.annotationDocument().annotations().size() == 1U);
+    const auto annotationId = router.annotationDocument().annotations()[0].id;
+
+    CHECK(router.keyPressed(ShapeEditorKey::eraser, false, false));
+    owner = router.presentations()[1];
+    CHECK(owner.eraserOptions.has_value());
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.eraserOptions->layout.rectangleMode)));
+    CHECK(router.cursorStyle(rightWindow, PixelPoint{200, 200})
+        == OverlayCursorStyle::crosshair);
+    const auto capturesBefore = platform.captureCalls;
+    CHECK(router.pointerDown(rightWindow, PixelPoint{200, 200}));
+    CHECK(platform.captureCalls == capturesBefore + 1);
+    platform.cursor = PixelPoint{40, 120};
+    router.pointerMove(rightWindow, PixelPoint{40, 120});
+    CHECK(router.presentations()[1].annotationPlan.eraserPreview.has_value());
+    router.pointerUp(rightWindow, PixelPoint{40, 120});
+    CHECK(router.phase() == SelectionPhase::ready);
+    CHECK(router.selection() == lockedSelection);
+    CHECK(router.annotationDocument().eraserMasks().size() == 1U);
+    CHECK((router.annotationDocument().eraserMasks()[0].affectedAnnotationIds
+        == std::vector<xxsnap::win::AnnotationId>{annotationId}));
+}
+
 } // namespace
 
 int main()
@@ -1059,5 +1127,7 @@ int main()
     testTextToolbarAcceptsUnicodeAndUsesRealPopupMenus();
     testNumberToolbarCreatesSequenceAndSupportsDoubleClickEditing();
     testMagnifierToolbarMatchesMacOptionsAndUsesComposite();
+    testEraserToolbarUsesMacLayoutAndModes();
+    testRectangleEraserRoutesFromOutsideLockedSelection();
     return failureCount == 0 ? 0 : 1;
 }

@@ -52,6 +52,11 @@ constexpr bool operator==(
         && left.height == right.height;
 }
 
+struct EraserMask {
+    AnnotationRect rect{};
+    std::vector<AnnotationId> affectedAnnotationIds;
+};
+
 constexpr AnnotationRect standardized(AnnotationRect rect) noexcept
 {
     if (rect.width < 0.0F) {

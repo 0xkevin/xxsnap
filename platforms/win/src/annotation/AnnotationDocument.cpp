@@ -272,6 +272,18 @@ bool AnnotationDocument::remove(AnnotationId id)
     std::optional<Snapshot> before;
     if (!numberEditBefore_.has_value()) before = snapshot();
     annotations_.erase(annotations_.begin() + static_cast<std::ptrdiff_t>(*index));
+    for (auto& mask : eraserMasks_) {
+        mask.affectedAnnotationIds.erase(
+            std::remove(mask.affectedAnnotationIds.begin(),
+                mask.affectedAnnotationIds.end(), id),
+            mask.affectedAnnotationIds.end());
+    }
+    eraserMasks_.erase(
+        std::remove_if(eraserMasks_.begin(), eraserMasks_.end(),
+            [](const EraserMask& mask) {
+                return mask.affectedAnnotationIds.empty();
+            }),
+        eraserMasks_.end());
     if (selectedId_ == id) {
         selectedId_ = annotations_.empty()
             ? std::nullopt
@@ -283,6 +295,52 @@ bool AnnotationDocument::remove(AnnotationId id)
     } else {
         commit(std::move(*before));
     }
+    return true;
+}
+
+bool AnnotationDocument::addEraserMask(
+    AnnotationRect rect,
+    std::vector<AnnotationId> affectedAnnotationIds)
+{
+    rect = standardized(rect);
+    std::sort(affectedAnnotationIds.begin(), affectedAnnotationIds.end());
+    affectedAnnotationIds.erase(
+        std::remove_if(affectedAnnotationIds.begin(),
+            affectedAnnotationIds.end(), [this](AnnotationId id) {
+                const auto found = std::lower_bound(
+                    annotations_.begin(), annotations_.end(), id,
+                    [](const ShapeAnnotation& annotation,
+                       AnnotationId candidate) {
+                        return annotation.id < candidate;
+                    });
+                return id == invalidAnnotationId
+                    || found == annotations_.end() || found->id != id;
+            }),
+        affectedAnnotationIds.end());
+    affectedAnnotationIds.erase(
+        std::unique(affectedAnnotationIds.begin(), affectedAnnotationIds.end()),
+        affectedAnnotationIds.end());
+    if (rect.width < 3.0F || rect.height < 3.0F
+        || affectedAnnotationIds.empty()) {
+        return false;
+    }
+    auto before = snapshot();
+    eraserMasks_.push_back({rect, std::move(affectedAnnotationIds)});
+    selectedId_.reset();
+    commit(std::move(before));
+    return true;
+}
+
+bool AnnotationDocument::clearAnnotationsAndMasks()
+{
+    if (annotations_.empty() && eraserMasks_.empty()) {
+        return false;
+    }
+    auto before = snapshot();
+    annotations_.clear();
+    eraserMasks_.clear();
+    selectedId_.reset();
+    commit(std::move(before));
     return true;
 }
 
@@ -696,6 +754,11 @@ const std::vector<ShapeAnnotation>& AnnotationDocument::annotations() const noex
     return annotations_;
 }
 
+const std::vector<EraserMask>& AnnotationDocument::eraserMasks() const noexcept
+{
+    return eraserMasks_;
+}
+
 bool AnnotationDocument::canUndo() const noexcept
 {
     return !undoHistory_.empty();
@@ -758,7 +821,7 @@ ShapeAnnotation* AnnotationDocument::findMutable(AnnotationId id) noexcept
 
 AnnotationDocument::Snapshot AnnotationDocument::snapshot() const
 {
-    return {annotations_, selectedId_};
+    return {annotations_, eraserMasks_, selectedId_};
 }
 
 void AnnotationDocument::commit(Snapshot before)
@@ -771,6 +834,7 @@ void AnnotationDocument::commit(Snapshot before)
 void AnnotationDocument::restore(const Snapshot& state)
 {
     annotations_ = state.annotations;
+    eraserMasks_ = state.eraserMasks;
     selectedId_ = state.selectedId;
 }
 

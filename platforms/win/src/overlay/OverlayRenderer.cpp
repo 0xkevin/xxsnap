@@ -1569,6 +1569,67 @@ struct OverlayRenderer::Impl final {
         return std::nullopt;
     }
 
+    void drawToolbarIcon(
+        const ToolbarIconSpec& icon,
+        std::size_t iconIndex,
+        DipRect rect,
+        ID2D1Brush* selectedBrush,
+        bool selected) noexcept
+    {
+        const auto destination = d2dRect(insetRect(rect, icon.insetDip));
+        if (selected && !icon.fixedColor) {
+            const auto previousMode = renderTarget->GetAntialiasMode();
+            renderTarget->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
+            const auto bitmapSize = iconBitmaps[iconIndex]->GetSize();
+            const auto source = D2D1::RectF(
+                0.0F, 0.0F, bitmapSize.width, bitmapSize.height);
+            renderTarget->FillOpacityMask(
+                iconBitmaps[iconIndex].get(), selectedBrush,
+                D2D1_OPACITY_MASK_CONTENT_GRAPHICS,
+                &destination, &source);
+            renderTarget->SetAntialiasMode(previousMode);
+            return;
+        }
+        renderTarget->DrawBitmap(iconBitmaps[iconIndex].get(),
+            destination, 1.0F, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+    }
+
+    std::optional<OverlayRendererError> drawEraserOptions(
+        const OverlayEraserOptionsRenderState& options) noexcept
+    {
+        if (const auto resourceError = ensureTextResources()) {
+            return resourceError;
+        }
+        const auto panel = D2D1::RoundedRect(
+            d2dRect(options.layout.toolbar), 6.0F, 6.0F);
+        renderTarget->FillRoundedRectangle(&panel, textPanelBrush.get());
+        renderTarget->DrawRoundedRectangle(
+            &panel, textBorderBrush.get(), 1.0F);
+        const auto separator = D2D1::RoundedRect(
+            d2dRect(options.layout.separator), 0.75F, 0.75F);
+        renderTarget->FillRoundedRectangle(
+            &separator, textBorderBrush.get());
+
+        const auto iconRect = [](AnnotationRect rect) {
+            return DipRect{rect.x, rect.y, rect.width, rect.height};
+        };
+        const auto pointIndex = toolbarIconIndex(ToolbarAction::eraser);
+        drawToolbarIcon(
+            toolbarImageResources()[pointIndex],
+            pointIndex, iconRect(options.layout.pointMode),
+            textSelectionBrush.get(),
+            options.mode == EraserMode::point);
+        const auto rectangleIndex = toolbarIconIndex(ToolbarAction::rectangle);
+        drawToolbarIcon(
+            toolbarImageResources()[rectangleIndex],
+            rectangleIndex, iconRect(options.layout.rectangleMode),
+            textSelectionBrush.get(),
+            options.mode == EraserMode::rectangle);
+        drawToolbarIcon(eraserTrashIcon(), eraserTrashIconIndex(),
+            iconRect(options.layout.clearAll), textSelectionBrush.get(), false);
+        return std::nullopt;
+    }
+
     std::optional<OverlayRendererError> drawEyedropper(
         const OverlayEyedropperRenderState& state,
         AnnotationRect safeBounds) noexcept
@@ -2649,39 +2710,11 @@ struct OverlayRenderer::Impl final {
                     toolbarBorderBrush.get(),
                     VisualStyleCatalog::toolbarBorderDip);
 
-                const auto drawToolbarIcon = [this, &selectionBrush](
-                        const ToolbarIconSpec& icon,
-                        std::size_t iconIndex,
-                        DipRect rect,
-                        bool selected = false) {
-                    const auto destination = d2dRect(
-                        insetRect(rect, icon.insetDip));
-                    if (selected && !icon.fixedColor) {
-                        const auto previousMode = renderTarget->GetAntialiasMode();
-                        renderTarget->SetAntialiasMode(
-                            D2D1_ANTIALIAS_MODE_ALIASED);
-                        const auto bitmapSize = iconBitmaps[iconIndex]->GetSize();
-                        const auto source = D2D1::RectF(
-                            0.0F, 0.0F, bitmapSize.width, bitmapSize.height);
-                        renderTarget->FillOpacityMask(
-                            iconBitmaps[iconIndex].get(),
-                            selectionBrush.get(),
-                            D2D1_OPACITY_MASK_CONTENT_GRAPHICS,
-                            &destination,
-                            &source);
-                        renderTarget->SetAntialiasMode(previousMode);
-                    } else {
-                        renderTarget->DrawBitmap(
-                            iconBitmaps[iconIndex].get(),
-                            destination,
-                            1.0F,
-                            D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
-                    }
-                };
                 drawToolbarIcon(
                     dragHandleIcon(),
                     0U,
                     layout.toolbar.leadingDragHandle,
+                    selectionBrush.get(),
                     false);
                 for (std::size_t index = 0; index < layout.toolbarItems.size(); ++index) {
                     const auto& item = layout.toolbarItems[index];
@@ -2690,7 +2723,8 @@ struct OverlayRenderer::Impl final {
                         : disabledToolbarIconIndex(item.action);
                     const auto& icon = toolbarImageResources()[iconIndex];
                     drawToolbarIcon(
-                        icon, iconIndex, item.rect, item.selected);
+                        icon, iconIndex, item.rect,
+                        selectionBrush.get(), item.selected);
 
                     if (index + 1U < layout.toolbarItems.size()
                         && extraGapAfter(item.action) > 0.0F) {
@@ -2716,6 +2750,7 @@ struct OverlayRenderer::Impl final {
                     dragHandleIcon(),
                     0U,
                     layout.toolbar.trailingDragHandle,
+                    selectionBrush.get(),
                     false);
             }
 
@@ -2772,6 +2807,12 @@ struct OverlayRenderer::Impl final {
                         *state.magnifierOptions)) {
                     renderTarget->EndDraw();
                     return optionsError;
+                }
+            }
+            if (state.eraserOptions.has_value()) {
+                if (const auto optionsError = drawEraserOptions(
+                        *state.eraserOptions)) {
+                    return *optionsError;
                 }
             }
 

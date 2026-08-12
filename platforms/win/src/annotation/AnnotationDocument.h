@@ -50,6 +50,10 @@ public:
         MagnifierShape shape,
         float zoom,
         AnnotationStyle style = {});
+    bool addEraserMask(
+        AnnotationRect rect,
+        std::vector<AnnotationId> affectedAnnotationIds);
+    bool clearAnnotationsAndMasks();
 
     bool remove(AnnotationId id);
     bool updateRect(AnnotationId id, AnnotationRect rect);
@@ -98,6 +102,7 @@ public:
 
     const ShapeAnnotation* find(AnnotationId id) const noexcept;
     const std::vector<ShapeAnnotation>& annotations() const noexcept;
+    const std::vector<EraserMask>& eraserMasks() const noexcept;
 
     bool canUndo() const noexcept;
     bool canRedo() const noexcept;
@@ -108,6 +113,7 @@ public:
 private:
     struct Snapshot {
         std::vector<ShapeAnnotation> annotations;
+        std::vector<EraserMask> eraserMasks;
         std::optional<AnnotationId> selectedId;
     };
 
@@ -123,6 +129,7 @@ private:
     void restore(const Snapshot& snapshot);
 
     std::vector<ShapeAnnotation> annotations_;
+    std::vector<EraserMask> eraserMasks_;
     std::optional<AnnotationId> selectedId_;
     std::vector<HistoryEntry> undoHistory_;
     std::vector<HistoryEntry> redoHistory_;

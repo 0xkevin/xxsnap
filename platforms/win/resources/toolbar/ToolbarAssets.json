@@ -253,6 +253,20 @@
       "source" : "platforms/mac/Resources/Icons/text-tool.svg"
     },
     {
+      "fixedColor" : false,
+      "generated" : {
+        "100" : "platforms/win/resources/toolbar/100/trash.png",
+        "125" : "platforms/win/resources/toolbar/125/trash.png",
+        "150" : "platforms/win/resources/toolbar/150/trash.png",
+        "200" : "platforms/win/resources/toolbar/200/trash.png"
+      },
+      "insetDip" : 2,
+      "logicalSizeDip" : 16,
+      "name" : "trash",
+      "sha256" : "7fd272a8464f421697ec9eaf8ad3fd670f03fffe009a9269784617eecfd83b99",
+      "source" : "platforms/mac/Resources/Icons/trash.svg"
+    },
+    {
       "fixedColor" : true,
       "generated" : {
         "100" : "platforms/win/resources/toolbar/100/undo-disabled.png",

@@ -1,4 +1,5 @@
 #include "toolbar/ToolbarCatalog.h"
+#include "resource.h"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -82,7 +83,8 @@ void testCatalogContract()
     static_assert(extraGapAfter(ToolbarAction::redo) == 8.0F);
     static_assert(extraGapAfter(ToolbarAction::copy) == 0.0F);
 
-    CHECK(toolbarImageResources().size() == 21U);
+    CHECK(toolbarImageResources().size() == 22U);
+    CHECK(std::wstring_view(eraserTrashIcon().resourceName) == L"trash");
     static_assert(dragHandleIcon().resourceIdAt96Dpi > 0);
     const auto& rotationHandle = toolbarImageResources().back();
     CHECK(rotationHandle.insetDip == 4.0F);
@@ -198,9 +200,26 @@ void testAllEmbeddedResourcesDecode()
     CoUninitialize();
 }
 
+void testEmbeddedEraserCursorMatchesMacHotspot()
+{
+    const auto cursor = LoadCursorW(
+        GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDC_XXSNAP_ERASER));
+    CHECK(cursor != nullptr);
+    if (cursor == nullptr) return;
+
+    ICONINFO info{};
+    CHECK(GetIconInfo(cursor, &info));
+    CHECK(!info.fIcon);
+    CHECK(info.xHotspot == 11U);
+    CHECK(info.yHotspot == 21U);
+    if (info.hbmMask != nullptr) DeleteObject(info.hbmMask);
+    if (info.hbmColor != nullptr) DeleteObject(info.hbmColor);
+}
+
 int main()
 {
     testCatalogContract();
     testAllEmbeddedResourcesDecode();
+    testEmbeddedEraserCursorMatchesMacHotspot();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

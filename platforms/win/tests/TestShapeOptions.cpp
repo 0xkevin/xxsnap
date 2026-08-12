@@ -379,6 +379,23 @@ void testMagnifierOptionsMatchMacGeometryAndDefaults()
     CHECK(popup.menu.height == 104.0F);
 }
 
+void testEraserOptionsUseExactMacGeometry()
+{
+    const auto layout = eraserOptionsLayout({100, 200});
+    CHECK((layout.toolbar == AnnotationRect{100, 200, 100, 28}));
+    CHECK((layout.pointMode == AnnotationRect{108, 204, 20, 20}));
+    CHECK((layout.rectangleMode == AnnotationRect{132, 204, 20, 20}));
+    CHECK((layout.clearAll == AnnotationRect{172, 204, 20, 20}));
+    CHECK((layout.separator == AnnotationRect{161.25F, 208, 1.5F, 12}));
+    CHECK(eraserOptionHitTest(layout, {118, 214})->control
+        == EraserOptionControl::pointMode);
+    CHECK(eraserOptionHitTest(layout, {142, 214})->control
+        == EraserOptionControl::rectangleMode);
+    CHECK(eraserOptionHitTest(layout, {182, 214})->control
+        == EraserOptionControl::clearAll);
+    CHECK(!eraserOptionHitTest(layout, {162, 214}).has_value());
+}
+
 } // namespace
 
 int main()
@@ -396,5 +413,6 @@ int main()
     testTextOptionsMatchMacGeometryAndMenus();
     testNumberOptionsMatchMacGeometryTypesAndSizes();
     testMagnifierOptionsMatchMacGeometryAndDefaults();
+    testEraserOptionsUseExactMacGeometry();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

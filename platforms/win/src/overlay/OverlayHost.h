@@ -119,6 +119,11 @@ struct OverlayPresentationMagnifierOptions {
     std::optional<PopupMenuLayout> zoomMenu;
 };
 
+struct OverlayPresentationEraserOptions {
+    EraserOptionsLayout layout;
+    EraserMode mode = EraserMode::point;
+};
+
 struct OverlayPresentationEyedropper {
     AnnotationPoint pointer{};
     AnnotationColor color{};
@@ -144,6 +149,7 @@ struct OverlayPresentation {
     std::optional<OverlayPresentationTextOptions> textOptions;
     std::optional<OverlayPresentationNumberOptions> numberOptions;
     std::optional<OverlayPresentationMagnifierOptions> magnifierOptions;
+    std::optional<OverlayPresentationEraserOptions> eraserOptions;
     std::optional<OverlayPresentationEyedropper> eyedropper;
 };
 
@@ -249,6 +255,8 @@ private:
         const OverlaySurface& surface) const;
     std::optional<MagnifierOptionsLayout> currentMagnifierOptionsLayout(
         const OverlaySurface& surface) const;
+    std::optional<EraserOptionsLayout> currentEraserOptionsLayout(
+        const OverlaySurface& surface) const;
     void cancelOnce() noexcept;
     void completeOnce(OverlayInputAction action) noexcept;
     void emitTerminal(OverlayInputAction action) noexcept;
@@ -311,6 +319,7 @@ struct OverlayHostCreateResult;
 
 struct OverlayAnnotationSnapshot {
     AnnotationRenderPlan plan;
+    std::vector<EraserMask> eraserMasks;
     UINT dpiX = 96;
     UINT dpiY = 96;
 };

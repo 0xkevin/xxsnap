@@ -217,6 +217,13 @@ inline constexpr std::array imageResources{
         IDR_TOOLBAR_200_COPY_TO_CLIPBOARD_PNG,
     },
     ToolbarIconSpec{
+        L"trash", 2.0F, false,
+        IDR_TOOLBAR_100_TRASH_PNG,
+        IDR_TOOLBAR_125_TRASH_PNG,
+        IDR_TOOLBAR_150_TRASH_PNG,
+        IDR_TOOLBAR_200_TRASH_PNG,
+    },
+    ToolbarIconSpec{
         L"refresh-svgrepo-com3", 4.0F, true,
         IDR_TOOLBAR_100_REFRESH_SVGREPO_COM3_PNG,
         IDR_TOOLBAR_125_REFRESH_SVGREPO_COM3_PNG,
@@ -285,6 +292,16 @@ constexpr const ToolbarIconSpec& dragHandleIcon() noexcept
 constexpr const ToolbarIconSpec& rotationHandleIcon() noexcept
 {
     return toolbar_catalog_detail::imageResources.back();
+}
+
+constexpr std::size_t eraserTrashIconIndex() noexcept
+{
+    return toolbar_catalog_detail::imageResources.size() - 2U;
+}
+
+constexpr const ToolbarIconSpec& eraserTrashIcon() noexcept
+{
+    return toolbar_catalog_detail::imageResources[eraserTrashIconIndex()];
 }
 
 constexpr std::size_t rotationHandleIconIndex() noexcept

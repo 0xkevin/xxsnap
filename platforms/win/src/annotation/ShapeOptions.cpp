@@ -160,6 +160,34 @@ const std::array<float, 3>& macMagnifierStrokeWidths() noexcept
     return strokeWidths;
 }
 
+EraserOptionsLayout eraserOptionsLayout(AnnotationPoint origin) noexcept
+{
+    EraserOptionsLayout layout;
+    layout.toolbar = {origin.x, origin.y, 100.0F, 28.0F};
+    const auto y = origin.y + 4.0F;
+    layout.pointMode = {origin.x + 8.0F, y, 20.0F, 20.0F};
+    layout.rectangleMode = {origin.x + 32.0F, y, 20.0F, 20.0F};
+    layout.clearAll = {origin.x + 72.0F, y, 20.0F, 20.0F};
+    layout.separator = {origin.x + 61.25F, origin.y + 8.0F, 1.5F, 12.0F};
+    return layout;
+}
+
+std::optional<EraserOptionHit> eraserOptionHitTest(
+    const EraserOptionsLayout& layout,
+    AnnotationPoint point) noexcept
+{
+    if (contains(layout.pointMode, point)) {
+        return EraserOptionHit{EraserOptionControl::pointMode};
+    }
+    if (contains(layout.rectangleMode, point)) {
+        return EraserOptionHit{EraserOptionControl::rectangleMode};
+    }
+    if (contains(layout.clearAll, point)) {
+        return EraserOptionHit{EraserOptionControl::clearAll};
+    }
+    return std::nullopt;
+}
+
 ShapeOptionsState::ShapeOptionsState() noexcept
     : style_(primaryShapeActivationStyle({})), selectedPaletteIndex_(0U)
 {

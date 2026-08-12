@@ -310,6 +310,47 @@ void testMagnifierCommandsNormalizeStyleAndRemainReversible()
     CHECK(document.find(id)->magnifierShape == MagnifierShape::circle);
 }
 
+void testEraserMasksParticipateInHistoryAndPruneDeletedAnnotations()
+{
+    AnnotationDocument document;
+    const auto first = document.addShape(
+        AnnotationKind::rectangle, {0, 0, 40, 40});
+    const auto second = document.addShape(
+        AnnotationKind::ellipse, {20, 20, 40, 40});
+    const auto maskAdded = document.addEraserMask(
+        {10, 10, 20, 20}, {second, first, second, 9999});
+    CHECK(maskAdded);
+    CHECK(document.eraserMasks().size() == 1U);
+    CHECK(document.eraserMasks()[0].affectedAnnotationIds
+        == std::vector<AnnotationId>({first, second}));
+
+    CHECK(document.remove(first));
+    CHECK(document.eraserMasks().size() == 1U);
+    CHECK(document.eraserMasks()[0].affectedAnnotationIds
+        == std::vector<AnnotationId>({second}));
+    CHECK(document.undo());
+    CHECK(document.find(first) != nullptr);
+    CHECK(document.eraserMasks()[0].affectedAnnotationIds.size() == 2U);
+    CHECK(document.redo());
+    CHECK(document.find(first) == nullptr);
+
+    CHECK(document.remove(second));
+    CHECK(document.eraserMasks().empty());
+    CHECK(document.undo());
+    CHECK(document.find(second) != nullptr);
+    CHECK(document.eraserMasks().size() == 1U);
+
+    CHECK(document.clearAnnotationsAndMasks());
+    CHECK(document.annotations().empty());
+    CHECK(document.eraserMasks().empty());
+    CHECK(document.undo());
+    CHECK(document.find(second) != nullptr);
+    CHECK(document.eraserMasks().size() == 1U);
+    CHECK(document.redo());
+    CHECK(document.annotations().empty());
+    CHECK(document.eraserMasks().empty());
+}
+
 } // namespace
 
 int main()
@@ -325,5 +366,6 @@ int main()
     testTextEditTransactionKeepsUnicodeAndCancelsAtomically();
     testNumberMarksClampPayloadAndEditAsOneUndoStep();
     testMagnifierCommandsNormalizeStyleAndRemainReversible();
+    testEraserMasksParticipateInHistoryAndPruneDeletedAnnotations();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

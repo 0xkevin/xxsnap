@@ -189,3 +189,21 @@ for (name, tint) in [
         .write(to: destination, options: .atomic)
     print("Generated \(destination.path) from the macOS eyedropper cursor SVG.")
 }
+
+let eraserSource = repository
+    .appendingPathComponent("platforms/mac/Resources/Icons/eraser-tool.svg")
+guard let eraserImage = NSImage(contentsOf: eraserSource) else {
+    throw CocoaError(.fileReadCorruptFile)
+}
+let eraserBitmap = try renderedBitmap(
+    for: eraserImage,
+    destination: NSRect(x: 7, y: 7, width: 18, height: 18)
+)
+let eraserOutput = outputDirectory.appendingPathComponent("xxsnap-eraser.cur")
+let eraserHotSpot = NSPoint(
+    x: 7 + CGFloat(macCursorInset),
+    y: 17 + CGFloat(macCursorInset)
+)
+try cursorData(bitmap: eraserBitmap, hotSpot: eraserHotSpot)
+    .write(to: eraserOutput, options: .atomic)
+print("Generated \(eraserOutput.path) from the macOS eraser cursor SVG.")

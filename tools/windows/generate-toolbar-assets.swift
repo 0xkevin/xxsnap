@@ -47,6 +47,7 @@ let definitions = [
     AssetDefinition(name: "pin-to-screen", insetDip: 2, fixedColor: false),
     AssetDefinition(name: "save-to-file", insetDip: 2, fixedColor: false),
     AssetDefinition(name: "copy-to-clipboard", insetDip: 2, fixedColor: false),
+    AssetDefinition(name: "trash", insetDip: 2, fixedColor: false),
     AssetDefinition(name: "refresh-svgrepo-com3", insetDip: 4, fixedColor: true),
 ]
 

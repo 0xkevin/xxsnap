@@ -15,6 +15,7 @@ std::optional<CaptureError> composeAnnotations(
     UINT dpiY,
     std::int64_t contentOriginX = 0,
     std::int64_t contentOriginY = 0,
-    const PixelBuffer* magnifierSource = nullptr) noexcept;
+    const PixelBuffer* magnifierSource = nullptr,
+    const std::vector<EraserMask>& eraserMasks = {}) noexcept;
 
 } // namespace xxsnap::win

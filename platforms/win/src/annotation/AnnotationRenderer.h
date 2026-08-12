@@ -37,6 +37,7 @@ struct AnnotationRenderPlan {
     bool numberIncrementEnabled = false;
     bool numberDecrementEnabled = false;
     std::optional<AnnotationRect> numberCaret;
+    std::optional<AnnotationRect> eraserPreview;
 };
 
 struct AnnotationEditingState {

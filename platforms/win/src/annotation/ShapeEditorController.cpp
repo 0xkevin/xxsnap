@@ -149,6 +149,83 @@ AnnotationPoint clampedPoint(
     return point;
 }
 
+AnnotationRect outsetRect(AnnotationRect rect, float amount) noexcept
+{
+    rect = standardized(rect);
+    return {rect.x - amount, rect.y - amount,
+        rect.width + amount * 2.0F, rect.height + amount * 2.0F};
+}
+
+bool rotatedRectIntersects(
+    const ShapeAnnotation& annotation,
+    AnnotationRect target) noexcept
+{
+    target = standardized(target);
+    auto source = standardized(annotation.rect);
+    const auto padding = (isArrowLineAnnotation(annotation)
+            || isBrushAnnotation(annotation)
+            || isMarkerAnnotation(annotation)
+            || isMosaicStrokeAnnotation(annotation))
+        ? annotation.style.strokeWidthDip / 2.0F : 0.0F;
+    source = outsetRect(source, padding);
+    const AnnotationPoint center{
+        source.x + source.width / 2.0F,
+        source.y + source.height / 2.0F,
+    };
+    const auto radians = annotation.rotationDegrees * degreesToRadians;
+    const auto sine = approximateSine(radians);
+    const auto cosine = approximateCosine(radians);
+    auto corners = std::array<AnnotationPoint, 4>{
+        AnnotationPoint{source.x, source.y},
+        AnnotationPoint{source.x + source.width, source.y},
+        AnnotationPoint{source.x + source.width, source.y + source.height},
+        AnnotationPoint{source.x, source.y + source.height},
+    };
+    for (auto& corner : corners) {
+        const auto dx = corner.x - center.x;
+        const auto dy = corner.y - center.y;
+        corner = {center.x + dx * cosine - dy * sine,
+            center.y + dx * sine + dy * cosine};
+    }
+    const auto separatedOn = [&](AnnotationPoint axis) {
+        auto polygonMin = corners[0].x * axis.x + corners[0].y * axis.y;
+        auto polygonMax = polygonMin;
+        for (std::size_t index = 1; index < corners.size(); ++index) {
+            const auto value = corners[index].x * axis.x
+                + corners[index].y * axis.y;
+            polygonMin = minimum(polygonMin, value);
+            polygonMax = maximum(polygonMax, value);
+        }
+        const std::array<AnnotationPoint, 4> targetCorners{
+            AnnotationPoint{target.x, target.y},
+            AnnotationPoint{target.x + target.width, target.y},
+            AnnotationPoint{target.x + target.width, target.y + target.height},
+            AnnotationPoint{target.x, target.y + target.height},
+        };
+        auto targetMin = targetCorners[0].x * axis.x
+            + targetCorners[0].y * axis.y;
+        auto targetMax = targetMin;
+        for (std::size_t index = 1; index < targetCorners.size(); ++index) {
+            const auto value = targetCorners[index].x * axis.x
+                + targetCorners[index].y * axis.y;
+            targetMin = minimum(targetMin, value);
+            targetMax = maximum(targetMax, value);
+        }
+        return polygonMax < targetMin || targetMax < polygonMin;
+    };
+    if (separatedOn({1.0F, 0.0F}) || separatedOn({0.0F, 1.0F})) {
+        return false;
+    }
+    for (std::size_t index = 0; index < corners.size(); ++index) {
+        const auto edge = AnnotationPoint{
+            corners[(index + 1U) % corners.size()].x - corners[index].x,
+            corners[(index + 1U) % corners.size()].y - corners[index].y,
+        };
+        if (separatedOn({-edge.y, edge.x})) return false;
+    }
+    return true;
+}
+
 ShapeCursorStyle cursorStyleForResizeHandle(
     ShapeResizeHandle handle) noexcept
 {
@@ -189,6 +266,7 @@ ShapeEditorController::ShapeEditorController(
     toolbarState_.setCapability(ToolbarAction::text, true);
     toolbarState_.setCapability(ToolbarAction::number, true);
     toolbarState_.setCapability(ToolbarAction::magnifier, true);
+    toolbarState_.setCapability(ToolbarAction::eraser, true);
     toolbarState_.setCapability(ToolbarAction::undo, true);
     toolbarState_.setCapability(ToolbarAction::redo, true);
     syncHistory();
@@ -325,6 +403,31 @@ bool ShapeEditorController::isNumberToolActive() const noexcept
 bool ShapeEditorController::isMagnifierToolActive() const noexcept
 {
     return toolbarState_.selectedAction() == ToolbarAction::magnifier;
+}
+
+bool ShapeEditorController::isEraserToolActive() const noexcept
+{
+    return toolbarState_.selectedAction() == ToolbarAction::eraser;
+}
+
+EraserMode ShapeEditorController::eraserMode() const noexcept
+{
+    return eraserMode_;
+}
+
+std::optional<AnnotationRect>
+ShapeEditorController::eraserRectanglePreview() const noexcept
+{
+    if (!eraserRectangleStart_.has_value()
+        || !eraserRectangleCurrent_.has_value()) {
+        return std::nullopt;
+    }
+    return standardized({
+        eraserRectangleStart_->x,
+        eraserRectangleStart_->y,
+        eraserRectangleCurrent_->x - eraserRectangleStart_->x,
+        eraserRectangleCurrent_->y - eraserRectangleStart_->y,
+    });
 }
 
 int ShapeEditorController::nextNumberSequenceValue() const noexcept
@@ -517,36 +620,13 @@ bool ShapeEditorController::handleToolbarAction(ToolbarAction action)
         return true;
     }
     if (action == ToolbarAction::magnifier) {
-        if (isMagnifierToolActive()) {
-            deactivateTool();
-        } else {
-            cancelInteraction();
-            shapeToolActive_ = false;
-            arrowLineToolActive_ = false;
-            brushToolActive_ = false;
-            markerToolActive_ = false;
-            if (toolbarState_.selectTool(action)) {
-                document_.clearSelection();
-                dismissPopovers();
-            }
-        }
-        return true;
+        return toggleStatelessTool(action);
+    }
+    if (action == ToolbarAction::eraser) {
+        return toggleStatelessTool(action);
     }
     if (action == ToolbarAction::eyedropper) {
-        if (isEyedropperToolActive()) {
-            deactivateTool();
-        } else {
-            cancelInteraction();
-            shapeToolActive_ = false;
-            arrowLineToolActive_ = false;
-            brushToolActive_ = false;
-            markerToolActive_ = false;
-            if (toolbarState_.selectTool(action)) {
-                document_.clearSelection();
-                dismissPopovers();
-            }
-        }
-        return true;
+        return toggleStatelessTool(action);
     }
     if (action == ToolbarAction::undo) {
         const auto changed = document_.undo();
@@ -810,6 +890,27 @@ bool ShapeEditorController::applyMagnifierOptionHit(
         syncHistory();
     }
     return applied || !selected.has_value();
+}
+
+bool ShapeEditorController::applyEraserOptionHit(EraserOptionHit hit)
+{
+    switch (hit.control) {
+    case EraserOptionControl::pointMode:
+        eraserMode_ = EraserMode::point;
+        cancelInteraction();
+        return true;
+    case EraserOptionControl::rectangleMode:
+        eraserMode_ = EraserMode::rectangle;
+        cancelInteraction();
+        return true;
+    case EraserOptionControl::clearAll: {
+        cancelInteraction();
+        const auto changed = document_.clearAnnotationsAndMasks();
+        syncHistory();
+        return changed;
+    }
+    }
+    return false;
 }
 
 bool ShapeEditorController::setTextFontFamily(std::wstring family)
@@ -1552,8 +1653,24 @@ bool ShapeEditorController::pointerDown(
         || arrowInteraction_.mode() != ArrowLineInteractionMode::idle
         || brushInteraction_.active()
         || markerInteraction_.mode() != MarkerInteractionMode::idle
-        || mosaicInteraction_.mode() != MosaicInteractionMode::idle) {
+        || mosaicInteraction_.mode() != MosaicInteractionMode::idle
+        || eraserPointInteractionActive_
+        || eraserRectangleStart_.has_value()) {
         return false;
+    }
+    if (isEraserToolActive()) {
+        document_.clearSelection();
+        if (eraserMode_ == EraserMode::point) {
+            eraserPointInteractionActive_ = true;
+            if (const auto hit = annotationAtEraserPoint(point)) {
+                document_.remove(*hit);
+                syncHistory();
+            }
+        } else {
+            eraserRectangleStart_ = point;
+            eraserRectangleCurrent_ = point;
+        }
+        return true;
     }
     if (editingTextId_.has_value()) {
         const auto* editing = document_.find(*editingTextId_);
@@ -1802,6 +1919,15 @@ void ShapeEditorController::pointerMove(
     AnnotationPoint point,
     bool shift)
 {
+    if (eraserRectangleStart_.has_value()) {
+        if (!eraserRectangleCurrent_.has_value()
+            || !(*eraserRectangleCurrent_ == point)) {
+            eraserRectangleCurrent_ = point;
+            ++interactionRevision_;
+        }
+        return;
+    }
+    if (eraserPointInteractionActive_) return;
     point = clampedPoint(point, canvasBounds_);
     if (brushInteraction_.active()) {
         ++interactionRevision_;
@@ -1828,6 +1954,24 @@ bool ShapeEditorController::pointerUp(
     AnnotationPoint point,
     bool shift)
 {
+    if (eraserPointInteractionActive_) {
+        eraserPointInteractionActive_ = false;
+        ++interactionRevision_;
+        return true;
+    }
+    if (eraserRectangleStart_.has_value()) {
+        eraserRectangleCurrent_ = point;
+        const auto rect = eraserRectanglePreview().value_or(AnnotationRect{});
+        eraserRectangleStart_.reset();
+        eraserRectangleCurrent_.reset();
+        ++interactionRevision_;
+        if (rect.width >= 3.0F && rect.height >= 3.0F) {
+            document_.addEraserMask(
+                rect, annotationsIntersectingEraserRect(rect));
+            syncHistory();
+        }
+        return true;
+    }
     if (interaction_.mode() == ShapeInteractionMode::idle
         && arrowInteraction_.mode() == ArrowLineInteractionMode::idle
         && !brushInteraction_.active()
@@ -1866,11 +2010,18 @@ void ShapeEditorController::cancelInteraction() noexcept
     brushInteraction_.cancel();
     markerInteraction_.cancel();
     mosaicInteraction_.cancel();
+    eraserPointInteractionActive_ = false;
+    eraserRectangleStart_.reset();
+    eraserRectangleCurrent_.reset();
 }
 
 ShapeCursorStyle ShapeEditorController::cursorStyleAt(
     AnnotationPoint point) const noexcept
 {
+    if (isEraserToolActive()) {
+        return eraserMode_ == EraserMode::rectangle
+            ? ShapeCursorStyle::crosshair : ShapeCursorStyle::eraser;
+    }
     if (isEyedropperToolActive()) {
         return ShapeCursorStyle::eyedropper;
     }
@@ -2118,6 +2269,10 @@ ShapeEditorKeyResult ShapeEditorController::handleKey(
         handleToolbarAction(ToolbarAction::magnifier);
         return ShapeEditorKeyResult::consumed;
     }
+    if (!control && key == ShapeEditorKey::eraser) {
+        handleToolbarAction(ToolbarAction::eraser);
+        return ShapeEditorKeyResult::consumed;
+    }
     if (key == ShapeEditorKey::escapeKey) {
         if (interaction_.mode() != ShapeInteractionMode::idle
             || arrowInteraction_.mode() != ArrowLineInteractionMode::idle
@@ -2131,6 +2286,7 @@ ShapeEditorKeyResult ShapeEditorController::handleKey(
             || markerToolActive_ || isMosaicToolActive()
             || isTextToolActive() || isNumberToolActive()
             || isMagnifierToolActive()
+            || isEraserToolActive()
             || isEyedropperToolActive()) {
             deactivateTool();
             return ShapeEditorKeyResult::consumed;
@@ -2206,7 +2362,7 @@ AnnotationRenderPlan ShapeEditorController::renderPlan(
     AnnotationPoint selectionOriginDip,
     bool showEditingAffordances) const
 {
-    return buildAnnotationRenderPlan(
+    auto plan = buildAnnotationRenderPlan(
         document_, preview(), selectionOriginDip,
         showEditingAffordances,
         editingTextId_.has_value()
@@ -2217,6 +2373,10 @@ AnnotationRenderPlan ShapeEditorController::renderPlan(
                     *editingNumberId_, numberCaretPosition_,
                     numberEditBuffer_}}
                 : std::nullopt);
+    if (const auto preview = eraserRectanglePreview()) {
+        plan.eraserPreview = translated(*preview, selectionOriginDip);
+    }
+    return plan;
 }
 
 std::optional<AnnotationId> ShapeEditorController::annotationAtBorder(
@@ -2245,6 +2405,48 @@ std::optional<AnnotationId> ShapeEditorController::annotationAtBorder(
         }
     }
     return std::nullopt;
+}
+
+std::optional<AnnotationId>
+ShapeEditorController::annotationAtEraserPoint(AnnotationPoint point) const noexcept
+{
+    const auto& annotations = document_.annotations();
+    for (auto iterator = annotations.rbegin(); iterator != annotations.rend();
+         ++iterator) {
+        bool hit = false;
+        if (isArrowLineAnnotation(*iterator)) {
+            hit = arrowInteraction_.hitTestLine(iterator->id, point);
+        } else if (isBrushAnnotation(*iterator)) {
+            hit = brushInteraction_.hitTestPath(iterator->id, point);
+        } else if (isMarkerAnnotation(*iterator)) {
+            hit = markerInteraction_.hitTestLine(*iterator, point);
+        } else if (isMosaicStrokeAnnotation(*iterator)) {
+            hit = mosaicInteraction_.hitTestStroke(iterator->id, point);
+        } else if (isShapeKind(iterator->kind)) {
+            hit = containsRect(outsetRect(iterator->rect, 4.0F), point);
+        } else if (isNumberAnnotation(*iterator)) {
+            hit = containsRect(outsetRect(iterator->rect, 6.0F), point);
+        } else {
+            hit = containsRect(outsetRect(iterator->rect, 6.0F),
+                unrotatedPoint(point, *iterator));
+        }
+        if (hit) return iterator->id;
+    }
+    return std::nullopt;
+}
+
+std::vector<AnnotationId>
+ShapeEditorController::annotationsIntersectingEraserRect(
+    AnnotationRect rect) const
+{
+    std::vector<AnnotationId> result;
+    rect = standardized(rect);
+    for (const auto& annotation : document_.annotations()) {
+        if (rotatedRectIntersects(annotation, rect)) {
+            result.push_back(annotation.id);
+        }
+    }
+    return result;
 }
 
 std::optional<AnnotationId> ShapeEditorController::numberAnnotationAt(
@@ -2364,6 +2566,24 @@ void ShapeEditorController::syncHistory() noexcept
 {
     toolbarState_.setHistoryAvailability(
         document_.canUndo(), document_.canRedo());
+}
+
+bool ShapeEditorController::toggleStatelessTool(ToolbarAction action)
+{
+    if (toolbarState_.selectedAction() == action) {
+        deactivateTool();
+        return true;
+    }
+    cancelInteraction();
+    shapeToolActive_ = false;
+    arrowLineToolActive_ = false;
+    brushToolActive_ = false;
+    markerToolActive_ = false;
+    if (toolbarState_.selectTool(action)) {
+        document_.clearSelection();
+        dismissPopovers();
+    }
+    return true;
 }
 
 void ShapeEditorController::deactivateTool()

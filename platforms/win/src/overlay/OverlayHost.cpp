@@ -318,6 +318,8 @@ OverlayCursorStyle cursorStyleForShape(ShapeCursorStyle style) noexcept
         return OverlayCursorStyle::textInput;
     case ShapeCursorStyle::eyedropper:
         return OverlayCursorStyle::eyedropper;
+    case ShapeCursorStyle::eraser:
+        return OverlayCursorStyle::eraser;
     }
     return OverlayCursorStyle::arrow;
 }
@@ -618,7 +620,8 @@ OverlayInputRouter::composeCurrentSelection() const noexcept
                     *pixels, plan, owner.dpiX, owner.dpiY,
                     model_.selection()->x,
                     model_.selection()->y,
-                    rawSelectionCache_.get()).has_value()) {
+                    rawSelectionCache_.get(),
+                    editor_->document().eraserMasks()).has_value()) {
                 return std::nullopt;
             }
         }
@@ -881,6 +884,27 @@ OverlayInputRouter::currentMagnifierOptionsLayout(
         macShapePalette().size());
 }
 
+std::optional<EraserOptionsLayout>
+OverlayInputRouter::currentEraserOptionsLayout(
+    const OverlaySurface& surface) const
+{
+    if (!editor_ || !editor_->isEraserToolActive()
+        || !model_.selection().has_value()) {
+        return std::nullopt;
+    }
+    const auto chrome = computeOverlayLayout({
+        surface.physicalBounds,
+        *model_.selection(),
+        surface.dpiX,
+        surface.dpiY,
+        0.0F,
+        true,
+        toolbarActions(),
+    });
+    const auto initial = eraserOptionsLayout({});
+    return eraserOptionsLayout(optionsToolbarOrigin(chrome, initial.toolbar));
+}
+
 OverlayInputRouter::~OverlayInputRouter()
 {
     if (dragging_) {
@@ -1031,7 +1055,8 @@ std::vector<OverlayPresentation> OverlayInputRouter::presentations() const
                 physicalPixelsToDip(
                     selection.y - surface.physicalBounds.y, surface.dpiY),
             });
-            const auto requiresComposite = std::any_of(
+            const auto requiresComposite = !editor_->document().eraserMasks().empty()
+                || std::any_of(
                 presentation.annotationPlan.items.begin(),
                 presentation.annotationPlan.items.end(),
                 [](const auto& item) {
@@ -1047,7 +1072,10 @@ std::vector<OverlayPresentation> OverlayInputRouter::presentations() const
                     && annotationCompositeSelection_->height == selection.height;
                 const auto documentRevision = editor_->document().revision();
                 const auto interactionRevision
-                    = editor_->interactionRevision();
+                    = editor_->isEraserToolActive()
+                        && annotationCompositeCache_ != nullptr
+                    ? annotationCompositeInteractionRevision_
+                    : editor_->interactionRevision();
                 if (!cachedSelectionMatches
                     || annotationCompositeDocumentRevision_ != documentRevision
                     || annotationCompositeInteractionRevision_
@@ -1198,6 +1226,12 @@ std::vector<OverlayPresentation> OverlayInputRouter::presentations() const
                 }
                 presentation.magnifierOptions =
                     std::move(magnifierOptions);
+            }
+            if (const auto options = currentEraserOptionsLayout(surface)) {
+                presentation.eraserOptions = OverlayPresentationEraserOptions{
+                    *options,
+                    editor_->eraserMode(),
+                };
             }
             if (editor_->isEyedropperToolActive()
                 && eyedropperSamplePoint_.has_value()
@@ -1615,6 +1649,14 @@ bool OverlayInputRouter::pointerDown(
             }
             editor_->dismissPopovers();
         }
+        if (const auto options = currentEraserOptionsLayout(*surface);
+            options.has_value()) {
+            const AnnotationPoint point{x, y};
+            if (const auto hit = eraserOptionHitTest(*options, point)) {
+                editor_->applyEraserOptionHit(*hit);
+                return true;
+            }
+        }
     }
 
     const auto virtualPoint = toVirtual(*surface, clientPoint);
@@ -1746,6 +1788,10 @@ OverlayCursorStyle OverlayInputRouter::cursorStyle(
             return OverlayCursorStyle::arrow;
         }
         if (const auto options = currentNumberOptionsLayout(*surface);
+            options.has_value() && contains(options->toolbar, surfacePoint)) {
+            return OverlayCursorStyle::arrow;
+        }
+        if (const auto options = currentEraserOptionsLayout(*surface);
             options.has_value() && contains(options->toolbar, surfacePoint)) {
             return OverlayCursorStyle::arrow;
         }
@@ -2278,6 +2324,12 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
                 }
                 key = ShapeEditorKey::magnifier;
                 break;
+            case 'E':
+                if (router->isEditingInlineValue()) {
+                    return;
+                }
+                key = ShapeEditorKey::eraser;
+                break;
             default:
                 return;
             }
@@ -2423,6 +2475,13 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
                             options.state,
                             options.zoomMenu,
                         };
+                }
+                if (current[index].eraserOptions.has_value()) {
+                    const auto& options = *current[index].eraserOptions;
+                    state.eraserOptions = OverlayEraserOptionsRenderState{
+                        options.layout,
+                        options.mode,
+                    };
                 }
                 if (current[index].eyedropper.has_value()) {
                     const auto& eyedropper = *current[index].eyedropper;
@@ -2594,6 +2653,8 @@ OverlayAnnotationSnapshot OverlayHost::annotationSnapshot() const
               std::nullopt,
               {0.0F, 0.0F},
               false);
+    snapshot.eraserMasks
+        = impl_->router->annotationDocument().eraserMasks();
     const auto dpi = impl_->router->annotationDpi();
     snapshot.dpiX = dpi.first;
     snapshot.dpiY = dpi.second;

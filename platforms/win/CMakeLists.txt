@@ -61,6 +61,7 @@ set_property(
         "${PROJECT_SOURCE_DIR}/platforms/win/resources/cursors/xxsnap-rotation.cur"
         "${PROJECT_SOURCE_DIR}/platforms/win/resources/cursors/xxsnap-eyedropper.cur"
         "${PROJECT_SOURCE_DIR}/platforms/win/resources/cursors/xxsnap-eyedropper-light.cur"
+        "${PROJECT_SOURCE_DIR}/platforms/win/resources/cursors/xxsnap-eraser.cur"
         "${PROJECT_SOURCE_DIR}/platforms/mac/Resources/Icons/palette-tool.png"
         "${PROJECT_SOURCE_DIR}/platforms/win/resources/icons/text-bold.png"
         "${PROJECT_SOURCE_DIR}/platforms/win/resources/icons/text-bold-selected.png"
@@ -632,7 +633,9 @@ if(BUILD_TESTING)
     target_compile_features(xxsnap_toolbar_catalog_test PRIVATE cxx_std_17)
     target_include_directories(
         xxsnap_toolbar_catalog_test
-        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/src"
+            "${CMAKE_CURRENT_SOURCE_DIR}/resources"
     )
     target_link_libraries(
         xxsnap_toolbar_catalog_test

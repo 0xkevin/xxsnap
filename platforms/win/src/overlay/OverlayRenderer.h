@@ -112,6 +112,11 @@ struct OverlayMagnifierOptionsRenderState {
     std::optional<PopupMenuLayout> zoomMenu;
 };
 
+struct OverlayEraserOptionsRenderState {
+    EraserOptionsLayout layout;
+    EraserMode mode = EraserMode::point;
+};
+
 struct OverlayEyedropperRenderState {
     AnnotationPoint pointer{};
     AnnotationColor color{};
@@ -143,6 +148,7 @@ struct OverlayRenderState {
     std::optional<OverlayTextOptionsRenderState> textOptions;
     std::optional<OverlayNumberOptionsRenderState> numberOptions;
     std::optional<OverlayMagnifierOptionsRenderState> magnifierOptions;
+    std::optional<OverlayEraserOptionsRenderState> eraserOptions;
     std::optional<OverlayEyedropperRenderState> eyedropper;
 };
 

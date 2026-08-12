@@ -6,6 +6,7 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 source_root=$(CDPATH= cd -- "$script_dir/../.." && pwd)
 crosshair="$source_root/platforms/win/resources/cursors/xxsnap-crosshair.cur"
 rotation="$source_root/platforms/win/resources/cursors/xxsnap-rotation.cur"
+eraser="$source_root/platforms/win/resources/cursors/xxsnap-eraser.cur"
 
 if ! command -v magick >/dev/null 2>&1; then
     echo "ImageMagick is required to verify Windows cursor assets." >&2
@@ -61,3 +62,20 @@ if [ "$rotation_visible_bounds" != "14x14+9+9" ]; then
 fi
 
 echo "Windows rotation cursor keeps the macOS glyph without Win32 enlargement."
+
+if [ ! -f "$eraser" ]; then
+    echo "Windows eraser cursor is missing: $eraser" >&2
+    exit 1
+fi
+
+eraser_dimensions=$(magick identify -format '%wx%h' "$eraser")
+eraser_hotspot=$(od -An -tu1 -j10 -N4 "$eraser" | xargs)
+eraser_visible_bounds=$(magick identify -format '%@' "$eraser")
+if [ "$eraser_dimensions" != "32x32" ] \
+    || [ "$eraser_hotspot" != "11 0 21 0" ] \
+    || [ "$eraser_visible_bounds" != "18x16+7+8" ]; then
+    echo "Windows eraser cursor must preserve the 18px Mac glyph and translated (11,21) hotspot; got $eraser_dimensions, $eraser_hotspot, $eraser_visible_bounds." >&2
+    exit 1
+fi
+
+echo "Windows eraser cursor keeps the 18px macOS glyph without Win32 enlargement."

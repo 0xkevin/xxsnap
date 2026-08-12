@@ -462,6 +462,177 @@ void testMagnifierSamplesOriginalWithMacOffsetAndNearestFiltering()
     CHECK(static_cast<unsigned>(scaledCenter[1]) == 62U);
 }
 
+void testEraserMaskClearsOnlyItsAffectedAnnotationLayer()
+{
+    MemoryBudget budget(2U * 1024U * 1024U);
+    auto pixels = PixelBuffer::allocate(80, 80, budget);
+    CHECK(pixels.value != nullptr);
+    if (!pixels.value) return;
+    std::memset(pixels.value->data(), 0xFF, pixels.value->byteCount());
+
+    const auto filled = [](AnnotationId id, AnnotationRect rect,
+                            AnnotationColor color) {
+        ShapeAnnotation annotation;
+        annotation.id = id;
+        annotation.kind = AnnotationKind::rectangle;
+        annotation.rect = rect;
+        annotation.style.fillEnabled = true;
+        annotation.style.fillColor = color;
+        annotation.style.strokeColor = color;
+        annotation.style.strokeWidthDip = 1.0F;
+        return annotation;
+    };
+    AnnotationRenderPlan plan;
+    plan.items = {
+        {filled(1, {10, 10, 60, 60}, {255, 0, 0, 255}), false},
+        {filled(2, {20, 20, 40, 40}, {0, 0, 255, 255}), false},
+        {filled(3, {36, 36, 8, 8}, {0, 255, 0, 255}), false},
+    };
+    const std::vector<EraserMask> masks{{{30, 30, 20, 20}, {2}}};
+    CHECK(!composeAnnotations(
+        *pixels.value, plan, 96, 96, 0, 0, nullptr, masks).has_value());
+    const auto pixelAt = [&pixels](int x, int y) {
+        return pixels.value->data()
+            + static_cast<std::size_t>(y) * pixels.value->stride()
+            + static_cast<std::size_t>(x) * 4U;
+    };
+    const auto* blue = pixelAt(25, 25);
+    CHECK(static_cast<unsigned>(blue[0]) == 255U);
+    CHECK(static_cast<unsigned>(blue[1]) == 0U);
+    CHECK(static_cast<unsigned>(blue[2]) == 0U);
+    const auto* revealedRed = pixelAt(32, 32);
+    CHECK(static_cast<unsigned>(revealedRed[0]) == 0U);
+    CHECK(static_cast<unsigned>(revealedRed[1]) == 0U);
+    CHECK(static_cast<unsigned>(revealedRed[2]) == 255U);
+    const auto* laterGreen = pixelAt(40, 40);
+    CHECK(static_cast<unsigned>(laterGreen[0]) == 0U);
+    CHECK(static_cast<unsigned>(laterGreen[1]) == 255U);
+    CHECK(static_cast<unsigned>(laterGreen[2]) == 0U);
+}
+
+void testEraserMasksMatchMacDpiAndCpuLayerSemantics()
+{
+    const auto filled = [](AnnotationId id, AnnotationRect rect,
+                            AnnotationColor color) {
+        ShapeAnnotation annotation;
+        annotation.id = id;
+        annotation.kind = AnnotationKind::rectangle;
+        annotation.rect = rect;
+        annotation.style.fillEnabled = true;
+        annotation.style.fillColor = color;
+        annotation.style.strokeColor = color;
+        annotation.style.strokeWidthDip = 1.0F;
+        return annotation;
+    };
+    const auto pixelAt = [](PixelBuffer& pixels, int x, int y) {
+        return pixels.data() + static_cast<std::size_t>(y) * pixels.stride()
+            + static_cast<std::size_t>(x) * 4U;
+    };
+
+    MemoryBudget d2dBudget(2U * 1024U * 1024U);
+    auto d2d = PixelBuffer::allocate(120, 120, d2dBudget);
+    CHECK(d2d.value != nullptr);
+    if (!d2d.value) return;
+    std::memset(d2d.value->data(), 0xFF, d2d.value->byteCount());
+    AnnotationRenderPlan plan;
+    plan.items = {
+        {filled(1, {5, 5, 60, 60}, {255, 0, 0, 255}), false},
+        {filled(2, {5, 5, 60, 60}, {0, 0, 255, 255}), false},
+        {filled(3, {24, 24, 4, 4}, {0, 255, 0, 255}), false},
+    };
+    const std::vector<EraserMask> d2dMasks{{{20, 20, 10, 10}, {1, 2}}};
+    CHECK(!composeAnnotations(
+        *d2d.value, plan, 144, 144, 0, 0, nullptr, d2dMasks).has_value());
+    const auto* oneDipExpanded = pixelAt(*d2d.value, 28, 40);
+    CHECK(oneDipExpanded[0] == std::byte{0xFF});
+    CHECK(oneDipExpanded[1] == std::byte{0xFF});
+    CHECK(oneDipExpanded[2] == std::byte{0xFF});
+    const auto* outsideMask = pixelAt(*d2d.value, 70, 40);
+    CHECK(outsideMask[0] == std::byte{0xFF});
+    CHECK(outsideMask[1] == std::byte{0});
+    CHECK(outsideMask[2] == std::byte{0});
+    const auto* laterLayer = pixelAt(*d2d.value, 39, 39);
+    CHECK(laterLayer[0] == std::byte{0});
+    CHECK(laterLayer[1] == std::byte{0xFF});
+    CHECK(laterLayer[2] == std::byte{0});
+
+    MemoryBudget markerBudget(2U * 1024U * 1024U);
+    auto markerPixels = PixelBuffer::allocate(120, 90, markerBudget);
+    CHECK(markerPixels.value != nullptr);
+    if (!markerPixels.value) return;
+    std::memset(markerPixels.value->data(), 0xFF,
+        markerPixels.value->byteCount());
+    AnnotationStyle markerStyle;
+    markerStyle.strokeColor = {179, 235, 0, 255};
+    markerStyle.strokeWidthDip = 14.0F;
+    const MarkerLine markerLine{{10, 30}, {70, 30}};
+    ShapeAnnotation marker{
+        4, AnnotationKind::marker, markerLineBounds(markerLine), markerStyle,
+        0, std::nullopt, std::nullopt, markerLine};
+    plan.items = {{marker, false}};
+    const std::vector<EraserMask> markerMasks{{{30, 25, 10, 10}, {4}}};
+    CHECK(!composeAnnotations(*markerPixels.value, plan,
+        144, 144, 0, 0, nullptr, markerMasks).has_value());
+    const auto* erasedMarker = pixelAt(*markerPixels.value, 50, 45);
+    CHECK(erasedMarker[0] == std::byte{0xFF});
+    CHECK(erasedMarker[1] == std::byte{0xFF});
+    CHECK(erasedMarker[2] == std::byte{0xFF});
+    const auto* visibleMarker = pixelAt(*markerPixels.value, 25, 45);
+    CHECK(visibleMarker[1] != std::byte{0xFF}
+        || visibleMarker[2] != std::byte{0xFF});
+
+    MemoryBudget mosaicBudget(2U * 1024U * 1024U);
+    auto mosaicPixels = PixelBuffer::allocate(100, 80, mosaicBudget);
+    CHECK(mosaicPixels.value != nullptr);
+    if (!mosaicPixels.value) return;
+    fillTestGradient(*mosaicPixels.value);
+    std::vector<std::byte> mosaicOriginal(mosaicPixels.value->data(),
+        mosaicPixels.value->data() + mosaicPixels.value->byteCount());
+    ShapeAnnotation mosaic;
+    mosaic.id = 5;
+    mosaic.kind = AnnotationKind::mosaicRectangle;
+    mosaic.rect = {10, 10, 40, 30};
+    mosaic.mosaicRedaction = MosaicRedaction{
+        MosaicRedactionType::pixelMosaic, 8};
+    plan.items = {{mosaic, false}};
+    const std::vector<EraserMask> mosaicMasks{{{20, 15, 8, 8}, {5}}};
+    CHECK(!composeAnnotations(*mosaicPixels.value, plan,
+        96, 96, 0, 0, nullptr, mosaicMasks).has_value());
+    const auto erasedMosaicOffset = 18U * mosaicPixels.value->stride()
+        + 24U * 4U;
+    CHECK(std::memcmp(mosaicPixels.value->data() + erasedMosaicOffset,
+        mosaicOriginal.data() + erasedMosaicOffset, 4U) == 0);
+    const auto visibleMosaicOffset = 12U * mosaicPixels.value->stride()
+        + 12U * 4U;
+    CHECK(std::memcmp(mosaicPixels.value->data() + visibleMosaicOffset,
+        mosaicOriginal.data() + visibleMosaicOffset, 4U) != 0);
+
+    MemoryBudget magnifierBudget(4U * 1024U * 1024U);
+    auto raw = PixelBuffer::allocate(120, 80, magnifierBudget);
+    auto magnified = PixelBuffer::allocate(120, 80, magnifierBudget);
+    CHECK(raw.value != nullptr);
+    CHECK(magnified.value != nullptr);
+    if (!raw.value || !magnified.value) return;
+    fillTestGradient(*raw.value);
+    std::memcpy(magnified.value->data(), raw.value->data(),
+        raw.value->byteCount());
+    ShapeAnnotation magnifier;
+    magnifier.id = 6;
+    magnifier.kind = AnnotationKind::magnifier;
+    magnifier.rect = {40, 20, 40, 40};
+    magnifier.style.strokeWidthDip = 2.0F;
+    magnifier.magnifierShape = MagnifierShape::rectangle;
+    magnifier.magnifierZoom = 2.0F;
+    plan.items = {{magnifier, false}};
+    const std::vector<EraserMask> magnifierMasks{{{55, 35, 10, 10}, {6}}};
+    CHECK(!composeAnnotations(*magnified.value, plan,
+        96, 96, 0, 0, raw.value.get(), magnifierMasks).has_value());
+    CHECK(std::memcmp(pixelAt(*magnified.value, 60, 40),
+        pixelAt(*raw.value, 60, 40), 4U) == 0);
+    CHECK(std::memcmp(pixelAt(*magnified.value, 45, 25),
+        pixelAt(*raw.value, 45, 25), 4U) != 0);
+}
+
 } // namespace
 
 int main()
@@ -473,5 +644,7 @@ int main()
     testMarkerBatchingPreservesAnnotationOrder();
     testMosaicPixelAndGaussianRespectMasksAndOrder();
     testMagnifierSamplesOriginalWithMacOffsetAndNearestFiltering();
+    testEraserMaskClearsOnlyItsAffectedAnnotationLayer();
+    testEraserMasksMatchMacDpiAndCpuLayerSemantics();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

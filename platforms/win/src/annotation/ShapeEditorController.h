@@ -32,6 +32,7 @@ enum class ShapeEditorKey : std::uint8_t {
     text,
     number,
     magnifier,
+    eraser,
 };
 
 enum class ShapeEditorKeyResult : std::uint8_t {
@@ -59,6 +60,7 @@ enum class ShapeCursorStyle : std::uint8_t {
     numberCross,
     textInput,
     eyedropper,
+    eraser,
 };
 
 enum class TextPopupMenu : std::uint8_t {
@@ -94,6 +96,9 @@ public:
     bool isTextToolActive() const noexcept;
     bool isNumberToolActive() const noexcept;
     bool isMagnifierToolActive() const noexcept;
+    bool isEraserToolActive() const noexcept;
+    EraserMode eraserMode() const noexcept;
+    std::optional<AnnotationRect> eraserRectanglePreview() const noexcept;
     int nextNumberSequenceValue() const noexcept;
     bool isEditingInlineValue() const noexcept;
     bool isEditingNumber() const noexcept;
@@ -113,6 +118,7 @@ public:
     bool applyTextOptionHit(TextOptionHit hit);
     bool applyNumberOptionHit(NumberOptionHit hit);
     bool applyMagnifierOptionHit(MagnifierOptionHit hit);
+    bool applyEraserOptionHit(EraserOptionHit hit);
     bool setTextFontFamily(std::wstring family);
     bool setTextSize(float size);
     bool toggleTextPopupMenu(TextPopupMenu menu) noexcept;
@@ -173,6 +179,10 @@ public:
 private:
     std::optional<AnnotationId> annotationAtBorder(
         AnnotationPoint point) const noexcept;
+    std::optional<AnnotationId> annotationAtEraserPoint(
+        AnnotationPoint point) const noexcept;
+    std::vector<AnnotationId> annotationsIntersectingEraserRect(
+        AnnotationRect rect) const;
     std::optional<AnnotationId> textAnnotationAt(
         AnnotationPoint point) const noexcept;
     std::optional<AnnotationId> numberAnnotationAt(
@@ -195,6 +205,7 @@ private:
     void loadSelectedOptions() noexcept;
     bool applyOptionsStyleToSelection();
     void syncHistory() noexcept;
+    bool toggleStatelessTool(ToolbarAction action);
     void deactivateTool();
 
     AnnotationDocument document_;
@@ -227,6 +238,10 @@ private:
     int popupScrollOffset_ = 0;
     std::optional<NumberPopupMenu> numberPopupMenu_;
     bool magnifierZoomMenuVisible_ = false;
+    EraserMode eraserMode_ = EraserMode::point;
+    std::optional<AnnotationPoint> eraserRectangleStart_;
+    std::optional<AnnotationPoint> eraserRectangleCurrent_;
+    bool eraserPointInteractionActive_ = false;
     std::optional<AnnotationId> editingNumberId_;
     std::wstring numberEditBuffer_;
     std::size_t numberCaretPosition_ = 0U;

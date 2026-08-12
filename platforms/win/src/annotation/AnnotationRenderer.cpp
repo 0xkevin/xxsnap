@@ -880,6 +880,32 @@ HRESULT AnnotationRenderer::draw(
         renderTarget->SetTransform(previousTransform);
     }
 
+    if (plan.eraserPreview.has_value()) {
+        ComPtr<ID2D1SolidColorBrush> brush;
+        auto result = renderTarget->CreateSolidColorBrush(
+            D2D1::ColorF(0.0F, 122.0F / 255.0F, 1.0F, 1.0F),
+            brush.put());
+        if (FAILED(result)) return result;
+        const D2D1_STROKE_STYLE_PROPERTIES properties{
+            D2D1_CAP_STYLE_FLAT,
+            D2D1_CAP_STYLE_FLAT,
+            D2D1_CAP_STYLE_FLAT,
+            D2D1_LINE_JOIN_MITER,
+            10.0F,
+            D2D1_DASH_STYLE_CUSTOM,
+            0.0F,
+        };
+        constexpr std::array<float, 2> dashes{3.0F, 2.0F};
+        ComPtr<ID2D1StrokeStyle> stroke;
+        result = factory_->CreateStrokeStyle(
+            properties, dashes.data(),
+            static_cast<UINT32>(dashes.size()), stroke.put());
+        if (FAILED(result)) return result;
+        renderTarget->DrawRectangle(
+            d2dRect(standardized(*plan.eraserPreview)),
+            brush.get(), 2.0F, stroke.get());
+    }
+
     if (!plan.resizeHandles.empty() || !plan.lineHandles.empty()) {
         ComPtr<ID2D1SolidColorBrush> blueBrush;
         auto result = renderTarget->CreateSolidColorBrush(

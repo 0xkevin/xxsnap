@@ -12,6 +12,7 @@
 #include <cstring>
 #include <limits>
 #include <new>
+#include <unordered_map>
 #include <utility>
 
 namespace xxsnap::win {
@@ -333,6 +334,22 @@ std::vector<std::byte> copyRegion(
             source, static_cast<std::size_t>(stride));
     }
     return result;
+}
+
+void restoreRegion(
+    PixelBuffer& pixels,
+    PixelRegion region,
+    const std::vector<std::byte>& source) noexcept
+{
+    const auto rowBytes = static_cast<std::size_t>(region.width()) * 4U;
+    for (std::int64_t row = 0; row < region.height(); ++row) {
+        auto* destination = pixels.data()
+            + static_cast<std::uint64_t>(region.top + row) * pixels.stride()
+            + static_cast<std::uint64_t>(region.left) * 4U;
+        std::memcpy(destination,
+            source.data() + static_cast<std::size_t>(row) * rowBytes,
+            rowBytes);
+    }
 }
 
 void composeMosaic(
@@ -731,6 +748,104 @@ std::optional<CaptureError> copyBitmapToBuffer(
     return std::nullopt;
 }
 
+std::optional<CaptureError> copyBitmapRegion(
+    IWICBitmap* bitmap,
+    PixelRegion region,
+    std::vector<std::byte>& destination)
+{
+    if (region.empty()
+        || region.left > (std::numeric_limits<INT>::max)()
+        || region.top > (std::numeric_limits<INT>::max)()
+        || region.width() > (std::numeric_limits<INT>::max)()
+        || region.height() > (std::numeric_limits<INT>::max)()) {
+        return compositionError(E_INVALIDARG);
+    }
+    const WICRect rectangle{
+        static_cast<INT>(region.left),
+        static_cast<INT>(region.top),
+        static_cast<INT>(region.width()),
+        static_cast<INT>(region.height()),
+    };
+    ComPtr<IWICBitmapLock> lock;
+    auto result = bitmap->Lock(&rectangle, WICBitmapLockRead, lock.put());
+    if (FAILED(result)) return compositionError(result);
+    UINT stride = 0;
+    UINT size = 0;
+    BYTE* source = nullptr;
+    result = lock->GetStride(&stride);
+    if (SUCCEEDED(result)) result = lock->GetDataPointer(&size, &source);
+    const auto rowBytes = static_cast<std::uint64_t>(region.width()) * 4U;
+    const auto required = static_cast<std::uint64_t>(stride)
+            * static_cast<std::uint64_t>(region.height() - 1)
+        + rowBytes;
+    if (FAILED(result) || source == nullptr
+        || stride < rowBytes || required > size) {
+        return compositionError(FAILED(result) ? result : E_INVALIDARG);
+    }
+    try {
+        destination.resize(static_cast<std::size_t>(rowBytes)
+            * static_cast<std::size_t>(region.height()));
+    } catch (const std::bad_alloc&) {
+        return compositionError(E_OUTOFMEMORY);
+    }
+    for (std::int64_t row = 0; row < region.height(); ++row) {
+        std::memcpy(destination.data()
+                + static_cast<std::size_t>(row)
+                    * static_cast<std::size_t>(rowBytes),
+            source + static_cast<std::uint64_t>(row) * stride,
+            static_cast<std::size_t>(rowBytes));
+    }
+    return std::nullopt;
+}
+
+std::optional<CaptureError> restoreBitmapRegion(
+    IWICBitmap* bitmap,
+    PixelRegion region,
+    const std::vector<std::byte>& source) noexcept
+{
+    if (region.empty()
+        || region.left > (std::numeric_limits<INT>::max)()
+        || region.top > (std::numeric_limits<INT>::max)()
+        || region.width() > (std::numeric_limits<INT>::max)()
+        || region.height() > (std::numeric_limits<INT>::max)()) {
+        return compositionError(E_INVALIDARG);
+    }
+    const auto rowBytes = static_cast<std::uint64_t>(region.width()) * 4U;
+    if (source.size() < rowBytes * static_cast<std::uint64_t>(region.height())) {
+        return compositionError(E_INVALIDARG);
+    }
+    const WICRect rectangle{
+        static_cast<INT>(region.left),
+        static_cast<INT>(region.top),
+        static_cast<INT>(region.width()),
+        static_cast<INT>(region.height()),
+    };
+    ComPtr<IWICBitmapLock> lock;
+    auto result = bitmap->Lock(&rectangle, WICBitmapLockWrite, lock.put());
+    if (FAILED(result)) return compositionError(result);
+    UINT stride = 0;
+    UINT size = 0;
+    BYTE* destination = nullptr;
+    result = lock->GetStride(&stride);
+    if (SUCCEEDED(result)) {
+        result = lock->GetDataPointer(&size, &destination);
+    }
+    const auto required = static_cast<std::uint64_t>(stride)
+            * static_cast<std::uint64_t>(region.height() - 1)
+        + rowBytes;
+    if (FAILED(result) || destination == nullptr
+        || stride < rowBytes || required > size) {
+        return compositionError(FAILED(result) ? result : E_INVALIDARG);
+    }
+    for (std::int64_t row = 0; row < region.height(); ++row) {
+        std::memcpy(destination + static_cast<std::uint64_t>(row) * stride,
+            source.data() + static_cast<std::size_t>(row)
+                * static_cast<std::size_t>(rowBytes),
+            static_cast<std::size_t>(rowBytes));
+    }
+    return std::nullopt;
+}
+
 HRESULT createAnnotationRenderTarget(
     ID2D1Factory* factory,
     IWICBitmap* bitmap,
@@ -758,7 +873,8 @@ std::optional<CaptureError> composeAnnotations(
     UINT dpiY,
     std::int64_t contentOriginX,
     std::int64_t contentOriginY,
-    const PixelBuffer* magnifierSource) noexcept
+    const PixelBuffer* magnifierSource,
+    const std::vector<EraserMask>& eraserMasks) noexcept
 {
     if (plan.items.empty()) {
         return std::nullopt;
@@ -837,7 +953,13 @@ std::optional<CaptureError> composeAnnotations(
         const auto flushBitmapToPixels = [&]() noexcept {
             renderTarget.reset();
             failure = copyBitmapToBuffer(bitmap.get(), pixels);
+            pixelsContainLatestResult = !failure.has_value();
             return !failure.has_value();
+        };
+        const auto recreateRenderTarget = [&]() noexcept {
+            result = createAnnotationRenderTarget(
+                d2dFactory.get(), bitmap.get(), dpiX, dpiY, renderTarget);
+            return SUCCEEDED(result);
         };
         const auto resumeRenderingFromPixels = [&]() noexcept {
             failure = copyBufferToBitmap(pixels, bitmap.get());
@@ -845,26 +967,169 @@ std::optional<CaptureError> composeAnnotations(
                 return false;
             }
             pixelsContainLatestResult = false;
-            result = createAnnotationRenderTarget(
-                d2dFactory.get(), bitmap.get(), dpiX, dpiY, renderTarget);
-            return SUCCEEDED(result);
+            return recreateRenderTarget();
+        };
+        const auto ensurePixelsCurrent = [&]() noexcept {
+            return pixelsContainLatestResult || flushBitmapToPixels();
+        };
+        const auto ensureBitmapCurrent = [&]() noexcept {
+            return !pixelsContainLatestResult || resumeRenderingFromPixels();
         };
         AnnotationRenderer renderer(d2dFactory.get());
-        std::size_t index = 0U;
-        while (index < plan.items.size()) {
-            if (isMagnifierAnnotation(plan.items[index].annotation)) {
-                if (!flushBitmapToPixels()) {
-                    break;
+        std::unordered_map<AnnotationId, std::vector<const EraserMask*>>
+            masksByAnnotation;
+        try {
+            for (const auto& mask : eraserMasks) {
+                for (const auto id : mask.affectedAnnotationIds) {
+                    masksByAnnotation[id].push_back(&mask);
                 }
+            }
+        } catch (const std::bad_alloc&) {
+            failure = compositionError(E_OUTOFMEMORY);
+        }
+        const auto maskRegion = [dpiX, dpiY, &pixels](
+            const EraserMask& mask) {
+            const auto scaleX = static_cast<double>(dpiX == 0U ? 96U : dpiX)
+                / 96.0;
+            const auto scaleY = static_cast<double>(dpiY == 0U ? 96U : dpiY)
+                / 96.0;
+            const auto rect = standardized(mask.rect);
+            return PixelRegion{
+                (std::max<std::int64_t>)(0,
+                    static_cast<std::int64_t>(std::floor(
+                        (rect.x - 1.0) * scaleX))),
+                (std::max<std::int64_t>)(0,
+                    static_cast<std::int64_t>(std::floor(
+                        (rect.y - 1.0) * scaleY))),
+                (std::min<std::int64_t>)(pixels.width(),
+                    static_cast<std::int64_t>(std::ceil(
+                        (rect.x + rect.width + 1.0) * scaleX))),
+                (std::min<std::int64_t>)(pixels.height(),
+                    static_cast<std::int64_t>(std::ceil(
+                        (rect.y + rect.height + 1.0) * scaleY))),
+            };
+        };
+        std::size_t index = 0U;
+        while (!failure.has_value() && index < plan.items.size()) {
+            const auto& item = plan.items[index];
+            const auto maskEntry = masksByAnnotation.find(item.annotation.id);
+            const auto* itemMasks = maskEntry == masksByAnnotation.end()
+                ? nullptr : &maskEntry->second;
+            if (itemMasks == nullptr) {
+                if (isMagnifierAnnotation(item.annotation)) {
+                    if (!ensurePixelsCurrent()) break;
+                    composeMagnifierContent(pixels,
+                        source != nullptr ? source->data() : original.data(),
+                        source != nullptr ? source->stride() : pixels.stride(),
+                        item.annotation, dpiX, dpiY);
+                    if (!ensureBitmapCurrent()) break;
+                    AnnotationRenderPlan magnifierPlan;
+                    magnifierPlan.items.push_back(item);
+                    renderTarget->BeginDraw();
+                    result = renderer.draw(renderTarget.get(), magnifierPlan);
+                    if (SUCCEEDED(result)) result = renderTarget->EndDraw();
+                    if (FAILED(result)) break;
+                    ++index;
+                    pixelsContainLatestResult = false;
+                    continue;
+                }
+                if (isMarkerAnnotation(item.annotation)
+                    || isMosaicAnnotation(item.annotation)) {
+                    if (!ensurePixelsCurrent()) break;
+                    do {
+                        const auto& current = plan.items[index].annotation;
+                        if (isMarkerAnnotation(current)) {
+                            composeMarker(pixels, current, dpiX, dpiY);
+                        } else {
+                            try {
+                                composeMosaic(pixels, current,
+                                    dpiX, dpiY,
+                                    contentOriginX, contentOriginY);
+                            } catch (const std::bad_alloc&) {
+                                failure = compositionError(E_OUTOFMEMORY);
+                                break;
+                            }
+                        }
+                        ++index;
+                    } while (index < plan.items.size()
+                        && masksByAnnotation.find(
+                            plan.items[index].annotation.id)
+                            == masksByAnnotation.end()
+                        && (isMarkerAnnotation(
+                                plan.items[index].annotation)
+                            || isMosaicAnnotation(
+                                plan.items[index].annotation)));
+                    if (failure.has_value()) break;
+                    pixelsContainLatestResult = true;
+                    continue;
+                }
+                if (!ensureBitmapCurrent()) break;
+                AnnotationRenderPlan runPlan;
+                do {
+                    runPlan.items.push_back(plan.items[index]);
+                    ++index;
+                } while (index < plan.items.size()
+                    && masksByAnnotation.find(plan.items[index].annotation.id)
+                        == masksByAnnotation.end()
+                    && !isMarkerAnnotation(plan.items[index].annotation)
+                    && !isMosaicAnnotation(plan.items[index].annotation)
+                    && !isMagnifierAnnotation(plan.items[index].annotation));
+                renderTarget->BeginDraw();
+                result = renderer.draw(renderTarget.get(), runPlan);
+                if (SUCCEEDED(result)) result = renderTarget->EndDraw();
+                if (FAILED(result)) break;
+                pixelsContainLatestResult = false;
+                continue;
+            }
+
+            std::vector<std::pair<PixelRegion, std::vector<std::byte>>>
+                maskBackups;
+            const auto usesPixels = isMagnifierAnnotation(item.annotation)
+                || isMarkerAnnotation(item.annotation)
+                || isMosaicAnnotation(item.annotation);
+            if (usesPixels && !ensurePixelsCurrent()) break;
+            if (!usesPixels && !ensureBitmapCurrent()) break;
+            if (!usesPixels) renderTarget.reset();
+            try {
+                maskBackups.reserve(itemMasks->size());
+                for (const auto* mask : *itemMasks) {
+                    const auto region = maskRegion(*mask);
+                    if (region.empty()) continue;
+                    maskBackups.push_back({region, {}});
+                    if (usesPixels) {
+                        maskBackups.back().second = copyRegion(pixels, region);
+                    } else {
+                        failure = copyBitmapRegion(bitmap.get(), region,
+                            maskBackups.back().second);
+                        if (failure.has_value()) break;
+                    }
+                }
+            } catch (const std::bad_alloc&) {
+                failure = compositionError(E_OUTOFMEMORY);
+            }
+            if (failure.has_value()) break;
+            if (!usesPixels && !recreateRenderTarget()) break;
+
+            const auto restoreBitmapMasks = [&]() noexcept {
+                renderTarget.reset();
+                for (const auto& backup : maskBackups) {
+                    failure = restoreBitmapRegion(
+                        bitmap.get(), backup.first, backup.second);
+                    if (failure.has_value()) return false;
+                }
+                pixelsContainLatestResult = false;
+                return recreateRenderTarget();
+            };
+            if (isMagnifierAnnotation(item.annotation)) {
                 composeMagnifierContent(pixels,
                     source != nullptr ? source->data() : original.data(),
                     source != nullptr ? source->stride() : pixels.stride(),
-                    plan.items[index].annotation, dpiX, dpiY);
-                if (!resumeRenderingFromPixels()) {
+                    item.annotation, dpiX, dpiY);
+                if (!ensureBitmapCurrent()) {
                     break;
                 }
                 AnnotationRenderPlan magnifierPlan;
-                magnifierPlan.items.push_back(plan.items[index]);
+                magnifierPlan.items.push_back(item);
                 renderTarget->BeginDraw();
                 result = renderer.draw(renderTarget.get(), magnifierPlan);
                 if (SUCCEEDED(result)) {
@@ -873,61 +1138,36 @@ std::optional<CaptureError> composeAnnotations(
                 if (FAILED(result)) {
                     break;
                 }
-                ++index;
-                pixelsContainLatestResult = false;
-                continue;
-            }
-            if (isMarkerAnnotation(plan.items[index].annotation)
-                || isMosaicAnnotation(plan.items[index].annotation)) {
-                if (!flushBitmapToPixels()) {
-                    break;
-                }
-                do {
-                    if (isMarkerAnnotation(plan.items[index].annotation)) {
-                        composeMarker(
-                            pixels, plan.items[index].annotation, dpiX, dpiY);
-                    } else {
-                        try {
-                            composeMosaic(
-                                pixels, plan.items[index].annotation,
-                                dpiX, dpiY,
-                                contentOriginX, contentOriginY);
-                        } catch (const std::bad_alloc&) {
-                            failure = compositionError(E_OUTOFMEMORY);
-                            break;
-                        }
-                    }
-                    ++index;
-                } while (index < plan.items.size()
-                    && (isMarkerAnnotation(plan.items[index].annotation)
-                        || isMosaicAnnotation(plan.items[index].annotation)));
-                if (failure.has_value()) {
-                    break;
-                }
-                pixelsContainLatestResult = true;
-                if (index < plan.items.size()) {
-                    if (!resumeRenderingFromPixels()) {
+                if (!restoreBitmapMasks()) break;
+            } else if (isMarkerAnnotation(item.annotation)
+                || isMosaicAnnotation(item.annotation)) {
+                if (isMarkerAnnotation(item.annotation)) {
+                    composeMarker(pixels, item.annotation, dpiX, dpiY);
+                } else {
+                    try {
+                        composeMosaic(pixels, item.annotation,
+                            dpiX, dpiY, contentOriginX, contentOriginY);
+                    } catch (const std::bad_alloc&) {
+                        failure = compositionError(E_OUTOFMEMORY);
                         break;
                     }
                 }
-                continue;
+                pixelsContainLatestResult = true;
+            } else {
+                AnnotationRenderPlan itemPlan;
+                itemPlan.items.push_back(item);
+                renderTarget->BeginDraw();
+                result = renderer.draw(renderTarget.get(), itemPlan);
+                if (SUCCEEDED(result)) result = renderTarget->EndDraw();
+                if (FAILED(result)) break;
+                if (!restoreBitmapMasks()) break;
             }
-            AnnotationRenderPlan runPlan;
-            do {
-                runPlan.items.push_back(plan.items[index]);
-                ++index;
-            } while (index < plan.items.size()
-                && !isMarkerAnnotation(plan.items[index].annotation)
-                && !isMosaicAnnotation(plan.items[index].annotation)
-                && !isMagnifierAnnotation(plan.items[index].annotation));
-            renderTarget->BeginDraw();
-            result = renderer.draw(renderTarget.get(), runPlan);
-            if (SUCCEEDED(result)) {
-                result = renderTarget->EndDraw();
+            if (pixelsContainLatestResult) {
+                for (const auto& backup : maskBackups) {
+                    restoreRegion(pixels, backup.first, backup.second);
+                }
             }
-            if (FAILED(result)) {
-                break;
-            }
+            ++index;
         }
     }
     renderTarget.reset();

@@ -21,6 +21,34 @@ const std::array<float, 3>& macMarkerStrokeWidths() noexcept;
 const std::array<float, 3>& macMosaicStrokeWidths() noexcept;
 const std::array<float, 3>& macMagnifierStrokeWidths() noexcept;
 
+enum class EraserMode : std::uint8_t {
+    point,
+    rectangle,
+};
+
+enum class EraserOptionControl : std::uint8_t {
+    pointMode,
+    rectangleMode,
+    clearAll,
+};
+
+struct EraserOptionHit {
+    EraserOptionControl control = EraserOptionControl::pointMode;
+};
+
+struct EraserOptionsLayout {
+    AnnotationRect toolbar{};
+    AnnotationRect pointMode{};
+    AnnotationRect rectangleMode{};
+    AnnotationRect clearAll{};
+    AnnotationRect separator{};
+};
+
+EraserOptionsLayout eraserOptionsLayout(AnnotationPoint origin) noexcept;
+std::optional<EraserOptionHit> eraserOptionHitTest(
+    const EraserOptionsLayout& layout,
+    AnnotationPoint point) noexcept;
+
 class ShapeOptionsState {
 public:
     ShapeOptionsState() noexcept;

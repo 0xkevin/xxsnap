@@ -584,6 +584,10 @@ HCURSOR OverlayWindow::cursor() const noexcept
         result = LoadCursorW(
             instance_, MAKEINTRESOURCEW(IDC_XXSNAP_EYEDROPPER_LIGHT));
         break;
+    case OverlayCursorStyle::eraser:
+        result = LoadCursorW(
+            instance_, MAKEINTRESOURCEW(IDC_XXSNAP_ERASER));
+        break;
     }
     return result != nullptr
         ? result

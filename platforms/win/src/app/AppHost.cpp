@@ -185,7 +185,9 @@ public:
                 annotations.dpiX,
                 annotations.dpiY,
                 selectionRect.x,
-                selectionRect.y)) {
+                selectionRect.y,
+                nullptr,
+                annotations.eraserMasks)) {
             return *compositionError;
         }
         return composition;

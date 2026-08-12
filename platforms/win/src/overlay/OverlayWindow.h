@@ -85,6 +85,7 @@ enum class OverlayCursorStyle : std::uint8_t {
     textInput,
     eyedropper,
     eyedropperLight,
+    eraser,
 };
 
 class DpiRestartDecision final {

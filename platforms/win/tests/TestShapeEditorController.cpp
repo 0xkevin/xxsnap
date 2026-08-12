@@ -33,6 +33,7 @@ void testToolbarCapabilityAndPrimaryToolToggle()
         ToolbarAction::text,
         ToolbarAction::number,
         ToolbarAction::magnifier,
+        ToolbarAction::eraser,
         ToolbarAction::undo,
         ToolbarAction::redo,
         ToolbarAction::cancel,
@@ -755,6 +756,95 @@ void testMagnifierMatchesMacCreationOptionsAndEditing()
     CHECK(!editor.isMagnifierToolActive());
 }
 
+void testEraserMatchesMacPointRectangleAndClearSemantics()
+{
+    ShapeEditorController editor({0, 0, 300, 200});
+    const auto first = editor.document().addShape(
+        AnnotationKind::rectangle, {20, 20, 100, 80});
+    const auto second = editor.document().addShape(
+        AnnotationKind::ellipse, {40, 30, 100, 80});
+    CHECK(editor.handleKey(ShapeEditorKey::eraser, false, false)
+        == ShapeEditorKeyResult::consumed);
+    CHECK(editor.isEraserToolActive());
+    CHECK(editor.eraserMode() == EraserMode::point);
+    CHECK(editor.cursorStyleAt({60, 60}) == ShapeCursorStyle::eraser);
+
+    CHECK(editor.pointerDown({60, 60}));
+    editor.pointerMove({200, 150});
+    CHECK(editor.document().find(second) == nullptr);
+    CHECK(editor.document().find(first) != nullptr);
+    CHECK(editor.pointerUp({200, 150}));
+    CHECK(editor.document().find(first) != nullptr);
+
+    CHECK(editor.applyEraserOptionHit(
+        {EraserOptionControl::rectangleMode}));
+    CHECK(editor.cursorStyleAt({-20, -20}) == ShapeCursorStyle::crosshair);
+    CHECK(editor.pointerDown({-10, 10}));
+    editor.pointerMove({70, 70});
+    const auto preview = editor.eraserRectanglePreview();
+    CHECK(preview.has_value());
+    CHECK((preview.value_or(AnnotationRect{})
+        == AnnotationRect{-10, 10, 80, 60}));
+    CHECK(editor.renderPlan({}, true).eraserPreview == preview);
+    CHECK(editor.pointerUp({70, 70}));
+    CHECK(editor.document().find(first) != nullptr);
+    CHECK(editor.document().eraserMasks().size() == 1U);
+    CHECK((editor.document().eraserMasks()[0].affectedAnnotationIds
+        == std::vector<AnnotationId>{first}));
+
+    CHECK(editor.applyEraserOptionHit({EraserOptionControl::clearAll}));
+    CHECK(editor.document().annotations().empty());
+    CHECK(editor.document().eraserMasks().empty());
+    CHECK(editor.handleKey(ShapeEditorKey::z, true, false)
+        == ShapeEditorKeyResult::consumed);
+    CHECK(editor.document().find(first) != nullptr);
+    CHECK(editor.document().eraserMasks().size() == 1U);
+
+    const auto erasePoint = [](ShapeEditorController& controller,
+                               AnnotationPoint point) {
+        CHECK(controller.handleToolbarAction(ToolbarAction::eraser));
+        CHECK(controller.pointerDown(point));
+        CHECK(controller.pointerUp(point));
+    };
+    ShapeEditorController ellipseHit({0, 0, 100, 100});
+    const auto ellipseId = ellipseHit.document().addShape(
+        AnnotationKind::ellipse, {20, 20, 40, 40});
+    erasePoint(ellipseHit, {22, 22});
+    CHECK(ellipseHit.document().find(ellipseId) == nullptr);
+
+    ShapeEditorController rotatedShapeHit({0, 0, 100, 100});
+    const auto rotatedId = rotatedShapeHit.document().addShape(
+        AnnotationKind::rectangle, {20, 20, 40, 40}, {}, 45.0F);
+    erasePoint(rotatedShapeHit, {22, 22});
+    CHECK(rotatedShapeHit.document().find(rotatedId) == nullptr);
+
+    ShapeEditorController numberHit({0, 0, 100, 100});
+    const auto numberId = numberHit.document().addNumberMark(
+        {20, 20, 40, 40}, NumberMarkType::number, 1, false, 1);
+    erasePoint(numberHit, {20, 20});
+    CHECK(numberHit.document().find(numberId) == nullptr);
+
+    ShapeEditorController precise({0, 0, 300, 200});
+    const auto arrowId = precise.document().addArrowLine({
+        {20, 100}, {280, 100}, {150, 0},
+        ArrowType::none, ArrowType::normal});
+    precise.document().addShape(
+        AnnotationKind::rectangle, {100, 100, 100, 10}, {}, 45.0F);
+    CHECK(precise.handleToolbarAction(ToolbarAction::eraser));
+    CHECK(precise.applyEraserOptionHit(
+        {EraserOptionControl::rectangleMode}));
+    CHECK(precise.pointerDown({140, 5}));
+    precise.pointerMove({160, 20});
+    CHECK(precise.pointerUp({160, 20}));
+    CHECK(precise.document().eraserMasks().size() == 1U);
+    CHECK((precise.document().eraserMasks()[0].affectedAnnotationIds
+        == std::vector<AnnotationId>{arrowId}));
+    CHECK(precise.pointerDown({112, 132}));
+    precise.pointerMove({116, 136});
+    CHECK(precise.pointerUp({116, 136}));
+    CHECK(precise.document().eraserMasks().size() == 1U);
+}
+
 } // namespace
 
 int main()
@@ -774,5 +864,6 @@ int main()
     testNumberToolMatchesMacSequenceEditingAndControls();
     testNumberSequenceGroupsManualMarksResizeAndHistory();
     testMagnifierMatchesMacCreationOptionsAndEditing();
+    testEraserMatchesMacPointRectangleAndClearSemantics();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
