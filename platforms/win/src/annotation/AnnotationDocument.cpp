@@ -61,6 +61,29 @@ AnnotationId AnnotationDocument::addArrowLine(
     return id;
 }
 
+AnnotationId AnnotationDocument::addBrushPath(
+    BrushPath path,
+    AnnotationStyle style)
+{
+    if (path.points.size() < 2U || nextId_ == invalidAnnotationId) {
+        return invalidAnnotationId;
+    }
+    auto before = snapshot();
+    const auto id = nextId_++;
+    annotations_.push_back({
+        id,
+        AnnotationKind::brush,
+        brushPathBounds(path),
+        style,
+        0.0F,
+        std::nullopt,
+        std::move(path),
+    });
+    selectedId_.reset();
+    commit(std::move(before));
+    return id;
+}
+
 bool AnnotationDocument::remove(AnnotationId id)
 {
     const auto index = indexOf(id);
@@ -103,6 +126,9 @@ bool AnnotationDocument::move(AnnotationId id, AnnotationPoint offset)
     }
     if (isArrowLineAnnotation(*annotation)) {
         return updateArrowLine(id, translated(*annotation->arrowLine, offset));
+    }
+    if (isBrushAnnotation(*annotation)) {
+        return updateBrushPath(id, translated(*annotation->brushPath, offset));
     }
     return updateRect(id, translated(annotation->rect, offset));
 }
@@ -160,6 +186,22 @@ bool AnnotationDocument::updateArrowLine(AnnotationId id, ArrowLine line)
     auto before = snapshot();
     annotation->arrowLine = line;
     annotation->rect = arrowLineBounds(line);
+    commit(std::move(before));
+    return true;
+}
+
+bool AnnotationDocument::updateBrushPath(AnnotationId id, BrushPath path)
+{
+    auto* annotation = findMutable(id);
+    if (annotation == nullptr
+        || !isBrushAnnotation(*annotation)
+        || path.points.size() < 2U
+        || *annotation->brushPath == path) {
+        return false;
+    }
+    auto before = snapshot();
+    annotation->brushPath = std::move(path);
+    annotation->rect = brushPathBounds(*annotation->brushPath);
     commit(std::move(before));
     return true;
 }

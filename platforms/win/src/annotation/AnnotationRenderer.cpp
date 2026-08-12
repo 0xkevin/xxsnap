@@ -1,5 +1,6 @@
 #include "annotation/AnnotationRenderer.h"
 #include "annotation/ArrowLineRenderer.h"
+#include "annotation/BrushRenderer.h"
 
 #include <d2d1helper.h>
 
@@ -369,6 +370,10 @@ AnnotationRenderPlan buildAnnotationRenderPlan(
             annotation.arrowLine = translated(
                 *annotation.arrowLine, selectionOriginDip);
         }
+        if (annotation.brushPath.has_value()) {
+            annotation.brushPath = translated(
+                *annotation.brushPath, selectionOriginDip);
+        }
         plan.items.push_back({annotation, false});
     }
     if (preview.has_value()) {
@@ -378,6 +383,10 @@ AnnotationRenderPlan buildAnnotationRenderPlan(
         if (annotation.arrowLine.has_value()) {
             annotation.arrowLine = translated(
                 *annotation.arrowLine, selectionOriginDip);
+        }
+        if (annotation.brushPath.has_value()) {
+            annotation.brushPath = translated(
+                *annotation.brushPath, selectionOriginDip);
         }
         plan.items.push_back({annotation, true});
     }
@@ -414,6 +423,34 @@ AnnotationRenderPlan buildAnnotationRenderPlan(
             editing->arrowLine->end,
             editing->arrowLine->control,
         };
+        return plan;
+    }
+    if (editing->brushPath.has_value()) {
+        if (editing->id == invalidAnnotationId) {
+            return plan;
+        }
+        const auto& points = editing->brushPath->points;
+        if (points.size() >= 2U) {
+            const auto insetEndpoint = [](AnnotationPoint endpoint,
+                                           AnnotationPoint neighbour) {
+                constexpr float inset = 9.0F;
+                const auto dx = neighbour.x - endpoint.x;
+                const auto dy = neighbour.y - endpoint.y;
+                const auto length = static_cast<float>(std::hypot(dx, dy));
+                if (length <= 0.001F) {
+                    return endpoint;
+                }
+                const auto distance = minimum(inset, length / 2.0F);
+                return AnnotationPoint{
+                    endpoint.x + dx / length * distance,
+                    endpoint.y + dy / length * distance,
+                };
+            };
+            plan.lineHandles = {
+                insetEndpoint(points[0], points[1]),
+                insetEndpoint(points.back(), points[points.size() - 2U]),
+            };
+        }
         return plan;
     }
 
@@ -531,6 +568,15 @@ HRESULT AnnotationRenderer::draw(
         if (annotation.kind == AnnotationKind::arrowLine
             && annotation.arrowLine.has_value()) {
             const auto result = drawArrowLine(
+                factory_, renderTarget, annotation);
+            if (FAILED(result)) {
+                return result;
+            }
+            continue;
+        }
+        if (annotation.kind == AnnotationKind::brush
+            && annotation.brushPath.has_value()) {
+            const auto result = drawBrushPath(
                 factory_, renderTarget, annotation);
             if (FAILED(result)) {
                 return result;

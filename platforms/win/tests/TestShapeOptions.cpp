@@ -191,6 +191,32 @@ void testArrowLineOptionsMatchMacGeometryAndEndpointRules()
     CHECK(hitTestArrowTypeMenu(menu, {20, 170}) == 6U);
 }
 
+void testBrushOptionsMatchMacGeometry()
+{
+    BrushOptionsState state;
+    CHECK(state.style().strokeWidthDip == 3.0F);
+    CHECK(state.style().strokePattern == AnnotationStrokePattern::solid);
+    CHECK(state.selectedPaletteIndex() == 0U);
+    CHECK(state.setStrokeWidth(7.0F));
+    CHECK(!state.setStrokeWidth(6.0F));
+    CHECK(state.setStrokePattern(AnnotationStrokePattern::dashLongShort));
+    CHECK(!state.setStrokePattern(AnnotationStrokePattern::sketchSolid));
+
+    const auto layout = brushOptionsLayout({100, 200}, 20);
+    CHECK((layout.toolbar == AnnotationRect{100, 200, 418, 40}));
+    CHECK((layout.strokeWidths[0] == AnnotationRect{110, 210, 20, 20}));
+    CHECK((layout.strokeStyle == AnnotationRect{196, 210, 94, 20}));
+    CHECK((layout.colorSwatches[0] == AnnotationRect{314, 205, 12, 12}));
+    CHECK((layout.colorSwatches[20] == AnnotationRect{476, 204, 32, 32}));
+    CHECK(layout.separators.size() == 2U);
+    CHECK((layout.separators[0] == AnnotationRect{187.25F, 214, 1.5F, 12}));
+    CHECK((layout.separators[1] == AnnotationRect{302.25F, 214, 1.5F, 12}));
+    CHECK((brushOptionHitTest(layout, {110, 220})
+        == BrushOptionHit{BrushOptionControl::strokeWidth, 0}));
+    CHECK((brushOptionHitTest(layout, {197, 220})
+        == BrushOptionHit{BrushOptionControl::strokeStyle, 0}));
+}
+
 } // namespace
 
 int main()
@@ -202,5 +228,6 @@ int main()
     testOneRowAndClampedPaletteLayouts();
     testSharedHitGeometryAndMenus();
     testArrowLineOptionsMatchMacGeometryAndEndpointRules();
+    testBrushOptionsMatchMacGeometry();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

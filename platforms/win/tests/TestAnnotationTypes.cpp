@@ -36,6 +36,15 @@ void testGeometryStandardization()
         == AnnotationRect{1, 2, 3, 4}));
     CHECK((translated(AnnotationRect{1, 2, 3, 4}, {5, -2})
         == AnnotationRect{6, 0, 3, 4}));
+    const ArrowLine line{
+        {10, 20}, {90, 60}, {40, 5},
+        ArrowType::dot, ArrowType::normal};
+    const auto moved = translated(line, {7, -3});
+    CHECK((moved.start == AnnotationPoint{17, 17}));
+    CHECK((moved.end == AnnotationPoint{97, 57}));
+    CHECK((moved.control == AnnotationPoint{47, 2}));
+    CHECK(moved.startArrowType == ArrowType::dot);
+    CHECK(moved.endArrowType == ArrowType::normal);
 }
 
 void testPrimaryShapeActivationMatchesMac()

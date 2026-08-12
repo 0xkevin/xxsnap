@@ -75,6 +75,7 @@ enum class OverlayCursorStyle : std::uint8_t {
     resizeTopLeftBottomRight,
     resizeTopRightBottomLeft,
     rotation,
+    brush,
 };
 
 class DpiRestartDecision final {

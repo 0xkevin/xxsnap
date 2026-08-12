@@ -2,6 +2,7 @@
 
 #include "annotation/AnnotationRenderer.h"
 #include "annotation/ArrowLineInteraction.h"
+#include "annotation/BrushInteraction.h"
 #include "annotation/ShapeInteraction.h"
 #include "annotation/ShapeOptions.h"
 #include "toolbar/ToolbarState.h"
@@ -37,6 +38,7 @@ enum class ShapeCursorStyle : std::uint8_t {
     resizeTopLeftBottomRight,
     resizeTopRightBottomLeft,
     rotation,
+    brush,
 };
 
 class ShapeEditorController final {
@@ -47,18 +49,21 @@ public:
     const ToolbarState& toolbarState() const noexcept;
     const ShapeOptionsState& options() const noexcept;
     const ArrowLineOptionsState& arrowLineOptions() const noexcept;
+    const BrushOptionsState& brushOptions() const noexcept;
     const AnnotationDocument& document() const noexcept;
     AnnotationDocument& document() noexcept;
     const std::optional<ShapeAnnotation>& preview() const noexcept;
 
     bool isShapeToolActive() const noexcept;
     bool isArrowLineToolActive() const noexcept;
+    bool isBrushToolActive() const noexcept;
     bool strokePatternMenuVisible() const noexcept;
     bool cornerRadiusPanelVisible() const noexcept;
     std::optional<ArrowEndpoint> arrowTypeMenuEndpoint() const noexcept;
     bool handleToolbarAction(ToolbarAction action);
     bool applyOptionHit(ShapeOptionHit hit);
     bool applyArrowLineOptionHit(ArrowLineOptionHit hit);
+    bool applyBrushOptionHit(BrushOptionHit hit);
     bool applyArrowType(ArrowEndpoint endpoint, std::size_t index);
     bool applyStrokePattern(std::size_t index);
     bool setCornerRadius(float cornerRadiusDip);
@@ -66,9 +71,15 @@ public:
     bool selectCustomColor(AnnotationColor color);
     void dismissPopovers() noexcept;
 
-    bool pointerDown(AnnotationPoint point) noexcept;
-    void pointerMove(AnnotationPoint point) noexcept;
-    bool pointerUp(AnnotationPoint point);
+    bool pointerDown(
+        AnnotationPoint point,
+        bool shift = false) noexcept;
+    void pointerMove(
+        AnnotationPoint point,
+        bool shift = false);
+    bool pointerUp(
+        AnnotationPoint point,
+        bool shift = false);
     void cancelInteraction() noexcept;
     ShapeCursorStyle cursorStyleAt(AnnotationPoint point) const noexcept;
 
@@ -98,12 +109,15 @@ private:
     AnnotationDocument document_;
     ShapeOptionsState options_;
     ArrowLineOptionsState arrowLineOptions_;
+    BrushOptionsState brushOptions_;
     ShapeInteraction interaction_;
     ArrowLineInteraction arrowInteraction_;
+    BrushInteraction brushInteraction_;
     AnnotationRect canvasBounds_{};
     ToolbarState toolbarState_;
     bool shapeToolActive_ = false;
     bool arrowLineToolActive_ = false;
+    bool brushToolActive_ = false;
     bool strokePatternMenuVisible_ = false;
     bool cornerRadiusPanelVisible_ = false;
     std::optional<ArrowEndpoint> arrowTypeMenuEndpoint_;

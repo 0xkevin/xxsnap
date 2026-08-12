@@ -44,9 +44,10 @@ bool contains(AnnotationRect rect, AnnotationPoint point) noexcept
 
 StrokePatternMenuLayout strokePatternMenuFor(
     AnnotationRect field,
-    float safeHeight) noexcept
+    float safeHeight,
+    std::size_t itemCount = 6U) noexcept
 {
-    constexpr float menuHeight = 6.0F * 24.0F + 8.0F;
+    const auto menuHeight = static_cast<float>(itemCount) * 24.0F + 8.0F;
     auto menuRect = AnnotationRect{
         field.x,
         field.y + field.height + 8.0F,
@@ -56,7 +57,28 @@ StrokePatternMenuLayout strokePatternMenuFor(
     if (menuRect.y + menuRect.height > safeHeight - 8.0F) {
         menuRect.y = field.y - 8.0F - menuHeight;
     }
-    return strokePatternMenuLayout(menuRect);
+    return strokePatternMenuLayout(menuRect, itemCount);
+}
+
+AnnotationPoint optionsToolbarOrigin(
+    const OverlayLayout& chrome,
+    AnnotationRect initialToolbar) noexcept
+{
+    const AnnotationRect safe{
+        8.0F, 8.0F,
+        (std::max)(0.0F, chrome.overlayBounds.width - 16.0F),
+        (std::max)(0.0F, chrome.overlayBounds.height - 16.0F),
+    };
+    const auto x = (std::max)(safe.x, (std::min)(
+        chrome.toolbar.bounds.x,
+        safe.x + (std::max)(0.0F, safe.width - initialToolbar.width)));
+    auto y = chrome.toolbar.bounds.y + chrome.toolbar.bounds.height + 8.0F;
+    if (y + initialToolbar.height > safe.y + safe.height) {
+        y = chrome.toolbar.bounds.y - 8.0F - initialToolbar.height;
+    }
+    y = (std::max)(safe.y, (std::min)(
+        y, safe.y + (std::max)(0.0F, safe.height - initialToolbar.height)));
+    return {x, y};
 }
 
 ArrowTypeMenuLayout arrowTypeMenuFor(
@@ -122,6 +144,8 @@ OverlayCursorStyle cursorStyleForShape(ShapeCursorStyle style) noexcept
         return OverlayCursorStyle::resizeTopRightBottomLeft;
     case ShapeCursorStyle::rotation:
         return OverlayCursorStyle::rotation;
+    case ShapeCursorStyle::brush:
+        return OverlayCursorStyle::brush;
     }
     return OverlayCursorStyle::arrow;
 }
@@ -348,22 +372,8 @@ OverlayInputRouter::currentShapeOptionsLayout(
         actions,
     });
     const auto initial = shapeOptionsLayout({}, macShapePalette().size());
-    const AnnotationRect safe{
-        8.0F,
-        8.0F,
-        (std::max)(0.0F, chrome.overlayBounds.width - 16.0F),
-        (std::max)(0.0F, chrome.overlayBounds.height - 16.0F),
-    };
-    auto x = (std::max)(safe.x, (std::min)(
-        chrome.toolbar.bounds.x,
-        safe.x + (std::max)(0.0F, safe.width - initial.toolbar.width)));
-    auto y = chrome.toolbar.bounds.y + chrome.toolbar.bounds.height + 8.0F;
-    if (y + initial.toolbar.height > safe.y + safe.height) {
-        y = chrome.toolbar.bounds.y - 8.0F - initial.toolbar.height;
-    }
-    y = (std::max)(safe.y, (std::min)(
-        y, safe.y + (std::max)(0.0F, safe.height - initial.toolbar.height)));
-    return shapeOptionsLayout({x, y}, macShapePalette().size());
+    return shapeOptionsLayout(
+        optionsToolbarOrigin(chrome, initial.toolbar), macShapePalette().size());
 }
 
 std::optional<ArrowLineOptionsLayout>
@@ -384,21 +394,30 @@ OverlayInputRouter::currentArrowLineOptionsLayout(
         toolbarActions(),
     });
     const auto initial = arrowLineOptionsLayout({}, macShapePalette().size());
-    const AnnotationRect safe{
-        8.0F, 8.0F,
-        (std::max)(0.0F, chrome.overlayBounds.width - 16.0F),
-        (std::max)(0.0F, chrome.overlayBounds.height - 16.0F),
-    };
-    const auto x = (std::max)(safe.x, (std::min)(
-        chrome.toolbar.bounds.x,
-        safe.x + (std::max)(0.0F, safe.width - initial.toolbar.width)));
-    auto y = chrome.toolbar.bounds.y + chrome.toolbar.bounds.height + 8.0F;
-    if (y + initial.toolbar.height > safe.y + safe.height) {
-        y = chrome.toolbar.bounds.y - 8.0F - initial.toolbar.height;
+    return arrowLineOptionsLayout(
+        optionsToolbarOrigin(chrome, initial.toolbar), macShapePalette().size());
+}
+
+std::optional<BrushOptionsLayout>
+OverlayInputRouter::currentBrushOptionsLayout(
+    const OverlaySurface& surface) const
+{
+    if (!editor_ || !editor_->isBrushToolActive()
+        || !model_.selection().has_value()) {
+        return std::nullopt;
     }
-    y = (std::max)(safe.y, (std::min)(
-        y, safe.y + (std::max)(0.0F, safe.height - initial.toolbar.height)));
-    return arrowLineOptionsLayout({x, y}, macShapePalette().size());
+    const auto chrome = computeOverlayLayout({
+        surface.physicalBounds,
+        *model_.selection(),
+        surface.dpiX,
+        surface.dpiY,
+        0.0F,
+        true,
+        toolbarActions(),
+    });
+    const auto initial = brushOptionsLayout({}, macShapePalette().size());
+    return brushOptionsLayout(
+        optionsToolbarOrigin(chrome, initial.toolbar), macShapePalette().size());
 }
 
 OverlayInputRouter::~OverlayInputRouter()
@@ -595,6 +614,21 @@ std::vector<OverlayPresentation> OverlayInputRouter::presentations() const
                 }
                 presentation.arrowLineOptions = std::move(arrowOptions);
             }
+            if (const auto options = currentBrushOptionsLayout(surface)) {
+                OverlayPresentationBrushOptions brushOptions{
+                    *options,
+                    editor_->brushOptions(),
+                    std::nullopt,
+                };
+                if (editor_->strokePatternMenuVisible()) {
+                    const auto safeHeight = physicalPixelsToDip(
+                        surface.physicalBounds.height, surface.dpiY);
+                    brushOptions.strokePatternMenu = strokePatternMenuFor(
+                        options->strokeStyle, safeHeight,
+                        macBrushStrokePatterns().size());
+                }
+                presentation.brushOptions = std::move(brushOptions);
+            }
         }
     }
     return result;
@@ -645,7 +679,12 @@ bool OverlayInputRouter::pointerDown(HWND source, PixelPoint clientPoint) noexce
             surface->physicalBounds.height, surface->dpiY);
         if (editor_->strokePatternMenuVisible()) {
             std::optional<StrokePatternMenuLayout> menu;
-            if (const auto arrowOptions
+            if (const auto brushOptions
+                = currentBrushOptionsLayout(*surface)) {
+                menu = strokePatternMenuFor(
+                    brushOptions->strokeStyle, safeHeight,
+                    macBrushStrokePatterns().size());
+            } else if (const auto arrowOptions
                 = currentArrowLineOptionsLayout(*surface)) {
                 menu = strokePatternMenuFor(
                     arrowOptions->strokeStyle, safeHeight);
@@ -775,12 +814,30 @@ bool OverlayInputRouter::pointerDown(HWND source, PixelPoint clientPoint) noexce
             }
             editor_->dismissPopovers();
         }
+        if (const auto options = currentBrushOptionsLayout(*surface);
+            options.has_value()) {
+            const AnnotationPoint point{x, y};
+            if (const auto hit = brushOptionHitTest(*options, point)) {
+                if (hit->control == BrushOptionControl::customColor) {
+                    if (const auto chosen = platform_.chooseColor(
+                            source,
+                            editor_->brushOptions().style().strokeColor)) {
+                        editor_->selectCustomColor(*chosen);
+                    }
+                    return true;
+                }
+                editor_->applyBrushOptionHit(*hit);
+                return true;
+            }
+            editor_->dismissPopovers();
+        }
     }
 
     const auto virtualPoint = toVirtual(*surface, clientPoint);
     if (editor_ != nullptr) {
         if (const auto local = annotationPoint(virtualPoint);
-            local.has_value() && editor_->pointerDown(*local)) {
+            local.has_value()
+                && editor_->pointerDown(*local, platform_.shiftPressed())) {
             if (!platform_.captureMouse(source)) {
                 editor_->cancelInteraction();
                 lastError_ = OverlayInputErrorCode::mouseCaptureFailed;
@@ -856,6 +913,10 @@ OverlayCursorStyle OverlayInputRouter::cursorStyle(
             options.has_value() && contains(options->toolbar, surfacePoint)) {
             return OverlayCursorStyle::arrow;
         }
+        if (const auto options = currentBrushOptionsLayout(*surface);
+            options.has_value() && contains(options->toolbar, surfacePoint)) {
+            return OverlayCursorStyle::arrow;
+        }
     }
 
     const auto virtualPoint = toVirtual(*surface, clientPoint);
@@ -918,7 +979,7 @@ void OverlayInputRouter::platformPointerMove(PixelPoint virtualPoint) noexcept
     if (dragging_ && status_ == OverlayInputStatus::active) {
         if (annotationDragging_ && editor_ != nullptr) {
             if (const auto local = annotationPoint(virtualPoint)) {
-                editor_->pointerMove(*local);
+                editor_->pointerMove(*local, platform_.shiftPressed());
             }
         } else {
             model_.updateInteraction(virtualPoint);
@@ -933,7 +994,7 @@ void OverlayInputRouter::platformPointerUp(PixelPoint virtualPoint) noexcept
     }
     if (annotationDragging_ && editor_ != nullptr) {
         if (const auto local = annotationPoint(virtualPoint)) {
-            editor_->pointerUp(*local);
+            editor_->pointerUp(*local, platform_.shiftPressed());
         } else {
             editor_->cancelInteraction();
         }
@@ -1269,6 +1330,14 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
                         options.strokePatternMenu,
                         options.arrowTypeMenu,
                         options.arrowTypeMenuEndpoint,
+                    };
+                }
+                if (current[index].brushOptions.has_value()) {
+                    const auto& options = *current[index].brushOptions;
+                    state.brushOptions = OverlayBrushOptionsRenderState{
+                        options.layout,
+                        options.state,
+                        options.strokePatternMenu,
                     };
                 }
                 windows[index]->setRenderState(std::move(state));

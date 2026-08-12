@@ -25,6 +25,7 @@ void testToolbarCapabilityAndPrimaryToolToggle()
     const std::vector expected{
         ToolbarAction::rectangle,
         ToolbarAction::polyline,
+        ToolbarAction::pen,
         ToolbarAction::undo,
         ToolbarAction::redo,
         ToolbarAction::cancel,
@@ -42,6 +43,54 @@ void testToolbarCapabilityAndPrimaryToolToggle()
     CHECK(editor.handleToolbarAction(ToolbarAction::rectangle));
     CHECK(!editor.isShapeToolActive());
     CHECK(!editor.toolbarState().selectedAction().has_value());
+}
+
+void testBrushDrawsFreehandPath()
+{
+    ShapeEditorController editor({0, 0, 400, 300});
+    CHECK(editor.handleToolbarAction(ToolbarAction::pen));
+    CHECK(editor.isBrushToolActive());
+    CHECK(editor.brushOptions().style().strokeWidthDip == 3.0F);
+    CHECK(editor.pointerDown({20, 30}));
+    editor.pointerMove({40, 50});
+    editor.pointerMove({70, 45});
+    CHECK(editor.pointerUp({100, 80}));
+    CHECK(editor.document().annotations().size() == 1U);
+    const auto& freehand = editor.document().annotations()[0];
+    const auto id = freehand.id;
+    CHECK(freehand.kind == AnnotationKind::brush);
+    CHECK(freehand.brushPath.has_value());
+    CHECK(freehand.brushPath->points.size() == 4U);
+    CHECK((freehand.brushPath->points.front() == AnnotationPoint{20, 30}));
+    CHECK((freehand.brushPath->points.back() == AnnotationPoint{100, 80}));
+    CHECK(!editor.document().selectedId().has_value());
+
+    CHECK(editor.pointerDown({200, 200}));
+    editor.pointerMove({240, 240}, true);
+    CHECK(editor.pointerUp({500, -20}, true));
+    CHECK(editor.document().annotations().size() == 2U);
+    const auto& straight = editor.document().annotations()[1];
+    CHECK(straight.brushPath->points.size() == 2U);
+    CHECK((straight.brushPath->points[0] == AnnotationPoint{200, 200}));
+    CHECK((straight.brushPath->points[1] == AnnotationPoint{400, 0}));
+
+    CHECK(editor.handleKey(ShapeEditorKey::escapeKey, false, false)
+        == ShapeEditorKeyResult::consumed);
+    CHECK(editor.pointerDown({40, 50}));
+    editor.pointerMove({80, 90});
+    CHECK(editor.pointerUp({80, 90}));
+    CHECK(editor.document().selectedId() == id);
+    CHECK((editor.document().find(id)->brushPath->points.front()
+        == AnnotationPoint{60, 70}));
+    const auto plan = editor.renderPlan({}, true);
+    CHECK(plan.lineHandles.size() == 2U);
+    if (plan.lineHandles.size() == 2U) {
+        CHECK(editor.pointerDown(plan.lineHandles.front()));
+        editor.pointerMove({20, 20});
+        CHECK(editor.pointerUp({20, 20}));
+        CHECK(!(editor.document().find(id)->brushPath->points.front()
+            == AnnotationPoint{60, 70}));
+    }
 }
 
 void testArrowLineDrawMoveControlEditAndOptions()
@@ -153,8 +202,13 @@ void testArrowToolSwitchingMenusCursorsAndEditCancellation()
     CHECK(editor.pointerDown(bodyPoint));
     editor.pointerMove({bodyPoint.x + 20.0F, bodyPoint.y + 20.0F});
     CHECK(editor.pointerUp({bodyPoint.x + 20.0F, bodyPoint.y + 20.0F}));
-    CHECK(editor.document().find(id)->arrowLine.value()
-        == translated(line, {20, 20}));
+    const auto moved = *editor.document().find(id)->arrowLine;
+    CHECK((moved.start == AnnotationPoint{
+        line.start.x + 20.0F, line.start.y + 20.0F}));
+    CHECK((moved.end == AnnotationPoint{
+        line.end.x + 20.0F, line.end.y + 20.0F}));
+    CHECK((moved.control == AnnotationPoint{
+        line.control.x + 20.0F, line.control.y + 20.0F}));
     CHECK(editor.handleToolbarAction(ToolbarAction::undo));
     CHECK(editor.document().find(id)->arrowLine.value() == line);
 }
@@ -313,5 +367,6 @@ int main()
     testCtrlShortcutsDeleteAndTerminalRequests();
     testArrowLineDrawMoveControlEditAndOptions();
     testArrowToolSwitchingMenusCursorsAndEditCancellation();
+    testBrushDrawsFreehandPath();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

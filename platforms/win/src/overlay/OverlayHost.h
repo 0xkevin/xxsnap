@@ -71,6 +71,12 @@ struct OverlayPresentationArrowLineOptions {
     std::optional<ArrowEndpoint> arrowTypeMenuEndpoint;
 };
 
+struct OverlayPresentationBrushOptions {
+    BrushOptionsLayout layout;
+    BrushOptionsState state;
+    std::optional<StrokePatternMenuLayout> strokePatternMenu;
+};
+
 struct OverlayPresentation {
     std::optional<PixelRect> selection;
     bool showActions = false;
@@ -78,6 +84,7 @@ struct OverlayPresentation {
     AnnotationRenderPlan annotationPlan;
     std::optional<OverlayPresentationShapeOptions> shapeOptions;
     std::optional<OverlayPresentationArrowLineOptions> arrowLineOptions;
+    std::optional<OverlayPresentationBrushOptions> brushOptions;
 };
 
 class OverlayInputPlatform {
@@ -95,6 +102,10 @@ public:
         HWND, AnnotationColor) noexcept
     {
         return std::nullopt;
+    }
+    virtual bool shiftPressed() noexcept
+    {
+        return (GetKeyState(VK_SHIFT) & 0x8000) != 0;
     }
 };
 
@@ -155,6 +166,8 @@ private:
     std::optional<ShapeOptionsLayout> currentShapeOptionsLayout(
         const OverlaySurface& surface) const;
     std::optional<ArrowLineOptionsLayout> currentArrowLineOptionsLayout(
+        const OverlaySurface& surface) const;
+    std::optional<BrushOptionsLayout> currentBrushOptionsLayout(
         const OverlaySurface& surface) const;
     void cancelOnce() noexcept;
     void completeOnce(OverlayInputAction action) noexcept;

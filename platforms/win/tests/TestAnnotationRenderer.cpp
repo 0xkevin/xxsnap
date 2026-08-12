@@ -105,6 +105,31 @@ void testArrowLinePlanTranslatesCurveAndUsesThreeEditingHandles()
     CHECK(!plan.rotationHandle.has_value());
 }
 
+void testBrushPlanTranslatesPathAndUsesInsetEndpointHandles()
+{
+    AnnotationDocument document;
+    AnnotationStyle style;
+    style.strokeWidthDip = 5.0F;
+    const auto id = document.addBrushPath(
+        BrushPath{{{10, 20}, {40, 20}, {70, 50}}}, style);
+    CHECK(id != invalidAnnotationId);
+    CHECK(document.select(id));
+    const auto plan = buildAnnotationRenderPlan(
+        document, std::nullopt, {200, 100}, true);
+    CHECK(plan.items.size() == 1U);
+    CHECK(plan.items[0].annotation.brushPath.has_value());
+    CHECK((plan.items[0].annotation.brushPath->points.front()
+        == AnnotationPoint{210, 120}));
+    CHECK((plan.items[0].annotation.brushPath->points.back()
+        == AnnotationPoint{270, 150}));
+    CHECK(plan.resizeHandles.empty());
+    CHECK(plan.lineHandles.size() == 2U);
+    CHECK((plan.lineHandles.front() == AnnotationPoint{219, 120}));
+    CHECK(plan.lineHandles.back().x > 263.0F);
+    CHECK(plan.lineHandles.back().y > 143.0F);
+    CHECK(!plan.rotationHandle.has_value());
+}
+
 void testMacDashPatternsAreAbsoluteDips()
 {
     CHECK(strokeDashPattern(AnnotationStrokePattern::solid, 4).empty());
@@ -290,6 +315,111 @@ bool renderArrowSnapshot(
             if (dxEnd * dxEnd + dy * dy <= radius * radius) {
                 ++snapshot.endPixels;
             }
+        }
+    }
+    lock->Release();
+    return snapshot.opaquePixels > 0U;
+}
+
+bool renderBrushSnapshot(
+    std::uint32_t dpi,
+    AnnotationStrokePattern pattern,
+    ArrowSnapshot& snapshot)
+{
+    SnapshotResources resources;
+    if (FAILED(D2D1CreateFactory(
+            D2D1_FACTORY_TYPE_SINGLE_THREADED,
+            &resources.d2dFactory))) {
+        return false;
+    }
+    if (FAILED(CoCreateInstance(
+            CLSID_WICImagingFactory,
+            nullptr,
+            CLSCTX_INPROC_SERVER,
+            IID_PPV_ARGS(&resources.wicFactory)))) {
+        return false;
+    }
+    constexpr std::uint32_t logicalWidth = 240U;
+    constexpr std::uint32_t logicalHeight = 160U;
+    const auto pixelWidth = logicalWidth * dpi / 96U;
+    const auto pixelHeight = logicalHeight * dpi / 96U;
+    if (FAILED(resources.wicFactory->CreateBitmap(
+            pixelWidth, pixelHeight,
+            GUID_WICPixelFormat32bppPBGRA,
+            WICBitmapCacheOnLoad,
+            &resources.bitmap))) {
+        return false;
+    }
+    const auto properties = D2D1::RenderTargetProperties(
+        D2D1_RENDER_TARGET_TYPE_SOFTWARE,
+        D2D1::PixelFormat(
+            DXGI_FORMAT_B8G8R8A8_UNORM,
+            D2D1_ALPHA_MODE_PREMULTIPLIED),
+        static_cast<float>(dpi),
+        static_cast<float>(dpi));
+    if (FAILED(resources.d2dFactory->CreateWicBitmapRenderTarget(
+            resources.bitmap, properties, &resources.target))) {
+        return false;
+    }
+
+    AnnotationStyle style;
+    style.strokeColor = {255, 0, 0, 255};
+    style.strokeWidthDip = 5.0F;
+    style.strokePattern = pattern;
+    const BrushPath path{{
+        {20, 110}, {50, 70}, {85, 100}, {120, 45},
+        {155, 90}, {190, 55}, {220, 85},
+    }};
+    AnnotationRenderPlan plan;
+    plan.items.push_back({
+        ShapeAnnotation{
+            1,
+            AnnotationKind::brush,
+            brushPathBounds(path),
+            style,
+            0.0F,
+            std::nullopt,
+            path,
+        },
+        false,
+    });
+    resources.target->BeginDraw();
+    resources.target->Clear(D2D1::ColorF(0, 0));
+    AnnotationRenderer renderer(resources.d2dFactory);
+    if (FAILED(renderer.draw(resources.target, plan))
+        || FAILED(resources.target->EndDraw())) {
+        return false;
+    }
+
+    const WICRect lockRect{
+        0, 0,
+        static_cast<INT>(pixelWidth),
+        static_cast<INT>(pixelHeight),
+    };
+    IWICBitmapLock* lock = nullptr;
+    if (FAILED(resources.bitmap->Lock(&lockRect, WICBitmapLockRead, &lock))) {
+        return false;
+    }
+    UINT byteCount = 0U;
+    UINT stride = 0U;
+    BYTE* bytes = nullptr;
+    const auto dataResult = lock->GetDataPointer(&byteCount, &bytes);
+    const auto strideResult = lock->GetStride(&stride);
+    if (FAILED(dataResult) || FAILED(strideResult)
+        || byteCount < stride * pixelHeight) {
+        lock->Release();
+        return false;
+    }
+    snapshot = {};
+    for (std::uint32_t y = 0U; y < pixelHeight; ++y) {
+        for (std::uint32_t x = 0U; x < pixelWidth; ++x) {
+            const auto* pixel = bytes + y * stride + x * 4U;
+            if (pixel[3] == 0U) {
+                continue;
+            }
+            ++snapshot.opaquePixels;
+            snapshot.checksum += static_cast<std::uint64_t>(pixel[3])
+                * (1U + x + y * pixelWidth);
         }
     }
     lock->Release();
@@ -520,6 +650,35 @@ void testArrowEndpointsAndPatternsRenderAtSupportedDpis()
     }
 }
 
+void testBrushPatternsRenderAtSupportedDpis()
+{
+    const auto comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    const auto shouldUninitialize = SUCCEEDED(comResult);
+    CHECK(comResult == S_OK || comResult == S_FALSE
+        || comResult == RPC_E_CHANGED_MODE);
+    constexpr std::array patterns{
+        AnnotationStrokePattern::solid,
+        AnnotationStrokePattern::dashLong,
+        AnnotationStrokePattern::dashNarrow,
+        AnnotationStrokePattern::dashLongShort,
+    };
+    for (const auto dpi : std::array<std::uint32_t, 2>{96U, 144U}) {
+        std::array<std::uint64_t, patterns.size()> checksums{};
+        for (std::size_t index = 0U; index < patterns.size(); ++index) {
+            ArrowSnapshot snapshot;
+            CHECK(renderBrushSnapshot(dpi, patterns[index], snapshot));
+            CHECK(snapshot.opaquePixels > 100U * dpi / 96U);
+            checksums[index] = snapshot.checksum;
+        }
+        CHECK(checksums[0] != checksums[1]);
+        CHECK(checksums[1] != checksums[2]);
+        CHECK(checksums[2] != checksums[3]);
+    }
+    if (shouldUninitialize) {
+        CoUninitialize();
+    }
+}
+
 void testRotationHandleIsReservedForMacIconLayer()
 {
     const auto comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
@@ -538,10 +697,12 @@ int main()
     testPlanUsesSelectionLocalCoordinatesAndLivePreview();
     testEditingPreviewReplacesCommittedShape();
     testArrowLinePlanTranslatesCurveAndUsesThreeEditingHandles();
+    testBrushPlanTranslatesPathAndUsesInsetEndpointHandles();
     testMacDashPatternsAreAbsoluteDips();
     testStrokeMenuSketchSampleUsesExactMacJitter();
     testDirect2DSnapshotsAtAllSupportedDpis();
     testArrowEndpointsAndPatternsRenderAtSupportedDpis();
+    testBrushPatternsRenderAtSupportedDpis();
     testRotationHandleIsReservedForMacIconLayer();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

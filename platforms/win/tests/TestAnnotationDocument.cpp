@@ -156,6 +156,24 @@ void testArrowLineCommandsPreserveCurveGeometryAndHistory()
     CHECK(document.find(id)->arrowLine == line);
 }
 
+void testBrushPathHistoryAndBounds()
+{
+    AnnotationDocument document;
+    const BrushPath path{{{10, 20}, {35, 8}, {80, 50}}};
+    const auto id = document.addBrushPath(path);
+    CHECK(id != invalidAnnotationId);
+    CHECK(document.find(id)->kind == AnnotationKind::brush);
+    CHECK(document.find(id)->brushPath == path);
+    CHECK((document.find(id)->rect == AnnotationRect{10, 8, 70, 42}));
+    CHECK(document.move(id, {5, -3}));
+    CHECK((document.find(id)->brushPath->points[0]
+        == AnnotationPoint{15, 17}));
+    CHECK((document.find(id)->brushPath->points[2]
+        == AnnotationPoint{85, 47}));
+    CHECK(document.undo());
+    CHECK(document.find(id)->brushPath == path);
+}
+
 } // namespace
 
 int main()
@@ -165,5 +183,6 @@ int main()
     testInvalidAndNoOpEditsDoNotPolluteHistory();
     testNewCommandInvalidatesRedoAndSelectionIsSafe();
     testArrowLineCommandsPreserveCurveGeometryAndHistory();
+    testBrushPathHistoryAndBounds();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

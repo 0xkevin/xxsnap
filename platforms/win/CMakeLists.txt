@@ -305,6 +305,7 @@ add_library(
     xxsnap_annotation_renderer
     src/annotation/AnnotationRenderer.cpp
     src/annotation/ArrowLineRenderer.cpp
+    src/annotation/BrushRenderer.cpp
 )
 target_compile_features(xxsnap_annotation_renderer PUBLIC cxx_std_17)
 target_include_directories(
@@ -320,6 +321,7 @@ target_link_libraries(
 add_library(
     xxsnap_shape_editor_controller
     src/annotation/ArrowLineInteraction.cpp
+    src/annotation/BrushInteraction.cpp
     src/annotation/ShapeEditorController.cpp
 )
 target_compile_features(xxsnap_shape_editor_controller PUBLIC cxx_std_17)

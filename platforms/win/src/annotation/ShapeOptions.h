@@ -14,6 +14,8 @@ const std::array<AnnotationColor, 20>& macShapePalette() noexcept;
 const std::array<AnnotationStrokePattern, 6>& macShapeStrokePatterns() noexcept;
 const std::array<ArrowType, 7>& macArrowTypes() noexcept;
 const std::array<float, 3>& macArrowStrokeWidths() noexcept;
+const std::array<float, 3>& macBrushStrokeWidths() noexcept;
+const std::array<AnnotationStrokePattern, 4>& macBrushStrokePatterns() noexcept;
 
 class ShapeOptionsState {
 public:
@@ -65,6 +67,64 @@ private:
     ArrowType endArrowType_ = ArrowType::normal;
     std::optional<std::size_t> selectedPaletteIndex_;
 };
+
+class BrushOptionsState {
+public:
+    BrushOptionsState() noexcept;
+
+    const AnnotationStyle& style() const noexcept;
+    std::optional<std::size_t> selectedPaletteIndex() const noexcept;
+    bool load(AnnotationStyle style) noexcept;
+    bool setStrokeWidth(float strokeWidthDip) noexcept;
+    bool setStrokePattern(AnnotationStrokePattern pattern) noexcept;
+    bool selectPalette(std::size_t index) noexcept;
+    bool selectCustomColor(AnnotationColor color) noexcept;
+
+private:
+    void refreshPaletteSelection() noexcept;
+
+    AnnotationStyle style_{};
+    std::optional<std::size_t> selectedPaletteIndex_;
+};
+
+enum class BrushOptionControl : std::uint8_t {
+    strokeWidth,
+    strokeStyle,
+    palette,
+    customColor,
+};
+
+struct BrushOptionHit {
+    BrushOptionControl control = BrushOptionControl::strokeWidth;
+    std::size_t index = 0;
+};
+
+constexpr bool operator==(
+    BrushOptionHit left,
+    BrushOptionHit right) noexcept
+{
+    return left.control == right.control && left.index == right.index;
+}
+
+struct BrushOptionsLayout {
+    AnnotationRect toolbar{};
+    std::size_t paletteCount = 0;
+    std::vector<AnnotationRect> strokeWidths;
+    std::vector<AnnotationRect> strokeWidthHits;
+    AnnotationRect strokeStyle{};
+    AnnotationPoint strokeStyleSampleStart{};
+    AnnotationPoint strokeStyleSampleEnd{};
+    std::vector<AnnotationRect> colorSwatches;
+    std::vector<AnnotationRect> separators;
+};
+
+BrushOptionsLayout brushOptionsLayout(
+    AnnotationPoint origin,
+    std::size_t paletteCount);
+
+std::optional<BrushOptionHit> brushOptionHitTest(
+    const BrushOptionsLayout& layout,
+    AnnotationPoint point) noexcept;
 
 enum class ShapeOptionControl : std::uint8_t {
     strokeWidth,
@@ -141,6 +201,7 @@ struct ArrowLineOptionsLayout {
     AnnotationRect startArrowType{};
     AnnotationRect endArrowType{};
     std::vector<AnnotationRect> colorSwatches;
+    std::vector<AnnotationRect> separators;
 };
 
 ArrowLineOptionsLayout arrowLineOptionsLayout(
@@ -177,7 +238,9 @@ struct StrokePatternMenuLayout {
     std::vector<AnnotationPoint> sampleEnds;
 };
 
-StrokePatternMenuLayout strokePatternMenuLayout(AnnotationRect menu);
+StrokePatternMenuLayout strokePatternMenuLayout(
+    AnnotationRect menu,
+    std::size_t itemCount = 6U);
 
 std::optional<std::size_t> hitTestStrokePatternMenu(
     const StrokePatternMenuLayout& layout,

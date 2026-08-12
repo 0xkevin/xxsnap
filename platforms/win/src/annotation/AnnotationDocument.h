@@ -18,6 +18,9 @@ public:
     AnnotationId addArrowLine(
         ArrowLine line,
         AnnotationStyle style = {});
+    AnnotationId addBrushPath(
+        BrushPath path,
+        AnnotationStyle style = {});
 
     bool remove(AnnotationId id);
     bool updateRect(AnnotationId id, AnnotationRect rect);
@@ -26,6 +29,7 @@ public:
     bool updateRotation(AnnotationId id, float rotationDegrees);
     bool updateStyle(AnnotationId id, AnnotationStyle style);
     bool updateArrowLine(AnnotationId id, ArrowLine line);
+    bool updateBrushPath(AnnotationId id, BrushPath path);
 
     bool select(AnnotationId id) noexcept;
     void clearSelection() noexcept;

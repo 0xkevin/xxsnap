@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <vector>
 
 namespace xxsnap::win {
 
@@ -172,6 +173,45 @@ struct ArrowLine {
     ArrowType endArrowType = ArrowType::normal;
 };
 
+struct BrushPath {
+    std::vector<AnnotationPoint> points;
+};
+
+inline bool operator==(
+    const BrushPath& left,
+    const BrushPath& right) noexcept
+{
+    return left.points == right.points;
+}
+
+inline BrushPath translated(
+    BrushPath path,
+    AnnotationPoint offset)
+{
+    for (auto& point : path.points) {
+        point = translated(point, offset);
+    }
+    return path;
+}
+
+inline AnnotationRect brushPathBounds(const BrushPath& path) noexcept
+{
+    if (path.points.empty()) {
+        return {};
+    }
+    auto left = path.points.front().x;
+    auto right = left;
+    auto top = path.points.front().y;
+    auto bottom = top;
+    for (const auto point : path.points) {
+        left = point.x < left ? point.x : left;
+        right = point.x > right ? point.x : right;
+        top = point.y < top ? point.y : top;
+        bottom = point.y > bottom ? point.y : bottom;
+    }
+    return {left, top, right - left, bottom - top};
+}
+
 constexpr ArrowLine translated(
     ArrowLine line,
     AnnotationPoint offset) noexcept
@@ -222,6 +262,7 @@ struct ShapeAnnotation {
     AnnotationStyle style{};
     float rotationDegrees = 0.0F;
     std::optional<ArrowLine> arrowLine;
+    std::optional<BrushPath> brushPath;
 };
 
 constexpr bool isArrowLineAnnotation(
@@ -231,7 +272,14 @@ constexpr bool isArrowLineAnnotation(
         && annotation.arrowLine.has_value();
 }
 
-constexpr bool operator==(
+constexpr bool isBrushAnnotation(
+    const ShapeAnnotation& annotation) noexcept
+{
+    return annotation.kind == AnnotationKind::brush
+        && annotation.brushPath.has_value();
+}
+
+inline bool operator==(
     const ShapeAnnotation& left,
     const ShapeAnnotation& right) noexcept
 {
@@ -240,7 +288,8 @@ constexpr bool operator==(
         && left.rect == right.rect
         && left.style == right.style
         && left.rotationDegrees == right.rotationDegrees
-        && left.arrowLine == right.arrowLine;
+        && left.arrowLine == right.arrowLine
+        && left.brushPath == right.brushPath;
 }
 
 } // namespace xxsnap::win

@@ -80,6 +80,11 @@ public:
         return chosenColor;
     }
 
+    bool shiftPressed() noexcept override
+    {
+        return shiftDown;
+    }
+
     bool captureSucceeds = true;
     bool releaseSucceeds = true;
     bool registerSucceeds = true;
@@ -95,6 +100,7 @@ public:
     int unregisterCalls = 0;
     int chooseColorCalls = 0;
     HWND chosenColorWindow = nullptr;
+    bool shiftDown = false;
     std::optional<AnnotationColor> chosenColor = AnnotationColor{1, 2, 3, 255};
 };
 
@@ -419,7 +425,7 @@ void testShapeToolIsNonTerminalAndEditsThroughSharedPresentation()
     createReadySelection(router);
 
     auto owner = router.presentations()[1];
-    CHECK(owner.toolbarItems.size() == 7U);
+    CHECK(owner.toolbarItems.size() == 8U);
     const auto rectangle = owner.toolbarItems[0];
     CHECK(rectangle.action == xxsnap::win::ToolbarAction::rectangle);
     const auto capturesBeforeTool = platform.captureCalls;
@@ -472,9 +478,9 @@ void testShapeToolIsNonTerminalAndEditsThroughSharedPresentation()
 
     owner = router.presentations()[1];
     CHECK(owner.annotationPlan.items.size() == 1U);
-    CHECK(owner.toolbarItems[2].action == xxsnap::win::ToolbarAction::undo);
-    CHECK(owner.toolbarItems[2].enabled);
-    CHECK(router.pointerDown(rightWindow, owner.toolbarItems[2].centerPhysical));
+    CHECK(owner.toolbarItems[3].action == xxsnap::win::ToolbarAction::undo);
+    CHECK(owner.toolbarItems[3].enabled);
+    CHECK(router.pointerDown(rightWindow, owner.toolbarItems[3].centerPhysical));
     CHECK(router.annotationDocument().annotations().empty());
     CHECK(actions.empty());
 
@@ -493,7 +499,7 @@ void testArrowToolUsesMacOptionsMenuAndCreatesEditableCurve()
     createReadySelection(router);
 
     auto owner = router.presentations()[1];
-    CHECK(owner.toolbarItems.size() == 7U);
+    CHECK(owner.toolbarItems.size() == 8U);
     CHECK(owner.toolbarItems[1].action == xxsnap::win::ToolbarAction::polyline);
     CHECK(router.pointerDown(
         rightWindow, owner.toolbarItems[1].centerPhysical));
@@ -583,6 +589,60 @@ void testArrowToolUsesMacOptionsMenuAndCreatesEditableCurve()
     CHECK(router.presentations()[1].annotationPlan.lineHandles.size() == 3U);
 }
 
+void testBrushToolUsesMacOptionsAndShiftStraightLine()
+{
+    FakePlatform platform;
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform, {}, true);
+    createReadySelection(router);
+
+    auto owner = router.presentations()[1];
+    CHECK(owner.toolbarItems[2].action == xxsnap::win::ToolbarAction::pen);
+    CHECK(router.pointerDown(
+        rightWindow, owner.toolbarItems[2].centerPhysical));
+    owner = router.presentations()[1];
+    CHECK(owner.toolbarItems[2].selected);
+    CHECK(owner.brushOptions.has_value());
+    if (!owner.brushOptions.has_value()) {
+        return;
+    }
+    CHECK(owner.brushOptions->state.style().strokeWidthDip == 3.0F);
+    CHECK(owner.brushOptions->layout.toolbar.width == 418.0F);
+
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.brushOptions->layout.strokeWidths[2])));
+    owner = router.presentations()[1];
+    CHECK(owner.brushOptions->state.style().strokeWidthDip == 7.0F);
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.brushOptions->layout.strokeStyle)));
+    owner = router.presentations()[1];
+    CHECK(owner.brushOptions->strokePatternMenu.has_value());
+    CHECK(owner.brushOptions->strokePatternMenu->items.size() == 4U);
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.brushOptions->strokePatternMenu->items[3])));
+    owner = router.presentations()[1];
+    CHECK(owner.brushOptions->state.style().strokePattern
+        == xxsnap::win::AnnotationStrokePattern::dashLongShort);
+    CHECK(router.cursorStyle(rightWindow, PixelPoint{40, 90})
+        == OverlayCursorStyle::brush);
+
+    CHECK(router.pointerDown(rightWindow, PixelPoint{40, 90}));
+    platform.shiftDown = true;
+    platform.cursor = PixelPoint{180, 190};
+    router.pointerMove(rightWindow, PixelPoint{180, 190});
+    router.pointerUp(rightWindow, PixelPoint{180, 190});
+    CHECK(router.annotationDocument().annotations().size() == 1U);
+    const auto& created = router.annotationDocument().annotations().front();
+    CHECK(created.kind == xxsnap::win::AnnotationKind::brush);
+    CHECK(created.brushPath.has_value());
+    CHECK(created.brushPath->points.size() == 2U);
+    CHECK(created.style.strokeWidthDip == 7.0F);
+    CHECK(created.style.strokePattern
+        == xxsnap::win::AnnotationStrokePattern::dashLongShort);
+    CHECK(!router.annotationDocument().selectedId().has_value());
+    CHECK(router.presentations()[1].annotationPlan.lineHandles.empty());
+}
+
 void testShapeCanBeCreatedOutsideLockedSelectionOnOverlay()
 {
     FakePlatform platform;
@@ -634,6 +694,7 @@ int main()
     testRestartShutdownReleasesCaptureAndHotKeyWithoutCancelAction();
     testShapeToolIsNonTerminalAndEditsThroughSharedPresentation();
     testArrowToolUsesMacOptionsMenuAndCreatesEditableCurve();
+    testBrushToolUsesMacOptionsAndShiftStraightLine();
     testShapeCanBeCreatedOutsideLockedSelectionOnOverlay();
     return failureCount == 0 ? 0 : 1;
 }

@@ -287,6 +287,10 @@ HCURSOR OverlayWindow::cursor() const noexcept
         result = LoadCursorW(
             instance_, MAKEINTRESOURCEW(IDC_XXSNAP_ROTATION));
         break;
+    case OverlayCursorStyle::brush:
+        result = LoadCursorW(
+            instance_, MAKEINTRESOURCEW(IDC_XXSNAP_BRUSH));
+        break;
     }
     return result != nullptr
         ? result

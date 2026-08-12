@@ -28,6 +28,7 @@ constexpr std::array<AnnotationColor, 20> palette{
 
 constexpr std::array<float, 3> strokeWidths{2.0F, 4.0F, 7.0F};
 constexpr std::array<float, 3> arrowStrokeWidths{3.0F, 4.0F, 6.0F};
+constexpr std::array<float, 3> brushStrokeWidths{3.0F, 5.0F, 7.0F};
 
 constexpr std::array<AnnotationStrokePattern, 6> strokePatterns{
     AnnotationStrokePattern::solid,
@@ -36,6 +37,13 @@ constexpr std::array<AnnotationStrokePattern, 6> strokePatterns{
     AnnotationStrokePattern::dashLongShort,
     AnnotationStrokePattern::sketchSolid,
     AnnotationStrokePattern::sketchDashed,
+};
+
+constexpr std::array<AnnotationStrokePattern, 4> brushStrokePatterns{
+    AnnotationStrokePattern::solid,
+    AnnotationStrokePattern::dashLong,
+    AnnotationStrokePattern::dashNarrow,
+    AnnotationStrokePattern::dashLongShort,
 };
 
 constexpr std::array<ArrowType, 7> arrowTypes{
@@ -121,6 +129,16 @@ const std::array<ArrowType, 7>& macArrowTypes() noexcept
 const std::array<float, 3>& macArrowStrokeWidths() noexcept
 {
     return arrowStrokeWidths;
+}
+
+const std::array<float, 3>& macBrushStrokeWidths() noexcept
+{
+    return brushStrokeWidths;
+}
+
+const std::array<AnnotationStrokePattern, 4>& macBrushStrokePatterns() noexcept
+{
+    return brushStrokePatterns;
 }
 
 ShapeOptionsState::ShapeOptionsState() noexcept
@@ -387,6 +405,189 @@ void ArrowLineOptionsState::refreshPaletteSelection() noexcept
     }
 }
 
+BrushOptionsState::BrushOptionsState() noexcept
+    : selectedPaletteIndex_(0U)
+{
+    style_.strokeWidthDip = brushStrokeWidths.front();
+    style_.strokePattern = AnnotationStrokePattern::solid;
+    style_.strokeColor = palette.front();
+    style_.fillColor = palette.front();
+    style_.fillEnabled = false;
+}
+
+const AnnotationStyle& BrushOptionsState::style() const noexcept
+{
+    return style_;
+}
+
+std::optional<std::size_t> BrushOptionsState::selectedPaletteIndex() const noexcept
+{
+    return selectedPaletteIndex_;
+}
+
+bool BrushOptionsState::load(AnnotationStyle style) noexcept
+{
+    if (style.strokePattern == AnnotationStrokePattern::sketchSolid
+        || style.strokePattern == AnnotationStrokePattern::sketchDashed) {
+        style.strokePattern = AnnotationStrokePattern::solid;
+    }
+    style.fillEnabled = false;
+    const auto changed = style_ != style;
+    style_ = style;
+    refreshPaletteSelection();
+    return changed;
+}
+
+bool BrushOptionsState::setStrokeWidth(float strokeWidthDip) noexcept
+{
+    bool supported = false;
+    for (const auto candidate : brushStrokeWidths) {
+        supported = supported || candidate == strokeWidthDip;
+    }
+    if (!supported || style_.strokeWidthDip == strokeWidthDip) {
+        return false;
+    }
+    style_.strokeWidthDip = strokeWidthDip;
+    return true;
+}
+
+bool BrushOptionsState::setStrokePattern(
+    AnnotationStrokePattern pattern) noexcept
+{
+    bool supported = false;
+    for (const auto candidate : brushStrokePatterns) {
+        supported = supported || candidate == pattern;
+    }
+    if (!supported || style_.strokePattern == pattern) {
+        return false;
+    }
+    style_.strokePattern = pattern;
+    return true;
+}
+
+bool BrushOptionsState::selectPalette(std::size_t index) noexcept
+{
+    if (index >= palette.size()) {
+        return false;
+    }
+    const auto changed = !(style_.strokeColor == palette[index])
+        || selectedPaletteIndex_ != index;
+    style_.strokeColor = palette[index];
+    style_.fillColor = palette[index];
+    selectedPaletteIndex_ = index;
+    return changed;
+}
+
+bool BrushOptionsState::selectCustomColor(AnnotationColor color) noexcept
+{
+    color.alpha = 255;
+    const auto changed = !(style_.strokeColor == color)
+        || selectedPaletteIndex_.has_value();
+    style_.strokeColor = color;
+    style_.fillColor = color;
+    selectedPaletteIndex_.reset();
+    return changed;
+}
+
+void BrushOptionsState::refreshPaletteSelection() noexcept
+{
+    selectedPaletteIndex_.reset();
+    for (std::size_t index = 0; index < palette.size(); ++index) {
+        if (palette[index] == style_.strokeColor) {
+            selectedPaletteIndex_ = index;
+            return;
+        }
+    }
+}
+
+BrushOptionsLayout brushOptionsLayout(
+    AnnotationPoint origin,
+    std::size_t paletteCount)
+{
+    BrushOptionsLayout layout;
+    layout.paletteCount = clampedPaletteCount(paletteCount);
+    const auto rows = layout.paletteCount <= 10U ? 1U : 2U;
+    const auto columns = (layout.paletteCount + rows - 1U) / rows;
+    const auto customSize = rows == 1U ? 20.0F : 32.0F;
+    const auto height = rows == 1U ? 30.0F : 40.0F;
+    const auto width = 214.0F + static_cast<float>(columns) * 16.0F
+        + 2.0F + customSize + 10.0F;
+    layout.toolbar = {origin.x, origin.y, width, height};
+    const auto controlY = origin.y + (height - 20.0F) / 2.0F;
+    for (std::size_t index = 0; index < brushStrokeWidths.size(); ++index) {
+        const AnnotationRect control{
+            origin.x + 10.0F + static_cast<float>(index) * 24.0F,
+            controlY, 20.0F, 20.0F};
+        layout.strokeWidths.push_back(control);
+        layout.strokeWidthHits.push_back(inset(control, -3.0F, -5.0F));
+    }
+    layout.strokeStyle = {origin.x + 96.0F, controlY, 94.0F, 20.0F};
+    layout.strokeStyleSampleStart = {
+        layout.strokeStyle.x + 10.0F, controlY + 10.0F};
+    layout.strokeStyleSampleEnd = {
+        layout.strokeStyle.x + 72.0F, controlY + 10.0F};
+    for (std::size_t index = 0; index < layout.paletteCount; ++index) {
+        const auto column = index % columns;
+        const auto row = rows == 1U ? 0U : index / columns;
+        const auto swatchY = rows == 1U
+            ? origin.y + (height - 12.0F) / 2.0F
+            : origin.y + 5.0F + static_cast<float>(row) * 16.0F;
+        layout.colorSwatches.push_back({
+            origin.x + 214.0F + static_cast<float>(column) * 16.0F,
+            swatchY, 12.0F, 12.0F});
+    }
+    layout.colorSwatches.push_back({
+        origin.x + 214.0F + static_cast<float>(columns) * 16.0F + 2.0F,
+        origin.y + (height - customSize) / 2.0F,
+        customSize,
+        customSize});
+    const auto lastStrokeWidth = layout.strokeWidths.back();
+    const auto firstSeparatorX = lastStrokeWidth.x + lastStrokeWidth.width
+        + (layout.strokeStyle.x
+            - lastStrokeWidth.x - lastStrokeWidth.width) / 2.0F;
+    const auto secondSeparatorX = layout.strokeStyle.x
+        + layout.strokeStyle.width
+        + (layout.colorSwatches.front().x
+            - layout.strokeStyle.x - layout.strokeStyle.width) / 2.0F;
+    for (const auto x : {firstSeparatorX, secondSeparatorX}) {
+        layout.separators.push_back({
+            floorWithoutRuntime(x) + 0.25F,
+            origin.y + height / 2.0F - 6.0F,
+            1.5F,
+            12.0F,
+        });
+    }
+    return layout;
+}
+
+std::optional<BrushOptionHit> brushOptionHitTest(
+    const BrushOptionsLayout& layout,
+    AnnotationPoint point) noexcept
+{
+    for (std::size_t index = 0; index < layout.strokeWidthHits.size(); ++index) {
+        if (contains(layout.strokeWidthHits[index], point)) {
+            return BrushOptionHit{BrushOptionControl::strokeWidth, index};
+        }
+    }
+    if (contains(layout.strokeStyle, point)) {
+        return BrushOptionHit{BrushOptionControl::strokeStyle, 0};
+    }
+    if (layout.colorSwatches.empty()) {
+        return std::nullopt;
+    }
+    for (std::size_t index = 0; index + 1U < layout.colorSwatches.size(); ++index) {
+        if (contains(inset(layout.colorSwatches[index], -3.0F, -3.0F), point)) {
+            return BrushOptionHit{BrushOptionControl::palette, index};
+        }
+    }
+    if (contains(inset(layout.colorSwatches.back(), -2.0F, -2.0F), point)) {
+        return BrushOptionHit{
+            BrushOptionControl::customColor,
+            layout.colorSwatches.size() - 1U};
+    }
+    return std::nullopt;
+}
+
 ArrowLineOptionsLayout arrowLineOptionsLayout(
     AnnotationPoint origin,
     std::size_t paletteCount)
@@ -431,6 +632,27 @@ ArrowLineOptionsLayout arrowLineOptionsLayout(
         origin.y + (height - customSize) / 2.0F,
         customSize,
         customSize});
+    const auto lastStrokeWidth = layout.strokeWidths.back();
+    const auto firstSeparatorX = lastStrokeWidth.x + lastStrokeWidth.width
+        + (layout.strokeStyle.x
+            - lastStrokeWidth.x - lastStrokeWidth.width) / 2.0F;
+    const auto secondSeparatorX = layout.strokeStyle.x
+        + layout.strokeStyle.width
+        + (layout.startArrowType.x
+            - layout.strokeStyle.x - layout.strokeStyle.width) / 2.0F;
+    const auto thirdSeparatorX = layout.endArrowType.x
+        + layout.endArrowType.width
+        + (layout.colorSwatches.front().x
+            - layout.endArrowType.x - layout.endArrowType.width) / 2.0F;
+    for (const auto x : {
+             firstSeparatorX, secondSeparatorX, thirdSeparatorX}) {
+        layout.separators.push_back({
+            floorWithoutRuntime(x) + 0.25F,
+            origin.y + height / 2.0F - 6.0F,
+            1.5F,
+            12.0F,
+        });
+    }
     return layout;
 }
 
@@ -645,11 +867,12 @@ std::optional<ShapeOptionHit> shapeOptionHitTest(
     return std::nullopt;
 }
 
-StrokePatternMenuLayout strokePatternMenuLayout(AnnotationRect menu)
+StrokePatternMenuLayout strokePatternMenuLayout(
+    AnnotationRect menu,
+    std::size_t itemCount)
 {
     StrokePatternMenuLayout layout;
     layout.menu = standardized(menu);
-    constexpr std::size_t itemCount = 6U;
     for (std::size_t index = 0; index < itemCount; ++index) {
         const AnnotationRect item{
             layout.menu.x + 4.0F,
