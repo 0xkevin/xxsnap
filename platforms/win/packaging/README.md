@@ -89,3 +89,23 @@ The measurement discards three warm-up iterations and reports P50/P95 plus the
 DXGI/GDI backend mix. It records timing metadata only, never captured pixels.
 Parallels VM results are trend data; the Modern release gate remains P95 <= 250
 ms on the native dual-4K x64 reference machine.
+
+## Interactive startup smoke test
+
+Build the desktop-session helpers, then launch the verifier from a LocalSystem
+automation session (for example, `prlctl exec`) while the target Windows user
+is signed in:
+
+```powershell
+cmake --build C:\Users\kevin\build\xxsnap-modern-x64 `
+    --target xxsnap_interactive_session_launcher `
+             xxsnap_interactive_startup_verifier
+
+C:\Users\kevin\build\xxsnap-modern-x64\platforms\win\xxsnap_interactive_session_launcher.exe `
+    --wait `
+    C:\Users\kevin\build\xxsnap-modern-x64\platforms\win\xxsnap_interactive_startup_verifier.exe `
+    C:\Users\kevin\build\xxsnap-modern-x64\platforms\win\xxsnap_windows.exe
+```
+
+The verifier fails if XxSnap exits, remains tray-only, or does not expose a
+visible capture overlay within ten seconds. It closes the test process on exit.

@@ -75,6 +75,9 @@ struct ShapeOptionsLayout {
     AnnotationRect ellipseMode{};
     AnnotationRect ellipseModeBackground{};
     AnnotationRect strokeStyle{};
+    AnnotationPoint strokeStyleSampleStart{};
+    AnnotationPoint strokeStyleSampleEnd{};
+    AnnotationRect strokeStyleDisclosure{};
     std::vector<AnnotationRect> colorSwatches;
     std::vector<AnnotationRect> separators;
 };
@@ -90,6 +93,8 @@ std::optional<ShapeOptionHit> shapeOptionHitTest(
 struct StrokePatternMenuLayout {
     AnnotationRect menu{};
     std::vector<AnnotationRect> items;
+    std::vector<AnnotationPoint> sampleStarts;
+    std::vector<AnnotationPoint> sampleEnds;
 };
 
 StrokePatternMenuLayout strokePatternMenuLayout(AnnotationRect menu);

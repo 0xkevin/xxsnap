@@ -52,6 +52,7 @@ public:
     void cancel() noexcept;
 
     ShapeInteractionMode mode() const noexcept;
+    std::optional<ShapeResizeHandle> activeResizeHandle() const noexcept;
     const std::optional<ShapeAnnotation>& preview() const noexcept;
 
     std::optional<AnnotationPoint> resizeHandlePoint(

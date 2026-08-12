@@ -44,7 +44,8 @@ void testForcedAquaAppKitVisualContract()
     CHECK(VisualStyleCatalog::selectionBorderDip == 2.0f);
     CHECK(VisualStyleCatalog::selectionHandleDiameterDip == 10.0f);
     CHECK(VisualStyleCatalog::selectionHandleStrokeDip == 2.0f);
-    CHECK(std::wstring_view(VisualStyleCatalog::sizeLabelFontFamily) == L"Arial");
+    CHECK(std::wstring_view(VisualStyleCatalog::sizeLabelFontFamily)
+        == L"Microsoft YaHei");
     CHECK(VisualStyleCatalog::sizeLabelFontSizeDip == 12.0f);
     CHECK(VisualStyleCatalog::sizeLabelHeightDip == 24.0f);
     CHECK(VisualStyleCatalog::toolbarBackgroundAlpha == 0.9f);

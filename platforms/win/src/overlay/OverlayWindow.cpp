@@ -1,5 +1,7 @@
 #include "overlay/OverlayWindow.h"
 
+#include "resource.h"
+
 #include <algorithm>
 #include <limits>
 #include <new>
@@ -134,7 +136,7 @@ OverlayWindowCreateResult OverlayWindow::create(
     windowClass.style = CS_HREDRAW | CS_VREDRAW;
     windowClass.lpfnWndProc = &OverlayWindow::windowProcedure;
     windowClass.hInstance = instance;
-    windowClass.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32515));
+    windowClass.hCursor = nullptr;
     windowClass.lpszClassName = overlayWindowClassName;
     if (RegisterClassExW(&windowClass) == 0U) {
         const auto systemError = GetLastError();
@@ -249,6 +251,48 @@ void OverlayWindow::setRenderState(OverlayRenderState state) noexcept
     }
 }
 
+void OverlayWindow::setCursorStyle(OverlayCursorStyle style) noexcept
+{
+    cursorStyle_ = style;
+    SetCursor(cursor());
+}
+
+HCURSOR OverlayWindow::cursor() const noexcept
+{
+    HCURSOR result = nullptr;
+    switch (cursorStyle_) {
+    case OverlayCursorStyle::arrow:
+        result = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));
+        break;
+    case OverlayCursorStyle::crosshair:
+        result = LoadCursorW(
+            instance_, MAKEINTRESOURCEW(IDC_XXSNAP_CROSSHAIR));
+        break;
+    case OverlayCursorStyle::move:
+        result = LoadCursorW(nullptr, MAKEINTRESOURCEW(32646));
+        break;
+    case OverlayCursorStyle::resizeLeftRight:
+        result = LoadCursorW(nullptr, MAKEINTRESOURCEW(32644));
+        break;
+    case OverlayCursorStyle::resizeUpDown:
+        result = LoadCursorW(nullptr, MAKEINTRESOURCEW(32645));
+        break;
+    case OverlayCursorStyle::resizeTopLeftBottomRight:
+        result = LoadCursorW(nullptr, MAKEINTRESOURCEW(32642));
+        break;
+    case OverlayCursorStyle::resizeTopRightBottomLeft:
+        result = LoadCursorW(nullptr, MAKEINTRESOURCEW(32643));
+        break;
+    case OverlayCursorStyle::rotation:
+        result = LoadCursorW(
+            instance_, MAKEINTRESOURCEW(IDC_XXSNAP_ROTATION));
+        break;
+    }
+    return result != nullptr
+        ? result
+        : LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));
+}
+
 DpiRestartState OverlayWindow::dpiRestartState() const noexcept
 {
     return dpiRestartDecision_.state();
@@ -307,6 +351,12 @@ LRESULT OverlayWindow::handleMessage(
         }
     };
     switch (message) {
+    case WM_SETCURSOR:
+        if (LOWORD(lParam) == HTCLIENT) {
+            SetCursor(cursor());
+            return TRUE;
+        }
+        return DefWindowProcW(window_, message, wParam, lParam);
     case WM_PAINT:
         paint();
         return 0;

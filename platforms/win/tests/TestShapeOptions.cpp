@@ -92,6 +92,9 @@ void testTwoRowDefaultLayoutUsesExactMacDips()
     CHECK((layout.rectangleDisclosure == AnnotationRect{247, 222, 12, 12}));
     CHECK((layout.ellipseMode == AnnotationRect{262, 210, 22, 20}));
     CHECK((layout.strokeStyle == AnnotationRect{304, 210, 102, 20}));
+    CHECK((layout.strokeStyleSampleStart == AnnotationPoint{314, 220}));
+    CHECK((layout.strokeStyleSampleEnd == AnnotationPoint{384, 220}));
+    CHECK((layout.strokeStyleDisclosure == AnnotationRect{390, 218, 7, 5}));
     CHECK(layout.colorSwatches.size() == 21U);
     CHECK((layout.colorSwatches[0] == AnnotationRect{429, 205, 12, 12}));
     CHECK((layout.colorSwatches[10] == AnnotationRect{429, 221, 12, 12}));
@@ -143,6 +146,8 @@ void testSharedHitGeometryAndMenus()
     CHECK(menu.items.size() == 6U);
     CHECK((menu.items[0] == AnnotationRect{14, 24, 94, 20}));
     CHECK((menu.items[5] == AnnotationRect{14, 144, 94, 20}));
+    CHECK((menu.sampleStarts[0] == AnnotationPoint{24, 34}));
+    CHECK((menu.sampleEnds[0] == AnnotationPoint{98, 34}));
     CHECK(hitTestStrokePatternMenu(menu, {20, 150}) == 5U);
 }
 

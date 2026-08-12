@@ -27,6 +27,17 @@ enum class ShapeEditorKeyResult : std::uint8_t {
     requestCopy,
 };
 
+enum class ShapeCursorStyle : std::uint8_t {
+    arrow,
+    crosshair,
+    move,
+    resizeLeftRight,
+    resizeUpDown,
+    resizeTopLeftBottomRight,
+    resizeTopRightBottomLeft,
+    rotation,
+};
+
 class ShapeEditorController final {
 public:
     explicit ShapeEditorController(AnnotationRect canvasBounds) noexcept;
@@ -53,6 +64,7 @@ public:
     void pointerMove(AnnotationPoint point) noexcept;
     bool pointerUp(AnnotationPoint point);
     void cancelInteraction() noexcept;
+    ShapeCursorStyle cursorStyleAt(AnnotationPoint point) const noexcept;
 
     ShapeEditorKeyResult handleKey(
         ShapeEditorKey key,

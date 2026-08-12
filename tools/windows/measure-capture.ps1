@@ -90,6 +90,24 @@ try {
         throw "XxSnap exited during measurement startup with code $($application.ExitCode)."
     }
 
+    $startupDeadline = [DateTime]::UtcNow.AddSeconds(15)
+    do {
+        Start-Sleep -Milliseconds 25
+        $startupMetricCount = (Get-Content -LiteralPath $metricsPath).Count
+    } while ($startupMetricCount -le 1 -and [DateTime]::UtcNow -lt $startupDeadline)
+    if ($startupMetricCount -le 1) {
+        throw "Initial capture did not open during measurement startup."
+    }
+    if (-not [XxSnapMeasurementWindows]::Cancel([uint32]$application.Id)) {
+        throw "Could not close the initial capture overlay before measurement."
+    }
+    Start-Sleep -Milliseconds 75
+    [System.IO.File]::WriteAllText(
+        $metricsPath,
+        "trigger,backend,milliseconds`r`n",
+        [System.Text.UTF8Encoding]::new($false)
+    )
+
     $shell = New-Object -ComObject WScript.Shell
     for ($iteration = 0; $iteration -lt $Iterations; ++$iteration) {
         $before = (Get-Content -LiteralPath $metricsPath).Count

@@ -28,7 +28,7 @@ struct AssetEntry: Encodable {
 
 let definitions = [
     AssetDefinition(name: "settings-more", insetDip: 2, fixedColor: false),
-    AssetDefinition(name: "screenshot", insetDip: -1, fixedColor: false),
+    AssetDefinition(name: "screenshot", insetDip: 0, fixedColor: false),
     AssetDefinition(name: "arrow", insetDip: 0, fixedColor: false),
     AssetDefinition(name: "pencil-tool", insetDip: 2, fixedColor: false),
     AssetDefinition(name: "highlighter-tool", insetDip: 2, fixedColor: false),
@@ -47,9 +47,10 @@ let definitions = [
     AssetDefinition(name: "pin-to-screen", insetDip: 2, fixedColor: false),
     AssetDefinition(name: "save-to-file", insetDip: 2, fixedColor: false),
     AssetDefinition(name: "copy-to-clipboard", insetDip: 2, fixedColor: false),
+    AssetDefinition(name: "refresh-svgrepo-com3", insetDip: 4, fixedColor: true),
 ]
 
-let logicalSizeDip = 20
+let toolbarButtonSizeDip = 20
 let scales = [100, 125, 150, 200]
 let fileManager = FileManager.default
 let scriptURL = URL(fileURLWithPath: #filePath).standardizedFileURL
@@ -91,7 +92,12 @@ func sourceURL(for name: String) throws -> (url: URL, isVector: Bool) {
         userInfo: [NSLocalizedDescriptionKey: "Missing source for \(name)"])
 }
 
-func renderPNG(source: URL, isVector: Bool, pixelEdge: Int) throws -> Data {
+func renderPNG(
+    source: URL,
+    isVector: Bool,
+    logicalSizeDip: Int,
+    pixelEdge: Int
+) throws -> Data {
     guard let image = NSImage(contentsOf: source) else {
         throw NSError(
             domain: "ToolbarAssetGenerator",
@@ -158,6 +164,16 @@ do {
     for definition in definitions.sorted(by: { $0.name < $1.name }) {
         let source = try sourceURL(for: definition.name)
         let sourceData = try Data(contentsOf: source.url)
+        let logicalSizeDip = Int((
+            Double(toolbarButtonSizeDip) - definition.insetDip * 2.0
+        ).rounded(.toNearestOrAwayFromZero))
+        guard logicalSizeDip > 0 else {
+            throw NSError(
+                domain: "ToolbarAssetGenerator",
+                code: 6,
+                userInfo: [NSLocalizedDescriptionKey:
+                    "Invalid rendered size for \(definition.name)"])
+        }
         var generated: [String: String] = [:]
 
         for scale in scales {
@@ -173,6 +189,7 @@ do {
             let png = try renderPNG(
                 source: source.url,
                 isVector: source.isVector,
+                logicalSizeDip: logicalSizeDip,
                 pixelEdge: pixelEdge)
             try png.write(to: output, options: .atomic)
             generated[String(scale)] = relativePath(for: output)

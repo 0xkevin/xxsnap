@@ -743,19 +743,15 @@ struct OverlayRenderer::Impl final {
     }
 
     HRESULT drawStrokeSample(
-        AnnotationRect bounds,
+        AnnotationPoint startPoint,
+        AnnotationPoint endPoint,
         AnnotationStrokePattern pattern,
         float width,
-        ID2D1Brush* brush,
-        float leadingInset = 10.0F,
-        float trailingInset = 10.0F) noexcept
+        ID2D1Brush* brush) noexcept
     {
-        const auto start = D2D1::Point2F(
-            bounds.x + leadingInset, bounds.y + bounds.height / 2.0F);
-        const auto end = D2D1::Point2F(
-            bounds.x + bounds.width - trailingInset,
-            bounds.y + bounds.height / 2.0F);
-        const auto dashes = strokeDashPattern(pattern, width);
+        const auto start = D2D1::Point2F(startPoint.x, startPoint.y);
+        const auto end = D2D1::Point2F(endPoint.x, endPoint.y);
+        const auto dashes = normalizedStrokeDashPattern(pattern, width);
         ComPtr<ID2D1StrokeStyle> strokeStyle;
         if (!dashes.empty()) {
             auto properties = D2D1::StrokeStyleProperties(
@@ -775,15 +771,36 @@ struct OverlayRenderer::Impl final {
                 return result;
             }
         }
-        renderTarget->DrawLine(start, end, brush, width, strokeStyle.get());
         if (pattern == AnnotationStrokePattern::sketchSolid
             || pattern == AnnotationStrokePattern::sketchDashed) {
-            renderTarget->DrawLine(
-                D2D1::Point2F(start.x + 1.0F, start.y + 1.25F),
-                D2D1::Point2F(end.x - 1.0F, end.y + 0.5F),
-                brush,
-                (std::max)(1.0F, width * 0.45F),
-                strokeStyle.get());
+            ComPtr<ID2D1PathGeometry> geometry;
+            auto result = d2dFactory->CreatePathGeometry(geometry.put());
+            ComPtr<ID2D1GeometrySink> sink;
+            if (SUCCEEDED(result)) {
+                result = geometry->Open(sink.put());
+            }
+            if (FAILED(result)) {
+                return result;
+            }
+            const auto points = sketchStrokeSamplePoints(
+                startPoint, endPoint, width);
+            if (!points.empty()) {
+                sink->BeginFigure(
+                    D2D1::Point2F(points.front().x, points.front().y),
+                    D2D1_FIGURE_BEGIN_HOLLOW);
+                for (std::size_t index = 1; index < points.size(); ++index) {
+                    sink->AddLine(D2D1::Point2F(points[index].x, points[index].y));
+                }
+                sink->EndFigure(D2D1_FIGURE_END_OPEN);
+            }
+            result = sink->Close();
+            if (FAILED(result)) {
+                return result;
+            }
+            renderTarget->DrawGeometry(
+                geometry.get(), brush, width, strokeStyle.get());
+        } else {
+            renderTarget->DrawLine(start, end, brush, width, strokeStyle.get());
         }
         return S_OK;
     }
@@ -822,14 +839,19 @@ struct OverlayRenderer::Impl final {
         ComPtr<ID2D1SolidColorBrush> separatorBrush;
         ComPtr<ID2D1SolidColorBrush> selectionStrokeBrush;
         ComPtr<ID2D1SolidColorBrush> controlBrush;
+        ComPtr<ID2D1SolidColorBrush> controlBackgroundBrush;
         ComPtr<ID2D1SolidColorBrush> textBrush;
         ComPtr<ID2D1SolidColorBrush> fillPreviewBrush;
         const std::array results{
-            createBrush(D2D1::ColorF(1.0F, 1.0F, 1.0F, 0.90F), panelBrush),
+            createBrush(
+                colorWithMultipliedAlpha(
+                    VisualStyleCatalog::toolbarBackgroundColor, 0.96F),
+                panelBrush),
             createBrush(D2D1::ColorF(0.0F, 0.0F, 0.0F, 0.16F), borderBrush),
             createBrush(D2D1::ColorF(0.0F, 0.0F, 0.0F, 0.15F), separatorBrush),
             createBrush(D2D1::ColorF(0.0F, 0.48F, 1.0F, 1.0F), selectionStrokeBrush),
             createBrush(annotationColor(options.state.style().strokeColor), controlBrush),
+            createBrush(D2D1::ColorF(1.0F, 1.0F, 1.0F, 1.0F), controlBackgroundBrush),
             createBrush(D2D1::ColorF(0.12F, 0.12F, 0.12F, 1.0F), textBrush),
             createBrush(
                 options.state.style().fillEnabled
@@ -937,28 +959,29 @@ struct OverlayRenderer::Impl final {
 
         const auto strokeField = D2D1::RoundedRect(
             d2dRect(options.layout.strokeStyle), 4.0F, 4.0F);
+        renderTarget->FillRoundedRectangle(
+            &strokeField, controlBackgroundBrush.get());
         renderTarget->DrawRoundedRectangle(&strokeField, borderBrush.get(), 1.0F);
         auto strokeResult = drawStrokeSample(
-            options.layout.strokeStyle,
+            options.layout.strokeStyleSampleStart,
+            options.layout.strokeStyleSampleEnd,
             options.state.style().strokePattern,
             2.0F,
-            textBrush.get(),
-            10.0F,
-            22.0F);
+            textBrush.get());
         if (FAILED(strokeResult)) {
             return error(OverlayRendererErrorCode::drawFailed, strokeResult);
         }
-        const auto fieldArrowX = options.layout.strokeStyle.x
-            + options.layout.strokeStyle.width - 8.0F;
-        const auto fieldArrowY = options.layout.strokeStyle.y + 10.0F;
-        renderTarget->DrawLine(
-            D2D1::Point2F(fieldArrowX - 2.5F, fieldArrowY - 1.5F),
-            D2D1::Point2F(fieldArrowX, fieldArrowY + 1.5F),
-            textBrush.get(), 1.0F);
-        renderTarget->DrawLine(
-            D2D1::Point2F(fieldArrowX, fieldArrowY + 1.5F),
-            D2D1::Point2F(fieldArrowX + 2.5F, fieldArrowY - 1.5F),
-            textBrush.get(), 1.0F);
+        const auto disclosure = options.layout.strokeStyleDisclosure;
+        strokeResult = fillTriangle(
+            D2D1::Point2F(disclosure.x, disclosure.y),
+            D2D1::Point2F(disclosure.x + disclosure.width, disclosure.y),
+            D2D1::Point2F(
+                disclosure.x + disclosure.width / 2.0F,
+                disclosure.y + disclosure.height),
+            textBrush.get());
+        if (FAILED(strokeResult)) {
+            return error(OverlayRendererErrorCode::drawFailed, strokeResult);
+        }
 
         const auto& palette = macShapePalette();
         for (std::size_t index = 0;
@@ -1004,11 +1027,11 @@ struct OverlayRenderer::Impl final {
                  index < options.strokePatternMenu->items.size()
                     && index < patterns.size();
                  ++index) {
-                const auto item = options.strokePatternMenu->items[index];
                 const bool selected = patterns[index]
                     == options.state.style().strokePattern;
                 strokeResult = drawStrokeSample(
-                    item,
+                    options.strokePatternMenu->sampleStarts[index],
+                    options.strokePatternMenu->sampleEnds[index],
                     patterns[index],
                     2.0F,
                     selected ? selectionStrokeBrush.get() : textBrush.get());
@@ -1021,7 +1044,7 @@ struct OverlayRenderer::Impl final {
         if (options.cornerRadiusPanel.has_value()) {
             const auto& panel = *options.cornerRadiusPanel;
             drawPanel(panel.panel, 6.0F);
-            const wchar_t label[] = L"圆角";
+            const wchar_t label[] = L"\u5706\u89d2";
             renderTarget->DrawText(
                 label, 2U, textFormat.get(), d2dRect(panel.label),
                 textBrush.get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
@@ -1181,6 +1204,21 @@ struct OverlayRenderer::Impl final {
                     return error(
                         OverlayRendererErrorCode::drawFailed,
                         annotationResult);
+                }
+                if (state.annotationPlan.rotationHandle.has_value()) {
+                    const auto& point = *state.annotationPlan.rotationHandle;
+                    constexpr auto iconSizeDip = ToolbarMetrics::buttonSizeDip
+                        - rotationHandleIcon().insetDip * 2.0F;
+                    const auto destination = D2D1::RectF(
+                        point.x - iconSizeDip / 2.0F,
+                        point.y - iconSizeDip / 2.0F,
+                        point.x + iconSizeDip / 2.0F,
+                        point.y + iconSizeDip / 2.0F);
+                    renderTarget->DrawBitmap(
+                        iconBitmaps[rotationHandleIconIndex()].get(),
+                        destination,
+                        1.0F,
+                        D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
                 }
             }
 
