@@ -1,4 +1,5 @@
 #include "annotation/ShapeInteraction.h"
+#include "annotation/TextAnnotationRenderer.h"
 
 #include <array>
 
@@ -292,8 +293,13 @@ bool ShapeInteraction::commit()
         }
         break;
     case ShapeInteractionMode::moving:
-    case ShapeInteractionMode::resizing:
         changed = document_.updateRect(targetId_, preview_->rect);
+        break;
+    case ShapeInteractionMode::resizing:
+        changed = isTextAnnotation(*preview_)
+            ? document_.updateTextGeometry(
+                targetId_, preview_->rect, preview_->style)
+            : document_.updateRect(targetId_, preview_->rect);
         break;
     case ShapeInteractionMode::rotating:
         changed = document_.updateRotation(
@@ -556,7 +562,31 @@ void ShapeInteraction::updateResizing(AnnotationPoint point) noexcept
     const auto resized = standardized({left, top, right - left, bottom - top});
     if (resized.width >= minimumShapeSizeDip
         && resized.height >= minimumShapeSizeDip) {
-        preview_->rect = resized;
+        if (isTextAnnotation(*preview_)) {
+            const auto widthScale = resized.width
+                / (std::max)(minimumShapeSizeDip, startRect_.width);
+            const auto heightScale = resized.height
+                / (std::max)(minimumShapeSizeDip, startRect_.height);
+            const auto scale = (std::max)(widthScale, heightScale);
+            const auto* original = document_.find(targetId_);
+            const auto originalSize = original != nullptr
+                ? original->style.textSize : preview_->style.textSize;
+            preview_->style.textSize = clampedTextSize(originalSize * scale);
+            const AnnotationPoint center{
+                resized.x + resized.width / 2.0F,
+                resized.y + resized.height / 2.0F,
+            };
+            const auto measured = measuredTextRect(
+                {center.x, center.y}, *preview_->text, preview_->style);
+            preview_->rect = {
+                center.x - measured.width / 2.0F,
+                center.y - measured.height / 2.0F,
+                measured.width,
+                measured.height,
+            };
+        } else {
+            preview_->rect = resized;
+        }
     }
 }
 

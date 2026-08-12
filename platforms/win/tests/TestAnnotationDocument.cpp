@@ -214,6 +214,32 @@ void testMosaicSliderDragCreatesOneUndoEntry()
     CHECK(document.find(id) == nullptr);
 }
 
+void testTextEditTransactionKeepsUnicodeAndCancelsAtomically()
+{
+    AnnotationDocument document;
+    AnnotationStyle style;
+    style.textFontFamily = L"Microsoft YaHei";
+    document.beginTextEdit();
+    const auto id = document.addText({10, 20, 40, 24}, L"", style);
+    CHECK(id != invalidAnnotationId);
+    CHECK(document.updateText(id, L"中文", {10, 20, 80, 30}));
+    auto larger = style;
+    larger.textSize = 12.0F;
+    CHECK(document.updateTextGeometry(id, {10, 20, 100, 45}, larger));
+    document.endTextEdit(true);
+    CHECK(*document.find(id)->text == L"中文");
+    CHECK(document.find(id)->style.textSize == 12.0F);
+    CHECK(document.undo());
+    CHECK(document.find(id) == nullptr);
+    CHECK(document.redo());
+    CHECK(*document.find(id)->text == L"中文");
+
+    document.beginTextEdit();
+    CHECK(document.updateText(id, L"临时", {10, 20, 90, 30}));
+    document.endTextEdit(false);
+    CHECK(*document.find(id)->text == L"中文");
+}
+
 } // namespace
 
 int main()
@@ -226,5 +252,6 @@ int main()
     testBrushPathHistoryAndBounds();
     testMarkerLineHistoryAndZeroLengthDot();
     testMosaicSliderDragCreatesOneUndoEntry();
+    testTextEditTransactionKeepsUnicodeAndCancelsAtomically();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

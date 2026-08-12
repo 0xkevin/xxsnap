@@ -2,6 +2,8 @@
 
 #include "resource.h"
 
+#include <imm.h>
+
 #include <algorithm>
 #include <limits>
 #include <new>
@@ -248,6 +250,8 @@ void OverlayWindow::setSelection(
 
 void OverlayWindow::setRenderState(OverlayRenderState state) noexcept
 {
+    updateTextInputActivation(
+        state.selectedToolbarAction == ToolbarAction::text);
     renderState_ = std::move(state);
     if (window_ != nullptr) {
         if (renderState_.eyedropper.has_value()
@@ -260,6 +264,23 @@ void OverlayWindow::setRenderState(OverlayRenderState state) noexcept
             KillTimer(window_, colorSamplerCopySuccessTimerIdentifier);
         }
         InvalidateRect(window_, nullptr, FALSE);
+    }
+}
+
+void OverlayWindow::updateTextInputActivation(bool enabled) noexcept
+{
+    if (window_ == nullptr) {
+        return;
+    }
+    const auto current = GetWindowLongPtrW(window_, GWL_EXSTYLE);
+    const auto desired = enabled
+        ? current & ~static_cast<LONG_PTR>(WS_EX_NOACTIVATE)
+        : current | static_cast<LONG_PTR>(WS_EX_NOACTIVATE);
+    if (desired != current) {
+        SetWindowLongPtrW(window_, GWL_EXSTYLE, desired);
+        SetWindowPos(window_, nullptr, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER
+                | SWP_NOACTIVATE | SWP_FRAMECHANGED);
     }
 }
 
@@ -411,6 +432,9 @@ HCURSOR OverlayWindow::cursor() const noexcept
     case OverlayCursorStyle::mosaic:
         result = markerCursor_;
         break;
+    case OverlayCursorStyle::textInput:
+        result = LoadCursorW(nullptr, MAKEINTRESOURCEW(32513));
+        break;
     case OverlayCursorStyle::eyedropper:
         result = LoadCursorW(
             instance_, MAKEINTRESOURCEW(IDC_XXSNAP_EYEDROPPER));
@@ -512,6 +536,10 @@ LRESULT OverlayWindow::handleMessage(
         return 0;
     }
     case WM_LBUTTONDOWN:
+        if (renderState_.selectedToolbarAction == ToolbarAction::text) {
+            SetForegroundWindow(window_);
+            SetFocus(window_);
+        }
         dispatchInput({
             OverlayWindowInputKind::pointerDown,
             PixelPoint{
@@ -529,6 +557,12 @@ LRESULT OverlayWindow::handleMessage(
             },
         });
         return 0;
+    case WM_MOUSEWHEEL: {
+        OverlayWindowInput input{OverlayWindowInputKind::mouseWheel, {}};
+        input.wheelDelta = GET_WHEEL_DELTA_WPARAM(wParam);
+        dispatchInput(input);
+        return 0;
+    }
     case WM_LBUTTONUP:
         dispatchInput({
             OverlayWindowInputKind::pointerUp,
@@ -604,6 +638,25 @@ LRESULT OverlayWindow::handleMessage(
             dispatchInput({OverlayWindowInputKind::escape, {}});
             return 0;
         }
+        if (wParam == 'V'
+            && (GetKeyState(VK_CONTROL) & 0x8000) != 0
+            && renderState_.selectedToolbarAction == ToolbarAction::text
+            && OpenClipboard(window_)) {
+            const auto handle = GetClipboardData(CF_UNICODETEXT);
+            if (handle != nullptr) {
+                const auto* value = static_cast<const wchar_t*>(
+                    GlobalLock(handle));
+                if (value != nullptr) {
+                    OverlayWindowInput input{
+                        OverlayWindowInputKind::textInput, {}};
+                    input.text = value;
+                    dispatchInput(input);
+                    GlobalUnlock(handle);
+                }
+            }
+            CloseClipboard();
+            return 0;
+        }
         dispatchInput({
             OverlayWindowInputKind::keyDown,
             {},
@@ -612,6 +665,35 @@ LRESULT OverlayWindow::handleMessage(
             (GetKeyState(VK_SHIFT) & 0x8000) != 0,
         });
         return 0;
+    case WM_CHAR:
+        if (wParam >= 0x20U && wParam != 0x7FU
+            && renderState_.selectedToolbarAction == ToolbarAction::text) {
+            OverlayWindowInput input{OverlayWindowInputKind::textInput, {}};
+            input.text.push_back(static_cast<wchar_t>(wParam));
+            dispatchInput(input);
+        }
+        return 0;
+    case WM_IME_COMPOSITION:
+        if ((lParam & GCS_RESULTSTR) != 0
+            && renderState_.selectedToolbarAction == ToolbarAction::text) {
+            const auto context = ImmGetContext(window_);
+            if (context != nullptr) {
+                const auto byteCount = ImmGetCompositionStringW(
+                    context, GCS_RESULTSTR, nullptr, 0U);
+                if (byteCount > 0) {
+                    OverlayWindowInput input{
+                        OverlayWindowInputKind::textInput, {}};
+                    input.text.resize(
+                        static_cast<std::size_t>(byteCount) / sizeof(wchar_t));
+                    ImmGetCompositionStringW(context, GCS_RESULTSTR,
+                        input.text.data(), static_cast<DWORD>(byteCount));
+                    dispatchInput(input);
+                }
+                ImmReleaseContext(window_, context);
+            }
+            return 0;
+        }
+        return DefWindowProcW(window_, message, wParam, lParam);
     case WM_DPICHANGED: {
         RestartCallback callback;
         try {

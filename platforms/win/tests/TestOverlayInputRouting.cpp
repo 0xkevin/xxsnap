@@ -475,7 +475,7 @@ void testShapeToolIsNonTerminalAndEditsThroughSharedPresentation()
     createReadySelection(router);
 
     auto owner = router.presentations()[1];
-    CHECK(owner.toolbarItems.size() == 11U);
+    CHECK(owner.toolbarItems.size() == 12U);
     const auto rectangle = owner.toolbarItems[0];
     CHECK(rectangle.action == xxsnap::win::ToolbarAction::rectangle);
     const auto capturesBeforeTool = platform.captureCalls;
@@ -528,9 +528,13 @@ void testShapeToolIsNonTerminalAndEditsThroughSharedPresentation()
 
     owner = router.presentations()[1];
     CHECK(owner.annotationPlan.items.size() == 1U);
-    CHECK(owner.toolbarItems[6].action == xxsnap::win::ToolbarAction::undo);
-    CHECK(owner.toolbarItems[6].enabled);
-    CHECK(router.pointerDown(rightWindow, owner.toolbarItems[6].centerPhysical));
+    const auto undo = std::find_if(owner.toolbarItems.begin(),
+        owner.toolbarItems.end(), [](const auto& item) {
+            return item.action == xxsnap::win::ToolbarAction::undo;
+        });
+    CHECK(undo != owner.toolbarItems.end());
+    CHECK(undo->enabled);
+    CHECK(router.pointerDown(rightWindow, undo->centerPhysical));
     CHECK(router.annotationDocument().annotations().empty());
     CHECK(actions.empty());
 
@@ -549,7 +553,7 @@ void testArrowToolUsesMacOptionsMenuAndCreatesEditableCurve()
     createReadySelection(router);
 
     auto owner = router.presentations()[1];
-    CHECK(owner.toolbarItems.size() == 11U);
+    CHECK(owner.toolbarItems.size() == 12U);
     CHECK(owner.toolbarItems[1].action == xxsnap::win::ToolbarAction::polyline);
     CHECK(router.pointerDown(
         rightWindow, owner.toolbarItems[1].centerPhysical));
@@ -872,6 +876,51 @@ void testMosaicToolbarOptionsAndLiveComposite()
         == xxsnap::win::AnnotationKind::mosaicRectangle);
 }
 
+void testTextToolbarAcceptsUnicodeAndUsesRealPopupMenus()
+{
+    FakePlatform platform;
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform, {}, true);
+    createReadySelection(router);
+    auto owner = router.presentations()[1];
+    CHECK(owner.toolbarItems[6].action == xxsnap::win::ToolbarAction::text);
+    CHECK(router.keyPressed(ShapeEditorKey::text, false, false));
+    owner = router.presentations()[1];
+    CHECK(owner.textOptions.has_value());
+    CHECK(owner.textOptions->state.style().textFontFamily
+        == L"Microsoft YaHei");
+    CHECK(router.pointerDown(rightWindow, PixelPoint{30, 100}));
+    router.pointerUp(rightWindow, PixelPoint{30, 100});
+    CHECK(router.textInput(L"中文"));
+    CHECK(router.textInput(L"A"));
+    CHECK(router.keyPressed(ShapeEditorKey::left, false, false));
+    CHECK(router.textInput(L"测"));
+    CHECK(router.keyPressed(ShapeEditorKey::text, false, false));
+    CHECK(router.annotationDocument().annotations().size() == 1U);
+    CHECK(*router.annotationDocument().annotations()[0].text == L"中文测A");
+
+    owner = router.presentations()[1];
+    CHECK(router.keyPressed(ShapeEditorKey::text, false, false));
+    owner = router.presentations()[1];
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.textOptions->layout.fontFamily)));
+    owner = router.presentations()[1];
+    CHECK(owner.textOptions->popupMenu.has_value());
+    CHECK(!owner.textOptions->popupLabels.empty());
+    if (!owner.textOptions->popupLabels.empty()) {
+        CHECK(owner.textOptions->popupLabels[0] == L"Microsoft YaHei");
+    }
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.textOptions->layout.textSize)));
+    owner = router.presentations()[1];
+    CHECK(owner.textOptions->popupMenu.has_value());
+    CHECK(owner.textOptions->selectedPopupIndex.has_value());
+    if (owner.textOptions->selectedPopupIndex.has_value()) {
+        CHECK(owner.textOptions->popupLabels[
+            *owner.textOptions->selectedPopupIndex] == L"8");
+    }
+}
+
 } // namespace
 
 int main()
@@ -893,5 +942,6 @@ int main()
     testEyedropperSamplesCopiesAndMeasuresLikeMac();
     testShapeCannotBeCreatedOutsideLockedSelectionOnOverlay();
     testMosaicToolbarOptionsAndLiveComposite();
+    testTextToolbarAcceptsUnicodeAndUsesRealPopupMenus();
     return failureCount == 0 ? 0 : 1;
 }

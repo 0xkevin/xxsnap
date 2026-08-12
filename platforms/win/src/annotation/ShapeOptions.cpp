@@ -913,6 +913,225 @@ int mosaicValueForPoint(
             - mosaicMinimumRedactionValue) + 0.5F);
 }
 
+TextOptionsState::TextOptionsState() noexcept
+    : selectedPaletteIndex_(0U)
+{
+    style_.strokeColor = palette.front();
+    style_.fillColor = palette.front();
+    style_.strokeWidthDip = 0.0F;
+    style_.strokePattern = AnnotationStrokePattern::solid;
+    style_.fillEnabled = false;
+    style_.textSize = textDefaultSize;
+    style_.textFontFamily = textDefaultFontFamily;
+    style_.textOutlineEnabled = true;
+}
+
+const AnnotationStyle& TextOptionsState::style() const noexcept
+{
+    return style_;
+}
+
+std::optional<std::size_t>
+TextOptionsState::selectedPaletteIndex() const noexcept
+{
+    return selectedPaletteIndex_;
+}
+
+bool TextOptionsState::load(AnnotationStyle style) noexcept
+{
+    style.strokeWidthDip = 0.0F;
+    style.strokePattern = AnnotationStrokePattern::solid;
+    style.fillEnabled = false;
+    style.textSize = clampedTextSize(style.textSize);
+    if (style.textFontFamily.empty()) {
+        style.textFontFamily = textDefaultFontFamily;
+    }
+    const auto changed = style_ != style;
+    style_ = std::move(style);
+    refreshPaletteSelection();
+    return changed;
+}
+
+bool TextOptionsState::toggleBold() noexcept
+{
+    style_.textBold = !style_.textBold;
+    return true;
+}
+
+bool TextOptionsState::toggleItalic() noexcept
+{
+    style_.textItalic = !style_.textItalic;
+    return true;
+}
+
+bool TextOptionsState::toggleOutline() noexcept
+{
+    style_.textOutlineEnabled = !style_.textOutlineEnabled;
+    return true;
+}
+
+bool TextOptionsState::setFontFamily(std::wstring family)
+{
+    if (family.empty() || style_.textFontFamily == family) {
+        return false;
+    }
+    style_.textFontFamily = std::move(family);
+    return true;
+}
+
+bool TextOptionsState::setTextSize(float size) noexcept
+{
+    size = clampedTextSize(size);
+    if (style_.textSize == size) {
+        return false;
+    }
+    style_.textSize = size;
+    return true;
+}
+
+bool TextOptionsState::selectPalette(std::size_t index) noexcept
+{
+    if (index >= palette.size()) {
+        return false;
+    }
+    const auto changed = style_.strokeColor != palette[index]
+        || selectedPaletteIndex_ != index;
+    style_.strokeColor = palette[index];
+    style_.fillColor = palette[index];
+    selectedPaletteIndex_ = index;
+    return changed;
+}
+
+bool TextOptionsState::selectCustomColor(AnnotationColor color) noexcept
+{
+    const auto changed = style_.strokeColor != color
+        || selectedPaletteIndex_.has_value();
+    style_.strokeColor = color;
+    style_.fillColor = color;
+    selectedPaletteIndex_.reset();
+    return changed;
+}
+
+void TextOptionsState::refreshPaletteSelection() noexcept
+{
+    selectedPaletteIndex_.reset();
+    for (std::size_t index = 0; index < palette.size(); ++index) {
+        if (palette[index] == style_.strokeColor) {
+            selectedPaletteIndex_ = index;
+            return;
+        }
+    }
+}
+
+TextOptionsLayout textOptionsLayout(
+    AnnotationPoint origin,
+    std::size_t paletteCount)
+{
+    TextOptionsLayout layout;
+    layout.paletteCount = clampedPaletteCount(paletteCount);
+    const auto rows = layout.paletteCount <= 10U ? 1U : 2U;
+    const auto columns = (layout.paletteCount + rows - 1U) / rows;
+    const auto customSize = rows == 1U ? 20.0F : 32.0F;
+    const auto height = rows == 1U ? 30.0F : 40.0F;
+    const auto width = 350.0F + static_cast<float>(columns) * 16.0F
+        + 2.0F + customSize + 10.0F;
+    layout.toolbar = {origin.x, origin.y, width, height};
+    const auto y = origin.y + (height - 20.0F) / 2.0F;
+    layout.bold = {origin.x + 10.0F, y, 22.0F, 20.0F};
+    layout.italic = {origin.x + 38.0F, y, 22.0F, 20.0F};
+    layout.outline = {origin.x + 66.0F, y, 22.0F, 20.0F};
+    layout.fontFamily = {origin.x + 108.0F, y, 154.0F, 20.0F};
+    layout.textSize = {origin.x + 282.0F, y, 48.0F, 20.0F};
+    const auto paletteX = origin.x + 350.0F;
+    for (std::size_t index = 0; index < layout.paletteCount; ++index) {
+        const auto column = index % columns;
+        const auto row = rows == 1U ? 0U : index / columns;
+        const auto firstRowY = rows == 1U
+            ? origin.y + height / 2.0F - 6.0F : origin.y + 23.0F;
+        layout.colorSwatches.push_back({
+            paletteX + static_cast<float>(column) * 16.0F,
+            firstRowY - static_cast<float>(row) * 16.0F,
+            12.0F, 12.0F,
+        });
+    }
+    layout.colorSwatches.push_back({
+        paletteX + static_cast<float>(columns) * 16.0F + 2.0F,
+        origin.y + (height - customSize) / 2.0F,
+        customSize, customSize,
+    });
+    layout.separators = {
+        {origin.x + 98.0F, origin.y + height / 2.0F - 6.0F, 1.5F, 12.0F},
+        {origin.x + 272.0F, origin.y + height / 2.0F - 6.0F, 1.5F, 12.0F},
+        {origin.x + 340.0F, origin.y + height / 2.0F - 6.0F, 1.5F, 12.0F},
+    };
+    return layout;
+}
+
+std::optional<TextOptionHit> textOptionHitTest(
+    const TextOptionsLayout& layout,
+    AnnotationPoint point) noexcept
+{
+    if (contains(layout.bold, point)) return TextOptionHit{TextOptionControl::bold, 0U};
+    if (contains(layout.italic, point)) return TextOptionHit{TextOptionControl::italic, 0U};
+    if (contains(layout.outline, point)) return TextOptionHit{TextOptionControl::outline, 0U};
+    if (contains(layout.fontFamily, point)) return TextOptionHit{TextOptionControl::fontFamily, 0U};
+    if (contains(layout.textSize, point)) return TextOptionHit{TextOptionControl::textSize, 0U};
+    for (std::size_t index = 0; index + 1U < layout.colorSwatches.size(); ++index) {
+        if (contains(inset(layout.colorSwatches[index], -3.0F, -3.0F), point)) {
+            return TextOptionHit{TextOptionControl::palette, index};
+        }
+    }
+    if (!layout.colorSwatches.empty()
+        && contains(inset(layout.colorSwatches.back(), -2.0F, -2.0F), point)) {
+        return TextOptionHit{TextOptionControl::customColor,
+            layout.colorSwatches.size() - 1U};
+    }
+    return std::nullopt;
+}
+
+TextPopupMenuLayout textPopupMenuLayout(
+    AnnotationRect field,
+    std::size_t itemCount,
+    float safeHeight) noexcept
+{
+    constexpr float itemHeight = 24.0F;
+    constexpr float inset = 4.0F;
+    const auto height = inset * 2.0F
+        + itemHeight * static_cast<float>(itemCount);
+    AnnotationRect menu{
+        field.x,
+        field.y + field.height + 8.0F,
+        field.width,
+        height,
+    };
+    if (menu.y + menu.height > safeHeight - 8.0F) {
+        menu.y = field.y - 8.0F - menu.height;
+    }
+    menu.y = (std::max)(8.0F,
+        (std::min)(menu.y, safeHeight - 8.0F - menu.height));
+    TextPopupMenuLayout layout{menu, {}};
+    layout.items.reserve(itemCount);
+    for (std::size_t index = 0; index < itemCount; ++index) {
+        layout.items.push_back({
+            menu.x + inset,
+            menu.y + inset + itemHeight * static_cast<float>(index),
+            menu.width - inset * 2.0F,
+            itemHeight,
+        });
+    }
+    return layout;
+}
+
+std::optional<std::size_t> textPopupMenuHitTest(
+    const TextPopupMenuLayout& layout,
+    AnnotationPoint point) noexcept
+{
+    for (std::size_t index = 0; index < layout.items.size(); ++index) {
+        if (contains(layout.items[index], point)) return index;
+    }
+    return std::nullopt;
+}
+
 ArrowLineOptionsLayout arrowLineOptionsLayout(
     AnnotationPoint origin,
     std::size_t paletteCount)

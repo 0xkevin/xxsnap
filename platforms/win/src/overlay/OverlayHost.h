@@ -90,6 +90,14 @@ struct OverlayPresentationMosaicOptions {
     MosaicOptionsState state;
 };
 
+struct OverlayPresentationTextOptions {
+    TextOptionsLayout layout;
+    TextOptionsState state;
+    std::optional<TextPopupMenuLayout> popupMenu;
+    std::vector<std::wstring> popupLabels;
+    std::optional<std::size_t> selectedPopupIndex;
+};
+
 struct OverlayPresentationEyedropper {
     AnnotationPoint pointer{};
     AnnotationColor color{};
@@ -112,6 +120,7 @@ struct OverlayPresentation {
     std::optional<OverlayPresentationBrushOptions> brushOptions;
     std::optional<OverlayPresentationMarkerOptions> markerOptions;
     std::optional<OverlayPresentationMosaicOptions> mosaicOptions;
+    std::optional<OverlayPresentationTextOptions> textOptions;
     std::optional<OverlayPresentationEyedropper> eyedropper;
 };
 
@@ -171,6 +180,9 @@ public:
         ShapeEditorKey key,
         bool control,
         bool shift) noexcept;
+    bool textInput(std::wstring text);
+    bool mouseWheel(int delta) noexcept;
+    bool isEditingText() const noexcept;
     bool eyedropperShiftPressed() noexcept;
     void shutdownForRestart() noexcept;
 
@@ -205,6 +217,8 @@ private:
     std::optional<MarkerOptionsLayout> currentMarkerOptionsLayout(
         const OverlaySurface& surface) const;
     std::optional<MosaicOptionsLayout> currentMosaicOptionsLayout(
+        const OverlaySurface& surface) const;
+    std::optional<TextOptionsLayout> currentTextOptionsLayout(
         const OverlaySurface& surface) const;
     void cancelOnce() noexcept;
     void completeOnce(OverlayInputAction action) noexcept;

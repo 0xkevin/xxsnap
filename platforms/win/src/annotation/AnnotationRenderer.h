@@ -8,6 +8,7 @@
 
 #include <Windows.h>
 #include <d2d1.h>
+#include <dwrite.h>
 
 #include <optional>
 #include <vector>
@@ -24,13 +25,19 @@ struct AnnotationRenderPlan {
     std::vector<AnnotationPoint> resizeHandles;
     std::vector<AnnotationPoint> lineHandles;
     std::optional<AnnotationPoint> rotationHandle;
+    std::optional<AnnotationRect> textCaret;
+    float textCaretRotationDegrees = 0.0F;
+    std::optional<AnnotationPoint> textCaretRotationCenter;
+    std::optional<AnnotationPoint> textDeleteHandle;
 };
 
 AnnotationRenderPlan buildAnnotationRenderPlan(
     const AnnotationDocument& document,
     const std::optional<ShapeAnnotation>& preview,
     AnnotationPoint selectionOriginDip,
-    bool showEditingAffordances);
+    bool showEditingAffordances,
+    std::optional<AnnotationId> editingTextId = std::nullopt,
+    std::size_t textCaretPosition = 0U);
 
 std::vector<float> strokeDashPattern(
     AnnotationStrokePattern pattern,
@@ -59,6 +66,7 @@ public:
 
 private:
     ID2D1Factory* factory_ = nullptr;
+    IDWriteFactory* dwriteFactory_ = nullptr;
 };
 
 } // namespace xxsnap::win

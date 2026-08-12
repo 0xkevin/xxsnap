@@ -156,6 +156,38 @@ AnnotationId AnnotationDocument::addMosaicRectangle(
     return id;
 }
 
+AnnotationId AnnotationDocument::addText(
+    AnnotationRect rect,
+    std::wstring text,
+    AnnotationStyle style,
+    float rotationDegrees)
+{
+    rect = standardized(rect);
+    if (rect.width <= 0.0F || rect.height <= 0.0F
+        || nextId_ == invalidAnnotationId) {
+        return invalidAnnotationId;
+    }
+    style.strokeWidthDip = 0.0F;
+    style.strokePattern = AnnotationStrokePattern::solid;
+    style.fillEnabled = false;
+    style.textSize = clampedTextSize(style.textSize);
+    auto before = snapshot();
+    const auto id = nextId_++;
+    annotations_.push_back({
+        id, AnnotationKind::text, rect, std::move(style), rotationDegrees,
+        std::nullopt, std::nullopt, std::nullopt, std::nullopt,
+        std::nullopt, std::move(text),
+    });
+    selectedId_ = id;
+    if (textEditBefore_.has_value()) {
+        textEditChanged_ = true;
+        ++revision_;
+        return id;
+    }
+    commit(std::move(before));
+    return id;
+}
+
 bool AnnotationDocument::remove(AnnotationId id)
 {
     const auto index = indexOf(id);
@@ -179,7 +211,8 @@ bool AnnotationDocument::updateRect(AnnotationId id, AnnotationRect rect)
     rect = standardized(rect);
     if (annotation == nullptr
         || (!isShapeKind(annotation->kind)
-            && annotation->kind != AnnotationKind::mosaicRectangle)
+            && annotation->kind != AnnotationKind::mosaicRectangle
+            && annotation->kind != AnnotationKind::text)
         || rect.width <= 0.0F
         || rect.height <= 0.0F
         || annotation->rect == rect) {
@@ -338,6 +371,56 @@ bool AnnotationDocument::updateMosaicRedaction(
     return true;
 }
 
+bool AnnotationDocument::updateText(
+    AnnotationId id,
+    std::wstring text,
+    AnnotationRect rect)
+{
+    auto* annotation = findMutable(id);
+    rect = standardized(rect);
+    if (annotation == nullptr || !isTextAnnotation(*annotation)
+        || rect.width <= 0.0F || rect.height <= 0.0F
+        || (*annotation->text == text && annotation->rect == rect)) {
+        return false;
+    }
+    std::optional<Snapshot> before;
+    if (!textEditBefore_.has_value()) before = snapshot();
+    annotation->text = std::move(text);
+    annotation->rect = rect;
+    if (textEditBefore_.has_value()) {
+        textEditChanged_ = true;
+        ++revision_;
+        return true;
+    }
+    commit(std::move(*before));
+    return true;
+}
+
+bool AnnotationDocument::updateTextGeometry(
+    AnnotationId id,
+    AnnotationRect rect,
+    AnnotationStyle style)
+{
+    auto* annotation = findMutable(id);
+    rect = standardized(rect);
+    if (annotation == nullptr || !isTextAnnotation(*annotation)
+        || rect.width <= 0.0F || rect.height <= 0.0F
+        || (annotation->rect == rect && annotation->style == style)) {
+        return false;
+    }
+    std::optional<Snapshot> before;
+    if (!textEditBefore_.has_value()) before = snapshot();
+    annotation->rect = rect;
+    annotation->style = std::move(style);
+    if (textEditBefore_.has_value()) {
+        textEditChanged_ = true;
+        ++revision_;
+        return true;
+    }
+    commit(std::move(*before));
+    return true;
+}
+
 void AnnotationDocument::beginMosaicRedactionEdit()
 {
     if (!mosaicRedactionEditBefore_.has_value()) {
@@ -358,6 +441,30 @@ void AnnotationDocument::endMosaicRedactionEdit()
     }
     mosaicRedactionEditBefore_.reset();
     mosaicRedactionEditChanged_ = false;
+}
+
+void AnnotationDocument::beginTextEdit()
+{
+    if (!textEditBefore_.has_value()) {
+        textEditBefore_ = snapshot();
+        textEditChanged_ = false;
+    }
+}
+
+void AnnotationDocument::endTextEdit(bool keepChanges)
+{
+    if (!textEditBefore_.has_value()) {
+        return;
+    }
+    if (!keepChanges) {
+        restore(*textEditBefore_);
+        ++revision_;
+    } else if (textEditChanged_) {
+        undoHistory_.push_back({std::move(*textEditBefore_), snapshot()});
+        redoHistory_.clear();
+    }
+    textEditBefore_.reset();
+    textEditChanged_ = false;
 }
 
 bool AnnotationDocument::select(AnnotationId id) noexcept

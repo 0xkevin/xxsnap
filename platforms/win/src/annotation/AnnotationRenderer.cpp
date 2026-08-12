@@ -4,6 +4,7 @@
 #include "annotation/ArrowLineRenderer.h"
 #include "annotation/BrushRenderer.h"
 #include "annotation/MarkerRenderer.h"
+#include "annotation/TextAnnotationRenderer.h"
 
 #include <d2d1helper.h>
 
@@ -356,7 +357,9 @@ AnnotationRenderPlan buildAnnotationRenderPlan(
     const AnnotationDocument& document,
     const std::optional<ShapeAnnotation>& preview,
     AnnotationPoint selectionOriginDip,
-    bool showEditingAffordances)
+    bool showEditingAffordances,
+    std::optional<AnnotationId> editingTextId,
+    std::size_t textCaretPosition)
 {
     AnnotationRenderPlan plan;
     plan.items.reserve(document.annotations().size() + (preview.has_value() ? 1U : 0U));
@@ -436,6 +439,17 @@ AnnotationRenderPlan buildAnnotationRenderPlan(
         return plan;
     }
 
+    if (editingTextId.has_value() && editing->id == *editingTextId
+        && isTextAnnotation(*editing)) {
+        plan.textCaret = textCaretRect(*editing, textCaretPosition);
+        const auto rect = standardized(editing->rect);
+        plan.textCaretRotationDegrees = editing->rotationDegrees;
+        plan.textCaretRotationCenter = AnnotationPoint{
+            rect.x + rect.width / 2.0F,
+            rect.y + rect.height / 2.0F,
+        };
+    }
+
     if (editing->arrowLine.has_value()) {
         plan.lineHandles = {
             editing->arrowLine->start,
@@ -494,7 +508,18 @@ AnnotationRenderPlan buildAnnotationRenderPlan(
     }
 
     const auto handles = resizeHandlePoints(*editing);
-    plan.resizeHandles.assign(handles.begin(), handles.end());
+    if (isTextAnnotation(*editing)) {
+        plan.resizeHandles.reserve(handles.size() - 1U);
+        for (std::size_t index = 0; index < handles.size(); ++index) {
+            if (index == 2U) {
+                plan.textDeleteHandle = handles[index];
+            } else {
+                plan.resizeHandles.push_back(handles[index]);
+            }
+        }
+    } else {
+        plan.resizeHandles.assign(handles.begin(), handles.end());
+    }
     const auto rect = standardized(editing->rect);
     const AnnotationPoint rotation{
         rect.x + rect.width / 2.0F,
@@ -585,12 +610,19 @@ AnnotationRenderer::AnnotationRenderer(ID2D1Factory* factory) noexcept
     if (factory_ != nullptr) {
         factory_->AddRef();
     }
+    DWriteCreateFactory(
+        DWRITE_FACTORY_TYPE_SHARED,
+        __uuidof(IDWriteFactory),
+        reinterpret_cast<IUnknown**>(&dwriteFactory_));
 }
 
 AnnotationRenderer::~AnnotationRenderer()
 {
     if (factory_ != nullptr) {
         factory_->Release();
+    }
+    if (dwriteFactory_ != nullptr) {
+        dwriteFactory_->Release();
     }
 }
 
@@ -625,6 +657,30 @@ HRESULT AnnotationRenderer::draw(
         if (annotation.kind == AnnotationKind::marker
             && annotation.markerLine.has_value()) {
             const auto result = drawMarkerLine(renderTarget, annotation);
+            if (FAILED(result)) {
+                return result;
+            }
+            continue;
+        }
+        if (isTextAnnotation(annotation)) {
+            if (dwriteFactory_ == nullptr) {
+                return E_FAIL;
+            }
+            D2D1_MATRIX_3X2_F previousTransform{};
+            renderTarget->GetTransform(&previousTransform);
+            const auto fullRect = standardized(annotation.rect);
+            if (annotation.rotationDegrees != 0.0F) {
+                const auto center = D2D1::Point2F(
+                    fullRect.x + fullRect.width / 2.0F,
+                    fullRect.y + fullRect.height / 2.0F);
+                renderTarget->SetTransform(
+                    D2D1::Matrix3x2F::Rotation(
+                        annotation.rotationDegrees, center)
+                    * previousTransform);
+            }
+            const auto result = drawTextAnnotation(
+                factory_, dwriteFactory_, renderTarget, annotation);
+            renderTarget->SetTransform(previousTransform);
             if (FAILED(result)) {
                 return result;
             }
@@ -754,6 +810,61 @@ HRESULT AnnotationRenderer::draw(
         for (const auto point : plan.lineHandles) {
             drawHandle(point);
         }
+    }
+    if (plan.textCaret.has_value()) {
+        ComPtr<ID2D1SolidColorBrush> whiteBrush;
+        auto result = renderTarget->CreateSolidColorBrush(
+            D2D1::ColorF(1.0F, 1.0F, 1.0F, 0.95F), whiteBrush.put());
+        if (FAILED(result)) return result;
+        ComPtr<ID2D1SolidColorBrush> blackBrush;
+        result = renderTarget->CreateSolidColorBrush(
+            D2D1::ColorF(0.0F, 0.0F, 0.0F, 0.9F), blackBrush.put());
+        if (FAILED(result)) return result;
+        const auto caret = *plan.textCaret;
+        const auto x = caret.x + caret.width / 2.0F;
+        D2D1_MATRIX_3X2_F previousTransform{};
+        renderTarget->GetTransform(&previousTransform);
+        if (plan.textCaretRotationCenter.has_value()
+            && plan.textCaretRotationDegrees != 0.0F) {
+            renderTarget->SetTransform(
+                D2D1::Matrix3x2F::Rotation(
+                    plan.textCaretRotationDegrees,
+                    D2D1::Point2F(
+                        plan.textCaretRotationCenter->x,
+                        plan.textCaretRotationCenter->y))
+                * previousTransform);
+        }
+        renderTarget->DrawLine(
+            D2D1::Point2F(x, caret.y),
+            D2D1::Point2F(x, caret.y + caret.height),
+            whiteBrush.get(), 3.0F);
+        renderTarget->DrawLine(
+            D2D1::Point2F(x, caret.y),
+            D2D1::Point2F(x, caret.y + caret.height),
+            blackBrush.get(), 1.0F);
+        renderTarget->SetTransform(previousTransform);
+    }
+    if (plan.textDeleteHandle.has_value()) {
+        ComPtr<ID2D1SolidColorBrush> blueBrush;
+        auto result = renderTarget->CreateSolidColorBrush(
+            D2D1::ColorF(0.0F, 0.48F, 1.0F, 1.0F), blueBrush.put());
+        if (FAILED(result)) return result;
+        ComPtr<ID2D1SolidColorBrush> whiteBrush;
+        result = renderTarget->CreateSolidColorBrush(
+            D2D1::ColorF(D2D1::ColorF::White), whiteBrush.put());
+        if (FAILED(result)) return result;
+        const auto point = *plan.textDeleteHandle;
+        const auto circle = D2D1::Ellipse(
+            D2D1::Point2F(point.x, point.y), 7.0F, 7.0F);
+        renderTarget->FillEllipse(&circle, blueBrush.get());
+        renderTarget->DrawLine(
+            D2D1::Point2F(point.x - 3.0F, point.y - 3.0F),
+            D2D1::Point2F(point.x + 3.0F, point.y + 3.0F),
+            whiteBrush.get(), 1.6F);
+        renderTarget->DrawLine(
+            D2D1::Point2F(point.x - 3.0F, point.y + 3.0F),
+            D2D1::Point2F(point.x + 3.0F, point.y - 3.0F),
+            whiteBrush.get(), 1.6F);
     }
     return S_OK;
 }

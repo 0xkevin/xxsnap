@@ -89,6 +89,14 @@ struct OverlayMosaicOptionsRenderState {
     MosaicOptionsState state;
 };
 
+struct OverlayTextOptionsRenderState {
+    TextOptionsLayout layout;
+    TextOptionsState state;
+    std::optional<TextPopupMenuLayout> popupMenu;
+    std::vector<std::wstring> popupLabels;
+    std::optional<std::size_t> selectedPopupIndex;
+};
+
 struct OverlayEyedropperRenderState {
     AnnotationPoint pointer{};
     AnnotationColor color{};
@@ -117,6 +125,7 @@ struct OverlayRenderState {
     std::optional<OverlayBrushOptionsRenderState> brushOptions;
     std::optional<OverlayMarkerOptionsRenderState> markerOptions;
     std::optional<OverlayMosaicOptionsRenderState> mosaicOptions;
+    std::optional<OverlayTextOptionsRenderState> textOptions;
     std::optional<OverlayEyedropperRenderState> eyedropper;
 };
 

@@ -1147,6 +1147,135 @@ struct OverlayRenderer::Impl final {
         return std::nullopt;
     }
 
+    std::optional<OverlayRendererError> drawTextOptions(
+        const OverlayTextOptionsRenderState& options) noexcept
+    {
+        if (const auto resourceError = ensureTextResources()) {
+            return resourceError;
+        }
+        auto& panelBrush = textPanelBrush;
+        auto& borderBrush = textBorderBrush;
+        auto& selectionBrush = textSelectionBrush;
+        auto& textBrush = textForegroundBrush;
+        auto& whiteBrush = textWhiteBrush;
+        const auto panel = D2D1::RoundedRect(
+            d2dRect(options.layout.toolbar), 6.0F, 6.0F);
+        renderTarget->FillRoundedRectangle(&panel, panelBrush.get());
+        renderTarget->DrawRoundedRectangle(&panel, borderBrush.get(), 1.0F);
+
+        const auto drawToggle = [&](AnnotationRect rect,
+                                    bool selected,
+                                    std::size_t iconIndex,
+                                    float iconSize) {
+            const auto bitmapIndex = iconIndex * 2U + (selected ? 1U : 0U);
+            const AnnotationRect iconRect{
+                rect.x + (rect.width - iconSize) / 2.0F,
+                rect.y + (rect.height - iconSize) / 2.0F,
+                iconSize,
+                iconSize,
+            };
+            renderTarget->DrawBitmap(textIconBitmaps[bitmapIndex].get(),
+                d2dRect(iconRect), 1.0F,
+                D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+        };
+        drawToggle(options.layout.bold,
+            options.state.style().textBold, 0U, 20.0F);
+        drawToggle(options.layout.italic,
+            options.state.style().textItalic, 1U, 20.0F);
+        drawToggle(options.layout.outline,
+            options.state.style().textOutlineEnabled, 2U, 15.0F);
+
+        const auto drawPopup = [&](AnnotationRect rect,
+                                   const std::wstring& label) {
+            const auto field = D2D1::RoundedRect(d2dRect(rect), 4.0F, 4.0F);
+            renderTarget->FillRoundedRectangle(&field, whiteBrush.get());
+            renderTarget->DrawRoundedRectangle(&field, borderBrush.get(), 1.0F);
+            auto labelRect = rect;
+            labelRect.x += 6.0F;
+            labelRect.width -= 20.0F;
+            renderTarget->DrawText(
+                label.data(), static_cast<UINT32>(label.size()),
+                textFormat.get(), d2dRect(labelRect), textBrush.get(),
+                D2D1_DRAW_TEXT_OPTIONS_CLIP);
+            const auto centerX = rect.x + rect.width - 10.0F;
+            const auto centerY = rect.y + rect.height / 2.0F + 1.0F;
+            renderTarget->DrawLine(
+                D2D1::Point2F(centerX - 3.0F, centerY - 2.0F),
+                D2D1::Point2F(centerX, centerY + 1.0F), textBrush.get(), 1.0F);
+            renderTarget->DrawLine(
+                D2D1::Point2F(centerX, centerY + 1.0F),
+                D2D1::Point2F(centerX + 3.0F, centerY - 2.0F),
+                textBrush.get(), 1.0F);
+        };
+        drawPopup(options.layout.fontFamily,
+            options.state.style().textFontFamily);
+        drawPopup(options.layout.textSize,
+            std::to_wstring(static_cast<int>(
+                options.state.style().textSize + 0.5F)));
+
+        for (const auto separator : options.layout.separators) {
+            const auto rounded = D2D1::RoundedRect(
+                d2dRect(separator), 0.75F, 0.75F);
+            renderTarget->FillRoundedRectangle(&rounded, borderBrush.get());
+        }
+        const auto& palette = macShapePalette();
+        for (std::size_t index = 0;
+             index < options.layout.paletteCount && index < palette.size();
+             ++index) {
+            auto swatch = options.layout.colorSwatches[index];
+            const auto selected
+                = options.state.selectedPaletteIndex() == index;
+            if (selected) {
+                swatch = {swatch.x - 3.0F, swatch.y - 3.0F,
+                    swatch.width + 6.0F, swatch.height + 6.0F};
+            }
+            textVariableBrush->SetColor(annotationColor(palette[index]));
+            const auto rounded = D2D1::RoundedRect(
+                d2dRect(swatch), selected ? 4.0F : 2.5F,
+                selected ? 4.0F : 2.5F);
+            renderTarget->FillRoundedRectangle(
+                &rounded, textVariableBrush.get());
+            renderTarget->DrawRoundedRectangle(&rounded,
+                selected ? selectionBrush.get() : borderBrush.get(),
+                selected ? 1.5F : 1.0F);
+        }
+        if (!options.layout.colorSwatches.empty()) {
+            renderTarget->DrawBitmap(paletteBitmap.get(),
+                d2dRect(options.layout.colorSwatches.back()), 1.0F,
+                D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+        }
+        if (options.popupMenu.has_value()) {
+            const auto popup = D2D1::RoundedRect(
+                d2dRect(options.popupMenu->menu), 6.0F, 6.0F);
+            renderTarget->FillRoundedRectangle(&popup, panelBrush.get());
+            renderTarget->DrawRoundedRectangle(
+                &popup, borderBrush.get(), 1.0F);
+            const auto count = (std::min)(
+                options.popupMenu->items.size(),
+                options.popupLabels.size());
+            for (std::size_t index = 0; index < count; ++index) {
+                auto item = options.popupMenu->items[index];
+                const auto selected
+                    = options.selectedPopupIndex == index;
+                if (selected) {
+                    const auto highlight = D2D1::RoundedRect(
+                        d2dRect(item), 4.0F, 4.0F);
+                    renderTarget->FillRoundedRectangle(
+                        &highlight, selectionBrush.get());
+                }
+                item.x += 6.0F;
+                item.width -= 12.0F;
+                const auto& label = options.popupLabels[index];
+                renderTarget->DrawText(
+                    label.data(), static_cast<UINT32>(label.size()),
+                    textFormat.get(), d2dRect(item),
+                    selected ? whiteBrush.get() : textBrush.get(),
+                    D2D1_DRAW_TEXT_OPTIONS_CLIP);
+            }
+        }
+        return std::nullopt;
+    }
+
     std::optional<OverlayRendererError> drawEyedropper(
         const OverlayEyedropperRenderState& state,
         AnnotationRect safeBounds) noexcept
@@ -1417,6 +1546,54 @@ struct OverlayRenderer::Impl final {
             if (result.has_value()) {
                 discardMosaicResources();
                 return result;
+            }
+        }
+        return std::nullopt;
+    }
+
+    std::optional<OverlayRendererError> ensureTextResources() noexcept
+    {
+        if (textPanelBrush && textBorderBrush && textSelectionBrush
+            && textForegroundBrush && textWhiteBrush && textVariableBrush
+            && std::all_of(textIconBitmaps.begin(), textIconBitmaps.end(),
+                [](const auto& bitmap) { return bitmap.get() != nullptr; })) {
+            return std::nullopt;
+        }
+        discardTextResources();
+        const std::array results{
+            createBrush(colorWithMultipliedAlpha(
+                VisualStyleCatalog::toolbarBackgroundColor, 0.96F),
+                textPanelBrush),
+            createBrush(D2D1::ColorF(0.0F, 0.0F, 0.0F, 0.18F),
+                textBorderBrush),
+            createBrush(D2D1::ColorF(0.0F, 0.48F, 1.0F, 1.0F),
+                textSelectionBrush),
+            createBrush(D2D1::ColorF(0.12F, 0.12F, 0.12F, 1.0F),
+                textForegroundBrush),
+            createBrush(D2D1::ColorF(D2D1::ColorF::White),
+                textWhiteBrush),
+            createBrush(D2D1::ColorF(0.0F, 0.0F, 0.0F, 1.0F),
+                textVariableBrush),
+        };
+        for (const auto& result : results) {
+            if (result.has_value()) {
+                discardTextResources();
+                return result;
+            }
+        }
+        constexpr std::array iconResources{
+            IDR_TEXT_BOLD_PNG,
+            IDR_TEXT_BOLD_SELECTED_PNG,
+            IDR_TEXT_ITALIC_PNG,
+            IDR_TEXT_ITALIC_SELECTED_PNG,
+            IDR_TEXT_STROKE_PNG,
+            IDR_TEXT_STROKE_SELECTED_PNG,
+        };
+        for (std::size_t index = 0; index < iconResources.size(); ++index) {
+            if (const auto iconError = createIconBitmap(
+                    iconResources[index], textIconBitmaps[index].put())) {
+                discardTextResources();
+                return iconError;
             }
         }
         return std::nullopt;
@@ -2283,6 +2460,13 @@ struct OverlayRenderer::Impl final {
                     return optionsError;
                 }
             }
+            if (state.textOptions.has_value()) {
+                if (const auto optionsError = drawTextOptions(
+                        *state.textOptions)) {
+                    renderTarget->EndDraw();
+                    return optionsError;
+                }
+            }
 
             for (const auto handle : layout.handles) {
                 const auto ellipse = D2D1::Ellipse(
@@ -2323,6 +2507,7 @@ struct OverlayRenderer::Impl final {
     {
         discardEyedropperResources();
         discardMosaicResources();
+        discardTextResources();
         annotationCompositeBitmap.reset();
         annotationCompositeSource.reset();
         paletteBitmap.reset();
@@ -2358,6 +2543,17 @@ struct OverlayRenderer::Impl final {
         mosaicVariableBrush.reset();
     }
 
+    void discardTextResources() noexcept
+    {
+        textPanelBrush.reset();
+        textBorderBrush.reset();
+        textSelectionBrush.reset();
+        textForegroundBrush.reset();
+        textWhiteBrush.reset();
+        textVariableBrush.reset();
+        for (auto& bitmap : textIconBitmaps) bitmap.reset();
+    }
+
     HMODULE resourceModule = nullptr;
     HWND window = nullptr;
     bool comAttempted = false;
@@ -2389,6 +2585,13 @@ struct OverlayRenderer::Impl final {
     ComPtr<ID2D1SolidColorBrush> mosaicTextBrush;
     ComPtr<ID2D1SolidColorBrush> mosaicWhiteBrush;
     ComPtr<ID2D1SolidColorBrush> mosaicVariableBrush;
+    ComPtr<ID2D1SolidColorBrush> textPanelBrush;
+    ComPtr<ID2D1SolidColorBrush> textBorderBrush;
+    ComPtr<ID2D1SolidColorBrush> textSelectionBrush;
+    ComPtr<ID2D1SolidColorBrush> textForegroundBrush;
+    ComPtr<ID2D1SolidColorBrush> textWhiteBrush;
+    ComPtr<ID2D1SolidColorBrush> textVariableBrush;
+    std::array<ComPtr<ID2D1Bitmap>, 6> textIconBitmaps;
     ComPtr<ID2D1StrokeStyle> eyedropperWhiteStrokeStyle;
     ComPtr<ID2D1StrokeStyle> eyedropperBlueStrokeStyle;
     std::array<ComPtr<ID2D1Bitmap>, toolbarImageResources().size()> iconBitmaps;

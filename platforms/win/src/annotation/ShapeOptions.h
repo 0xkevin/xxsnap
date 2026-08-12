@@ -236,6 +236,82 @@ int mosaicValueForPoint(
     const MosaicOptionsLayout& layout,
     AnnotationPoint point) noexcept;
 
+class TextOptionsState {
+public:
+    TextOptionsState() noexcept;
+    const AnnotationStyle& style() const noexcept;
+    std::optional<std::size_t> selectedPaletteIndex() const noexcept;
+    bool load(AnnotationStyle style) noexcept;
+    bool toggleBold() noexcept;
+    bool toggleItalic() noexcept;
+    bool toggleOutline() noexcept;
+    bool setFontFamily(std::wstring family);
+    bool setTextSize(float size) noexcept;
+    bool selectPalette(std::size_t index) noexcept;
+    bool selectCustomColor(AnnotationColor color) noexcept;
+
+private:
+    void refreshPaletteSelection() noexcept;
+    AnnotationStyle style_{};
+    std::optional<std::size_t> selectedPaletteIndex_;
+};
+
+enum class TextOptionControl : std::uint8_t {
+    bold,
+    italic,
+    outline,
+    fontFamily,
+    textSize,
+    palette,
+    customColor,
+};
+
+struct TextOptionHit {
+    TextOptionControl control = TextOptionControl::bold;
+    std::size_t index = 0;
+};
+
+constexpr bool operator==(
+    TextOptionHit left,
+    TextOptionHit right) noexcept
+{
+    return left.control == right.control && left.index == right.index;
+}
+
+struct TextOptionsLayout {
+    AnnotationRect toolbar{};
+    AnnotationRect bold{};
+    AnnotationRect italic{};
+    AnnotationRect outline{};
+    AnnotationRect fontFamily{};
+    AnnotationRect textSize{};
+    std::size_t paletteCount = 0;
+    std::vector<AnnotationRect> colorSwatches;
+    std::vector<AnnotationRect> separators;
+};
+
+struct TextPopupMenuLayout {
+    AnnotationRect menu{};
+    std::vector<AnnotationRect> items;
+};
+
+TextPopupMenuLayout textPopupMenuLayout(
+    AnnotationRect field,
+    std::size_t itemCount,
+    float safeHeight) noexcept;
+
+std::optional<std::size_t> textPopupMenuHitTest(
+    const TextPopupMenuLayout& layout,
+    AnnotationPoint point) noexcept;
+
+TextOptionsLayout textOptionsLayout(
+    AnnotationPoint origin,
+    std::size_t paletteCount);
+
+std::optional<TextOptionHit> textOptionHitTest(
+    const TextOptionsLayout& layout,
+    AnnotationPoint point) noexcept;
+
 enum class ShapeOptionControl : std::uint8_t {
     strokeWidth,
     fillToggle,

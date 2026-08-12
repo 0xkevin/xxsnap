@@ -2,9 +2,21 @@
 
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace xxsnap::win {
+
+inline constexpr float textMinimumSize = 3.0F;
+inline constexpr float textMaximumSize = 72.0F;
+inline constexpr float textDefaultSize = 8.0F;
+inline constexpr wchar_t textDefaultFontFamily[] = L"Microsoft YaHei";
+
+constexpr float clampedTextSize(float size) noexcept
+{
+    return size < textMinimumSize ? textMinimumSize
+        : size > textMaximumSize ? textMaximumSize : size;
+}
 
 using AnnotationId = std::uint64_t;
 inline constexpr AnnotationId invalidAnnotationId = 0;
@@ -86,6 +98,13 @@ constexpr bool operator==(
         && left.alpha == right.alpha;
 }
 
+constexpr bool operator!=(
+    AnnotationColor left,
+    AnnotationColor right) noexcept
+{
+    return !(left == right);
+}
+
 enum class AnnotationStrokePattern : std::uint8_t {
     solid,
     dashLong,
@@ -102,6 +121,12 @@ struct AnnotationStyle {
     bool fillEnabled = false;
     AnnotationColor fillColor{245, 34, 45, 255};
     float cornerRadiusDip = 0.0F;
+    float textSize = textDefaultSize;
+    std::wstring textFontFamily = textDefaultFontFamily;
+    bool textBold = false;
+    bool textItalic = false;
+    bool textOutlineEnabled = true;
+    AnnotationColor textOutlineColor{0, 0, 0, 255};
 };
 
 constexpr bool operator==(
@@ -113,17 +138,23 @@ constexpr bool operator==(
         && left.strokePattern == right.strokePattern
         && left.fillEnabled == right.fillEnabled
         && left.fillColor == right.fillColor
-        && left.cornerRadiusDip == right.cornerRadiusDip;
+        && left.cornerRadiusDip == right.cornerRadiusDip
+        && left.textSize == right.textSize
+        && left.textFontFamily == right.textFontFamily
+        && left.textBold == right.textBold
+        && left.textItalic == right.textItalic
+        && left.textOutlineEnabled == right.textOutlineEnabled
+        && left.textOutlineColor == right.textOutlineColor;
 }
 
-constexpr bool operator!=(
+inline bool operator!=(
     const AnnotationStyle& left,
     const AnnotationStyle& right) noexcept
 {
     return !(left == right);
 }
 
-constexpr AnnotationStyle primaryShapeActivationStyle(
+inline AnnotationStyle primaryShapeActivationStyle(
     AnnotationStyle style) noexcept
 {
     style.strokeWidthDip = 4.0F;
@@ -335,6 +366,7 @@ struct ShapeAnnotation {
     std::optional<MarkerLine> markerLine;
     std::optional<MosaicStroke> mosaicStroke;
     std::optional<MosaicRedaction> mosaicRedaction;
+    std::optional<std::wstring> text;
 };
 
 constexpr bool isArrowLineAnnotation(
@@ -380,6 +412,12 @@ constexpr bool isMosaicAnnotation(
         || isMosaicRectangleAnnotation(annotation);
 }
 
+inline bool isTextAnnotation(const ShapeAnnotation& annotation) noexcept
+{
+    return annotation.kind == AnnotationKind::text
+        && annotation.text.has_value();
+}
+
 inline bool operator==(
     const ShapeAnnotation& left,
     const ShapeAnnotation& right) noexcept
@@ -393,7 +431,8 @@ inline bool operator==(
         && left.brushPath == right.brushPath
         && left.markerLine == right.markerLine
         && left.mosaicStroke == right.mosaicStroke
-        && left.mosaicRedaction == right.mosaicRedaction;
+        && left.mosaicRedaction == right.mosaicRedaction
+        && left.text == right.text;
 }
 
 } // namespace xxsnap::win

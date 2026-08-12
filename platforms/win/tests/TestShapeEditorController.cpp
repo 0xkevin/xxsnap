@@ -30,6 +30,7 @@ void testToolbarCapabilityAndPrimaryToolToggle()
         ToolbarAction::marker,
         ToolbarAction::eyedropper,
         ToolbarAction::mosaic,
+        ToolbarAction::text,
         ToolbarAction::undo,
         ToolbarAction::redo,
         ToolbarAction::cancel,
@@ -467,6 +468,54 @@ void testMosaicCreatesStrokeAndRotatableRectangle()
     CHECK(!editor.pointerDown({-20, -20}));
 }
 
+void testTextCreatesUnicodeAndEditsAtCaret()
+{
+    ShapeEditorController editor({0, 0, 400, 300});
+    CHECK(editor.handleKey(ShapeEditorKey::text, false, false)
+        == ShapeEditorKeyResult::consumed);
+    CHECK(editor.isTextToolActive());
+    CHECK(editor.textOptions().style().textFontFamily
+        == L"Microsoft YaHei");
+    CHECK(editor.textOptions().style().textSize == 8.0F);
+    CHECK(editor.pointerDown({60, 80}));
+    CHECK(editor.isEditingText());
+    CHECK(editor.insertText(L"中文AB"));
+    CHECK(editor.handleKey(ShapeEditorKey::left, false, false)
+        == ShapeEditorKeyResult::consumed);
+    CHECK(editor.insertText(L"测"));
+    CHECK(editor.handleKey(ShapeEditorKey::home, false, false)
+        == ShapeEditorKeyResult::consumed);
+    CHECK(editor.insertText(L"开"));
+    CHECK(editor.handleKey(ShapeEditorKey::end, false, false)
+        == ShapeEditorKeyResult::consumed);
+    CHECK(editor.insertText(L"\n第二行"));
+    CHECK(editor.commitTextEdit());
+    CHECK(editor.document().annotations().size() == 1U);
+    const auto id = editor.document().annotations()[0].id;
+    const auto* text = editor.document().find(id);
+    CHECK(text != nullptr && isTextAnnotation(*text));
+    CHECK(*text->text == L"开中文A测B\n第二行");
+    CHECK(text->style.textFontFamily == L"Microsoft YaHei");
+    CHECK(text->rect.width > 16.0F);
+    CHECK(text->rect.height > 24.0F);
+
+    CHECK(editor.pointerDown({text->rect.x + 10.0F,
+        text->rect.y + text->rect.height / 2.0F}));
+    CHECK(editor.isEditingText());
+    const auto plan = editor.renderPlan({0, 0});
+    CHECK(plan.textCaret.has_value());
+    CHECK(plan.textDeleteHandle.has_value());
+    CHECK(plan.resizeHandles.size() == 7U);
+    CHECK(editor.toggleTextPopupMenu(TextPopupMenu::fontFamily));
+    CHECK(editor.textPopupMenu() == TextPopupMenu::fontFamily);
+    editor.dismissPopovers();
+    CHECK(!editor.textPopupMenu().has_value());
+    CHECK(editor.setTextSize(12.0F));
+    CHECK(editor.document().find(id)->style.textSize == 12.0F);
+    CHECK(editor.cancelTextEdit());
+    CHECK(editor.document().find(id)->style.textSize == 8.0F);
+}
+
 } // namespace
 
 int main()
@@ -482,5 +531,6 @@ int main()
     testMarkerDrawsSnappedLineDotAndEditsEndpoints();
     testEyedropperMatchesMacToolSelectionAndEscape();
     testMosaicCreatesStrokeAndRotatableRectangle();
+    testTextCreatesUnicodeAndEditsAtCaret();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

@@ -599,6 +599,65 @@ bool genericRendererLeavesRotationHandleForMacIconLayer()
     return transparent;
 }
 
+bool unicodeTextProducesVisibleOutlinedPixels()
+{
+    SnapshotResources resources;
+    if (FAILED(D2D1CreateFactory(
+            D2D1_FACTORY_TYPE_SINGLE_THREADED,
+            &resources.d2dFactory))) return false;
+    if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr,
+            CLSCTX_INPROC_SERVER,
+            IID_PPV_ARGS(&resources.wicFactory)))) return false;
+    constexpr UINT width = 220U;
+    constexpr UINT height = 100U;
+    if (FAILED(resources.wicFactory->CreateBitmap(width, height,
+            GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnLoad,
+            &resources.bitmap))) return false;
+    const auto properties = D2D1::RenderTargetProperties(
+        D2D1_RENDER_TARGET_TYPE_SOFTWARE,
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
+            D2D1_ALPHA_MODE_PREMULTIPLIED), 96.0F, 96.0F);
+    if (FAILED(resources.d2dFactory->CreateWicBitmapRenderTarget(
+            resources.bitmap, properties, &resources.target))) return false;
+    AnnotationStyle style;
+    style.textFontFamily = L"Microsoft YaHei";
+    style.textSize = 12.0F;
+    style.strokeColor = {245, 34, 45, 255};
+    style.textOutlineEnabled = true;
+    AnnotationDocument document;
+    const auto id = document.addText(
+        {10, 15, 190, 60}, L"中文 Ab", style);
+    if (id == invalidAnnotationId) return false;
+    const auto plan = buildAnnotationRenderPlan(
+        document, std::nullopt, {}, false);
+    resources.target->BeginDraw();
+    resources.target->Clear(D2D1::ColorF(0, 0));
+    AnnotationRenderer renderer(resources.d2dFactory);
+    if (FAILED(renderer.draw(resources.target, plan))
+        || FAILED(resources.target->EndDraw())) return false;
+    const WICRect lockRect{0, 0,
+        static_cast<INT>(width), static_cast<INT>(height)};
+    IWICBitmapLock* lock = nullptr;
+    if (FAILED(resources.bitmap->Lock(
+            &lockRect, WICBitmapLockRead, &lock))) return false;
+    UINT byteCount = 0U;
+    BYTE* bytes = nullptr;
+    auto opaquePixels = std::size_t{0U};
+    auto redPixels = std::size_t{0U};
+    auto darkPixels = std::size_t{0U};
+    if (SUCCEEDED(lock->GetDataPointer(&byteCount, &bytes))) {
+        for (UINT offset = 0U; offset + 3U < byteCount; offset += 4U) {
+            if (bytes[offset + 3U] == 0U) continue;
+            ++opaquePixels;
+            if (bytes[offset + 2U] > bytes[offset] + 30U) ++redPixels;
+            if (bytes[offset] < 60U && bytes[offset + 1U] < 60U
+                && bytes[offset + 2U] < 60U) ++darkPixels;
+        }
+    }
+    lock->Release();
+    return opaquePixels > 400U && redPixels > 150U && darkPixels > 30U;
+}
+
 void testDirect2DSnapshotsAtAllSupportedDpis()
 {
     const auto comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
@@ -733,6 +792,16 @@ void testRotationHandleIsReservedForMacIconLayer()
     }
 }
 
+void testUnicodeTextAndMacOutlineRender()
+{
+    const auto comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    const auto shouldUninitialize = SUCCEEDED(comResult);
+    CHECK(comResult == S_OK || comResult == S_FALSE
+        || comResult == RPC_E_CHANGED_MODE);
+    CHECK(unicodeTextProducesVisibleOutlinedPixels());
+    if (shouldUninitialize) CoUninitialize();
+}
+
 } // namespace
 
 int main()
@@ -749,5 +818,6 @@ int main()
     testBrushPatternsRenderAtSupportedDpis();
     testMarkerRendersWithMacOpacityAtSupportedDpis();
     testRotationHandleIsReservedForMacIconLayer();
+    testUnicodeTextAndMacOutlineRender();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

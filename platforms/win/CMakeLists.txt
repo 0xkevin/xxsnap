@@ -62,6 +62,12 @@ set_property(
         "${PROJECT_SOURCE_DIR}/platforms/win/resources/cursors/xxsnap-eyedropper.cur"
         "${PROJECT_SOURCE_DIR}/platforms/win/resources/cursors/xxsnap-eyedropper-light.cur"
         "${PROJECT_SOURCE_DIR}/platforms/mac/Resources/Icons/palette-tool.png"
+        "${PROJECT_SOURCE_DIR}/platforms/win/resources/icons/text-bold.png"
+        "${PROJECT_SOURCE_DIR}/platforms/win/resources/icons/text-bold-selected.png"
+        "${PROJECT_SOURCE_DIR}/platforms/win/resources/icons/text-italic.png"
+        "${PROJECT_SOURCE_DIR}/platforms/win/resources/icons/text-italic-selected.png"
+        "${PROJECT_SOURCE_DIR}/platforms/win/resources/icons/text-stroke.png"
+        "${PROJECT_SOURCE_DIR}/platforms/win/resources/icons/text-stroke-selected.png"
         ${XXSNAP_TOOLBAR_ASSET_FILES}
 )
 add_library(xxsnap_visual_resources INTERFACE)
@@ -288,9 +294,24 @@ target_include_directories(
     xxsnap_shape_interaction
     PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
+add_library(
+    xxsnap_text_annotation_renderer
+    src/annotation/TextAnnotationRenderer.cpp
+)
+target_compile_features(xxsnap_text_annotation_renderer PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_text_annotation_renderer
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_text_annotation_renderer
+    PUBLIC xxsnap_annotation_document
+    PRIVATE d2d1 dwrite
+)
+
 target_link_libraries(
     xxsnap_shape_interaction
-    PUBLIC xxsnap_annotation_document
+    PUBLIC xxsnap_annotation_document xxsnap_text_annotation_renderer
 )
 
 add_library(
@@ -317,8 +338,8 @@ target_include_directories(
 )
 target_link_libraries(
     xxsnap_annotation_renderer
-    PUBLIC xxsnap_annotation_document
-    PRIVATE d2d1
+    PUBLIC xxsnap_annotation_document xxsnap_text_annotation_renderer
+    PRIVATE d2d1 dwrite
 )
 
 add_library(
@@ -374,7 +395,7 @@ target_include_directories(
 target_link_libraries(
     xxsnap_overlay_window
     PUBLIC xxsnap_overlay_renderer
-    PRIVATE xxsnap_windows_build_configuration user32 gdi32
+    PRIVATE xxsnap_windows_build_configuration user32 gdi32 imm32
 )
 
 add_library(

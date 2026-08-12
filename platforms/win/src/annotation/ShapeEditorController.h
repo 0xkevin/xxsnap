@@ -18,11 +18,18 @@ namespace xxsnap::win {
 enum class ShapeEditorKey : std::uint8_t {
     escapeKey,
     deleteKey,
+    backspace,
+    enter,
+    left,
+    right,
+    home,
+    end,
     z,
     save,
     copy,
     eyedropper,
     mosaic,
+    text,
 };
 
 enum class ShapeEditorKeyResult : std::uint8_t {
@@ -45,7 +52,13 @@ enum class ShapeCursorStyle : std::uint8_t {
     brush,
     marker,
     mosaic,
+    textInput,
     eyedropper,
+};
+
+enum class TextPopupMenu : std::uint8_t {
+    fontFamily,
+    textSize,
 };
 
 class ShapeEditorController final {
@@ -59,6 +72,7 @@ public:
     const BrushOptionsState& brushOptions() const noexcept;
     const MarkerOptionsState& markerOptions() const noexcept;
     const MosaicOptionsState& mosaicOptions() const noexcept;
+    const TextOptionsState& textOptions() const noexcept;
     const AnnotationDocument& document() const noexcept;
     AnnotationDocument& document() noexcept;
     std::uint64_t interactionRevision() const noexcept;
@@ -70,6 +84,10 @@ public:
     bool isMarkerToolActive() const noexcept;
     bool isEyedropperToolActive() const noexcept;
     bool isMosaicToolActive() const noexcept;
+    bool isTextToolActive() const noexcept;
+    bool isEditingText() const noexcept;
+    std::optional<TextPopupMenu> textPopupMenu() const noexcept;
+    int textPopupScrollOffset() const noexcept;
     bool strokePatternMenuVisible() const noexcept;
     bool cornerRadiusPanelVisible() const noexcept;
     std::optional<ArrowEndpoint> arrowTypeMenuEndpoint() const noexcept;
@@ -79,6 +97,16 @@ public:
     bool applyBrushOptionHit(BrushOptionHit hit);
     bool applyMarkerOptionHit(MarkerOptionHit hit);
     bool applyMosaicOptionHit(MosaicOptionHit hit);
+    bool applyTextOptionHit(TextOptionHit hit);
+    bool setTextFontFamily(std::wstring family);
+    bool setTextSize(float size);
+    bool toggleTextPopupMenu(TextPopupMenu menu) noexcept;
+    bool scrollTextPopupMenu(int delta) noexcept;
+    bool insertText(std::wstring text);
+    bool deleteTextBackward();
+    bool deleteTextForward();
+    bool commitTextEdit();
+    bool cancelTextEdit();
     void beginMosaicRedactionEdit();
     void endMosaicRedactionEdit();
     bool setMosaicRedactionValue(int value);
@@ -111,6 +139,8 @@ public:
         ShapeResizeHandle handle) const noexcept;
     std::optional<AnnotationPoint> rotationHandlePoint(
         AnnotationId id) const noexcept;
+    std::optional<AnnotationPoint> textDeleteHandlePoint(
+        AnnotationId id) const noexcept;
     AnnotationRenderPlan renderPlan(
         AnnotationPoint selectionOriginDip,
         bool showEditingAffordances = true) const;
@@ -118,11 +148,15 @@ public:
 private:
     std::optional<AnnotationId> annotationAtBorder(
         AnnotationPoint point) const noexcept;
+    std::optional<AnnotationId> textAnnotationAt(
+        AnnotationPoint point) const noexcept;
+    bool beginTextEdit(AnnotationId id) noexcept;
+    bool applyTextStyleToSelection();
     bool applyArrowOptionsToSelection();
     void loadSelectedOptions() noexcept;
     bool applyOptionsStyleToSelection();
     void syncHistory() noexcept;
-    void deactivateTool() noexcept;
+    void deactivateTool();
 
     AnnotationDocument document_;
     ShapeOptionsState options_;
@@ -130,6 +164,7 @@ private:
     BrushOptionsState brushOptions_;
     MarkerOptionsState markerOptions_;
     MosaicOptionsState mosaicOptions_;
+    TextOptionsState textOptions_;
     ShapeInteraction interaction_;
     ArrowLineInteraction arrowInteraction_;
     BrushInteraction brushInteraction_;
@@ -145,6 +180,10 @@ private:
     bool cornerRadiusPanelVisible_ = false;
     std::uint64_t interactionRevision_ = 0;
     std::optional<ArrowEndpoint> arrowTypeMenuEndpoint_;
+    std::optional<AnnotationId> editingTextId_;
+    std::size_t textCaretPosition_ = 0U;
+    std::optional<TextPopupMenu> textPopupMenu_;
+    int textPopupScrollOffset_ = 0;
 };
 
 } // namespace xxsnap::win

@@ -33,6 +33,11 @@ public:
         MosaicRedaction redaction,
         AnnotationStyle style = {},
         float rotationDegrees = 0.0F);
+    AnnotationId addText(
+        AnnotationRect rect,
+        std::wstring text,
+        AnnotationStyle style = {},
+        float rotationDegrees = 0.0F);
 
     bool remove(AnnotationId id);
     bool updateRect(AnnotationId id, AnnotationRect rect);
@@ -45,8 +50,18 @@ public:
     bool updateMarkerLine(AnnotationId id, MarkerLine line);
     bool updateMosaicStroke(AnnotationId id, MosaicStroke stroke);
     bool updateMosaicRedaction(AnnotationId id, MosaicRedaction redaction);
+    bool updateText(
+        AnnotationId id,
+        std::wstring text,
+        AnnotationRect rect);
+    bool updateTextGeometry(
+        AnnotationId id,
+        AnnotationRect rect,
+        AnnotationStyle style);
     void beginMosaicRedactionEdit();
     void endMosaicRedactionEdit();
+    void beginTextEdit();
+    void endTextEdit(bool keepChanges);
 
     bool select(AnnotationId id) noexcept;
     void clearSelection() noexcept;
@@ -84,6 +99,8 @@ private:
     std::vector<HistoryEntry> redoHistory_;
     std::optional<Snapshot> mosaicRedactionEditBefore_;
     bool mosaicRedactionEditChanged_ = false;
+    std::optional<Snapshot> textEditBefore_;
+    bool textEditChanged_ = false;
     AnnotationId nextId_ = 1;
     std::uint64_t revision_ = 0;
 };

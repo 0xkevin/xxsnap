@@ -12,6 +12,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
 
 namespace xxsnap::win {
 
@@ -78,6 +79,7 @@ enum class OverlayCursorStyle : std::uint8_t {
     brush,
     marker,
     mosaic,
+    textInput,
     eyedropper,
     eyedropperLight,
 };
@@ -105,6 +107,8 @@ enum class OverlayWindowInputKind {
     cancelMode,
     escape,
     keyDown,
+    textInput,
+    mouseWheel,
 };
 
 struct OverlayWindowInput {
@@ -113,6 +117,8 @@ struct OverlayWindowInput {
     WPARAM virtualKey = 0;
     bool control = false;
     bool shift = false;
+    std::wstring text;
+    int wheelDelta = 0;
 };
 
 struct OverlayWindowCreateResult;
@@ -164,6 +170,7 @@ private:
     void paint() noexcept;
     HCURSOR cursor() const noexcept;
     void discardMarkerCursor() noexcept;
+    void updateTextInputActivation(bool enabled) noexcept;
     void setDotCursor(
         AnnotationColor color,
         float strokeWidthDip,

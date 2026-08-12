@@ -20,13 +20,19 @@ void check(bool condition, const char* expression, int line)
 #define CHECK(expression) check((expression), #expression, __LINE__)
 
 constexpr AnnotationColor macDefaultRed{245, 34, 45, 255};
-constexpr AnnotationStyle defaultStyle{};
-static_assert(defaultStyle.strokeColor == macDefaultRed);
-static_assert(defaultStyle.strokeWidthDip == 3.0F);
-static_assert(defaultStyle.strokePattern == AnnotationStrokePattern::solid);
-static_assert(!defaultStyle.fillEnabled);
-static_assert(defaultStyle.fillColor == macDefaultRed);
-static_assert(defaultStyle.cornerRadiusDip == 0.0F);
+
+void testDefaultStyleMatchesMac()
+{
+    const AnnotationStyle defaultStyle{};
+    CHECK(defaultStyle.strokeColor == macDefaultRed);
+    CHECK(defaultStyle.strokeWidthDip == 3.0F);
+    CHECK(defaultStyle.strokePattern == AnnotationStrokePattern::solid);
+    CHECK(!defaultStyle.fillEnabled);
+    CHECK(defaultStyle.fillColor == macDefaultRed);
+    CHECK(defaultStyle.cornerRadiusDip == 0.0F);
+    CHECK(defaultStyle.textSize == 8.0F);
+    CHECK(defaultStyle.textFontFamily == L"Microsoft YaHei");
+}
 
 void testGeometryStandardization()
 {
@@ -85,6 +91,7 @@ void testShapeAnnotationKeepsStablePortableState()
 
 int main()
 {
+    testDefaultStyleMatchesMac();
     testGeometryStandardization();
     testPrimaryShapeActivationMatchesMac();
     testShapeAnnotationKeepsStablePortableState();

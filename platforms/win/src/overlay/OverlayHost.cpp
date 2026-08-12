@@ -12,6 +12,7 @@
 #include <cstring>
 #include <limits>
 #include <new>
+#include <cwchar>
 #include <utility>
 
 namespace xxsnap::win {
@@ -44,6 +45,109 @@ bool contains(AnnotationRect rect, AnnotationPoint point) noexcept
     return point.x >= rect.x && point.y >= rect.y
         && point.x <= rect.x + rect.width
         && point.y <= rect.y + rect.height;
+}
+
+int CALLBACK collectFontFamily(
+    const LOGFONTW* font,
+    const TEXTMETRICW*,
+    DWORD,
+    LPARAM parameter)
+{
+    if (font == nullptr || font->lfFaceName[0] == L'@') return 1;
+    auto* families = reinterpret_cast<std::vector<std::wstring>*>(parameter);
+    families->emplace_back(font->lfFaceName);
+    return 1;
+}
+
+const std::vector<std::wstring>& systemFontFamilies()
+{
+    static const auto families = [] {
+        std::vector<std::wstring> result;
+        auto dc = GetDC(nullptr);
+        if (dc != nullptr) {
+            LOGFONTW request{};
+            request.lfCharSet = DEFAULT_CHARSET;
+            EnumFontFamiliesExW(dc, &request, collectFontFamily,
+                reinterpret_cast<LPARAM>(&result), 0U);
+            ReleaseDC(nullptr, dc);
+        }
+        std::sort(result.begin(), result.end());
+        result.erase(std::unique(result.begin(), result.end()), result.end());
+        const auto preferred = std::find(
+            result.begin(), result.end(), textDefaultFontFamily);
+        if (preferred != result.end() && preferred != result.begin()) {
+            const auto value = *preferred;
+            result.erase(preferred);
+            result.insert(result.begin(), value);
+        } else if (preferred == result.end()) {
+            result.insert(result.begin(), textDefaultFontFamily);
+        }
+        return result;
+    }();
+    return families;
+}
+
+struct TextPopupData {
+    TextPopupMenuLayout layout;
+    std::vector<std::wstring> labels;
+    std::size_t firstIndex = 0U;
+    std::optional<std::size_t> selectedIndex;
+};
+
+TextPopupData textPopupDataFor(
+    TextPopupMenu menu,
+    const TextOptionsLayout& options,
+    const TextOptionsState& state,
+    float safeHeight,
+    int scrollOffset)
+{
+    constexpr std::size_t visibleCount = 10U;
+    TextPopupData data;
+    AnnotationRect field{};
+    std::size_t totalCount = 0U;
+    std::size_t selected = 0U;
+    if (menu == TextPopupMenu::fontFamily) {
+        field = options.fontFamily;
+        const auto& fonts = systemFontFamilies();
+        totalCount = fonts.size();
+        const auto found = std::find(fonts.begin(), fonts.end(),
+            state.style().textFontFamily);
+        selected = found == fonts.end() ? 0U
+            : static_cast<std::size_t>(std::distance(fonts.begin(), found));
+    } else {
+        field = options.textSize;
+        totalCount = 70U;
+        selected = static_cast<std::size_t>(
+            clampedTextSize(state.style().textSize) - textMinimumSize);
+    }
+    const auto heightLimitedCount = static_cast<std::size_t>((std::max)(
+        1.0F, std::floor((safeHeight - 24.0F) / 24.0F)));
+    const auto count = (std::min)(
+        (std::min)(visibleCount, heightLimitedCount), totalCount);
+    data.firstIndex = selected > count / 2U ? selected - count / 2U : 0U;
+    if (scrollOffset < 0) {
+        const auto amount = static_cast<std::size_t>(-scrollOffset);
+        data.firstIndex = amount > data.firstIndex
+            ? 0U : data.firstIndex - amount;
+    } else {
+        data.firstIndex += static_cast<std::size_t>(scrollOffset);
+    }
+    if (data.firstIndex + count > totalCount) {
+        data.firstIndex = totalCount - count;
+    }
+    data.layout = textPopupMenuLayout(field, count, safeHeight);
+    data.labels.reserve(count);
+    for (std::size_t offset = 0; offset < count; ++offset) {
+        const auto index = data.firstIndex + offset;
+        if (menu == TextPopupMenu::fontFamily) {
+            data.labels.push_back(systemFontFamilies()[index]);
+        } else {
+            data.labels.push_back(std::to_wstring(
+                index + static_cast<std::size_t>(textMinimumSize)));
+        }
+        if (index == selected) data.selectedIndex = offset;
+    }
+    return data;
 }
 
 StrokePatternMenuLayout strokePatternMenuFor(
@@ -154,6 +258,8 @@ OverlayCursorStyle cursorStyleForShape(ShapeCursorStyle style) noexcept
         return OverlayCursorStyle::marker;
     case ShapeCursorStyle::mosaic:
         return OverlayCursorStyle::mosaic;
+    case ShapeCursorStyle::textInput:
+        return OverlayCursorStyle::textInput;
     case ShapeCursorStyle::eyedropper:
         return OverlayCursorStyle::eyedropper;
     }
@@ -626,6 +732,29 @@ OverlayInputRouter::currentMosaicOptionsLayout(
         optionsToolbarOrigin(chrome, initial.toolbar));
 }
 
+std::optional<TextOptionsLayout>
+OverlayInputRouter::currentTextOptionsLayout(
+    const OverlaySurface& surface) const
+{
+    if (!editor_ || !editor_->isTextToolActive()
+        || !model_.selection().has_value()) {
+        return std::nullopt;
+    }
+    const auto chrome = computeOverlayLayout({
+        surface.physicalBounds,
+        *model_.selection(),
+        surface.dpiX,
+        surface.dpiY,
+        0.0F,
+        true,
+        toolbarActions(),
+    });
+    const auto initial = textOptionsLayout({}, macShapePalette().size());
+    return textOptionsLayout(
+        optionsToolbarOrigin(chrome, initial.toolbar),
+        macShapePalette().size());
+}
+
 OverlayInputRouter::~OverlayInputRouter()
 {
     if (dragging_) {
@@ -885,6 +1014,26 @@ std::vector<OverlayPresentation> OverlayInputRouter::presentations() const
                     *options,
                     editor_->mosaicOptions(),
                 };
+            }
+            if (const auto options = currentTextOptionsLayout(surface)) {
+                OverlayPresentationTextOptions textOptions{
+                    *options,
+                    editor_->textOptions(),
+                    std::nullopt,
+                    {},
+                    std::nullopt,
+                };
+                if (const auto menu = editor_->textPopupMenu()) {
+                    const auto safeHeight = physicalPixelsToDip(
+                        surface.physicalBounds.height, surface.dpiY);
+                    const auto data = textPopupDataFor(
+                        *menu, *options, editor_->textOptions(), safeHeight,
+                        editor_->textPopupScrollOffset());
+                    textOptions.popupMenu = data.layout;
+                    textOptions.popupLabels = data.labels;
+                    textOptions.selectedPopupIndex = data.selectedIndex;
+                }
+                presentation.textOptions = std::move(textOptions);
             }
             if (editor_->isEyedropperToolActive()
                 && eyedropperSamplePoint_.has_value()
@@ -1179,6 +1328,51 @@ bool OverlayInputRouter::pointerDown(HWND source, PixelPoint clientPoint) noexce
             }
             editor_->dismissPopovers();
         }
+        if (const auto options = currentTextOptionsLayout(*surface);
+            options.has_value()) {
+            const AnnotationPoint point{x, y};
+            if (const auto menu = editor_->textPopupMenu()) {
+                const auto safeHeight = physicalPixelsToDip(
+                    surface->physicalBounds.height, surface->dpiY);
+                const auto data = textPopupDataFor(
+                    *menu, *options, editor_->textOptions(), safeHeight,
+                    editor_->textPopupScrollOffset());
+                if (const auto item = textPopupMenuHitTest(
+                        data.layout, point)) {
+                    const auto index = data.firstIndex + *item;
+                    if (*menu == TextPopupMenu::fontFamily) {
+                        if (index < systemFontFamilies().size()) {
+                            editor_->setTextFontFamily(
+                                systemFontFamilies()[index]);
+                        }
+                    } else {
+                        editor_->setTextSize(
+                            static_cast<float>(index) + textMinimumSize);
+                    }
+                    editor_->dismissPopovers();
+                    return true;
+                }
+            }
+            if (const auto hit = textOptionHitTest(*options, point)) {
+                if (hit->control == TextOptionControl::customColor) {
+                    if (const auto chosen = platform_.chooseColor(
+                            source,
+                            editor_->textOptions().style().strokeColor)) {
+                        editor_->selectCustomColor(*chosen);
+                    }
+                } else if (hit->control == TextOptionControl::fontFamily) {
+                    editor_->toggleTextPopupMenu(
+                        TextPopupMenu::fontFamily);
+                } else if (hit->control == TextOptionControl::textSize) {
+                    editor_->toggleTextPopupMenu(
+                        TextPopupMenu::textSize);
+                } else {
+                    editor_->applyTextOptionHit(*hit);
+                }
+                return true;
+            }
+            editor_->dismissPopovers();
+        }
     }
 
     const auto virtualPoint = toVirtual(*surface, clientPoint);
@@ -1209,6 +1403,9 @@ bool OverlayInputRouter::pointerDown(HWND source, PixelPoint clientPoint) noexce
         if (const auto local = annotationPoint(virtualPoint);
             local.has_value()
                 && editor_->pointerDown(*local, platform_.shiftPressed())) {
+            if (editor_->isEditingText()) {
+                return true;
+            }
             if (!platform_.captureMouse(source)) {
                 editor_->cancelInteraction();
                 lastError_ = OverlayInputErrorCode::mouseCaptureFailed;
@@ -1298,6 +1495,10 @@ OverlayCursorStyle OverlayInputRouter::cursorStyle(
             return OverlayCursorStyle::arrow;
         }
         if (const auto options = currentMosaicOptionsLayout(*surface);
+            options.has_value() && contains(options->toolbar, surfacePoint)) {
+            return OverlayCursorStyle::arrow;
+        }
+        if (const auto options = currentTextOptionsLayout(*surface);
             options.has_value() && contains(options->toolbar, surfacePoint)) {
             return OverlayCursorStyle::arrow;
         }
@@ -1523,6 +1724,28 @@ bool OverlayInputRouter::keyPressed(
     return false;
 }
 
+bool OverlayInputRouter::textInput(std::wstring text)
+{
+    return status_ == OverlayInputStatus::active
+        && editor_ != nullptr
+        && editor_->isEditingText()
+        && editor_->insertText(std::move(text));
+}
+
+bool OverlayInputRouter::mouseWheel(int delta) noexcept
+{
+    if (status_ != OverlayInputStatus::active || editor_ == nullptr
+        || !editor_->textPopupMenu().has_value() || delta == 0) {
+        return false;
+    }
+    return editor_->scrollTextPopupMenu(delta > 0 ? -3 : 3);
+}
+
+bool OverlayInputRouter::isEditingText() const noexcept
+{
+    return editor_ != nullptr && editor_->isEditingText();
+}
+
 bool OverlayInputRouter::eyedropperShiftPressed() noexcept
 {
     if (status_ != OverlayInputStatus::active || editor_ == nullptr
@@ -1726,6 +1949,12 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
         case OverlayWindowInputKind::escape:
             router->escapePressed();
             break;
+        case OverlayWindowInputKind::textInput:
+            router->textInput(input.text);
+            break;
+        case OverlayWindowInputKind::mouseWheel:
+            router->mouseWheel(input.wheelDelta);
+            break;
         case OverlayWindowInputKind::keyDown: {
             if (input.virtualKey == VK_SHIFT) {
                 router->eyedropperShiftPressed();
@@ -1735,6 +1964,24 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
             switch (input.virtualKey) {
             case VK_DELETE:
                 key = ShapeEditorKey::deleteKey;
+                break;
+            case VK_BACK:
+                key = ShapeEditorKey::backspace;
+                break;
+            case VK_RETURN:
+                key = ShapeEditorKey::enter;
+                break;
+            case VK_LEFT:
+                key = ShapeEditorKey::left;
+                break;
+            case VK_RIGHT:
+                key = ShapeEditorKey::right;
+                break;
+            case VK_HOME:
+                key = ShapeEditorKey::home;
+                break;
+            case VK_END:
+                key = ShapeEditorKey::end;
                 break;
             case 'Z':
                 key = ShapeEditorKey::z;
@@ -1750,6 +1997,12 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
                 break;
             case 'M':
                 key = ShapeEditorKey::mosaic;
+                break;
+            case 'T':
+                if (router->isEditingText()) {
+                    return;
+                }
+                key = ShapeEditorKey::text;
                 break;
             default:
                 return;
@@ -1858,6 +2111,16 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
                     state.mosaicOptions = OverlayMosaicOptionsRenderState{
                         options.layout,
                         options.state,
+                    };
+                }
+                if (current[index].textOptions.has_value()) {
+                    const auto& options = *current[index].textOptions;
+                    state.textOptions = OverlayTextOptionsRenderState{
+                        options.layout,
+                        options.state,
+                        options.popupMenu,
+                        options.popupLabels,
+                        options.selectedPopupIndex,
                     };
                 }
                 if (current[index].eyedropper.has_value()) {

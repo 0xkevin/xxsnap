@@ -1,6 +1,11 @@
 #include "annotation/ShapeEditorController.h"
+#include "annotation/TextAnnotationRenderer.h"
+#include "annotation/AnnotationGeometry.h"
 
+#include <algorithm>
 #include <array>
+#include <cwctype>
+#include <utility>
 
 namespace xxsnap::win {
 namespace {
@@ -180,6 +185,7 @@ ShapeEditorController::ShapeEditorController(
     toolbarState_.setCapability(ToolbarAction::marker, true);
     toolbarState_.setCapability(ToolbarAction::eyedropper, true);
     toolbarState_.setCapability(ToolbarAction::mosaic, true);
+    toolbarState_.setCapability(ToolbarAction::text, true);
     toolbarState_.setCapability(ToolbarAction::undo, true);
     toolbarState_.setCapability(ToolbarAction::redo, true);
     syncHistory();
@@ -224,6 +230,11 @@ const MarkerOptionsState& ShapeEditorController::markerOptions() const noexcept
 const MosaicOptionsState& ShapeEditorController::mosaicOptions() const noexcept
 {
     return mosaicOptions_;
+}
+
+const TextOptionsState& ShapeEditorController::textOptions() const noexcept
+{
+    return textOptions_;
 }
 
 const AnnotationDocument& ShapeEditorController::document() const noexcept
@@ -287,6 +298,27 @@ bool ShapeEditorController::isMosaicToolActive() const noexcept
     return toolbarState_.selectedAction() == ToolbarAction::mosaic;
 }
 
+bool ShapeEditorController::isTextToolActive() const noexcept
+{
+    return toolbarState_.selectedAction() == ToolbarAction::text;
+}
+
+bool ShapeEditorController::isEditingText() const noexcept
+{
+    return editingTextId_.has_value();
+}
+
+std::optional<TextPopupMenu>
+ShapeEditorController::textPopupMenu() const noexcept
+{
+    return textPopupMenu_;
+}
+
+int ShapeEditorController::textPopupScrollOffset() const noexcept
+{
+    return textPopupScrollOffset_;
+}
+
 bool ShapeEditorController::strokePatternMenuVisible() const noexcept
 {
     return strokePatternMenuVisible_;
@@ -305,6 +337,9 @@ ShapeEditorController::arrowTypeMenuEndpoint() const noexcept
 
 bool ShapeEditorController::handleToolbarAction(ToolbarAction action)
 {
+    if (action != ToolbarAction::text && editingTextId_.has_value()) {
+        commitTextEdit();
+    }
     if (action == ToolbarAction::rectangle) {
         if (shapeToolActive_) {
             deactivateTool();
@@ -390,6 +425,25 @@ bool ShapeEditorController::handleToolbarAction(ToolbarAction action)
                 MosaicOptionsState activated;
                 mosaicOptions_ = activated;
                 document_.clearSelection();
+            }
+        }
+        return true;
+    }
+    if (action == ToolbarAction::text) {
+        if (isTextToolActive()) {
+            commitTextEdit();
+            deactivateTool();
+        } else {
+            cancelInteraction();
+            shapeToolActive_ = false;
+            arrowLineToolActive_ = false;
+            brushToolActive_ = false;
+            markerToolActive_ = false;
+            if (toolbarState_.selectTool(action)) {
+                TextOptionsState activated;
+                textOptions_ = std::move(activated);
+                document_.clearSelection();
+                dismissPopovers();
             }
         }
         return true;
@@ -598,6 +652,217 @@ void ShapeEditorController::endMosaicRedactionEdit()
     syncHistory();
 }
 
+bool ShapeEditorController::applyTextOptionHit(TextOptionHit hit)
+{
+    bool changed = false;
+    switch (hit.control) {
+    case TextOptionControl::bold:
+        changed = textOptions_.toggleBold();
+        break;
+    case TextOptionControl::italic:
+        changed = textOptions_.toggleItalic();
+        break;
+    case TextOptionControl::outline:
+        changed = textOptions_.toggleOutline();
+        break;
+    case TextOptionControl::palette:
+        changed = textOptions_.selectPalette(hit.index);
+        break;
+    case TextOptionControl::customColor:
+    case TextOptionControl::fontFamily:
+    case TextOptionControl::textSize:
+        return false;
+    }
+    if (changed) {
+        applyTextStyleToSelection();
+    }
+    return changed;
+}
+
+bool ShapeEditorController::setTextFontFamily(std::wstring family)
+{
+    const auto changed = textOptions_.setFontFamily(std::move(family));
+    return changed && applyTextStyleToSelection();
+}
+
+bool ShapeEditorController::setTextSize(float size)
+{
+    const auto changed = textOptions_.setTextSize(size);
+    return changed && applyTextStyleToSelection();
+}
+
+bool ShapeEditorController::toggleTextPopupMenu(
+    TextPopupMenu menu) noexcept
+{
+    textPopupMenu_ = textPopupMenu_ == menu
+        ? std::nullopt : std::optional<TextPopupMenu>{menu};
+    textPopupScrollOffset_ = 0;
+    strokePatternMenuVisible_ = false;
+    cornerRadiusPanelVisible_ = false;
+    arrowTypeMenuEndpoint_.reset();
+    return true;
+}
+
+bool ShapeEditorController::scrollTextPopupMenu(int delta) noexcept
+{
+    if (!textPopupMenu_.has_value() || delta == 0) return false;
+    textPopupScrollOffset_ = (std::max)(-10000,
+        (std::min)(10000, textPopupScrollOffset_ + delta));
+    return true;
+}
+
+bool ShapeEditorController::insertText(std::wstring text)
+{
+    if (!editingTextId_.has_value() || text.empty()) {
+        return false;
+    }
+    const auto* annotation = document_.find(*editingTextId_);
+    if (annotation == nullptr || !isTextAnnotation(*annotation)) {
+        editingTextId_.reset();
+        return false;
+    }
+    auto updated = *annotation->text;
+    textCaretPosition_ = (std::min)(
+        textCaretPosition_, updated.size());
+    updated.insert(textCaretPosition_, text);
+    textCaretPosition_ += text.size();
+    const AnnotationPoint anchor{
+        annotation->rect.x + textHorizontalPaddingDip,
+        annotation->rect.y + annotation->rect.height / 2.0F,
+    };
+    ++interactionRevision_;
+    return document_.updateText(*editingTextId_, updated,
+        measuredTextRect(anchor, updated, annotation->style));
+}
+
+bool ShapeEditorController::deleteTextBackward()
+{
+    if (!editingTextId_.has_value()) {
+        return false;
+    }
+    const auto* annotation = document_.find(*editingTextId_);
+    if (annotation == nullptr || !isTextAnnotation(*annotation)) {
+        return false;
+    }
+    auto updated = *annotation->text;
+    textCaretPosition_ = (std::min)(
+        textCaretPosition_, updated.size());
+    if (updated.empty()) {
+        return cancelTextEdit();
+    }
+    if (textCaretPosition_ == 0U) return false;
+    auto eraseStart = textCaretPosition_ - 1U;
+    if (eraseStart > 0U && updated[eraseStart] >= 0xDC00
+        && updated[eraseStart] <= 0xDFFF
+        && updated[eraseStart - 1U] >= 0xD800
+        && updated[eraseStart - 1U] <= 0xDBFF) {
+        --eraseStart;
+    }
+    updated.erase(eraseStart, textCaretPosition_ - eraseStart);
+    textCaretPosition_ = eraseStart;
+    const AnnotationPoint anchor{
+        annotation->rect.x + textHorizontalPaddingDip,
+        annotation->rect.y + annotation->rect.height / 2.0F,
+    };
+    ++interactionRevision_;
+    return document_.updateText(*editingTextId_, updated,
+        measuredTextRect(anchor, updated, annotation->style));
+}
+
+bool ShapeEditorController::deleteTextForward()
+{
+    if (!editingTextId_.has_value()) return false;
+    const auto* annotation = document_.find(*editingTextId_);
+    if (annotation == nullptr || !isTextAnnotation(*annotation)) return false;
+    auto updated = *annotation->text;
+    textCaretPosition_ = (std::min)(textCaretPosition_, updated.size());
+    if (textCaretPosition_ >= updated.size()) return false;
+    auto eraseCount = std::size_t{1U};
+    if (updated[textCaretPosition_] >= 0xD800
+        && updated[textCaretPosition_] <= 0xDBFF
+        && textCaretPosition_ + 1U < updated.size()
+        && updated[textCaretPosition_ + 1U] >= 0xDC00
+        && updated[textCaretPosition_ + 1U] <= 0xDFFF) {
+        eraseCount = 2U;
+    }
+    updated.erase(textCaretPosition_, eraseCount);
+    const AnnotationPoint anchor{
+        annotation->rect.x + textHorizontalPaddingDip,
+        annotation->rect.y + annotation->rect.height / 2.0F,
+    };
+    ++interactionRevision_;
+    return document_.updateText(*editingTextId_, updated,
+        measuredTextRect(anchor, updated, annotation->style));
+}
+
+bool ShapeEditorController::commitTextEdit()
+{
+    if (!editingTextId_.has_value()) {
+        return false;
+    }
+    const auto* annotation = document_.find(*editingTextId_);
+    const auto keep = annotation != nullptr && isTextAnnotation(*annotation)
+        && std::any_of(annotation->text->begin(), annotation->text->end(),
+            [](wchar_t character) { return !std::iswspace(character); });
+    document_.endTextEdit(keep);
+    editingTextId_.reset();
+    textCaretPosition_ = 0U;
+    ++interactionRevision_;
+    syncHistory();
+    return true;
+}
+
+bool ShapeEditorController::cancelTextEdit()
+{
+    if (!editingTextId_.has_value()) {
+        return false;
+    }
+    document_.endTextEdit(false);
+    editingTextId_.reset();
+    textCaretPosition_ = 0U;
+    ++interactionRevision_;
+    syncHistory();
+    return true;
+}
+
+bool ShapeEditorController::beginTextEdit(AnnotationId id) noexcept
+{
+    const auto* annotation = document_.find(id);
+    if (annotation == nullptr || !isTextAnnotation(*annotation)) {
+        return false;
+    }
+    if (editingTextId_ != id) {
+        commitTextEdit();
+        document_.beginTextEdit();
+        editingTextId_ = id;
+        textCaretPosition_ = annotation->text->size();
+    }
+    document_.select(id);
+    textOptions_.load(annotation->style);
+    ++interactionRevision_;
+    return true;
+}
+
+bool ShapeEditorController::applyTextStyleToSelection()
+{
+    const auto selected = document_.selectedId();
+    const auto* annotation = selected.has_value()
+        ? document_.find(*selected) : nullptr;
+    if (annotation == nullptr || !isTextAnnotation(*annotation)) {
+        return true;
+    }
+    const auto text = *annotation->text;
+    const AnnotationPoint anchor{
+        annotation->rect.x + textHorizontalPaddingDip,
+        annotation->rect.y + annotation->rect.height / 2.0F,
+    };
+    const auto style = textOptions_.style();
+    const auto changed = document_.updateTextGeometry(
+        *selected, measuredTextRect(anchor, text, style), style);
+    syncHistory();
+    return changed;
+}
+
 bool ShapeEditorController::applyOptionHit(ShapeOptionHit hit)
 {
     bool changed = false;
@@ -708,7 +973,9 @@ bool ShapeEditorController::adjustCornerRadius(float deltaDip)
 
 bool ShapeEditorController::selectCustomColor(AnnotationColor color)
 {
-    const auto optionChanged = markerToolActive_
+    const auto optionChanged = isTextToolActive()
+        ? textOptions_.selectCustomColor(color)
+        : markerToolActive_
         ? markerOptions_.selectCustomColor(color)
         : brushToolActive_
             ? brushOptions_.selectCustomColor(color)
@@ -719,7 +986,9 @@ bool ShapeEditorController::selectCustomColor(AnnotationColor color)
         return false;
     }
     auto changed = false;
-    if (markerToolActive_) {
+    if (isTextToolActive()) {
+        changed = applyTextStyleToSelection();
+    } else if (markerToolActive_) {
         const auto selected = document_.selectedId();
         const auto* annotation = selected.has_value()
             ? document_.find(*selected) : nullptr;
@@ -739,6 +1008,8 @@ void ShapeEditorController::dismissPopovers() noexcept
     strokePatternMenuVisible_ = false;
     cornerRadiusPanelVisible_ = false;
     arrowTypeMenuEndpoint_.reset();
+    textPopupMenu_.reset();
+    textPopupScrollOffset_ = 0;
 }
 
 bool ShapeEditorController::pointerDown(
@@ -754,8 +1025,39 @@ bool ShapeEditorController::pointerDown(
         || mosaicInteraction_.mode() != MosaicInteractionMode::idle) {
         return false;
     }
+    if (editingTextId_.has_value()) {
+        const auto* editing = document_.find(*editingTextId_);
+        const auto deleteHandle = textDeleteHandlePoint(*editingTextId_);
+        if (deleteHandle.has_value()
+            && annotationDistanceSquared(point, *deleteHandle) <= 100.0F) {
+            const auto id = *editingTextId_;
+            commitTextEdit();
+            const auto removed = document_.remove(id);
+            syncHistory();
+            return removed;
+        }
+        if (editing != nullptr
+            && containsRect(standardized(editing->rect),
+                unrotatedPoint(point, *editing))) {
+            if (const auto position = textPositionAtPoint(
+                    *editing, unrotatedPoint(point, *editing))) {
+                textCaretPosition_ = *position;
+            }
+            return true;
+        }
+        commitTextEdit();
+    }
     if (const auto selected = document_.selectedId(); selected.has_value()) {
         const auto* annotation = document_.find(*selected);
+        if (annotation != nullptr && isTextAnnotation(*annotation)) {
+            if (const auto handle = textDeleteHandlePoint(*selected);
+                handle.has_value()
+                && annotationDistanceSquared(point, *handle) <= 100.0F) {
+                const auto removed = document_.remove(*selected);
+                syncHistory();
+                return removed;
+            }
+        }
         if (annotation != nullptr && annotation->arrowLine.has_value()) {
             if (const auto handle = arrowInteraction_.hitTestHandle(
                     *selected, point)) {
@@ -792,6 +1094,19 @@ bool ShapeEditorController::pointerDown(
         document_.clearSelection();
         return brushInteraction_.begin(point, brushOptions_.style());
     }
+    if (isTextToolActive()) {
+        if (const auto text = textAnnotationAt(point)) {
+            if (!beginTextEdit(*text)) return false;
+            const auto* annotation = document_.find(*text);
+            if (annotation != nullptr) {
+                if (const auto position = textPositionAtPoint(
+                        *annotation, unrotatedPoint(point, *annotation))) {
+                    textCaretPosition_ = *position;
+                }
+            }
+            return true;
+        }
+    }
     if (const auto hit = annotationAtBorder(point); hit.has_value()) {
         document_.select(*hit);
         loadSelectedOptions();
@@ -821,6 +1136,21 @@ bool ShapeEditorController::pointerDown(
         }
         return mosaicInteraction_.beginDrawing(
             point, mosaicOptions_.style(), mosaicOptions_.redaction());
+    }
+    if (isTextToolActive()) {
+        document_.clearSelection();
+        document_.beginTextEdit();
+        const auto rect = measuredTextRect(
+            point, L"", textOptions_.style());
+        const auto id = document_.addText(
+            rect, L"", textOptions_.style());
+        if (id == invalidAnnotationId) {
+            document_.endTextEdit(false);
+            return false;
+        }
+        editingTextId_ = id;
+        textCaretPosition_ = 0U;
+        return true;
     }
     if (arrowLineToolActive_) {
         document_.clearSelection();
@@ -981,6 +1311,16 @@ ShapeCursorStyle ShapeEditorController::cursorStyleAt(
     if (annotationAtBorder(point).has_value()) {
         return ShapeCursorStyle::move;
     }
+    if (const auto selected = document_.selectedId(); selected.has_value()) {
+        if (const auto handle = textDeleteHandlePoint(*selected);
+            handle.has_value()
+            && annotationDistanceSquared(point, *handle) <= 100.0F) {
+            return ShapeCursorStyle::arrow;
+        }
+    }
+    if (isTextToolActive() && textAnnotationAt(point).has_value()) {
+        return ShapeCursorStyle::textInput;
+    }
     if (brushToolActive_) {
         return ShapeCursorStyle::brush;
     }
@@ -991,7 +1331,7 @@ ShapeCursorStyle ShapeEditorController::cursorStyleAt(
         return mosaicOptions_.kind() == AnnotationKind::mosaicStroke
             ? ShapeCursorStyle::mosaic : ShapeCursorStyle::crosshair;
     }
-    return shapeToolActive_ || arrowLineToolActive_
+    return shapeToolActive_ || arrowLineToolActive_ || isTextToolActive()
         ? ShapeCursorStyle::crosshair : ShapeCursorStyle::arrow;
 }
 
@@ -1000,12 +1340,81 @@ ShapeEditorKeyResult ShapeEditorController::handleKey(
     bool control,
     bool shift)
 {
+    if (editingTextId_.has_value()) {
+        if (key == ShapeEditorKey::escapeKey) {
+            cancelTextEdit();
+            return ShapeEditorKeyResult::consumed;
+        }
+        if (!control && key == ShapeEditorKey::backspace) {
+            deleteTextBackward();
+            return ShapeEditorKeyResult::consumed;
+        }
+        if (!control && key == ShapeEditorKey::deleteKey) {
+            deleteTextForward();
+            return ShapeEditorKeyResult::consumed;
+        }
+        if (!control && key == ShapeEditorKey::enter) {
+            insertText(L"\n");
+            return ShapeEditorKeyResult::consumed;
+        }
+        const auto* annotation = document_.find(*editingTextId_);
+        const auto textLength = annotation != nullptr && annotation->text.has_value()
+            ? annotation->text->size() : 0U;
+        if (!control && key == ShapeEditorKey::left) {
+            if (textCaretPosition_ > 0U) {
+                --textCaretPosition_;
+                if (annotation != nullptr && textCaretPosition_ > 0U
+                    && (*annotation->text)[textCaretPosition_] >= 0xDC00
+                    && (*annotation->text)[textCaretPosition_] <= 0xDFFF) {
+                    --textCaretPosition_;
+                }
+            }
+            ++interactionRevision_;
+            return ShapeEditorKeyResult::consumed;
+        }
+        if (!control && key == ShapeEditorKey::right) {
+            if (textCaretPosition_ < textLength) {
+                if (annotation != nullptr
+                    && (*annotation->text)[textCaretPosition_] >= 0xD800
+                    && (*annotation->text)[textCaretPosition_] <= 0xDBFF
+                    && textCaretPosition_ + 1U < textLength) {
+                    ++textCaretPosition_;
+                }
+                ++textCaretPosition_;
+            }
+            ++interactionRevision_;
+            return ShapeEditorKeyResult::consumed;
+        }
+        if (!control && key == ShapeEditorKey::home) {
+            const std::wstring text = annotation != nullptr
+                ? *annotation->text : std::wstring{};
+            const auto newline = text.rfind(L'\n',
+                textCaretPosition_ == 0U ? 0U : textCaretPosition_ - 1U);
+            textCaretPosition_ = newline == std::wstring::npos
+                ? 0U : newline + 1U;
+            ++interactionRevision_;
+            return ShapeEditorKeyResult::consumed;
+        }
+        if (!control && key == ShapeEditorKey::end) {
+            const std::wstring text = annotation != nullptr
+                ? *annotation->text : std::wstring{};
+            const auto newline = text.find(L'\n', textCaretPosition_);
+            textCaretPosition_ = newline == std::wstring::npos
+                ? text.size() : newline;
+            ++interactionRevision_;
+            return ShapeEditorKeyResult::consumed;
+        }
+    }
     if (!control && key == ShapeEditorKey::eyedropper) {
         handleToolbarAction(ToolbarAction::eyedropper);
         return ShapeEditorKeyResult::consumed;
     }
     if (!control && key == ShapeEditorKey::mosaic) {
         handleToolbarAction(ToolbarAction::mosaic);
+        return ShapeEditorKeyResult::consumed;
+    }
+    if (!control && key == ShapeEditorKey::text) {
+        handleToolbarAction(ToolbarAction::text);
         return ShapeEditorKeyResult::consumed;
     }
     if (key == ShapeEditorKey::escapeKey) {
@@ -1019,7 +1428,7 @@ ShapeEditorKeyResult ShapeEditorController::handleKey(
         }
         if (shapeToolActive_ || arrowLineToolActive_ || brushToolActive_
             || markerToolActive_ || isMosaicToolActive()
-            || isEyedropperToolActive()) {
+            || isTextToolActive() || isEyedropperToolActive()) {
             deactivateTool();
             return ShapeEditorKeyResult::consumed;
         }
@@ -1065,13 +1474,23 @@ std::optional<AnnotationPoint> ShapeEditorController::rotationHandlePoint(
     return interaction_.rotationHandlePoint(id);
 }
 
+std::optional<AnnotationPoint> ShapeEditorController::textDeleteHandlePoint(
+    AnnotationId id) const noexcept
+{
+    const auto* annotation = document_.find(id);
+    if (annotation == nullptr || !isTextAnnotation(*annotation)) {
+        return std::nullopt;
+    }
+    return interaction_.resizeHandlePoint(id, ShapeResizeHandle::topRight);
+}
+
 AnnotationRenderPlan ShapeEditorController::renderPlan(
     AnnotationPoint selectionOriginDip,
     bool showEditingAffordances) const
 {
     return buildAnnotationRenderPlan(
         document_, preview(), selectionOriginDip,
-        showEditingAffordances);
+        showEditingAffordances, editingTextId_, textCaretPosition_);
 }
 
 std::optional<AnnotationId> ShapeEditorController::annotationAtBorder(
@@ -1098,6 +1517,31 @@ std::optional<AnnotationId> ShapeEditorController::annotationAtBorder(
     return std::nullopt;
 }
 
+std::optional<AnnotationId> ShapeEditorController::textAnnotationAt(
+    AnnotationPoint point) const noexcept
+{
+    const auto& annotations = document_.annotations();
+    for (auto iterator = annotations.rbegin(); iterator != annotations.rend();
+         ++iterator) {
+        if (!isTextAnnotation(*iterator)) {
+            continue;
+        }
+        const auto local = unrotatedPoint(point, *iterator);
+        const auto rect = standardized(iterator->rect);
+        constexpr float border = 6.0F;
+        const AnnotationRect interior{
+            rect.x + border,
+            rect.y + border,
+            maximum(0.0F, rect.width - border * 2.0F),
+            maximum(0.0F, rect.height - border * 2.0F),
+        };
+        if (containsRect(interior, local)) {
+            return iterator->id;
+        }
+    }
+    return std::nullopt;
+}
+
 void ShapeEditorController::loadSelectedOptions() noexcept
 {
     const auto selected = document_.selectedId();
@@ -1113,6 +1557,8 @@ void ShapeEditorController::loadSelectedOptions() noexcept
             markerOptions_.load(annotation->style);
         } else if (isMosaicAnnotation(*annotation)) {
             mosaicOptions_.load(*annotation);
+        } else if (isTextAnnotation(*annotation)) {
+            textOptions_.load(annotation->style);
         } else {
             options_.load(annotation->kind, annotation->style);
         }
@@ -1151,8 +1597,11 @@ void ShapeEditorController::syncHistory() noexcept
         document_.canUndo(), document_.canRedo());
 }
 
-void ShapeEditorController::deactivateTool() noexcept
+void ShapeEditorController::deactivateTool()
 {
+    if (editingTextId_.has_value()) {
+        commitTextEdit();
+    }
     cancelInteraction();
     shapeToolActive_ = false;
     arrowLineToolActive_ = false;
@@ -1162,6 +1611,8 @@ void ShapeEditorController::deactivateTool() noexcept
     strokePatternMenuVisible_ = false;
     cornerRadiusPanelVisible_ = false;
     arrowTypeMenuEndpoint_.reset();
+    textPopupMenu_.reset();
+    textPopupScrollOffset_ = 0;
 }
 
 } // namespace xxsnap::win

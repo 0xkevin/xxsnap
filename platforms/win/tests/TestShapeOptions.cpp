@@ -273,6 +273,41 @@ void testMosaicOptionsMatchMacGeometryAndRanges()
         {layout.valueTrack.x + layout.valueTrack.width, 210}) == 20);
 }
 
+void testTextOptionsMatchMacGeometryAndMenus()
+{
+    TextOptionsState state;
+    CHECK(state.style().textFontFamily == L"Microsoft YaHei");
+    CHECK(state.style().textSize == 8.0F);
+    CHECK(state.style().textOutlineEnabled);
+    CHECK(state.selectedPaletteIndex() == 0U);
+    CHECK(state.toggleBold());
+    CHECK(state.toggleItalic());
+    CHECK(state.setTextSize(100.0F));
+    CHECK(state.style().textSize == 72.0F);
+    CHECK(state.setTextSize(1.0F));
+    CHECK(state.style().textSize == 3.0F);
+    CHECK(state.setFontFamily(L"Arial"));
+
+    const auto layout = textOptionsLayout({100, 200}, 20U);
+    CHECK((layout.toolbar == AnnotationRect{100, 200, 554, 40}));
+    CHECK((layout.bold == AnnotationRect{110, 210, 22, 20}));
+    CHECK((layout.italic == AnnotationRect{138, 210, 22, 20}));
+    CHECK((layout.outline == AnnotationRect{166, 210, 22, 20}));
+    CHECK((layout.fontFamily == AnnotationRect{208, 210, 154, 20}));
+    CHECK((layout.textSize == AnnotationRect{382, 210, 48, 20}));
+    CHECK((textOptionHitTest(layout, {120, 220})
+        == TextOptionHit{TextOptionControl::bold, 0U}));
+    CHECK((textOptionHitTest(layout, {400, 220})
+        == TextOptionHit{TextOptionControl::textSize, 0U}));
+
+    const auto popup = textPopupMenuLayout(layout.textSize, 10U, 800.0F);
+    CHECK(popup.items.size() == 10U);
+    CHECK(popup.menu.width == layout.textSize.width);
+    CHECK(popup.menu.height == 248.0F);
+    CHECK(textPopupMenuHitTest(popup, {
+        popup.items[4].x + 2.0F, popup.items[4].y + 2.0F}) == 4U);
+}
+
 } // namespace
 
 int main()
@@ -287,5 +322,6 @@ int main()
     testBrushOptionsMatchMacGeometry();
     testMarkerOptionsMatchMacGeometry();
     testMosaicOptionsMatchMacGeometryAndRanges();
+    testTextOptionsMatchMacGeometryAndMenus();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
