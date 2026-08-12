@@ -509,6 +509,9 @@ void OverlayInputRouter::lockSelection(PixelRect selection) noexcept
 
 std::vector<ToolbarAction> OverlayInputRouter::toolbarActions() const
 {
+    if (mode_ == OverlayMode::textRecognition) {
+        return {};
+    }
     if (mode_ == OverlayMode::pinnedImageEditor) {
         return {
             pinnedEditorToolbarActions().begin(),
@@ -1094,6 +1097,11 @@ std::vector<OverlayPresentation> OverlayInputRouter::presentations() const
         presentation.showActions = owner.has_value() && *owner == index;
         presentation.pinnedImageEditor
             = mode_ == OverlayMode::pinnedImageEditor;
+        presentation.textRecognition
+            = mode_ == OverlayMode::textRecognition;
+        if (presentation.textRecognition) {
+            presentation.showActions = false;
+        }
         if (!presentation.showActions || !presentation.selection.has_value()) {
             continue;
         }
@@ -1768,7 +1776,8 @@ bool OverlayInputRouter::pointerDown(
         1, dipLengthToPhysicalPixels(
             VisualStyleCatalog::selectionHandleDiameterDip / 2.0F,
             (std::max)(surface->dpiX, surface->dpiY)));
-    const auto hit = model_.phase() == SelectionPhase::ready
+    const auto hit = mode_ != OverlayMode::textRecognition
+            && model_.phase() == SelectionPhase::ready
         ? model_.hitTest(point, handleRadius)
         : SelectionHandle::none;
     bool began = false;
@@ -1799,6 +1808,9 @@ OverlayCursorStyle OverlayInputRouter::cursorStyle(
     const auto* surface = surfaceFor(source);
     if (surface == nullptr) {
         return OverlayCursorStyle::arrow;
+    }
+    if (mode_ == OverlayMode::textRecognition) {
+        return OverlayCursorStyle::crosshair;
     }
     if (hitToolbarAction(*surface, clientPoint).has_value()) {
         return OverlayCursorStyle::arrow;
@@ -1982,6 +1994,9 @@ void OverlayInputRouter::platformPointerUp(PixelPoint virtualPoint) noexcept
     if (!released) {
         lastError_ = OverlayInputErrorCode::mouseReleaseFailed;
         cancelOnce();
+    } else if (mode_ == OverlayMode::textRecognition
+               && model_.selection().has_value()) {
+        completeOnce(OverlayInputAction::recognizeText);
     }
 }
 
@@ -2515,6 +2530,7 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
                 state.selection = current[index].selection;
                 state.showActions = current[index].showActions;
                 state.pinnedImageEditor = current[index].pinnedImageEditor;
+                state.textRecognition = current[index].textRecognition;
                 state.annotationPlan = current[index].annotationPlan;
                 state.annotationComposite
                     = current[index].annotationComposite;
@@ -2644,6 +2660,28 @@ OverlayHostCreateResult OverlayHost::create(
     RestartCallback restartCallback,
     ActionCallback actionCallback)
 {
+    return createWithMode(instance, desktop, std::move(restartCallback),
+        std::move(actionCallback), true, OverlayMode::capture);
+}
+
+OverlayHostCreateResult OverlayHost::createTextRecognition(
+    HINSTANCE instance,
+    const FrozenDesktop& desktop,
+    RestartCallback restartCallback,
+    ActionCallback actionCallback)
+{
+    return createWithMode(instance, desktop, std::move(restartCallback),
+        std::move(actionCallback), false, OverlayMode::textRecognition);
+}
+
+OverlayHostCreateResult OverlayHost::createWithMode(
+    HINSTANCE instance,
+    const FrozenDesktop& desktop,
+    RestartCallback restartCallback,
+    ActionCallback actionCallback,
+    bool shapeAnnotationsEnabled,
+    OverlayMode mode)
+{
     if (desktop.displays.empty()) {
         return {nullptr, OverlayHostError{OverlayHostErrorCode::noDisplays}};
     }
@@ -2705,8 +2743,9 @@ OverlayHostCreateResult OverlayHost::create(
                     locked->dispatchAction(action);
                 }
             },
-            true,
-            &desktop);
+            shapeAnnotationsEnabled,
+            &desktop,
+            mode);
         if (!impl->router->activateEscapeHotKey(impl->windows.front()->handle())) {
             return {
                 nullptr,

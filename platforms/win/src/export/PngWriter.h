@@ -31,6 +31,7 @@ enum class ExportErrorCode {
     clipboardAllocationFailed,
     clipboardLockFailed,
     clipboardSetDibFailed,
+    clipboardSetTextFailed,
     clipboardSetPngFailed,
     clipboardCloseFailed,
     temporaryFileCreateFailed,

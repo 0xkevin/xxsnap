@@ -1283,6 +1283,34 @@ void testRectangleEraserRoutesFromOutsideLockedSelection()
         == std::vector<xxsnap::win::AnnotationId>{annotationId}));
 }
 
+void testTextRecognitionAutoCompletesWithoutCaptureChrome()
+{
+    FakePlatform platform;
+    std::vector<OverlayInputAction> actions;
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform,
+        [&actions](OverlayInputAction action) { actions.push_back(action); },
+        false, nullptr, OverlayMode::textRecognition);
+    auto presentations = router.presentations();
+    CHECK(presentations.size() == 2U);
+    CHECK(presentations[0].textRecognition);
+    CHECK(presentations[1].textRecognition);
+    CHECK(!presentations[0].showActions);
+    CHECK(!presentations[1].showActions);
+    CHECK(presentations[0].toolbarItems.empty());
+    CHECK(router.cursorStyle(leftWindow, PixelPoint{300, 100})
+        == OverlayCursorStyle::crosshair);
+
+    CHECK(router.pointerDown(leftWindow, PixelPoint{500, 80}));
+    platform.cursor = PixelPoint{120, 280};
+    router.pointerMove(leftWindow, PixelPoint{500, 80});
+    router.pointerUp(leftWindow, PixelPoint{500, 80});
+    CHECK(router.status() == OverlayInputStatus::completed);
+    CHECK(actions == std::vector<OverlayInputAction>{
+        OverlayInputAction::recognizeText});
+    CHECK((router.selection() == PixelRect{-140, 80, 260, 200}));
+}
+
 } // namespace
 
 int main()
@@ -1317,5 +1345,6 @@ int main()
     testMagnifierToolbarMatchesMacOptionsAndUsesComposite();
     testEraserToolbarUsesMacLayoutAndModes();
     testRectangleEraserRoutesFromOutsideLockedSelection();
+    testTextRecognitionAutoCompletesWithoutCaptureChrome();
     return failureCount == 0 ? 0 : 1;
 }

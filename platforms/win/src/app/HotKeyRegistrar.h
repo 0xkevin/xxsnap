@@ -49,6 +49,7 @@ constexpr std::array<HotKeyBinding, 5> defaultAppHotKeys() noexcept
 inline constexpr int regionCaptureHotKeyIdentifier = 0x5852;
 inline constexpr int restorePinnedImageHotKeyIdentifier = 0x585A;
 inline constexpr int fullScreenCaptureHotKeyIdentifier = 0x585B;
+inline constexpr int ocrHotKeyIdentifier = 0x585C;
 
 class HotKeyApi {
 public:
@@ -88,6 +89,7 @@ public:
 
     bool registerMvpRegionCapture(HWND window) noexcept;
     bool registerFullScreenCapture(HWND window, Callback callback) noexcept;
+    bool registerOcr(HWND window, Callback callback) noexcept;
     bool registerRestorePinnedImage(HWND window, Callback callback) noexcept;
     bool unregister() noexcept;
     bool handleMessage(UINT message, WPARAM wParam) noexcept;
@@ -97,10 +99,12 @@ private:
     HotKeyApi& api_;
     Callback callback_;
     Callback fullScreenCaptureCallback_;
+    Callback ocrCallback_;
     Callback restorePinnedImageCallback_;
     HWND window_ = nullptr;
     bool registered_ = false;
     bool fullScreenCaptureRegistered_ = false;
+    bool ocrRegistered_ = false;
     bool restorePinnedImageRegistered_ = false;
     std::optional<HotKeyError> lastError_;
 };

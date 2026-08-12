@@ -33,6 +33,7 @@ enum class OverlayInputAction {
     finishEditing,
     hideEditingToolbar,
     togglePinnedImageAlwaysOnTop,
+    recognizeText,
 };
 
 enum class OverlayInputStatus {
@@ -59,6 +60,7 @@ struct OverlaySurface {
 enum class OverlayMode {
     capture,
     pinnedImageEditor,
+    textRecognition,
 };
 
 struct NumberCursorState {
@@ -149,6 +151,7 @@ struct OverlayPresentation {
     std::optional<PixelRect> selection;
     bool showActions = false;
     bool pinnedImageEditor = false;
+    bool textRecognition = false;
     std::vector<OverlayPresentationToolbarItem> toolbarItems;
     AnnotationRenderPlan annotationPlan;
     std::shared_ptr<const PixelBuffer> annotationComposite;
@@ -365,6 +368,11 @@ public:
         const FrozenDesktop& desktop,
         ActionCallback actionCallback,
         bool alwaysOnTop = true);
+    static OverlayHostCreateResult createTextRecognition(
+        HINSTANCE instance,
+        const FrozenDesktop& desktop,
+        RestartCallback restartCallback,
+        ActionCallback actionCallback);
 
     void show() noexcept;
     void setAlwaysOnTop(bool enabled) noexcept;
@@ -377,6 +385,13 @@ public:
 
 private:
     struct Impl;
+    static OverlayHostCreateResult createWithMode(
+        HINSTANCE instance,
+        const FrozenDesktop& desktop,
+        RestartCallback restartCallback,
+        ActionCallback actionCallback,
+        bool shapeAnnotationsEnabled,
+        OverlayMode mode);
     explicit OverlayHost(std::shared_ptr<Impl> impl) noexcept;
     std::shared_ptr<Impl> impl_;
 };

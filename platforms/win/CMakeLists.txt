@@ -69,6 +69,10 @@ set_property(
         "${PROJECT_SOURCE_DIR}/platforms/win/resources/icons/text-italic-selected.png"
         "${PROJECT_SOURCE_DIR}/platforms/win/resources/icons/text-stroke.png"
         "${PROJECT_SOURCE_DIR}/platforms/win/resources/icons/text-stroke-selected.png"
+        "${PROJECT_SOURCE_DIR}/platforms/win/resources/icons/ocr-correct.bmp"
+        "${PROJECT_SOURCE_DIR}/platforms/win/resources/icons/ocr-failed.bmp"
+        "${PROJECT_SOURCE_DIR}/platforms/mac/Resources/Icons/correct.svg"
+        "${PROJECT_SOURCE_DIR}/platforms/mac/Resources/Icons/failed.svg"
         ${XXSNAP_TOOLBAR_ASSET_FILES}
 )
 add_library(xxsnap_visual_resources INTERFACE)
@@ -522,6 +526,57 @@ target_link_libraries(
             xxsnap_windows_build_configuration user32 gdi32 comdlg32
 )
 
+add_library(
+    xxsnap_quirc
+    third_party/quirc/decode.c
+    third_party/quirc/identify.c
+    third_party/quirc/quirc.c
+    third_party/quirc/version_db.c
+)
+target_include_directories(
+    xxsnap_quirc PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/third_party/quirc"
+)
+if(MSVC)
+    target_compile_options(xxsnap_quirc PRIVATE /wd4244 /wd4018 /wd4100 /wd4457 /wd4389)
+endif()
+
+add_library(
+    xxsnap_ocr_engine
+    src/ocr/OcrEngine.cpp
+    src/ocr/QrCodeEngine.cpp
+)
+target_compile_features(xxsnap_ocr_engine PUBLIC cxx_std_20)
+target_include_directories(
+    xxsnap_ocr_engine PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_ocr_engine
+    PUBLIC snipory_core_portable
+    PRIVATE xxsnap_quirc
+    PRIVATE xxsnap_windows_build_configuration ole32
+)
+if(XXSNAP_WINDOWS_FAMILY STREQUAL "modern")
+    target_link_libraries(xxsnap_ocr_engine PRIVATE windowsapp)
+endif()
+
+add_library(
+    xxsnap_ocr_capture_host
+    src/ocr/OcrCaptureHost.cpp
+    src/ocr/OcrResultPresenter.cpp
+)
+target_compile_features(xxsnap_ocr_capture_host PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_ocr_capture_host PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_ocr_capture_host
+    PUBLIC xxsnap_ocr_engine xxsnap_overlay_host
+    PRIVATE xxsnap_dxgi_capture_backend xxsnap_gdi_capture_backend
+            xxsnap_fallback_capture_backend xxsnap_display_topology
+            xxsnap_selection_composer xxsnap_clipboard_writer
+            xxsnap_windows_build_configuration ole32 user32 gdi32
+)
+
 add_library(xxsnap_single_instance src/app/SingleInstance.cpp)
 target_compile_features(xxsnap_single_instance PUBLIC cxx_std_17)
 target_include_directories(
@@ -594,6 +649,7 @@ target_link_libraries(
         xxsnap_scroll_capture_host
         xxsnap_pinned_image_host
         xxsnap_full_screen_capture_preview_host
+        xxsnap_ocr_capture_host
         xxsnap_selection_composer
         xxsnap_annotation_composer
         xxsnap_png_writer
@@ -1048,6 +1104,26 @@ if(BUILD_TESTING)
     )
     add_test(NAME clipboard_writer COMMAND xxsnap_clipboard_writer_test)
 
+    configure_file(
+        tests/fixtures/qr-xxsnap-2026.bmp
+        "${CMAKE_CURRENT_BINARY_DIR}/fixtures/qr-xxsnap-2026.bmp"
+        COPYONLY
+    )
+    add_executable(
+        xxsnap_ocr_engine_test
+        tests/TestOcrEngine.cpp
+    )
+    target_compile_features(xxsnap_ocr_engine_test PRIVATE cxx_std_20)
+    target_link_libraries(
+        xxsnap_ocr_engine_test
+        PRIVATE xxsnap_ocr_engine xxsnap_windows_build_configuration user32 gdi32
+    )
+    add_test(NAME ocr_engine COMMAND xxsnap_ocr_engine_test)
+    set_tests_properties(
+        ocr_engine PROPERTIES
+        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/fixtures"
+    )
+
     add_executable(
         xxsnap_png_writer_test
         tests/TestPngWriter.cpp
@@ -1097,6 +1173,17 @@ if(BUILD_TESTING)
     target_link_libraries(
         xxsnap_interactive_fullscreen_verifier PRIVATE user32 gdi32
     )
+
+    add_executable(
+        xxsnap_interactive_ocr_verifier EXCLUDE_FROM_ALL
+        ${CMAKE_SOURCE_DIR}/tools/windows/verify-interactive-ocr.cpp
+    )
+    target_compile_features(
+        xxsnap_interactive_ocr_verifier PRIVATE cxx_std_17
+    )
+    target_link_libraries(
+        xxsnap_interactive_ocr_verifier PRIVATE user32 gdi32
+    )
 endif()
 
 set(xxsnap_capture_session_targets
@@ -1126,6 +1213,9 @@ set(xxsnap_capture_session_targets
     xxsnap_overlay_host
     xxsnap_pinned_image_host
     xxsnap_full_screen_capture_preview_host
+    xxsnap_quirc
+    xxsnap_ocr_engine
+    xxsnap_ocr_capture_host
     xxsnap_single_instance
     xxsnap_tray_icon
     xxsnap_hot_key_registrar
@@ -1162,11 +1252,13 @@ if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_scroll_region_capturer_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_annotation_composer_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_clipboard_writer_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_ocr_engine_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_png_writer_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_interactive_session_launcher)
     list(APPEND xxsnap_capture_session_targets xxsnap_interactive_startup_verifier)
     list(APPEND xxsnap_capture_session_targets xxsnap_interactive_pin_verifier)
     list(APPEND xxsnap_capture_session_targets xxsnap_interactive_fullscreen_verifier)
+    list(APPEND xxsnap_capture_session_targets xxsnap_interactive_ocr_verifier)
 endif()
 
 if(MSVC)

@@ -145,9 +145,41 @@ bool HotKeyRegistrar::registerFullScreenCapture(
     return true;
 }
 
+bool HotKeyRegistrar::registerOcr(
+    HWND window, Callback callback) noexcept
+{
+    if (ocrRegistered_) return window_ == window;
+    if (window == nullptr || (window_ != nullptr && window_ != window)) {
+        lastError_ = HotKeyError{
+            HotKeyErrorCode::invalidWindow, ERROR_INVALID_WINDOW_HANDLE};
+        return false;
+    }
+    constexpr auto binding = defaultAppHotKeys()[2];
+    DWORD error = ERROR_SUCCESS;
+    if (!api_.registerHotKey(window, ocrHotKeyIdentifier,
+            binding.modifiers, binding.virtualKey, error)) {
+        lastError_ = HotKeyError{
+            HotKeyErrorCode::registrationFailed, error};
+        return false;
+    }
+    window_ = window;
+    ocrRegistered_ = true;
+    try {
+        ocrCallback_ = std::move(callback);
+    } catch (...) {
+        api_.unregisterHotKey(window, ocrHotKeyIdentifier, error);
+        ocrRegistered_ = false;
+        lastError_ = HotKeyError{
+            HotKeyErrorCode::registrationFailed, ERROR_NOT_ENOUGH_MEMORY};
+        return false;
+    }
+    lastError_.reset();
+    return true;
+}
+
 bool HotKeyRegistrar::unregister() noexcept
 {
-    if (!registered_ && !fullScreenCaptureRegistered_
+    if (!registered_ && !fullScreenCaptureRegistered_ && !ocrRegistered_
         && !restorePinnedImageRegistered_) {
         return true;
     }
@@ -177,6 +209,14 @@ bool HotKeyRegistrar::unregister() noexcept
     } else {
         fullScreenCaptureRegistered_ = false;
     }
+    if (ocrRegistered_ && !api_.unregisterHotKey(
+            window_, ocrHotKeyIdentifier, error)) {
+        lastError_ = HotKeyError{
+            HotKeyErrorCode::unregistrationFailed, error};
+        succeeded = false;
+    } else {
+        ocrRegistered_ = false;
+    }
     if (succeeded) {
         window_ = nullptr;
         lastError_.reset();
@@ -197,6 +237,9 @@ bool HotKeyRegistrar::handleMessage(UINT message, WPARAM wParam) noexcept
         } else if (fullScreenCaptureRegistered_
             && wParam == static_cast<WPARAM>(fullScreenCaptureHotKeyIdentifier)) {
             callback = fullScreenCaptureCallback_;
+        } else if (ocrRegistered_
+            && wParam == static_cast<WPARAM>(ocrHotKeyIdentifier)) {
+            callback = ocrCallback_;
         } else if (restorePinnedImageRegistered_
             && wParam == static_cast<WPARAM>(restorePinnedImageHotKeyIdentifier)) {
             callback = restorePinnedImageCallback_;

@@ -2515,6 +2515,7 @@ struct OverlayRenderer::Impl final {
         ComPtr<ID2D1SolidColorBrush> toolbarBackgroundBrush;
         ComPtr<ID2D1SolidColorBrush> toolbarBorderBrush;
         ComPtr<ID2D1SolidColorBrush> toolbarSeparatorBrush;
+        ComPtr<ID2D1SolidColorBrush> recognitionFillBrush;
 
         const std::array brushResults{
             createBrush(D2D1::ColorF(
@@ -2539,6 +2540,7 @@ struct OverlayRenderer::Impl final {
                 VisualStyleCatalog::toolbarBackgroundAlpha), toolbarBackgroundBrush),
             createBrush(color(VisualStyleCatalog::toolbarBorderColor), toolbarBorderBrush),
             createBrush(D2D1::ColorF(0.0F, 0.0F, 0.0F, 0.15F), toolbarSeparatorBrush),
+            createBrush(D2D1::ColorF(0.70F, 0.70F, 0.70F, 0.28F), recognitionFillBrush),
         };
         for (const auto& brushResult : brushResults) {
             if (brushResult.has_value()) {
@@ -2589,10 +2591,12 @@ struct OverlayRenderer::Impl final {
             D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
 
         if (!state.selection.has_value()) {
-            renderTarget->FillRectangle(d2dRect(overlayBounds), dimBrush.get());
+            if (!state.textRecognition) {
+                renderTarget->FillRectangle(d2dRect(overlayBounds), dimBrush.get());
+            }
         } else {
             const auto& layout = *chromeLayout;
-            if (!state.pinnedImageEditor) {
+            if (!state.pinnedImageEditor && !state.textRecognition) {
                 for (const auto mask : layout.mask) {
                     if (mask.width > 0.0F && mask.height > 0.0F) {
                         renderTarget->FillRectangle(d2dRect(mask), dimBrush.get());
@@ -2643,10 +2647,15 @@ struct OverlayRenderer::Impl final {
                 annotationCompositeSource.reset();
             }
 
-            renderTarget->DrawRectangle(
-                d2dRect(layout.border),
-                selectionBrush.get(),
-                VisualStyleCatalog::selectionBorderDip);
+            if (state.textRecognition) {
+                renderTarget->FillRectangle(
+                    d2dRect(layout.border), recognitionFillBrush.get());
+            } else {
+                renderTarget->DrawRectangle(
+                    d2dRect(layout.border),
+                    selectionBrush.get(),
+                    VisualStyleCatalog::selectionBorderDip);
+            }
 
             if (!state.annotationPlan.items.empty()
                 || !state.annotationPlan.resizeHandles.empty()) {
@@ -2833,7 +2842,7 @@ struct OverlayRenderer::Impl final {
                 }
             }
 
-            if (!state.pinnedImageEditor) {
+            if (!state.pinnedImageEditor && !state.textRecognition) {
                 for (const auto handle : layout.handles) {
                     const auto ellipse = D2D1::Ellipse(
                         D2D1::Point2F(

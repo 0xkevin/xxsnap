@@ -132,6 +132,7 @@ struct OverlayRenderState {
     std::optional<PixelRect> selection;
     bool showActions = true;
     bool pinnedImageEditor = false;
+    bool textRecognition = false;
     std::vector<ToolbarAction> toolbarActions{
         terminalToolbarActions().begin(),
         terminalToolbarActions().end(),
