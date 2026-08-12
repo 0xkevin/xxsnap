@@ -1414,6 +1414,161 @@ struct OverlayRenderer::Impl final {
         return std::nullopt;
     }
 
+    std::optional<OverlayRendererError> drawMagnifierOptions(
+        const OverlayMagnifierOptionsRenderState& options) noexcept
+    {
+        if (const auto resourceError = ensureTextResources()) {
+            return resourceError;
+        }
+        auto& panelBrush = textPanelBrush;
+        auto& borderBrush = textBorderBrush;
+        auto& selectionBrush = textSelectionBrush;
+        auto& foregroundBrush = textForegroundBrush;
+        auto& whiteBrush = textWhiteBrush;
+        const auto panel = D2D1::RoundedRect(
+            d2dRect(options.layout.toolbar), 6.0F, 6.0F);
+        renderTarget->FillRoundedRectangle(&panel, panelBrush.get());
+        renderTarget->DrawRoundedRectangle(&panel, borderBrush.get(), 1.0F);
+
+        for (const auto separator : options.layout.separators) {
+            const auto rounded = D2D1::RoundedRect(
+                d2dRect(separator), 0.75F, 0.75F);
+            renderTarget->FillRoundedRectangle(&rounded, borderBrush.get());
+        }
+
+        const auto& widths = macMagnifierStrokeWidths();
+        for (std::size_t index = 0;
+             index < options.layout.strokeWidths.size()
+                && index < widths.size(); ++index) {
+            const auto rect = options.layout.strokeWidths[index];
+            renderTarget->DrawLine(
+                {rect.x + 4.0F, rect.y + rect.height / 2.0F},
+                {rect.x + rect.width - 4.0F,
+                    rect.y + rect.height / 2.0F},
+                options.state.style().strokeWidthDip == widths[index]
+                    ? selectionBrush.get() : foregroundBrush.get(),
+                widths[index]);
+        }
+
+        const auto drawShape = [&](AnnotationRect rect,
+                                   MagnifierShape shape) {
+            const auto selected = options.state.shape() == shape;
+            if (selected) {
+                const auto button = D2D1::RoundedRect(
+                    d2dRect(AnnotationRect{rect.x - 3.0F, rect.y - 4.0F,
+                        rect.width + 6.0F, rect.height + 8.0F}),
+                    4.0F, 4.0F);
+                renderTarget->DrawRoundedRectangle(
+                    &button, selectionBrush.get(), 1.5F);
+            }
+            auto* brush = selected
+                ? selectionBrush.get() : foregroundBrush.get();
+            const auto center = D2D1::Point2F(
+                rect.x + rect.width / 2.0F,
+                rect.y + rect.height / 2.0F);
+            if (shape == MagnifierShape::circle) {
+                const auto circle = D2D1::Ellipse(center, 6.5F, 6.5F);
+                renderTarget->DrawEllipse(&circle, brush, 1.5F);
+            } else {
+                const auto rectangle = D2D1::RoundedRect(
+                    D2D1::RectF(center.x - 6.5F, center.y - 6.5F,
+                        center.x + 6.5F, center.y + 6.5F),
+                    1.5F, 1.5F);
+                renderTarget->DrawRoundedRectangle(
+                    &rectangle, brush, 1.5F);
+            }
+        };
+        drawShape(options.layout.rectangleMode, MagnifierShape::rectangle);
+        drawShape(options.layout.circleMode, MagnifierShape::circle);
+
+        const auto zoomField = D2D1::RoundedRect(
+            d2dRect(options.layout.zoom), 4.0F, 4.0F);
+        renderTarget->FillRoundedRectangle(&zoomField, whiteBrush.get());
+        renderTarget->DrawRoundedRectangle(
+            &zoomField, borderBrush.get(), 1.0F);
+        const auto zoomIndex = static_cast<std::size_t>(std::distance(
+            magnifierZoomOptions.begin(),
+            std::find_if(magnifierZoomOptions.begin(),
+                magnifierZoomOptions.end(), [&](const auto& option) {
+                    return option.value == options.state.zoom();
+                })));
+        const auto zoomLabel = magnifierZoomOptions[(std::min)(
+            zoomIndex, magnifierZoomOptions.size() - 1U)].label;
+        auto zoomLabelRect = options.layout.zoom;
+        zoomLabelRect.x += 6.0F;
+        zoomLabelRect.width -= 20.0F;
+        renderTarget->DrawText(zoomLabel.data(),
+            static_cast<UINT32>(zoomLabel.size()), textFormat.get(),
+            d2dRect(zoomLabelRect), foregroundBrush.get(),
+            D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        const auto arrowX = options.layout.zoom.x
+            + options.layout.zoom.width - 10.0F;
+        const auto arrowY = options.layout.zoom.y
+            + options.layout.zoom.height / 2.0F + 1.0F;
+        renderTarget->DrawLine({arrowX - 3.0F, arrowY - 2.0F},
+            {arrowX, arrowY + 1.0F}, foregroundBrush.get(), 1.0F);
+        renderTarget->DrawLine({arrowX, arrowY + 1.0F},
+            {arrowX + 3.0F, arrowY - 2.0F}, foregroundBrush.get(), 1.0F);
+
+        const auto& palette = macShapePalette();
+        for (std::size_t index = 0;
+             index < options.layout.paletteCount && index < palette.size();
+             ++index) {
+            auto swatch = options.layout.colorSwatches[index];
+            const auto selected
+                = options.state.selectedPaletteIndex() == index;
+            if (selected) {
+                swatch = {swatch.x - 3.0F, swatch.y - 3.0F,
+                    swatch.width + 6.0F, swatch.height + 6.0F};
+            }
+            textVariableBrush->SetColor(annotationColor(palette[index]));
+            const auto rounded = D2D1::RoundedRect(d2dRect(swatch),
+                selected ? 4.0F : 2.5F, selected ? 4.0F : 2.5F);
+            renderTarget->FillRoundedRectangle(
+                &rounded, textVariableBrush.get());
+            renderTarget->DrawRoundedRectangle(&rounded,
+                selected ? selectionBrush.get() : borderBrush.get(),
+                selected ? 1.5F : 1.0F);
+        }
+        if (!options.layout.colorSwatches.empty()) {
+            renderTarget->DrawBitmap(paletteBitmap.get(),
+                d2dRect(options.layout.colorSwatches.back()), 1.0F,
+                D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+        }
+
+        if (options.zoomMenu.has_value()) {
+            const auto popup = D2D1::RoundedRect(
+                d2dRect(options.zoomMenu->menu), 6.0F, 6.0F);
+            renderTarget->FillRoundedRectangle(&popup, panelBrush.get());
+            renderTarget->DrawRoundedRectangle(
+                &popup, borderBrush.get(), 1.0F);
+            const auto count = (std::min)(
+                options.zoomMenu->items.size(), magnifierZoomOptions.size());
+            for (std::size_t index = 0; index < count; ++index) {
+                auto item = options.zoomMenu->items[index];
+                const auto selected = options.state.zoom()
+                    == magnifierZoomOptions[index].value;
+                if (selected) {
+                    textVariableBrush->SetColor(
+                        D2D1::ColorF(0.0F, 0.48F, 1.0F, 0.16F));
+                    const auto highlight = D2D1::RoundedRect(
+                        d2dRect(item), 4.0F, 4.0F);
+                    renderTarget->FillRoundedRectangle(
+                        &highlight, textVariableBrush.get());
+                }
+                const auto label = magnifierZoomOptions[index].label;
+                item.x += 8.0F;
+                item.width -= 16.0F;
+                renderTarget->DrawText(label.data(),
+                    static_cast<UINT32>(label.size()), textFormat.get(),
+                    d2dRect(item), selected ? selectionBrush.get()
+                        : foregroundBrush.get(),
+                    D2D1_DRAW_TEXT_OPTIONS_CLIP);
+            }
+        }
+        return std::nullopt;
+    }
+
     std::optional<OverlayRendererError> drawEyedropper(
         const OverlayEyedropperRenderState& state,
         AnnotationRect safeBounds) noexcept
@@ -2608,6 +2763,13 @@ struct OverlayRenderer::Impl final {
             if (state.numberOptions.has_value()) {
                 if (const auto optionsError = drawNumberOptions(
                         *state.numberOptions)) {
+                    renderTarget->EndDraw();
+                    return optionsError;
+                }
+            }
+            if (state.magnifierOptions.has_value()) {
+                if (const auto optionsError = drawMagnifierOptions(
+                        *state.magnifierOptions)) {
                     renderTarget->EndDraw();
                     return optionsError;
                 }

@@ -235,6 +235,34 @@ AnnotationId AnnotationDocument::addNumberMark(
     return id;
 }
 
+AnnotationId AnnotationDocument::addMagnifier(
+    AnnotationRect rect,
+    MagnifierShape shape,
+    float zoom,
+    AnnotationStyle style)
+{
+    rect = standardized(rect);
+    if (rect.width <= 0.0F || rect.height <= 0.0F
+        || nextId_ == invalidAnnotationId) {
+        return invalidAnnotationId;
+    }
+    style.strokePattern = AnnotationStrokePattern::solid;
+    style.fillEnabled = false;
+    auto before = snapshot();
+    const auto id = nextId_++;
+    ShapeAnnotation annotation;
+    annotation.id = id;
+    annotation.kind = AnnotationKind::magnifier;
+    annotation.rect = rect;
+    annotation.style = style;
+    annotation.magnifierShape = shape;
+    annotation.magnifierZoom = normalizedMagnifierZoom(zoom);
+    annotations_.push_back(std::move(annotation));
+    selectedId_ = id;
+    commit(std::move(before));
+    return id;
+}
+
 bool AnnotationDocument::remove(AnnotationId id)
 {
     const auto index = indexOf(id);
@@ -266,7 +294,8 @@ bool AnnotationDocument::updateRect(AnnotationId id, AnnotationRect rect)
         || (!isShapeKind(annotation->kind)
             && annotation->kind != AnnotationKind::mosaicRectangle
             && annotation->kind != AnnotationKind::text
-            && annotation->kind != AnnotationKind::numberSequence)
+            && annotation->kind != AnnotationKind::numberSequence
+            && annotation->kind != AnnotationKind::magnifier)
         || rect.width <= 0.0F
         || rect.height <= 0.0F
         || annotation->rect == rect) {
@@ -540,6 +569,30 @@ bool AnnotationDocument::updateNumberGeometry(
     } else {
         commit(std::move(*before));
     }
+    return true;
+}
+
+bool AnnotationDocument::updateMagnifier(
+    AnnotationId id,
+    MagnifierShape shape,
+    float zoom,
+    AnnotationStyle style)
+{
+    auto* annotation = findMutable(id);
+    zoom = normalizedMagnifierZoom(zoom);
+    style.strokePattern = AnnotationStrokePattern::solid;
+    style.fillEnabled = false;
+    if (annotation == nullptr || !isMagnifierAnnotation(*annotation)
+        || (annotation->magnifierShape == shape
+            && annotation->magnifierZoom == zoom
+            && annotation->style == style)) {
+        return false;
+    }
+    auto before = snapshot();
+    annotation->magnifierShape = shape;
+    annotation->magnifierZoom = zoom;
+    annotation->style = style;
+    commit(std::move(before));
     return true;
 }
 

@@ -476,7 +476,7 @@ void testShapeToolIsNonTerminalAndEditsThroughSharedPresentation()
     createReadySelection(router);
 
     auto owner = router.presentations()[1];
-    CHECK(owner.toolbarItems.size() == 13U);
+    CHECK(owner.toolbarItems.size() == 14U);
     const auto rectangle = owner.toolbarItems[0];
     CHECK(rectangle.action == xxsnap::win::ToolbarAction::rectangle);
     const auto capturesBeforeTool = platform.captureCalls;
@@ -554,7 +554,7 @@ void testArrowToolUsesMacOptionsMenuAndCreatesEditableCurve()
     createReadySelection(router);
 
     auto owner = router.presentations()[1];
-    CHECK(owner.toolbarItems.size() == 13U);
+    CHECK(owner.toolbarItems.size() == 14U);
     CHECK(owner.toolbarItems[1].action == xxsnap::win::ToolbarAction::polyline);
     CHECK(router.pointerDown(
         rightWindow, owner.toolbarItems[1].centerPhysical));
@@ -967,6 +967,74 @@ void testNumberToolbarCreatesSequenceAndSupportsDoubleClickEditing()
     CHECK(router.annotationDocument().annotations()[0].numberSequenceIsManual);
 }
 
+void testMagnifierToolbarMatchesMacOptionsAndUsesComposite()
+{
+    FakePlatform platform;
+    auto desktop = solidDesktop({40, 90, 140, 255});
+    CHECK(desktop != nullptr);
+    if (!desktop) return;
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform, {}, true,
+        desktop.get());
+    createReadySelection(router);
+    CHECK(router.keyPressed(ShapeEditorKey::magnifier, false, false));
+    auto owner = router.presentations()[1];
+    CHECK(owner.toolbarItems.size() == 14U);
+    CHECK(owner.toolbarItems[8].action
+        == xxsnap::win::ToolbarAction::magnifier);
+    CHECK(owner.toolbarItems[8].selected);
+    CHECK(owner.magnifierOptions.has_value());
+    CHECK(owner.magnifierOptions->layout.toolbar.width == 440.0F);
+    CHECK(owner.magnifierOptions->state.shape()
+        == xxsnap::win::MagnifierShape::rectangle);
+    CHECK(owner.magnifierOptions->state.zoom() == 2.0F);
+    CHECK((owner.magnifierOptions->state.style().strokeColor
+        == AnnotationColor{0, 122, 255, 255}));
+
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.magnifierOptions->layout.circleMode)));
+    owner = router.presentations()[1];
+    CHECK(owner.magnifierOptions->state.shape()
+        == xxsnap::win::MagnifierShape::circle);
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.magnifierOptions->layout.zoom)));
+    owner = router.presentations()[1];
+    CHECK(owner.magnifierOptions->zoomMenu.has_value());
+    CHECK(owner.magnifierOptions->zoomMenu->items.size() == 4U);
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.magnifierOptions->zoomMenu->items[2])));
+    owner = router.presentations()[1];
+    CHECK(owner.magnifierOptions->state.zoom() == 3.0F);
+    CHECK(!owner.magnifierOptions->zoomMenu.has_value());
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.magnifierOptions->layout.colorSwatches.back())));
+    CHECK(platform.chooseColorCalls == 1);
+    CHECK(platform.chosenColorWindow == rightWindow);
+    owner = router.presentations()[1];
+    CHECK((owner.magnifierOptions->state.style().strokeColor
+        == AnnotationColor{1, 2, 3, 255}));
+
+    platform.shiftDown = true;
+    platform.cursor = PixelPoint{20, 100};
+    CHECK(router.pointerDown(rightWindow, PixelPoint{20, 100}));
+    platform.cursor = PixelPoint{90, 140};
+    router.pointerMove(rightWindow, *platform.cursor);
+    router.pointerUp(rightWindow, *platform.cursor);
+    CHECK(router.annotationDocument().annotations().size() == 1U);
+    const auto& annotation = router.annotationDocument().annotations()[0];
+    CHECK(isMagnifierAnnotation(annotation));
+    CHECK(annotation.magnifierShape
+        == xxsnap::win::MagnifierShape::circle);
+    CHECK(annotation.magnifierZoom == 3.0F);
+    CHECK((annotation.style.strokeColor == AnnotationColor{1, 2, 3, 255}));
+    CHECK(annotation.rect.width == annotation.rect.height);
+    owner = router.presentations()[1];
+    CHECK(owner.annotationComposite != nullptr);
+    CHECK(owner.annotationPlan.items.empty());
+    CHECK(!owner.annotationPlan.resizeHandles.empty());
+    CHECK(!owner.annotationPlan.rotationHandle.has_value());
+}
+
 } // namespace
 
 int main()
@@ -990,5 +1058,6 @@ int main()
     testMosaicToolbarOptionsAndLiveComposite();
     testTextToolbarAcceptsUnicodeAndUsesRealPopupMenus();
     testNumberToolbarCreatesSequenceAndSupportsDoubleClickEditing();
+    testMagnifierToolbarMatchesMacOptionsAndUsesComposite();
     return failureCount == 0 ? 0 : 1;
 }

@@ -341,6 +341,44 @@ void testNumberOptionsMatchMacGeometryTypesAndSizes()
     CHECK(numberSizeValues.size() == 20U);
 }
 
+void testMagnifierOptionsMatchMacGeometryAndDefaults()
+{
+    MagnifierOptionsState state;
+    CHECK(state.shape() == MagnifierShape::rectangle);
+    CHECK(state.zoom() == 2.0F);
+    CHECK(state.style().strokeWidthDip == 2.0F);
+    CHECK(state.style().strokePattern == AnnotationStrokePattern::solid);
+    CHECK(!state.style().fillEnabled);
+    CHECK((state.style().strokeColor == AnnotationColor{0, 122, 255, 255}));
+    CHECK(!state.selectedPaletteIndex().has_value());
+    CHECK(state.setShape(MagnifierShape::circle));
+    CHECK(state.setZoom(3.6F));
+    CHECK(state.zoom() == 4.0F);
+    CHECK(!state.setStrokeWidth(3.0F));
+    CHECK(state.setStrokeWidth(7.0F));
+
+    const auto layout = magnifierOptionsLayout({100, 200}, 20U);
+    CHECK((layout.toolbar == AnnotationRect{100, 200, 440, 40}));
+    CHECK((layout.strokeWidths[0] == AnnotationRect{110, 210, 20, 20}));
+    CHECK((layout.rectangleMode == AnnotationRect{192, 210, 26, 20}));
+    CHECK((layout.circleMode == AnnotationRect{224, 210, 22, 20}));
+    CHECK((layout.zoom == AnnotationRect{260, 210, 58, 20}));
+    CHECK((layout.colorSwatches[0] == AnnotationRect{336, 205, 12, 12}));
+    CHECK((layout.colorSwatches[20] == AnnotationRect{498, 204, 32, 32}));
+    CHECK((layout.separators[0] == AnnotationRect{185.25F, 214, 1.5F, 12}));
+    CHECK((layout.separators[1] == AnnotationRect{253.25F, 214, 1.5F, 12}));
+    CHECK((layout.separators[2] == AnnotationRect{327.25F, 214, 1.5F, 12}));
+    CHECK((magnifierOptionHitTest(layout, {110, 220})
+        == MagnifierOptionHit{MagnifierOptionControl::strokeWidth, 0U}));
+    CHECK((magnifierOptionHitTest(layout, {230, 220})
+        == MagnifierOptionHit{MagnifierOptionControl::circleMode, 0U}));
+    CHECK((magnifierOptionHitTest(layout, {280, 220})
+        == MagnifierOptionHit{MagnifierOptionControl::zoom, 0U}));
+    const auto popup = popupMenuLayout(layout.zoom, 4U, 800.0F);
+    CHECK(popup.items.size() == 4U);
+    CHECK(popup.menu.height == 104.0F);
+}
+
 } // namespace
 
 int main()
@@ -357,5 +395,6 @@ int main()
     testMosaicOptionsMatchMacGeometryAndRanges();
     testTextOptionsMatchMacGeometryAndMenus();
     testNumberOptionsMatchMacGeometryTypesAndSizes();
+    testMagnifierOptionsMatchMacGeometryAndDefaults();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

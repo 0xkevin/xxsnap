@@ -106,6 +106,12 @@ struct OverlayNumberOptionsRenderState {
     std::optional<std::size_t> selectedPopupIndex;
 };
 
+struct OverlayMagnifierOptionsRenderState {
+    MagnifierOptionsLayout layout;
+    MagnifierOptionsState state;
+    std::optional<PopupMenuLayout> zoomMenu;
+};
+
 struct OverlayEyedropperRenderState {
     AnnotationPoint pointer{};
     AnnotationColor color{};
@@ -136,6 +142,7 @@ struct OverlayRenderState {
     std::optional<OverlayMosaicOptionsRenderState> mosaicOptions;
     std::optional<OverlayTextOptionsRenderState> textOptions;
     std::optional<OverlayNumberOptionsRenderState> numberOptions;
+    std::optional<OverlayMagnifierOptionsRenderState> magnifierOptions;
     std::optional<OverlayEyedropperRenderState> eyedropper;
 };
 

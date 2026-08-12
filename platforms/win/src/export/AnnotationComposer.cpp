@@ -475,6 +475,165 @@ void composeMarker(
     }
 }
 
+struct MagnifierGeometry {
+    float sourceLeft = 0.0F;
+    float sourceTop = 0.0F;
+    float sourceRight = 0.0F;
+    float sourceBottom = 0.0F;
+    float drawLeft = 0.0F;
+    float drawTop = 0.0F;
+    float drawWidth = 0.0F;
+    float drawHeight = 0.0F;
+};
+
+std::optional<MagnifierGeometry> magnifierGeometry(
+    AnnotationRect destination,
+    float zoom,
+    float sourceWidth,
+    float sourceHeight,
+    float contentXOffset,
+    float contentYOffset) noexcept
+{
+    destination = standardized(destination);
+    if (destination.width <= 0.0F || destination.height <= 0.0F
+        || sourceWidth <= 0.0F || sourceHeight <= 0.0F) {
+        return std::nullopt;
+    }
+    zoom = normalizedMagnifierZoom(zoom);
+    const auto requestedWidth = destination.width / zoom;
+    const auto requestedHeight = destination.height / zoom;
+    const auto centeredLeft = destination.x
+        + destination.width / 2.0F - requestedWidth / 2.0F;
+    const auto shiftedLeft = centeredLeft - contentXOffset / zoom;
+    const auto shiftedFits = shiftedLeft >= 0.0F
+        && shiftedLeft + requestedWidth <= sourceWidth
+        && destination.x > 0.0F
+        && destination.x + destination.width < sourceWidth;
+    const auto requestedLeft = shiftedFits ? shiftedLeft : centeredLeft;
+    const auto requestedTop = destination.y
+        + destination.height / 2.0F - requestedHeight / 2.0F;
+    const auto sourceLeft = (std::max)(0.0F, std::floor(requestedLeft));
+    const auto sourceTop = (std::max)(0.0F, std::floor(requestedTop));
+    const auto sourceRight = (std::min)(sourceWidth,
+        std::ceil(requestedLeft + requestedWidth));
+    const auto sourceBottom = (std::min)(sourceHeight,
+        std::ceil(requestedTop + requestedHeight));
+    if (sourceLeft >= sourceRight || sourceTop >= sourceBottom) {
+        return std::nullopt;
+    }
+    const auto xScale = destination.width / (std::max)(requestedWidth, 1.0F);
+    const auto yScale = destination.height / (std::max)(requestedHeight, 1.0F);
+    const auto drawWidth = (sourceRight - sourceLeft) * xScale;
+    const auto drawHeight = (sourceBottom - sourceTop) * yScale;
+    const auto visibleLeft = (std::max)(0.0F, destination.x);
+    const auto visibleTop = (std::max)(0.0F, destination.y);
+    const auto visibleRight = (std::min)(sourceWidth,
+        destination.x + destination.width);
+    const auto visibleBottom = (std::min)(sourceHeight,
+        destination.y + destination.height);
+    const auto drawLeft = sourceLeft <= 0.0F && requestedLeft < 0.0F
+        ? visibleLeft
+        : sourceRight >= sourceWidth
+            && requestedLeft + requestedWidth > sourceWidth
+        ? visibleRight - drawWidth
+        : destination.x + (sourceLeft - requestedLeft) * xScale;
+    const auto drawTop = sourceTop <= 0.0F && requestedTop < 0.0F
+        ? visibleTop
+        : sourceBottom >= sourceHeight
+            && requestedTop + requestedHeight > sourceHeight
+        ? visibleBottom - drawHeight
+        : destination.y + (sourceTop - requestedTop) * yScale;
+    return MagnifierGeometry{
+        sourceLeft, sourceTop, sourceRight, sourceBottom,
+        drawLeft, drawTop - contentYOffset, drawWidth, drawHeight};
+}
+
+void composeMagnifierContent(
+    PixelBuffer& pixels,
+    const std::byte* sourcePixels,
+    std::uint64_t sourceStride,
+    const ShapeAnnotation& annotation,
+    UINT dpiX,
+    UINT dpiY) noexcept
+{
+    if (!isMagnifierAnnotation(annotation)
+        || sourcePixels == nullptr) {
+        return;
+    }
+    const auto scaleX = static_cast<float>(dpiX == 0U ? 96U : dpiX) / 96.0F;
+    const auto scaleY = static_cast<float>(dpiY == 0U ? 96U : dpiY) / 96.0F;
+    const auto rect = standardized(annotation.rect);
+    const AnnotationRect destination{
+        rect.x * scaleX,
+        rect.y * scaleY,
+        rect.width * scaleX,
+        rect.height * scaleY,
+    };
+    const auto geometry = magnifierGeometry(
+        destination,
+        *annotation.magnifierZoom,
+        static_cast<float>(pixels.width()),
+        static_cast<float>(pixels.height()),
+        12.0F * scaleX,
+        3.0F * scaleY);
+    if (!geometry.has_value()) {
+        return;
+    }
+    const auto left = (std::max<std::int64_t>)(0,
+        static_cast<std::int64_t>(std::floor(destination.x)));
+    const auto top = (std::max<std::int64_t>)(0,
+        static_cast<std::int64_t>(std::floor(destination.y)));
+    const auto right = (std::min<std::int64_t>)(pixels.width(),
+        static_cast<std::int64_t>(std::ceil(
+            destination.x + destination.width)));
+    const auto bottom = (std::min<std::int64_t>)(pixels.height(),
+        static_cast<std::int64_t>(std::ceil(
+            destination.y + destination.height)));
+    const auto centerX = destination.x + destination.width / 2.0F;
+    const auto centerY = destination.y + destination.height / 2.0F;
+    const auto radiusX = destination.width / 2.0F;
+    const auto radiusY = destination.height / 2.0F;
+    for (auto y = top; y < bottom; ++y) {
+        for (auto x = left; x < right; ++x) {
+            const auto sampleX = static_cast<float>(x) + 0.5F;
+            const auto sampleY = static_cast<float>(y) + 0.5F;
+            if (*annotation.magnifierShape == MagnifierShape::circle) {
+                const auto dx = (sampleX - centerX) / radiusX;
+                const auto dy = (sampleY - centerY) / radiusY;
+                if (dx * dx + dy * dy > 1.0F) {
+                    continue;
+                }
+            }
+            if (sampleX < geometry->drawLeft
+                || sampleY < geometry->drawTop
+                || sampleX >= geometry->drawLeft + geometry->drawWidth
+                || sampleY >= geometry->drawTop + geometry->drawHeight) {
+                continue;
+            }
+            const auto sourceX = (std::min<std::int64_t>)(
+                static_cast<std::int64_t>(geometry->sourceRight) - 1,
+                static_cast<std::int64_t>(geometry->sourceLeft
+                    + (sampleX - geometry->drawLeft)
+                        / geometry->drawWidth
+                        * (geometry->sourceRight - geometry->sourceLeft)));
+            const auto sourceY = (std::min<std::int64_t>)(
+                static_cast<std::int64_t>(geometry->sourceBottom) - 1,
+                static_cast<std::int64_t>(geometry->sourceTop
+                    + (sampleY - geometry->drawTop)
+                        / geometry->drawHeight
+                        * (geometry->sourceBottom - geometry->sourceTop)));
+            const auto sourceOffset = static_cast<std::size_t>(
+                static_cast<std::uint64_t>(sourceY) * sourceStride
+                + static_cast<std::uint64_t>(sourceX) * 4U);
+            const auto destinationOffset = static_cast<std::size_t>(
+                static_cast<std::uint64_t>(y) * pixels.stride()
+                + static_cast<std::uint64_t>(x) * 4U);
+            std::memcpy(pixels.data() + destinationOffset,
+                sourcePixels + sourceOffset, 4U);
+        }
+    }
+}
+
 template<typename Interface>
 class ComPtr final {
 public:
@@ -598,7 +757,8 @@ std::optional<CaptureError> composeAnnotations(
     UINT dpiX,
     UINT dpiY,
     std::int64_t contentOriginX,
-    std::int64_t contentOriginY) noexcept
+    std::int64_t contentOriginY,
+    const PixelBuffer* magnifierSource) noexcept
 {
     if (plan.items.empty()) {
         return std::nullopt;
@@ -609,6 +769,30 @@ std::optional<CaptureError> composeAnnotations(
         || pixels.format()
             != snipory::core::portable::PixelFormat::bgra8Premultiplied) {
         return compositionError(E_INVALIDARG);
+    }
+
+    std::vector<std::byte> original;
+    const PixelBuffer* source = magnifierSource;
+    if (source != nullptr
+        && (source->width() != pixels.width()
+            || source->height() != pixels.height()
+            || source->format() != pixels.format()
+            || source->byteCount() < pixels.byteCount())) {
+        source = nullptr;
+    }
+    if (source == nullptr && std::any_of(plan.items.begin(), plan.items.end(),
+            [](const auto& item) {
+                return isMagnifierAnnotation(item.annotation);
+            })) {
+        try {
+            original.assign(
+                pixels.data(), pixels.data() + pixels.byteCount());
+        } catch (const std::bad_alloc&) {
+            return compositionError(E_OUTOFMEMORY);
+        }
+        // The fallback preserves the export path, where no immutable raw
+        // selection buffer is available.
+        source = nullptr;
     }
 
     const auto comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
@@ -650,14 +834,52 @@ std::optional<CaptureError> composeAnnotations(
     }
     auto pixelsContainLatestResult = false;
     if (!failure.has_value() && SUCCEEDED(result)) {
+        const auto flushBitmapToPixels = [&]() noexcept {
+            renderTarget.reset();
+            failure = copyBitmapToBuffer(bitmap.get(), pixels);
+            return !failure.has_value();
+        };
+        const auto resumeRenderingFromPixels = [&]() noexcept {
+            failure = copyBufferToBitmap(pixels, bitmap.get());
+            if (failure.has_value()) {
+                return false;
+            }
+            pixelsContainLatestResult = false;
+            result = createAnnotationRenderTarget(
+                d2dFactory.get(), bitmap.get(), dpiX, dpiY, renderTarget);
+            return SUCCEEDED(result);
+        };
         AnnotationRenderer renderer(d2dFactory.get());
         std::size_t index = 0U;
         while (index < plan.items.size()) {
+            if (isMagnifierAnnotation(plan.items[index].annotation)) {
+                if (!flushBitmapToPixels()) {
+                    break;
+                }
+                composeMagnifierContent(pixels,
+                    source != nullptr ? source->data() : original.data(),
+                    source != nullptr ? source->stride() : pixels.stride(),
+                    plan.items[index].annotation, dpiX, dpiY);
+                if (!resumeRenderingFromPixels()) {
+                    break;
+                }
+                AnnotationRenderPlan magnifierPlan;
+                magnifierPlan.items.push_back(plan.items[index]);
+                renderTarget->BeginDraw();
+                result = renderer.draw(renderTarget.get(), magnifierPlan);
+                if (SUCCEEDED(result)) {
+                    result = renderTarget->EndDraw();
+                }
+                if (FAILED(result)) {
+                    break;
+                }
+                ++index;
+                pixelsContainLatestResult = false;
+                continue;
+            }
             if (isMarkerAnnotation(plan.items[index].annotation)
                 || isMosaicAnnotation(plan.items[index].annotation)) {
-                renderTarget.reset();
-                failure = copyBitmapToBuffer(bitmap.get(), pixels);
-                if (failure.has_value()) {
+                if (!flushBitmapToPixels()) {
                     break;
                 }
                 do {
@@ -684,15 +906,7 @@ std::optional<CaptureError> composeAnnotations(
                 }
                 pixelsContainLatestResult = true;
                 if (index < plan.items.size()) {
-                    failure = copyBufferToBitmap(pixels, bitmap.get());
-                    if (failure.has_value()) {
-                        break;
-                    }
-                    pixelsContainLatestResult = false;
-                    result = createAnnotationRenderTarget(
-                        d2dFactory.get(), bitmap.get(),
-                        dpiX, dpiY, renderTarget);
-                    if (FAILED(result)) {
+                    if (!resumeRenderingFromPixels()) {
                         break;
                     }
                 }
@@ -704,7 +918,8 @@ std::optional<CaptureError> composeAnnotations(
                 ++index;
             } while (index < plan.items.size()
                 && !isMarkerAnnotation(plan.items[index].annotation)
-                && !isMosaicAnnotation(plan.items[index].annotation));
+                && !isMosaicAnnotation(plan.items[index].annotation)
+                && !isMagnifierAnnotation(plan.items[index].annotation));
             renderTarget->BeginDraw();
             result = renderer.draw(renderTarget.get(), runPlan);
             if (SUCCEEDED(result)) {

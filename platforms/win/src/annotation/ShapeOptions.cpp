@@ -155,6 +155,11 @@ const std::array<float, 3>& macMosaicStrokeWidths() noexcept
     return mosaicStrokeWidths;
 }
 
+const std::array<float, 3>& macMagnifierStrokeWidths() noexcept
+{
+    return strokeWidths;
+}
+
 ShapeOptionsState::ShapeOptionsState() noexcept
     : style_(primaryShapeActivationStyle({})), selectedPaletteIndex_(0U)
 {
@@ -1340,6 +1345,176 @@ PopupMenuLayout numberTypeMenuLayout(
         });
     }
     return layout;
+}
+
+MagnifierOptionsState::MagnifierOptionsState() noexcept
+{
+    AnnotationStyle style;
+    style.strokeColor = {0, 122, 255, 255};
+    style.fillColor = style.strokeColor;
+    style.strokeWidthDip = strokeWidths.front();
+    style.strokePattern = AnnotationStrokePattern::solid;
+    style.fillEnabled = false;
+    shapeOptions_.load(AnnotationKind::rectangle, style);
+}
+
+MagnifierShape MagnifierOptionsState::shape() const noexcept
+{
+    return shapeOptions_.kind() == AnnotationKind::ellipse
+        ? MagnifierShape::circle : MagnifierShape::rectangle;
+}
+
+float MagnifierOptionsState::zoom() const noexcept
+{
+    return zoom_;
+}
+
+const AnnotationStyle& MagnifierOptionsState::style() const noexcept
+{
+    return shapeOptions_.style();
+}
+
+std::optional<std::size_t>
+MagnifierOptionsState::selectedPaletteIndex() const noexcept
+{
+    return shapeOptions_.selectedPaletteIndex();
+}
+
+bool MagnifierOptionsState::load(
+    const ShapeAnnotation& annotation) noexcept
+{
+    if (!isMagnifierAnnotation(annotation)) {
+        return false;
+    }
+    auto style = annotation.style;
+    style.strokePattern = AnnotationStrokePattern::solid;
+    style.fillEnabled = false;
+    const auto kind = *annotation.magnifierShape == MagnifierShape::circle
+        ? AnnotationKind::ellipse : AnnotationKind::rectangle;
+    const auto zoom = normalizedMagnifierZoom(*annotation.magnifierZoom);
+    const auto changed = shapeOptions_.load(kind, style) || zoom_ != zoom;
+    zoom_ = zoom;
+    return changed;
+}
+
+bool MagnifierOptionsState::setShape(MagnifierShape shape) noexcept
+{
+    return shapeOptions_.setKind(shape == MagnifierShape::circle
+        ? AnnotationKind::ellipse : AnnotationKind::rectangle);
+}
+
+bool MagnifierOptionsState::setZoom(float zoom) noexcept
+{
+    zoom = normalizedMagnifierZoom(zoom);
+    if (zoom_ == zoom) {
+        return false;
+    }
+    zoom_ = zoom;
+    return true;
+}
+
+bool MagnifierOptionsState::setStrokeWidth(
+    float strokeWidthDip) noexcept
+{
+    return shapeOptions_.setStrokeWidth(strokeWidthDip);
+}
+
+bool MagnifierOptionsState::selectPalette(std::size_t index) noexcept
+{
+    return shapeOptions_.selectPalette(index);
+}
+
+bool MagnifierOptionsState::selectCustomColor(
+    AnnotationColor color) noexcept
+{
+    return shapeOptions_.selectCustomColor(color);
+}
+
+MagnifierOptionsLayout magnifierOptionsLayout(
+    AnnotationPoint origin,
+    std::size_t paletteCount)
+{
+    MagnifierOptionsLayout layout;
+    layout.paletteCount = clampedPaletteCount(paletteCount);
+    const auto rows = layout.paletteCount <= 10U ? 1U : 2U;
+    const auto columns = (layout.paletteCount + rows - 1U) / rows;
+    const auto customSize = rows == 1U ? 20.0F : 32.0F;
+    const auto height = rows == 1U ? 30.0F : 40.0F;
+    const auto paletteWidth = 236.0F
+        + static_cast<float>(columns) * 16.0F
+        + 2.0F + customSize + 10.0F;
+    const auto width = maximum(430.0F, paletteWidth);
+    layout.toolbar = {origin.x, origin.y, width, height};
+    const auto y = origin.y + (height - 20.0F) / 2.0F;
+    for (std::size_t index = 0; index < strokeWidths.size(); ++index) {
+        const AnnotationRect control{
+            origin.x + 10.0F + static_cast<float>(index) * 24.0F,
+            y, 20.0F, 20.0F};
+        layout.strokeWidths.push_back(control);
+        layout.strokeWidthHits.push_back(inset(control, -3.0F, -4.0F));
+    }
+    layout.rectangleMode = {origin.x + 92.0F, y, 26.0F, 20.0F};
+    layout.circleMode = {origin.x + 124.0F, y, 22.0F, 20.0F};
+    layout.zoom = {origin.x + 160.0F, y, 58.0F, 20.0F};
+    const auto paletteX = origin.x + 236.0F;
+    for (std::size_t index = 0; index < layout.paletteCount; ++index) {
+        const auto column = index % columns;
+        const auto row = rows == 1U ? 0U : index / columns;
+        const auto swatchY = rows == 1U
+            ? origin.y + height / 2.0F - 6.0F
+            : origin.y + 5.0F + static_cast<float>(row) * 16.0F;
+        layout.colorSwatches.push_back({
+            paletteX + static_cast<float>(column) * 16.0F,
+            swatchY,
+            12.0F, 12.0F,
+        });
+    }
+    layout.colorSwatches.push_back({
+        paletteX + static_cast<float>(columns) * 16.0F + 2.0F,
+        origin.y + (height - customSize) / 2.0F,
+        customSize, customSize,
+    });
+    layout.separators = {
+        {origin.x + 85.25F, origin.y + height / 2.0F - 6.0F,
+            1.5F, 12.0F},
+        {origin.x + 153.25F, origin.y + height / 2.0F - 6.0F,
+            1.5F, 12.0F},
+        {origin.x + 227.25F, origin.y + height / 2.0F - 6.0F,
+            1.5F, 12.0F},
+    };
+    return layout;
+}
+
+std::optional<MagnifierOptionHit> magnifierOptionHitTest(
+    const MagnifierOptionsLayout& layout,
+    AnnotationPoint point) noexcept
+{
+    for (std::size_t index = 0; index < layout.strokeWidthHits.size(); ++index) {
+        if (contains(layout.strokeWidthHits[index], point)) {
+            return MagnifierOptionHit{
+                MagnifierOptionControl::strokeWidth, index};
+        }
+    }
+    if (contains(layout.rectangleMode, point)) {
+        return MagnifierOptionHit{MagnifierOptionControl::rectangleMode, 0U};
+    }
+    if (contains(layout.circleMode, point)) {
+        return MagnifierOptionHit{MagnifierOptionControl::circleMode, 0U};
+    }
+    if (contains(layout.zoom, point)) {
+        return MagnifierOptionHit{MagnifierOptionControl::zoom, 0U};
+    }
+    for (std::size_t index = 0; index + 1U < layout.colorSwatches.size(); ++index) {
+        if (contains(inset(layout.colorSwatches[index], -3.0F, -3.0F), point)) {
+            return MagnifierOptionHit{MagnifierOptionControl::palette, index};
+        }
+    }
+    if (!layout.colorSwatches.empty()
+        && contains(inset(layout.colorSwatches.back(), -2.0F, -2.0F), point)) {
+        return MagnifierOptionHit{MagnifierOptionControl::customColor,
+            layout.colorSwatches.size() - 1U};
+    }
+    return std::nullopt;
 }
 
 ArrowLineOptionsLayout arrowLineOptionsLayout(

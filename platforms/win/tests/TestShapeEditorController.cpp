@@ -32,6 +32,7 @@ void testToolbarCapabilityAndPrimaryToolToggle()
         ToolbarAction::mosaic,
         ToolbarAction::text,
         ToolbarAction::number,
+        ToolbarAction::magnifier,
         ToolbarAction::undo,
         ToolbarAction::redo,
         ToolbarAction::cancel,
@@ -674,6 +675,86 @@ void testNumberSequenceGroupsManualMarksResizeAndHistory()
         - (before.y + before.height / 2.0F)) < 0.01F);
 }
 
+void testMagnifierMatchesMacCreationOptionsAndEditing()
+{
+    ShapeEditorController editor({0, 0, 400, 300});
+    CHECK(editor.handleKey(ShapeEditorKey::magnifier, false, false)
+        == ShapeEditorKeyResult::consumed);
+    CHECK(editor.isMagnifierToolActive());
+    CHECK(editor.magnifierOptions().shape() == MagnifierShape::rectangle);
+    CHECK(editor.magnifierOptions().zoom() == 2.0F);
+    CHECK(editor.cursorStyleAt({20, 20}) == ShapeCursorStyle::crosshair);
+    CHECK(editor.applyMagnifierOptionHit(
+        {MagnifierOptionControl::circleMode, 0U}));
+    CHECK(editor.selectMagnifierZoom(3.0F));
+    CHECK(editor.applyMagnifierOptionHit(
+        {MagnifierOptionControl::strokeWidth, 2U}));
+
+    const auto idleRevision = editor.interactionRevision();
+    editor.pointerMove({20, 30});
+    CHECK(editor.interactionRevision() == idleRevision);
+    CHECK(editor.pointerDown({20, 30}));
+    editor.pointerMove({100, 70}, true);
+    const auto movedRevision = editor.interactionRevision();
+    editor.pointerMove({100, 70}, true);
+    CHECK(editor.interactionRevision() == movedRevision);
+    CHECK(editor.pointerUp({100, 70}, true));
+    CHECK(editor.document().annotations().size() == 1U);
+    const auto id = editor.document().annotations()[0].id;
+    const auto* magnifier = editor.document().find(id);
+    CHECK(isMagnifierAnnotation(*magnifier));
+    CHECK(magnifier->magnifierShape == MagnifierShape::circle);
+    CHECK(magnifier->magnifierZoom == 3.0F);
+    CHECK(magnifier->style.strokeWidthDip == 7.0F);
+    CHECK(magnifier->rect.width == magnifier->rect.height);
+    CHECK(editor.document().selectedId() == id);
+    const auto plan = editor.renderPlan({}, true);
+    CHECK(plan.resizeHandles.size() == 8U);
+    CHECK(!plan.rotationHandle.has_value());
+    CHECK(editor.cursorStyleAt({60, 70}) == ShapeCursorStyle::move);
+
+    CHECK(editor.handleToolbarAction(ToolbarAction::magnifier));
+    CHECK(!editor.isMagnifierToolActive());
+    CHECK(editor.handleToolbarAction(ToolbarAction::magnifier));
+    CHECK(editor.isMagnifierToolActive());
+    CHECK(editor.magnifierOptions().shape() == MagnifierShape::circle);
+    CHECK(editor.magnifierOptions().zoom() == 3.0F);
+    CHECK(editor.magnifierOptions().style().strokeWidthDip == 7.0F);
+
+    auto reloadedStyle = editor.document().find(id)->style;
+    reloadedStyle.strokeWidthDip = 2.0F;
+    CHECK(editor.document().updateMagnifier(
+        id, MagnifierShape::rectangle, 4.0F, reloadedStyle));
+    CHECK(editor.handleToolbarAction(ToolbarAction::eyedropper));
+    CHECK(editor.isEyedropperToolActive());
+    CHECK(editor.pointerDown({60, 70}));
+    CHECK(editor.pointerUp({60, 70}));
+    CHECK(editor.isMagnifierToolActive());
+    CHECK(editor.document().selectedId() == id);
+    CHECK(editor.magnifierOptions().shape() == MagnifierShape::rectangle);
+    CHECK(editor.magnifierOptions().zoom() == 4.0F);
+    CHECK(editor.magnifierOptions().style().strokeWidthDip == 2.0F);
+
+    CHECK(editor.handleKey(ShapeEditorKey::deleteKey, false, false)
+        == ShapeEditorKeyResult::consumed);
+    CHECK(editor.document().annotations().empty());
+    CHECK(editor.handleKey(ShapeEditorKey::z, true, false)
+        == ShapeEditorKeyResult::consumed);
+    CHECK(editor.document().annotations().size() == 1U);
+    CHECK(editor.toolbarState().isEnabled(ToolbarAction::redo));
+    CHECK(editor.applyMagnifierOptionHit(
+        {MagnifierOptionControl::circleMode, 0U}));
+    CHECK(!editor.toolbarState().isEnabled(ToolbarAction::redo));
+    CHECK(editor.handleKey(ShapeEditorKey::z, true, false)
+        == ShapeEditorKeyResult::consumed);
+    CHECK(editor.toolbarState().isEnabled(ToolbarAction::redo));
+    CHECK(editor.selectMagnifierZoom(3.0F));
+    CHECK(!editor.toolbarState().isEnabled(ToolbarAction::redo));
+    CHECK(editor.handleKey(ShapeEditorKey::escapeKey, false, false)
+        == ShapeEditorKeyResult::consumed);
+    CHECK(!editor.isMagnifierToolActive());
+}
+
 } // namespace
 
 int main()
@@ -692,5 +773,6 @@ int main()
     testTextCreatesUnicodeAndEditsAtCaret();
     testNumberToolMatchesMacSequenceEditingAndControls();
     testNumberSequenceGroupsManualMarksResizeAndHistory();
+    testMagnifierMatchesMacCreationOptionsAndEditing();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

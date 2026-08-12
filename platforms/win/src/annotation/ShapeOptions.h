@@ -19,6 +19,7 @@ const std::array<float, 3>& macBrushStrokeWidths() noexcept;
 const std::array<AnnotationStrokePattern, 4>& macBrushStrokePatterns() noexcept;
 const std::array<float, 3>& macMarkerStrokeWidths() noexcept;
 const std::array<float, 3>& macMosaicStrokeWidths() noexcept;
+const std::array<float, 3>& macMagnifierStrokeWidths() noexcept;
 
 class ShapeOptionsState {
 public:
@@ -374,6 +375,65 @@ std::optional<NumberOptionHit> numberOptionHitTest(
 PopupMenuLayout numberTypeMenuLayout(
     AnnotationRect field,
     float safeHeight) noexcept;
+
+class MagnifierOptionsState {
+public:
+    MagnifierOptionsState() noexcept;
+    MagnifierShape shape() const noexcept;
+    float zoom() const noexcept;
+    const AnnotationStyle& style() const noexcept;
+    std::optional<std::size_t> selectedPaletteIndex() const noexcept;
+    bool load(const ShapeAnnotation& annotation) noexcept;
+    bool setShape(MagnifierShape shape) noexcept;
+    bool setZoom(float zoom) noexcept;
+    bool setStrokeWidth(float strokeWidthDip) noexcept;
+    bool selectPalette(std::size_t index) noexcept;
+    bool selectCustomColor(AnnotationColor color) noexcept;
+
+private:
+    ShapeOptionsState shapeOptions_;
+    float zoom_ = 2.0F;
+};
+
+enum class MagnifierOptionControl : std::uint8_t {
+    strokeWidth,
+    rectangleMode,
+    circleMode,
+    zoom,
+    palette,
+    customColor,
+};
+
+struct MagnifierOptionHit {
+    MagnifierOptionControl control = MagnifierOptionControl::strokeWidth;
+    std::size_t index = 0;
+};
+
+constexpr bool operator==(
+    MagnifierOptionHit left,
+    MagnifierOptionHit right) noexcept
+{
+    return left.control == right.control && left.index == right.index;
+}
+
+struct MagnifierOptionsLayout {
+    AnnotationRect toolbar{};
+    std::vector<AnnotationRect> strokeWidths;
+    std::vector<AnnotationRect> strokeWidthHits;
+    AnnotationRect rectangleMode{};
+    AnnotationRect circleMode{};
+    AnnotationRect zoom{};
+    std::size_t paletteCount = 0;
+    std::vector<AnnotationRect> colorSwatches;
+    std::vector<AnnotationRect> separators;
+};
+
+MagnifierOptionsLayout magnifierOptionsLayout(
+    AnnotationPoint origin,
+    std::size_t paletteCount);
+std::optional<MagnifierOptionHit> magnifierOptionHitTest(
+    const MagnifierOptionsLayout& layout,
+    AnnotationPoint point) noexcept;
 
 enum class ShapeOptionControl : std::uint8_t {
     strokeWidth,

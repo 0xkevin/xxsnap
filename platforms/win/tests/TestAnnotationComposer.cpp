@@ -344,6 +344,124 @@ void testMosaicPixelAndGaussianRespectMasksAndOrder()
     CHECK(std::memcmp(orderedPixel, pixelOnly, 4U) != 0);
 }
 
+void testMagnifierSamplesOriginalWithMacOffsetAndNearestFiltering()
+{
+    MemoryBudget budget(4U * 1024U * 1024U);
+    auto raw = PixelBuffer::allocate(120, 80, budget);
+    auto allocation = PixelBuffer::allocate(120, 80, budget);
+    CHECK(raw.value != nullptr);
+    CHECK(allocation.value != nullptr);
+    if (!raw.value || !allocation.value) return;
+    for (std::int64_t y = 0; y < raw.value->height(); ++y) {
+        for (std::int64_t x = 0; x < raw.value->width(); ++x) {
+            auto* pixel = raw.value->data()
+                + static_cast<std::uint64_t>(y) * raw.value->stride()
+                + static_cast<std::uint64_t>(x) * 4U;
+            pixel[0] = static_cast<std::byte>(x);
+            pixel[1] = static_cast<std::byte>(y);
+            pixel[2] = std::byte{0};
+            pixel[3] = std::byte{0xFF};
+        }
+    }
+    std::memcpy(allocation.value->data(), raw.value->data(),
+        raw.value->byteCount());
+    AnnotationStyle red;
+    red.fillEnabled = true;
+    red.fillColor = {255, 0, 0, 255};
+    red.strokeColor = red.fillColor;
+    ShapeAnnotation cover;
+    cover.id = 1;
+    cover.kind = AnnotationKind::rectangle;
+    cover.rect = {40, 20, 40, 40};
+    cover.style = red;
+    ShapeAnnotation magnifier;
+    magnifier.id = 2;
+    magnifier.kind = AnnotationKind::magnifier;
+    magnifier.rect = {40, 20, 40, 40};
+    magnifier.style.strokeColor = {0, 122, 255, 255};
+    magnifier.style.strokeWidthDip = 2.0F;
+    magnifier.magnifierShape = MagnifierShape::rectangle;
+    magnifier.magnifierZoom = 2.0F;
+    AnnotationRenderPlan plan;
+    plan.items = {{cover, false}, {magnifier, false}};
+    CHECK(!composeAnnotations(
+        *allocation.value, plan, 96, 96, 0, 0, raw.value.get()).has_value());
+    const auto* center = allocation.value->data()
+        + 40U * allocation.value->stride() + 60U * 4U;
+    CHECK(static_cast<unsigned>(center[0]) == 54U);
+    CHECK(static_cast<unsigned>(center[1]) == 41U);
+    CHECK(static_cast<unsigned>(center[2]) == 0U);
+
+    auto fallback = PixelBuffer::allocate(120, 80, budget);
+    CHECK(fallback.value != nullptr);
+    if (!fallback.value) return;
+    std::memcpy(fallback.value->data(), raw.value->data(),
+        raw.value->byteCount());
+    CHECK(!composeAnnotations(*fallback.value, plan, 96, 96).has_value());
+    CHECK(std::memcmp(fallback.value->data(), allocation.value->data(),
+        fallback.value->byteCount()) == 0);
+
+    auto circle = PixelBuffer::allocate(120, 80, budget);
+    CHECK(circle.value != nullptr);
+    if (!circle.value) return;
+    std::memcpy(circle.value->data(), raw.value->data(), raw.value->byteCount());
+    magnifier.magnifierShape = MagnifierShape::circle;
+    plan.items = {{magnifier, false}};
+    CHECK(!composeAnnotations(
+        *circle.value, plan, 96, 96, 0, 0, raw.value.get()).has_value());
+    const auto* corner = circle.value->data()
+        + 21U * circle.value->stride() + 41U * 4U;
+    CHECK(corner[0] == std::byte{41});
+    CHECK(corner[1] == std::byte{21});
+    CHECK(corner[2] == std::byte{0});
+
+    auto clipped = PixelBuffer::allocate(120, 80, budget);
+    CHECK(clipped.value != nullptr);
+    if (!clipped.value) return;
+    std::memcpy(clipped.value->data(), raw.value->data(), raw.value->byteCount());
+    magnifier.magnifierShape = MagnifierShape::rectangle;
+    magnifier.rect = {-25, 20, 40, 40};
+    magnifier.style.strokeWidthDip = 0.0F;
+    plan.items = {{magnifier, false}};
+    CHECK(!composeAnnotations(
+        *clipped.value, plan, 96, 96, 0, 0, raw.value.get()).has_value());
+    const auto* clippedLeft = clipped.value->data()
+        + 40U * clipped.value->stride() + 2U * 4U;
+    const auto* clippedInner = clipped.value->data()
+        + 40U * clipped.value->stride() + 8U * 4U;
+    CHECK(static_cast<unsigned>(clippedLeft[0]) == 1U);
+    CHECK(static_cast<unsigned>(clippedInner[0]) == 4U);
+
+    MemoryBudget scaledBudget(4U * 1024U * 1024U);
+    auto scaledRaw = PixelBuffer::allocate(180, 120, scaledBudget);
+    auto scaled = PixelBuffer::allocate(180, 120, scaledBudget);
+    CHECK(scaledRaw.value != nullptr);
+    CHECK(scaled.value != nullptr);
+    if (!scaledRaw.value || !scaled.value) return;
+    for (std::int64_t y = 0; y < scaledRaw.value->height(); ++y) {
+        for (std::int64_t x = 0; x < scaledRaw.value->width(); ++x) {
+            auto* pixel = scaledRaw.value->data()
+                + static_cast<std::uint64_t>(y) * scaledRaw.value->stride()
+                + static_cast<std::uint64_t>(x) * 4U;
+            pixel[0] = static_cast<std::byte>(x);
+            pixel[1] = static_cast<std::byte>(y);
+            pixel[2] = std::byte{0};
+            pixel[3] = std::byte{0xFF};
+        }
+    }
+    std::memcpy(scaled.value->data(), scaledRaw.value->data(),
+        scaledRaw.value->byteCount());
+    magnifier.rect = {40, 20, 40, 40};
+    plan.items = {{magnifier, false}};
+    CHECK(!composeAnnotations(
+        *scaled.value, plan, 144, 144, 0, 0,
+        scaledRaw.value.get()).has_value());
+    const auto* scaledCenter = scaled.value->data()
+        + 60U * scaled.value->stride() + 90U * 4U;
+    CHECK(static_cast<unsigned>(scaledCenter[0]) == 81U);
+    CHECK(static_cast<unsigned>(scaledCenter[1]) == 62U);
+}
+
 } // namespace
 
 int main()
@@ -354,5 +472,6 @@ int main()
     testMarkerUsesMultiplyAndDarkBackgroundFallback();
     testMarkerBatchingPreservesAnnotationOrder();
     testMosaicPixelAndGaussianRespectMasksAndOrder();
+    testMagnifierSamplesOriginalWithMacOffsetAndNearestFiltering();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

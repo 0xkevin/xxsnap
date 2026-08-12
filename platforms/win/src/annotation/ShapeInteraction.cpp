@@ -155,6 +155,21 @@ bool ShapeInteraction::beginMosaicRectangleDrawing(
         point, style, rotationDegrees, redaction);
 }
 
+bool ShapeInteraction::beginMagnifierDrawing(
+    AnnotationPoint point,
+    MagnifierShape shape,
+    float zoom,
+    AnnotationStyle style) noexcept
+{
+    if (!beginDrawingInternal(AnnotationKind::magnifier,
+            point, style, 0.0F, std::nullopt)) {
+        return false;
+    }
+    preview_->magnifierShape = shape;
+    preview_->magnifierZoom = normalizedMagnifierZoom(zoom);
+    return true;
+}
+
 bool ShapeInteraction::beginDrawingInternal(
     AnnotationKind kind,
     AnnotationPoint point,
@@ -250,11 +265,13 @@ bool ShapeInteraction::beginRotation(
     return true;
 }
 
-void ShapeInteraction::update(AnnotationPoint point) noexcept
+void ShapeInteraction::update(
+    AnnotationPoint point,
+    bool constrainSquare) noexcept
 {
     switch (mode_) {
     case ShapeInteractionMode::drawing:
-        updateDrawing(point);
+        updateDrawing(point, constrainSquare);
         break;
     case ShapeInteractionMode::moving:
         updateMoving(point);
@@ -281,17 +298,7 @@ bool ShapeInteraction::commit()
     case ShapeInteractionMode::drawing:
         if (preview_->rect.width >= minimumShapeSizeDip
             && preview_->rect.height >= minimumShapeSizeDip) {
-            changed = preview_->kind == AnnotationKind::mosaicRectangle
-                ? document_.addMosaicRectangle(
-                    preview_->rect,
-                    *preview_->mosaicRedaction,
-                    preview_->style,
-                    preview_->rotationDegrees) != invalidAnnotationId
-                : document_.addShape(
-                    preview_->kind,
-                    preview_->rect,
-                    preview_->style,
-                    preview_->rotationDegrees) != invalidAnnotationId;
+            changed = commitDrawingPreview();
         }
         break;
     case ShapeInteractionMode::moving:
@@ -316,6 +323,35 @@ bool ShapeInteraction::commit()
 
     cancel();
     return changed;
+}
+
+bool ShapeInteraction::commitDrawingPreview()
+{
+    if (!preview_.has_value()) {
+        return false;
+    }
+    switch (preview_->kind) {
+    case AnnotationKind::rectangle:
+    case AnnotationKind::ellipse:
+        return document_.addShape(preview_->kind, preview_->rect,
+                   preview_->style, preview_->rotationDegrees)
+            != invalidAnnotationId;
+    case AnnotationKind::mosaicRectangle:
+        return preview_->mosaicRedaction.has_value()
+            && document_.addMosaicRectangle(preview_->rect,
+                   *preview_->mosaicRedaction, preview_->style,
+                   preview_->rotationDegrees)
+                != invalidAnnotationId;
+    case AnnotationKind::magnifier:
+        return preview_->magnifierShape.has_value()
+            && preview_->magnifierZoom.has_value()
+            && document_.addMagnifier(preview_->rect,
+                   *preview_->magnifierShape, *preview_->magnifierZoom,
+                   preview_->style)
+                != invalidAnnotationId;
+    default:
+        return false;
+    }
 }
 
 void ShapeInteraction::cancel() noexcept
@@ -495,12 +531,23 @@ AnnotationRect ShapeInteraction::clampRect(AnnotationRect rect) const noexcept
     return rect;
 }
 
-void ShapeInteraction::updateDrawing(AnnotationPoint point) noexcept
+void ShapeInteraction::updateDrawing(
+    AnnotationPoint point,
+    bool constrainSquare) noexcept
 {
     if (!preview_.has_value()) {
         return;
     }
     point = clampPoint(point);
+    if (preview_->kind == AnnotationKind::magnifier && constrainSquare) {
+        const auto deltaX = point.x - startPoint_.x;
+        const auto deltaY = point.y - startPoint_.y;
+        const auto side = maximum(
+            absoluteValue(deltaX), absoluteValue(deltaY));
+        point.x = startPoint_.x + (deltaX < 0.0F ? -side : side);
+        point.y = startPoint_.y + (deltaY < 0.0F ? -side : side);
+        point = clampPoint(point);
+    }
     preview_->rect = standardized({
         startPoint_.x,
         startPoint_.y,

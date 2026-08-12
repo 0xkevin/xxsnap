@@ -113,6 +113,12 @@ struct OverlayPresentationNumberOptions {
     std::optional<std::size_t> selectedPopupIndex;
 };
 
+struct OverlayPresentationMagnifierOptions {
+    MagnifierOptionsLayout layout;
+    MagnifierOptionsState state;
+    std::optional<PopupMenuLayout> zoomMenu;
+};
+
 struct OverlayPresentationEyedropper {
     AnnotationPoint pointer{};
     AnnotationColor color{};
@@ -137,6 +143,7 @@ struct OverlayPresentation {
     std::optional<OverlayPresentationMosaicOptions> mosaicOptions;
     std::optional<OverlayPresentationTextOptions> textOptions;
     std::optional<OverlayPresentationNumberOptions> numberOptions;
+    std::optional<OverlayPresentationMagnifierOptions> magnifierOptions;
     std::optional<OverlayPresentationEyedropper> eyedropper;
 };
 
@@ -240,6 +247,8 @@ private:
         const OverlaySurface& surface) const;
     std::optional<NumberOptionsLayout> currentNumberOptionsLayout(
         const OverlaySurface& surface) const;
+    std::optional<MagnifierOptionsLayout> currentMagnifierOptionsLayout(
+        const OverlaySurface& surface) const;
     void cancelOnce() noexcept;
     void completeOnce(OverlayInputAction action) noexcept;
     void emitTerminal(OverlayInputAction action) noexcept;
@@ -266,11 +275,13 @@ private:
     std::optional<std::size_t> editorOwnerIndex_;
     std::unique_ptr<ShapeEditorController> editor_;
     const FrozenDesktop* desktop_ = nullptr;
+    mutable std::shared_ptr<const PixelBuffer> rawSelectionCache_;
+    mutable std::optional<PixelRect> rawSelectionCacheSelection_;
     std::unique_ptr<PixelBuffer> eyedropperComposite_;
-    mutable std::shared_ptr<const PixelBuffer> mosaicCompositeCache_;
-    mutable std::optional<PixelRect> mosaicCompositeSelection_;
-    mutable std::uint64_t mosaicCompositeDocumentRevision_ = 0;
-    mutable std::uint64_t mosaicCompositeInteractionRevision_ = 0;
+    mutable std::shared_ptr<const PixelBuffer> annotationCompositeCache_;
+    mutable std::optional<PixelRect> annotationCompositeSelection_;
+    mutable std::uint64_t annotationCompositeDocumentRevision_ = 0;
+    mutable std::uint64_t annotationCompositeInteractionRevision_ = 0;
     std::optional<PixelPoint> eyedropperSamplePoint_;
     std::optional<AnnotationColor> eyedropperSampleColor_;
     std::array<AnnotationColor, 81> eyedropperMagnifier_{};

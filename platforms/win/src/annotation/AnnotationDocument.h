@@ -45,6 +45,11 @@ public:
         bool manualSequence,
         std::uint64_t groupId,
         AnnotationStyle style = {});
+    AnnotationId addMagnifier(
+        AnnotationRect rect,
+        MagnifierShape shape,
+        float zoom,
+        AnnotationStyle style = {});
 
     bool remove(AnnotationId id);
     bool updateRect(AnnotationId id, AnnotationRect rect);
@@ -74,6 +79,11 @@ public:
     bool updateNumberGeometry(
         AnnotationId id,
         AnnotationRect rect,
+        AnnotationStyle style);
+    bool updateMagnifier(
+        AnnotationId id,
+        MagnifierShape shape,
+        float zoom,
         AnnotationStyle style);
     void beginMosaicRedactionEdit();
     void endMosaicRedactionEdit();

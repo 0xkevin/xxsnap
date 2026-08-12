@@ -177,6 +177,29 @@ void testNumberPlanUsesDedicatedMacControlsAndCaret()
     CHECK(!plan.rotationHandle.has_value());
 }
 
+void testMagnifierPlanUsesEightHandlesWithoutRotation()
+{
+    AnnotationDocument document;
+    AnnotationStyle style;
+    style.strokeColor = {0, 122, 255, 255};
+    style.strokeWidthDip = 2.0F;
+    const auto id = document.addMagnifier(
+        {20, 30, 80, 60}, MagnifierShape::circle, 2.0F, style);
+    CHECK(id != invalidAnnotationId);
+    CHECK(document.select(id));
+    const auto plan = buildAnnotationRenderPlan(
+        document, std::nullopt, {10, 15}, true);
+    CHECK(plan.items.size() == 1U);
+    CHECK(isMagnifierAnnotation(plan.items[0].annotation));
+    CHECK((plan.items[0].annotation.rect
+        == AnnotationRect{30, 45, 80, 60}));
+    CHECK(plan.resizeHandles.size() == 8U);
+    CHECK((plan.resizeHandles.front() == AnnotationPoint{30, 45}));
+    CHECK((plan.resizeHandles.back() == AnnotationPoint{110, 105}));
+    CHECK(!plan.rotationHandle.has_value());
+    CHECK(plan.lineHandles.empty());
+}
+
 void testMacDashPatternsAreAbsoluteDips()
 {
     CHECK(strokeDashPattern(AnnotationStrokePattern::solid, 4).empty());
@@ -840,6 +863,7 @@ int main()
     testBrushPlanTranslatesPathAndUsesInsetEndpointHandles();
     testMarkerPlanTranslatesLineAndUsesInsetEndpointHandles();
     testNumberPlanUsesDedicatedMacControlsAndCaret();
+    testMagnifierPlanUsesEightHandlesWithoutRotation();
     testMacDashPatternsAreAbsoluteDips();
     testStrokeMenuSketchSampleUsesExactMacJitter();
     testDirect2DSnapshotsAtAllSupportedDpis();

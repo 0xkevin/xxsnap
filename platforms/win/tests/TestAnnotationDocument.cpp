@@ -278,6 +278,38 @@ void testNumberMarksClampPayloadAndEditAsOneUndoStep()
     CHECK(document.find(first)->numberMarkType == NumberMarkType::number);
 }
 
+void testMagnifierCommandsNormalizeStyleAndRemainReversible()
+{
+    AnnotationDocument document;
+    AnnotationStyle style;
+    style.strokeColor = {1, 2, 3, 99};
+    style.fillEnabled = true;
+    style.strokePattern = AnnotationStrokePattern::dashLong;
+    const auto id = document.addMagnifier(
+        {10, 20, 80, 60}, MagnifierShape::circle, 2.8F, style);
+    CHECK(id != invalidAnnotationId);
+    const auto* annotation = document.find(id);
+    CHECK(isMagnifierAnnotation(*annotation));
+    CHECK(annotation->magnifierShape == MagnifierShape::circle);
+    CHECK(annotation->magnifierZoom == 3.0F);
+    CHECK(annotation->style.strokePattern == AnnotationStrokePattern::solid);
+    CHECK(!annotation->style.fillEnabled);
+
+    CHECK(document.updateMagnifier(
+        id, MagnifierShape::rectangle, 3.8F, annotation->style));
+    CHECK(document.find(id)->magnifierShape == MagnifierShape::rectangle);
+    CHECK(document.find(id)->magnifierZoom == 4.0F);
+    CHECK(document.move(id, {5, -10}));
+    CHECK((document.find(id)->rect == AnnotationRect{15, 10, 80, 60}));
+    CHECK(document.updateRect(id, {20, 30, 40, 50}));
+    CHECK(document.undo());
+    CHECK((document.find(id)->rect == AnnotationRect{15, 10, 80, 60}));
+    CHECK(document.undo());
+    CHECK((document.find(id)->rect == AnnotationRect{10, 20, 80, 60}));
+    CHECK(document.undo());
+    CHECK(document.find(id)->magnifierShape == MagnifierShape::circle);
+}
+
 } // namespace
 
 int main()
@@ -292,5 +324,6 @@ int main()
     testMosaicSliderDragCreatesOneUndoEntry();
     testTextEditTransactionKeepsUnicodeAndCancelsAtomically();
     testNumberMarksClampPayloadAndEditAsOneUndoStep();
+    testMagnifierCommandsNormalizeStyleAndRemainReversible();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

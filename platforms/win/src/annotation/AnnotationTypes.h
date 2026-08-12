@@ -1,7 +1,9 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <optional>
+#include <string_view>
 #include <string>
 #include <vector>
 
@@ -180,6 +182,39 @@ enum class NumberMarkType : std::uint8_t {
     check,
     cross,
 };
+
+enum class MagnifierShape : std::uint8_t {
+    circle,
+    rectangle,
+};
+
+struct MagnifierZoomOption {
+    float value;
+    std::wstring_view label;
+};
+
+inline constexpr std::array<MagnifierZoomOption, 4> magnifierZoomOptions{{
+    {1.5F, L"1.5x"},
+    {2.0F, L"2x"},
+    {3.0F, L"3x"},
+    {4.0F, L"4x"},
+}};
+
+constexpr float normalizedMagnifierZoom(float zoom) noexcept
+{
+    auto selected = magnifierZoomOptions[0].value;
+    auto distance = zoom > selected ? zoom - selected : selected - zoom;
+    for (const auto& option : magnifierZoomOptions) {
+        const auto candidate = option.value;
+        const auto candidateDistance = zoom > candidate
+            ? zoom - candidate : candidate - zoom;
+        if (candidateDistance < distance) {
+            selected = candidate;
+            distance = candidateDistance;
+        }
+    }
+    return selected;
+}
 
 constexpr bool isShapeKind(AnnotationKind kind) noexcept
 {
@@ -377,6 +412,8 @@ struct ShapeAnnotation {
     std::optional<int> numberSequenceIndex;
     bool numberSequenceIsManual = false;
     std::uint64_t numberSequenceGroupId = 0;
+    std::optional<MagnifierShape> magnifierShape;
+    std::optional<float> magnifierZoom;
 };
 
 constexpr bool isArrowLineAnnotation(
@@ -428,6 +465,14 @@ inline bool isTextAnnotation(const ShapeAnnotation& annotation) noexcept
         && annotation.text.has_value();
 }
 
+constexpr bool isMagnifierAnnotation(
+    const ShapeAnnotation& annotation) noexcept
+{
+    return annotation.kind == AnnotationKind::magnifier
+        && annotation.magnifierShape.has_value()
+        && annotation.magnifierZoom.has_value();
+}
+
 constexpr bool isNumberAnnotation(
     const ShapeAnnotation& annotation) noexcept
 {
@@ -453,7 +498,16 @@ inline bool operator==(
         && left.numberMarkType == right.numberMarkType
         && left.numberSequenceIndex == right.numberSequenceIndex
         && left.numberSequenceIsManual == right.numberSequenceIsManual
-        && left.numberSequenceGroupId == right.numberSequenceGroupId;
+        && left.numberSequenceGroupId == right.numberSequenceGroupId
+        && left.magnifierShape == right.magnifierShape
+        && left.magnifierZoom == right.magnifierZoom;
+}
+
+inline bool operator!=(
+    const ShapeAnnotation& left,
+    const ShapeAnnotation& right) noexcept
+{
+    return !(left == right);
 }
 
 } // namespace xxsnap::win

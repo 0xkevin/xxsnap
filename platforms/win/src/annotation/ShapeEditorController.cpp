@@ -188,6 +188,7 @@ ShapeEditorController::ShapeEditorController(
     toolbarState_.setCapability(ToolbarAction::mosaic, true);
     toolbarState_.setCapability(ToolbarAction::text, true);
     toolbarState_.setCapability(ToolbarAction::number, true);
+    toolbarState_.setCapability(ToolbarAction::magnifier, true);
     toolbarState_.setCapability(ToolbarAction::undo, true);
     toolbarState_.setCapability(ToolbarAction::redo, true);
     syncHistory();
@@ -242,6 +243,12 @@ const TextOptionsState& ShapeEditorController::textOptions() const noexcept
 const NumberOptionsState& ShapeEditorController::numberOptions() const noexcept
 {
     return numberOptions_;
+}
+
+const MagnifierOptionsState&
+ShapeEditorController::magnifierOptions() const noexcept
+{
+    return magnifierOptions_;
 }
 
 const AnnotationDocument& ShapeEditorController::document() const noexcept
@@ -315,6 +322,11 @@ bool ShapeEditorController::isNumberToolActive() const noexcept
     return toolbarState_.selectedAction() == ToolbarAction::number;
 }
 
+bool ShapeEditorController::isMagnifierToolActive() const noexcept
+{
+    return toolbarState_.selectedAction() == ToolbarAction::magnifier;
+}
+
 int ShapeEditorController::nextNumberSequenceValue() const noexcept
 {
     return nextNumberValue(currentNumberGroupId_);
@@ -345,6 +357,11 @@ std::optional<NumberPopupMenu>
 ShapeEditorController::numberPopupMenu() const noexcept
 {
     return numberPopupMenu_;
+}
+
+bool ShapeEditorController::magnifierZoomMenuVisible() const noexcept
+{
+    return magnifierZoomMenuVisible_;
 }
 
 bool ShapeEditorController::strokePatternMenuVisible() const noexcept
@@ -493,6 +510,22 @@ bool ShapeEditorController::handleToolbarAction(ToolbarAction action)
                 NumberOptionsState activated;
                 numberOptions_ = activated;
                 currentNumberGroupId_ = nextNumberGroupId_++;
+                document_.clearSelection();
+                dismissPopovers();
+            }
+        }
+        return true;
+    }
+    if (action == ToolbarAction::magnifier) {
+        if (isMagnifierToolActive()) {
+            deactivateTool();
+        } else {
+            cancelInteraction();
+            shapeToolActive_ = false;
+            arrowLineToolActive_ = false;
+            brushToolActive_ = false;
+            markerToolActive_ = false;
+            if (toolbarState_.selectTool(action)) {
                 document_.clearSelection();
                 dismissPopovers();
             }
@@ -739,6 +772,46 @@ bool ShapeEditorController::applyNumberOptionHit(NumberOptionHit hit)
     return changed && applyNumberStyleToSelection();
 }
 
+bool ShapeEditorController::applyMagnifierOptionHit(
+    MagnifierOptionHit hit)
+{
+    bool changed = false;
+    switch (hit.control) {
+    case MagnifierOptionControl::strokeWidth: {
+        const auto& widths = macMagnifierStrokeWidths();
+        changed = hit.index < widths.size()
+            && magnifierOptions_.setStrokeWidth(widths[hit.index]);
+        break;
+    }
+    case MagnifierOptionControl::rectangleMode:
+        changed = magnifierOptions_.setShape(MagnifierShape::rectangle);
+        break;
+    case MagnifierOptionControl::circleMode:
+        changed = magnifierOptions_.setShape(MagnifierShape::circle);
+        break;
+    case MagnifierOptionControl::zoom:
+        magnifierZoomMenuVisible_ = !magnifierZoomMenuVisible_;
+        textPopupMenu_.reset();
+        numberPopupMenu_.reset();
+        return true;
+    case MagnifierOptionControl::palette:
+        changed = magnifierOptions_.selectPalette(hit.index);
+        break;
+    case MagnifierOptionControl::customColor:
+        return false;
+    }
+    magnifierZoomMenuVisible_ = false;
+    if (!changed) {
+        return false;
+    }
+    const auto selected = document_.selectedId();
+    const auto applied = applyMagnifierOptionsToSelection();
+    if (applied) {
+        syncHistory();
+    }
+    return applied || !selected.has_value();
+}
+
 bool ShapeEditorController::setTextFontFamily(std::wstring family)
 {
     const auto changed = textOptions_.setFontFamily(std::move(family));
@@ -757,6 +830,7 @@ bool ShapeEditorController::toggleTextPopupMenu(
     textPopupMenu_ = textPopupMenu_ == menu
         ? std::nullopt : std::optional<TextPopupMenu>{menu};
     numberPopupMenu_.reset();
+    magnifierZoomMenuVisible_ = false;
     popupScrollOffset_ = 0;
     strokePatternMenuVisible_ = false;
     cornerRadiusPanelVisible_ = false;
@@ -780,6 +854,7 @@ bool ShapeEditorController::toggleNumberPopupMenu(
         ? std::nullopt : std::optional<NumberPopupMenu>{menu};
     popupScrollOffset_ = 0;
     textPopupMenu_.reset();
+    magnifierZoomMenuVisible_ = false;
     strokePatternMenuVisible_ = false;
     cornerRadiusPanelVisible_ = false;
     arrowTypeMenuEndpoint_.reset();
@@ -828,6 +903,21 @@ bool ShapeEditorController::setNumberSize(float size)
     const auto changed = numberOptions_.setSize(size);
     numberPopupMenu_.reset();
     return changed && applyNumberStyleToSelection();
+}
+
+bool ShapeEditorController::selectMagnifierZoom(float zoom)
+{
+    const auto changed = magnifierOptions_.setZoom(zoom);
+    magnifierZoomMenuVisible_ = false;
+    if (!changed) {
+        return false;
+    }
+    const auto selected = document_.selectedId();
+    const auto applied = applyMagnifierOptionsToSelection();
+    if (applied) {
+        syncHistory();
+    }
+    return applied || !selected.has_value();
 }
 
 bool ShapeEditorController::insertText(std::wstring text)
@@ -1379,35 +1469,62 @@ bool ShapeEditorController::adjustCornerRadius(float deltaDip)
 
 bool ShapeEditorController::selectCustomColor(AnnotationColor color)
 {
-    const auto optionChanged = isNumberToolActive()
-        ? numberOptions_.selectCustomColor(color)
-        : isTextToolActive()
-        ? textOptions_.selectCustomColor(color)
-        : markerToolActive_
-        ? markerOptions_.selectCustomColor(color)
-        : brushToolActive_
-            ? brushOptions_.selectCustomColor(color)
-            : arrowLineToolActive_
-                ? arrowLineOptions_.selectCustomColor(color)
-                : options_.selectCustomColor(color);
+    const auto activeAction = toolbarState_.selectedAction().value_or(
+        ToolbarAction::rectangle);
+    bool optionChanged = false;
+    switch (activeAction) {
+    case ToolbarAction::polyline:
+        optionChanged = arrowLineOptions_.selectCustomColor(color);
+        break;
+    case ToolbarAction::pen:
+        optionChanged = brushOptions_.selectCustomColor(color);
+        break;
+    case ToolbarAction::marker:
+        optionChanged = markerOptions_.selectCustomColor(color);
+        break;
+    case ToolbarAction::text:
+        optionChanged = textOptions_.selectCustomColor(color);
+        break;
+    case ToolbarAction::number:
+        optionChanged = numberOptions_.selectCustomColor(color);
+        break;
+    case ToolbarAction::magnifier:
+        optionChanged = magnifierOptions_.selectCustomColor(color);
+        break;
+    default:
+        optionChanged = options_.selectCustomColor(color);
+        break;
+    }
     if (!optionChanged) {
         return false;
     }
     auto changed = false;
-    if (isNumberToolActive()) {
+    switch (activeAction) {
+    case ToolbarAction::magnifier:
+        changed = applyMagnifierOptionsToSelection();
+        break;
+    case ToolbarAction::number:
         changed = applyNumberStyleToSelection();
-    } else if (isTextToolActive()) {
+        break;
+    case ToolbarAction::text:
         changed = applyTextStyleToSelection();
-    } else if (markerToolActive_) {
+        break;
+    case ToolbarAction::marker: {
         const auto selected = document_.selectedId();
         const auto* annotation = selected.has_value()
             ? document_.find(*selected) : nullptr;
         changed = annotation != nullptr && isMarkerAnnotation(*annotation)
             && document_.updateStyle(*selected, markerOptions_.style());
-    } else if (arrowLineToolActive_) {
+        break;
+    }
+    case ToolbarAction::polyline:
         changed = applyArrowOptionsToSelection();
-    } else if (!brushToolActive_) {
+        break;
+    case ToolbarAction::pen:
+        break;
+    default:
         changed = applyOptionsStyleToSelection();
+        break;
     }
     syncHistory();
     return changed || !document_.selectedId().has_value();
@@ -1421,6 +1538,7 @@ void ShapeEditorController::dismissPopovers() noexcept
     textPopupMenu_.reset();
     popupScrollOffset_ = 0;
     numberPopupMenu_.reset();
+    magnifierZoomMenuVisible_ = false;
 }
 
 bool ShapeEditorController::pointerDown(
@@ -1535,6 +1653,12 @@ bool ShapeEditorController::pointerDown(
         } else if (annotation != nullptr && isNumberAnnotation(*annotation)) {
             // Number marks expose only the dedicated bottom-right size handle.
         } else if (annotation != nullptr
+            && isMagnifierAnnotation(*annotation)) {
+            if (const auto handle = interaction_.hitTestResizeHandle(
+                    *selected, point); handle.has_value()) {
+                return interaction_.beginResize(*selected, *handle);
+            }
+        } else if (annotation != nullptr
             && !isMosaicStrokeAnnotation(*annotation)) {
             if (interaction_.hitTestRotationHandle(*selected, point)) {
                 return interaction_.beginRotation(*selected, point);
@@ -1578,21 +1702,26 @@ bool ShapeEditorController::pointerDown(
     }
     if (const auto hit = annotationAtBorder(point); hit.has_value()) {
         document_.select(*hit);
+        const auto* annotation = document_.find(*hit);
+        if (annotation != nullptr && isMagnifierAnnotation(*annotation)) {
+            shapeToolActive_ = false;
+            arrowLineToolActive_ = false;
+            brushToolActive_ = false;
+            markerToolActive_ = false;
+            toolbarState_.selectTool(ToolbarAction::magnifier);
+            dismissPopovers();
+        }
         loadSelectedOptions();
-        if (const auto* annotation = document_.find(*hit);
-            annotation != nullptr && annotation->arrowLine.has_value()) {
+        if (annotation != nullptr && annotation->arrowLine.has_value()) {
             return arrowInteraction_.beginMove(*hit, point);
         }
-        if (const auto* annotation = document_.find(*hit);
-            annotation != nullptr && isBrushAnnotation(*annotation)) {
+        if (annotation != nullptr && isBrushAnnotation(*annotation)) {
             return brushInteraction_.beginMove(*hit, point);
         }
-        if (const auto* annotation = document_.find(*hit);
-            annotation != nullptr && isMarkerAnnotation(*annotation)) {
+        if (annotation != nullptr && isMarkerAnnotation(*annotation)) {
             return markerInteraction_.beginMove(*hit, point);
         }
-        if (const auto* annotation = document_.find(*hit);
-            annotation != nullptr && isMosaicStrokeAnnotation(*annotation)) {
+        if (annotation != nullptr && isMosaicStrokeAnnotation(*annotation)) {
             return mosaicInteraction_.beginMove(*hit, point);
         }
         return interaction_.beginMove(*hit, point);
@@ -1640,6 +1769,14 @@ bool ShapeEditorController::pointerDown(
         syncHistory();
         return id != invalidAnnotationId;
     }
+    if (isMagnifierToolActive()) {
+        document_.clearSelection();
+        return interaction_.beginMagnifierDrawing(
+            point,
+            magnifierOptions_.shape(),
+            magnifierOptions_.zoom(),
+            magnifierOptions_.style());
+    }
     if (arrowLineToolActive_) {
         document_.clearSelection();
         return arrowInteraction_.beginDrawing(
@@ -1665,18 +1802,25 @@ void ShapeEditorController::pointerMove(
     AnnotationPoint point,
     bool shift)
 {
-    ++interactionRevision_;
     point = clampedPoint(point, canvasBounds_);
     if (brushInteraction_.active()) {
+        ++interactionRevision_;
         brushInteraction_.update(point, shift);
     } else if (mosaicInteraction_.mode() != MosaicInteractionMode::idle) {
+        ++interactionRevision_;
         mosaicInteraction_.update(point, shift);
     } else if (markerInteraction_.mode() != MarkerInteractionMode::idle) {
+        ++interactionRevision_;
         markerInteraction_.update(point, shift);
     } else if (arrowInteraction_.mode() != ArrowLineInteractionMode::idle) {
+        ++interactionRevision_;
         arrowInteraction_.update(point);
-    } else {
-        interaction_.update(point);
+    } else if (interaction_.mode() != ShapeInteractionMode::idle) {
+        const auto previous = interaction_.preview();
+        interaction_.update(point, shift);
+        if (interaction_.preview() != previous) {
+            ++interactionRevision_;
+        }
     }
 }
 
@@ -1706,7 +1850,7 @@ bool ShapeEditorController::pointerUp(
         arrowInteraction_.update(point);
         arrowInteraction_.commit();
     } else {
-        interaction_.update(point);
+        interaction_.update(point, shift);
         interaction_.commit();
     }
     loadSelectedOptions();
@@ -1800,6 +1944,12 @@ ShapeCursorStyle ShapeEditorController::cursorStyleAt(
                 return ShapeCursorStyle::resizeUpDown;
             }
         } else if (annotation != nullptr
+            && isMagnifierAnnotation(*annotation)) {
+            if (const auto handle = interaction_.hitTestResizeHandle(
+                    *selected, point)) {
+                return cursorStyleForResizeHandle(*handle);
+            }
+        } else if (annotation != nullptr
             && !isMosaicStrokeAnnotation(*annotation)) {
             if (interaction_.hitTestRotationHandle(*selected, point)) {
                 return ShapeCursorStyle::rotation;
@@ -1844,6 +1994,7 @@ ShapeCursorStyle ShapeEditorController::cursorStyleAt(
         }
     }
     return shapeToolActive_ || arrowLineToolActive_ || isTextToolActive()
+        || isMagnifierToolActive()
         ? ShapeCursorStyle::crosshair : ShapeCursorStyle::arrow;
 }
 
@@ -1963,6 +2114,10 @@ ShapeEditorKeyResult ShapeEditorController::handleKey(
         handleToolbarAction(ToolbarAction::number);
         return ShapeEditorKeyResult::consumed;
     }
+    if (!control && key == ShapeEditorKey::magnifier) {
+        handleToolbarAction(ToolbarAction::magnifier);
+        return ShapeEditorKeyResult::consumed;
+    }
     if (key == ShapeEditorKey::escapeKey) {
         if (interaction_.mode() != ShapeInteractionMode::idle
             || arrowInteraction_.mode() != ArrowLineInteractionMode::idle
@@ -1975,6 +2130,7 @@ ShapeEditorKeyResult ShapeEditorController::handleKey(
         if (shapeToolActive_ || arrowLineToolActive_ || brushToolActive_
             || markerToolActive_ || isMosaicToolActive()
             || isTextToolActive() || isNumberToolActive()
+            || isMagnifierToolActive()
             || isEyedropperToolActive()) {
             deactivateTool();
             return ShapeEditorKeyResult::consumed;
@@ -2079,6 +2235,8 @@ std::optional<AnnotationId> ShapeEditorController::annotationAtBorder(
             contains = mosaicInteraction_.hitTestStroke(iterator->id, point);
         } else if (isNumberAnnotation(*iterator)) {
             contains = ellipseContains(iterator->rect, point);
+        } else if (isMagnifierAnnotation(*iterator)) {
+            contains = containsRect(standardized(iterator->rect), point);
         } else {
             contains = shapeBorderContains(*iterator, point);
         }
@@ -2153,6 +2311,8 @@ void ShapeEditorController::loadSelectedOptions() noexcept
                 nextNumberGroupId_ = (std::max)(nextNumberGroupId_,
                     currentNumberGroupId_ + 1U);
             }
+        } else if (isMagnifierAnnotation(*annotation)) {
+            magnifierOptions_.load(*annotation);
         } else {
             options_.load(annotation->kind, annotation->style);
         }
@@ -2164,6 +2324,21 @@ bool ShapeEditorController::applyOptionsStyleToSelection()
     const auto selected = document_.selectedId();
     return selected.has_value()
         && document_.updateStyle(*selected, options_.style());
+}
+
+bool ShapeEditorController::applyMagnifierOptionsToSelection()
+{
+    const auto selected = document_.selectedId();
+    if (!selected.has_value()) {
+        return false;
+    }
+    const auto* annotation = document_.find(*selected);
+    return annotation != nullptr && isMagnifierAnnotation(*annotation)
+        && document_.updateMagnifier(
+            *selected,
+            magnifierOptions_.shape(),
+            magnifierOptions_.zoom(),
+            magnifierOptions_.style());
 }
 
 bool ShapeEditorController::applyArrowOptionsToSelection()
@@ -2211,6 +2386,7 @@ void ShapeEditorController::deactivateTool()
     textPopupMenu_.reset();
     popupScrollOffset_ = 0;
     numberPopupMenu_.reset();
+    magnifierZoomMenuVisible_ = false;
 }
 
 } // namespace xxsnap::win

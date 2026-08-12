@@ -164,6 +164,38 @@ void testRotationPreviewCancelAndCommit()
     CHECK(document.find(id)->rotationDegrees == 0.0F);
 }
 
+void testMagnifierShiftSquareMinimumAndResize()
+{
+    AnnotationDocument document;
+    ShapeInteraction interaction(document, {0, 0, 100, 80});
+    AnnotationStyle style;
+    style.strokeColor = {0, 122, 255, 255};
+    style.strokeWidthDip = 2.0F;
+    CHECK(interaction.beginMagnifierDrawing(
+        {10, 10}, MagnifierShape::circle, 2.0F, style));
+    interaction.update({50, 30}, true);
+    CHECK((interaction.preview()->rect == AnnotationRect{10, 10, 40, 40}));
+    CHECK(interaction.commit());
+    const auto id = document.annotations()[0].id;
+    CHECK(document.find(id)->magnifierShape == MagnifierShape::circle);
+    CHECK(document.find(id)->magnifierZoom == 2.0F);
+
+    CHECK(interaction.beginResize(id, ShapeResizeHandle::bottomRight));
+    interaction.update({90, 70});
+    CHECK((interaction.preview()->rect == AnnotationRect{10, 10, 80, 60}));
+    CHECK(interaction.commit());
+    CHECK(interaction.beginMove(id, {20, 20}));
+    interaction.update({-50, -50});
+    CHECK((interaction.preview()->rect == AnnotationRect{0, 0, 80, 60}));
+    interaction.cancel();
+
+    CHECK(interaction.beginMagnifierDrawing(
+        {90, 70}, MagnifierShape::rectangle, 4.0F, style));
+    interaction.update({94, 74});
+    CHECK(!interaction.commit());
+    CHECK(document.annotations().size() == 1U);
+}
+
 } // namespace
 
 int main()
@@ -174,5 +206,6 @@ int main()
     testAllEightResizeHandlesAndHitTesting();
     testResizeRejectsTooSmallPreviewAndClipsPointer();
     testRotationPreviewCancelAndCommit();
+    testMagnifierShiftSquareMinimumAndResize();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

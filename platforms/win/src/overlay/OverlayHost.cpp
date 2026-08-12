@@ -582,20 +582,43 @@ OverlayInputRouter::composeCurrentSelection() const noexcept
         return std::nullopt;
     }
     try {
-        MemoryBudget budget(512U * 1024U * 1024U);
-        auto composition = composeSelection(
-            *model_.selection(), *desktop_, budget);
-        auto* pixels = std::get_if<PixelBuffer>(&composition);
-        if (pixels == nullptr) {
+        const auto selection = snipory::core::portable::standardized(
+            *model_.selection());
+        const auto cacheMatches = rawSelectionCacheSelection_.has_value()
+            && rawSelectionCacheSelection_->x == selection.x
+            && rawSelectionCacheSelection_->y == selection.y
+            && rawSelectionCacheSelection_->width == selection.width
+            && rawSelectionCacheSelection_->height == selection.height;
+        if (!cacheMatches || rawSelectionCache_ == nullptr) {
+            rawSelectionCache_.reset();
+            rawSelectionCacheSelection_.reset();
+            MemoryBudget rawBudget(512U * 1024U * 1024U);
+            auto raw = composeSelection(selection, *desktop_, rawBudget);
+            auto* pixels = std::get_if<PixelBuffer>(&raw);
+            if (pixels == nullptr) {
+                return std::nullopt;
+            }
+            rawSelectionCache_ = std::make_shared<PixelBuffer>(
+                std::move(*pixels));
+            rawSelectionCacheSelection_ = selection;
+        }
+        MemoryBudget outputBudget(512U * 1024U * 1024U);
+        auto output = PixelBuffer::allocate(rawSelectionCache_->width(),
+            rawSelectionCache_->height(), outputBudget);
+        if (!output.value) {
             return std::nullopt;
         }
+        std::memcpy(output.value->data(), rawSelectionCache_->data(),
+            rawSelectionCache_->byteCount());
+        auto* pixels = output.value.get();
         if (editor_ != nullptr && editorOwnerIndex_.has_value()) {
             const auto& owner = surfaces_[*editorOwnerIndex_];
             const auto plan = editor_->renderPlan({}, false);
             if (composeAnnotations(
                     *pixels, plan, owner.dpiX, owner.dpiY,
                     model_.selection()->x,
-                    model_.selection()->y).has_value()) {
+                    model_.selection()->y,
+                    rawSelectionCache_.get()).has_value()) {
                 return std::nullopt;
             }
         }
@@ -834,6 +857,30 @@ OverlayInputRouter::currentNumberOptionsLayout(
         macShapePalette().size());
 }
 
+std::optional<MagnifierOptionsLayout>
+OverlayInputRouter::currentMagnifierOptionsLayout(
+    const OverlaySurface& surface) const
+{
+    if (!editor_ || !editor_->isMagnifierToolActive()
+        || !model_.selection().has_value()) {
+        return std::nullopt;
+    }
+    const auto chrome = computeOverlayLayout({
+        surface.physicalBounds,
+        *model_.selection(),
+        surface.dpiX,
+        surface.dpiY,
+        0.0F,
+        true,
+        toolbarActions(),
+    });
+    const auto initial = magnifierOptionsLayout(
+        {}, macShapePalette().size());
+    return magnifierOptionsLayout(
+        optionsToolbarOrigin(chrome, initial.toolbar),
+        macShapePalette().size());
+}
+
 OverlayInputRouter::~OverlayInputRouter()
 {
     if (dragging_) {
@@ -984,44 +1031,45 @@ std::vector<OverlayPresentation> OverlayInputRouter::presentations() const
                 physicalPixelsToDip(
                     selection.y - surface.physicalBounds.y, surface.dpiY),
             });
-            const auto containsMosaic = std::any_of(
+            const auto requiresComposite = std::any_of(
                 presentation.annotationPlan.items.begin(),
                 presentation.annotationPlan.items.end(),
                 [](const auto& item) {
-                    return isMosaicAnnotation(item.annotation);
+                    return isMosaicAnnotation(item.annotation)
+                        || isMagnifierAnnotation(item.annotation);
                 });
-            if (containsMosaic && desktop_ != nullptr) {
+            if (requiresComposite && desktop_ != nullptr) {
                 const auto cachedSelectionMatches
-                    = mosaicCompositeSelection_.has_value()
-                    && mosaicCompositeSelection_->x == selection.x
-                    && mosaicCompositeSelection_->y == selection.y
-                    && mosaicCompositeSelection_->width == selection.width
-                    && mosaicCompositeSelection_->height == selection.height;
+                    = annotationCompositeSelection_.has_value()
+                    && annotationCompositeSelection_->x == selection.x
+                    && annotationCompositeSelection_->y == selection.y
+                    && annotationCompositeSelection_->width == selection.width
+                    && annotationCompositeSelection_->height == selection.height;
                 const auto documentRevision = editor_->document().revision();
                 const auto interactionRevision
                     = editor_->interactionRevision();
                 if (!cachedSelectionMatches
-                    || mosaicCompositeDocumentRevision_ != documentRevision
-                    || mosaicCompositeInteractionRevision_
+                    || annotationCompositeDocumentRevision_ != documentRevision
+                    || annotationCompositeInteractionRevision_
                         != interactionRevision
-                    || mosaicCompositeCache_ == nullptr) {
-                    mosaicCompositeCache_.reset();
+                    || annotationCompositeCache_ == nullptr) {
+                    annotationCompositeCache_.reset();
                     if (auto composition = composeCurrentSelection()) {
-                        mosaicCompositeCache_ = std::make_shared<PixelBuffer>(
+                        annotationCompositeCache_ = std::make_shared<PixelBuffer>(
                             std::move(*composition));
                     }
-                    mosaicCompositeSelection_ = selection;
-                    mosaicCompositeDocumentRevision_ = documentRevision;
-                    mosaicCompositeInteractionRevision_
+                    annotationCompositeSelection_ = selection;
+                    annotationCompositeDocumentRevision_ = documentRevision;
+                    annotationCompositeInteractionRevision_
                         = interactionRevision;
                 }
-                if (mosaicCompositeCache_ != nullptr) {
-                    presentation.annotationComposite = mosaicCompositeCache_;
+                if (annotationCompositeCache_ != nullptr) {
+                    presentation.annotationComposite = annotationCompositeCache_;
                     presentation.annotationPlan.items.clear();
                 }
             } else {
-                mosaicCompositeCache_.reset();
-                mosaicCompositeSelection_.reset();
+                annotationCompositeCache_.reset();
+                annotationCompositeSelection_.reset();
             }
             if (const auto options = currentShapeOptionsLayout(surface)) {
                 OverlayPresentationShapeOptions shapeOptions{
@@ -1135,6 +1183,21 @@ std::vector<OverlayPresentation> OverlayInputRouter::presentations() const
                     numberOptions.selectedPopupIndex = data.selectedIndex;
                 }
                 presentation.numberOptions = std::move(numberOptions);
+            }
+            if (const auto options = currentMagnifierOptionsLayout(surface)) {
+                OverlayPresentationMagnifierOptions magnifierOptions{
+                    *options,
+                    editor_->magnifierOptions(),
+                    std::nullopt,
+                };
+                if (editor_->magnifierZoomMenuVisible()) {
+                    const auto safeHeight = physicalPixelsToDip(
+                        surface.physicalBounds.height, surface.dpiY);
+                    magnifierOptions.zoomMenu = popupMenuLayout(
+                        options->zoom, magnifierZoomOptions.size(), safeHeight);
+                }
+                presentation.magnifierOptions =
+                    std::move(magnifierOptions);
             }
             if (editor_->isEyedropperToolActive()
                 && eyedropperSamplePoint_.has_value()
@@ -1514,6 +1577,39 @@ bool OverlayInputRouter::pointerDown(
                     editor_->toggleNumberPopupMenu(NumberPopupMenu::size);
                 } else {
                     editor_->applyNumberOptionHit(*hit);
+                }
+                return true;
+            }
+            editor_->dismissPopovers();
+        }
+        if (const auto options = currentMagnifierOptionsLayout(*surface);
+            options.has_value()) {
+            const AnnotationPoint point{x, y};
+            if (editor_->magnifierZoomMenuVisible()) {
+                const auto safeHeight = physicalPixelsToDip(
+                    surface->physicalBounds.height, surface->dpiY);
+                const auto menu = popupMenuLayout(
+                    options->zoom, magnifierZoomOptions.size(), safeHeight);
+                if (const auto item = popupMenuHitTest(menu, point)) {
+                    if (*item < magnifierZoomOptions.size()) {
+                        editor_->selectMagnifierZoom(
+                            magnifierZoomOptions[*item].value);
+                    }
+                    editor_->dismissPopovers();
+                    return true;
+                }
+                if (contains(menu.menu, point)) {
+                    return true;
+                }
+            }
+            if (const auto hit = magnifierOptionHitTest(*options, point)) {
+                if (hit->control == MagnifierOptionControl::customColor) {
+                    if (const auto chosen = platform_.chooseColor(source,
+                            editor_->magnifierOptions().style().strokeColor)) {
+                        editor_->selectCustomColor(*chosen);
+                    }
+                } else {
+                    editor_->applyMagnifierOptionHit(*hit);
                 }
                 return true;
             }
@@ -2176,6 +2272,12 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
                 }
                 key = ShapeEditorKey::number;
                 break;
+            case 'G':
+                if (router->isEditingInlineValue()) {
+                    return;
+                }
+                key = ShapeEditorKey::magnifier;
+                break;
             default:
                 return;
             }
@@ -2312,6 +2414,15 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
                         options.popupLabels,
                         options.selectedPopupIndex,
                     };
+                }
+                if (current[index].magnifierOptions.has_value()) {
+                    const auto& options = *current[index].magnifierOptions;
+                    state.magnifierOptions =
+                        OverlayMagnifierOptionsRenderState{
+                            options.layout,
+                            options.state,
+                            options.zoomMenu,
+                        };
                 }
                 if (current[index].eyedropper.has_value()) {
                     const auto& eyedropper = *current[index].eyedropper;

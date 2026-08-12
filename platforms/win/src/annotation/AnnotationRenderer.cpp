@@ -576,6 +576,9 @@ AnnotationRenderPlan buildAnnotationRenderPlan(
     } else {
         plan.resizeHandles.assign(handles.begin(), handles.end());
     }
+    if (isMagnifierAnnotation(*editing)) {
+        return plan;
+    }
     const auto rect = standardized(editing->rect);
     const AnnotationPoint rotation{
         rect.x + rect.width / 2.0F,
@@ -750,6 +753,34 @@ HRESULT AnnotationRenderer::draw(
                 dwriteFactory_, renderTarget, annotation, item.numberDraft);
             if (FAILED(result)) {
                 return result;
+            }
+            continue;
+        }
+        if (isMagnifierAnnotation(annotation)) {
+            const auto rect = strokeInsetRect(annotation);
+            if (rect.width <= 0.0F || rect.height <= 0.0F
+                || annotation.style.strokeWidthDip <= 0.0F) {
+                continue;
+            }
+            ComPtr<ID2D1SolidColorBrush> strokeBrush;
+            const auto result = renderTarget->CreateSolidColorBrush(
+                d2dColor(annotation.style.strokeColor),
+                strokeBrush.put());
+            if (FAILED(result)) {
+                return result;
+            }
+            if (*annotation.magnifierShape == MagnifierShape::circle) {
+                const auto ellipse = D2D1::Ellipse(
+                    D2D1::Point2F(
+                        rect.x + rect.width / 2.0F,
+                        rect.y + rect.height / 2.0F),
+                    rect.width / 2.0F,
+                    rect.height / 2.0F);
+                renderTarget->DrawEllipse(&ellipse, strokeBrush.get(),
+                    annotation.style.strokeWidthDip);
+            } else {
+                renderTarget->DrawRectangle(d2dRect(rect), strokeBrush.get(),
+                    annotation.style.strokeWidthDip);
             }
             continue;
         }
