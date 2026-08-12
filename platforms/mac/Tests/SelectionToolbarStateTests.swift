@@ -3922,6 +3922,51 @@ final class SelectionToolbarStateTests: XCTestCase {
     }
 
     @MainActor
+    func testPinnedImageControllerScalesPastScreenAroundPointerAndStopsAtFourTimesVisibleSize() throws {
+        let visibleFrame = try XCTUnwrap(NSScreen.main?.visibleFrame)
+        let initialFrame = NSRect(
+            x: visibleFrame.midX - 100,
+            y: visibleFrame.midY - 50,
+            width: 200,
+            height: 100
+        )
+        let controller = PinnedImageWindowController(
+            image: solidImage(size: initialFrame.size, color: .white),
+            screenRect: initialFrame
+        )
+        let activeVisibleFrame = try XCTUnwrap(controller.window?.screen?.visibleFrame)
+        let anchor = NSPoint(
+            x: initialFrame.minX + initialFrame.width * 0.25,
+            y: initialFrame.minY + initialFrame.height * 0.75
+        )
+
+        controller.scale(by: 100, around: anchor)
+
+        let enlarged = controller.test_imageFrameInScreen
+        let maximumSize = NSSize(
+            width: activeVisibleFrame.width * PinnedImageWindowGeometry.maxZoomScreenMultiple,
+            height: activeVisibleFrame.height * PinnedImageWindowGeometry.maxZoomScreenMultiple
+        )
+        let expectedScale = min(
+            maximumSize.width / initialFrame.width,
+            maximumSize.height / initialFrame.height
+        )
+        XCTAssertEqual(enlarged.width, initialFrame.width * expectedScale, accuracy: 0.1)
+        XCTAssertEqual(enlarged.height, initialFrame.height * expectedScale, accuracy: 0.1)
+        XCTAssertEqual(
+            max(enlarged.width / activeVisibleFrame.width, enlarged.height / activeVisibleFrame.height),
+            PinnedImageWindowGeometry.maxZoomScreenMultiple,
+            accuracy: 0.001
+        )
+        XCTAssertEqual((anchor.x - enlarged.minX) / enlarged.width, 0.25, accuracy: 0.001)
+        XCTAssertEqual((anchor.y - enlarged.minY) / enlarged.height, 0.75, accuracy: 0.001)
+
+        controller.scale(by: 1.08, around: anchor)
+        XCTAssertEqual(controller.test_imageFrameInScreen.size, enlarged.size)
+        controller.window?.close()
+    }
+
+    @MainActor
     func testPinnedImageActivePrimaryToolsEscapeThenFinishEditing() {
         for key in ["s", "a", "b", "h", "p", "m", "t", "n", "g", "e"] {
             let controller = PinnedImageWindowController(
@@ -4189,6 +4234,24 @@ final class SelectionToolbarStateTests: XCTestCase {
         )
         XCTAssertEqual(scaled.width, 300, accuracy: 0.1)
         XCTAssertEqual(scaled.height, 150, accuracy: 0.1)
+
+        let oversizedLandscape = PinnedImageWindowGeometry.scaledSize(
+            currentSize: NSSize(width: 200, height: 100),
+            aspectRatio: 2,
+            scaleFactor: 100,
+            visibleFrame: visibleFrame
+        )
+        XCTAssertEqual(oversizedLandscape.width, 4_000, accuracy: 0.1)
+        XCTAssertEqual(oversizedLandscape.height, 2_000, accuracy: 0.1)
+
+        let oversizedPortrait = PinnedImageWindowGeometry.scaledSize(
+            currentSize: NSSize(width: 100, height: 200),
+            aspectRatio: 0.5,
+            scaleFactor: 100,
+            visibleFrame: visibleFrame
+        )
+        XCTAssertEqual(oversizedPortrait.width, 1_400, accuracy: 0.1)
+        XCTAssertEqual(oversizedPortrait.height, 2_800, accuracy: 0.1)
 
         let clamped = PinnedImageWindowGeometry.scaledSize(
             currentSize: NSSize(width: 200, height: 100),

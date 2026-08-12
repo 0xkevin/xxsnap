@@ -26,13 +26,14 @@ final class UpdateControllerTests: XCTestCase {
         let result = AppUpdatePolicyEvaluator.evaluate(
             policy: policy(requirements: []),
             currentVersion: "1.0.0",
-            currentBuild: 1
+            currentBuild: 2
         )
 
         guard case let .available(release) = result else {
             return XCTFail("expected available")
         }
         XCTAssertEqual(release.version, "1.1.0")
+        XCTAssertEqual(release.buildNumber, 3)
     }
 
     func testEvaluatorUsesSignedServerTimeForGraceAndMandatoryStates() throws {
@@ -72,7 +73,7 @@ final class UpdateControllerTests: XCTestCase {
         let result = AppUpdatePolicyEvaluator.evaluate(
             policy: policy(requirements: [requirement]),
             currentVersion: "1.1.0",
-            currentBuild: 2
+            currentBuild: 3
         )
 
         XCTAssertEqual(result, .upToDate)
@@ -119,7 +120,7 @@ final class UpdateControllerTests: XCTestCase {
             expiresAt: now.addingTimeInterval(600),
             latest: AppUpdateRelease(
                 version: "1.1.0",
-                buildNumber: 2,
+                buildNumber: 3,
                 downloadURL: URL(string: "https://download.xxsofts.com/api/v1/downloads/latest")!,
                 sha256: String(repeating: "a", count: 64),
                 releaseNotes: "Update"

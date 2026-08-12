@@ -2,6 +2,7 @@ import AppKit
 
 struct PinnedImageWindowGeometry {
     static let maxScreenFraction: CGFloat = 0.8
+    static let maxZoomScreenMultiple: CGFloat = 4
     static let minLongSide: CGFloat = 96
     static let shadowOutset: CGFloat = 18
     static let toolbarGap: CGFloat = 6
@@ -33,8 +34,8 @@ struct PinnedImageWindowGeometry {
         }
 
         let maxSize = NSSize(
-            width: max(minLongSide, visibleFrame.width * maxScreenFraction),
-            height: max(minLongSide, visibleFrame.height * maxScreenFraction)
+            width: max(minLongSide, visibleFrame.width * maxZoomScreenMultiple),
+            height: max(minLongSide, visibleFrame.height * maxZoomScreenMultiple)
         )
         let proposedWidth = currentSize.width * scaleFactor
         let proposedHeight = proposedWidth / aspectRatio
@@ -204,6 +205,9 @@ final class PinnedImageWindowController: NSWindowController, PinnedImageWindowPr
             visibleFrame: visibleFrame
         )
         guard newImageSize.width > 0, newImageSize.height > 0 else {
+            return
+        }
+        guard newImageSize != currentImageFrame.size else {
             return
         }
 
