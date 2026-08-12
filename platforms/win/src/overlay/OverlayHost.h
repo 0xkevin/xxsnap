@@ -12,10 +12,13 @@
 
 #include <Windows.h>
 
+#include <array>
+#include <chrono>
 #include <cstddef>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -82,6 +85,17 @@ struct OverlayPresentationMarkerOptions {
     MarkerOptionsState state;
 };
 
+struct OverlayPresentationEyedropper {
+    AnnotationPoint pointer{};
+    AnnotationColor color{};
+    std::array<AnnotationColor, 81> magnifier{};
+    EyedropperCopyMode copyMode = EyedropperCopyMode::hex;
+    std::uint32_t copySuccessMillisecondsRemaining = 0;
+    std::optional<AnnotationPoint> measurementStart;
+    std::optional<AnnotationPoint> measurementEnd;
+    std::wstring measurementLabel;
+};
+
 struct OverlayPresentation {
     std::optional<PixelRect> selection;
     bool showActions = false;
@@ -91,6 +105,7 @@ struct OverlayPresentation {
     std::optional<OverlayPresentationArrowLineOptions> arrowLineOptions;
     std::optional<OverlayPresentationBrushOptions> brushOptions;
     std::optional<OverlayPresentationMarkerOptions> markerOptions;
+    std::optional<OverlayPresentationEyedropper> eyedropper;
 };
 
 class OverlayInputPlatform {
@@ -109,6 +124,7 @@ public:
     {
         return std::nullopt;
     }
+    virtual bool copyText(const std::wstring&) noexcept { return false; }
     virtual bool shiftPressed() noexcept
     {
         return (GetKeyState(VK_SHIFT) & 0x8000) != 0;
@@ -124,7 +140,8 @@ public:
         std::vector<OverlaySurface> surfaces,
         OverlayInputPlatform& platform,
         ActionCallback actionCallback,
-        bool shapeAnnotationsEnabled = false);
+        bool shapeAnnotationsEnabled = false,
+        const FrozenDesktop* desktop = nullptr);
     ~OverlayInputRouter();
 
     OverlayInputRouter(const OverlayInputRouter&) = delete;
@@ -147,6 +164,7 @@ public:
         ShapeEditorKey key,
         bool control,
         bool shift) noexcept;
+    bool eyedropperShiftPressed() noexcept;
     void shutdownForRestart() noexcept;
 
     OverlayInputStatus status() const noexcept;
@@ -182,6 +200,10 @@ private:
     void completeOnce(OverlayInputAction action) noexcept;
     void emitTerminal(OverlayInputAction action) noexcept;
     void releaseInteraction() noexcept;
+    void refreshEyedropperComposite() noexcept;
+    void clearEyedropperState() noexcept;
+    void updateEyedropper(PixelPoint virtualPoint, bool shift) noexcept;
+    bool eyedropperPointIsValid(PixelPoint virtualPoint) const noexcept;
 
     SelectionModel model_;
     std::vector<OverlaySurface> surfaces_;
@@ -197,6 +219,17 @@ private:
     bool shapeAnnotationsEnabled_ = false;
     std::optional<std::size_t> editorOwnerIndex_;
     std::unique_ptr<ShapeEditorController> editor_;
+    const FrozenDesktop* desktop_ = nullptr;
+    std::unique_ptr<PixelBuffer> eyedropperComposite_;
+    std::optional<PixelPoint> eyedropperSamplePoint_;
+    std::optional<AnnotationColor> eyedropperSampleColor_;
+    std::array<AnnotationColor, 81> eyedropperMagnifier_{};
+    std::optional<PixelPoint> eyedropperMeasurementStart_;
+    std::optional<PixelPoint> eyedropperMeasurementEnd_;
+    bool eyedropperMeasurementInProgress_ = false;
+    EyedropperCopyMode eyedropperCopyMode_ = EyedropperCopyMode::hex;
+    std::optional<std::chrono::steady_clock::time_point>
+        eyedropperCopySuccessUntil_;
     std::optional<OverlayInputErrorCode> lastError_;
 };
 

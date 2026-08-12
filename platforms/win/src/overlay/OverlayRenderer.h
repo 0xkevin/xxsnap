@@ -8,6 +8,7 @@
 #include "annotation/AnnotationRenderer.h"
 #include "annotation/ShapeOptions.h"
 #include "overlay/VisualStyleCatalog.h"
+#include "overlay/Eyedropper.h"
 #include "toolbar/ToolbarLayout.h"
 
 #include <Windows.h>
@@ -83,6 +84,17 @@ struct OverlayMarkerOptionsRenderState {
     MarkerOptionsState state;
 };
 
+struct OverlayEyedropperRenderState {
+    AnnotationPoint pointer{};
+    AnnotationColor color{};
+    std::array<AnnotationColor, 81> magnifier{};
+    EyedropperCopyMode copyMode = EyedropperCopyMode::hex;
+    std::uint32_t copySuccessMillisecondsRemaining = 0;
+    std::optional<AnnotationPoint> measurementStart;
+    std::optional<AnnotationPoint> measurementEnd;
+    std::wstring measurementLabel;
+};
+
 struct OverlayRenderState {
     std::optional<PixelRect> selection;
     bool showActions = true;
@@ -98,6 +110,7 @@ struct OverlayRenderState {
     std::optional<OverlayArrowLineOptionsRenderState> arrowLineOptions;
     std::optional<OverlayBrushOptionsRenderState> brushOptions;
     std::optional<OverlayMarkerOptionsRenderState> markerOptions;
+    std::optional<OverlayEyedropperRenderState> eyedropper;
 };
 
 float physicalPixelsToDip(std::int64_t pixels, std::uint32_t dpi) noexcept;

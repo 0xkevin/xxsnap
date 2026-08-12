@@ -28,6 +28,7 @@ void testToolbarCapabilityAndPrimaryToolToggle()
         ToolbarAction::polyline,
         ToolbarAction::pen,
         ToolbarAction::marker,
+        ToolbarAction::eyedropper,
         ToolbarAction::undo,
         ToolbarAction::redo,
         ToolbarAction::cancel,
@@ -401,6 +402,28 @@ void testCtrlShortcutsDeleteAndTerminalRequests()
         == ShapeEditorKeyResult::requestCancel);
 }
 
+void testEyedropperMatchesMacToolSelectionAndEscape()
+{
+    ShapeEditorController editor({0, 0, 300, 200});
+    CHECK(editor.handleToolbarAction(ToolbarAction::rectangle));
+    CHECK(editor.handleToolbarAction(ToolbarAction::eyedropper));
+    CHECK(!editor.isShapeToolActive());
+    CHECK(editor.isEyedropperToolActive());
+    CHECK(editor.toolbarState().selectedAction() == ToolbarAction::eyedropper);
+    CHECK(editor.cursorStyleAt({20, 20}) == ShapeCursorStyle::eyedropper);
+    CHECK(editor.handleKey(ShapeEditorKey::escapeKey, false, false)
+        == ShapeEditorKeyResult::consumed);
+    CHECK(!editor.isEyedropperToolActive());
+    CHECK(!editor.toolbarState().selectedAction().has_value());
+
+    CHECK(editor.handleKey(ShapeEditorKey::eyedropper, false, false)
+        == ShapeEditorKeyResult::consumed);
+    CHECK(editor.isEyedropperToolActive());
+    CHECK(editor.handleToolbarAction(ToolbarAction::marker));
+    CHECK(!editor.isEyedropperToolActive());
+    CHECK(editor.isMarkerToolActive());
+}
+
 } // namespace
 
 int main()
@@ -414,5 +437,6 @@ int main()
     testArrowToolSwitchingMenusCursorsAndEditCancellation();
     testBrushDrawsFreehandPath();
     testMarkerDrawsSnappedLineDotAndEditsEndpoints();
+    testEyedropperMatchesMacToolSelectionAndEscape();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

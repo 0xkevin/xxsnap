@@ -59,6 +59,8 @@ set_property(
         "${PROJECT_SOURCE_DIR}/platforms/win/resources/icons/Snipory.ico"
         "${PROJECT_SOURCE_DIR}/platforms/win/resources/cursors/xxsnap-crosshair.cur"
         "${PROJECT_SOURCE_DIR}/platforms/win/resources/cursors/xxsnap-rotation.cur"
+        "${PROJECT_SOURCE_DIR}/platforms/win/resources/cursors/xxsnap-eyedropper.cur"
+        "${PROJECT_SOURCE_DIR}/platforms/win/resources/cursors/xxsnap-eyedropper-light.cur"
         "${PROJECT_SOURCE_DIR}/platforms/mac/Resources/Icons/palette-tool.png"
         ${XXSNAP_TOOLBAR_ASSET_FILES}
 )
@@ -339,6 +341,7 @@ target_link_libraries(
 
 add_library(
     xxsnap_overlay_renderer
+    src/overlay/Eyedropper.cpp
     src/overlay/OverlayRenderer.cpp
 )
 target_compile_features(xxsnap_overlay_renderer PUBLIC cxx_std_17)
@@ -388,7 +391,8 @@ target_link_libraries(
     xxsnap_overlay_host
     PUBLIC xxsnap_overlay_window xxsnap_selection_model
            xxsnap_shape_editor_controller
-    PRIVATE xxsnap_windows_build_configuration user32 comdlg32
+    PRIVATE xxsnap_selection_composer xxsnap_annotation_composer
+            xxsnap_windows_build_configuration user32 comdlg32
 )
 
 add_library(xxsnap_single_instance src/app/SingleInstance.cpp)

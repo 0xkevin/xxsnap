@@ -3,6 +3,7 @@
 #include "annotation/AnnotationTypes.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace xxsnap::win {
@@ -51,6 +52,37 @@ inline AnnotationPoint insetAnnotationEndpoint(
     return {
         endpoint.x + dx / length * distance,
         endpoint.y + dy / length * distance,
+    };
+}
+
+inline AnnotationPoint snappedAnnotationEnd(
+    AnnotationPoint start,
+    AnnotationPoint end) noexcept
+{
+    constexpr float diagonal = 0.7071067811865475F;
+    constexpr std::array directions{
+        AnnotationPoint{1, 0}, AnnotationPoint{diagonal, diagonal},
+        AnnotationPoint{0, 1}, AnnotationPoint{-diagonal, diagonal},
+        AnnotationPoint{-1, 0}, AnnotationPoint{-diagonal, -diagonal},
+        AnnotationPoint{0, -1}, AnnotationPoint{diagonal, -diagonal},
+    };
+    const auto dx = end.x - start.x;
+    const auto dy = end.y - start.y;
+    if (dx * dx + dy * dy < 0.000001F) {
+        return end;
+    }
+    auto best = directions.front();
+    auto bestProjection = dx * best.x + dy * best.y;
+    for (const auto direction : directions) {
+        const auto projection = dx * direction.x + dy * direction.y;
+        if (projection > bestProjection) {
+            best = direction;
+            bestProjection = projection;
+        }
+    }
+    return {
+        start.x + best.x * bestProjection,
+        start.y + best.y * bestProjection,
     };
 }
 

@@ -12,6 +12,7 @@ namespace xxsnap::win {
 namespace {
 
 constexpr wchar_t overlayWindowClassName[] = L"XxSnapCaptureOverlayWindow";
+constexpr UINT_PTR colorSamplerCopySuccessTimerIdentifier = 1U;
 
 bool fitsWin32Coordinate(std::int64_t value) noexcept
 {
@@ -105,6 +106,7 @@ OverlayWindow::~OverlayWindow()
     discardMarkerCursor();
     if (window_ != nullptr) {
         const auto window = std::exchange(window_, nullptr);
+        KillTimer(window, colorSamplerCopySuccessTimerIdentifier);
         SetWindowLongPtrW(window, GWLP_USERDATA, 0);
         DestroyWindow(window);
     }
@@ -248,6 +250,15 @@ void OverlayWindow::setRenderState(OverlayRenderState state) noexcept
 {
     renderState_ = std::move(state);
     if (window_ != nullptr) {
+        if (renderState_.eyedropper.has_value()
+            && renderState_.eyedropper->copySuccessMillisecondsRemaining > 0) {
+            SetTimer(
+                window_, colorSamplerCopySuccessTimerIdentifier,
+                renderState_.eyedropper->copySuccessMillisecondsRemaining,
+                nullptr);
+        } else {
+            KillTimer(window_, colorSamplerCopySuccessTimerIdentifier);
+        }
         InvalidateRect(window_, nullptr, FALSE);
     }
 }
@@ -379,6 +390,14 @@ HCURSOR OverlayWindow::cursor() const noexcept
     case OverlayCursorStyle::marker:
         result = markerCursor_;
         break;
+    case OverlayCursorStyle::eyedropper:
+        result = LoadCursorW(
+            instance_, MAKEINTRESOURCEW(IDC_XXSNAP_EYEDROPPER));
+        break;
+    case OverlayCursorStyle::eyedropperLight:
+        result = LoadCursorW(
+            instance_, MAKEINTRESOURCEW(IDC_XXSNAP_EYEDROPPER_LIGHT));
+        break;
     }
     return result != nullptr
         ? result
@@ -452,6 +471,16 @@ LRESULT OverlayWindow::handleMessage(
     case WM_PAINT:
         paint();
         return 0;
+    case WM_TIMER:
+        if (wParam == colorSamplerCopySuccessTimerIdentifier) {
+            KillTimer(window_, colorSamplerCopySuccessTimerIdentifier);
+            if (renderState_.eyedropper.has_value()) {
+                renderState_.eyedropper->copySuccessMillisecondsRemaining = 0;
+                InvalidateRect(window_, nullptr, FALSE);
+            }
+            return 0;
+        }
+        return DefWindowProcW(window_, message, wParam, lParam);
     case WM_SIZE: {
         RECT client{};
         if (GetClientRect(window_, &client)) {

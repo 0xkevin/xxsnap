@@ -457,6 +457,9 @@ struct OverlayRenderer::Impl final {
     ~Impl()
     {
         discardDeviceResources();
+        measurementTextFormat.reset();
+        samplerValueTextFormat.reset();
+        samplerTextFormat.reset();
         textFormat.reset();
         wicFactory.reset();
         dwriteFactory.reset();
@@ -468,7 +471,9 @@ struct OverlayRenderer::Impl final {
 
     std::optional<OverlayRendererError> ensureFactories() noexcept
     {
-        if (d2dFactory && dwriteFactory && wicFactory && textFormat) {
+        if (d2dFactory && dwriteFactory && wicFactory && textFormat
+            && samplerTextFormat && samplerValueTextFormat
+            && measurementTextFormat) {
             return std::nullopt;
         }
 
@@ -542,6 +547,56 @@ struct OverlayRenderer::Impl final {
                 textFormat.reset();
                 return configurationError;
             }
+        }
+        const auto createSamplerFormat = [this](
+            float size,
+            DWRITE_FONT_WEIGHT weight,
+            DWRITE_TEXT_ALIGNMENT alignment,
+            ComPtr<IDWriteTextFormat>& destination)
+                -> std::optional<OverlayRendererError> {
+            if (destination) {
+                return std::nullopt;
+            }
+            const auto result = dwriteFactory->CreateTextFormat(
+                VisualStyleCatalog::sizeLabelFontFamily,
+                nullptr,
+                weight,
+                DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL,
+                size,
+                VisualStyleCatalog::sizeLabelLocaleName,
+                destination.put());
+            if (FAILED(result)) {
+                return error(OverlayRendererErrorCode::dwriteFactoryFailed, result);
+            }
+            const std::array configurationResults{
+                destination->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP),
+                destination->SetTextAlignment(alignment),
+                destination->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER),
+            };
+            for (const auto configurationResult : configurationResults) {
+                if (const auto configurationError
+                    = checkTextFormatConfigurationResult(configurationResult)) {
+                    destination.reset();
+                    return configurationError;
+                }
+            }
+            return std::nullopt;
+        };
+        if (const auto formatError = createSamplerFormat(
+                12.0F, DWRITE_FONT_WEIGHT_MEDIUM,
+                DWRITE_TEXT_ALIGNMENT_CENTER, samplerTextFormat)) {
+            return formatError;
+        }
+        if (const auto formatError = createSamplerFormat(
+                13.0F, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                DWRITE_TEXT_ALIGNMENT_LEADING, samplerValueTextFormat)) {
+            return formatError;
+        }
+        if (const auto formatError = createSamplerFormat(
+                12.0F, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                DWRITE_TEXT_ALIGNMENT_CENTER, measurementTextFormat)) {
+            return formatError;
         }
         return std::nullopt;
     }
@@ -930,6 +985,250 @@ struct OverlayRenderer::Impl final {
             renderTarget->DrawBitmap(paletteBitmap.get(),
                 d2dRect(options.layout.colorSwatches.back()), 1.0F,
                 D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+        }
+        return std::nullopt;
+    }
+
+    std::optional<OverlayRendererError> drawEyedropper(
+        const OverlayEyedropperRenderState& state,
+        AnnotationRect safeBounds) noexcept
+    {
+        if (const auto resourceError = ensureEyedropperResources()) {
+            return resourceError;
+        }
+        auto& panelWhiteBrush = eyedropperPanelWhiteBrush;
+        auto& whiteBrush = eyedropperWhiteBrush;
+        auto& blueBrush = eyedropperBlueBrush;
+        auto& darkBrush = eyedropperDarkBrush;
+        auto& infoBrush = eyedropperInfoBrush;
+        auto& borderBrush = eyedropperBorderBrush;
+        auto& gridBrush = eyedropperGridBrush;
+        auto& successBrush = eyedropperSuccessBrush;
+        auto& cellBrush = eyedropperCellBrush;
+
+        if (state.measurementStart.has_value()
+            && state.measurementEnd.has_value()
+            && !state.measurementLabel.empty()) {
+            const auto start = D2D1::Point2F(
+                state.measurementStart->x, state.measurementStart->y);
+            const auto end = D2D1::Point2F(
+                state.measurementEnd->x, state.measurementEnd->y);
+            renderTarget->DrawLine(
+                start, end, whiteBrush.get(), 3.0F,
+                eyedropperWhiteStrokeStyle.get());
+            renderTarget->DrawLine(
+                start, end, blueBrush.get(), 1.5F,
+                eyedropperBlueStrokeStyle.get());
+
+            float labelWidth = 0.0F;
+            if (const auto measureError = measureLabel(
+                    state.measurementLabel, labelWidth)) {
+                return measureError;
+            }
+            const auto midpointX = (start.x + end.x) / 2.0F;
+            AnnotationRect label{
+                midpointX - (labelWidth + 14.0F) / 2.0F,
+                (std::min)(start.y, end.y) - 30.0F,
+                labelWidth + 14.0F,
+                24.0F,
+            };
+            label.x = (std::max)(safeBounds.x + 4.0F, (std::min)(
+                label.x, safeBounds.x + safeBounds.width - label.width - 4.0F));
+            label.y = (std::max)(safeBounds.y + 4.0F, (std::min)(
+                label.y, safeBounds.y + safeBounds.height - label.height - 4.0F));
+            const auto rounded = D2D1::RoundedRect(d2dRect(label), 5.0F, 5.0F);
+            renderTarget->FillRoundedRectangle(&rounded, darkBrush.get());
+            renderTarget->DrawText(
+                state.measurementLabel.data(),
+                static_cast<UINT32>(state.measurementLabel.size()),
+                measurementTextFormat.get(), d2dRect(label), whiteBrush.get(),
+                D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        }
+
+        const auto layout = eyedropperPanelLayout(state.pointer, safeBounds);
+        const auto panel = D2D1::RoundedRect(
+            d2dRect(layout.panel), 10.0F, 10.0F);
+        renderTarget->FillRoundedRectangle(&panel, panelWhiteBrush.get());
+        renderTarget->DrawRoundedRectangle(&panel, borderBrush.get(), 1.0F);
+
+        ComPtr<ID2D1RoundedRectangleGeometry> panelClipGeometry;
+        auto geometryResult = d2dFactory->CreateRoundedRectangleGeometry(
+            panel, panelClipGeometry.put());
+        if (FAILED(geometryResult)) {
+            return error(OverlayRendererErrorCode::drawFailed, geometryResult);
+        }
+        ComPtr<ID2D1Layer> panelClipLayer;
+        geometryResult = renderTarget->CreateLayer(nullptr, panelClipLayer.put());
+        if (FAILED(geometryResult)) {
+            return error(OverlayRendererErrorCode::drawFailed, geometryResult);
+        }
+        const auto layerParameters = D2D1::LayerParameters(
+            D2D1::InfiniteRect(), panelClipGeometry.get());
+        renderTarget->PushLayer(layerParameters, panelClipLayer.get());
+
+        const auto cellWidth = layout.magnifier.width / 9.0F;
+        const auto cellHeight = layout.magnifier.height / 9.0F;
+        for (int row = 0; row < 9; ++row) {
+            for (int column = 0; column < 9; ++column) {
+                cellBrush->SetColor(annotationColor(
+                    state.magnifier[static_cast<std::size_t>(
+                        row * 9 + column)]));
+                const AnnotationRect cell{
+                    layout.magnifier.x + column * cellWidth,
+                    layout.magnifier.y + row * cellHeight,
+                    cellWidth,
+                    cellHeight,
+                };
+                renderTarget->FillRectangle(d2dRect(cell), cellBrush.get());
+            }
+        }
+        for (int step = 0; step <= 9; ++step) {
+            const auto x = layout.magnifier.x + step * cellWidth;
+            const auto y = layout.magnifier.y + step * cellHeight;
+            renderTarget->DrawLine(
+                D2D1::Point2F(x, layout.magnifier.y),
+                D2D1::Point2F(x, layout.magnifier.y + layout.magnifier.height),
+                gridBrush.get(), 0.8F);
+            renderTarget->DrawLine(
+                D2D1::Point2F(layout.magnifier.x, y),
+                D2D1::Point2F(layout.magnifier.x + layout.magnifier.width, y),
+                gridBrush.get(), 0.8F);
+        }
+        const AnnotationRect centerCell{
+            layout.magnifier.x + 4.0F * cellWidth,
+            layout.magnifier.y + 4.0F * cellHeight,
+            cellWidth,
+            cellHeight,
+        };
+        renderTarget->DrawRectangle(d2dRect(centerCell), darkBrush.get(), 1.6F);
+        renderTarget->PopLayer();
+        renderTarget->FillRectangle(d2dRect(layout.info), infoBrush.get());
+
+        const auto coordinate = L"(" + std::to_wstring(
+            static_cast<int>(state.pointer.x)) + L" , " + std::to_wstring(
+            static_cast<int>(safeBounds.height - state.pointer.y)) + L")";
+        const auto value = eyedropperColorText(state.color, state.copyMode);
+        const auto copySucceeded
+            = state.copySuccessMillisecondsRemaining > 0;
+        const auto copyHint = copySucceeded
+            ? std::wstring(L"复制成功")
+            : state.copyMode == EyedropperCopyMode::hex
+                ? std::wstring(L"按 C 复制HEX颜色值")
+                : std::wstring(L"按 C 复制RGB颜色值");
+        const std::wstring switchHint = L"按 Shift 切换 RGB/HEX";
+        const std::array<std::pair<std::wstring, AnnotationRect>, 3> rows{{
+            {coordinate, {layout.info.x + 8.0F, layout.info.y + 5.0F,
+                layout.info.width - 16.0F, 18.0F}},
+            {copyHint, {layout.info.x + 8.0F, layout.info.y + 50.0F,
+                layout.info.width - 16.0F, 18.0F}},
+            {switchHint, {layout.info.x + 8.0F, layout.info.y + 70.0F,
+                layout.info.width - 16.0F, 18.0F}},
+        }};
+        for (const auto& [text, rect] : rows) {
+            renderTarget->DrawText(
+                text.data(), static_cast<UINT32>(text.size()),
+                samplerTextFormat.get(), d2dRect(rect),
+                copySucceeded && text == copyHint
+                    ? successBrush.get() : panelWhiteBrush.get(),
+                D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        }
+
+        ComPtr<IDWriteTextLayout> valueLayout;
+        auto textResult = dwriteFactory->CreateTextLayout(
+            value.data(), static_cast<UINT32>(value.size()),
+            samplerValueTextFormat.get(), layout.info.width, 18.0F,
+            valueLayout.put());
+        if (FAILED(textResult)) {
+            return error(OverlayRendererErrorCode::drawFailed, textResult);
+        }
+        DWRITE_TEXT_METRICS valueMetrics{};
+        textResult = valueLayout->GetMetrics(&valueMetrics);
+        if (FAILED(textResult)) {
+            return error(OverlayRendererErrorCode::drawFailed, textResult);
+        }
+        constexpr float swatchSize = 18.0F;
+        constexpr float swatchGap = 7.0F;
+        const auto groupWidth = swatchSize + swatchGap
+            + valueMetrics.widthIncludingTrailingWhitespace;
+        const AnnotationRect swatch{
+            layout.info.x + (layout.info.width - groupWidth) / 2.0F,
+            layout.info.y + 27.0F,
+            swatchSize,
+            swatchSize,
+        };
+        cellBrush->SetColor(annotationColor(state.color));
+        const auto roundedSwatch = D2D1::RoundedRect(
+            d2dRect(swatch), 3.0F, 3.0F);
+        renderTarget->FillRoundedRectangle(&roundedSwatch, cellBrush.get());
+        renderTarget->DrawRoundedRectangle(
+            &roundedSwatch, panelWhiteBrush.get(), 1.2F);
+        const AnnotationRect valueRect{
+            swatch.x + swatch.width + swatchGap,
+            layout.info.y + 27.0F,
+            valueMetrics.widthIncludingTrailingWhitespace + 2.0F,
+            18.0F,
+        };
+        renderTarget->DrawText(
+            value.data(), static_cast<UINT32>(value.size()),
+            samplerValueTextFormat.get(), d2dRect(valueRect),
+            panelWhiteBrush.get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        return std::nullopt;
+    }
+
+    std::optional<OverlayRendererError> ensureEyedropperResources() noexcept
+    {
+        if (eyedropperPanelWhiteBrush && eyedropperWhiteBrush
+            && eyedropperBlueBrush && eyedropperDarkBrush
+            && eyedropperInfoBrush && eyedropperBorderBrush
+            && eyedropperGridBrush && eyedropperSuccessBrush
+            && eyedropperCellBrush && eyedropperWhiteStrokeStyle
+            && eyedropperBlueStrokeStyle) {
+            return std::nullopt;
+        }
+        discardEyedropperResources();
+        const std::array results{
+            createBrush(D2D1::ColorF(1.0F, 1.0F, 1.0F, 1.0F),
+                eyedropperPanelWhiteBrush),
+            createBrush(D2D1::ColorF(1.0F, 1.0F, 1.0F, 0.95F),
+                eyedropperWhiteBrush),
+            createBrush(D2D1::ColorF(0.0F, 0.48F, 1.0F, 1.0F),
+                eyedropperBlueBrush),
+            createBrush(D2D1::ColorF(0.08F, 0.08F, 0.08F, 0.90F),
+                eyedropperDarkBrush),
+            createBrush(D2D1::ColorF(0.33F, 0.33F, 0.33F, 0.98F),
+                eyedropperInfoBrush),
+            createBrush(D2D1::ColorF(0.72F, 0.72F, 0.72F, 1.0F),
+                eyedropperBorderBrush),
+            createBrush(D2D1::ColorF(0.78F, 0.78F, 0.78F, 1.0F),
+                eyedropperGridBrush),
+            createBrush(D2D1::ColorF(0.20F, 0.78F, 0.35F, 1.0F),
+                eyedropperSuccessBrush),
+            createBrush(D2D1::ColorF(0.0F, 0.0F, 0.0F, 1.0F),
+                eyedropperCellBrush),
+        };
+        for (const auto& result : results) {
+            if (result.has_value()) {
+                discardEyedropperResources();
+                return result;
+            }
+        }
+        D2D1_STROKE_STYLE_PROPERTIES properties{};
+        properties.startCap = D2D1_CAP_STYLE_ROUND;
+        properties.endCap = D2D1_CAP_STYLE_ROUND;
+        properties.dashCap = D2D1_CAP_STYLE_ROUND;
+        properties.dashStyle = D2D1_DASH_STYLE_CUSTOM;
+        const float whiteDashes[]{6.0F / 3.0F, 4.0F / 3.0F};
+        const float blueDashes[]{6.0F / 1.5F, 4.0F / 1.5F};
+        auto result = d2dFactory->CreateStrokeStyle(
+            properties, whiteDashes, 2U, eyedropperWhiteStrokeStyle.put());
+        if (SUCCEEDED(result)) {
+            result = d2dFactory->CreateStrokeStyle(
+                properties, blueDashes, 2U,
+                eyedropperBlueStrokeStyle.put());
+        }
+        if (FAILED(result)) {
+            discardEyedropperResources();
+            return error(OverlayRendererErrorCode::drawFailed, result);
         }
         return std::nullopt;
     }
@@ -1759,6 +2058,15 @@ struct OverlayRenderer::Impl final {
                     handleStrokeBrush.get(),
                     VisualStyleCatalog::selectionHandleStrokeDip);
             }
+            if (state.eyedropper.has_value()) {
+                if (const auto eyedropperError = drawEyedropper(
+                        *state.eyedropper,
+                        {overlayBounds.x, overlayBounds.y,
+                            overlayBounds.width, overlayBounds.height})) {
+                    renderTarget->EndDraw();
+                    return eyedropperError;
+                }
+            }
         }
 
         const auto result = renderTarget->EndDraw();
@@ -1774,12 +2082,28 @@ struct OverlayRenderer::Impl final {
 
     void discardDeviceResources() noexcept
     {
+        discardEyedropperResources();
         paletteBitmap.reset();
         for (auto& bitmap : iconBitmaps) {
             bitmap.reset();
         }
         backgroundBitmap.reset();
         renderTarget.reset();
+    }
+
+    void discardEyedropperResources() noexcept
+    {
+        eyedropperPanelWhiteBrush.reset();
+        eyedropperWhiteBrush.reset();
+        eyedropperBlueBrush.reset();
+        eyedropperDarkBrush.reset();
+        eyedropperInfoBrush.reset();
+        eyedropperBorderBrush.reset();
+        eyedropperGridBrush.reset();
+        eyedropperSuccessBrush.reset();
+        eyedropperCellBrush.reset();
+        eyedropperWhiteStrokeStyle.reset();
+        eyedropperBlueStrokeStyle.reset();
     }
 
     HMODULE resourceModule = nullptr;
@@ -1790,9 +2114,23 @@ struct OverlayRenderer::Impl final {
     ComPtr<IDWriteFactory> dwriteFactory;
     ComPtr<IWICImagingFactory> wicFactory;
     ComPtr<IDWriteTextFormat> textFormat;
+    ComPtr<IDWriteTextFormat> samplerTextFormat;
+    ComPtr<IDWriteTextFormat> samplerValueTextFormat;
+    ComPtr<IDWriteTextFormat> measurementTextFormat;
     ComPtr<ID2D1HwndRenderTarget> renderTarget;
     ComPtr<ID2D1Bitmap> backgroundBitmap;
     ComPtr<ID2D1Bitmap> paletteBitmap;
+    ComPtr<ID2D1SolidColorBrush> eyedropperPanelWhiteBrush;
+    ComPtr<ID2D1SolidColorBrush> eyedropperWhiteBrush;
+    ComPtr<ID2D1SolidColorBrush> eyedropperBlueBrush;
+    ComPtr<ID2D1SolidColorBrush> eyedropperDarkBrush;
+    ComPtr<ID2D1SolidColorBrush> eyedropperInfoBrush;
+    ComPtr<ID2D1SolidColorBrush> eyedropperBorderBrush;
+    ComPtr<ID2D1SolidColorBrush> eyedropperGridBrush;
+    ComPtr<ID2D1SolidColorBrush> eyedropperSuccessBrush;
+    ComPtr<ID2D1SolidColorBrush> eyedropperCellBrush;
+    ComPtr<ID2D1StrokeStyle> eyedropperWhiteStrokeStyle;
+    ComPtr<ID2D1StrokeStyle> eyedropperBlueStrokeStyle;
     std::array<ComPtr<ID2D1Bitmap>, toolbarImageResources().size()> iconBitmaps;
 };
 

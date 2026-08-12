@@ -20,6 +20,7 @@ enum class ShapeEditorKey : std::uint8_t {
     z,
     save,
     copy,
+    eyedropper,
 };
 
 enum class ShapeEditorKeyResult : std::uint8_t {
@@ -41,6 +42,7 @@ enum class ShapeCursorStyle : std::uint8_t {
     rotation,
     brush,
     marker,
+    eyedropper,
 };
 
 class ShapeEditorController final {
@@ -61,6 +63,7 @@ public:
     bool isArrowLineToolActive() const noexcept;
     bool isBrushToolActive() const noexcept;
     bool isMarkerToolActive() const noexcept;
+    bool isEyedropperToolActive() const noexcept;
     bool strokePatternMenuVisible() const noexcept;
     bool cornerRadiusPanelVisible() const noexcept;
     std::optional<ArrowEndpoint> arrowTypeMenuEndpoint() const noexcept;

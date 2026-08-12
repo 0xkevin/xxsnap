@@ -1,11 +1,15 @@
 #include "overlay/OverlayHost.h"
 
+#include "annotation/AnnotationGeometry.h"
+#include "export/AnnotationComposer.h"
+#include "export/SelectionComposer.h"
 #include "overlay/OverlayRenderer.h"
 
 #include <commdlg.h>
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <new>
 #include <utility>
@@ -148,6 +152,8 @@ OverlayCursorStyle cursorStyleForShape(ShapeCursorStyle style) noexcept
         return OverlayCursorStyle::brush;
     case ShapeCursorStyle::marker:
         return OverlayCursorStyle::marker;
+    case ShapeCursorStyle::eyedropper:
+        return OverlayCursorStyle::eyedropper;
     }
     return OverlayCursorStyle::arrow;
 }
@@ -258,6 +264,36 @@ public:
             255,
         };
     }
+
+    bool copyText(const std::wstring& text) noexcept override
+    {
+        if (!OpenClipboard(nullptr)) {
+            return false;
+        }
+        struct ClipboardCloser {
+            ~ClipboardCloser() { CloseClipboard(); }
+        } closer;
+        if (!EmptyClipboard()) {
+            return false;
+        }
+        const auto bytes = (text.size() + 1U) * sizeof(wchar_t);
+        const auto memory = GlobalAlloc(GMEM_MOVEABLE, bytes);
+        if (memory == nullptr) {
+            return false;
+        }
+        auto* destination = GlobalLock(memory);
+        if (destination == nullptr) {
+            GlobalFree(memory);
+            return false;
+        }
+        std::memcpy(destination, text.c_str(), bytes);
+        GlobalUnlock(memory);
+        if (SetClipboardData(CF_UNICODETEXT, memory) == nullptr) {
+            GlobalFree(memory);
+            return false;
+        }
+        return true;
+    }
 };
 
 } // namespace
@@ -267,12 +303,14 @@ OverlayInputRouter::OverlayInputRouter(
     std::vector<OverlaySurface> surfaces,
     OverlayInputPlatform& platform,
     ActionCallback actionCallback,
-    bool shapeAnnotationsEnabled)
+    bool shapeAnnotationsEnabled,
+    const FrozenDesktop* desktop)
     : model_(snipory::core::portable::standardized(virtualBounds))
     , surfaces_(std::move(surfaces))
     , platform_(platform)
     , actionCallback_(std::move(actionCallback))
     , shapeAnnotationsEnabled_(shapeAnnotationsEnabled)
+    , desktop_(desktop)
 {
     for (auto& surface : surfaces_) {
         surface.physicalBounds = snipory::core::portable::standardized(
@@ -353,6 +391,118 @@ std::optional<AnnotationPoint> OverlayInputRouter::annotationPoint(
         physicalPixelsToDip(virtualPoint.x - selection.x, owner.dpiX),
         physicalPixelsToDip(virtualPoint.y - selection.y, owner.dpiY),
     };
+}
+
+bool OverlayInputRouter::eyedropperPointIsValid(
+    PixelPoint virtualPoint) const noexcept
+{
+    return model_.selection().has_value()
+        && contains(*model_.selection(), virtualPoint);
+}
+
+void OverlayInputRouter::clearEyedropperState() noexcept
+{
+    eyedropperComposite_.reset();
+    eyedropperSamplePoint_.reset();
+    eyedropperSampleColor_.reset();
+    eyedropperMagnifier_.fill({});
+    eyedropperMeasurementStart_.reset();
+    eyedropperMeasurementEnd_.reset();
+    eyedropperMeasurementInProgress_ = false;
+    eyedropperCopyMode_ = EyedropperCopyMode::hex;
+    eyedropperCopySuccessUntil_.reset();
+}
+
+void OverlayInputRouter::refreshEyedropperComposite() noexcept
+{
+    eyedropperComposite_.reset();
+    if (desktop_ == nullptr || !model_.selection().has_value()) {
+        return;
+    }
+    try {
+        MemoryBudget budget(512U * 1024U * 1024U);
+        auto composition = composeSelection(
+            *model_.selection(), *desktop_, budget);
+        auto* pixels = std::get_if<PixelBuffer>(&composition);
+        if (pixels == nullptr) {
+            return;
+        }
+        if (editor_ != nullptr && editorOwnerIndex_.has_value()) {
+            const auto& owner = surfaces_[*editorOwnerIndex_];
+            const auto plan = editor_->renderPlan({}, false);
+            if (composeAnnotations(
+                    *pixels, plan, owner.dpiX, owner.dpiY).has_value()) {
+                return;
+            }
+        }
+        eyedropperComposite_ = std::make_unique<PixelBuffer>(
+            std::move(*pixels));
+    } catch (...) {
+        eyedropperComposite_.reset();
+    }
+}
+
+void OverlayInputRouter::updateEyedropper(
+    PixelPoint virtualPoint,
+    bool shift) noexcept
+{
+    if (editor_ == nullptr || !editor_->isEyedropperToolActive()
+        || !eyedropperPointIsValid(virtualPoint)
+        || eyedropperComposite_ == nullptr
+        || !model_.selection().has_value()) {
+        eyedropperSamplePoint_.reset();
+        eyedropperSampleColor_.reset();
+        return;
+    }
+    const auto selection = snipory::core::portable::standardized(
+        *model_.selection());
+    const auto localX = (std::max<std::int64_t>)(0,
+        (std::min<std::int64_t>)(eyedropperComposite_->width() - 1,
+            virtualPoint.x - selection.x));
+    const auto localY = (std::max<std::int64_t>)(0,
+        (std::min<std::int64_t>)(eyedropperComposite_->height() - 1,
+            virtualPoint.y - selection.y));
+    const auto colorAt = [this](std::int64_t x, std::int64_t y) {
+        x = (std::max<std::int64_t>)(0,
+            (std::min<std::int64_t>)(eyedropperComposite_->width() - 1, x));
+        y = (std::max<std::int64_t>)(0,
+            (std::min<std::int64_t>)(eyedropperComposite_->height() - 1, y));
+        const auto* pixel = eyedropperComposite_->data()
+            + static_cast<std::uint64_t>(y) * eyedropperComposite_->stride()
+            + static_cast<std::uint64_t>(x) * 4U;
+        return AnnotationColor{
+            static_cast<std::uint8_t>(pixel[2]),
+            static_cast<std::uint8_t>(pixel[1]),
+            static_cast<std::uint8_t>(pixel[0]),
+            255,
+        };
+    };
+    eyedropperSamplePoint_ = virtualPoint;
+    eyedropperSampleColor_ = colorAt(localX, localY);
+    for (int row = 0; row < 9; ++row) {
+        for (int column = 0; column < 9; ++column) {
+            eyedropperMagnifier_[static_cast<std::size_t>(row * 9 + column)] =
+                colorAt(localX + column - 4, localY + row - 4);
+        }
+    }
+    if (eyedropperMeasurementInProgress_
+        && eyedropperMeasurementStart_.has_value()) {
+        auto end = AnnotationPoint{
+            static_cast<float>(virtualPoint.x),
+            static_cast<float>(virtualPoint.y),
+        };
+        if (shift) {
+            const auto start = AnnotationPoint{
+                static_cast<float>(eyedropperMeasurementStart_->x),
+                static_cast<float>(eyedropperMeasurementStart_->y),
+            };
+            end = snappedAnnotationEnd(start, end);
+        }
+        eyedropperMeasurementEnd_ = PixelPoint{
+            static_cast<std::int64_t>(std::llround(end.x)),
+            static_cast<std::int64_t>(std::llround(end.y)),
+        };
+    }
 }
 
 std::optional<ShapeOptionsLayout>
@@ -659,6 +809,51 @@ std::vector<OverlayPresentation> OverlayInputRouter::presentations() const
                     editor_->markerOptions(),
                 };
             }
+            if (editor_->isEyedropperToolActive()
+                && eyedropperSamplePoint_.has_value()
+                && eyedropperSampleColor_.has_value()) {
+                const auto toSurfaceDip = [&surface](PixelPoint point) {
+                    return AnnotationPoint{
+                        physicalPixelsToDip(
+                            point.x - surface.physicalBounds.x, surface.dpiX),
+                        physicalPixelsToDip(
+                            point.y - surface.physicalBounds.y, surface.dpiY),
+                    };
+                };
+                OverlayPresentationEyedropper eyedropper;
+                eyedropper.pointer = toSurfaceDip(*eyedropperSamplePoint_);
+                eyedropper.color = *eyedropperSampleColor_;
+                eyedropper.magnifier = eyedropperMagnifier_;
+                eyedropper.copyMode = eyedropperCopyMode_;
+                if (eyedropperCopySuccessUntil_.has_value()) {
+                    const auto remaining = std::chrono::duration_cast<
+                        std::chrono::milliseconds>(
+                        *eyedropperCopySuccessUntil_
+                        - std::chrono::steady_clock::now()).count();
+                    if (remaining > 0) {
+                        eyedropper.copySuccessMillisecondsRemaining
+                            = static_cast<std::uint32_t>((std::min<std::int64_t>)(
+                                remaining, 1200));
+                    }
+                }
+                if (eyedropperMeasurementStart_.has_value()
+                    && eyedropperMeasurementEnd_.has_value()) {
+                    const auto length = eyedropperPixelLength(
+                        {static_cast<float>(eyedropperMeasurementStart_->x),
+                            static_cast<float>(eyedropperMeasurementStart_->y)},
+                        {static_cast<float>(eyedropperMeasurementEnd_->x),
+                            static_cast<float>(eyedropperMeasurementEnd_->y)});
+                    if (length > 0) {
+                        eyedropper.measurementStart = toSurfaceDip(
+                            *eyedropperMeasurementStart_);
+                        eyedropper.measurementEnd = toSurfaceDip(
+                            *eyedropperMeasurementEnd_);
+                        eyedropper.measurementLabel = std::to_wstring(length)
+                            + L" px";
+                    }
+                }
+                presentation.eyedropper = std::move(eyedropper);
+            }
         }
     }
     return result;
@@ -759,6 +954,12 @@ bool OverlayInputRouter::pointerDown(HWND source, PixelPoint clientPoint) noexce
             completeOnce(OverlayInputAction::copy);
         } else if (editor_ != nullptr) {
             editor_->handleToolbarAction(*action);
+            if (editor_->isEyedropperToolActive()) {
+                clearEyedropperState();
+                refreshEyedropperComposite();
+            } else {
+                clearEyedropperState();
+            }
         }
         return true;
     }
@@ -881,6 +1082,29 @@ bool OverlayInputRouter::pointerDown(HWND source, PixelPoint clientPoint) noexce
     }
 
     const auto virtualPoint = toVirtual(*surface, clientPoint);
+    if (editor_ != nullptr && editor_->isEyedropperToolActive()) {
+        if (!eyedropperPointIsValid(virtualPoint)) {
+            return true;
+        }
+        updateEyedropper(virtualPoint, platform_.shiftPressed());
+        if (eyedropperMeasurementInProgress_
+            && eyedropperMeasurementStart_.has_value()) {
+            const auto start = *eyedropperMeasurementStart_;
+            const auto end = eyedropperMeasurementEnd_.value_or(virtualPoint);
+            if (eyedropperPixelLength(
+                    {static_cast<float>(start.x), static_cast<float>(start.y)},
+                    {static_cast<float>(end.x), static_cast<float>(end.y)}) == 0) {
+                eyedropperMeasurementStart_.reset();
+                eyedropperMeasurementEnd_.reset();
+            }
+            eyedropperMeasurementInProgress_ = false;
+        } else {
+            eyedropperMeasurementStart_ = virtualPoint;
+            eyedropperMeasurementEnd_ = virtualPoint;
+            eyedropperMeasurementInProgress_ = true;
+        }
+        return true;
+    }
     if (editor_ != nullptr) {
         if (const auto local = annotationPoint(virtualPoint);
             local.has_value()
@@ -971,6 +1195,20 @@ OverlayCursorStyle OverlayInputRouter::cursorStyle(
     }
 
     const auto virtualPoint = toVirtual(*surface, clientPoint);
+    if (editor_ != nullptr && editor_->isEyedropperToolActive()) {
+        if (!eyedropperPointIsValid(virtualPoint)) {
+            return OverlayCursorStyle::arrow;
+        }
+        if (eyedropperSampleColor_.has_value()) {
+            const auto color = *eyedropperSampleColor_;
+            const auto luminance = (0.2126F * color.red
+                + 0.7152F * color.green + 0.0722F * color.blue) / 255.0F;
+            if (luminance < 0.45F) {
+                return OverlayCursorStyle::eyedropperLight;
+            }
+        }
+        return OverlayCursorStyle::eyedropper;
+    }
     if (editor_ != nullptr) {
         if (const auto local = annotationPoint(virtualPoint)) {
             const auto shapeStyle = editor_->cursorStyleAt(*local);
@@ -997,8 +1235,15 @@ OverlayCursorStyle OverlayInputRouter::cursorStyle(
     return OverlayCursorStyle::crosshair;
 }
 
-void OverlayInputRouter::pointerMove(HWND, PixelPoint) noexcept
+void OverlayInputRouter::pointerMove(HWND source, PixelPoint clientPoint) noexcept
 {
+    if (status_ == OverlayInputStatus::active
+        && editor_ != nullptr && editor_->isEyedropperToolActive()) {
+        if (const auto* surface = surfaceFor(source)) {
+            updateEyedropper(
+                toVirtual(*surface, clientPoint), platform_.shiftPressed());
+        }
+    }
     if (!dragging_ || status_ != OverlayInputStatus::active) {
         return;
     }
@@ -1087,6 +1332,9 @@ void OverlayInputRouter::escapePressed() noexcept
         const auto result = editor_->handleKey(
             ShapeEditorKey::escapeKey, false, false);
         if (result == ShapeEditorKeyResult::consumed) {
+            if (!editor_->isEyedropperToolActive()) {
+                clearEyedropperState();
+            }
             return;
         }
     }
@@ -1106,7 +1354,27 @@ bool OverlayInputRouter::keyPressed(
     if (status_ != OverlayInputStatus::active || editor_ == nullptr) {
         return false;
     }
+    if (editor_->isEyedropperToolActive()
+        && key == ShapeEditorKey::copy && !control
+        && eyedropperSampleColor_.has_value()) {
+        const auto copied = platform_.copyText(eyedropperColorText(
+            *eyedropperSampleColor_, eyedropperCopyMode_));
+        if (copied) {
+            eyedropperCopySuccessUntil_ = std::chrono::steady_clock::now()
+                + std::chrono::milliseconds(1200);
+        }
+        return copied;
+    }
     const auto result = editor_->handleKey(key, control, shift);
+    if (key == ShapeEditorKey::eyedropper
+        && result == ShapeEditorKeyResult::consumed) {
+        if (editor_->isEyedropperToolActive()) {
+            clearEyedropperState();
+            refreshEyedropperComposite();
+        } else {
+            clearEyedropperState();
+        }
+    }
     switch (result) {
     case ShapeEditorKeyResult::ignored:
         return false;
@@ -1123,6 +1391,17 @@ bool OverlayInputRouter::keyPressed(
         return true;
     }
     return false;
+}
+
+bool OverlayInputRouter::eyedropperShiftPressed() noexcept
+{
+    if (status_ != OverlayInputStatus::active || editor_ == nullptr
+        || !editor_->isEyedropperToolActive()) {
+        return false;
+    }
+    eyedropperCopyMode_ = eyedropperCopyMode_ == EyedropperCopyMode::hex
+        ? EyedropperCopyMode::rgb : EyedropperCopyMode::hex;
+    return true;
 }
 
 void OverlayInputRouter::shutdownForRestart() noexcept
@@ -1306,6 +1585,10 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
             router->escapePressed();
             break;
         case OverlayWindowInputKind::keyDown: {
+            if (input.virtualKey == VK_SHIFT) {
+                router->eyedropperShiftPressed();
+                break;
+            }
             ShapeEditorKey key;
             switch (input.virtualKey) {
             case VK_DELETE:
@@ -1319,6 +1602,9 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
                 break;
             case 'C':
                 key = ShapeEditorKey::copy;
+                break;
+            case 'P':
+                key = ShapeEditorKey::eyedropper;
                 break;
             default:
                 return;
@@ -1412,6 +1698,19 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
                         options.state,
                     };
                 }
+                if (current[index].eyedropper.has_value()) {
+                    const auto& eyedropper = *current[index].eyedropper;
+                    state.eyedropper = OverlayEyedropperRenderState{
+                        eyedropper.pointer,
+                        eyedropper.color,
+                        eyedropper.magnifier,
+                        eyedropper.copyMode,
+                        eyedropper.copySuccessMillisecondsRemaining,
+                        eyedropper.measurementStart,
+                        eyedropper.measurementEnd,
+                        eyedropper.measurementLabel,
+                    };
+                }
                 windows[index]->setRenderState(std::move(state));
             }
             return true;
@@ -1495,7 +1794,8 @@ OverlayHostCreateResult OverlayHost::create(
                     locked->dispatchAction(action);
                 }
             },
-            true);
+            true,
+            &desktop);
         if (!impl->router->activateEscapeHotKey(impl->windows.front()->handle())) {
             return {
                 nullptr,

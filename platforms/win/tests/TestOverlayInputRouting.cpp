@@ -1,6 +1,10 @@
 #include "overlay/OverlayHost.h"
+#include "capture/DisplayTopology.h"
 
+#include <algorithm>
 #include <cstdint>
+#include <chrono>
+#include <cstring>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -85,6 +89,13 @@ public:
         return shiftDown;
     }
 
+    bool copyText(const std::wstring& text) noexcept override
+    {
+        copiedText = text;
+        ++copyTextCalls;
+        return copyTextSucceeds;
+    }
+
     bool captureSucceeds = true;
     bool releaseSucceeds = true;
     bool registerSucceeds = true;
@@ -101,8 +112,47 @@ public:
     int chooseColorCalls = 0;
     HWND chosenColorWindow = nullptr;
     bool shiftDown = false;
+    bool copyTextSucceeds = true;
+    int copyTextCalls = 0;
+    std::wstring copiedText;
     std::optional<AnnotationColor> chosenColor = AnnotationColor{1, 2, 3, 255};
 };
+
+std::unique_ptr<xxsnap::win::FrozenDesktop> solidDesktop(
+    AnnotationColor color)
+{
+    using namespace xxsnap::win;
+    std::vector<DisplayDescriptor> descriptors{{
+        L"desktop",
+        {-640, 0, 1280, 360},
+        96U,
+        96U,
+        DISPLAYCONFIG_ROTATION_IDENTITY,
+    }};
+    const auto topologyResult = buildDisplayTopologySnapshot(descriptors);
+    if (!topologyResult.hasValue()) {
+        return nullptr;
+    }
+    snipory::core::portable::MemoryBudget budget(8U * 1024U * 1024U);
+    auto allocation = snipory::core::portable::PixelBuffer::allocate(
+        1280, 360, budget);
+    if (!allocation.value) {
+        return nullptr;
+    }
+    for (std::size_t offset = 0U;
+         offset < allocation.value->byteCount(); offset += 4U) {
+        allocation.value->data()[offset] = static_cast<std::byte>(color.blue);
+        allocation.value->data()[offset + 1U] = static_cast<std::byte>(color.green);
+        allocation.value->data()[offset + 2U] = static_cast<std::byte>(color.red);
+        allocation.value->data()[offset + 3U] = std::byte{0xFF};
+    }
+    std::vector<FrozenDisplay> displays;
+    displays.emplace_back(descriptors.front(), std::move(*allocation.value));
+    return std::make_unique<FrozenDesktop>(
+        *topologyResult.value(),
+        std::move(displays),
+        std::chrono::steady_clock::time_point{});
+}
 
 const HWND leftWindow = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(1));
 const HWND rightWindow = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(2));
@@ -425,7 +475,7 @@ void testShapeToolIsNonTerminalAndEditsThroughSharedPresentation()
     createReadySelection(router);
 
     auto owner = router.presentations()[1];
-    CHECK(owner.toolbarItems.size() == 9U);
+    CHECK(owner.toolbarItems.size() == 10U);
     const auto rectangle = owner.toolbarItems[0];
     CHECK(rectangle.action == xxsnap::win::ToolbarAction::rectangle);
     const auto capturesBeforeTool = platform.captureCalls;
@@ -478,9 +528,9 @@ void testShapeToolIsNonTerminalAndEditsThroughSharedPresentation()
 
     owner = router.presentations()[1];
     CHECK(owner.annotationPlan.items.size() == 1U);
-    CHECK(owner.toolbarItems[4].action == xxsnap::win::ToolbarAction::undo);
-    CHECK(owner.toolbarItems[4].enabled);
-    CHECK(router.pointerDown(rightWindow, owner.toolbarItems[4].centerPhysical));
+    CHECK(owner.toolbarItems[5].action == xxsnap::win::ToolbarAction::undo);
+    CHECK(owner.toolbarItems[5].enabled);
+    CHECK(router.pointerDown(rightWindow, owner.toolbarItems[5].centerPhysical));
     CHECK(router.annotationDocument().annotations().empty());
     CHECK(actions.empty());
 
@@ -499,7 +549,7 @@ void testArrowToolUsesMacOptionsMenuAndCreatesEditableCurve()
     createReadySelection(router);
 
     auto owner = router.presentations()[1];
-    CHECK(owner.toolbarItems.size() == 9U);
+    CHECK(owner.toolbarItems.size() == 10U);
     CHECK(owner.toolbarItems[1].action == xxsnap::win::ToolbarAction::polyline);
     CHECK(router.pointerDown(
         rightWindow, owner.toolbarItems[1].centerPhysical));
@@ -687,6 +737,65 @@ void testMarkerToolUsesMacOptionsAndShiftSnapping()
     CHECK(router.presentations()[1].annotationPlan.lineHandles.size() == 2U);
 }
 
+void testEyedropperSamplesCopiesAndMeasuresLikeMac()
+{
+    FakePlatform platform;
+    const auto desktop = solidDesktop({10, 20, 30, 255});
+    CHECK(desktop != nullptr);
+    if (!desktop) {
+        return;
+    }
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform, {}, true,
+        desktop.get());
+    createReadySelection(router);
+    const auto owner = router.presentations()[1];
+    const auto eyedropper = std::find_if(
+        owner.toolbarItems.begin(), owner.toolbarItems.end(),
+        [](const auto& item) {
+            return item.action == xxsnap::win::ToolbarAction::eyedropper;
+        });
+    CHECK(eyedropper != owner.toolbarItems.end());
+    if (eyedropper == owner.toolbarItems.end()) {
+        return;
+    }
+    CHECK(router.pointerDown(rightWindow, eyedropper->centerPhysical));
+    const auto selectedOwner = router.presentations()[1];
+    CHECK(std::find_if(
+        selectedOwner.toolbarItems.begin(),
+        selectedOwner.toolbarItems.end(),
+        [](const auto& item) {
+            return item.action == xxsnap::win::ToolbarAction::eyedropper
+                && item.selected;
+        }) != selectedOwner.toolbarItems.end());
+
+    router.pointerMove(rightWindow, PixelPoint{20, 100});
+    auto presentation = router.presentations()[1];
+    CHECK(presentation.eyedropper.has_value());
+    CHECK((presentation.eyedropper->color
+        == AnnotationColor{10, 20, 30, 255}));
+    CHECK(router.cursorStyle(rightWindow, PixelPoint{20, 100})
+        == OverlayCursorStyle::eyedropperLight);
+    CHECK(router.keyPressed(ShapeEditorKey::copy, false, false));
+    CHECK(platform.copiedText == L"#0A141E");
+    CHECK(router.presentations()[1]
+        .eyedropper->copySuccessMillisecondsRemaining > 0U);
+    CHECK(router.eyedropperShiftPressed());
+    CHECK(router.keyPressed(ShapeEditorKey::copy, false, false));
+    CHECK(platform.copiedText == L"10, 20, 30");
+
+    CHECK(router.pointerDown(rightWindow, PixelPoint{20, 100}));
+    router.pointerMove(rightWindow, PixelPoint{23, 104});
+    CHECK(router.pointerDown(rightWindow, PixelPoint{23, 104}));
+    presentation = router.presentations()[1];
+    CHECK(presentation.eyedropper->measurementStart.has_value());
+    CHECK(presentation.eyedropper->measurementEnd.has_value());
+    CHECK(presentation.eyedropper->measurementLabel == L"5 px");
+
+    CHECK(router.keyPressed(ShapeEditorKey::eyedropper, false, false));
+    CHECK(!router.presentations()[1].eyedropper.has_value());
+}
+
 void testShapeCanBeCreatedOutsideLockedSelectionOnOverlay()
 {
     FakePlatform platform;
@@ -740,6 +849,7 @@ int main()
     testArrowToolUsesMacOptionsMenuAndCreatesEditableCurve();
     testBrushToolUsesMacOptionsAndShiftStraightLine();
     testMarkerToolUsesMacOptionsAndShiftSnapping();
+    testEyedropperSamplesCopiesAndMeasuresLikeMac();
     testShapeCanBeCreatedOutsideLockedSelectionOnOverlay();
     return failureCount == 0 ? 0 : 1;
 }

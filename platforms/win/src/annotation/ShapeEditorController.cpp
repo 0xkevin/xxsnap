@@ -177,6 +177,7 @@ ShapeEditorController::ShapeEditorController(
     toolbarState_.setCapability(ToolbarAction::polyline, true);
     toolbarState_.setCapability(ToolbarAction::pen, true);
     toolbarState_.setCapability(ToolbarAction::marker, true);
+    toolbarState_.setCapability(ToolbarAction::eyedropper, true);
     toolbarState_.setCapability(ToolbarAction::undo, true);
     toolbarState_.setCapability(ToolbarAction::redo, true);
     syncHistory();
@@ -258,6 +259,11 @@ bool ShapeEditorController::isBrushToolActive() const noexcept
 bool ShapeEditorController::isMarkerToolActive() const noexcept
 {
     return markerToolActive_;
+}
+
+bool ShapeEditorController::isEyedropperToolActive() const noexcept
+{
+    return toolbarState_.selectedAction() == ToolbarAction::eyedropper;
 }
 
 bool ShapeEditorController::strokePatternMenuVisible() const noexcept
@@ -344,6 +350,22 @@ bool ShapeEditorController::handleToolbarAction(ToolbarAction action)
             if (markerToolActive_) {
                 MarkerOptionsState activated;
                 markerOptions_ = activated;
+            }
+        }
+        return true;
+    }
+    if (action == ToolbarAction::eyedropper) {
+        if (isEyedropperToolActive()) {
+            deactivateTool();
+        } else {
+            cancelInteraction();
+            shapeToolActive_ = false;
+            arrowLineToolActive_ = false;
+            brushToolActive_ = false;
+            markerToolActive_ = false;
+            if (toolbarState_.selectTool(action)) {
+                document_.clearSelection();
+                dismissPopovers();
             }
         }
         return true;
@@ -757,6 +779,9 @@ void ShapeEditorController::cancelInteraction() noexcept
 ShapeCursorStyle ShapeEditorController::cursorStyleAt(
     AnnotationPoint point) const noexcept
 {
+    if (isEyedropperToolActive()) {
+        return ShapeCursorStyle::eyedropper;
+    }
     switch (interaction_.mode()) {
     case ShapeInteractionMode::drawing:
         return ShapeCursorStyle::crosshair;
@@ -834,6 +859,10 @@ ShapeEditorKeyResult ShapeEditorController::handleKey(
     bool control,
     bool shift)
 {
+    if (!control && key == ShapeEditorKey::eyedropper) {
+        handleToolbarAction(ToolbarAction::eyedropper);
+        return ShapeEditorKeyResult::consumed;
+    }
     if (key == ShapeEditorKey::escapeKey) {
         if (interaction_.mode() != ShapeInteractionMode::idle
             || arrowInteraction_.mode() != ArrowLineInteractionMode::idle
@@ -843,7 +872,7 @@ ShapeEditorKeyResult ShapeEditorController::handleKey(
             return ShapeEditorKeyResult::consumed;
         }
         if (shapeToolActive_ || arrowLineToolActive_ || brushToolActive_
-            || markerToolActive_) {
+            || markerToolActive_ || isEyedropperToolActive()) {
             deactivateTool();
             return ShapeEditorKeyResult::consumed;
         }

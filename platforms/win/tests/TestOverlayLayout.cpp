@@ -305,6 +305,33 @@ void testWindowAndResourceContracts()
     CHECK(xxsnap::win::toolbarResourceId(
         xxsnap::win::toolbarIcon(xxsnap::win::ToolbarAction::copy), 192)
         == IDR_TOOLBAR_200_COPY_TO_CLIPBOARD_PNG);
+    CHECK(LoadCursorW(
+        GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDC_XXSNAP_EYEDROPPER))
+        != nullptr);
+    CHECK(LoadCursorW(GetModuleHandleW(nullptr),
+        MAKEINTRESOURCEW(IDC_XXSNAP_EYEDROPPER_LIGHT)) != nullptr);
+}
+
+void testEyedropperUsesMacPanelGeometryAndFormats()
+{
+    const auto layout = xxsnap::win::eyedropperPanelLayout(
+        {620.0F, 340.0F}, {0.0F, 0.0F, 640.0F, 360.0F});
+    CHECK_RECT((DipRect{layout.panel.x, layout.panel.y,
+        layout.panel.width, layout.panel.height}),
+        (DipRect{422.0F, 138.0F, 184.0F, 188.0F}));
+    CHECK_RECT((DipRect{layout.magnifier.x, layout.magnifier.y,
+        layout.magnifier.width, layout.magnifier.height}),
+        (DipRect{422.0F, 138.0F, 184.0F, 96.0F}));
+    CHECK_RECT((DipRect{layout.info.x, layout.info.y,
+        layout.info.width, layout.info.height}),
+        (DipRect{422.0F, 234.0F, 184.0F, 92.0F}));
+    CHECK(xxsnap::win::eyedropperColorText(
+        {10, 20, 30, 255}, xxsnap::win::EyedropperCopyMode::hex)
+        == L"#0A141E");
+    CHECK(xxsnap::win::eyedropperColorText(
+        {10, 20, 30, 255}, xxsnap::win::EyedropperCopyMode::rgb)
+        == L"10, 20, 30");
+    CHECK(xxsnap::win::eyedropperPixelLength({0, 0}, {3, 4}) == 5);
 }
 
 void testDpiRestartNotificationIsSingleAndFailClosed()
@@ -441,6 +468,7 @@ int main()
     testCrossDisplaySelectionChromeOwnership();
     testMacToolbarSideCandidatesAtEveryDpi();
     testWindowAndResourceContracts();
+    testEyedropperUsesMacPanelGeometryAndFormats();
     testDpiRestartNotificationIsSingleAndFailClosed();
     testDirectWriteConfigurationFailuresAreExplicit();
     testEmbeddedToolbarResources();

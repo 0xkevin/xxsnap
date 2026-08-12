@@ -25,6 +25,7 @@ private func littleEndian32(_ value: UInt32, into data: inout Data) {
 
 private func renderedBitmap(
     for image: NSImage,
+    tint: NSColor? = nil,
     destination: NSRect = NSRect(
         x: macCursorInset,
         y: macCursorInset,
@@ -60,6 +61,10 @@ private func renderedBitmap(
         operation: .copy,
         fraction: 1.0
     )
+    if let tint {
+        tint.setFill()
+        destination.fill(using: .sourceAtop)
+    }
     context.flushGraphics()
     NSGraphicsContext.restoreGraphicsState()
 
@@ -154,3 +159,33 @@ let rotationBitmap = try renderedBitmap(
 try cursorData(bitmap: rotationBitmap, hotSpot: NSPoint(x: 16, y: 16))
     .write(to: rotationOutput, options: .atomic)
 print("Generated \(rotationOutput.path) from the macOS rotation cursor SVG.")
+
+let eyedropperSource = repository
+    .appendingPathComponent("platforms/mac/Resources/Icons/eyedropper.svg")
+guard let eyedropperImage = NSImage(contentsOf: eyedropperSource) else {
+    throw CocoaError(.fileReadCorruptFile)
+}
+let eyedropperRect = NSRect(
+    x: macCursorInset + 3,
+    y: macCursorInset + 3,
+    width: 18,
+    height: 18
+)
+let eyedropperHotSpot = NSPoint(
+    x: CGFloat(macCursorInset) + 3.6,
+    y: CGFloat(macCursorInset) + 20.4
+)
+for (name, tint) in [
+    ("xxsnap-eyedropper.cur", nil),
+    ("xxsnap-eyedropper-light.cur", NSColor.white),
+] as [(String, NSColor?)] {
+    let bitmap = try renderedBitmap(
+        for: eyedropperImage,
+        tint: tint,
+        destination: eyedropperRect
+    )
+    let destination = outputDirectory.appendingPathComponent(name)
+    try cursorData(bitmap: bitmap, hotSpot: eyedropperHotSpot)
+        .write(to: destination, options: .atomic)
+    print("Generated \(destination.path) from the macOS eyedropper cursor SVG.")
+}
