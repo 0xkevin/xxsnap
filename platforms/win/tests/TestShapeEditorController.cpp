@@ -34,6 +34,7 @@ void testToolbarCapabilityAndPrimaryToolToggle()
         ToolbarAction::number,
         ToolbarAction::magnifier,
         ToolbarAction::eraser,
+        ToolbarAction::scroll,
         ToolbarAction::undo,
         ToolbarAction::redo,
         ToolbarAction::cancel,

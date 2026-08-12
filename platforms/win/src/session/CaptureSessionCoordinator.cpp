@@ -3,6 +3,7 @@
 #include "session/CaptureMemoryPlan.h"
 
 #include <new>
+#include <algorithm>
 #include <utility>
 #include <variant>
 
@@ -180,6 +181,36 @@ void CaptureSessionCoordinator::handleAction(OverlayInputAction action) noexcept
         return;
     }
 
+    if (action == OverlayInputAction::scrollCapture) {
+        constexpr std::size_t scrollCaptureMemoryLimit =
+            256U * 1024U * 1024U;
+        const auto generation = generation_;
+        const std::weak_ptr<CallbackState> weak = callbacks_;
+        scrollCaptureMayBeOpen_ = true;
+        bool started = false;
+        try {
+            started = services_.beginScrollCapture(
+                *selected,
+                static_cast<std::size_t>((std::min)(
+                    memoryLimitBytes_,
+                    static_cast<std::uint64_t>(scrollCaptureMemoryLimit))),
+                [weak, generation](ScrollCaptureCompletion completion) {
+                    if (const auto state = weak.lock(); state && state->owner
+                        && state->owner->generation_ == generation) {
+                        state->owner->handleScrollCaptureCompletion(
+                            std::move(completion));
+                    }
+                });
+        } catch (...) {
+            started = false;
+        }
+        if (!started) {
+            scrollCaptureMayBeOpen_ = false;
+            fail(CaptureSessionErrorCode::scrollCaptureFailed);
+        }
+        return;
+    }
+
     auto composition = services_.compose(*selected, *desktop_, *budget_);
     if (!std::holds_alternative<PixelBuffer>(composition)) {
         fail(CaptureSessionErrorCode::compositionFailed);
@@ -194,6 +225,47 @@ void CaptureSessionCoordinator::handleAction(OverlayInputAction action) noexcept
     const auto exportResult = services_.exportSelection(pixels, action);
     if (exportResult == CaptureExportResult::failed) {
         if (action == OverlayInputAction::copy) {
+            recentCapture_.emplace(std::move(pixels));
+        }
+        fail(CaptureSessionErrorCode::exportFailed);
+        return;
+    }
+    finish(SessionEvent::complete);
+}
+
+void CaptureSessionCoordinator::handleScrollCaptureCompletion(
+    ScrollCaptureCompletion completion) noexcept
+{
+    if (!scrollCaptureMayBeOpen_
+        || stateMachine_.state() != CaptureSessionState::ready) {
+        return;
+    }
+    scrollCaptureMayBeOpen_ = false;
+    if (completion.status == ScrollCaptureCompletionStatus::cancelled) {
+        if (stateMachine_.dispatch(SessionEvent::resumeSelection)
+                != TransitionResult::accepted
+            || !services_.resumeOverlayAfterScrollCapture()) {
+            fail(CaptureSessionErrorCode::scrollCaptureFailed);
+        }
+        return;
+    }
+    if (completion.status != ScrollCaptureCompletionStatus::completed
+        || !completion.pixels.has_value()
+        || (completion.action != OverlayInputAction::copy
+            && completion.action != OverlayInputAction::save)) {
+        fail(CaptureSessionErrorCode::scrollCaptureFailed);
+        return;
+    }
+    if (stateMachine_.dispatch(SessionEvent::exportStarted)
+        != TransitionResult::accepted) {
+        fail(CaptureSessionErrorCode::unexpectedFailure);
+        return;
+    }
+    auto pixels = std::move(*completion.pixels);
+    const auto exportResult = services_.exportSelection(
+        pixels, completion.action);
+    if (exportResult == CaptureExportResult::failed) {
+        if (completion.action == OverlayInputAction::copy) {
             recentCapture_.emplace(std::move(pixels));
         }
         fail(CaptureSessionErrorCode::exportFailed);
@@ -242,6 +314,10 @@ void CaptureSessionCoordinator::finish(SessionEvent event) noexcept
 void CaptureSessionCoordinator::releaseSession() noexcept
 {
     ++generation_;
+    if (scrollCaptureMayBeOpen_) {
+        services_.cancelScrollCapture();
+        scrollCaptureMayBeOpen_ = false;
+    }
     if (overlayMayBeOpen_) {
         closingOverlay_ = true;
         services_.closeOverlay();

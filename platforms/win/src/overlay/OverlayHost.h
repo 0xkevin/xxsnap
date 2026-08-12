@@ -28,6 +28,7 @@ enum class OverlayInputAction {
     cancel,
     save,
     copy,
+    scrollCapture,
 };
 
 enum class OverlayInputStatus {
@@ -257,6 +258,9 @@ private:
         const OverlaySurface& surface) const;
     std::optional<EraserOptionsLayout> currentEraserOptionsLayout(
         const OverlaySurface& surface) const;
+    bool handleCornerRadiusPanelPointer(
+        const OverlaySurface& surface,
+        PixelPoint clientPoint) noexcept;
     void cancelOnce() noexcept;
     void completeOnce(OverlayInputAction action) noexcept;
     void emitTerminal(OverlayInputAction action) noexcept;
@@ -340,6 +344,8 @@ public:
         ActionCallback actionCallback);
 
     void show() noexcept;
+    bool suspendForScrollCapture() noexcept;
+    bool resumeAfterScrollCapture() noexcept;
     std::optional<PixelRect> selection() const noexcept;
     OverlayAnnotationSnapshot annotationSnapshot() const;
     SelectionPhase phase() const noexcept;

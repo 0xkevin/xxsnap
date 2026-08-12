@@ -148,6 +148,7 @@ public:
 
     HWND handle() const noexcept;
     void show() noexcept;
+    void hide() noexcept;
     void setSelection(
         std::optional<PixelRect> selection,
         bool showActions = true) noexcept;

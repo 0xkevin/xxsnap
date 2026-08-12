@@ -32,6 +32,8 @@ using xxsnap::win::FrozenDisplay;
 using xxsnap::win::OverlayInputAction;
 using xxsnap::win::PixelRect;
 using xxsnap::win::SelectionCompositionResult;
+using xxsnap::win::ScrollCaptureCompletion;
+using xxsnap::win::ScrollCaptureCompletionStatus;
 using xxsnap::win::TopologyError;
 using xxsnap::win::TopologyErrorCode;
 using xxsnap::win::buildDisplayTopologySnapshot;
@@ -125,6 +127,30 @@ public:
         return selectedRect;
     }
 
+    bool beginScrollCapture(
+        PixelRect selection,
+        std::size_t maximumAcceptedBytes,
+        ScrollCaptureCallback callback) override
+    {
+        ++beginScrollCalls;
+        scrollSelection = selection;
+        scrollMaximumBytes = maximumAcceptedBytes;
+        scrollCallback = std::move(callback);
+        return beginScrollSucceeds;
+    }
+
+    void cancelScrollCapture() noexcept override
+    {
+        ++cancelScrollCalls;
+        scrollCallback = {};
+    }
+
+    bool resumeOverlayAfterScrollCapture() noexcept override
+    {
+        ++resumeOverlayCalls;
+        return resumeOverlaySucceeds;
+    }
+
     void closeOverlay() noexcept override
     {
         ++closeCalls;
@@ -172,15 +198,26 @@ public:
         }
     }
 
+    void completeScroll(ScrollCaptureCompletion completion)
+    {
+        if (scrollCallback) {
+            auto callback = std::move(scrollCallback);
+            callback(std::move(completion));
+        }
+    }
+
     bool failTopology = false;
     bool failCapture = false;
     bool failOverlay = false;
     bool failComposition = false;
+    bool beginScrollSucceeds = true;
+    bool resumeOverlaySucceeds = true;
     std::vector<std::int64_t> topologyWidths;
     CaptureExportResult exportResult = CaptureExportResult::completed;
     std::optional<PixelRect> selectedRect = PixelRect{1, 1, 3, 2};
     RestartCallback restartCallback;
     ActionCallback actionCallback;
+    ScrollCaptureCallback scrollCallback;
     std::function<void()> onOpen;
     bool overlayOpen = false;
     int topologyCalls = 0;
@@ -190,10 +227,66 @@ public:
     int closeCalls = 0;
     int composeCalls = 0;
     int exportCalls = 0;
+    int beginScrollCalls = 0;
+    int cancelScrollCalls = 0;
+    int resumeOverlayCalls = 0;
+    std::optional<PixelRect> scrollSelection;
+    std::size_t scrollMaximumBytes = 0U;
     std::optional<OverlayInputAction> exportedAction;
     std::int64_t exportedWidth = 0;
     std::vector<CaptureSessionErrorCode> reportedErrors;
 };
+
+void testScrollCaptureCanCancelBackToSelectionAndCompleteToExport()
+{
+    FakeServices services;
+    CaptureSessionCoordinator coordinator(services);
+    CHECK(coordinator.start() == CaptureSessionStartResult::started);
+
+    services.emit(OverlayInputAction::scrollCapture);
+    CHECK(coordinator.state() == CaptureSessionState::ready);
+    CHECK(services.beginScrollCalls == 1);
+    CHECK(services.scrollSelection == services.selectedRect);
+    CHECK(services.scrollMaximumBytes > 0U);
+    CHECK(services.composeCalls == 0);
+
+    services.completeScroll({ScrollCaptureCompletionStatus::cancelled});
+    CHECK(coordinator.state() == CaptureSessionState::selecting);
+    CHECK(services.resumeOverlayCalls == 1);
+
+    services.emit(OverlayInputAction::scrollCapture);
+    CHECK(coordinator.state() == CaptureSessionState::ready);
+    MemoryBudget outputBudget(64U);
+    ScrollCaptureCompletion completion;
+    completion.status = ScrollCaptureCompletionStatus::completed;
+    completion.pixels.emplace(allocatePixels(3, 2, outputBudget));
+    completion.action = OverlayInputAction::copy;
+    services.completeScroll(std::move(completion));
+
+    CHECK(coordinator.state() == CaptureSessionState::idle);
+    CHECK(services.exportCalls == 1);
+    CHECK(services.exportedAction == OverlayInputAction::copy);
+    CHECK(services.closeCalls == 1);
+}
+
+void testScrollCaptureStartAndRuntimeFailuresAreReported()
+{
+    FakeServices startFailure;
+    startFailure.beginScrollSucceeds = false;
+    CaptureSessionCoordinator first(startFailure);
+    CHECK(first.start() == CaptureSessionStartResult::started);
+    startFailure.emit(OverlayInputAction::scrollCapture);
+    CHECK(first.state() == CaptureSessionState::idle);
+    CHECK(first.lastError() == CaptureSessionErrorCode::scrollCaptureFailed);
+
+    FakeServices runtimeFailure;
+    CaptureSessionCoordinator second(runtimeFailure);
+    CHECK(second.start() == CaptureSessionStartResult::started);
+    runtimeFailure.emit(OverlayInputAction::scrollCapture);
+    runtimeFailure.completeScroll({ScrollCaptureCompletionStatus::failed});
+    CHECK(second.state() == CaptureSessionState::idle);
+    CHECK(second.lastError() == CaptureSessionErrorCode::scrollCaptureFailed);
+}
 
 void testCopyCompletesAndBusyStartIsIgnored()
 {
@@ -451,6 +544,8 @@ int main()
 {
     testArchitectureDefaultMemoryLimit();
     testCopyCompletesAndBusyStartIsIgnored();
+    testScrollCaptureCanCancelBackToSelectionAndCompleteToExport();
+    testScrollCaptureStartAndRuntimeFailuresAreReported();
     testCancelAndCancelledSaveReturnToIdle();
     testDisplayChangeRestartsWithFreshCapture();
     testCaptureTopologyMismatchRetriesOnlyOnce();

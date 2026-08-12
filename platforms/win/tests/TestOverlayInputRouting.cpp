@@ -463,6 +463,28 @@ void testRestartShutdownReleasesCaptureAndHotKeyWithoutCancelAction()
     CHECK(actions.empty());
 }
 
+void testScrollToolbarSuspendsOverlayWithoutCompletingRouter()
+{
+    FakePlatform platform;
+    std::vector<OverlayInputAction> actions;
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform,
+        [&actions](OverlayInputAction action) { actions.push_back(action); },
+        true);
+    CHECK(router.activateEscapeHotKey(leftWindow));
+    createReadySelection(router);
+    const auto owner = router.presentations()[1];
+    CHECK(owner.toolbarItems.size() == 16U);
+    CHECK(owner.toolbarItems[10].action
+        == xxsnap::win::ToolbarAction::scroll);
+    CHECK(router.pointerDown(
+        rightWindow, owner.toolbarItems[10].centerPhysical));
+    CHECK(actions.size() == 1U);
+    CHECK(actions.front() == OverlayInputAction::scrollCapture);
+    CHECK(router.status() == OverlayInputStatus::active);
+    CHECK(platform.unregisterCalls == 1);
+}
+
 void testShapeToolIsNonTerminalAndEditsThroughSharedPresentation()
 {
     FakePlatform platform;
@@ -476,7 +498,7 @@ void testShapeToolIsNonTerminalAndEditsThroughSharedPresentation()
     createReadySelection(router);
 
     auto owner = router.presentations()[1];
-    CHECK(owner.toolbarItems.size() == 15U);
+    CHECK(owner.toolbarItems.size() == 16U);
     const auto rectangle = owner.toolbarItems[0];
     CHECK(rectangle.action == xxsnap::win::ToolbarAction::rectangle);
     const auto capturesBeforeTool = platform.captureCalls;
@@ -554,7 +576,7 @@ void testArrowToolUsesMacOptionsMenuAndCreatesEditableCurve()
     createReadySelection(router);
 
     auto owner = router.presentations()[1];
-    CHECK(owner.toolbarItems.size() == 15U);
+    CHECK(owner.toolbarItems.size() == 16U);
     CHECK(owner.toolbarItems[1].action == xxsnap::win::ToolbarAction::polyline);
     CHECK(router.pointerDown(
         rightWindow, owner.toolbarItems[1].centerPhysical));
@@ -979,7 +1001,7 @@ void testMagnifierToolbarMatchesMacOptionsAndUsesComposite()
     createReadySelection(router);
     CHECK(router.keyPressed(ShapeEditorKey::magnifier, false, false));
     auto owner = router.presentations()[1];
-    CHECK(owner.toolbarItems.size() == 15U);
+    CHECK(owner.toolbarItems.size() == 16U);
     CHECK(owner.toolbarItems[8].action
         == xxsnap::win::ToolbarAction::magnifier);
     CHECK(owner.toolbarItems[8].selected);
@@ -1117,6 +1139,7 @@ int main()
     testEscapeUnregisterFailureIsObservableAndRetriedOnDestruction();
     testTerminalCallbackMaySynchronouslyDestroyRouter();
     testRestartShutdownReleasesCaptureAndHotKeyWithoutCancelAction();
+    testScrollToolbarSuspendsOverlayWithoutCompletingRouter();
     testShapeToolIsNonTerminalAndEditsThroughSharedPresentation();
     testArrowToolUsesMacOptionsMenuAndCreatesEditableCurve();
     testBrushToolUsesMacOptionsAndShiftStraightLine();

@@ -905,6 +905,51 @@ OverlayInputRouter::currentEraserOptionsLayout(
     return eraserOptionsLayout(optionsToolbarOrigin(chrome, initial.toolbar));
 }
 
+bool OverlayInputRouter::handleCornerRadiusPanelPointer(
+    const OverlaySurface& surface,
+    PixelPoint clientPoint) noexcept
+{
+    if (!editor_ || !editor_->cornerRadiusPanelVisible()) return false;
+    const auto options = currentShapeOptionsLayout(surface);
+    if (!options.has_value()) return false;
+    const AnnotationPoint point{
+        static_cast<float>(clientPoint.x) * 96.0F
+            / static_cast<float>(surface.dpiX),
+        static_cast<float>(clientPoint.y) * 96.0F
+            / static_cast<float>(surface.dpiY),
+    };
+    const AnnotationRect safe{
+        0.0F,
+        0.0F,
+        physicalPixelsToDip(surface.physicalBounds.width, surface.dpiX),
+        physicalPixelsToDip(surface.physicalBounds.height, surface.dpiY),
+    };
+    const auto panel = cornerRadiusPanelLayout(*options, safe);
+    if (contains(panel.increment, point)) {
+        editor_->adjustCornerRadius(1.0F);
+        return true;
+    }
+    if (contains(panel.decrement, point)) {
+        editor_->adjustCornerRadius(-1.0F);
+        return true;
+    }
+    const AnnotationRect sliderHit{
+        panel.sliderTrack.x - 5.0F,
+        panel.sliderTrack.y - 8.0F,
+        panel.sliderTrack.width + 10.0F,
+        panel.sliderTrack.height + 16.0F,
+    };
+    if (contains(sliderHit, point) && panel.sliderTrack.width > 0.0F) {
+        const auto ratio = (std::max)(0.0F, (std::min)(
+            1.0F,
+            (point.x - panel.sliderTrack.x) / panel.sliderTrack.width));
+        editor_->setCornerRadius(
+            static_cast<float>(static_cast<int>(ratio * 30.0F + 0.5F)));
+        return true;
+    }
+    return contains(panel.panel, point);
+}
+
 OverlayInputRouter::~OverlayInputRouter()
 {
     if (dragging_) {
@@ -1369,6 +1414,9 @@ bool OverlayInputRouter::pointerDown(
             }
         }
     }
+    if (handleCornerRadiusPanelPointer(*surface, clientPoint)) {
+        return true;
+    }
     if (const auto action = hitToolbarAction(*surface, clientPoint)) {
         if (!toolbarActionEnabled(*action)) {
             return true;
@@ -1379,6 +1427,10 @@ bool OverlayInputRouter::pointerDown(
             completeOnce(OverlayInputAction::save);
         } else if (*action == ToolbarAction::copy) {
             completeOnce(OverlayInputAction::copy);
+        } else if (*action == ToolbarAction::scroll) {
+            releaseInteraction();
+            deactivateEscapeHotKey();
+            emitTerminal(OverlayInputAction::scrollCapture);
         } else if (editor_ != nullptr) {
             editor_->handleToolbarAction(*action);
             if (editor_->isEyedropperToolActive()) {
@@ -1399,43 +1451,6 @@ bool OverlayInputRouter::pointerDown(
         if (const auto options = currentShapeOptionsLayout(*surface);
             options.has_value()) {
             const AnnotationPoint point{x, y};
-            if (editor_->cornerRadiusPanelVisible()) {
-                const AnnotationRect safe{
-                    0.0F,
-                    0.0F,
-                    physicalPixelsToDip(
-                        surface->physicalBounds.width, surface->dpiX),
-                    physicalPixelsToDip(
-                        surface->physicalBounds.height, surface->dpiY),
-                };
-                const auto panel = cornerRadiusPanelLayout(*options, safe);
-                if (contains(panel.increment, point)) {
-                    editor_->adjustCornerRadius(1.0F);
-                    return true;
-                }
-                if (contains(panel.decrement, point)) {
-                    editor_->adjustCornerRadius(-1.0F);
-                    return true;
-                }
-                const AnnotationRect sliderHit{
-                    panel.sliderTrack.x - 5.0F,
-                    panel.sliderTrack.y - 8.0F,
-                    panel.sliderTrack.width + 10.0F,
-                    panel.sliderTrack.height + 16.0F,
-                };
-                if (contains(sliderHit, point) && panel.sliderTrack.width > 0.0F) {
-                    const auto ratio = (std::max)(0.0F, (std::min)(
-                        1.0F,
-                        (point.x - panel.sliderTrack.x)
-                            / panel.sliderTrack.width));
-                    editor_->setCornerRadius(
-                        static_cast<float>(static_cast<int>(ratio * 30.0F + 0.5F)));
-                    return true;
-                }
-                if (contains(panel.panel, point)) {
-                    return true;
-                }
-            }
             if (const auto hit = shapeOptionHitTest(*options, {x, y});
                 hit.has_value()) {
                 if (hit->control == ShapeOptionControl::customColor) {
@@ -2631,6 +2646,34 @@ void OverlayHost::show() noexcept
         }
         window->show();
     }
+}
+
+bool OverlayHost::suspendForScrollCapture() noexcept
+{
+    const auto impl = impl_;
+    if (!impl || !impl->router
+        || impl->router->status() != OverlayInputStatus::active) {
+        return false;
+    }
+    impl->router->deactivateEscapeHotKey();
+    for (const auto& window : impl->windows) {
+        window->hide();
+    }
+    return true;
+}
+
+bool OverlayHost::resumeAfterScrollCapture() noexcept
+{
+    const auto impl = impl_;
+    if (!impl || !impl->router || impl->windows.empty()
+        || impl->router->status() != OverlayInputStatus::active
+        || !impl->router->activateEscapeHotKey(
+            impl->windows.front()->handle())
+        || !impl->refresh()) {
+        return false;
+    }
+    show();
+    return true;
 }
 
 std::optional<PixelRect> OverlayHost::selection() const noexcept

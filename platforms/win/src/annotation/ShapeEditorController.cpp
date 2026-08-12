@@ -267,6 +267,7 @@ ShapeEditorController::ShapeEditorController(
     toolbarState_.setCapability(ToolbarAction::number, true);
     toolbarState_.setCapability(ToolbarAction::magnifier, true);
     toolbarState_.setCapability(ToolbarAction::eraser, true);
+    toolbarState_.setCapability(ToolbarAction::scroll, true);
     toolbarState_.setCapability(ToolbarAction::undo, true);
     toolbarState_.setCapability(ToolbarAction::redo, true);
     syncHistory();

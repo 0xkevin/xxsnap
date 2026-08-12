@@ -212,6 +212,69 @@ target_link_libraries(
 )
 
 add_library(
+    xxsnap_scroll_capture_session
+    src/scroll/ScrollCaptureSession.cpp
+)
+target_compile_features(xxsnap_scroll_capture_session PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_scroll_capture_session
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_scroll_capture_session
+    PUBLIC snipory_core_scroll snipory_core_portable
+)
+
+add_library(
+    xxsnap_scroll_capture_target_detector
+    src/scroll/ScrollCaptureTargetDetector.cpp
+)
+target_compile_features(
+    xxsnap_scroll_capture_target_detector PUBLIC cxx_std_17
+)
+target_include_directories(
+    xxsnap_scroll_capture_target_detector
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_scroll_capture_target_detector
+    PUBLIC snipory_core_portable
+    PRIVATE ole32
+)
+
+add_library(
+    xxsnap_scroll_region_capturer
+    src/scroll/ScrollRegionCapturer.cpp
+)
+target_compile_features(xxsnap_scroll_region_capturer PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_scroll_region_capturer
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_scroll_region_capturer
+    PUBLIC xxsnap_gdi_capture_backend snipory_core_scroll
+)
+
+add_library(
+    xxsnap_scroll_capture_host
+    src/scroll/ScrollCaptureHost.cpp
+)
+target_compile_features(xxsnap_scroll_capture_host PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_scroll_capture_host
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_scroll_capture_host
+    PUBLIC xxsnap_scroll_capture_session
+           xxsnap_scroll_capture_target_detector
+           xxsnap_scroll_region_capturer
+           xxsnap_toolbar_layout
+    PRIVATE gdi32 user32 ole32 windowscodecs msimg32
+)
+
+add_library(
     xxsnap_annotation_composer
     src/export/AnnotationComposer.cpp
 )
@@ -488,6 +551,7 @@ target_link_libraries(
         xxsnap_dxgi_capture_backend
         xxsnap_gdi_capture_backend
         xxsnap_fallback_capture_backend
+        xxsnap_scroll_capture_host
         xxsnap_selection_composer
         xxsnap_annotation_composer
         xxsnap_png_writer
@@ -856,6 +920,54 @@ if(BUILD_TESTING)
     add_test(NAME selection_composer COMMAND xxsnap_selection_composer_test)
 
     add_executable(
+        xxsnap_scroll_capture_session_test
+        tests/TestScrollCaptureSession.cpp
+    )
+    target_compile_features(
+        xxsnap_scroll_capture_session_test PRIVATE cxx_std_17
+    )
+    target_link_libraries(
+        xxsnap_scroll_capture_session_test
+        PRIVATE xxsnap_scroll_capture_session
+    )
+    add_test(
+        NAME scroll_capture_session
+        COMMAND xxsnap_scroll_capture_session_test
+    )
+
+    add_executable(
+        xxsnap_scroll_capture_target_detector_test
+        tests/TestScrollCaptureTargetDetector.cpp
+    )
+    target_compile_features(
+        xxsnap_scroll_capture_target_detector_test PRIVATE cxx_std_17
+    )
+    target_link_libraries(
+        xxsnap_scroll_capture_target_detector_test
+        PRIVATE xxsnap_scroll_capture_target_detector
+    )
+    add_test(
+        NAME scroll_capture_target_detector
+        COMMAND xxsnap_scroll_capture_target_detector_test
+    )
+
+    add_executable(
+        xxsnap_scroll_region_capturer_test
+        tests/TestScrollRegionCapturer.cpp
+    )
+    target_compile_features(
+        xxsnap_scroll_region_capturer_test PRIVATE cxx_std_17
+    )
+    target_link_libraries(
+        xxsnap_scroll_region_capturer_test
+        PRIVATE xxsnap_scroll_region_capturer
+    )
+    add_test(
+        NAME scroll_region_capturer
+        COMMAND xxsnap_scroll_region_capturer_test
+    )
+
+    add_executable(
         xxsnap_annotation_composer_test
         tests/TestAnnotationComposer.cpp
     )
@@ -918,6 +1030,10 @@ set(xxsnap_capture_session_targets
     xxsnap_dxgi_capture_backend
     xxsnap_fallback_capture_backend
     xxsnap_selection_composer
+    xxsnap_scroll_capture_session
+    xxsnap_scroll_capture_target_detector
+    xxsnap_scroll_region_capturer
+    xxsnap_scroll_capture_host
     xxsnap_annotation_composer
     xxsnap_png_writer
     xxsnap_clipboard_writer
@@ -961,6 +1077,9 @@ if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_capture_session_coordinator_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_memory_budget_matrix_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_selection_composer_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_scroll_capture_session_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_scroll_capture_target_detector_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_scroll_region_capturer_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_annotation_composer_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_clipboard_writer_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_png_writer_test)

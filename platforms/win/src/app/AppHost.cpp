@@ -13,6 +13,7 @@
 #include "export/SelectionComposer.h"
 #include "resource.h"
 #include "session/CaptureSessionCoordinator.h"
+#include "scroll/ScrollCaptureHost.h"
 #include "support/RuntimeApis.h"
 
 #include <Windows.h>
@@ -143,6 +144,10 @@ public:
         RestartCallback restartCallback,
         ActionCallback actionCallback) override
     {
+        targetProcessId_ = 0U;
+        if (const auto foreground = GetForegroundWindow()) {
+            GetWindowThreadProcessId(foreground, &targetProcessId_);
+        }
         overlay_.reset();
         auto result = OverlayHost::create(
             instance_, desktop, std::move(restartCallback),
@@ -163,8 +168,59 @@ public:
         return overlay_ ? overlay_->selection() : std::nullopt;
     }
 
+    bool beginScrollCapture(
+        PixelRect selectionRect,
+        std::size_t maximumAcceptedBytes,
+        ScrollCaptureCallback callback) override
+    {
+        if (!overlay_ || scrollCapture_ || !callback) return false;
+        const auto annotation = overlay_->annotationSnapshot();
+        if (!overlay_->suspendForScrollCapture()) return false;
+        scrollCapture_ = ScrollCaptureHost::create(
+            instance_, selectionRect, targetProcessId_,
+            annotation.dpiX, annotation.dpiY, maximumAcceptedBytes,
+            [this, callback = std::move(callback)](
+                ScrollCaptureHostResult result) mutable {
+                ScrollCaptureCompletion completion;
+                switch (result.status) {
+                case ScrollCaptureHostStatus::completed:
+                    completion.status = ScrollCaptureCompletionStatus::completed;
+                    completion.pixels = std::move(result.pixels);
+                    completion.action = result.action
+                            == ScrollCaptureHostExportAction::save
+                        ? OverlayInputAction::save
+                        : OverlayInputAction::copy;
+                    break;
+                case ScrollCaptureHostStatus::cancelled:
+                    completion.status = ScrollCaptureCompletionStatus::cancelled;
+                    break;
+                case ScrollCaptureHostStatus::failed:
+                    completion.status = ScrollCaptureCompletionStatus::failed;
+                    break;
+                }
+                callback(std::move(completion));
+            });
+        if (!scrollCapture_) {
+            overlay_->resumeAfterScrollCapture();
+            return false;
+        }
+        return true;
+    }
+
+    void cancelScrollCapture() noexcept override
+    {
+        scrollCapture_.reset();
+    }
+
+    bool resumeOverlayAfterScrollCapture() noexcept override
+    {
+        scrollCapture_.reset();
+        return overlay_ && overlay_->resumeAfterScrollCapture();
+    }
+
     void closeOverlay() noexcept override
     {
+        scrollCapture_.reset();
         overlay_.reset();
     }
 
@@ -255,6 +311,8 @@ private:
     GdiCaptureBackend gdi_;
     FallbackCaptureBackend fallback_;
     std::unique_ptr<OverlayHost> overlay_;
+    std::unique_ptr<ScrollCaptureHost> scrollCapture_;
+    DWORD targetProcessId_ = 0U;
     ErrorCallback errorCallback_;
 };
 

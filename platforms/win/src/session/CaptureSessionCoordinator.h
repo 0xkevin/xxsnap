@@ -28,8 +28,21 @@ enum class CaptureSessionErrorCode {
     selectionUnavailable,
     compositionFailed,
     exportFailed,
+    scrollCaptureFailed,
     allocationFailed,
     unexpectedFailure,
+};
+
+enum class ScrollCaptureCompletionStatus {
+    completed,
+    cancelled,
+    failed,
+};
+
+struct ScrollCaptureCompletion {
+    ScrollCaptureCompletionStatus status = ScrollCaptureCompletionStatus::failed;
+    std::optional<PixelBuffer> pixels;
+    OverlayInputAction action = OverlayInputAction::copy;
 };
 
 enum class CaptureExportResult {
@@ -42,6 +55,7 @@ class CaptureSessionServices {
 public:
     using RestartCallback = std::function<void()>;
     using ActionCallback = std::function<void(OverlayInputAction)>;
+    using ScrollCaptureCallback = std::function<void(ScrollCaptureCompletion)>;
 
     virtual ~CaptureSessionServices() = default;
 
@@ -55,6 +69,12 @@ public:
         ActionCallback actionCallback) = 0;
     virtual void showOverlay() noexcept = 0;
     virtual std::optional<PixelRect> selection() const noexcept = 0;
+    virtual bool beginScrollCapture(
+        PixelRect selection,
+        std::size_t maximumAcceptedBytes,
+        ScrollCaptureCallback callback) = 0;
+    virtual void cancelScrollCapture() noexcept = 0;
+    virtual bool resumeOverlayAfterScrollCapture() noexcept = 0;
     virtual void closeOverlay() noexcept = 0;
     virtual SelectionCompositionResult compose(
         PixelRect selection,
@@ -95,6 +115,8 @@ private:
 
     CaptureSessionStartResult startSession(bool newRequest) noexcept;
     void handleAction(OverlayInputAction action) noexcept;
+    void handleScrollCaptureCompletion(
+        ScrollCaptureCompletion completion) noexcept;
     void restart() noexcept;
     void fail(CaptureSessionErrorCode error) noexcept;
     void finish(SessionEvent event) noexcept;
@@ -112,6 +134,7 @@ private:
     bool closingOverlay_ = false;
     bool restarting_ = false;
     bool topologyRetryUsed_ = false;
+    bool scrollCaptureMayBeOpen_ = false;
     std::uint64_t generation_ = 0;
 };
 

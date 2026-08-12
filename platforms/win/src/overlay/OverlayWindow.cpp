@@ -240,6 +240,13 @@ void OverlayWindow::show() noexcept
     UpdateWindow(window_);
 }
 
+void OverlayWindow::hide() noexcept
+{
+    if (window_ != nullptr) {
+        ShowWindow(window_, SW_HIDE);
+    }
+}
+
 void OverlayWindow::setSelection(
     std::optional<PixelRect> selection,
     bool showActions) noexcept
