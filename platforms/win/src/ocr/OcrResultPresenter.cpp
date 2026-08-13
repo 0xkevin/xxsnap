@@ -1,4 +1,5 @@
 #include "ocr/OcrResultPresenter.h"
+#include "app/CaptureSound.h"
 #include "app/PreferencesSettings.h"
 #include "resource.h"
 
@@ -211,7 +212,9 @@ void OcrResultPresenter::showSuccess(PixelRect selection) noexcept
 {
     SystemPreferencesRegistry registry;
     const auto settings = PreferencesSettingsStore(registry).load();
-    if (shouldPlayTextRecognitionSuccessSound(settings)) MessageBeep(MB_OK);
+    if (shouldPlayTextRecognitionSuccessSound(settings)) {
+        playTextRecognitionSuccessSound(impl_->instance);
+    }
     if (shouldShowTextRecognitionSuccessNotification(settings)) {
         impl_->show(true, selection);
     }

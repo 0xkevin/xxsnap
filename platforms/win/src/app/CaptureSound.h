@@ -9,13 +9,16 @@
 
 namespace xxsnap::win {
 
-using CaptureSoundPlayer = BOOL (WINAPI*)(LPCWSTR, HMODULE, DWORD);
+using EmbeddedSoundPlayer = BOOL (WINAPI*)(LPCWSTR, HMODULE, DWORD);
 
-inline constexpr DWORD fullScreenCaptureSoundFlags =
+inline constexpr DWORD embeddedSoundFlags =
     SND_RESOURCE | SND_ASYNC | SND_NODEFAULT;
 
 bool playFullScreenCaptureSound(
-    HINSTANCE instance, CaptureSoundPlayer player) noexcept;
+    HINSTANCE instance, EmbeddedSoundPlayer player) noexcept;
 bool playFullScreenCaptureSound(HINSTANCE instance) noexcept;
+bool playTextRecognitionSuccessSound(
+    HINSTANCE instance, EmbeddedSoundPlayer player) noexcept;
+bool playTextRecognitionSuccessSound(HINSTANCE instance) noexcept;
 
 } // namespace xxsnap::win

@@ -38,7 +38,13 @@ void testPlaybackUsesEmbeddedWaveAsynchronously()
     CHECK(playFullScreenCaptureSound(module, recordPlayback));
     CHECK(playedResource == MAKEINTRESOURCEW(IDR_FULL_SCREEN_CAPTURE_SOUND));
     CHECK(playedModule == module);
-    CHECK(playedFlags == fullScreenCaptureSoundFlags);
+    CHECK(playedFlags == embeddedSoundFlags);
+
+    CHECK(playTextRecognitionSuccessSound(module, recordPlayback));
+    CHECK(playedResource
+        == MAKEINTRESOURCEW(IDR_TEXT_RECOGNITION_SUCCESS_SOUND));
+    CHECK(playedModule == module);
+    CHECK(playedFlags == embeddedSoundFlags);
 }
 
 void testPlaybackHandlesDefaultModuleAndFailure()
@@ -47,28 +53,33 @@ void testPlaybackHandlesDefaultModuleAndFailure()
     CHECK(!playFullScreenCaptureSound(nullptr, recordPlayback));
     CHECK(playedModule == GetModuleHandleW(nullptr));
     CHECK(!playFullScreenCaptureSound(nullptr, nullptr));
+    CHECK(!playTextRecognitionSuccessSound(nullptr, recordPlayback));
+    CHECK(playedModule == GetModuleHandleW(nullptr));
+    CHECK(!playTextRecognitionSuccessSound(nullptr, nullptr));
     playbackResult = TRUE;
 }
 
 void testEmbeddedResourceContainsWaveData()
 {
     const auto module = GetModuleHandleW(nullptr);
-    const auto resource = FindResourceW(
-        module,
-        MAKEINTRESOURCEW(IDR_FULL_SCREEN_CAPTURE_SOUND),
-        L"WAVE");
-    CHECK(resource != nullptr);
-    if (resource == nullptr) return;
+    for (const auto identifier : {
+             IDR_FULL_SCREEN_CAPTURE_SOUND,
+             IDR_TEXT_RECOGNITION_SUCCESS_SOUND}) {
+        const auto resource = FindResourceW(
+            module, MAKEINTRESOURCEW(identifier), L"WAVE");
+        CHECK(resource != nullptr);
+        if (resource == nullptr) continue;
 
-    const auto size = SizeofResource(module, resource);
-    const auto loaded = LoadResource(module, resource);
-    const auto* bytes = static_cast<const unsigned char*>(
-        LockResource(loaded));
-    CHECK(size > 44U);
-    CHECK(bytes != nullptr);
-    if (bytes == nullptr || size < 12U) return;
-    CHECK(std::memcmp(bytes, "RIFF", 4U) == 0);
-    CHECK(std::memcmp(bytes + 8U, "WAVE", 4U) == 0);
+        const auto size = SizeofResource(module, resource);
+        const auto loaded = LoadResource(module, resource);
+        const auto* bytes = static_cast<const unsigned char*>(
+            LockResource(loaded));
+        CHECK(size > 44U);
+        CHECK(bytes != nullptr);
+        if (bytes == nullptr || size < 12U) continue;
+        CHECK(std::memcmp(bytes, "RIFF", 4U) == 0);
+        CHECK(std::memcmp(bytes + 8U, "WAVE", 4U) == 0);
+    }
 }
 
 } // namespace

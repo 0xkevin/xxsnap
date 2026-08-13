@@ -8,6 +8,8 @@ $iconsDirectory = Join-Path $repoRoot "platforms\mac\Resources\Icons"
 $toolbarVerifier = Join-Path $PSScriptRoot "verify-toolbar-assets.ps1"
 $macCaptureSound = Join-Path $repoRoot "platforms\mac\Resources\Sounds\fullscreencutsound.mp3"
 $windowsCaptureSound = Join-Path $repoRoot "platforms\win\resources\sounds\fullscreencutsound.wav"
+$macNotificationSound = Join-Path $repoRoot "platforms\mac\Resources\Sounds\notification.mp3"
+$windowsNotificationSound = Join-Path $repoRoot "platforms\win\resources\sounds\notification.wav"
 
 function Test-AssetHash {
     param(
@@ -77,6 +79,8 @@ foreach ($asset in $expectedAssets.GetEnumerator()) {
 $expectedSounds = [ordered]@{
     $macCaptureSound = "c06b6214373fb4c3cacc695eefa9ca34d2ba948296b4a38203c3a1969a584562"
     $windowsCaptureSound = "60d8b6cf87375ebc0147f043ec5a5c1a9b32bd2f4637677c885cef55eb9d8779"
+    $macNotificationSound = "053a2fe627916e048af1ce04b356988f3844754f370ea169f16bdf8f72eb0d07"
+    $windowsNotificationSound = "0aebdc275a120950bfd98f6c947198604eb681e02e6fa7fa89d37e3be7082450"
 }
 foreach ($asset in $expectedSounds.GetEnumerator()) {
     if (-not (Test-AssetHash -Path $asset.Key -ExpectedHash $asset.Value `
@@ -85,15 +89,18 @@ foreach ($asset in $expectedSounds.GetEnumerator()) {
     }
 }
 
-if (Test-Path -LiteralPath $windowsCaptureSound -PathType Leaf) {
-    $stream = [System.IO.File]::OpenRead($windowsCaptureSound)
+foreach ($waveSound in @($windowsCaptureSound, $windowsNotificationSound)) {
+    if (-not (Test-Path -LiteralPath $waveSound -PathType Leaf)) {
+        continue
+    }
+    $stream = [System.IO.File]::OpenRead($waveSound)
     try {
         $header = [byte[]]::new(12)
         if ($stream.Read($header, 0, $header.Length) -ne $header.Length -or
             [Text.Encoding]::ASCII.GetString($header, 0, 4) -ne "RIFF" -or
             [Text.Encoding]::ASCII.GetString($header, 8, 4) -ne "WAVE") {
             [Console]::Error.WriteLine(
-                "FAIL: fullscreencutsound.wav is not a RIFF/WAVE resource"
+                "FAIL: $(Split-Path -Leaf $waveSound) is not a RIFF/WAVE resource"
             )
             $failed = $true
         }

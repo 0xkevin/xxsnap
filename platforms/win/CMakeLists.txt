@@ -74,6 +74,7 @@ set_property(
         "${PROJECT_SOURCE_DIR}/platforms/mac/Resources/Icons/correct.svg"
         "${PROJECT_SOURCE_DIR}/platforms/mac/Resources/Icons/failed.svg"
         "${PROJECT_SOURCE_DIR}/platforms/win/resources/sounds/fullscreencutsound.wav"
+        "${PROJECT_SOURCE_DIR}/platforms/win/resources/sounds/notification.wav"
         ${XXSNAP_TOOLBAR_ASSET_FILES}
 )
 add_library(xxsnap_visual_resources INTERFACE)
@@ -562,6 +563,19 @@ if(XXSNAP_WINDOWS_FAMILY STREQUAL "modern")
     target_link_libraries(xxsnap_ocr_engine PRIVATE windowsapp)
 endif()
 
+add_library(xxsnap_capture_sound src/app/CaptureSound.cpp)
+target_compile_features(xxsnap_capture_sound PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_capture_sound
+    PUBLIC
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/resources"
+)
+target_link_libraries(
+    xxsnap_capture_sound
+    PRIVATE xxsnap_windows_build_configuration winmm
+)
+
 add_library(
     xxsnap_ocr_capture_host
     src/ocr/OcrCaptureHost.cpp
@@ -577,7 +591,8 @@ target_link_libraries(
     PRIVATE xxsnap_dxgi_capture_backend xxsnap_gdi_capture_backend
             xxsnap_fallback_capture_backend xxsnap_display_topology
             xxsnap_selection_composer xxsnap_clipboard_writer
-            xxsnap_preferences_settings xxsnap_windows_build_configuration
+            xxsnap_preferences_settings xxsnap_capture_sound
+            xxsnap_windows_build_configuration
             ole32 user32 gdi32
 )
 
@@ -658,19 +673,6 @@ target_link_libraries(
     xxsnap_shortcut_feedback
     PUBLIC xxsnap_hot_key_registrar xxsnap_preferences_settings
     PRIVATE xxsnap_windows_build_configuration user32 gdi32
-)
-
-add_library(xxsnap_capture_sound src/app/CaptureSound.cpp)
-target_compile_features(xxsnap_capture_sound PUBLIC cxx_std_17)
-target_include_directories(
-    xxsnap_capture_sound
-    PUBLIC
-        "${CMAKE_CURRENT_SOURCE_DIR}/src"
-        "${CMAKE_CURRENT_SOURCE_DIR}/resources"
-)
-target_link_libraries(
-    xxsnap_capture_sound
-    PRIVATE xxsnap_windows_build_configuration winmm
 )
 
 add_library(xxsnap_preferences_window src/app/PreferencesWindow.cpp)
