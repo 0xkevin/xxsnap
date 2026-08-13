@@ -11,6 +11,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
 
 namespace xxsnap::win {
 
@@ -30,23 +31,24 @@ enum class TrayCommand : UINT {
 
 struct TrayMenuItem {
     TrayCommand command;
-    const wchar_t* label;
+    std::wstring label;
     bool separator = false;
 };
 
 using TrayMenuItems = std::array<TrayMenuItem, 12>;
+using TrayMenuShortcuts = std::array<std::wstring, 4>;
 
 inline constexpr UINT trayCallbackMessage = WM_APP + 0x58;
 inline constexpr UINT trayIconIdentifier = 1;
 
-constexpr TrayMenuItems mvpTrayMenuItems() noexcept
+inline TrayMenuItems mvpTrayMenuItems()
 {
     return {{
         {TrayCommand::regionCapture, L"\u533a\u57df\u622a\u56fe"},
         {TrayCommand::fullScreenCapture, L"\u5168\u5c4f\u622a\u56fe"},
         {TrayCommand::textRecognition, L"\u6587\u5b57\u8bc6\u522b"},
         {TrayCommand::teachingPen, L"\u6559\u7b14"},
-        {TrayCommand::regionCapture, nullptr, true},
+        {TrayCommand::regionCapture, L"", true},
         {TrayCommand::preferences, L"\u504f\u597d\u8bbe\u7f6e\u2026"},
         {TrayCommand::checkForUpdates, L"\u68c0\u67e5\u66f4\u65b0\u2026"},
         {TrayCommand::donation, L"\u652f\u6301\u5f00\u53d1\u8005 \u2615"},
@@ -106,6 +108,7 @@ public:
         CommandCallback callback);
 
     UINT taskbarCreatedMessage() const noexcept;
+    bool setMenuShortcuts(const TrayMenuShortcuts& shortcuts) noexcept;
     bool handleMessage(UINT message, WPARAM wParam, LPARAM lParam) noexcept;
     bool showHotKeyConflict(const wchar_t* text) noexcept;
     const std::optional<TrayIconError>& lastError() const noexcept;

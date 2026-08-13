@@ -287,6 +287,19 @@ HotKeyBinding HotKeyRegistrar::binding(HotKeyCommand command) const noexcept
     return bindings_[commandIndex(command)];
 }
 
+bool HotKeyRegistrar::isRegistered(HotKeyCommand command) const noexcept
+{
+    switch (command) {
+    case HotKeyCommand::regionCapture: return registered_;
+    case HotKeyCommand::fullScreen: return fullScreenCaptureRegistered_;
+    case HotKeyCommand::ocr: return ocrRegistered_;
+    case HotKeyCommand::teachingPen: return teachingPenRegistered_;
+    case HotKeyCommand::restoreMostRecentlyHiddenPinnedImage:
+        return restorePinnedImageRegistered_;
+    }
+    return false;
+}
+
 bool HotKeyRegistrar::unregister() noexcept
 {
     if (!registered_ && !fullScreenCaptureRegistered_ && !ocrRegistered_

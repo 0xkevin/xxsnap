@@ -71,7 +71,7 @@ public:
                     menu,
                     MF_STRING,
                     static_cast<UINT_PTR>(item.command),
-                    item.label)) {
+                    item.label.c_str())) {
                 error = GetLastError();
                 DestroyMenu(menu);
                 return std::nullopt;
@@ -141,10 +141,12 @@ public:
 struct TrayIcon::State final {
     explicit State(CommandCallback sourceCallback)
         : callback(std::move(sourceCallback))
+        , menuItems(mvpTrayMenuItems())
     {
     }
 
     CommandCallback callback;
+    TrayMenuItems menuItems;
     std::optional<TrayIconError> lastError;
 };
 
@@ -276,6 +278,24 @@ UINT TrayIcon::taskbarCreatedMessage() const noexcept
     return taskbarCreatedMessage_;
 }
 
+bool TrayIcon::setMenuShortcuts(
+    const TrayMenuShortcuts& shortcuts) noexcept
+{
+    try {
+        auto updated = mvpTrayMenuItems();
+        for (std::size_t index = 0; index < shortcuts.size(); ++index) {
+            if (!shortcuts[index].empty()) {
+                updated[index].label += L'\t';
+                updated[index].label += shortcuts[index];
+            }
+        }
+        state_->menuItems.swap(updated);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
 void TrayIcon::dispatch(TrayCommand command) noexcept
 {
     const auto state = state_;
@@ -319,7 +339,7 @@ bool TrayIcon::handleMessage(UINT message, WPARAM, LPARAM lParam) noexcept
     const auto owner = owner_;
     DWORD error = ERROR_SUCCESS;
     const auto command = api->showContextMenu(
-        owner, mvpTrayMenuItems(), error);
+        owner, state->menuItems, error);
     if (!command.has_value()) {
         if (error != ERROR_SUCCESS) {
             state->lastError = TrayIconError{TrayIconErrorCode::menuFailed, error};

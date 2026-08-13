@@ -211,6 +211,8 @@ void testTrayLifecycleMenuAndExplorerRestart()
     CHECK(result.value->taskbarCreatedMessage() == api.taskbarMessage);
 
     tray = std::move(result.value);
+    CHECK(tray->setMenuShortcuts({{
+        L"Ctrl+`", L"Ctrl+Shift+1", L"Ctrl+3", L"Ctrl+2"}}));
     CHECK(tray->handleMessage(api.taskbarMessage, 0, 0));
     CHECK(api.calls.size() == 4U);
     CHECK(api.calls[2].operation == NIM_ADD);
@@ -226,23 +228,26 @@ void testTrayLifecycleMenuAndExplorerRestart()
     CHECK(tray == nullptr);
     CHECK(api.menuCalls == 1);
     CHECK(api.menuItems[0].command == TrayCommand::regionCapture);
-    CHECK(std::wstring(api.menuItems[0].label) == L"\u533a\u57df\u622a\u56fe");
+    CHECK(api.menuItems[0].label
+        == L"\u533a\u57df\u622a\u56fe\tCtrl+`");
     CHECK(api.menuItems[1].command == TrayCommand::fullScreenCapture);
-    CHECK(std::wstring(api.menuItems[1].label) == L"\u5168\u5c4f\u622a\u56fe");
+    CHECK(api.menuItems[1].label
+        == L"\u5168\u5c4f\u622a\u56fe\tCtrl+Shift+1");
     CHECK(api.menuItems[2].command == TrayCommand::textRecognition);
-    CHECK(std::wstring(api.menuItems[2].label) == L"\u6587\u5b57\u8bc6\u522b");
+    CHECK(api.menuItems[2].label
+        == L"\u6587\u5b57\u8bc6\u522b\tCtrl+3");
     CHECK(api.menuItems[3].command == TrayCommand::teachingPen);
-    CHECK(std::wstring(api.menuItems[3].label) == L"\u6559\u7b14");
+    CHECK(api.menuItems[3].label == L"\u6559\u7b14\tCtrl+2");
     CHECK(api.menuItems[4].separator);
     CHECK(api.menuItems[5].command == TrayCommand::preferences);
-    CHECK(std::wstring(api.menuItems[5].label) == L"\u504f\u597d\u8bbe\u7f6e\u2026");
+    CHECK(api.menuItems[5].label == L"\u504f\u597d\u8bbe\u7f6e\u2026");
     CHECK(api.menuItems[6].command == TrayCommand::checkForUpdates);
     CHECK(api.menuItems[7].command == TrayCommand::donation);
     CHECK(api.menuItems[8].command == TrayCommand::help);
     CHECK(api.menuItems[9].command == TrayCommand::exportDiagnostics);
     CHECK(api.menuItems[10].command == TrayCommand::about);
     CHECK(api.menuItems[11].command == TrayCommand::exit);
-    CHECK(std::wstring(api.menuItems[11].label) == L"\u9000\u51fa");
+    CHECK(api.menuItems[11].label == L"\u9000\u51fa");
     CHECK(api.calls.back().operation == NIM_DELETE);
 }
 
@@ -259,6 +264,7 @@ void testTrayMenuLoopMaySynchronouslyDestroyTray()
         [&](TrayCommand) { ++callbackCalls; });
     CHECK(result.value != nullptr);
     tray = std::move(result.value);
+    CHECK(tray->setMenuShortcuts({{L"Ctrl+`", L"", L"", L""}}));
     api.onShowContextMenu = [&] { tray.reset(); };
     auto* trayDuringMenu = tray.get();
     CHECK(trayDuringMenu->handleMessage(
@@ -267,6 +273,9 @@ void testTrayMenuLoopMaySynchronouslyDestroyTray()
         MAKELPARAM(WM_RBUTTONUP, xxsnap::win::trayIconIdentifier)));
     CHECK(tray == nullptr);
     CHECK(callbackCalls == 1);
+    CHECK(api.menuItems[0].label
+        == L"\u533a\u57df\u622a\u56fe\tCtrl+`");
+    CHECK(api.menuItems[1].label == L"\u5168\u5c4f\u622a\u56fe");
 
     FakeTrayIconApi wrongIconApi;
     auto wrongIconResult = TrayIcon::create(
@@ -382,6 +391,7 @@ void testAllDefaultMappingsAndMvpRegistration()
     });
     const auto window = reinterpret_cast<HWND>(0x301);
     CHECK(registrar->registerMvpRegionCapture(window));
+    CHECK(registrar->isRegistered(HotKeyCommand::regionCapture));
     CHECK(api.registrations.size() == 1U);
     CHECK(api.registrations[0].modifiers == MOD_CONTROL);
     CHECK(api.registrations[0].virtualKey == VK_OEM_3);
@@ -391,6 +401,7 @@ void testAllDefaultMappingsAndMvpRegistration()
     int teachingPenCalls = 0;
     CHECK(registrar->registerFullScreenCapture(
         window, [&] { ++fullScreenCalls; }));
+    CHECK(registrar->isRegistered(HotKeyCommand::fullScreen));
     CHECK(api.registrations.size() == 2U);
     CHECK(api.registrations[1].identifier
         == xxsnap::win::fullScreenCaptureHotKeyIdentifier);
@@ -402,6 +413,7 @@ void testAllDefaultMappingsAndMvpRegistration()
             xxsnap::win::fullScreenCaptureHotKeyIdentifier)));
     CHECK(fullScreenCalls == 1);
     CHECK(registrar->registerOcr(window, [&] { ++ocrCalls; }));
+    CHECK(registrar->isRegistered(HotKeyCommand::ocr));
     CHECK(api.registrations.size() == 3U);
     CHECK(api.registrations[2].identifier
         == xxsnap::win::ocrHotKeyIdentifier);
@@ -413,6 +425,7 @@ void testAllDefaultMappingsAndMvpRegistration()
     CHECK(ocrCalls == 1);
     CHECK(registrar->registerTeachingPen(
         window, [&] { ++teachingPenCalls; }));
+    CHECK(registrar->isRegistered(HotKeyCommand::teachingPen));
     CHECK(api.registrations.size() == 4U);
     CHECK(api.registrations[3].identifier
         == xxsnap::win::teachingPenHotKeyIdentifier);
@@ -424,6 +437,8 @@ void testAllDefaultMappingsAndMvpRegistration()
     CHECK(teachingPenCalls == 1);
     CHECK(registrar->registerRestorePinnedImage(
         window, [&] { ++restoreCalls; }));
+    CHECK(registrar->isRegistered(
+        HotKeyCommand::restoreMostRecentlyHiddenPinnedImage));
     CHECK(api.registrations.size() == 5U);
     CHECK(api.registrations[4].identifier
         == xxsnap::win::restorePinnedImageHotKeyIdentifier);
@@ -450,6 +465,7 @@ void testHotKeyConflictAndCleanupAreExplicit()
     conflict.registerError = ERROR_HOTKEY_ALREADY_REGISTERED;
     HotKeyRegistrar failed(conflict, [] {});
     CHECK(!failed.registerMvpRegionCapture(reinterpret_cast<HWND>(0x311)));
+    CHECK(!failed.isRegistered(HotKeyCommand::regionCapture));
     CHECK(failed.lastError().has_value());
     CHECK(failed.lastError()->nativeCode == ERROR_HOTKEY_ALREADY_REGISTERED);
     CHECK(conflict.registrations.size() == 1U);
@@ -472,6 +488,7 @@ void testHotKeyConflictAndCleanupAreExplicit()
         HotKeyRegistrar registered(api, [] {});
         CHECK(registered.registerMvpRegionCapture(reinterpret_cast<HWND>(0x321)));
         CHECK(registered.unregister());
+        CHECK(!registered.isRegistered(HotKeyCommand::regionCapture));
         CHECK(registered.unregister());
     }
     CHECK(api.unregisterCalls == 1);
@@ -514,6 +531,7 @@ void testHotKeyRebindIsImmediateAndRollsBackOnConflict()
     const HotKeyBinding conflict{
         HotKeyCommand::ocr, MOD_CONTROL | MOD_SHIFT, 'O'};
     CHECK(!registrar.rebind(conflict));
+    CHECK(registrar.isRegistered(HotKeyCommand::ocr));
     CHECK(registrar.binding(HotKeyCommand::ocr) == replacement);
     CHECK(registrar.lastError().has_value());
     CHECK(registrar.lastError()->nativeCode == ERROR_HOTKEY_ALREADY_REGISTERED);

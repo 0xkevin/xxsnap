@@ -493,6 +493,7 @@ public:
                     MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
             }
         }
+        refreshTrayMenuShortcuts();
         shortcutFeedback_ = ShortcutFeedbackController::create(
             instance_, window_, preferencesSettingsStore_,
             [this](UINT modifiers, UINT virtualKey) {
@@ -726,9 +727,16 @@ private:
     {
         if (!hotKey_) return false;
         const auto previous = hotKey_->binding(binding.command);
-        if (!hotKey_->rebind(binding)) return false;
-        if (hotKeySettingsStore_.save(binding)) return true;
+        if (!hotKey_->rebind(binding)) {
+            refreshTrayMenuShortcuts();
+            return false;
+        }
+        if (hotKeySettingsStore_.save(binding)) {
+            refreshTrayMenuShortcuts();
+            return true;
+        }
         hotKey_->rebind(previous);
+        refreshTrayMenuShortcuts();
         return false;
     }
 
@@ -742,13 +750,42 @@ private:
                 for (std::size_t index = 0; index < applied; ++index) {
                     hotKey_->rebind(previous[index]);
                 }
+                refreshTrayMenuShortcuts();
                 return false;
             }
             ++applied;
         }
-        if (hotKeySettingsStore_.reset()) return true;
+        if (hotKeySettingsStore_.reset()) {
+            refreshTrayMenuShortcuts();
+            return true;
+        }
         for (const auto binding : previous) hotKey_->rebind(binding);
+        refreshTrayMenuShortcuts();
         return false;
+    }
+
+    void refreshTrayMenuShortcuts() noexcept
+    {
+        if (!tray_ || !hotKey_) return;
+        try {
+            constexpr std::array commands{
+                HotKeyCommand::regionCapture,
+                HotKeyCommand::fullScreen,
+                HotKeyCommand::ocr,
+                HotKeyCommand::teachingPen,
+            };
+            TrayMenuShortcuts shortcuts{};
+            for (std::size_t index = 0; index < commands.size(); ++index) {
+                const auto command = commands[index];
+                if (hotKey_->isRegistered(command)) {
+                    const auto binding = hotKey_->binding(command);
+                    shortcuts[index] = shortcutDisplayText(
+                        binding.modifiers, binding.virtualKey);
+                }
+            }
+            tray_->setMenuShortcuts(shortcuts);
+        } catch (...) {
+        }
     }
 
     void startFullScreenCapture() noexcept

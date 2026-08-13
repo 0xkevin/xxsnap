@@ -96,6 +96,7 @@ public:
     bool registerRestorePinnedImage(HWND window, Callback callback) noexcept;
     bool rebind(HotKeyBinding binding) noexcept;
     HotKeyBinding binding(HotKeyCommand command) const noexcept;
+    bool isRegistered(HotKeyCommand command) const noexcept;
     bool unregister() noexcept;
     bool handleMessage(UINT message, WPARAM wParam) noexcept;
     const std::optional<HotKeyError>& lastError() const noexcept;
