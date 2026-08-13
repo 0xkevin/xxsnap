@@ -454,6 +454,36 @@ void testEmbeddedToolbarResources()
         }
     }
 
+    const auto alipay = FindResourceW(module,
+        MAKEINTRESOURCEW(IDR_DONATION_ALIPAY), MAKEINTRESOURCEW(10));
+    CHECK(alipay != nullptr);
+    if (alipay != nullptr) {
+        const auto loaded = LoadResource(module, alipay);
+        const auto* bytes = static_cast<const unsigned char*>(
+            loaded == nullptr ? nullptr : LockResource(loaded));
+        CHECK(bytes != nullptr);
+        CHECK(SizeofResource(module, alipay) >= 2U);
+        if (bytes != nullptr && SizeofResource(module, alipay) >= 2U) {
+            CHECK(bytes[0] == 0xFFU && bytes[1] == 0xD8U);
+        }
+    }
+    const auto wechatPay = FindResourceW(module,
+        MAKEINTRESOURCEW(IDR_DONATION_WECHATPAY), MAKEINTRESOURCEW(10));
+    CHECK(wechatPay != nullptr);
+    if (wechatPay != nullptr) {
+        const auto loaded = LoadResource(module, wechatPay);
+        const auto* bytes = static_cast<const unsigned char*>(
+            loaded == nullptr ? nullptr : LockResource(loaded));
+        CHECK(bytes != nullptr);
+        CHECK(SizeofResource(module, wechatPay) >= pngSignature.size());
+        if (bytes != nullptr
+            && SizeofResource(module, wechatPay) >= pngSignature.size()) {
+            for (std::size_t index = 0; index < pngSignature.size(); ++index) {
+                CHECK(bytes[index] == pngSignature[index]);
+            }
+        }
+    }
+
     std::vector<int> embeddedResourceIds;
     CHECK(EnumResourceNamesW(
         module,
@@ -461,6 +491,8 @@ void testEmbeddedToolbarResources()
         &collectIntegerResourceName,
         reinterpret_cast<LONG_PTR>(&embeddedResourceIds)) != FALSE);
     std::sort(embeddedResourceIds.begin(), embeddedResourceIds.end());
+    expectedResourceIds.push_back(IDR_DONATION_ALIPAY);
+    expectedResourceIds.push_back(IDR_DONATION_WECHATPAY);
     std::sort(expectedResourceIds.begin(), expectedResourceIds.end());
     CHECK(embeddedResourceIds == expectedResourceIds);
 }

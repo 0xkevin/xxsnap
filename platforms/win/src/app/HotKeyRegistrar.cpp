@@ -5,6 +5,31 @@
 namespace xxsnap::win {
 namespace {
 
+constexpr std::size_t commandIndex(HotKeyCommand command) noexcept
+{
+    switch (command) {
+    case HotKeyCommand::regionCapture: return 0U;
+    case HotKeyCommand::fullScreen: return 1U;
+    case HotKeyCommand::ocr: return 2U;
+    case HotKeyCommand::teachingPen: return 3U;
+    case HotKeyCommand::restoreMostRecentlyHiddenPinnedImage: return 4U;
+    }
+    return 0U;
+}
+
+constexpr int commandIdentifier(HotKeyCommand command) noexcept
+{
+    switch (command) {
+    case HotKeyCommand::regionCapture: return regionCaptureHotKeyIdentifier;
+    case HotKeyCommand::fullScreen: return fullScreenCaptureHotKeyIdentifier;
+    case HotKeyCommand::ocr: return ocrHotKeyIdentifier;
+    case HotKeyCommand::teachingPen: return teachingPenHotKeyIdentifier;
+    case HotKeyCommand::restoreMostRecentlyHiddenPinnedImage:
+        return restorePinnedImageHotKeyIdentifier;
+    }
+    return regionCaptureHotKeyIdentifier;
+}
+
 class SystemHotKeyApi final : public HotKeyApi {
 public:
     bool registerHotKey(
@@ -42,9 +67,11 @@ HotKeyApi& systemHotKeyApi() noexcept
     return api;
 }
 
-HotKeyRegistrar::HotKeyRegistrar(HotKeyApi& api, Callback callback)
+HotKeyRegistrar::HotKeyRegistrar(HotKeyApi& api, Callback callback,
+    std::array<HotKeyBinding, 5> bindings)
     : api_(api)
     , callback_(std::move(callback))
+    , bindings_(bindings)
 {
 }
 
@@ -63,7 +90,8 @@ bool HotKeyRegistrar::registerMvpRegionCapture(HWND window) noexcept
             HotKeyErrorCode::invalidWindow, ERROR_INVALID_WINDOW_HANDLE};
         return false;
     }
-    constexpr auto binding = defaultAppHotKeys()[0];
+    const auto binding = bindings_[0];
+    window_ = window;
     DWORD error = ERROR_SUCCESS;
     if (!api_.registerHotKey(
             window,
@@ -75,7 +103,6 @@ bool HotKeyRegistrar::registerMvpRegionCapture(HWND window) noexcept
             HotKeyErrorCode::registrationFailed, error};
         return false;
     }
-    window_ = window;
     registered_ = true;
     lastError_.reset();
     return true;
@@ -90,7 +117,15 @@ bool HotKeyRegistrar::registerRestorePinnedImage(
             HotKeyErrorCode::invalidWindow, ERROR_INVALID_WINDOW_HANDLE};
         return false;
     }
-    constexpr auto binding = defaultAppHotKeys()[4];
+    try {
+        restorePinnedImageCallback_ = std::move(callback);
+    } catch (...) {
+        lastError_ = HotKeyError{
+            HotKeyErrorCode::registrationFailed, ERROR_NOT_ENOUGH_MEMORY};
+        return false;
+    }
+    window_ = window;
+    const auto binding = bindings_[4];
     DWORD error = ERROR_SUCCESS;
     if (!api_.registerHotKey(window, restorePinnedImageHotKeyIdentifier,
             binding.modifiers, binding.virtualKey, error)) {
@@ -98,17 +133,7 @@ bool HotKeyRegistrar::registerRestorePinnedImage(
             HotKeyErrorCode::registrationFailed, error};
         return false;
     }
-    window_ = window;
     restorePinnedImageRegistered_ = true;
-    try {
-        restorePinnedImageCallback_ = std::move(callback);
-    } catch (...) {
-        api_.unregisterHotKey(window, restorePinnedImageHotKeyIdentifier, error);
-        restorePinnedImageRegistered_ = false;
-        lastError_ = HotKeyError{
-            HotKeyErrorCode::registrationFailed, ERROR_NOT_ENOUGH_MEMORY};
-        return false;
-    }
     lastError_.reset();
     return true;
 }
@@ -122,7 +147,15 @@ bool HotKeyRegistrar::registerFullScreenCapture(
             HotKeyErrorCode::invalidWindow, ERROR_INVALID_WINDOW_HANDLE};
         return false;
     }
-    constexpr auto binding = defaultAppHotKeys()[1];
+    try {
+        fullScreenCaptureCallback_ = std::move(callback);
+    } catch (...) {
+        lastError_ = HotKeyError{
+            HotKeyErrorCode::registrationFailed, ERROR_NOT_ENOUGH_MEMORY};
+        return false;
+    }
+    window_ = window;
+    const auto binding = bindings_[1];
     DWORD error = ERROR_SUCCESS;
     if (!api_.registerHotKey(window, fullScreenCaptureHotKeyIdentifier,
             binding.modifiers, binding.virtualKey, error)) {
@@ -130,17 +163,7 @@ bool HotKeyRegistrar::registerFullScreenCapture(
             HotKeyErrorCode::registrationFailed, error};
         return false;
     }
-    window_ = window;
     fullScreenCaptureRegistered_ = true;
-    try {
-        fullScreenCaptureCallback_ = std::move(callback);
-    } catch (...) {
-        api_.unregisterHotKey(window, fullScreenCaptureHotKeyIdentifier, error);
-        fullScreenCaptureRegistered_ = false;
-        lastError_ = HotKeyError{
-            HotKeyErrorCode::registrationFailed, ERROR_NOT_ENOUGH_MEMORY};
-        return false;
-    }
     lastError_.reset();
     return true;
 }
@@ -154,7 +177,15 @@ bool HotKeyRegistrar::registerOcr(
             HotKeyErrorCode::invalidWindow, ERROR_INVALID_WINDOW_HANDLE};
         return false;
     }
-    constexpr auto binding = defaultAppHotKeys()[2];
+    try {
+        ocrCallback_ = std::move(callback);
+    } catch (...) {
+        lastError_ = HotKeyError{
+            HotKeyErrorCode::registrationFailed, ERROR_NOT_ENOUGH_MEMORY};
+        return false;
+    }
+    window_ = window;
+    const auto binding = bindings_[2];
     DWORD error = ERROR_SUCCESS;
     if (!api_.registerHotKey(window, ocrHotKeyIdentifier,
             binding.modifiers, binding.virtualKey, error)) {
@@ -162,17 +193,7 @@ bool HotKeyRegistrar::registerOcr(
             HotKeyErrorCode::registrationFailed, error};
         return false;
     }
-    window_ = window;
     ocrRegistered_ = true;
-    try {
-        ocrCallback_ = std::move(callback);
-    } catch (...) {
-        api_.unregisterHotKey(window, ocrHotKeyIdentifier, error);
-        ocrRegistered_ = false;
-        lastError_ = HotKeyError{
-            HotKeyErrorCode::registrationFailed, ERROR_NOT_ENOUGH_MEMORY};
-        return false;
-    }
     lastError_.reset();
     return true;
 }
@@ -186,7 +207,15 @@ bool HotKeyRegistrar::registerTeachingPen(
             HotKeyErrorCode::invalidWindow, ERROR_INVALID_WINDOW_HANDLE};
         return false;
     }
-    constexpr auto binding = defaultAppHotKeys()[3];
+    try {
+        teachingPenCallback_ = std::move(callback);
+    } catch (...) {
+        lastError_ = HotKeyError{
+            HotKeyErrorCode::registrationFailed, ERROR_NOT_ENOUGH_MEMORY};
+        return false;
+    }
+    window_ = window;
+    const auto binding = bindings_[3];
     DWORD error = ERROR_SUCCESS;
     if (!api_.registerHotKey(window, teachingPenHotKeyIdentifier,
             binding.modifiers, binding.virtualKey, error)) {
@@ -194,19 +223,68 @@ bool HotKeyRegistrar::registerTeachingPen(
             HotKeyErrorCode::registrationFailed, error};
         return false;
     }
-    window_ = window;
     teachingPenRegistered_ = true;
-    try {
-        teachingPenCallback_ = std::move(callback);
-    } catch (...) {
-        api_.unregisterHotKey(window, teachingPenHotKeyIdentifier, error);
-        teachingPenRegistered_ = false;
-        lastError_ = HotKeyError{
-            HotKeyErrorCode::registrationFailed, ERROR_NOT_ENOUGH_MEMORY};
-        return false;
-    }
     lastError_.reset();
     return true;
+}
+
+bool HotKeyRegistrar::rebind(HotKeyBinding replacement) noexcept
+{
+    if (window_ == nullptr || replacement.modifiers == 0U
+        || replacement.virtualKey == 0U) {
+        lastError_ = HotKeyError{
+            HotKeyErrorCode::invalidWindow, ERROR_INVALID_PARAMETER};
+        return false;
+    }
+    bool* registered = nullptr;
+    switch (replacement.command) {
+    case HotKeyCommand::regionCapture: registered = &registered_; break;
+    case HotKeyCommand::fullScreen:
+        registered = &fullScreenCaptureRegistered_;
+        break;
+    case HotKeyCommand::ocr: registered = &ocrRegistered_; break;
+    case HotKeyCommand::teachingPen:
+        registered = &teachingPenRegistered_;
+        break;
+    case HotKeyCommand::restoreMostRecentlyHiddenPinnedImage:
+        registered = &restorePinnedImageRegistered_;
+        break;
+    }
+    if (registered == nullptr) return false;
+
+    const auto index = commandIndex(replacement.command);
+    const auto previous = bindings_[index];
+    const auto identifier = commandIdentifier(replacement.command);
+    const auto wasRegistered = *registered;
+    DWORD error = ERROR_SUCCESS;
+    if (wasRegistered
+        && !api_.unregisterHotKey(window_, identifier, error)) {
+        lastError_ = HotKeyError{
+            HotKeyErrorCode::unregistrationFailed, error};
+        return false;
+    }
+    *registered = false;
+    if (!api_.registerHotKey(window_, identifier,
+            replacement.modifiers, replacement.virtualKey, error)) {
+        const auto registrationError = error;
+        if (wasRegistered) {
+            DWORD rollbackError = ERROR_SUCCESS;
+            *registered = api_.registerHotKey(window_, identifier,
+                previous.modifiers, previous.virtualKey, rollbackError);
+        }
+        lastError_ = HotKeyError{
+            HotKeyErrorCode::registrationFailed, registrationError};
+        return false;
+    }
+    bindings_[index] = replacement;
+    *registered = true;
+    lastError_.reset();
+    return true;
+}
+
+HotKeyBinding HotKeyRegistrar::binding(HotKeyCommand command) const noexcept
+{
+    return bindings_[commandIndex(command)];
 }
 
 bool HotKeyRegistrar::unregister() noexcept

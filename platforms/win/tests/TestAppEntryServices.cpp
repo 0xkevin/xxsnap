@@ -26,6 +26,7 @@ using xxsnap::win::TrayCommand;
 using xxsnap::win::TrayIcon;
 using xxsnap::win::TrayIconApi;
 using xxsnap::win::TrayMenuItem;
+using xxsnap::win::TrayMenuItems;
 
 int failureCount = 0;
 
@@ -163,7 +164,7 @@ public:
 
     std::optional<TrayCommand> showContextMenu(
         HWND,
-        const std::array<TrayMenuItem, 5>& items,
+        const TrayMenuItems& items,
         DWORD& error) noexcept override
     {
         ++menuCalls;
@@ -184,7 +185,7 @@ public:
     std::wstring taskbarMessageName;
     std::vector<NotifyCall> calls;
     int menuCalls = 0;
-    std::array<TrayMenuItem, 5> menuItems{};
+    TrayMenuItems menuItems{};
     std::function<void()> onShowContextMenu;
 };
 
@@ -232,8 +233,16 @@ void testTrayLifecycleMenuAndExplorerRestart()
     CHECK(std::wstring(api.menuItems[2].label) == L"\u6587\u5b57\u8bc6\u522b");
     CHECK(api.menuItems[3].command == TrayCommand::teachingPen);
     CHECK(std::wstring(api.menuItems[3].label) == L"\u6559\u7b14");
-    CHECK(api.menuItems[4].command == TrayCommand::exit);
-    CHECK(std::wstring(api.menuItems[4].label) == L"\u9000\u51fa");
+    CHECK(api.menuItems[4].separator);
+    CHECK(api.menuItems[5].command == TrayCommand::preferences);
+    CHECK(std::wstring(api.menuItems[5].label) == L"\u504f\u597d\u8bbe\u7f6e\u2026");
+    CHECK(api.menuItems[6].command == TrayCommand::checkForUpdates);
+    CHECK(api.menuItems[7].command == TrayCommand::donation);
+    CHECK(api.menuItems[8].command == TrayCommand::help);
+    CHECK(api.menuItems[9].command == TrayCommand::exportDiagnostics);
+    CHECK(api.menuItems[10].command == TrayCommand::about);
+    CHECK(api.menuItems[11].command == TrayCommand::exit);
+    CHECK(std::wstring(api.menuItems[11].label) == L"\u9000\u51fa");
     CHECK(api.calls.back().operation == NIM_DELETE);
 }
 
@@ -323,7 +332,8 @@ public:
     {
         registrations.push_back({window, identifier, modifiers, virtualKey});
         error = registerError;
-        return registerSucceeds;
+        const auto call = registerCalls++;
+        return registerSucceeds && call != failRegisterCall;
     }
 
     bool unregisterHotKey(HWND window, int identifier, DWORD& error) noexcept override
@@ -336,6 +346,8 @@ public:
     }
 
     bool registerSucceeds = true;
+    int registerCalls = 0;
+    int failRegisterCall = -1;
     DWORD registerError = ERROR_SUCCESS;
     bool unregisterSucceeds = true;
     DWORD unregisterError = ERROR_SUCCESS;
@@ -478,6 +490,35 @@ void testHotKeyConflictAndCleanupAreExplicit()
     CHECK(unregisterFailure.unregisterCalls == 2);
 }
 
+void testHotKeyRebindIsImmediateAndRollsBackOnConflict()
+{
+    FakeHotKeyApi api;
+    HotKeyRegistrar registrar(api, [] {});
+    const auto window = reinterpret_cast<HWND>(0x341);
+    CHECK(registrar.registerMvpRegionCapture(window));
+    CHECK(registrar.registerFullScreenCapture(window, [] {}));
+    CHECK(registrar.registerOcr(window, [] {}));
+    CHECK(registrar.registerTeachingPen(window, [] {}));
+    CHECK(registrar.registerRestorePinnedImage(window, [] {}));
+
+    const HotKeyBinding replacement{
+        HotKeyCommand::ocr, MOD_CONTROL | MOD_ALT, 'O'};
+    CHECK(registrar.rebind(replacement));
+    CHECK(registrar.binding(HotKeyCommand::ocr) == replacement);
+    CHECK(api.unregisteredIdentifier == xxsnap::win::ocrHotKeyIdentifier);
+    CHECK(api.registrations.back().modifiers == (MOD_CONTROL | MOD_ALT));
+    CHECK(api.registrations.back().virtualKey == 'O');
+
+    api.registerError = ERROR_HOTKEY_ALREADY_REGISTERED;
+    api.failRegisterCall = api.registerCalls;
+    const HotKeyBinding conflict{
+        HotKeyCommand::ocr, MOD_CONTROL | MOD_SHIFT, 'O'};
+    CHECK(!registrar.rebind(conflict));
+    CHECK(registrar.binding(HotKeyCommand::ocr) == replacement);
+    CHECK(registrar.lastError().has_value());
+    CHECK(registrar.lastError()->nativeCode == ERROR_HOTKEY_ALREADY_REGISTERED);
+}
+
 } // namespace
 
 int main()
@@ -488,6 +529,7 @@ int main()
     testTrayMenuLoopMaySynchronouslyDestroyTray();
     testAllDefaultMappingsAndMvpRegistration();
     testHotKeyConflictAndCleanupAreExplicit();
+    testHotKeyRebindIsImmediateAndRollsBackOnConflict();
 
     if (failureCount != 0) {
         std::cerr << failureCount << " app entry service check(s) failed\n";

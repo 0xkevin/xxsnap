@@ -50,7 +50,7 @@ public:
 
     std::optional<TrayCommand> showContextMenu(
         HWND owner,
-        const std::array<TrayMenuItem, 5>& items,
+        const TrayMenuItems& items,
         DWORD& error) noexcept override
     {
         const auto menu = CreatePopupMenu();
@@ -59,6 +59,14 @@ public:
             return std::nullopt;
         }
         for (const auto& item : items) {
+            if (item.separator) {
+                if (!AppendMenuW(menu, MF_SEPARATOR, 0, nullptr)) {
+                    error = GetLastError();
+                    DestroyMenu(menu);
+                    return std::nullopt;
+                }
+                continue;
+            }
             if (!AppendMenuW(
                     menu,
                     MF_STRING,
@@ -102,6 +110,24 @@ public:
         }
         if (command == static_cast<UINT>(TrayCommand::teachingPen)) {
             return TrayCommand::teachingPen;
+        }
+        if (command == static_cast<UINT>(TrayCommand::preferences)) {
+            return TrayCommand::preferences;
+        }
+        if (command == static_cast<UINT>(TrayCommand::checkForUpdates)) {
+            return TrayCommand::checkForUpdates;
+        }
+        if (command == static_cast<UINT>(TrayCommand::donation)) {
+            return TrayCommand::donation;
+        }
+        if (command == static_cast<UINT>(TrayCommand::help)) {
+            return TrayCommand::help;
+        }
+        if (command == static_cast<UINT>(TrayCommand::exportDiagnostics)) {
+            return TrayCommand::exportDiagnostics;
+        }
+        if (command == static_cast<UINT>(TrayCommand::about)) {
+            return TrayCommand::about;
         }
         if (command == static_cast<UINT>(TrayCommand::exit)) {
             return TrayCommand::exit;

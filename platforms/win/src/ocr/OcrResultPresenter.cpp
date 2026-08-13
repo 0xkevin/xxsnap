@@ -1,4 +1,5 @@
 #include "ocr/OcrResultPresenter.h"
+#include "app/PreferencesSettings.h"
 #include "resource.h"
 
 #include <algorithm>
@@ -208,7 +209,12 @@ OcrResultPresenter::~OcrResultPresenter() = default;
 
 void OcrResultPresenter::showSuccess(PixelRect selection) noexcept
 {
-    impl_->show(true, selection);
+    SystemPreferencesRegistry registry;
+    const auto settings = PreferencesSettingsStore(registry).load();
+    if (shouldPlayTextRecognitionSuccessSound(settings)) MessageBeep(MB_OK);
+    if (shouldShowTextRecognitionSuccessNotification(settings)) {
+        impl_->show(true, selection);
+    }
 }
 
 void OcrResultPresenter::showFailure(PixelRect selection) noexcept

@@ -10,6 +10,8 @@
 namespace xxsnap::win {
 namespace {
 
+constexpr wchar_t applicationKey[] = L"Software\\XxSnap";
+constexpr wchar_t preferencesSubkey[] = L"Preferences";
 constexpr wchar_t preferencesKey[] = L"Software\\XxSnap\\Preferences";
 constexpr wchar_t defaultFilenameTemplate[] =
     L"xxsnap_截图_{yyyyMMdd}_{HHmmss}";
@@ -82,26 +84,34 @@ bool validUpdateInterval(int value) noexcept
         != allowedUpdateIntervals.end();
 }
 
-class RegistryKey final {
+class PreferencesKey final {
 public:
-    explicit RegistryKey(REGSAM access) noexcept
+    explicit PreferencesKey(bool create) noexcept
     {
-        if ((access & KEY_SET_VALUE) != 0U) {
-            RegCreateKeyExW(HKEY_CURRENT_USER, preferencesKey, 0, nullptr,
-                REG_OPTION_NON_VOLATILE, access, nullptr, &key_, nullptr);
-        } else {
-            RegOpenKeyExW(HKEY_CURRENT_USER, preferencesKey, 0, access, &key_);
+        if (!create) {
+            RegOpenKeyExW(HKEY_CURRENT_USER, preferencesKey, 0,
+                KEY_QUERY_VALUE, &key_);
+            return;
         }
+        HKEY application = nullptr;
+        if (RegCreateKeyExW(HKEY_CURRENT_USER, applicationKey, 0, nullptr,
+                REG_OPTION_NON_VOLATILE,
+                KEY_CREATE_SUB_KEY | KEY_SET_VALUE, nullptr,
+                &application, nullptr) != ERROR_SUCCESS) {
+            return;
+        }
+        RegCreateKeyExW(application, preferencesSubkey, 0, nullptr,
+            REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, nullptr, &key_, nullptr);
+        RegCloseKey(application);
     }
 
-    ~RegistryKey()
+    ~PreferencesKey()
     {
         if (key_ != nullptr) RegCloseKey(key_);
     }
 
-    RegistryKey(const RegistryKey&) = delete;
-    RegistryKey& operator=(const RegistryKey&) = delete;
-
+    PreferencesKey(const PreferencesKey&) = delete;
+    PreferencesKey& operator=(const PreferencesKey&) = delete;
     HKEY get() const noexcept { return key_; }
 
 private:
@@ -138,11 +148,23 @@ bool operator!=(
     return !(lhs == rhs);
 }
 
+bool shouldPlayTextRecognitionSuccessSound(
+    const PreferencesSettings& settings) noexcept
+{
+    return !settings.disablesTextRecognitionSound;
+}
+
+bool shouldShowTextRecognitionSuccessNotification(
+    const PreferencesSettings& settings) noexcept
+{
+    return !settings.disablesTextRecognitionSuccessNotification;
+}
+
 std::optional<std::wstring> SystemPreferencesRegistry::readString(
     const wchar_t* name) const noexcept
 {
     if (name == nullptr) return std::nullopt;
-    RegistryKey key(KEY_QUERY_VALUE);
+    PreferencesKey key(false);
     if (key.get() == nullptr) return std::nullopt;
     DWORD type = 0;
     DWORD byteCount = 0;
@@ -172,7 +194,7 @@ std::optional<DWORD> SystemPreferencesRegistry::readDword(
     const wchar_t* name) const noexcept
 {
     if (name == nullptr) return std::nullopt;
-    RegistryKey key(KEY_QUERY_VALUE);
+    PreferencesKey key(false);
     if (key.get() == nullptr) return std::nullopt;
     DWORD value = 0;
     DWORD type = 0;
@@ -193,7 +215,7 @@ bool SystemPreferencesRegistry::writeString(
                 - 1U) {
         return false;
     }
-    RegistryKey key(KEY_SET_VALUE);
+    PreferencesKey key(true);
     if (key.get() == nullptr) return false;
     const auto byteCount = static_cast<DWORD>(
         (value.size() + 1U) * sizeof(wchar_t));
@@ -206,7 +228,7 @@ bool SystemPreferencesRegistry::writeDword(
     const wchar_t* name, DWORD value) noexcept
 {
     if (name == nullptr) return false;
-    RegistryKey key(KEY_SET_VALUE);
+    PreferencesKey key(true);
     if (key.get() == nullptr) return false;
     return RegSetValueExW(key.get(), name, 0, REG_DWORD,
                reinterpret_cast<const BYTE*>(&value), sizeof(value))

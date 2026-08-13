@@ -6,6 +6,13 @@ COMDLG32.dll!CommDlgExtendedError
 COMDLG32.dll!ChooseColorW
 COMDLG32.dll!GetSaveFileNameW
 
+ADVAPI32.dll!RegCloseKey
+ADVAPI32.dll!RegCreateKeyExW
+ADVAPI32.dll!RegDeleteValueW
+ADVAPI32.dll!RegOpenKeyExW
+ADVAPI32.dll!RegQueryValueExW
+ADVAPI32.dll!RegSetValueExW
+
 ole32.dll!CoCreateGuid
 ole32.dll!CoCreateInstance
 ole32.dll!CoInitializeEx
@@ -15,6 +22,7 @@ ole32.dll!GetHGlobalFromStream
 ole32.dll!StringFromGUID2
 
 USER32.dll!AppendMenuW
+USER32.dll!AdjustWindowRectEx
 USER32.dll!BeginPaint
 USER32.dll!CallNextHookEx
 USER32.dll!CloseClipboard
@@ -28,6 +36,7 @@ USER32.dll!DestroyWindow
 USER32.dll!DispatchMessageW
 USER32.dll!DisplayConfigGetDeviceInfo
 USER32.dll!DrawTextW
+USER32.dll!DrawFocusRect
 USER32.dll!EmptyClipboard
 USER32.dll!EndPaint
 USER32.dll!EnumDisplayMonitors
@@ -38,9 +47,11 @@ USER32.dll!GetClientRect
 USER32.dll!GetClipboardData
 USER32.dll!GetCursorPos
 USER32.dll!GetDC
+USER32.dll!GetDlgItem
 USER32.dll!GetDisplayConfigBufferSizes
 USER32.dll!GetForegroundWindow
 USER32.dll!GetKeyState
+USER32.dll!GetKeyNameTextW
 USER32.dll!GetMessageW
 USER32.dll!GetMonitorInfoW
 USER32.dll!GetSystemMetrics
@@ -48,13 +59,19 @@ USER32.dll!GetWindowThreadProcessId
 USER32.dll!GetWindowLongPtrW
 USER32.dll!GetWindowLongW
 USER32.dll!GetWindowRect
+USER32.dll!GetWindowTextLengthW
+USER32.dll!GetWindowTextW
+USER32.dll!InflateRect
 USER32.dll!InvalidateRect
 USER32.dll!IsWindow
 USER32.dll!KillTimer
 USER32.dll!LoadCursorW
 USER32.dll!LoadImageW
 USER32.dll!MessageBoxW
+USER32.dll!MapVirtualKeyW
+USER32.dll!MessageBeep
 USER32.dll!MonitorFromRect
+USER32.dll!MonitorFromWindow
 USER32.dll!MonitorFromPoint
 USER32.dll!OpenClipboard
 USER32.dll!PostMessageW
@@ -67,6 +84,7 @@ USER32.dll!RegisterHotKey
 USER32.dll!RegisterWindowMessageW
 USER32.dll!ReleaseCapture
 USER32.dll!ReleaseDC
+USER32.dll!SendMessageW
 USER32.dll!SetCapture
 USER32.dll!SetClipboardData
 USER32.dll!SetCursor
@@ -111,6 +129,7 @@ GDI32.dll!EnumFontFamiliesExW
 GDI32.dll!FillRgn
 GDI32.dll!GdiFlush
 GDI32.dll!GetDeviceCaps
+GDI32.dll!GetObjectW
 GDI32.dll!GetStockObject
 GDI32.dll!LineTo
 GDI32.dll!MoveToEx
@@ -120,11 +139,13 @@ GDI32.dll!SelectObject
 GDI32.dll!SetBkMode
 GDI32.dll!SetStretchBltMode
 GDI32.dll!SetTextColor
+GDI32.dll!StretchBlt
 GDI32.dll!StretchDIBits
 
 MSIMG32.dll!AlphaBlend
 
 SHELL32.dll!Shell_NotifyIconW
+SHELL32.dll!ShellExecuteW
 
 IMM32.dll!ImmGetCompositionStringW
 IMM32.dll!ImmGetContext
@@ -146,6 +167,8 @@ KERNEL32.dll!GetCurrentProcessId
 KERNEL32.dll!GetCurrentThreadId
 KERNEL32.dll!GetEnvironmentVariableW
 KERNEL32.dll!GetLastError
+KERNEL32.dll!GetLocalTime
+KERNEL32.dll!GetModuleFileNameW
 KERNEL32.dll!GetModuleHandleW
 KERNEL32.dll!GetProcAddress
 KERNEL32.dll!GetStartupInfoW
@@ -165,6 +188,7 @@ KERNEL32.dll!LoadResource
 KERNEL32.dll!LockResource
 KERNEL32.dll!MultiByteToWideChar
 KERNEL32.dll!MoveFileExW
+KERNEL32.dll!MulDiv
 KERNEL32.dll!QueryPerformanceCounter
 KERNEL32.dll!ReleaseSRWLockExclusive
 KERNEL32.dll!ResetEvent
@@ -220,7 +244,12 @@ VCRUNTIME140.dll!memcmp
 VCRUNTIME140.dll!memcpy
 VCRUNTIME140.dll!memmove
 VCRUNTIME140.dll!memset
+VCRUNTIME140.dll!wcschr
 VCRUNTIME140_1.dll!__CxxFrameHandler4
+
+VERSION.dll!GetFileVersionInfoSizeW
+VERSION.dll!GetFileVersionInfoW
+VERSION.dll!VerQueryValueW
 
 api-ms-win-crt-heap-l1-1-0.dll!_callnewh
 api-ms-win-crt-heap-l1-1-0.dll!_set_new_mode
@@ -273,6 +302,7 @@ api-ms-win-crt-runtime-l1-1-0.dll!exit
 api-ms-win-crt-runtime-l1-1-0.dll!terminate
 api-ms-win-crt-stdio-l1-1-0.dll!__p__commode
 api-ms-win-crt-stdio-l1-1-0.dll!__stdio_common_vswprintf
+api-ms-win-crt-stdio-l1-1-0.dll!__stdio_common_vswprintf_s
 api-ms-win-crt-stdio-l1-1-0.dll!__stdio_common_vsprintf
 api-ms-win-crt-stdio-l1-1-0.dll!_fseeki64
 api-ms-win-crt-stdio-l1-1-0.dll!_set_fmode
@@ -282,5 +312,8 @@ api-ms-win-crt-stdio-l1-1-0.dll!fread
 api-ms-win-crt-stdio-l1-1-0.dll!fwrite
 api-ms-win-crt-stdio-l1-1-0.dll!tmpfile
 api-ms-win-crt-string-l1-1-0.dll!iswspace
+api-ms-win-crt-string-l1-1-0.dll!_wcsicmp
+api-ms-win-crt-string-l1-1-0.dll!towlower
 api-ms-win-crt-string-l1-1-0.dll!wcscmp
 api-ms-win-crt-string-l1-1-0.dll!wcslen
+api-ms-win-crt-string-l1-1-0.dll!wcsncpy_s

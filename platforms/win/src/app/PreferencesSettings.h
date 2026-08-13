@@ -28,6 +28,10 @@ bool operator==(
     const PreferencesSettings& lhs, const PreferencesSettings& rhs) noexcept;
 bool operator!=(
     const PreferencesSettings& lhs, const PreferencesSettings& rhs) noexcept;
+bool shouldPlayTextRecognitionSuccessSound(
+    const PreferencesSettings& settings) noexcept;
+bool shouldShowTextRecognitionSuccessNotification(
+    const PreferencesSettings& settings) noexcept;
 
 inline constexpr std::array<int, 6> allowedUpdateIntervals{
     1, 6, 12, 24, 48, 72};

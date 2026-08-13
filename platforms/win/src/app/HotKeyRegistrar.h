@@ -82,7 +82,8 @@ class HotKeyRegistrar final {
 public:
     using Callback = std::function<void()>;
 
-    HotKeyRegistrar(HotKeyApi& api, Callback callback);
+    HotKeyRegistrar(HotKeyApi& api, Callback callback,
+        std::array<HotKeyBinding, 5> bindings = defaultAppHotKeys());
     ~HotKeyRegistrar();
 
     HotKeyRegistrar(const HotKeyRegistrar&) = delete;
@@ -93,6 +94,8 @@ public:
     bool registerOcr(HWND window, Callback callback) noexcept;
     bool registerTeachingPen(HWND window, Callback callback) noexcept;
     bool registerRestorePinnedImage(HWND window, Callback callback) noexcept;
+    bool rebind(HotKeyBinding binding) noexcept;
+    HotKeyBinding binding(HotKeyCommand command) const noexcept;
     bool unregister() noexcept;
     bool handleMessage(UINT message, WPARAM wParam) noexcept;
     const std::optional<HotKeyError>& lastError() const noexcept;
@@ -110,6 +113,7 @@ private:
     bool ocrRegistered_ = false;
     bool teachingPenRegistered_ = false;
     bool restorePinnedImageRegistered_ = false;
+    std::array<HotKeyBinding, 5> bindings_ = defaultAppHotKeys();
     std::optional<HotKeyError> lastError_;
 };
 

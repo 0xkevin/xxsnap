@@ -1,4 +1,5 @@
 #include "app/PreferencesSettings.h"
+#include "app/HotKeySettings.h"
 
 #include <iostream>
 #include <map>
@@ -68,6 +69,13 @@ void testDefaultsMatchMacContract()
     CHECK(!settings.disablesTextRecognitionSuccessNotification);
     CHECK(settings.showsShortcutFeedback);
     CHECK(settings.showsSystemShortcutFeedback);
+    CHECK(shouldPlayTextRecognitionSuccessSound(settings));
+    CHECK(shouldShowTextRecognitionSuccessNotification(settings));
+    auto muted = settings;
+    muted.disablesTextRecognitionSound = true;
+    muted.disablesTextRecognitionSuccessNotification = true;
+    CHECK(!shouldPlayTextRecognitionSuccessSound(muted));
+    CHECK(!shouldShowTextRecognitionSuccessNotification(muted));
 }
 
 void testStoreRecoversOnlyInvalidFields()
@@ -168,6 +176,34 @@ void testSuggestedFilenameFallsBackFromInvalidStoredTemplate()
         == L"xxsnap_截图_20260813_070509.png");
 }
 
+void testHotKeySettingsRecoverPersistAndReset()
+{
+    FakeRegistry registry;
+    registry.dwords[L"HotKey.Ocr.Modifiers"] = MOD_CONTROL | MOD_ALT;
+    registry.dwords[L"HotKey.Ocr.VirtualKey"] = 'O';
+    registry.dwords[L"HotKey.TeachingPen.Modifiers"] = 0U;
+    registry.dwords[L"HotKey.TeachingPen.VirtualKey"] = 'P';
+    HotKeySettingsStore store(registry);
+    const auto loaded = store.load();
+    CHECK(loaded[2] == (HotKeyBinding{
+        HotKeyCommand::ocr, MOD_CONTROL | MOD_ALT, 'O'}));
+    CHECK(loaded[3] == defaultAppHotKeys()[3]);
+
+    const HotKeyBinding replacement{
+        HotKeyCommand::regionCapture, MOD_CONTROL | MOD_SHIFT, 'S'};
+    CHECK(store.save(replacement));
+    CHECK(registry.dwords[L"HotKey.Region.Binding"]
+        == ((MOD_CONTROL | MOD_SHIFT) << 16U | 'S'));
+    CHECK(store.load()[0] == replacement);
+    registry.failWrites = true;
+    CHECK(!store.save(HotKeyBinding{
+        HotKeyCommand::regionCapture, MOD_CONTROL | MOD_ALT, 'R'}));
+    registry.failWrites = false;
+    CHECK(store.load()[0] == replacement);
+    CHECK(store.reset());
+    CHECK(store.load() == defaultAppHotKeys());
+}
+
 } // namespace
 
 int main()
@@ -178,5 +214,6 @@ int main()
     testFilenameTemplateRendering();
     testFilenameTemplateValidation();
     testSuggestedFilenameFallsBackFromInvalidStoredTemplate();
+    testHotKeySettingsRecoverPersistAndReset();
     return failureCount == 0 ? 0 : 1;
 }

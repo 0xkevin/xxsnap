@@ -576,7 +576,8 @@ target_link_libraries(
     PRIVATE xxsnap_dxgi_capture_backend xxsnap_gdi_capture_backend
             xxsnap_fallback_capture_backend xxsnap_display_topology
             xxsnap_selection_composer xxsnap_clipboard_writer
-            xxsnap_windows_build_configuration ole32 user32 gdi32
+            xxsnap_preferences_settings xxsnap_windows_build_configuration
+            ole32 user32 gdi32
 )
 
 add_library(xxsnap_single_instance src/app/SingleInstance.cpp)
@@ -612,6 +613,29 @@ target_link_libraries(
     PRIVATE xxsnap_windows_build_configuration user32
 )
 
+add_library(xxsnap_hot_key_settings src/app/HotKeySettings.cpp)
+target_compile_features(xxsnap_hot_key_settings PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_hot_key_settings
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_hot_key_settings
+    PUBLIC xxsnap_hot_key_registrar xxsnap_preferences_settings
+    PRIVATE xxsnap_windows_build_configuration
+)
+
+add_library(xxsnap_launch_at_login src/app/LaunchAtLogin.cpp)
+target_compile_features(xxsnap_launch_at_login PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_launch_at_login
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_launch_at_login
+    PRIVATE xxsnap_windows_build_configuration advapi32
+)
+
 add_library(xxsnap_preferences_settings src/app/PreferencesSettings.cpp)
 target_compile_features(xxsnap_preferences_settings PUBLIC cxx_std_17)
 target_include_directories(
@@ -621,6 +645,21 @@ target_include_directories(
 target_link_libraries(
     xxsnap_preferences_settings
     PRIVATE xxsnap_windows_build_configuration advapi32
+)
+
+add_library(xxsnap_preferences_window src/app/PreferencesWindow.cpp)
+target_compile_features(xxsnap_preferences_window PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_preferences_window
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/resources"
+)
+target_link_libraries(
+    xxsnap_preferences_window
+    PUBLIC xxsnap_preferences_settings
+    PRIVATE xxsnap_launch_at_login xxsnap_windows_build_configuration
+            user32 gdi32 shell32 version
+            windowscodecs ole32
 )
 
 add_library(
@@ -670,7 +709,9 @@ target_link_libraries(
         xxsnap_single_instance
         xxsnap_tray_icon
         xxsnap_hot_key_registrar
+        xxsnap_hot_key_settings
         xxsnap_preferences_settings
+        xxsnap_preferences_window
         xxsnap_visual_resources
         xxsnap_windows_build_configuration
         comdlg32
@@ -1013,9 +1054,32 @@ if(BUILD_TESTING)
     target_compile_features(xxsnap_preferences_settings_test PRIVATE cxx_std_17)
     target_link_libraries(
         xxsnap_preferences_settings_test
-        PRIVATE xxsnap_preferences_settings xxsnap_windows_build_configuration
+        PRIVATE xxsnap_preferences_settings xxsnap_hot_key_settings
+                xxsnap_windows_build_configuration
     )
     add_test(NAME preferences_settings COMMAND xxsnap_preferences_settings_test)
+
+    add_executable(
+        xxsnap_launch_at_login_test
+        tests/TestLaunchAtLogin.cpp
+    )
+    target_compile_features(xxsnap_launch_at_login_test PRIVATE cxx_std_17)
+    target_link_libraries(
+        xxsnap_launch_at_login_test
+        PRIVATE xxsnap_launch_at_login xxsnap_windows_build_configuration
+    )
+    add_test(NAME launch_at_login COMMAND xxsnap_launch_at_login_test)
+
+    add_executable(
+        xxsnap_preferences_window_test
+        tests/TestPreferencesWindow.cpp
+    )
+    target_compile_features(xxsnap_preferences_window_test PRIVATE cxx_std_17)
+    target_link_libraries(
+        xxsnap_preferences_window_test
+        PRIVATE xxsnap_preferences_window xxsnap_windows_build_configuration
+    )
+    add_test(NAME preferences_window COMMAND xxsnap_preferences_window_test)
 
     add_executable(
         xxsnap_capture_session_coordinator_test
@@ -1220,6 +1284,18 @@ if(BUILD_TESTING)
     target_link_libraries(
         xxsnap_interactive_teaching_pen_verifier PRIVATE user32 gdi32
     )
+
+    add_executable(
+        xxsnap_interactive_preferences_verifier EXCLUDE_FROM_ALL
+        ${CMAKE_SOURCE_DIR}/tools/windows/verify-interactive-preferences.cpp
+    )
+    target_compile_features(
+        xxsnap_interactive_preferences_verifier PRIVATE cxx_std_17
+    )
+    target_link_libraries(
+        xxsnap_interactive_preferences_verifier
+        PRIVATE xxsnap_preferences_settings user32 gdi32 advapi32
+    )
 endif()
 
 set(xxsnap_capture_session_targets
@@ -1255,7 +1331,10 @@ set(xxsnap_capture_session_targets
     xxsnap_single_instance
     xxsnap_tray_icon
     xxsnap_hot_key_registrar
+    xxsnap_hot_key_settings
+    xxsnap_launch_at_login
     xxsnap_preferences_settings
+    xxsnap_preferences_window
     xxsnap_capture_session_coordinator
     xxsnap_windows
 )
@@ -1282,6 +1361,8 @@ if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_overlay_input_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_app_entry_services_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_preferences_settings_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_launch_at_login_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_preferences_window_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_capture_session_coordinator_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_memory_budget_matrix_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_selection_composer_test)

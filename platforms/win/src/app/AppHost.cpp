@@ -1,7 +1,9 @@
 #include "app/AppHost.h"
 
 #include "app/HotKeyRegistrar.h"
+#include "app/HotKeySettings.h"
 #include "app/PreferencesSettings.h"
+#include "app/PreferencesWindow.h"
 #include "app/SingleInstance.h"
 #include "app/TrayIcon.h"
 #include "capture/DisplayTopology.h"
@@ -60,6 +62,7 @@ constexpr wchar_t sessionFailureText[] =
 constexpr wchar_t captureMetricsPathVariable[] = L"XXSNAP_CAPTURE_METRICS_PATH";
 constexpr wchar_t interactiveTestingVariable[] = L"XXSNAP_INTERACTIVE_TESTING";
 constexpr UINT testOcrMessage = WM_APP + 0x7A;
+constexpr UINT testPreferencesMessage = WM_APP + 0x7B;
 
 void appendCaptureTiming(
     const char* trigger,
@@ -369,6 +372,7 @@ public:
     {
         hotKey_.reset();
         tray_.reset();
+        preferencesWindow_.reset();
         fullScreenPreview_.reset();
         teachingPenOverlay_.reset();
         teachingPenDesktop_.reset();
@@ -419,7 +423,8 @@ public:
         tray_ = std::move(trayResult.value);
 
         hotKey_ = std::make_unique<HotKeyRegistrar>(
-            systemHotKeyApi(), [this] { startRegionCapture("hotkey"); });
+            systemHotKeyApi(), [this] { startRegionCapture("hotkey"); },
+            hotKeySettingsStore_.load());
         if (!hotKey_->registerMvpRegionCapture(window_)) {
             if (!tray_->showHotKeyConflict(hotKeyConflictText)) {
                 MessageBoxW(
@@ -553,6 +558,12 @@ private:
             startTextRecognition();
             return 0;
         }
+        if (message == testPreferencesMessage
+            && GetEnvironmentVariableW(
+                interactiveTestingVariable, nullptr, 0) > 1) {
+            showPreferences(PreferencesSection::general);
+            return 0;
+        }
         switch (message) {
         case WM_CLOSE:
             DestroyWindow(window);
@@ -599,9 +610,73 @@ private:
             startTextRecognition();
         } else if (command == TrayCommand::teachingPen) {
             toggleTeachingPen();
+        } else if (command == TrayCommand::preferences) {
+            showPreferences(PreferencesSection::general);
+        } else if (command == TrayCommand::checkForUpdates) {
+            MessageBoxW(window_, L"已是最新版本", applicationName,
+                MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND);
+        } else if (command == TrayCommand::donation) {
+            showPreferences(PreferencesSection::donation);
+        } else if (command == TrayCommand::about) {
+            showPreferences(PreferencesSection::about);
         } else if (command == TrayCommand::exit && window_ != nullptr) {
             PostMessageW(window_, WM_CLOSE, 0, 0);
         }
+    }
+
+    void showPreferences(PreferencesSection section) noexcept
+    {
+        if (!preferencesWindow_) {
+            preferencesWindow_ = PreferencesWindow::create(
+                instance_, window_, PreferencesShortcutCallbacks{
+                    [this] { return currentHotKeyBindings(); },
+                    [this](HotKeyBinding binding) {
+                        return applyHotKeyBinding(binding);
+                    },
+                    [this] { return resetHotKeyBindings(); },
+                });
+        }
+        if (preferencesWindow_) preferencesWindow_->show(section);
+    }
+
+    std::array<HotKeyBinding, 5> currentHotKeyBindings() const noexcept
+    {
+        auto bindings = hotKeySettingsStore_.load();
+        if (hotKey_) {
+            for (auto& binding : bindings) {
+                binding = hotKey_->binding(binding.command);
+            }
+        }
+        return bindings;
+    }
+
+    bool applyHotKeyBinding(HotKeyBinding binding) noexcept
+    {
+        if (!hotKey_) return false;
+        const auto previous = hotKey_->binding(binding.command);
+        if (!hotKey_->rebind(binding)) return false;
+        if (hotKeySettingsStore_.save(binding)) return true;
+        hotKey_->rebind(previous);
+        return false;
+    }
+
+    bool resetHotKeyBindings() noexcept
+    {
+        if (!hotKey_) return false;
+        const auto previous = currentHotKeyBindings();
+        std::size_t applied = 0;
+        for (const auto binding : defaultAppHotKeys()) {
+            if (!hotKey_->rebind(binding)) {
+                for (std::size_t index = 0; index < applied; ++index) {
+                    hotKey_->rebind(previous[index]);
+                }
+                return false;
+            }
+            ++applied;
+        }
+        if (hotKeySettingsStore_.reset()) return true;
+        for (const auto binding : previous) hotKey_->rebind(binding);
+        return false;
     }
 
     void startFullScreenCapture() noexcept
@@ -793,10 +868,13 @@ private:
     RuntimeApis& runtimeApis_;
     HWND window_ = nullptr;
     std::unique_ptr<SingleInstance> singleInstance_;
+    SystemPreferencesRegistry preferencesRegistry_;
+    HotKeySettingsStore hotKeySettingsStore_{preferencesRegistry_};
     std::unique_ptr<WinCaptureSessionServices> sessionServices_;
     std::unique_ptr<CaptureSessionCoordinator> coordinator_;
     std::unique_ptr<TrayIcon> tray_;
     std::unique_ptr<HotKeyRegistrar> hotKey_;
+    std::unique_ptr<PreferencesWindow> preferencesWindow_;
     std::unique_ptr<FullScreenCapturePreviewHost> fullScreenPreview_;
     std::unique_ptr<OcrCaptureHost> ocrCapture_;
     std::unique_ptr<FrozenDesktop> teachingPenDesktop_;
