@@ -73,6 +73,7 @@ set_property(
         "${PROJECT_SOURCE_DIR}/platforms/win/resources/icons/ocr-failed.bmp"
         "${PROJECT_SOURCE_DIR}/platforms/mac/Resources/Icons/correct.svg"
         "${PROJECT_SOURCE_DIR}/platforms/mac/Resources/Icons/failed.svg"
+        "${PROJECT_SOURCE_DIR}/platforms/win/resources/sounds/fullscreencutsound.wav"
         ${XXSNAP_TOOLBAR_ASSET_FILES}
 )
 add_library(xxsnap_visual_resources INTERFACE)
@@ -659,6 +660,19 @@ target_link_libraries(
     PRIVATE xxsnap_windows_build_configuration user32 gdi32
 )
 
+add_library(xxsnap_capture_sound src/app/CaptureSound.cpp)
+target_compile_features(xxsnap_capture_sound PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_capture_sound
+    PUBLIC
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/resources"
+)
+target_link_libraries(
+    xxsnap_capture_sound
+    PRIVATE xxsnap_windows_build_configuration winmm
+)
+
 add_library(xxsnap_preferences_window src/app/PreferencesWindow.cpp)
 target_compile_features(xxsnap_preferences_window PUBLIC cxx_std_17)
 target_include_directories(
@@ -747,6 +761,7 @@ target_link_libraries(
         xxsnap_hot_key_settings
         xxsnap_preferences_settings
         xxsnap_shortcut_feedback
+        xxsnap_capture_sound
         xxsnap_preferences_window
         xxsnap_help_window
         xxsnap_diagnostic_support
@@ -1106,6 +1121,18 @@ if(BUILD_TESTING)
         PRIVATE xxsnap_shortcut_feedback xxsnap_windows_build_configuration
     )
     add_test(NAME shortcut_feedback COMMAND xxsnap_shortcut_feedback_test)
+
+    add_executable(
+        xxsnap_capture_sound_test tests/TestCaptureSound.cpp
+    )
+    target_compile_features(xxsnap_capture_sound_test PRIVATE cxx_std_17)
+    target_link_libraries(
+        xxsnap_capture_sound_test
+        PRIVATE xxsnap_capture_sound xxsnap_visual_resources
+                xxsnap_windows_build_configuration
+    )
+    add_dependencies(xxsnap_capture_sound_test xxsnap_visual_assets)
+    add_test(NAME capture_sound COMMAND xxsnap_capture_sound_test)
 
     add_executable(
         xxsnap_launch_at_login_test

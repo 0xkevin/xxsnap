@@ -1,5 +1,6 @@
 #include "app/AppHost.h"
 
+#include "app/CaptureSound.h"
 #include "app/HotKeyRegistrar.h"
 #include "app/HotKeySettings.h"
 #include "app/HelpWindow.h"
@@ -794,7 +795,9 @@ private:
             }
             if (!fullScreenPreview_->show(std::move(*pixels), bounds)) {
                 showSessionError(CaptureSessionErrorCode::overlayFailed);
+                return;
             }
+            playFullScreenCaptureSound(instance_);
         } catch (...) {
             showSessionError(CaptureSessionErrorCode::allocationFailed);
         }

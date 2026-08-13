@@ -149,6 +149,8 @@ GDI32.dll!StretchDIBits
 
 MSIMG32.dll!AlphaBlend
 
+WINMM.dll!PlaySoundW
+
 SHELL32.dll!Shell_NotifyIconW
 SHELL32.dll!ShellExecuteW
 SHELL32.dll!SHGetFolderPathW

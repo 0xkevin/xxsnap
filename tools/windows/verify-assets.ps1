@@ -6,6 +6,49 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).ProviderPath
 $iconsDirectory = Join-Path $repoRoot "platforms\mac\Resources\Icons"
 $toolbarVerifier = Join-Path $PSScriptRoot "verify-toolbar-assets.ps1"
+$macCaptureSound = Join-Path $repoRoot "platforms\mac\Resources\Sounds\fullscreencutsound.mp3"
+$windowsCaptureSound = Join-Path $repoRoot "platforms\win\resources\sounds\fullscreencutsound.wav"
+
+function Test-AssetHash {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ExpectedHash,
+
+        [Parameter(Mandatory = $true)]
+        [string]$DisplayName
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        [Console]::Error.WriteLine(
+            "FAIL: $DisplayName expected=$ExpectedHash actual=<missing> path=$Path"
+        )
+        return $false
+    }
+
+    try {
+        $actualHash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+    catch {
+        $hashError = $_.Exception.Message
+        [Console]::Error.WriteLine(
+            "FAIL: $DisplayName expected=$ExpectedHash actual=<hash-error:$hashError>"
+        )
+        return $false
+    }
+
+    if ($actualHash -ne $ExpectedHash) {
+        [Console]::Error.WriteLine(
+            "FAIL: $DisplayName expected=$ExpectedHash actual=$actualHash path=$Path"
+        )
+        return $false
+    }
+
+    [Console]::Out.WriteLine("OK: $DisplayName")
+    return $true
+}
 
 & (Join-Path $PSHOME "powershell.exe") `
     -NoProfile `
@@ -25,35 +68,39 @@ $expectedAssets = [ordered]@{
 $failed = $false
 foreach ($asset in $expectedAssets.GetEnumerator()) {
     $assetPath = Join-Path $iconsDirectory $asset.Key
-    if (-not (Test-Path -LiteralPath $assetPath -PathType Leaf)) {
-        [Console]::Error.WriteLine(
-            "FAIL: $($asset.Key) expected=$($asset.Value) actual=<missing> path=$assetPath"
-        )
+    if (-not (Test-AssetHash -Path $assetPath -ExpectedHash $asset.Value `
+            -DisplayName $asset.Key)) {
         $failed = $true
-        continue
     }
+}
 
+$expectedSounds = [ordered]@{
+    $macCaptureSound = "c06b6214373fb4c3cacc695eefa9ca34d2ba948296b4a38203c3a1969a584562"
+    $windowsCaptureSound = "60d8b6cf87375ebc0147f043ec5a5c1a9b32bd2f4637677c885cef55eb9d8779"
+}
+foreach ($asset in $expectedSounds.GetEnumerator()) {
+    if (-not (Test-AssetHash -Path $asset.Key -ExpectedHash $asset.Value `
+            -DisplayName (Split-Path -Leaf $asset.Key))) {
+        $failed = $true
+    }
+}
+
+if (Test-Path -LiteralPath $windowsCaptureSound -PathType Leaf) {
+    $stream = [System.IO.File]::OpenRead($windowsCaptureSound)
     try {
-        $actualHash = (Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        $header = [byte[]]::new(12)
+        if ($stream.Read($header, 0, $header.Length) -ne $header.Length -or
+            [Text.Encoding]::ASCII.GetString($header, 0, 4) -ne "RIFF" -or
+            [Text.Encoding]::ASCII.GetString($header, 8, 4) -ne "WAVE") {
+            [Console]::Error.WriteLine(
+                "FAIL: fullscreencutsound.wav is not a RIFF/WAVE resource"
+            )
+            $failed = $true
+        }
     }
-    catch {
-        $hashError = $_.Exception.Message
-        [Console]::Error.WriteLine(
-            "FAIL: $($asset.Key) expected=$($asset.Value) actual=<hash-error:$hashError>"
-        )
-        $failed = $true
-        continue
+    finally {
+        $stream.Dispose()
     }
-
-    if ($actualHash -ne $asset.Value) {
-        [Console]::Error.WriteLine(
-            "FAIL: $($asset.Key) expected=$($asset.Value) actual=$actualHash"
-        )
-        $failed = $true
-        continue
-    }
-
-    Write-Output "OK: $($asset.Key)"
 }
 
 if ($failed) {
