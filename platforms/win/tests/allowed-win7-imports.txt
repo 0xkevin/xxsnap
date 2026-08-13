@@ -37,6 +37,7 @@ USER32.dll!DispatchMessageW
 USER32.dll!DisplayConfigGetDeviceInfo
 USER32.dll!DrawTextW
 USER32.dll!DrawFocusRect
+USER32.dll!EnableWindow
 USER32.dll!EmptyClipboard
 USER32.dll!EndPaint
 USER32.dll!EnumDisplayMonitors
@@ -72,6 +73,7 @@ USER32.dll!MapVirtualKeyW
 USER32.dll!MessageBeep
 USER32.dll!MonitorFromRect
 USER32.dll!MonitorFromWindow
+USER32.dll!MoveWindow
 USER32.dll!MonitorFromPoint
 USER32.dll!OpenClipboard
 USER32.dll!PostMessageW
@@ -137,6 +139,7 @@ GDI32.dll!Rectangle
 GDI32.dll!RoundRect
 GDI32.dll!SelectObject
 GDI32.dll!SetBkMode
+GDI32.dll!SetBkColor
 GDI32.dll!SetStretchBltMode
 GDI32.dll!SetTextColor
 GDI32.dll!StretchBlt

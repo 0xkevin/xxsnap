@@ -2,6 +2,7 @@
 
 #include "app/HotKeyRegistrar.h"
 #include "app/HotKeySettings.h"
+#include "app/HelpWindow.h"
 #include "app/PreferencesSettings.h"
 #include "app/PreferencesWindow.h"
 #include "app/SingleInstance.h"
@@ -64,6 +65,7 @@ constexpr wchar_t captureMetricsPathVariable[] = L"XXSNAP_CAPTURE_METRICS_PATH";
 constexpr wchar_t interactiveTestingVariable[] = L"XXSNAP_INTERACTIVE_TESTING";
 constexpr UINT testOcrMessage = WM_APP + 0x7A;
 constexpr UINT testPreferencesMessage = WM_APP + 0x7B;
+constexpr UINT testHelpMessage = WM_APP + 0x7C;
 
 void appendCaptureTiming(
     const char* trigger,
@@ -569,6 +571,12 @@ private:
             showPreferences(PreferencesSection::general);
             return 0;
         }
+        if (message == testHelpMessage
+            && GetEnvironmentVariableW(
+                interactiveTestingVariable, nullptr, 0) > 1) {
+            showHelp();
+            return 0;
+        }
         switch (message) {
         case WM_CLOSE:
             DestroyWindow(window);
@@ -624,6 +632,8 @@ private:
                 MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND);
         } else if (command == TrayCommand::donation) {
             showPreferences(PreferencesSection::donation);
+        } else if (command == TrayCommand::help) {
+            showHelp();
         } else if (command == TrayCommand::exportDiagnostics) {
             if (diagnosticSupport_) diagnosticSupport_->exportDiagnostics();
         } else if (command == TrayCommand::about) {
@@ -646,6 +656,14 @@ private:
                 });
         }
         if (preferencesWindow_) preferencesWindow_->show(section);
+    }
+
+    void showHelp() noexcept
+    {
+        if (!helpWindow_) {
+            helpWindow_ = HelpWindow::create(instance_, window_);
+        }
+        if (helpWindow_) helpWindow_->show();
     }
 
     std::array<HotKeyBinding, 5> currentHotKeyBindings() const noexcept
@@ -894,6 +912,7 @@ private:
     std::unique_ptr<TrayIcon> tray_;
     std::unique_ptr<HotKeyRegistrar> hotKey_;
     std::unique_ptr<PreferencesWindow> preferencesWindow_;
+    std::unique_ptr<HelpWindow> helpWindow_;
     std::unique_ptr<FullScreenCapturePreviewHost> fullScreenPreview_;
     std::unique_ptr<OcrCaptureHost> ocrCapture_;
     std::unique_ptr<FrozenDesktop> teachingPenDesktop_;
