@@ -159,6 +159,7 @@ std::wstring virtualKeyName(UINT virtualKey)
 
 std::wstring formatHotKey(HotKeyBinding binding)
 {
+    if (!binding.enabled) return L"未设置";
     std::wstring result;
     const auto append = [&result](const wchar_t* value) {
         if (!result.empty()) result += L" + ";
@@ -837,7 +838,7 @@ struct PreferencesWindow::Impl final {
             && notification == BN_CLICKED) {
             recordingShortcutIndex = identifier - shortcutFirstId;
             if (const auto button = GetDlgItem(window, identifier)) {
-                SetWindowTextW(button, L"请按快捷键…");
+                SetWindowTextW(button, L"按键 / Delete 清除");
             }
             SetFocus(window);
         } else if (identifier == contactId && notification == BN_CLICKED) {
@@ -850,6 +851,19 @@ struct PreferencesWindow::Impl final {
     {
         if (recordingShortcutIndex < 0 || recordingShortcutIndex >= 5) return;
         if (virtualKey == VK_ESCAPE) {
+            recordingShortcutIndex = -1;
+            rebuildPage();
+            return;
+        }
+        if (virtualKey == VK_DELETE || virtualKey == VK_BACK) {
+            const auto disabled = disabledHotKey(hotKeyCommand(
+                static_cast<std::size_t>(recordingShortcutIndex)));
+            if (!shortcutCallbacks.apply
+                || !shortcutCallbacks.apply(disabled)) {
+                MessageBoxW(window, L"无法停用该快捷键。",
+                    L"录制快捷键", MB_OK | MB_ICONWARNING);
+                return;
+            }
             recordingShortcutIndex = -1;
             rebuildPage();
             return;
@@ -875,6 +889,7 @@ struct PreferencesWindow::Impl final {
         if (shortcutCallbacks.load) bindings = shortcutCallbacks.load();
         for (std::size_t index = 0; index < bindings.size(); ++index) {
             if (static_cast<int>(index) != recordingShortcutIndex
+                && bindings[index].enabled
                 && bindings[index].modifiers == replacement.modifiers
                 && bindings[index].virtualKey == replacement.virtualKey) {
                 MessageBoxW(window, L"该快捷键已被 XxSnap 的其他操作占用。",

@@ -71,11 +71,18 @@ std::array<HotKeyBinding, 5> HotKeySettingsStore::load() const noexcept
     auto result = defaultAppHotKeys();
     for (std::size_t index = 0; index < result.size(); ++index) {
         if (const auto encoded = registry_.readDword(bindingNames[index])) {
+            if (*encoded == 0U) {
+                result[index].modifiers = 0U;
+                result[index].virtualKey = 0U;
+                result[index].enabled = false;
+                continue;
+            }
             UINT modifiers = 0;
             UINT virtualKey = 0;
             if (decodeBinding(*encoded, modifiers, virtualKey)) {
                 result[index].modifiers = modifiers;
                 result[index].virtualKey = virtualKey;
+                result[index].enabled = true;
                 continue;
             }
         }
@@ -86,6 +93,7 @@ std::array<HotKeyBinding, 5> HotKeySettingsStore::load() const noexcept
             && validBinding(*modifiers, *virtualKey)) {
             result[index].modifiers = *modifiers;
             result[index].virtualKey = *virtualKey;
+            result[index].enabled = true;
         }
     }
     return result;
@@ -93,8 +101,12 @@ std::array<HotKeyBinding, 5> HotKeySettingsStore::load() const noexcept
 
 bool HotKeySettingsStore::save(HotKeyBinding binding) noexcept
 {
-    if (!validBinding(binding.modifiers, binding.virtualKey)) return false;
     const auto index = commandIndex(binding.command);
+    if (!binding.enabled) {
+        if (binding.modifiers != 0U || binding.virtualKey != 0U) return false;
+        return registry_.writeDword(bindingNames[index], 0U);
+    }
+    if (!validBinding(binding.modifiers, binding.virtualKey)) return false;
     return registry_.writeDword(bindingNames[index],
         encodeBinding(binding.modifiers, binding.virtualKey));
 }

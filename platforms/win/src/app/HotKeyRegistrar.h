@@ -24,13 +24,20 @@ struct HotKeyBinding {
     HotKeyCommand command;
     UINT modifiers;
     UINT virtualKey;
+    bool enabled = true;
 };
 
 constexpr bool operator==(HotKeyBinding lhs, HotKeyBinding rhs) noexcept
 {
     return lhs.command == rhs.command
         && lhs.modifiers == rhs.modifiers
-        && lhs.virtualKey == rhs.virtualKey;
+        && lhs.virtualKey == rhs.virtualKey
+        && lhs.enabled == rhs.enabled;
+}
+
+constexpr HotKeyBinding disabledHotKey(HotKeyCommand command) noexcept
+{
+    return {command, 0U, 0U, false};
 }
 
 using AppHotKey = HotKeyBinding;

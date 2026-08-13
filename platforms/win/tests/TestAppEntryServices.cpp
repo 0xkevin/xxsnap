@@ -483,6 +483,22 @@ void testHotKeyConflictAndCleanupAreExplicit()
     CHECK(restoreFailed.lastError()->nativeCode
         == ERROR_HOTKEY_ALREADY_REGISTERED);
 
+    FakeHotKeyApi disabledApi;
+    auto disabledBindings = xxsnap::win::defaultAppHotKeys();
+    disabledBindings[2] = disabledHotKey(HotKeyCommand::ocr);
+    HotKeyRegistrar initiallyDisabled(
+        disabledApi, [] {}, disabledBindings);
+    const auto disabledWindow = reinterpret_cast<HWND>(0x313);
+    CHECK(initiallyDisabled.registerMvpRegionCapture(disabledWindow));
+    CHECK(initiallyDisabled.registerOcr(disabledWindow, [] {}));
+    CHECK(disabledApi.registrations.size() == 1U);
+    CHECK(!initiallyDisabled.isRegistered(HotKeyCommand::ocr));
+    CHECK(initiallyDisabled.rebind(xxsnap::win::defaultAppHotKeys()[2]));
+    CHECK(initiallyDisabled.isRegistered(HotKeyCommand::ocr));
+    CHECK(disabledApi.registrations.size() == 2U);
+    CHECK(initiallyDisabled.unregister());
+    CHECK(!initiallyDisabled.rebind(xxsnap::win::defaultAppHotKeys()[2]));
+
     FakeHotKeyApi api;
     {
         HotKeyRegistrar registered(api, [] {});
@@ -518,9 +534,17 @@ void testHotKeyRebindIsImmediateAndRollsBackOnConflict()
     CHECK(registrar.registerTeachingPen(window, [] {}));
     CHECK(registrar.registerRestorePinnedImage(window, [] {}));
 
+    const auto disabled = disabledHotKey(HotKeyCommand::ocr);
+    CHECK(registrar.rebind(disabled));
+    CHECK(!registrar.isRegistered(HotKeyCommand::ocr));
+    CHECK(registrar.binding(HotKeyCommand::ocr) == disabled);
+    CHECK(!registrar.handleMessage(
+        WM_HOTKEY, static_cast<WPARAM>(xxsnap::win::ocrHotKeyIdentifier)));
+
     const HotKeyBinding replacement{
         HotKeyCommand::ocr, MOD_CONTROL | MOD_ALT, 'O'};
     CHECK(registrar.rebind(replacement));
+    CHECK(registrar.isRegistered(HotKeyCommand::ocr));
     CHECK(registrar.binding(HotKeyCommand::ocr) == replacement);
     CHECK(api.unregisteredIdentifier == xxsnap::win::ocrHotKeyIdentifier);
     CHECK(api.registrations.back().modifiers == (MOD_CONTROL | MOD_ALT));

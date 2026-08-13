@@ -92,6 +92,10 @@ bool HotKeyRegistrar::registerMvpRegionCapture(HWND window) noexcept
     }
     const auto binding = bindings_[0];
     window_ = window;
+    if (!binding.enabled) {
+        lastError_.reset();
+        return true;
+    }
     DWORD error = ERROR_SUCCESS;
     if (!api_.registerHotKey(
             window,
@@ -126,6 +130,10 @@ bool HotKeyRegistrar::registerRestorePinnedImage(
     }
     window_ = window;
     const auto binding = bindings_[4];
+    if (!binding.enabled) {
+        lastError_.reset();
+        return true;
+    }
     DWORD error = ERROR_SUCCESS;
     if (!api_.registerHotKey(window, restorePinnedImageHotKeyIdentifier,
             binding.modifiers, binding.virtualKey, error)) {
@@ -156,6 +164,10 @@ bool HotKeyRegistrar::registerFullScreenCapture(
     }
     window_ = window;
     const auto binding = bindings_[1];
+    if (!binding.enabled) {
+        lastError_.reset();
+        return true;
+    }
     DWORD error = ERROR_SUCCESS;
     if (!api_.registerHotKey(window, fullScreenCaptureHotKeyIdentifier,
             binding.modifiers, binding.virtualKey, error)) {
@@ -186,6 +198,10 @@ bool HotKeyRegistrar::registerOcr(
     }
     window_ = window;
     const auto binding = bindings_[2];
+    if (!binding.enabled) {
+        lastError_.reset();
+        return true;
+    }
     DWORD error = ERROR_SUCCESS;
     if (!api_.registerHotKey(window, ocrHotKeyIdentifier,
             binding.modifiers, binding.virtualKey, error)) {
@@ -216,6 +232,10 @@ bool HotKeyRegistrar::registerTeachingPen(
     }
     window_ = window;
     const auto binding = bindings_[3];
+    if (!binding.enabled) {
+        lastError_.reset();
+        return true;
+    }
     DWORD error = ERROR_SUCCESS;
     if (!api_.registerHotKey(window, teachingPenHotKeyIdentifier,
             binding.modifiers, binding.virtualKey, error)) {
@@ -230,8 +250,11 @@ bool HotKeyRegistrar::registerTeachingPen(
 
 bool HotKeyRegistrar::rebind(HotKeyBinding replacement) noexcept
 {
-    if (window_ == nullptr || replacement.modifiers == 0U
-        || replacement.virtualKey == 0U) {
+    if (window_ == nullptr
+        || (replacement.enabled && (replacement.modifiers == 0U
+            || replacement.virtualKey == 0U))
+        || (!replacement.enabled && (replacement.modifiers != 0U
+            || replacement.virtualKey != 0U))) {
         lastError_ = HotKeyError{
             HotKeyErrorCode::invalidWindow, ERROR_INVALID_PARAMETER};
         return false;
@@ -264,10 +287,10 @@ bool HotKeyRegistrar::rebind(HotKeyBinding replacement) noexcept
         return false;
     }
     *registered = false;
-    if (!api_.registerHotKey(window_, identifier,
+    if (replacement.enabled && !api_.registerHotKey(window_, identifier,
             replacement.modifiers, replacement.virtualKey, error)) {
         const auto registrationError = error;
-        if (wasRegistered) {
+        if (wasRegistered && previous.enabled) {
             DWORD rollbackError = ERROR_SUCCESS;
             *registered = api_.registerHotKey(window_, identifier,
                 previous.modifiers, previous.virtualKey, rollbackError);
@@ -277,7 +300,7 @@ bool HotKeyRegistrar::rebind(HotKeyBinding replacement) noexcept
         return false;
     }
     bindings_[index] = replacement;
-    *registered = true;
+    *registered = replacement.enabled;
     lastError_.reset();
     return true;
 }
@@ -305,6 +328,8 @@ bool HotKeyRegistrar::unregister() noexcept
     if (!registered_ && !fullScreenCaptureRegistered_ && !ocrRegistered_
         && !teachingPenRegistered_
         && !restorePinnedImageRegistered_) {
+        window_ = nullptr;
+        lastError_.reset();
         return true;
     }
     DWORD error = ERROR_SUCCESS;

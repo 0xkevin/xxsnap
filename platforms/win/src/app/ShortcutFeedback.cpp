@@ -171,7 +171,8 @@ bool isDisplayableSystemShortcut(UINT modifiers, UINT virtualKey) noexcept
 bool matchesHotKeyBinding(
     HotKeyBinding binding, UINT modifiers, UINT virtualKey) noexcept
 {
-    return normalizedModifiers(binding.modifiers)
+    return binding.enabled
+        && normalizedModifiers(binding.modifiers)
             == normalizedModifiers(modifiers)
         && binding.virtualKey == virtualKey;
 }
@@ -502,7 +503,8 @@ ShortcutFeedbackController::~ShortcutFeedbackController() = default;
 void ShortcutFeedbackController::showAppShortcut(
     HotKeyBinding binding) noexcept
 {
-    if (impl_->settingsStore.load().showsShortcutFeedback) {
+    if (binding.enabled
+        && impl_->settingsStore.load().showsShortcutFeedback) {
         impl_->show(binding.modifiers, binding.virtualKey);
     }
 }

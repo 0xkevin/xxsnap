@@ -195,6 +195,12 @@ void testHotKeySettingsRecoverPersistAndReset()
     CHECK(registry.dwords[L"HotKey.Region.Binding"]
         == ((MOD_CONTROL | MOD_SHIFT) << 16U | 'S'));
     CHECK(store.load()[0] == replacement);
+    const auto disabled = disabledHotKey(HotKeyCommand::ocr);
+    CHECK(store.save(disabled));
+    CHECK(registry.dwords[L"HotKey.Ocr.Binding"] == 0U);
+    CHECK(store.load()[2] == disabled);
+    CHECK(!store.save(HotKeyBinding{
+        HotKeyCommand::ocr, MOD_CONTROL, 'O', false}));
     registry.failWrites = true;
     CHECK(!store.save(HotKeyBinding{
         HotKeyCommand::regionCapture, MOD_CONTROL | MOD_ALT, 'R'}));
