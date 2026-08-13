@@ -49,6 +49,7 @@ struct OcrCaptureHost::Impl final {
     GdiCaptureBackend gdi;
     FallbackCaptureBackend fallback{dxgi, gdi};
     OcrResultPresenter presenter;
+    OcrCaptureHost::CompletionCallback completionCallback;
     HWND messageWindow = nullptr;
     std::unique_ptr<MemoryBudget> budget;
     std::unique_ptr<FrozenDesktop> desktop;
@@ -57,11 +58,13 @@ struct OcrCaptureHost::Impl final {
     std::uint64_t generation = 0;
     bool active = false;
 
-    Impl(HINSTANCE module, HWND sourceOwner, RuntimeApis& apis)
+    Impl(HINSTANCE module, HWND sourceOwner, RuntimeApis& apis,
+        OcrCaptureHost::CompletionCallback callback)
         : instance(module != nullptr ? module : GetModuleHandleW(nullptr))
         , owner(sourceOwner)
         , runtimeApis(apis)
         , presenter(instance, owner)
+        , completionCallback(std::move(callback))
     {
     }
 
@@ -118,9 +121,11 @@ struct OcrCaptureHost::Impl final {
 
     void cancel() noexcept
     {
+        const auto wasActive = active;
         ++generation;
         active = false;
         releaseCapture();
+        if (wasActive && completionCallback) completionCallback();
     }
 
     void showFailure(PixelRect selection) noexcept
@@ -266,6 +271,7 @@ struct OcrCaptureHost::Impl final {
         } else {
             presenter.showFailure(completion.selection);
         }
+        if (completionCallback) completionCallback();
     }
 
     LRESULT handle(UINT message, WPARAM wParam, LPARAM lParam) noexcept
@@ -285,8 +291,10 @@ struct OcrCaptureHost::Impl final {
 };
 
 OcrCaptureHost::OcrCaptureHost(
-    HINSTANCE instance, HWND owner, RuntimeApis& runtimeApis)
-    : impl_(std::make_unique<Impl>(instance, owner, runtimeApis))
+    HINSTANCE instance, HWND owner, RuntimeApis& runtimeApis,
+    CompletionCallback completionCallback)
+    : impl_(std::make_unique<Impl>(instance, owner, runtimeApis,
+          std::move(completionCallback)))
 {
 }
 

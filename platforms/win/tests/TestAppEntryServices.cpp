@@ -163,7 +163,7 @@ public:
 
     std::optional<TrayCommand> showContextMenu(
         HWND,
-        const std::array<TrayMenuItem, 4>& items,
+        const std::array<TrayMenuItem, 5>& items,
         DWORD& error) noexcept override
     {
         ++menuCalls;
@@ -184,7 +184,7 @@ public:
     std::wstring taskbarMessageName;
     std::vector<NotifyCall> calls;
     int menuCalls = 0;
-    std::array<TrayMenuItem, 4> menuItems{};
+    std::array<TrayMenuItem, 5> menuItems{};
     std::function<void()> onShowContextMenu;
 };
 
@@ -230,8 +230,10 @@ void testTrayLifecycleMenuAndExplorerRestart()
     CHECK(std::wstring(api.menuItems[1].label) == L"\u5168\u5c4f\u622a\u56fe");
     CHECK(api.menuItems[2].command == TrayCommand::textRecognition);
     CHECK(std::wstring(api.menuItems[2].label) == L"\u6587\u5b57\u8bc6\u522b");
-    CHECK(api.menuItems[3].command == TrayCommand::exit);
-    CHECK(std::wstring(api.menuItems[3].label) == L"\u9000\u51fa");
+    CHECK(api.menuItems[3].command == TrayCommand::teachingPen);
+    CHECK(std::wstring(api.menuItems[3].label) == L"\u6559\u7b14");
+    CHECK(api.menuItems[4].command == TrayCommand::exit);
+    CHECK(std::wstring(api.menuItems[4].label) == L"\u9000\u51fa");
     CHECK(api.calls.back().operation == NIM_DELETE);
 }
 
@@ -374,6 +376,7 @@ void testAllDefaultMappingsAndMvpRegistration()
     int restoreCalls = 0;
     int fullScreenCalls = 0;
     int ocrCalls = 0;
+    int teachingPenCalls = 0;
     CHECK(registrar->registerFullScreenCapture(
         window, [&] { ++fullScreenCalls; }));
     CHECK(api.registrations.size() == 2U);
@@ -396,13 +399,24 @@ void testAllDefaultMappingsAndMvpRegistration()
         WM_HOTKEY,
         static_cast<WPARAM>(xxsnap::win::ocrHotKeyIdentifier)));
     CHECK(ocrCalls == 1);
-    CHECK(registrar->registerRestorePinnedImage(
-        window, [&] { ++restoreCalls; }));
+    CHECK(registrar->registerTeachingPen(
+        window, [&] { ++teachingPenCalls; }));
     CHECK(api.registrations.size() == 4U);
     CHECK(api.registrations[3].identifier
-        == xxsnap::win::restorePinnedImageHotKeyIdentifier);
+        == xxsnap::win::teachingPenHotKeyIdentifier);
     CHECK(api.registrations[3].modifiers == MOD_CONTROL);
-    CHECK(api.registrations[3].virtualKey == '1');
+    CHECK(api.registrations[3].virtualKey == '2');
+    CHECK(registrar->handleMessage(
+        WM_HOTKEY,
+        static_cast<WPARAM>(xxsnap::win::teachingPenHotKeyIdentifier)));
+    CHECK(teachingPenCalls == 1);
+    CHECK(registrar->registerRestorePinnedImage(
+        window, [&] { ++restoreCalls; }));
+    CHECK(api.registrations.size() == 5U);
+    CHECK(api.registrations[4].identifier
+        == xxsnap::win::restorePinnedImageHotKeyIdentifier);
+    CHECK(api.registrations[4].modifiers == MOD_CONTROL);
+    CHECK(api.registrations[4].virtualKey == '1');
     CHECK(registrar->handleMessage(
         WM_HOTKEY,
         static_cast<WPARAM>(
@@ -414,7 +428,7 @@ void testAllDefaultMappingsAndMvpRegistration()
         static_cast<WPARAM>(xxsnap::win::regionCaptureHotKeyIdentifier)));
     CHECK(callbackCalls == 1);
     CHECK(registrar == nullptr);
-    CHECK(api.unregisterCalls == 4);
+    CHECK(api.unregisterCalls == 5);
 }
 
 void testHotKeyConflictAndCleanupAreExplicit()

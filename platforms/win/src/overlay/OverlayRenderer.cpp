@@ -469,6 +469,40 @@ struct OverlayRenderer::Impl final {
         }
     }
 
+    static bool isCompactOptionsToolbar(AnnotationRect toolbar) noexcept
+    {
+        return std::abs(toolbar.width - 56.0F) < 0.5F;
+    }
+
+    void drawStrokeWidthPreview(
+        AnnotationRect rect,
+        std::size_t index,
+        float lineWidth,
+        bool selected,
+        ID2D1Brush* selectionBrush,
+        ID2D1Brush* normalBrush,
+        bool compact) noexcept
+    {
+        auto* brush = selected ? selectionBrush : normalBrush;
+        if (compact) {
+            constexpr std::array<float, 3> diameters{4.0F, 7.0F, 10.0F};
+            const auto diameter = diameters[(std::min)(
+                index, diameters.size() - 1U)];
+            const auto dot = D2D1::Ellipse(
+                D2D1::Point2F(rect.x + rect.width / 2.0F,
+                    rect.y + rect.height / 2.0F),
+                diameter / 2.0F, diameter / 2.0F);
+            renderTarget->FillEllipse(&dot, brush);
+            return;
+        }
+        renderTarget->DrawLine(
+            D2D1::Point2F(rect.x + 4.0F,
+                rect.y + rect.height / 2.0F),
+            D2D1::Point2F(rect.x + rect.width - 4.0F,
+                rect.y + rect.height / 2.0F),
+            brush, lineWidth);
+    }
+
     std::optional<OverlayRendererError> ensureFactories() noexcept
     {
         if (d2dFactory && dwriteFactory && wicFactory && textFormat
@@ -639,17 +673,14 @@ struct OverlayRenderer::Impl final {
         }
 
         const auto& widths = macArrowStrokeWidths();
+        const auto compact = isCompactOptionsToolbar(options.layout.toolbar);
         for (std::size_t index = 0;
              index < options.layout.strokeWidths.size() && index < widths.size();
              ++index) {
             const auto rect = options.layout.strokeWidths[index];
-            auto* brush = options.state.style().strokeWidthDip == widths[index]
-                ? selectionBrush.get()
-                : textBrush.get();
-            renderTarget->DrawLine(
-                D2D1::Point2F(rect.x + 4.0F, rect.y + 10.0F),
-                D2D1::Point2F(rect.x + rect.width - 4.0F, rect.y + 10.0F),
-                brush, widths[index]);
+            drawStrokeWidthPreview(rect, index, widths[index],
+                options.state.style().strokeWidthDip == widths[index],
+                selectionBrush.get(), textBrush.get(), compact);
         }
 
         const auto field = D2D1::RoundedRect(
@@ -713,7 +744,7 @@ struct OverlayRenderer::Impl final {
              ++index) {
             auto swatch = options.layout.colorSwatches[index];
             const auto selected = options.state.selectedPaletteIndex() == index;
-            if (selected) {
+            if (selected && !compact) {
                 swatch = {swatch.x - 3.0F, swatch.y - 3.0F,
                     swatch.width + 6.0F, swatch.height + 6.0F};
             }
@@ -823,18 +854,14 @@ struct OverlayRenderer::Impl final {
         }
 
         const auto& widths = macBrushStrokeWidths();
+        const auto compact = isCompactOptionsToolbar(options.layout.toolbar);
         for (std::size_t index = 0;
              index < options.layout.strokeWidths.size() && index < widths.size();
              ++index) {
             const auto rect = options.layout.strokeWidths[index];
-            auto* brush = options.state.style().strokeWidthDip == widths[index]
-                ? selectionBrush.get()
-                : textBrush.get();
-            renderTarget->DrawLine(
-                D2D1::Point2F(rect.x + 4.0F, rect.y + rect.height / 2.0F),
-                D2D1::Point2F(
-                    rect.x + rect.width - 4.0F, rect.y + rect.height / 2.0F),
-                brush, widths[index]);
+            drawStrokeWidthPreview(rect, index, widths[index],
+                options.state.style().strokeWidthDip == widths[index],
+                selectionBrush.get(), textBrush.get(), compact);
         }
 
         const auto field = D2D1::RoundedRect(
@@ -870,7 +897,7 @@ struct OverlayRenderer::Impl final {
              ++index) {
             auto swatch = options.layout.colorSwatches[index];
             const auto selected = options.state.selectedPaletteIndex() == index;
-            if (selected) {
+            if (selected && !compact) {
                 swatch = {swatch.x - 3.0F, swatch.y - 3.0F,
                     swatch.width + 6.0F, swatch.height + 6.0F};
             }
@@ -939,6 +966,7 @@ struct OverlayRenderer::Impl final {
             d2dRect(options.layout.toolbar), 6.0F, 6.0F);
         renderTarget->FillRoundedRectangle(&panel, panelBrush.get());
         renderTarget->DrawRoundedRectangle(&panel, borderBrush.get(), 1.0F);
+        const auto compact = isCompactOptionsToolbar(options.layout.toolbar);
         for (const auto separator : options.layout.separators) {
             const auto rounded = D2D1::RoundedRect(
                 d2dRect(separator), 0.75F, 0.75F);
@@ -950,13 +978,9 @@ struct OverlayRenderer::Impl final {
              index < options.layout.strokeWidths.size()
                 && index < widths.size() && index < previews.size(); ++index) {
             const auto rect = options.layout.strokeWidths[index];
-            renderTarget->DrawLine(
-                D2D1::Point2F(rect.x + 4.0F, rect.y + rect.height / 2.0F),
-                D2D1::Point2F(
-                    rect.x + rect.width - 4.0F, rect.y + rect.height / 2.0F),
-                options.state.style().strokeWidthDip == widths[index]
-                    ? selectionBrush.get() : textBrush.get(),
-                previews[index]);
+            drawStrokeWidthPreview(rect, index, previews[index],
+                options.state.style().strokeWidthDip == widths[index],
+                selectionBrush.get(), textBrush.get(), compact);
         }
         const auto& palette = macShapePalette();
         for (std::size_t index = 0;
@@ -964,7 +988,7 @@ struct OverlayRenderer::Impl final {
              ++index) {
             auto swatch = options.layout.colorSwatches[index];
             const auto selected = options.state.selectedPaletteIndex() == index;
-            if (selected) {
+            if (selected && !compact) {
                 swatch = {swatch.x - 3.0F, swatch.y - 3.0F,
                     swatch.width + 6.0F, swatch.height + 6.0F};
             }
@@ -1162,6 +1186,7 @@ struct OverlayRenderer::Impl final {
             d2dRect(options.layout.toolbar), 6.0F, 6.0F);
         renderTarget->FillRoundedRectangle(&panel, panelBrush.get());
         renderTarget->DrawRoundedRectangle(&panel, borderBrush.get(), 1.0F);
+        const auto compact = isCompactOptionsToolbar(options.layout.toolbar);
 
         const auto drawToggle = [&](AnnotationRect rect,
                                     bool selected,
@@ -1179,11 +1204,12 @@ struct OverlayRenderer::Impl final {
                 D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
         };
         drawToggle(options.layout.bold,
-            options.state.style().textBold, 0U, 20.0F);
+            options.state.style().textBold, 0U, compact ? 13.0F : 20.0F);
         drawToggle(options.layout.italic,
-            options.state.style().textItalic, 1U, 20.0F);
+            options.state.style().textItalic, 1U, compact ? 13.0F : 20.0F);
         drawToggle(options.layout.outline,
-            options.state.style().textOutlineEnabled, 2U, 15.0F);
+            options.state.style().textOutlineEnabled, 2U,
+            compact ? 11.0F : 15.0F);
 
         const auto drawPopup = [&](AnnotationRect rect,
                                    const std::wstring& label) {
@@ -1225,7 +1251,7 @@ struct OverlayRenderer::Impl final {
             auto swatch = options.layout.colorSwatches[index];
             const auto selected
                 = options.state.selectedPaletteIndex() == index;
-            if (selected) {
+            if (selected && !compact) {
                 swatch = {swatch.x - 3.0F, swatch.y - 3.0F,
                     swatch.width + 6.0F, swatch.height + 6.0F};
             }
@@ -1429,6 +1455,7 @@ struct OverlayRenderer::Impl final {
             d2dRect(options.layout.toolbar), 6.0F, 6.0F);
         renderTarget->FillRoundedRectangle(&panel, panelBrush.get());
         renderTarget->DrawRoundedRectangle(&panel, borderBrush.get(), 1.0F);
+        const auto compact = isCompactOptionsToolbar(options.layout.toolbar);
 
         for (const auto separator : options.layout.separators) {
             const auto rounded = D2D1::RoundedRect(
@@ -1441,13 +1468,9 @@ struct OverlayRenderer::Impl final {
              index < options.layout.strokeWidths.size()
                 && index < widths.size(); ++index) {
             const auto rect = options.layout.strokeWidths[index];
-            renderTarget->DrawLine(
-                {rect.x + 4.0F, rect.y + rect.height / 2.0F},
-                {rect.x + rect.width - 4.0F,
-                    rect.y + rect.height / 2.0F},
-                options.state.style().strokeWidthDip == widths[index]
-                    ? selectionBrush.get() : foregroundBrush.get(),
-                widths[index]);
+            drawStrokeWidthPreview(rect, index, widths[index],
+                options.state.style().strokeWidthDip == widths[index],
+                selectionBrush.get(), foregroundBrush.get(), compact);
         }
 
         const auto drawShape = [&](AnnotationRect rect,
@@ -1467,12 +1490,15 @@ struct OverlayRenderer::Impl final {
                 rect.x + rect.width / 2.0F,
                 rect.y + rect.height / 2.0F);
             if (shape == MagnifierShape::circle) {
-                const auto circle = D2D1::Ellipse(center, 6.5F, 6.5F);
+                const auto radius = compact ? 6.0F : 6.5F;
+                const auto circle = D2D1::Ellipse(center, radius, radius);
                 renderTarget->DrawEllipse(&circle, brush, 1.5F);
             } else {
                 const auto rectangle = D2D1::RoundedRect(
-                    D2D1::RectF(center.x - 6.5F, center.y - 6.5F,
-                        center.x + 6.5F, center.y + 6.5F),
+                    D2D1::RectF(center.x - (compact ? 6.0F : 6.5F),
+                        center.y - (compact ? 6.0F : 6.5F),
+                        center.x + (compact ? 6.0F : 6.5F),
+                        center.y + (compact ? 6.0F : 6.5F)),
                     1.5F, 1.5F);
                 renderTarget->DrawRoundedRectangle(
                     &rectangle, brush, 1.5F);
@@ -1517,7 +1543,7 @@ struct OverlayRenderer::Impl final {
             auto swatch = options.layout.colorSwatches[index];
             const auto selected
                 = options.state.selectedPaletteIndex() == index;
-            if (selected) {
+            if (selected && !compact) {
                 swatch = {swatch.x - 3.0F, swatch.y - 3.0F,
                     swatch.width + 6.0F, swatch.height + 6.0F};
             }
@@ -1605,10 +1631,12 @@ struct OverlayRenderer::Impl final {
         renderTarget->FillRoundedRectangle(&panel, textPanelBrush.get());
         renderTarget->DrawRoundedRectangle(
             &panel, textBorderBrush.get(), 1.0F);
-        const auto separator = D2D1::RoundedRect(
-            d2dRect(options.layout.separator), 0.75F, 0.75F);
-        renderTarget->FillRoundedRectangle(
-            &separator, textBorderBrush.get());
+        if (!isCompactOptionsToolbar(options.layout.toolbar)) {
+            const auto separator = D2D1::RoundedRect(
+                d2dRect(options.layout.separator), 0.75F, 0.75F);
+            renderTarget->FillRoundedRectangle(
+                &separator, textBorderBrush.get());
+        }
 
         const auto iconRect = [](AnnotationRect rect) {
             return DipRect{rect.x, rect.y, rect.width, rect.height};
@@ -2281,6 +2309,7 @@ struct OverlayRenderer::Impl final {
             renderTarget->DrawRoundedRectangle(&rounded, borderBrush.get(), 1.0F);
         };
         drawPanel(options.layout.toolbar, 6.0F);
+        const auto compact = isCompactOptionsToolbar(options.layout.toolbar);
         for (const auto separator : options.layout.separators) {
             const auto rounded = D2D1::RoundedRect(d2dRect(separator), 0.75F, 0.75F);
             renderTarget->FillRoundedRectangle(&rounded, separatorBrush.get());
@@ -2291,18 +2320,16 @@ struct OverlayRenderer::Impl final {
             const auto rect = options.layout.strokeWidths[index];
             const bool selected = index < widths.size()
                 && options.state.style().strokeWidthDip == widths[index];
-            renderTarget->DrawLine(
-                D2D1::Point2F(rect.x + 4.0F, rect.y + rect.height / 2.0F),
-                D2D1::Point2F(rect.x + rect.width - 4.0F, rect.y + rect.height / 2.0F),
-                selected ? selectionStrokeBrush.get() : textBrush.get(),
-                widths[index]);
+            drawStrokeWidthPreview(rect, index, widths[index], selected,
+                selectionStrokeBrush.get(), textBrush.get(), compact);
         }
 
+        const auto fillInset = compact ? 5.5F : 4.0F;
         const AnnotationRect fillIconBounds{
-            options.layout.fillToggle.x + 4.0F,
-            options.layout.fillToggle.y + 4.0F,
-            options.layout.fillToggle.width - 8.0F,
-            options.layout.fillToggle.height - 8.0F,
+            options.layout.fillToggle.x + fillInset,
+            options.layout.fillToggle.y + fillInset,
+            options.layout.fillToggle.width - fillInset * 2.0F,
+            options.layout.fillToggle.height - fillInset * 2.0F,
         };
         if (options.state.kind() == AnnotationKind::ellipse) {
             const auto fillIcon = D2D1::Ellipse(
@@ -2319,17 +2346,18 @@ struct OverlayRenderer::Impl final {
         }
 
         const bool rectangle = options.state.kind() == AnnotationKind::rectangle;
+        const auto shapeIconSize = compact ? 9.0F : 13.0F;
         const auto rectangleIcon = D2D1::RoundedRect(
             d2dRect(AnnotationRect{
                 options.layout.rectangleMode.x
-                    + (options.layout.rectangleMode.width - 13.0F) / 2.0F,
+                    + (options.layout.rectangleMode.width - shapeIconSize) / 2.0F,
                 options.layout.rectangleMode.y
-                    + (options.layout.rectangleMode.height - 13.0F) / 2.0F,
-                13.0F,
-                13.0F,
+                    + (options.layout.rectangleMode.height - shapeIconSize) / 2.0F,
+                shapeIconSize,
+                shapeIconSize,
             }),
-            1.5F,
-            1.5F);
+            compact ? 0.0F : 1.5F,
+            compact ? 0.0F : 1.5F);
         renderTarget->DrawRoundedRectangle(
             &rectangleIcon,
             rectangle ? selectionStrokeBrush.get() : textBrush.get(),
@@ -2338,14 +2366,15 @@ struct OverlayRenderer::Impl final {
             D2D1::Point2F(
                 options.layout.ellipseMode.x + options.layout.ellipseMode.width / 2.0F,
                 options.layout.ellipseMode.y + options.layout.ellipseMode.height / 2.0F),
-            6.5F,
-            6.0F);
+            shapeIconSize / 2.0F,
+            shapeIconSize / 2.0F);
         renderTarget->DrawEllipse(
             &ellipse,
             rectangle ? textBrush.get() : selectionStrokeBrush.get(),
             1.6F);
 
-        auto shapeResult = fillTriangle(
+        auto shapeResult = S_OK;
+        if (!compact) shapeResult = fillTriangle(
             D2D1::Point2F(
                 options.layout.rectangleModeBackground.x
                     + options.layout.rectangleModeBackground.width,
@@ -2398,7 +2427,7 @@ struct OverlayRenderer::Impl final {
              ++index) {
             auto swatch = options.layout.colorSwatches[index];
             const bool selected = options.state.selectedPaletteIndex() == index;
-            if (selected) {
+            if (selected && !compact) {
                 swatch = {
                     swatch.x - 3.0F,
                     swatch.y - 3.0F,
@@ -2564,6 +2593,16 @@ struct OverlayRenderer::Impl final {
                 state.showActions,
                 state.toolbarActions,
             });
+            if (state.teachingPenToolbar.has_value()) {
+                chromeLayout->toolbar = *state.teachingPenToolbar;
+                chromeLayout->toolbarItems.clear();
+                chromeLayout->toolbarItems.reserve(
+                    state.teachingPenToolbar->items.size());
+                for (const auto& item : state.teachingPenToolbar->items) {
+                    chromeLayout->toolbarItems.push_back(
+                        {item.action, item.rect, false, true});
+                }
+            }
             for (auto& item : chromeLayout->toolbarItems) {
                 item.selected = state.selectedToolbarAction == item.action;
                 if (item.action == ToolbarAction::undo) {
@@ -2596,7 +2635,8 @@ struct OverlayRenderer::Impl final {
             }
         } else {
             const auto& layout = *chromeLayout;
-            if (!state.pinnedImageEditor && !state.textRecognition) {
+            if (!state.pinnedImageEditor && !state.textRecognition
+                && !state.teachingPen) {
                 for (const auto mask : layout.mask) {
                     if (mask.width > 0.0F && mask.height > 0.0F) {
                         renderTarget->FillRectangle(d2dRect(mask), dimBrush.get());
@@ -2650,7 +2690,7 @@ struct OverlayRenderer::Impl final {
             if (state.textRecognition) {
                 renderTarget->FillRectangle(
                     d2dRect(layout.border), recognitionFillBrush.get());
-            } else {
+            } else if (!state.teachingPen) {
                 renderTarget->DrawRectangle(
                     d2dRect(layout.border),
                     selectionBrush.get(),
@@ -2686,7 +2726,7 @@ struct OverlayRenderer::Impl final {
             }
 
             if (layout.showActions) {
-                if (!state.pinnedImageEditor) {
+                if (!state.pinnedImageEditor && !state.teachingPen) {
                     const auto labelRounded = D2D1::RoundedRect(
                         d2dRect(layout.sizeLabel),
                         VisualStyleCatalog::sizeLabelCornerRadiusDip,
@@ -2721,12 +2761,14 @@ struct OverlayRenderer::Impl final {
                     toolbarBorderBrush.get(),
                     VisualStyleCatalog::toolbarBorderDip);
 
-                drawToolbarIcon(
-                    dragHandleIcon(),
-                    0U,
-                    layout.toolbar.leadingDragHandle,
-                    selectionBrush.get(),
-                    false);
+                if (!state.teachingPen) {
+                    drawToolbarIcon(
+                        dragHandleIcon(),
+                        0U,
+                        layout.toolbar.leadingDragHandle,
+                        selectionBrush.get(),
+                        false);
+                }
                 for (std::size_t index = 0; index < layout.toolbarItems.size(); ++index) {
                     const auto& item = layout.toolbarItems[index];
                     if (toolbarIcon(item.action).kind
@@ -2772,12 +2814,14 @@ struct OverlayRenderer::Impl final {
                             &roundedSeparator, toolbarSeparatorBrush.get());
                     }
                 }
-                drawToolbarIcon(
-                    dragHandleIcon(),
-                    0U,
-                    layout.toolbar.trailingDragHandle,
-                    selectionBrush.get(),
-                    false);
+                if (!state.teachingPen) {
+                    drawToolbarIcon(
+                        dragHandleIcon(),
+                        0U,
+                        layout.toolbar.trailingDragHandle,
+                        selectionBrush.get(),
+                        false);
+                }
             }
 
             if (state.shapeOptions.has_value()) {
@@ -2842,7 +2886,8 @@ struct OverlayRenderer::Impl final {
                 }
             }
 
-            if (!state.pinnedImageEditor && !state.textRecognition) {
+            if (!state.pinnedImageEditor && !state.textRecognition
+                && !state.teachingPen) {
                 for (const auto handle : layout.handles) {
                     const auto ellipse = D2D1::Ellipse(
                         D2D1::Point2F(

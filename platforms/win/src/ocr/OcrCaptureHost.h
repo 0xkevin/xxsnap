@@ -10,6 +10,7 @@
 
 #include <Windows.h>
 
+#include <functional>
 #include <memory>
 #include <thread>
 
@@ -20,7 +21,10 @@ class RuntimeApis;
 
 class OcrCaptureHost final {
 public:
-    OcrCaptureHost(HINSTANCE instance, HWND owner, RuntimeApis& runtimeApis);
+    using CompletionCallback = std::function<void()>;
+
+    OcrCaptureHost(HINSTANCE instance, HWND owner, RuntimeApis& runtimeApis,
+        CompletionCallback completionCallback = {});
     ~OcrCaptureHost();
 
     OcrCaptureHost(const OcrCaptureHost&) = delete;

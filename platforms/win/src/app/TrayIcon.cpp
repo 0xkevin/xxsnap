@@ -50,7 +50,7 @@ public:
 
     std::optional<TrayCommand> showContextMenu(
         HWND owner,
-        const std::array<TrayMenuItem, 4>& items,
+        const std::array<TrayMenuItem, 5>& items,
         DWORD& error) noexcept override
     {
         const auto menu = CreatePopupMenu();
@@ -99,6 +99,9 @@ public:
         }
         if (command == static_cast<UINT>(TrayCommand::textRecognition)) {
             return TrayCommand::textRecognition;
+        }
+        if (command == static_cast<UINT>(TrayCommand::teachingPen)) {
+            return TrayCommand::teachingPen;
         }
         if (command == static_cast<UINT>(TrayCommand::exit)) {
             return TrayCommand::exit;

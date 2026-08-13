@@ -18,7 +18,8 @@ enum class TrayCommand : UINT {
     regionCapture = 0x5801,
     fullScreenCapture = 0x5802,
     textRecognition = 0x5803,
-    exit = 0x5804,
+    teachingPen = 0x5804,
+    exit = 0x5805,
 };
 
 struct TrayMenuItem {
@@ -29,12 +30,13 @@ struct TrayMenuItem {
 inline constexpr UINT trayCallbackMessage = WM_APP + 0x58;
 inline constexpr UINT trayIconIdentifier = 1;
 
-constexpr std::array<TrayMenuItem, 4> mvpTrayMenuItems() noexcept
+constexpr std::array<TrayMenuItem, 5> mvpTrayMenuItems() noexcept
 {
     return {{
         {TrayCommand::regionCapture, L"\u533a\u57df\u622a\u56fe"},
         {TrayCommand::fullScreenCapture, L"\u5168\u5c4f\u622a\u56fe"},
         {TrayCommand::textRecognition, L"\u6587\u5b57\u8bc6\u522b"},
+        {TrayCommand::teachingPen, L"\u6559\u7b14"},
         {TrayCommand::exit, L"\u9000\u51fa"},
     }};
 }
@@ -50,7 +52,7 @@ public:
         DWORD& error) noexcept = 0;
     virtual std::optional<TrayCommand> showContextMenu(
         HWND owner,
-        const std::array<TrayMenuItem, 4>& items,
+        const std::array<TrayMenuItem, 5>& items,
         DWORD& error) noexcept = 0;
 };
 

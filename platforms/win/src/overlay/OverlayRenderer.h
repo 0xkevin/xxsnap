@@ -133,6 +133,8 @@ struct OverlayRenderState {
     bool showActions = true;
     bool pinnedImageEditor = false;
     bool textRecognition = false;
+    bool teachingPen = false;
+    std::optional<MainToolbarLayout> teachingPenToolbar;
     std::vector<ToolbarAction> toolbarActions{
         terminalToolbarActions().begin(),
         terminalToolbarActions().end(),

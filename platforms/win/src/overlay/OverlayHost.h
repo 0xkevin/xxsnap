@@ -61,6 +61,7 @@ enum class OverlayMode {
     capture,
     pinnedImageEditor,
     textRecognition,
+    teachingPen,
 };
 
 struct NumberCursorState {
@@ -152,6 +153,8 @@ struct OverlayPresentation {
     bool showActions = false;
     bool pinnedImageEditor = false;
     bool textRecognition = false;
+    bool teachingPen = false;
+    std::optional<MainToolbarLayout> teachingPenToolbar;
     std::vector<OverlayPresentationToolbarItem> toolbarItems;
     AnnotationRenderPlan annotationPlan;
     std::shared_ptr<const PixelBuffer> annotationComposite;
@@ -212,6 +215,7 @@ public:
     bool deactivateEscapeHotKey() noexcept;
     bool pointerDown(HWND source, PixelPoint clientPoint,
         int clickCount = 1) noexcept;
+    bool rightPointerDown(HWND source, PixelPoint clientPoint) noexcept;
     void pointerMove(HWND source, PixelPoint clientPoint) noexcept;
     void pointerUp(HWND source, PixelPoint clientPoint) noexcept;
     OverlayCursorStyle cursorStyle(
@@ -254,6 +258,10 @@ private:
     std::optional<std::size_t> actionOwner() const noexcept;
     std::optional<ToolbarAction> hitToolbarAction(
         const OverlaySurface& surface, PixelPoint clientPoint) const noexcept;
+    std::optional<MainToolbarLayout> teachingPenToolbarLayout(
+        const OverlaySurface& surface) const;
+    std::optional<AnnotationPoint> teachingPenOptionsOrigin(
+        const OverlaySurface& surface, float height) const noexcept;
     std::vector<ToolbarAction> toolbarActions() const;
     bool toolbarActionEnabled(ToolbarAction action) const noexcept;
     void ensureEditor() noexcept;
@@ -321,6 +329,7 @@ private:
     std::optional<PixelPoint> eyedropperMeasurementEnd_;
     bool eyedropperMeasurementInProgress_ = false;
     bool pinnedImageShiftShortcutCandidate_ = false;
+    std::optional<PixelPoint> teachingPenToolbarAnchor_;
     EyedropperCopyMode eyedropperCopyMode_ = EyedropperCopyMode::hex;
     std::optional<std::chrono::steady_clock::time_point>
         eyedropperCopySuccessUntil_;
@@ -373,11 +382,18 @@ public:
         const FrozenDesktop& desktop,
         RestartCallback restartCallback,
         ActionCallback actionCallback);
+    static OverlayHostCreateResult createTeachingPen(
+        HINSTANCE instance,
+        const FrozenDesktop& desktop,
+        RestartCallback restartCallback,
+        ActionCallback actionCallback);
 
     void show() noexcept;
     void setAlwaysOnTop(bool enabled) noexcept;
     bool suspendForScrollCapture() noexcept;
     bool resumeAfterScrollCapture() noexcept;
+    bool suspendInputForRecognition() noexcept;
+    bool resumeInputAfterRecognition() noexcept;
     std::optional<PixelRect> selection() const noexcept;
     OverlayAnnotationSnapshot annotationSnapshot() const;
     SelectionPhase phase() const noexcept;

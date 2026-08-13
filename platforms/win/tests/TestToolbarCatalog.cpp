@@ -76,6 +76,22 @@ void testCatalogContract()
     static_assert(pinnedEditorToolbarActions().size() == 15);
     static_assert(pinnedEditorToolbarActions().back()
         == ToolbarAction::finishEditing);
+    constexpr std::array teachingPenExpected{
+        ToolbarAction::pen,
+        ToolbarAction::rectangle,
+        ToolbarAction::polyline,
+        ToolbarAction::marker,
+        ToolbarAction::text,
+        ToolbarAction::number,
+        ToolbarAction::mosaic,
+        ToolbarAction::eyedropper,
+        ToolbarAction::eraser,
+        ToolbarAction::magnifier,
+        ToolbarAction::copy,
+        ToolbarAction::save,
+    };
+    static_assert(arraysEqual(
+        teachingPenToolbarActions(), teachingPenExpected));
     static_assert(toolbarIcon(ToolbarAction::finishEditing).kind
         == ToolbarIconSpec::Kind::checkmark);
     CHECK(toolbarIcon(ToolbarAction::rectangle).insetDip == 0.0F);

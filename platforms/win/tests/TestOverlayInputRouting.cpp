@@ -1311,6 +1311,149 @@ void testTextRecognitionAutoCompletesWithoutCaptureChrome()
     CHECK((router.selection() == PixelRect{-140, 80, 260, 200}));
 }
 
+void testTeachingPenStartsFullScreenWithBrushAndHiddenToolbar()
+{
+    FakePlatform platform;
+    std::vector<OverlayInputAction> actions;
+    const auto window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(3));
+    OverlayInputRouter router(
+        PixelRect{0, 0, 800, 600},
+        {{window, PixelRect{0, 0, 800, 600}, 96, 96}},
+        platform,
+        [&actions](OverlayInputAction action) { actions.push_back(action); },
+        true, nullptr, OverlayMode::teachingPen);
+
+    CHECK(router.phase() == SelectionPhase::ready);
+    CHECK((router.selection() == PixelRect{0, 0, 800, 600}));
+    const auto hidden = router.presentations().front();
+    CHECK(hidden.teachingPen);
+    CHECK(!hidden.showActions);
+    CHECK(hidden.toolbarItems.empty());
+
+    CHECK(router.rightPointerDown(window, {360, 420}));
+    const auto shown = router.presentations().front();
+    CHECK(shown.showActions);
+    CHECK(shown.toolbarItems.size()
+        == xxsnap::win::teachingPenToolbarActions().size());
+    CHECK(shown.toolbarItems.front().action == xxsnap::win::ToolbarAction::pen);
+    CHECK(shown.toolbarItems.front().selected);
+    CHECK((shown.toolbarItems.front().rectPhysical
+        == PixelRect{370, 430, 20, 20}));
+
+    CHECK(router.rightPointerDown(window, {360, 420}));
+    CHECK(!router.presentations().front().showActions);
+    CHECK(actions.empty());
+}
+
+void testTeachingPenToolbarSelectionAndCanvasDrawingMatchMac()
+{
+    FakePlatform platform;
+    std::vector<OverlayInputAction> actions;
+    const auto window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(3));
+    OverlayInputRouter router(
+        PixelRect{0, 0, 800, 600},
+        {{window, PixelRect{0, 0, 800, 600}, 96, 96}},
+        platform,
+        [&actions](OverlayInputAction action) { actions.push_back(action); },
+        true, nullptr, OverlayMode::teachingPen);
+
+    CHECK(router.rightPointerDown(window, {360, 420}));
+    const auto shown = router.presentations().front();
+    const auto rectangle = std::find_if(
+        shown.toolbarItems.begin(), shown.toolbarItems.end(), [](const auto& item) {
+            return item.action == xxsnap::win::ToolbarAction::rectangle;
+        });
+    CHECK(rectangle != shown.toolbarItems.end());
+    if (rectangle == shown.toolbarItems.end()) return;
+    CHECK(router.pointerDown(window, rectangle->centerPhysical));
+    const auto rectangleOptions = router.presentations().front();
+    CHECK(rectangleOptions.showActions);
+    CHECK(rectangleOptions.shapeOptions.has_value());
+    if (rectangleOptions.shapeOptions.has_value()) {
+        CHECK(rectangleOptions.shapeOptions->state.style().cornerRadiusDip
+            == 0.0F);
+        CHECK(!rectangleOptions.shapeOptions->cornerRadiusPanel.has_value());
+    }
+
+    platform.cursor = PixelPoint{180, 160};
+    CHECK(router.pointerDown(window, {100, 100}));
+    router.pointerMove(window, {180, 160});
+    router.pointerUp(window, {180, 160});
+    CHECK(!router.presentations().front().showActions);
+    CHECK(router.annotationDocument().annotations().size() == 1U);
+    CHECK(router.annotationDocument().annotations().front().kind
+        == xxsnap::win::AnnotationKind::rectangle);
+    CHECK(router.annotationDocument().annotations().front()
+        .style.cornerRadiusDip == 0.0F);
+}
+
+void testTeachingPenTextDefaultsToNoOutline()
+{
+    FakePlatform platform;
+    const auto window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(3));
+    OverlayInputRouter router(
+        PixelRect{0, 0, 800, 600},
+        {{window, PixelRect{0, 0, 800, 600}, 96, 96}},
+        platform, [](OverlayInputAction) {}, true, nullptr,
+        OverlayMode::teachingPen);
+
+    CHECK(router.rightPointerDown(window, {360, 420}));
+    const auto shown = router.presentations().front();
+    const auto textTool = std::find_if(
+        shown.toolbarItems.begin(), shown.toolbarItems.end(), [](const auto& item) {
+            return item.action == xxsnap::win::ToolbarAction::text;
+        });
+    CHECK(textTool != shown.toolbarItems.end());
+    if (textTool == shown.toolbarItems.end()) return;
+    CHECK(router.pointerDown(window, textTool->centerPhysical));
+    const auto selected = router.presentations().front();
+    CHECK(selected.textOptions.has_value());
+    if (selected.textOptions.has_value()) {
+        CHECK(!selected.textOptions->state.style().textOutlineEnabled);
+    }
+}
+
+void testTeachingPenEscapeAndCopyUseMacCompletionSemantics()
+{
+    FakePlatform platform;
+    std::vector<OverlayInputAction> actions;
+    const auto window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(3));
+    OverlayInputRouter router(
+        PixelRect{0, 0, 800, 600},
+        {{window, PixelRect{0, 0, 800, 600}, 96, 96}},
+        platform,
+        [&actions](OverlayInputAction action) { actions.push_back(action); },
+        true, nullptr, OverlayMode::teachingPen);
+
+    router.escapePressed();
+    CHECK(router.status() == OverlayInputStatus::active);
+    CHECK(actions.empty());
+    router.escapePressed();
+    CHECK(router.status() == OverlayInputStatus::cancelled);
+    CHECK(actions == std::vector<OverlayInputAction>{OverlayInputAction::cancel});
+
+    actions.clear();
+    OverlayInputRouter copyRouter(
+        PixelRect{0, 0, 800, 600},
+        {{window, PixelRect{0, 0, 800, 600}, 96, 96}},
+        platform,
+        [&actions](OverlayInputAction action) { actions.push_back(action); },
+        true, nullptr, OverlayMode::teachingPen);
+    CHECK(copyRouter.rightPointerDown(window, {360, 420}));
+    const auto shown = copyRouter.presentations().front();
+    const auto copy = std::find_if(
+        shown.toolbarItems.begin(), shown.toolbarItems.end(), [](const auto& item) {
+            return item.action == xxsnap::win::ToolbarAction::copy;
+        });
+    CHECK(copy != shown.toolbarItems.end());
+    if (copy != shown.toolbarItems.end()) {
+        CHECK(copyRouter.pointerDown(window, copy->centerPhysical));
+    }
+    CHECK(copyRouter.status() == OverlayInputStatus::completed);
+    CHECK(actions == std::vector<OverlayInputAction>{OverlayInputAction::copy});
+    CHECK((copyRouter.selection() == PixelRect{0, 0, 800, 600}));
+}
+
 } // namespace
 
 int main()
@@ -1346,5 +1489,9 @@ int main()
     testEraserToolbarUsesMacLayoutAndModes();
     testRectangleEraserRoutesFromOutsideLockedSelection();
     testTextRecognitionAutoCompletesWithoutCaptureChrome();
+    testTeachingPenStartsFullScreenWithBrushAndHiddenToolbar();
+    testTeachingPenToolbarSelectionAndCanvasDrawingMatchMac();
+    testTeachingPenTextDefaultsToNoOutline();
+    testTeachingPenEscapeAndCopyUseMacCompletionSemantics();
     return failureCount == 0 ? 0 : 1;
 }

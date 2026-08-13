@@ -1184,6 +1184,17 @@ if(BUILD_TESTING)
     target_link_libraries(
         xxsnap_interactive_ocr_verifier PRIVATE user32 gdi32
     )
+
+    add_executable(
+        xxsnap_interactive_teaching_pen_verifier EXCLUDE_FROM_ALL
+        ${CMAKE_SOURCE_DIR}/tools/windows/verify-interactive-teaching-pen.cpp
+    )
+    target_compile_features(
+        xxsnap_interactive_teaching_pen_verifier PRIVATE cxx_std_17
+    )
+    target_link_libraries(
+        xxsnap_interactive_teaching_pen_verifier PRIVATE user32 gdi32
+    )
 endif()
 
 set(xxsnap_capture_session_targets
@@ -1259,6 +1270,8 @@ if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_interactive_pin_verifier)
     list(APPEND xxsnap_capture_session_targets xxsnap_interactive_fullscreen_verifier)
     list(APPEND xxsnap_capture_session_targets xxsnap_interactive_ocr_verifier)
+    list(APPEND xxsnap_capture_session_targets
+        xxsnap_interactive_teaching_pen_verifier)
 endif()
 
 if(MSVC)

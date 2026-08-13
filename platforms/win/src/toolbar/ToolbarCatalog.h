@@ -100,6 +100,21 @@ inline constexpr std::array pinnedEditorActions{
     ToolbarAction::finishEditing,
 };
 
+inline constexpr std::array teachingPenActions{
+    ToolbarAction::pen,
+    ToolbarAction::rectangle,
+    ToolbarAction::polyline,
+    ToolbarAction::marker,
+    ToolbarAction::text,
+    ToolbarAction::number,
+    ToolbarAction::mosaic,
+    ToolbarAction::eyedropper,
+    ToolbarAction::eraser,
+    ToolbarAction::magnifier,
+    ToolbarAction::copy,
+    ToolbarAction::save,
+};
+
 inline constexpr std::array imageResources{
     ToolbarIconSpec{
         L"settings-more", 2.0F, false,
@@ -281,6 +296,11 @@ constexpr const auto& terminalToolbarActions() noexcept
 constexpr const auto& pinnedEditorToolbarActions() noexcept
 {
     return toolbar_catalog_detail::pinnedEditorActions;
+}
+
+constexpr const auto& teachingPenToolbarActions() noexcept
+{
+    return toolbar_catalog_detail::teachingPenActions;
 }
 
 constexpr const ToolbarIconSpec& toolbarIcon(ToolbarAction action) noexcept

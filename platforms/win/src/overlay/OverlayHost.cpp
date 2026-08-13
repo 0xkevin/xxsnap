@@ -492,6 +492,13 @@ OverlayInputRouter::OverlayInputRouter(
             surface.dpiY = 96;
         }
     }
+    if (mode_ == OverlayMode::teachingPen) {
+        lockSelection(virtualBounds);
+        if (editor_ != nullptr) {
+            editor_->setTeachingPenMode(true);
+            editor_->handleToolbarAction(ToolbarAction::pen);
+        }
+    }
 }
 
 void OverlayInputRouter::lockSelection(PixelRect selection) noexcept
@@ -516,6 +523,12 @@ std::vector<ToolbarAction> OverlayInputRouter::toolbarActions() const
         return {
             pinnedEditorToolbarActions().begin(),
             pinnedEditorToolbarActions().end(),
+        };
+    }
+    if (mode_ == OverlayMode::teachingPen) {
+        return {
+            teachingPenToolbarActions().begin(),
+            teachingPenToolbarActions().end(),
         };
     }
     return editor_ != nullptr
@@ -569,6 +582,50 @@ void OverlayInputRouter::ensureEditor() noexcept
     if (editorOwnerIndex_ == owner) {
         editor_->setCanvasBounds(bounds);
     }
+}
+
+std::optional<MainToolbarLayout>
+OverlayInputRouter::teachingPenToolbarLayout(
+    const OverlaySurface& surface) const
+{
+    if (mode_ != OverlayMode::teachingPen
+        || !teachingPenToolbarAnchor_.has_value()
+        || !contains(surface.physicalBounds, *teachingPenToolbarAnchor_)) {
+        return std::nullopt;
+    }
+    const ToolbarPoint pointer{
+        physicalPixelsToDip(
+            teachingPenToolbarAnchor_->x - surface.physicalBounds.x,
+            surface.dpiX),
+        physicalPixelsToDip(
+            teachingPenToolbarAnchor_->y - surface.physicalBounds.y,
+            surface.dpiY),
+    };
+    const ToolbarRect bounds{
+        0.0F,
+        0.0F,
+        physicalPixelsToDip(surface.physicalBounds.width, surface.dpiX),
+        physicalPixelsToDip(surface.physicalBounds.height, surface.dpiY),
+    };
+    return computeTeachingPenToolbarLayout(pointer, bounds);
+}
+
+std::optional<AnnotationPoint>
+OverlayInputRouter::teachingPenOptionsOrigin(
+    const OverlaySurface& surface,
+    float height) const noexcept
+{
+    const auto toolbar = teachingPenToolbarLayout(surface);
+    if (!toolbar.has_value()) return std::nullopt;
+    const ToolbarRect bounds{
+        0.0F,
+        0.0F,
+        physicalPixelsToDip(surface.physicalBounds.width, surface.dpiX),
+        physicalPixelsToDip(surface.physicalBounds.height, surface.dpiY),
+    };
+    const auto origin = attachedTeachingPenToolbarOrigin(
+        toolbar->bounds, bounds, height);
+    return AnnotationPoint{origin.x, origin.y};
 }
 
 std::optional<AnnotationPoint> OverlayInputRouter::annotationPoint(
@@ -741,6 +798,17 @@ OverlayInputRouter::currentShapeOptionsLayout(
         || !model_.selection().has_value()) {
         return std::nullopt;
     }
+    if (mode_ == OverlayMode::teachingPen) {
+        const auto initial = teachingPenShapeOptionsLayout(
+            {}, macShapePalette().size());
+        const auto origin = teachingPenOptionsOrigin(
+            surface, initial.toolbar.height);
+        return origin.has_value()
+            ? std::optional<ShapeOptionsLayout>(
+                teachingPenShapeOptionsLayout(
+                    *origin, macShapePalette().size()))
+            : std::nullopt;
+    }
     const auto actions = toolbarActions();
     const auto chrome = computeOverlayLayout({
         surface.physicalBounds,
@@ -764,6 +832,17 @@ OverlayInputRouter::currentArrowLineOptionsLayout(
         || !model_.selection().has_value()) {
         return std::nullopt;
     }
+    if (mode_ == OverlayMode::teachingPen) {
+        const auto initial = teachingPenArrowLineOptionsLayout(
+            {}, macShapePalette().size());
+        const auto origin = teachingPenOptionsOrigin(
+            surface, initial.toolbar.height);
+        return origin.has_value()
+            ? std::optional<ArrowLineOptionsLayout>(
+                teachingPenArrowLineOptionsLayout(
+                    *origin, macShapePalette().size()))
+            : std::nullopt;
+    }
     const auto chrome = computeOverlayLayout({
         surface.physicalBounds,
         *model_.selection(),
@@ -785,6 +864,17 @@ OverlayInputRouter::currentBrushOptionsLayout(
     if (!editor_ || !editor_->isBrushToolActive()
         || !model_.selection().has_value()) {
         return std::nullopt;
+    }
+    if (mode_ == OverlayMode::teachingPen) {
+        const auto initial = teachingPenBrushOptionsLayout(
+            {}, macShapePalette().size());
+        const auto origin = teachingPenOptionsOrigin(
+            surface, initial.toolbar.height);
+        return origin.has_value()
+            ? std::optional<BrushOptionsLayout>(
+                teachingPenBrushOptionsLayout(
+                    *origin, macShapePalette().size()))
+            : std::nullopt;
     }
     const auto chrome = computeOverlayLayout({
         surface.physicalBounds,
@@ -808,6 +898,17 @@ OverlayInputRouter::currentMarkerOptionsLayout(
         || !model_.selection().has_value()) {
         return std::nullopt;
     }
+    if (mode_ == OverlayMode::teachingPen) {
+        const auto initial = teachingPenMarkerOptionsLayout(
+            {}, macShapePalette().size());
+        const auto origin = teachingPenOptionsOrigin(
+            surface, initial.toolbar.height);
+        return origin.has_value()
+            ? std::optional<MarkerOptionsLayout>(
+                teachingPenMarkerOptionsLayout(
+                    *origin, macShapePalette().size()))
+            : std::nullopt;
+    }
     const auto chrome = computeOverlayLayout({
         surface.physicalBounds,
         *model_.selection(),
@@ -830,6 +931,15 @@ OverlayInputRouter::currentMosaicOptionsLayout(
         || !model_.selection().has_value()) {
         return std::nullopt;
     }
+    if (mode_ == OverlayMode::teachingPen) {
+        const auto initial = teachingPenMosaicOptionsLayout({});
+        const auto origin = teachingPenOptionsOrigin(
+            surface, initial.toolbar.height);
+        return origin.has_value()
+            ? std::optional<MosaicOptionsLayout>(
+                teachingPenMosaicOptionsLayout(*origin))
+            : std::nullopt;
+    }
     const auto chrome = computeOverlayLayout({
         surface.physicalBounds,
         *model_.selection(),
@@ -851,6 +961,17 @@ OverlayInputRouter::currentTextOptionsLayout(
     if (!editor_ || !editor_->isTextToolActive()
         || !model_.selection().has_value()) {
         return std::nullopt;
+    }
+    if (mode_ == OverlayMode::teachingPen) {
+        const auto initial = teachingPenTextOptionsLayout(
+            {}, macShapePalette().size());
+        const auto origin = teachingPenOptionsOrigin(
+            surface, initial.toolbar.height);
+        return origin.has_value()
+            ? std::optional<TextOptionsLayout>(
+                teachingPenTextOptionsLayout(
+                    *origin, macShapePalette().size()))
+            : std::nullopt;
     }
     const auto chrome = computeOverlayLayout({
         surface.physicalBounds,
@@ -875,6 +996,17 @@ OverlayInputRouter::currentNumberOptionsLayout(
         || !model_.selection().has_value()) {
         return std::nullopt;
     }
+    if (mode_ == OverlayMode::teachingPen) {
+        const auto initial = teachingPenNumberOptionsLayout(
+            {}, macShapePalette().size());
+        const auto origin = teachingPenOptionsOrigin(
+            surface, initial.toolbar.height);
+        return origin.has_value()
+            ? std::optional<NumberOptionsLayout>(
+                teachingPenNumberOptionsLayout(
+                    *origin, macShapePalette().size()))
+            : std::nullopt;
+    }
     const auto chrome = computeOverlayLayout({
         surface.physicalBounds,
         *model_.selection(),
@@ -897,6 +1029,17 @@ OverlayInputRouter::currentMagnifierOptionsLayout(
     if (!editor_ || !editor_->isMagnifierToolActive()
         || !model_.selection().has_value()) {
         return std::nullopt;
+    }
+    if (mode_ == OverlayMode::teachingPen) {
+        const auto initial = teachingPenMagnifierOptionsLayout(
+            {}, macShapePalette().size());
+        const auto origin = teachingPenOptionsOrigin(
+            surface, initial.toolbar.height);
+        return origin.has_value()
+            ? std::optional<MagnifierOptionsLayout>(
+                teachingPenMagnifierOptionsLayout(
+                    *origin, macShapePalette().size()))
+            : std::nullopt;
     }
     const auto chrome = computeOverlayLayout({
         surface.physicalBounds,
@@ -921,6 +1064,15 @@ OverlayInputRouter::currentEraserOptionsLayout(
     if (!editor_ || !editor_->isEraserToolActive()
         || !model_.selection().has_value()) {
         return std::nullopt;
+    }
+    if (mode_ == OverlayMode::teachingPen) {
+        const auto initial = teachingPenEraserOptionsLayout({});
+        const auto origin = teachingPenOptionsOrigin(
+            surface, initial.toolbar.height);
+        return origin.has_value()
+            ? std::optional<EraserOptionsLayout>(
+                teachingPenEraserOptionsLayout(*origin))
+            : std::nullopt;
     }
     const auto chrome = computeOverlayLayout({
         surface.physicalBounds,
@@ -1099,10 +1251,19 @@ std::vector<OverlayPresentation> OverlayInputRouter::presentations() const
             = mode_ == OverlayMode::pinnedImageEditor;
         presentation.textRecognition
             = mode_ == OverlayMode::textRecognition;
+        presentation.teachingPen
+            = mode_ == OverlayMode::teachingPen;
         if (presentation.textRecognition) {
             presentation.showActions = false;
         }
-        if (!presentation.showActions || !presentation.selection.has_value()) {
+        if (presentation.teachingPen) {
+            presentation.teachingPenToolbar = teachingPenToolbarLayout(
+                surfaces_[index]);
+            presentation.showActions
+                = presentation.teachingPenToolbar.has_value();
+        }
+        if ((!presentation.teachingPen && !presentation.showActions)
+            || !presentation.selection.has_value()) {
             continue;
         }
         const auto& surface = surfaces_[index];
@@ -1116,19 +1277,26 @@ std::vector<OverlayPresentation> OverlayInputRouter::presentations() const
             true,
             actions,
         });
-        presentation.toolbarItems.reserve(layout.toolbarItems.size());
-        for (const auto& item : layout.toolbarItems) {
-            const auto rect = buttonRectPhysical(item.rect, surface);
-            presentation.toolbarItems.push_back({
-                item.action,
-                rect,
-                buttonCenterPhysical(rect),
-                editor_ != nullptr
-                    && editor_->toolbarState().selectedAction() == item.action,
-                toolbarActionEnabled(item.action),
-            });
+        if (presentation.showActions) {
+            const auto& toolbarItems = presentation.teachingPenToolbar.has_value()
+                ? presentation.teachingPenToolbar->items
+                : layout.toolbar.items;
+            presentation.toolbarItems.reserve(toolbarItems.size());
+            for (const auto& item : toolbarItems) {
+                const auto rect = buttonRectPhysical(item.rect, surface);
+                presentation.toolbarItems.push_back({
+                    item.action,
+                    rect,
+                    buttonCenterPhysical(rect),
+                    editor_ != nullptr
+                        && editor_->toolbarState().selectedAction() == item.action,
+                    toolbarActionEnabled(item.action),
+                });
+            }
         }
-        if (editor_ != nullptr && editorOwnerIndex_ == index) {
+        if (editor_ != nullptr
+            && (editorOwnerIndex_ == index
+                || mode_ == OverlayMode::teachingPen)) {
             const auto selection = snipory::core::portable::standardized(
                 *presentation.selection);
             presentation.annotationPlan = editor_->renderPlan({
@@ -1369,8 +1537,21 @@ std::optional<ToolbarAction> OverlayInputRouter::hitToolbarAction(
     const OverlaySurface& surface, PixelPoint clientPoint) const noexcept
 {
     const auto owner = actionOwner();
-    if (!owner.has_value() || &surfaces_[*owner] != &surface
-        || !model_.selection().has_value()) {
+    if (!model_.selection().has_value()) {
+        return std::nullopt;
+    }
+    if (mode_ == OverlayMode::teachingPen) {
+        const auto layout = teachingPenToolbarLayout(surface);
+        if (!layout.has_value()) return std::nullopt;
+        const auto point = ToolbarPoint{
+            static_cast<float>(clientPoint.x) * 96.0F
+                / static_cast<float>(surface.dpiX),
+            static_cast<float>(clientPoint.y) * 96.0F
+                / static_cast<float>(surface.dpiY),
+        };
+        return toolbarActionAt(*layout, point);
+    }
+    if (!owner.has_value() || &surfaces_[*owner] != &surface) {
         return std::nullopt;
     }
     const auto layout = computeOverlayLayout({
@@ -1403,7 +1584,8 @@ bool OverlayInputRouter::pointerDown(
         return false;
     }
     if (editor_ != nullptr && editorOwnerIndex_.has_value()
-        && &surfaces_[*editorOwnerIndex_] == surface) {
+        && (&surfaces_[*editorOwnerIndex_] == surface
+            || mode_ == OverlayMode::teachingPen)) {
         const AnnotationPoint point{
             static_cast<float>(clientPoint.x) * 96.0F
                 / static_cast<float>(surface->dpiX),
@@ -1716,6 +1898,11 @@ bool OverlayInputRouter::pointerDown(
         }
     }
 
+    if (mode_ == OverlayMode::teachingPen
+        && teachingPenToolbarAnchor_.has_value()) {
+        teachingPenToolbarAnchor_.reset();
+        if (editor_ != nullptr) editor_->dismissPopovers();
+    }
     const auto virtualPoint = toVirtual(*surface, clientPoint);
     if (editor_ != nullptr && editor_->isEyedropperToolActive()) {
         if (!eyedropperPointIsValid(virtualPoint)) {
@@ -1765,6 +1952,10 @@ bool OverlayInputRouter::pointerDown(
             return true;
         }
     }
+
+    if (mode_ == OverlayMode::teachingPen) {
+        return true;
+    }
     if (!platform_.captureMouse(source)) {
         lastError_ = OverlayInputErrorCode::mouseCaptureFailed;
         cancelOnce();
@@ -1799,6 +1990,26 @@ bool OverlayInputRouter::pointerDown(
     return true;
 }
 
+bool OverlayInputRouter::rightPointerDown(
+    HWND source,
+    PixelPoint clientPoint) noexcept
+{
+    if (status_ != OverlayInputStatus::active
+        || mode_ != OverlayMode::teachingPen || dragging_) {
+        return false;
+    }
+    const auto* surface = surfaceFor(source);
+    if (surface == nullptr) return false;
+    if (teachingPenToolbarAnchor_.has_value()) {
+        teachingPenToolbarAnchor_.reset();
+        if (editor_ != nullptr) editor_->dismissPopovers();
+    } else {
+        teachingPenToolbarAnchor_ = toVirtual(*surface, clientPoint);
+        if (editor_ != nullptr) editor_->dismissPopovers();
+    }
+    return true;
+}
+
 OverlayCursorStyle OverlayInputRouter::cursorStyle(
     HWND source, PixelPoint clientPoint) const noexcept
 {
@@ -1823,7 +2034,8 @@ OverlayCursorStyle OverlayInputRouter::cursorStyle(
             / static_cast<float>(surface->dpiY),
     };
     if (editorOwnerIndex_.has_value()
-        && &surfaces_[*editorOwnerIndex_] == surface) {
+        && (&surfaces_[*editorOwnerIndex_] == surface
+            || mode_ == OverlayMode::teachingPen)) {
         if (const auto options = currentShapeOptionsLayout(*surface);
             options.has_value() && contains(options->toolbar, surfacePoint)) {
             return OverlayCursorStyle::arrow;
@@ -1880,6 +2092,10 @@ OverlayCursorStyle OverlayInputRouter::cursorStyle(
                 return cursorStyleForShape(shapeStyle);
             }
         }
+    }
+
+    if (mode_ == OverlayMode::teachingPen) {
+        return OverlayCursorStyle::arrow;
     }
 
     if (model_.phase() == SelectionPhase::moving) {
@@ -2310,6 +2526,7 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
     std::vector<std::unique_ptr<OverlayWindow>> windows;
     std::unique_ptr<OverlayInputRouter> router;
     bool restartRequested = false;
+    bool inputSuspended = false;
 
     void closeWindows() noexcept
     {
@@ -2351,12 +2568,15 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
 
     void handleInput(HWND source, const OverlayWindowInput& input) noexcept
     {
-        if (restartRequested || !router) {
+        if (restartRequested || inputSuspended || !router) {
             return;
         }
         switch (input.kind) {
         case OverlayWindowInputKind::pointerDown:
             router->pointerDown(source, input.clientPoint, input.clickCount);
+            break;
+        case OverlayWindowInputKind::rightPointerDown:
+            router->rightPointerDown(source, input.clientPoint);
             break;
         case OverlayWindowInputKind::pointerMove:
             router->pointerMove(source, input.clientPoint);
@@ -2531,6 +2751,9 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
                 state.showActions = current[index].showActions;
                 state.pinnedImageEditor = current[index].pinnedImageEditor;
                 state.textRecognition = current[index].textRecognition;
+                state.teachingPen = current[index].teachingPen;
+                state.teachingPenToolbar
+                    = current[index].teachingPenToolbar;
                 state.annotationPlan = current[index].annotationPlan;
                 state.annotationComposite
                     = current[index].annotationComposite;
@@ -2672,6 +2895,16 @@ OverlayHostCreateResult OverlayHost::createTextRecognition(
 {
     return createWithMode(instance, desktop, std::move(restartCallback),
         std::move(actionCallback), false, OverlayMode::textRecognition);
+}
+
+OverlayHostCreateResult OverlayHost::createTeachingPen(
+    HINSTANCE instance,
+    const FrozenDesktop& desktop,
+    RestartCallback restartCallback,
+    ActionCallback actionCallback)
+{
+    return createWithMode(instance, desktop, std::move(restartCallback),
+        std::move(actionCallback), true, OverlayMode::teachingPen);
 }
 
 OverlayHostCreateResult OverlayHost::createWithMode(
@@ -2892,6 +3125,35 @@ bool OverlayHost::resumeAfterScrollCapture() noexcept
     if (!impl || !impl->router || impl->windows.empty()
         || impl->router->status() != OverlayInputStatus::active
         || !impl->router->activateEscapeHotKey(
+            impl->windows.front()->handle())
+        || !impl->refresh()) {
+        return false;
+    }
+    show();
+    return true;
+}
+
+bool OverlayHost::suspendInputForRecognition() noexcept
+{
+    const auto impl = impl_;
+    if (!impl || !impl->router
+        || impl->router->status() != OverlayInputStatus::active) {
+        return false;
+    }
+    impl->router->deactivateEscapeHotKey();
+    impl->inputSuspended = true;
+    return true;
+}
+
+bool OverlayHost::resumeInputAfterRecognition() noexcept
+{
+    const auto impl = impl_;
+    if (!impl || !impl->router || impl->windows.empty()
+        || impl->router->status() != OverlayInputStatus::active) {
+        return false;
+    }
+    impl->inputSuspended = false;
+    if (!impl->router->activateEscapeHotKey(
             impl->windows.front()->handle())
         || !impl->refresh()) {
         return false;

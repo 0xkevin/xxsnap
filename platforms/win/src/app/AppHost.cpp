@@ -47,6 +47,8 @@ constexpr wchar_t fullScreenHotKeyConflictText[] =
     L"Ctrl+Shift+1 \u5df2\u88ab\u5176\u4ed6\u7a0b\u5e8f\u5360\u7528\uff0c\u4ecd\u53ef\u4ece\u6258\u76d8\u542f\u52a8\u5168\u5c4f\u622a\u56fe\u3002";
 constexpr wchar_t ocrHotKeyConflictText[] =
     L"Ctrl+3 \u5df2\u88ab\u5176\u4ed6\u7a0b\u5e8f\u5360\u7528\uff0c\u4ecd\u53ef\u4ece\u6258\u76d8\u542f\u52a8\u6587\u5b57\u8bc6\u522b\u3002";
+constexpr wchar_t teachingPenHotKeyConflictText[] =
+    L"Ctrl+2 \u5df2\u88ab\u5176\u4ed6\u7a0b\u5e8f\u5360\u7528\uff0c\u4ecd\u53ef\u4ece\u6258\u76d8\u542f\u52a8\u6559\u7b14\u3002";
 constexpr wchar_t topologyChangedText[] =
     L"\u663e\u793a\u5668\u914d\u7f6e\u8fde\u7eed\u53d8\u5316\uff0c\u672c\u6b21\u622a\u56fe\u5df2\u53d6\u6d88\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002";
 constexpr wchar_t clipboardFailureText[] =
@@ -54,6 +56,8 @@ constexpr wchar_t clipboardFailureText[] =
 constexpr wchar_t sessionFailureText[] =
     L"\u672c\u6b21\u622a\u56fe\u672a\u5b8c\u6210\uff0c\u8bf7\u91cd\u8bd5\u3002";
 constexpr wchar_t captureMetricsPathVariable[] = L"XXSNAP_CAPTURE_METRICS_PATH";
+constexpr wchar_t interactiveTestingVariable[] = L"XXSNAP_INTERACTIVE_TESTING";
+constexpr UINT testOcrMessage = WM_APP + 0x7A;
 
 void appendCaptureTiming(
     const char* trigger,
@@ -362,6 +366,8 @@ public:
         hotKey_.reset();
         tray_.reset();
         fullScreenPreview_.reset();
+        teachingPenOverlay_.reset();
+        teachingPenDesktop_.reset();
         coordinator_.reset();
         sessionServices_.reset();
         singleInstance_.reset();
@@ -445,8 +451,20 @@ public:
                     MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
             }
         }
+        if (!hotKey_->registerTeachingPen(
+                window_, [this] { toggleTeachingPen(); })) {
+            if (!tray_->showHotKeyConflict(teachingPenHotKeyConflictText)) {
+                MessageBoxW(window_, teachingPenHotKeyConflictText,
+                    applicationName,
+                    MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
+            }
+        }
         ocrCapture_ = std::make_unique<OcrCaptureHost>(
-            instance_, window_, runtimeApis_);
+            instance_, window_, runtimeApis_, [this] {
+                if (teachingPenOverlay_) {
+                    teachingPenOverlay_->resumeInputAfterRecognition();
+                }
+            });
         startRegionCapture("launch");
         return HostInitializationResult::primary;
     }
@@ -525,6 +543,12 @@ private:
         if (tray_ && tray_->handleMessage(message, wParam, lParam)) {
             return 0;
         }
+        if (message == testOcrMessage
+            && GetEnvironmentVariableW(
+                interactiveTestingVariable, nullptr, 0) > 1) {
+            startTextRecognition();
+            return 0;
+        }
         switch (message) {
         case WM_CLOSE:
             DestroyWindow(window);
@@ -546,7 +570,7 @@ private:
 
     void startRegionCapture(const char* trigger) noexcept
     {
-        if (coordinator_) {
+        if (coordinator_ && !teachingPenOverlay_) {
             const auto startedAt = std::chrono::steady_clock::now();
             const auto result = coordinator_->start();
             const auto finishedAt = std::chrono::steady_clock::now();
@@ -569,6 +593,8 @@ private:
             startFullScreenCapture();
         } else if (command == TrayCommand::textRecognition) {
             startTextRecognition();
+        } else if (command == TrayCommand::teachingPen) {
+            toggleTeachingPen();
         } else if (command == TrayCommand::exit && window_ != nullptr) {
             PostMessageW(window_, WM_CLOSE, 0, 0);
         }
@@ -576,7 +602,7 @@ private:
 
     void startFullScreenCapture() noexcept
     {
-        if (!coordinator_ || !sessionServices_
+        if (teachingPenOverlay_ || !coordinator_ || !sessionServices_
             || coordinator_->state() != CaptureSessionState::idle) {
             return;
         }
@@ -629,7 +655,118 @@ private:
             || coordinator_->state() != CaptureSessionState::idle) {
             return;
         }
-        ocrCapture_->start();
+        const auto teachingWasSuspended = teachingPenOverlay_
+            && teachingPenOverlay_->suspendInputForRecognition();
+        if (!ocrCapture_->start() && teachingWasSuspended
+            && teachingPenOverlay_) {
+            teachingPenOverlay_->resumeInputAfterRecognition();
+        }
+    }
+
+    void toggleTeachingPen() noexcept
+    {
+        if (teachingPenOverlay_) {
+            teachingPenOverlay_.reset();
+            teachingPenDesktop_.reset();
+            return;
+        }
+        startTeachingPen();
+    }
+
+    void startTeachingPen() noexcept
+    {
+        if (!coordinator_ || !sessionServices_
+            || coordinator_->state() != CaptureSessionState::idle
+            || teachingPenOverlay_) {
+            return;
+        }
+        try {
+            auto topologyResult = sessionServices_->snapshotTopology();
+            const auto* topology = topologyResult.value();
+            if (topology == nullptr) {
+                showSessionError(CaptureSessionErrorCode::topologyFailed);
+                return;
+            }
+            const auto memoryPlan = planFrozenDesktopMemory(
+                topology->displays(), defaultCaptureSessionMemoryLimit);
+            if (memoryPlan.status != CaptureMemoryPlanStatus::fits) {
+                showSessionError(CaptureSessionErrorCode::memoryLimitExceeded);
+                return;
+            }
+            MemoryBudget captureBudget(defaultCaptureSessionMemoryLimit);
+            auto captured = sessionServices_->capture(*topology, captureBudget);
+            auto* desktop = std::get_if<FrozenDesktop>(&captured);
+            if (desktop == nullptr) {
+                showSessionError(CaptureSessionErrorCode::captureFailed);
+                return;
+            }
+            teachingPenDesktop_ = std::make_unique<FrozenDesktop>(
+                std::move(*desktop));
+            auto created = OverlayHost::createTeachingPen(
+                instance_, *teachingPenDesktop_,
+                [this] {
+                    teachingPenOverlay_.reset();
+                    teachingPenDesktop_.reset();
+                    startTeachingPen();
+                },
+                [this](OverlayInputAction action) {
+                    finishTeachingPen(action);
+                });
+            teachingPenOverlay_ = std::move(created.value);
+            if (!teachingPenOverlay_) {
+                teachingPenDesktop_.reset();
+                showSessionError(CaptureSessionErrorCode::overlayFailed);
+                return;
+            }
+            teachingPenOverlay_->show();
+        } catch (...) {
+            teachingPenOverlay_.reset();
+            teachingPenDesktop_.reset();
+            showSessionError(CaptureSessionErrorCode::allocationFailed);
+        }
+    }
+
+    void finishTeachingPen(OverlayInputAction action) noexcept
+    {
+        if (!teachingPenOverlay_ || !teachingPenDesktop_) return;
+        if (action != OverlayInputAction::copy
+            && action != OverlayInputAction::save) {
+            teachingPenOverlay_.reset();
+            teachingPenDesktop_.reset();
+            return;
+        }
+        try {
+            const auto bounds = teachingPenDesktop_->topology.virtualBounds();
+            const auto annotation = teachingPenOverlay_->annotationSnapshot();
+            MemoryBudget budget(defaultCaptureSessionMemoryLimit);
+            auto composition = composeSelection(
+                bounds, *teachingPenDesktop_, budget);
+            auto* pixels = std::get_if<PixelBuffer>(&composition);
+            if (pixels == nullptr || composeAnnotations(
+                    *pixels,
+                    annotation.plan,
+                    annotation.dpiX,
+                    annotation.dpiY,
+                    bounds.x,
+                    bounds.y,
+                    nullptr,
+                    annotation.eraserMasks).has_value()) {
+                teachingPenOverlay_.reset();
+                teachingPenDesktop_.reset();
+                showSessionError(CaptureSessionErrorCode::compositionFailed);
+                return;
+            }
+            teachingPenOverlay_.reset();
+            teachingPenDesktop_.reset();
+            if (sessionServices_->exportSelection(*pixels, action)
+                == CaptureExportResult::failed) {
+                showSessionError(CaptureSessionErrorCode::exportFailed);
+            }
+        } catch (...) {
+            teachingPenOverlay_.reset();
+            teachingPenDesktop_.reset();
+            showSessionError(CaptureSessionErrorCode::allocationFailed);
+        }
     }
 
     void showSessionError(CaptureSessionErrorCode error) noexcept
@@ -658,6 +795,8 @@ private:
     std::unique_ptr<HotKeyRegistrar> hotKey_;
     std::unique_ptr<FullScreenCapturePreviewHost> fullScreenPreview_;
     std::unique_ptr<OcrCaptureHost> ocrCapture_;
+    std::unique_ptr<FrozenDesktop> teachingPenDesktop_;
+    std::unique_ptr<OverlayHost> teachingPenOverlay_;
 };
 
 } // namespace

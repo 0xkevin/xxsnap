@@ -106,6 +106,7 @@ private:
 
 enum class OverlayWindowInputKind {
     pointerDown,
+    rightPointerDown,
     pointerMove,
     pointerUp,
     captureChanged,

@@ -45,6 +45,8 @@ struct EraserOptionsLayout {
 };
 
 EraserOptionsLayout eraserOptionsLayout(AnnotationPoint origin) noexcept;
+EraserOptionsLayout teachingPenEraserOptionsLayout(
+    AnnotationPoint origin) noexcept;
 std::optional<EraserOptionHit> eraserOptionHitTest(
     const EraserOptionsLayout& layout,
     AnnotationPoint point) noexcept;
@@ -153,6 +155,9 @@ struct BrushOptionsLayout {
 BrushOptionsLayout brushOptionsLayout(
     AnnotationPoint origin,
     std::size_t paletteCount);
+BrushOptionsLayout teachingPenBrushOptionsLayout(
+    AnnotationPoint origin,
+    std::size_t paletteCount);
 
 std::optional<BrushOptionHit> brushOptionHitTest(
     const BrushOptionsLayout& layout,
@@ -202,6 +207,9 @@ struct MarkerOptionsLayout {
 };
 
 MarkerOptionsLayout markerOptionsLayout(
+    AnnotationPoint origin,
+    std::size_t paletteCount);
+MarkerOptionsLayout teachingPenMarkerOptionsLayout(
     AnnotationPoint origin,
     std::size_t paletteCount);
 
@@ -259,6 +267,7 @@ struct MosaicOptionsLayout {
 };
 
 MosaicOptionsLayout mosaicOptionsLayout(AnnotationPoint origin);
+MosaicOptionsLayout teachingPenMosaicOptionsLayout(AnnotationPoint origin);
 std::optional<MosaicOptionHit> mosaicOptionHitTest(
     const MosaicOptionsLayout& layout,
     AnnotationPoint point) noexcept;
@@ -337,6 +346,9 @@ std::optional<std::size_t> popupMenuHitTest(
 TextOptionsLayout textOptionsLayout(
     AnnotationPoint origin,
     std::size_t paletteCount);
+TextOptionsLayout teachingPenTextOptionsLayout(
+    AnnotationPoint origin,
+    std::size_t paletteCount);
 
 std::optional<TextOptionHit> textOptionHitTest(
     const TextOptionsLayout& layout,
@@ -395,6 +407,9 @@ struct NumberOptionsLayout {
 };
 
 NumberOptionsLayout numberOptionsLayout(
+    AnnotationPoint origin,
+    std::size_t paletteCount);
+NumberOptionsLayout teachingPenNumberOptionsLayout(
     AnnotationPoint origin,
     std::size_t paletteCount);
 std::optional<NumberOptionHit> numberOptionHitTest(
@@ -457,6 +472,9 @@ struct MagnifierOptionsLayout {
 };
 
 MagnifierOptionsLayout magnifierOptionsLayout(
+    AnnotationPoint origin,
+    std::size_t paletteCount);
+MagnifierOptionsLayout teachingPenMagnifierOptionsLayout(
     AnnotationPoint origin,
     std::size_t paletteCount);
 std::optional<MagnifierOptionHit> magnifierOptionHitTest(
@@ -544,6 +562,9 @@ struct ArrowLineOptionsLayout {
 ArrowLineOptionsLayout arrowLineOptionsLayout(
     AnnotationPoint origin,
     std::size_t paletteCount);
+ArrowLineOptionsLayout teachingPenArrowLineOptionsLayout(
+    AnnotationPoint origin,
+    std::size_t paletteCount);
 
 std::optional<ArrowLineOptionHit> arrowLineOptionHitTest(
     const ArrowLineOptionsLayout& layout,
@@ -561,6 +582,9 @@ std::optional<std::size_t> hitTestArrowTypeMenu(
     AnnotationPoint point) noexcept;
 
 ShapeOptionsLayout shapeOptionsLayout(
+    AnnotationPoint origin,
+    std::size_t paletteCount);
+ShapeOptionsLayout teachingPenShapeOptionsLayout(
     AnnotationPoint origin,
     std::size_t paletteCount);
 

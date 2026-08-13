@@ -31,19 +31,7 @@ int failureCount = 0;
 
 std::unique_ptr<PixelBuffer> loadFixture(const wchar_t* path)
 {
-    wchar_t executablePath[MAX_PATH]{};
-    const auto executableLength = GetModuleFileNameW(
-        nullptr, executablePath, static_cast<DWORD>(std::size(executablePath)));
-    if (executableLength == 0U || executableLength >= std::size(executablePath)) {
-        return nullptr;
-    }
-    std::wstring fixturePath(executablePath, executableLength);
-    const auto separator = fixturePath.find_last_of(L"\\/");
-    if (separator == std::wstring::npos) return nullptr;
-    fixturePath.resize(separator + 1U);
-    fixturePath += L"fixtures\\";
-    fixturePath += path;
-    std::ifstream stream(fixturePath.c_str(), std::ios::binary);
+    std::ifstream stream(path, std::ios::binary);
     if (!stream) return nullptr;
     BITMAPFILEHEADER fileHeader{};
     BITMAPV5HEADER info{};

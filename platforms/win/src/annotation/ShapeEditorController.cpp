@@ -285,6 +285,16 @@ void ShapeEditorController::setCanvasBounds(
     canvasBounds_ = standardized(canvasBounds);
 }
 
+void ShapeEditorController::setTeachingPenMode(bool enabled) noexcept
+{
+    teachingPenMode_ = enabled;
+    if (!enabled) return;
+    options_.setCornerRadius(0.0F);
+    if (textOptions_.style().textOutlineEnabled) {
+        textOptions_.toggleOutline();
+    }
+}
+
 const ToolbarState& ShapeEditorController::toolbarState() const noexcept
 {
     return toolbarState_;
@@ -505,6 +515,9 @@ bool ShapeEditorController::handleToolbarAction(ToolbarAction action)
             shapeToolActive_ = toolbarState_.selectTool(action);
             if (shapeToolActive_) {
                 ShapeOptionsState activated;
+                if (teachingPenMode_) {
+                    activated.setCornerRadius(0.0F);
+                }
                 options_ = activated;
                 applyOptionsStyleToSelection();
             }
@@ -594,6 +607,10 @@ bool ShapeEditorController::handleToolbarAction(ToolbarAction action)
             markerToolActive_ = false;
             if (toolbarState_.selectTool(action)) {
                 TextOptionsState activated;
+                if (teachingPenMode_
+                    && activated.style().textOutlineEnabled) {
+                    activated.toggleOutline();
+                }
                 textOptions_ = std::move(activated);
                 document_.clearSelection();
                 dismissPopovers();

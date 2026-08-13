@@ -11,6 +11,11 @@ constexpr bool contains(ToolbarRect rect, ToolbarPoint point) noexcept
         && point.y < rect.y + rect.height;
 }
 
+constexpr float clamp(float value, float lower, float upper) noexcept
+{
+    return value < lower ? lower : value > upper ? upper : value;
+}
+
 } // namespace
 
 float toolbarWidth(const std::vector<ToolbarAction>& actions) noexcept
@@ -59,6 +64,78 @@ MainToolbarLayout computeMainToolbarLayout(
         ToolbarMetrics::buttonSizeDip,
     };
     return layout;
+}
+
+MainToolbarLayout computeTeachingPenToolbarLayout(
+    ToolbarPoint pointer,
+    ToolbarRect bounds)
+{
+    constexpr float margin = 4.0F;
+    constexpr float gap = 6.0F;
+    constexpr float width = 56.0F;
+    constexpr float height = 168.0F;
+    constexpr float cell = 20.0F;
+    constexpr float cellGap = 8.0F;
+    const ToolbarRect safe{
+        bounds.x + margin,
+        bounds.y + margin,
+        bounds.width - margin * 2.0F,
+        bounds.height - margin * 2.0F,
+    };
+    auto x = pointer.x + gap + width <= safe.x + safe.width
+        ? pointer.x + gap : pointer.x - gap - width;
+    auto y = pointer.y + gap + height <= safe.y + safe.height
+        ? pointer.y + gap : pointer.y - gap - height;
+    x = clamp(x, safe.x, safe.x + safe.width - width);
+    y = clamp(y, safe.y, safe.y + safe.height - height);
+
+    MainToolbarLayout layout{
+        {x, y, width, height}, {}, {}, {}};
+    layout.items.reserve(teachingPenToolbarActions().size());
+    for (std::size_t index = 0;
+         index < teachingPenToolbarActions().size(); ++index) {
+        const auto column = index % 2U;
+        const auto row = index / 2U;
+        layout.items.push_back({
+            teachingPenToolbarActions()[index],
+            {
+                x + margin + static_cast<float>(column) * (cell + cellGap),
+                y + margin + static_cast<float>(row) * (cell + cellGap),
+                cell,
+                cell,
+            },
+        });
+    }
+    return layout;
+}
+
+ToolbarPoint attachedTeachingPenToolbarOrigin(
+    ToolbarRect toolbar,
+    ToolbarRect bounds,
+    float attachedHeight) noexcept
+{
+    constexpr float margin = 4.0F;
+    constexpr float gap = 4.0F;
+    constexpr float width = 56.0F;
+    const ToolbarRect safe{
+        bounds.x + margin,
+        bounds.y + margin,
+        bounds.width - margin * 2.0F,
+        bounds.height - margin * 2.0F,
+    };
+    const auto right = toolbar.x + toolbar.width + gap;
+    const auto left = toolbar.x - gap - width;
+    float x = right + width <= safe.x + safe.width ? right : left;
+    if (x < safe.x || x + width > safe.x + safe.width) {
+        const auto rightSpace = safe.x + safe.width
+            - (toolbar.x + toolbar.width);
+        const auto leftSpace = toolbar.x - safe.x;
+        x = rightSpace >= leftSpace ? right : left;
+    }
+    x = clamp(x, safe.x, safe.x + safe.width - width);
+    const auto y = clamp(toolbar.y,
+        safe.y, safe.y + safe.height - attachedHeight);
+    return {x, y};
 }
 
 std::optional<ToolbarAction> toolbarActionAt(

@@ -113,6 +113,102 @@ std::size_t clampedPaletteCount(std::size_t count) noexcept
     return count > 20U ? 20U : count;
 }
 
+constexpr float teachingPenToolbarWidth = 56.0F;
+constexpr float teachingPenInset = 4.0F;
+constexpr float teachingPenRowStep = 26.0F;
+constexpr float teachingPenControlHeight = 20.0F;
+
+AnnotationRect teachingPenRow(
+    AnnotationPoint origin,
+    std::size_t row,
+    float x,
+    float width) noexcept
+{
+    return {
+        origin.x + teachingPenInset + x,
+        origin.y + teachingPenInset
+            + static_cast<float>(row) * teachingPenRowStep,
+        width,
+        teachingPenControlHeight,
+    };
+}
+
+std::array<AnnotationRect, 3> teachingPenTripleRow(
+    AnnotationPoint origin,
+    std::size_t row) noexcept
+{
+    constexpr float width = 14.0F;
+    constexpr float contentWidth = teachingPenToolbarWidth
+        - teachingPenInset * 2.0F;
+    constexpr float gap = (contentWidth - width * 3.0F) / 2.0F;
+    return {{
+        teachingPenRow(origin, row, 0.0F, width),
+        teachingPenRow(origin, row, width + gap, width),
+        teachingPenRow(origin, row, (width + gap) * 2.0F, width),
+    }};
+}
+
+std::array<AnnotationRect, 2> teachingPenPairRow(
+    AnnotationPoint origin,
+    std::size_t row) noexcept
+{
+    constexpr float contentWidth = teachingPenToolbarWidth
+        - teachingPenInset * 2.0F;
+    return {{
+        teachingPenRow(origin, row, 0.0F, 20.0F),
+        teachingPenRow(origin, row, contentWidth - 20.0F, 20.0F),
+    }};
+}
+
+float teachingPenOptionsHeight(
+    std::size_t controlRows,
+    std::size_t paletteCount,
+    bool showsPalette) noexcept
+{
+    const auto paletteRows = showsPalette
+        ? (clampedPaletteCount(paletteCount) + 1U + 3U) / 4U : 0U;
+    return maximum(60.0F,
+        8.0F + static_cast<float>(controlRows) * teachingPenRowStep
+            + static_cast<float>(paletteRows) * 12.0F);
+}
+
+std::vector<AnnotationRect> teachingPenPalette(
+    AnnotationPoint origin,
+    std::size_t controlRows,
+    std::size_t paletteCount)
+{
+    paletteCount = clampedPaletteCount(paletteCount);
+    std::vector<AnnotationRect> result;
+    result.reserve(paletteCount + 1U);
+    constexpr float contentWidth = teachingPenToolbarWidth
+        - teachingPenInset * 2.0F;
+    for (std::size_t index = 0; index <= paletteCount; ++index) {
+        const auto column = index % 4U;
+        const auto row = index / 4U;
+        result.push_back({
+            origin.x + teachingPenInset
+                + static_cast<float>(column) * 12.0F,
+            origin.y + teachingPenInset
+                + static_cast<float>(controlRows) * teachingPenRowStep
+                + static_cast<float>(row) * 12.0F,
+            index == paletteCount ? contentWidth : 10.0F,
+            10.0F,
+        });
+    }
+    return result;
+}
+
+void teachingPenStrokeRows(
+    AnnotationPoint origin,
+    std::size_t row,
+    std::vector<AnnotationRect>& controls,
+    std::vector<AnnotationRect>& hits)
+{
+    const auto rowRects = teachingPenTripleRow(origin, row);
+    controls.assign(rowRects.begin(), rowRects.end());
+    hits = controls;
+}
+
 } // namespace
 
 const std::array<AnnotationColor, 20>& macShapePalette() noexcept
@@ -1915,6 +2011,181 @@ CornerRadiusPanelLayout cornerRadiusPanelLayout(
         18.0F,
         layout.value.height / 2.0F,
     };
+    return layout;
+}
+
+EraserOptionsLayout teachingPenEraserOptionsLayout(
+    AnnotationPoint origin) noexcept
+{
+    EraserOptionsLayout layout;
+    layout.toolbar = {origin.x, origin.y, teachingPenToolbarWidth, 60.0F};
+    const auto modes = teachingPenPairRow(origin, 0U);
+    layout.pointMode = modes[0];
+    layout.rectangleMode = modes[1];
+    layout.clearAll = teachingPenRow(origin, 1U, 14.0F, 20.0F);
+    layout.separator = layout.clearAll;
+    return layout;
+}
+
+BrushOptionsLayout teachingPenBrushOptionsLayout(
+    AnnotationPoint origin,
+    std::size_t paletteCount)
+{
+    BrushOptionsLayout layout;
+    layout.paletteCount = clampedPaletteCount(paletteCount);
+    layout.toolbar = {origin.x, origin.y, teachingPenToolbarWidth,
+        teachingPenOptionsHeight(2U, paletteCount, true)};
+    teachingPenStrokeRows(
+        origin, 0U, layout.strokeWidths, layout.strokeWidthHits);
+    layout.strokeStyle = teachingPenRow(origin, 1U, 0.0F, 48.0F);
+    layout.strokeStyleSampleStart = {
+        layout.strokeStyle.x + 8.0F, layout.strokeStyle.y + 10.0F};
+    layout.strokeStyleSampleEnd = {
+        layout.strokeStyle.x + 35.0F, layout.strokeStyle.y + 10.0F};
+    layout.colorSwatches = teachingPenPalette(origin, 2U, paletteCount);
+    return layout;
+}
+
+MarkerOptionsLayout teachingPenMarkerOptionsLayout(
+    AnnotationPoint origin,
+    std::size_t paletteCount)
+{
+    MarkerOptionsLayout layout;
+    layout.paletteCount = clampedPaletteCount(paletteCount);
+    layout.toolbar = {origin.x, origin.y, teachingPenToolbarWidth,
+        teachingPenOptionsHeight(1U, paletteCount, true)};
+    teachingPenStrokeRows(
+        origin, 0U, layout.strokeWidths, layout.strokeWidthHits);
+    layout.colorSwatches = teachingPenPalette(origin, 1U, paletteCount);
+    return layout;
+}
+
+MosaicOptionsLayout teachingPenMosaicOptionsLayout(AnnotationPoint origin)
+{
+    MosaicOptionsLayout layout;
+    layout.toolbar = {origin.x, origin.y, teachingPenToolbarWidth,
+        teachingPenOptionsHeight(3U, 0U, false)};
+    teachingPenStrokeRows(
+        origin, 0U, layout.strokeWidths, layout.strokeWidthHits);
+    const auto modes = teachingPenPairRow(origin, 1U);
+    layout.rectangleMode = modes[0];
+    layout.redactionType = modes[1];
+    layout.redactionValue = teachingPenRow(origin, 2U, 0.0F, 48.0F);
+    layout.valueTrack = {
+        layout.redactionValue.x + 5.0F,
+        layout.redactionValue.y + 8.0F,
+        25.0F,
+        4.0F,
+    };
+    layout.valueLabel = {
+        layout.redactionValue.x + 31.0F,
+        layout.redactionValue.y,
+        17.0F,
+        20.0F,
+    };
+    return layout;
+}
+
+TextOptionsLayout teachingPenTextOptionsLayout(
+    AnnotationPoint origin,
+    std::size_t paletteCount)
+{
+    TextOptionsLayout layout;
+    layout.paletteCount = clampedPaletteCount(paletteCount);
+    layout.toolbar = {origin.x, origin.y, teachingPenToolbarWidth,
+        teachingPenOptionsHeight(3U, paletteCount, true)};
+    const auto emphasis = teachingPenTripleRow(origin, 0U);
+    layout.bold = emphasis[0];
+    layout.italic = emphasis[1];
+    layout.outline = emphasis[2];
+    layout.fontFamily = teachingPenRow(origin, 1U, 0.0F, 48.0F);
+    layout.textSize = teachingPenRow(origin, 2U, 0.0F, 48.0F);
+    layout.colorSwatches = teachingPenPalette(origin, 3U, paletteCount);
+    return layout;
+}
+
+NumberOptionsLayout teachingPenNumberOptionsLayout(
+    AnnotationPoint origin,
+    std::size_t paletteCount)
+{
+    NumberOptionsLayout layout;
+    layout.paletteCount = clampedPaletteCount(paletteCount);
+    layout.toolbar = {origin.x, origin.y, teachingPenToolbarWidth,
+        teachingPenOptionsHeight(2U, paletteCount, true)};
+    layout.markType = teachingPenRow(origin, 0U, 0.0F, 48.0F);
+    layout.size = teachingPenRow(origin, 1U, 0.0F, 48.0F);
+    layout.colorSwatches = teachingPenPalette(origin, 2U, paletteCount);
+    return layout;
+}
+
+MagnifierOptionsLayout teachingPenMagnifierOptionsLayout(
+    AnnotationPoint origin,
+    std::size_t paletteCount)
+{
+    MagnifierOptionsLayout layout;
+    layout.paletteCount = clampedPaletteCount(paletteCount);
+    layout.toolbar = {origin.x, origin.y, teachingPenToolbarWidth,
+        teachingPenOptionsHeight(3U, paletteCount, true)};
+    teachingPenStrokeRows(
+        origin, 0U, layout.strokeWidths, layout.strokeWidthHits);
+    const auto shapes = teachingPenPairRow(origin, 1U);
+    layout.rectangleMode = shapes[0];
+    layout.circleMode = shapes[1];
+    layout.zoom = teachingPenRow(origin, 2U, 0.0F, 48.0F);
+    layout.colorSwatches = teachingPenPalette(origin, 3U, paletteCount);
+    return layout;
+}
+
+ArrowLineOptionsLayout teachingPenArrowLineOptionsLayout(
+    AnnotationPoint origin,
+    std::size_t paletteCount)
+{
+    ArrowLineOptionsLayout layout;
+    layout.paletteCount = clampedPaletteCount(paletteCount);
+    layout.toolbar = {origin.x, origin.y, teachingPenToolbarWidth,
+        teachingPenOptionsHeight(4U, paletteCount, true)};
+    teachingPenStrokeRows(
+        origin, 0U, layout.strokeWidths, layout.strokeWidthHits);
+    layout.strokeStyle = teachingPenRow(origin, 1U, 0.0F, 48.0F);
+    layout.strokeStyleSampleStart = {
+        layout.strokeStyle.x + 8.0F, layout.strokeStyle.y + 10.0F};
+    layout.strokeStyleSampleEnd = {
+        layout.strokeStyle.x + 35.0F, layout.strokeStyle.y + 10.0F};
+    layout.startArrowType = teachingPenRow(origin, 2U, 0.0F, 48.0F);
+    layout.endArrowType = teachingPenRow(origin, 3U, 0.0F, 48.0F);
+    layout.colorSwatches = teachingPenPalette(origin, 4U, paletteCount);
+    return layout;
+}
+
+ShapeOptionsLayout teachingPenShapeOptionsLayout(
+    AnnotationPoint origin,
+    std::size_t paletteCount)
+{
+    ShapeOptionsLayout layout;
+    layout.paletteCount = clampedPaletteCount(paletteCount);
+    layout.toolbar = {origin.x, origin.y, teachingPenToolbarWidth,
+        teachingPenOptionsHeight(3U, paletteCount, true)};
+    teachingPenStrokeRows(
+        origin, 0U, layout.strokeWidths, layout.strokeWidthHits);
+    const auto shapes = teachingPenTripleRow(origin, 1U);
+    layout.fillToggle = shapes[0];
+    layout.fillToggleBackground = shapes[0];
+    layout.rectangleMode = shapes[1];
+    layout.rectangleModeBackground = shapes[1];
+    layout.ellipseMode = shapes[2];
+    layout.ellipseModeBackground = shapes[2];
+    layout.strokeStyle = teachingPenRow(origin, 2U, 0.0F, 48.0F);
+    layout.strokeStyleSampleStart = {
+        layout.strokeStyle.x + 8.0F, layout.strokeStyle.y + 10.0F};
+    layout.strokeStyleSampleEnd = {
+        layout.strokeStyle.x + 35.0F, layout.strokeStyle.y + 10.0F};
+    layout.strokeStyleDisclosure = {
+        layout.strokeStyle.x + 38.0F,
+        layout.strokeStyle.y + 8.0F,
+        6.0F,
+        4.0F,
+    };
+    layout.colorSwatches = teachingPenPalette(origin, 3U, paletteCount);
     return layout;
 }
 

@@ -744,10 +744,18 @@ LRESULT OverlayWindow::handleMessage(
         return 0;
     }
     case WM_RBUTTONDOWN:
+        dispatchInput({
+            OverlayWindowInputKind::rightPointerDown,
+            PixelPoint{
+                static_cast<short>(LOWORD(lParam)),
+                static_cast<short>(HIWORD(lParam)),
+            },
+        });
+        return 0;
     case WM_RBUTTONUP:
     case WM_CONTEXTMENU:
         dispatchInput({OverlayWindowInputKind::cancelShiftShortcut, {}});
-        return DefWindowProcW(window_, message, wParam, lParam);
+        return 0;
     case WM_MOUSEMOVE:
         dispatchInput({
             OverlayWindowInputKind::pointerMove,
