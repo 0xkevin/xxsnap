@@ -122,6 +122,7 @@ GDI32.dll!CreateDCW
 GDI32.dll!CreateDIBSection
 GDI32.dll!CreateFontW
 GDI32.dll!CreatePen
+GDI32.dll!CreatePolygonRgn
 GDI32.dll!CreateRectRgn
 GDI32.dll!CreateRoundRectRgn
 GDI32.dll!CreateSolidBrush
@@ -132,6 +133,7 @@ GDI32.dll!FillRgn
 GDI32.dll!GdiFlush
 GDI32.dll!GetDeviceCaps
 GDI32.dll!GetObjectW
+GDI32.dll!GetTextExtentPoint32W
 GDI32.dll!GetStockObject
 GDI32.dll!LineTo
 GDI32.dll!MoveToEx

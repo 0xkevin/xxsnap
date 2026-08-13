@@ -647,6 +647,18 @@ target_link_libraries(
     PRIVATE xxsnap_windows_build_configuration advapi32
 )
 
+add_library(xxsnap_shortcut_feedback src/app/ShortcutFeedback.cpp)
+target_compile_features(xxsnap_shortcut_feedback PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_shortcut_feedback
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_shortcut_feedback
+    PUBLIC xxsnap_hot_key_registrar xxsnap_preferences_settings
+    PRIVATE xxsnap_windows_build_configuration user32 gdi32
+)
+
 add_library(xxsnap_preferences_window src/app/PreferencesWindow.cpp)
 target_compile_features(xxsnap_preferences_window PUBLIC cxx_std_17)
 target_include_directories(
@@ -734,6 +746,7 @@ target_link_libraries(
         xxsnap_hot_key_registrar
         xxsnap_hot_key_settings
         xxsnap_preferences_settings
+        xxsnap_shortcut_feedback
         xxsnap_preferences_window
         xxsnap_help_window
         xxsnap_diagnostic_support
@@ -1085,6 +1098,16 @@ if(BUILD_TESTING)
     add_test(NAME preferences_settings COMMAND xxsnap_preferences_settings_test)
 
     add_executable(
+        xxsnap_shortcut_feedback_test tests/TestShortcutFeedback.cpp
+    )
+    target_compile_features(xxsnap_shortcut_feedback_test PRIVATE cxx_std_17)
+    target_link_libraries(
+        xxsnap_shortcut_feedback_test
+        PRIVATE xxsnap_shortcut_feedback xxsnap_windows_build_configuration
+    )
+    add_test(NAME shortcut_feedback COMMAND xxsnap_shortcut_feedback_test)
+
+    add_executable(
         xxsnap_launch_at_login_test
         tests/TestLaunchAtLogin.cpp
     )
@@ -1351,6 +1374,17 @@ if(BUILD_TESTING)
     target_link_libraries(
         xxsnap_interactive_help_verifier PRIVATE user32 gdi32
     )
+
+    add_executable(
+        xxsnap_interactive_shortcut_feedback_verifier EXCLUDE_FROM_ALL
+        ${CMAKE_SOURCE_DIR}/tools/windows/verify-interactive-shortcut-feedback.cpp
+    )
+    target_compile_features(
+        xxsnap_interactive_shortcut_feedback_verifier PRIVATE cxx_std_17
+    )
+    target_link_libraries(
+        xxsnap_interactive_shortcut_feedback_verifier PRIVATE user32
+    )
 endif()
 
 set(xxsnap_capture_session_targets
@@ -1389,6 +1423,7 @@ set(xxsnap_capture_session_targets
     xxsnap_hot_key_settings
     xxsnap_launch_at_login
     xxsnap_preferences_settings
+    xxsnap_shortcut_feedback
     xxsnap_preferences_window
     xxsnap_help_window
     xxsnap_diagnostic_support
@@ -1418,6 +1453,7 @@ if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_overlay_input_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_app_entry_services_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_preferences_settings_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_shortcut_feedback_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_launch_at_login_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_preferences_window_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_help_window_test)
@@ -1439,6 +1475,8 @@ if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_interactive_ocr_verifier)
     list(APPEND xxsnap_capture_session_targets
         xxsnap_interactive_teaching_pen_verifier)
+    list(APPEND xxsnap_capture_session_targets
+        xxsnap_interactive_shortcut_feedback_verifier)
 endif()
 
 if(MSVC)

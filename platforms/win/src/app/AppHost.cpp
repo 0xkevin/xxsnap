@@ -5,6 +5,7 @@
 #include "app/HelpWindow.h"
 #include "app/PreferencesSettings.h"
 #include "app/PreferencesWindow.h"
+#include "app/ShortcutFeedback.h"
 #include "app/SingleInstance.h"
 #include "app/TrayIcon.h"
 #include "capture/DisplayTopology.h"
@@ -66,6 +67,7 @@ constexpr wchar_t interactiveTestingVariable[] = L"XXSNAP_INTERACTIVE_TESTING";
 constexpr UINT testOcrMessage = WM_APP + 0x7A;
 constexpr UINT testPreferencesMessage = WM_APP + 0x7B;
 constexpr UINT testHelpMessage = WM_APP + 0x7C;
+constexpr UINT testShortcutFeedbackMessage = WM_APP + 0x7D;
 
 void appendCaptureTiming(
     const char* trigger,
@@ -373,6 +375,7 @@ public:
 
     ~Host()
     {
+        shortcutFeedback_.reset();
         hotKey_.reset();
         tray_.reset();
         preferencesWindow_.reset();
@@ -430,7 +433,10 @@ public:
         tray_ = std::move(trayResult.value);
 
         hotKey_ = std::make_unique<HotKeyRegistrar>(
-            systemHotKeyApi(), [this] { startRegionCapture("hotkey"); },
+            systemHotKeyApi(), [this] {
+                showShortcutFeedback(HotKeyCommand::regionCapture);
+                startRegionCapture("hotkey");
+            },
             hotKeySettingsStore_.load());
         if (!hotKey_->registerMvpRegionCapture(window_)) {
             if (!tray_->showHotKeyConflict(hotKeyConflictText)) {
@@ -440,6 +446,8 @@ public:
             }
         }
         if (!hotKey_->registerRestorePinnedImage(window_, [this] {
+            showShortcutFeedback(
+                HotKeyCommand::restoreMostRecentlyHiddenPinnedImage);
             if (!coordinator_ || !coordinator_->pinCurrentSelection()) {
                 if (sessionServices_) {
                     sessionServices_->restoreMostRecentlyHiddenPinnedImage();
@@ -453,14 +461,20 @@ public:
             }
         }
         if (!hotKey_->registerFullScreenCapture(
-                window_, [this] { startFullScreenCapture(); })) {
+                window_, [this] {
+                    showShortcutFeedback(HotKeyCommand::fullScreen);
+                    startFullScreenCapture();
+                })) {
             if (!tray_->showHotKeyConflict(fullScreenHotKeyConflictText)) {
                 MessageBoxW(window_, fullScreenHotKeyConflictText,
                     applicationName,
                     MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
             }
         }
-        if (!hotKey_->registerOcr(window_, [this] { startTextRecognition(); })) {
+        if (!hotKey_->registerOcr(window_, [this] {
+                showShortcutFeedback(HotKeyCommand::ocr);
+                startTextRecognition();
+            })) {
             if (!tray_->showHotKeyConflict(ocrHotKeyConflictText)) {
                 MessageBoxW(window_, ocrHotKeyConflictText,
                     applicationName,
@@ -468,13 +482,27 @@ public:
             }
         }
         if (!hotKey_->registerTeachingPen(
-                window_, [this] { toggleTeachingPen(); })) {
+                window_, [this] {
+                    showShortcutFeedback(HotKeyCommand::teachingPen);
+                    toggleTeachingPen();
+                })) {
             if (!tray_->showHotKeyConflict(teachingPenHotKeyConflictText)) {
                 MessageBoxW(window_, teachingPenHotKeyConflictText,
                     applicationName,
                     MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
             }
         }
+        shortcutFeedback_ = ShortcutFeedbackController::create(
+            instance_, window_, preferencesSettingsStore_,
+            [this](UINT modifiers, UINT virtualKey) {
+                for (const auto binding : currentHotKeyBindings()) {
+                    if (matchesHotKeyBinding(
+                            binding, modifiers, virtualKey)) {
+                        return true;
+                    }
+                }
+                return false;
+            });
         ocrCapture_ = std::make_unique<OcrCaptureHost>(
             instance_, window_, runtimeApis_, [this] {
                 if (teachingPenOverlay_) {
@@ -577,6 +605,15 @@ private:
             showHelp();
             return 0;
         }
+        if (message == testShortcutFeedbackMessage
+            && GetEnvironmentVariableW(
+                interactiveTestingVariable, nullptr, 0) > 1) {
+            if (shortcutFeedback_) {
+                shortcutFeedback_->showForTesting(
+                    MOD_CONTROL | MOD_SHIFT, '1');
+            }
+            return 0;
+        }
         switch (message) {
         case WM_CLOSE:
             DestroyWindow(window);
@@ -612,6 +649,13 @@ private:
                     sessionServices_->lastBackend(),
                     finishedAt - startedAt);
             }
+        }
+    }
+
+    void showShortcutFeedback(HotKeyCommand command) noexcept
+    {
+        if (shortcutFeedback_ && hotKey_) {
+            shortcutFeedback_->showAppShortcut(hotKey_->binding(command));
         }
     }
 
@@ -904,6 +948,7 @@ private:
     HWND window_ = nullptr;
     std::unique_ptr<SingleInstance> singleInstance_;
     SystemPreferencesRegistry preferencesRegistry_;
+    PreferencesSettingsStore preferencesSettingsStore_{preferencesRegistry_};
     HotKeySettingsStore hotKeySettingsStore_{preferencesRegistry_};
     DiagnosticLogStore diagnosticLog_;
     std::unique_ptr<DiagnosticSupportController> diagnosticSupport_;
@@ -911,6 +956,7 @@ private:
     std::unique_ptr<CaptureSessionCoordinator> coordinator_;
     std::unique_ptr<TrayIcon> tray_;
     std::unique_ptr<HotKeyRegistrar> hotKey_;
+    std::unique_ptr<ShortcutFeedbackController> shortcutFeedback_;
     std::unique_ptr<PreferencesWindow> preferencesWindow_;
     std::unique_ptr<HelpWindow> helpWindow_;
     std::unique_ptr<FullScreenCapturePreviewHost> fullScreenPreview_;
