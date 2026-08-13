@@ -310,6 +310,8 @@ void testWindowAndResourceContracts()
         != nullptr);
     CHECK(LoadCursorW(GetModuleHandleW(nullptr),
         MAKEINTRESOURCEW(IDC_XXSNAP_EYEDROPPER_LIGHT)) != nullptr);
+    CHECK(LoadCursorW(GetModuleHandleW(nullptr),
+        MAKEINTRESOURCEW(IDC_XXSNAP_BRUSH)) != nullptr);
 }
 
 void testEyedropperUsesMacPanelGeometryAndFormats()

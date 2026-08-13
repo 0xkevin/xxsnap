@@ -71,7 +71,11 @@ private func renderedBitmap(
     return bitmap
 }
 
-private func cursorData(bitmap: NSBitmapImageRep, hotSpot: NSPoint) -> Data {
+private func cursorData(
+    bitmap: NSBitmapImageRep,
+    hotSpot: NSPoint,
+    flipVertically: Bool = false
+) -> Data {
     let xorRowBytes = cursorSize * 4
     let andRowBytes = ((cursorSize + 31) / 32) * 4
     let bitmapBytes = 40 + xorRowBytes * cursorSize + andRowBytes * cursorSize
@@ -101,8 +105,9 @@ private func cursorData(bitmap: NSBitmapImageRep, hotSpot: NSPoint) -> Data {
     littleEndian32(0, into: &cursor)
 
     for y in 0..<cursorSize {
+        let sourceY = flipVertically ? cursorSize - 1 - y : y
         for x in 0..<cursorSize {
-            let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB)
+            let color = bitmap.colorAt(x: x, y: sourceY)?.usingColorSpace(.deviceRGB)
                 ?? .clear
             cursor.append(UInt8(max(0, min(255, Int(color.blueComponent * 255.0 + 0.5)))))
             cursor.append(UInt8(max(0, min(255, Int(color.greenComponent * 255.0 + 0.5)))))
@@ -111,9 +116,10 @@ private func cursorData(bitmap: NSBitmapImageRep, hotSpot: NSPoint) -> Data {
         }
     }
     for y in 0..<cursorSize {
+        let sourceY = flipVertically ? cursorSize - 1 - y : y
         var row = [UInt8](repeating: 0, count: andRowBytes)
         for x in 0..<cursorSize {
-            let alpha = bitmap.colorAt(x: x, y: y)?.alphaComponent ?? 0
+            let alpha = bitmap.colorAt(x: x, y: sourceY)?.alphaComponent ?? 0
             if alpha < 0.5 {
                 row[x / 8] |= UInt8(1 << (7 - x % 8))
             }
@@ -185,10 +191,31 @@ for (name, tint) in [
         destination: eyedropperRect
     )
     let destination = outputDirectory.appendingPathComponent(name)
-    try cursorData(bitmap: bitmap, hotSpot: eyedropperHotSpot)
+    try cursorData(
+        bitmap: bitmap,
+        hotSpot: eyedropperHotSpot,
+        flipVertically: true
+    )
         .write(to: destination, options: .atomic)
     print("Generated \(destination.path) from the macOS eyedropper cursor SVG.")
 }
+
+let brushSource = repository
+    .appendingPathComponent("platforms/mac/Resources/Icons/pencil-tool.svg")
+guard let brushImage = NSImage(contentsOf: brushSource) else {
+    throw CocoaError(.fileReadCorruptFile)
+}
+let brushBitmap = try renderedBitmap(
+    for: brushImage,
+    destination: NSRect(x: 7, y: 7, width: 18, height: 18)
+)
+let brushOutput = outputDirectory.appendingPathComponent("xxsnap-brush.cur")
+try cursorData(
+    bitmap: brushBitmap,
+    hotSpot: NSPoint(x: 10, y: 22),
+    flipVertically: true
+).write(to: brushOutput, options: .atomic)
+print("Generated \(brushOutput.path) from the macOS pencil cursor SVG.")
 
 let eraserSource = repository
     .appendingPathComponent("platforms/mac/Resources/Icons/eraser-tool.svg")

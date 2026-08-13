@@ -2771,21 +2771,6 @@ struct OverlayRenderer::Impl final {
                 }
                 for (std::size_t index = 0; index < layout.toolbarItems.size(); ++index) {
                     const auto& item = layout.toolbarItems[index];
-                    if (toolbarIcon(item.action).kind
-                        == ToolbarIconSpec::Kind::checkmark) {
-                        const auto left = item.rect.x + 4.5F;
-                        const auto middleX = item.rect.x + 9.0F;
-                        const auto middleY = item.rect.y + 14.0F;
-                        renderTarget->DrawLine(
-                            D2D1::Point2F(left, item.rect.y + 10.5F),
-                            D2D1::Point2F(middleX, middleY),
-                            labelTextBrush.get(), 2.4F);
-                        renderTarget->DrawLine(
-                            D2D1::Point2F(middleX, middleY),
-                            D2D1::Point2F(item.rect.x + 16.5F, item.rect.y + 6.0F),
-                            labelTextBrush.get(), 2.4F);
-                        continue;
-                    }
                     const auto iconIndex = item.enabled
                         ? toolbarIconIndex(item.action)
                         : disabledToolbarIconIndex(item.action);

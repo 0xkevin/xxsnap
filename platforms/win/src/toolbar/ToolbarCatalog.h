@@ -30,11 +30,6 @@ enum class ToolbarAction : std::uint8_t {
 };
 
 struct ToolbarIconSpec {
-    enum class Kind : std::uint8_t {
-        image,
-        checkmark,
-    };
-
     const wchar_t* resourceName;
     float insetDip;
     bool fixedColor;
@@ -42,7 +37,6 @@ struct ToolbarIconSpec {
     int resourceIdAt120Dpi;
     int resourceIdAt144Dpi;
     int resourceIdAt192Dpi;
-    Kind kind = Kind::image;
 };
 
 struct ToolbarMetrics {
@@ -270,15 +264,22 @@ inline constexpr std::array imageResources{
         IDR_TOOLBAR_150_REFRESH_SVGREPO_COM3_PNG,
         IDR_TOOLBAR_200_REFRESH_SVGREPO_COM3_PNG,
     },
+    ToolbarIconSpec{
+        L"done", 0.0F, false,
+        IDR_TOOLBAR_100_DONE_PNG,
+        IDR_TOOLBAR_125_DONE_PNG,
+        IDR_TOOLBAR_150_DONE_PNG,
+        IDR_TOOLBAR_200_DONE_PNG,
+    },
 };
+
+inline constexpr std::size_t trashIconIndex = 20U;
+inline constexpr std::size_t rotationIconIndex = 21U;
+inline constexpr std::size_t finishEditingIconIndex = 22U;
 
 inline constexpr std::array<std::size_t, fullActions.size() + 1U> actionIconIndices{
-    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 17, 18, 19, 16,
-};
-
-inline constexpr ToolbarIconSpec finishEditingIcon{
-    L"finish-editing", 0.0F, true, 0, 0, 0, 0,
-    ToolbarIconSpec::Kind::checkmark,
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 17, 18, 19,
+    finishEditingIconIndex,
 };
 
 } // namespace toolbar_catalog_detail
@@ -305,9 +306,6 @@ constexpr const auto& teachingPenToolbarActions() noexcept
 
 constexpr const ToolbarIconSpec& toolbarIcon(ToolbarAction action) noexcept
 {
-    if (action == ToolbarAction::finishEditing) {
-        return toolbar_catalog_detail::finishEditingIcon;
-    }
     const auto index = toolbar_catalog_detail::actionIconIndices[
         static_cast<std::size_t>(action)];
     return toolbar_catalog_detail::imageResources[index];
@@ -349,12 +347,13 @@ constexpr const ToolbarIconSpec& dragHandleIcon() noexcept
 
 constexpr const ToolbarIconSpec& rotationHandleIcon() noexcept
 {
-    return toolbar_catalog_detail::imageResources.back();
+    return toolbar_catalog_detail::imageResources[
+        toolbar_catalog_detail::rotationIconIndex];
 }
 
 constexpr std::size_t eraserTrashIconIndex() noexcept
 {
-    return toolbar_catalog_detail::imageResources.size() - 2U;
+    return toolbar_catalog_detail::trashIconIndex;
 }
 
 constexpr const ToolbarIconSpec& eraserTrashIcon() noexcept
@@ -364,7 +363,7 @@ constexpr const ToolbarIconSpec& eraserTrashIcon() noexcept
 
 constexpr std::size_t rotationHandleIconIndex() noexcept
 {
-    return toolbar_catalog_detail::imageResources.size() - 1U;
+    return toolbar_catalog_detail::rotationIconIndex;
 }
 
 constexpr const auto& toolbarImageResources() noexcept
@@ -386,6 +385,17 @@ constexpr int toolbarResourceId(
         return icon.resourceIdAt144Dpi;
     }
     return icon.resourceIdAt192Dpi;
+}
+
+constexpr int toolbarIconPixelEdge(
+    const ToolbarIconSpec& icon,
+    std::uint32_t dpi) noexcept
+{
+    const auto safeDpi = dpi == 0U ? 96U : dpi;
+    const auto logicalEdge = ToolbarMetrics::buttonSizeDip
+        - icon.insetDip * 2.0F;
+    return static_cast<int>(
+        logicalEdge * static_cast<float>(safeDpi) / 96.0F + 0.5F);
 }
 
 constexpr float extraGapAfter(ToolbarAction action) noexcept

@@ -92,8 +92,8 @@ void testCatalogContract()
     };
     static_assert(arraysEqual(
         teachingPenToolbarActions(), teachingPenExpected));
-    static_assert(toolbarIcon(ToolbarAction::finishEditing).kind
-        == ToolbarIconSpec::Kind::checkmark);
+    CHECK(std::wstring_view(toolbarIcon(ToolbarAction::finishEditing).resourceName)
+        == L"done");
     CHECK(toolbarIcon(ToolbarAction::rectangle).insetDip == 0.0F);
     static_assert(toolbarIcon(ToolbarAction::number).insetDip == 3.0F);
     static_assert(toolbarIcon(ToolbarAction::scroll).insetDip == 0.0F);
@@ -104,10 +104,10 @@ void testCatalogContract()
     static_assert(extraGapAfter(ToolbarAction::redo) == 8.0F);
     static_assert(extraGapAfter(ToolbarAction::copy) == 0.0F);
 
-    CHECK(toolbarImageResources().size() == 22U);
+    CHECK(toolbarImageResources().size() == 23U);
     CHECK(std::wstring_view(eraserTrashIcon().resourceName) == L"trash");
     static_assert(dragHandleIcon().resourceIdAt96Dpi > 0);
-    const auto& rotationHandle = toolbarImageResources().back();
+    const auto& rotationHandle = rotationHandleIcon();
     CHECK(rotationHandle.insetDip == 4.0F);
     CHECK(rotationHandle.fixedColor);
     CHECK(rotationHandle.resourceIdAt96Dpi > 0);
@@ -118,6 +118,14 @@ void testCatalogContract()
     static_assert(toolbarResourceId(dragHandleIcon(), 121) == dragHandleIcon().resourceIdAt144Dpi);
     static_assert(toolbarResourceId(dragHandleIcon(), 145) == dragHandleIcon().resourceIdAt192Dpi);
     static_assert(toolbarResourceId(dragHandleIcon(), 240) == dragHandleIcon().resourceIdAt192Dpi);
+    static_assert(toolbarIconPixelEdge(toolbarIcon(ToolbarAction::pen), 96U)
+        == 16);
+    static_assert(toolbarIconPixelEdge(toolbarIcon(ToolbarAction::pen), 144U)
+        == 24);
+    static_assert(toolbarIconPixelEdge(toolbarIcon(ToolbarAction::scroll), 144U)
+        == 30);
+    static_assert(toolbarIconPixelEdge(
+        toolbarIcon(ToolbarAction::finishEditing), 192U) == 40);
 
     for (const auto action : fullToolbarActions()) {
         const auto& icon = toolbarIcon(action);
@@ -200,21 +208,18 @@ void testAllEmbeddedResourcesDecode()
         IID_PPV_ARGS(&factory))));
     if (factory) {
         for (const auto& icon : toolbarImageResources()) {
-            const auto expectedEdge = [&icon](UINT scalePercent) {
-                const auto logicalEdge = ToolbarMetrics::buttonSizeDip
-                    - icon.insetDip * 2.0F;
-                return static_cast<UINT>(
-                    logicalEdge * static_cast<float>(scalePercent) / 100.0F
-                    + 0.5F);
-            };
             checkEmbeddedPng(
-                factory.Get(), icon.resourceIdAt96Dpi, expectedEdge(100U));
+                factory.Get(), icon.resourceIdAt96Dpi,
+                toolbarIconPixelEdge(icon, 96U));
             checkEmbeddedPng(
-                factory.Get(), icon.resourceIdAt120Dpi, expectedEdge(125U));
+                factory.Get(), icon.resourceIdAt120Dpi,
+                toolbarIconPixelEdge(icon, 120U));
             checkEmbeddedPng(
-                factory.Get(), icon.resourceIdAt144Dpi, expectedEdge(150U));
+                factory.Get(), icon.resourceIdAt144Dpi,
+                toolbarIconPixelEdge(icon, 144U));
             checkEmbeddedPng(
-                factory.Get(), icon.resourceIdAt192Dpi, expectedEdge(200U));
+                factory.Get(), icon.resourceIdAt192Dpi,
+                toolbarIconPixelEdge(icon, 192U));
         }
     }
     factory.Reset();

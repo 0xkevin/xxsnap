@@ -20,6 +20,7 @@ void check(bool condition, const char* expression, int line)
 #define CHECK(expression) check((expression), #expression, __LINE__)
 
 constexpr AnnotationColor macDefaultRed{245, 34, 45, 255};
+constexpr AnnotationColor macTextOutlineWhite{255, 255, 255, 255};
 
 void testDefaultStyleMatchesMac()
 {
@@ -32,6 +33,8 @@ void testDefaultStyleMatchesMac()
     CHECK(defaultStyle.cornerRadiusDip == 0.0F);
     CHECK(defaultStyle.textSize == 8.0F);
     CHECK(defaultStyle.textFontFamily == L"Microsoft YaHei");
+    CHECK(defaultStyle.textOutlineEnabled);
+    CHECK(defaultStyle.textOutlineColor == macTextOutlineWhite);
 }
 
 void testGeometryStandardization()

@@ -45,6 +45,20 @@
     {
       "fixedColor" : false,
       "generated" : {
+        "100" : "platforms/win/resources/toolbar/100/done.png",
+        "125" : "platforms/win/resources/toolbar/125/done.png",
+        "150" : "platforms/win/resources/toolbar/150/done.png",
+        "200" : "platforms/win/resources/toolbar/200/done.png"
+      },
+      "insetDip" : 0,
+      "logicalSizeDip" : 20,
+      "name" : "done",
+      "sha256" : "4bcae00fd749b2fd3edaff645f665039cacb70751509b2e272281a5e11e635d4",
+      "source" : "platforms/mac/Resources/Icons/done.svg"
+    },
+    {
+      "fixedColor" : false,
+      "generated" : {
         "100" : "platforms/win/resources/toolbar/100/eraser-tool.png",
         "125" : "platforms/win/resources/toolbar/125/eraser-tool.png",
         "150" : "platforms/win/resources/toolbar/150/eraser-tool.png",

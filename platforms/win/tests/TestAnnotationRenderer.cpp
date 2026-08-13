@@ -695,18 +695,18 @@ bool unicodeTextProducesVisibleOutlinedPixels()
     BYTE* bytes = nullptr;
     auto opaquePixels = std::size_t{0U};
     auto redPixels = std::size_t{0U};
-    auto darkPixels = std::size_t{0U};
+    auto whitePixels = std::size_t{0U};
     if (SUCCEEDED(lock->GetDataPointer(&byteCount, &bytes))) {
         for (UINT offset = 0U; offset + 3U < byteCount; offset += 4U) {
             if (bytes[offset + 3U] == 0U) continue;
             ++opaquePixels;
             if (bytes[offset + 2U] > bytes[offset] + 30U) ++redPixels;
-            if (bytes[offset] < 60U && bytes[offset + 1U] < 60U
-                && bytes[offset + 2U] < 60U) ++darkPixels;
+            if (bytes[offset] > 220U && bytes[offset + 1U] > 220U
+                && bytes[offset + 2U] > 220U) ++whitePixels;
         }
     }
     lock->Release();
-    return opaquePixels > 400U && redPixels > 150U && darkPixels > 30U;
+    return opaquePixels > 400U && redPixels > 150U && whitePixels > 30U;
 }
 
 void testDirect2DSnapshotsAtAllSupportedDpis()

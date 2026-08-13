@@ -157,7 +157,10 @@ std::optional<PixelRect> detectTargetWithTimeout(
     }
 }
 
-IconBitmap decodeResourcePng(HINSTANCE instance, int resourceId) noexcept
+IconBitmap decodeResourcePng(
+    HINSTANCE instance,
+    int resourceId,
+    int targetEdge) noexcept
 {
     IconBitmap result;
     const auto resource = FindResourceW(
@@ -195,10 +198,26 @@ IconBitmap decodeResourcePng(HINSTANCE instance, int resourceId) noexcept
         || height > static_cast<UINT>((std::numeric_limits<int>::max)())) {
         return result;
     }
+    ComPtr<IWICBitmapScaler> scaler;
+    IWICBitmapSource* source = frame.get();
+    if (targetEdge > 0
+        && (width != static_cast<UINT>(targetEdge)
+            || height != static_cast<UINT>(targetEdge))) {
+        if (FAILED(factory->CreateBitmapScaler(scaler.put()))
+            || FAILED(scaler->Initialize(
+                frame.get(), static_cast<UINT>(targetEdge),
+                static_cast<UINT>(targetEdge),
+                WICBitmapInterpolationModeFant))) {
+            return result;
+        }
+        source = scaler.get();
+        width = static_cast<UINT>(targetEdge);
+        height = static_cast<UINT>(targetEdge);
+    }
     ComPtr<IWICFormatConverter> converter;
     if (FAILED(factory->CreateFormatConverter(converter.put()))
         || FAILED(converter->Initialize(
-            frame.get(), GUID_WICPixelFormat32bppPBGRA,
+            source, GUID_WICPixelFormat32bppPBGRA,
             WICBitmapDitherTypeNone, nullptr, 0.0,
             WICBitmapPaletteTypeCustom))) {
         return result;
@@ -263,6 +282,7 @@ struct ScrollCaptureHost::Impl final {
     std::wstring captureNotice;
     std::int64_t reviewOffset = 0;
     std::vector<IconBitmap> icons;
+    IconBitmap finishIcon;
     bool targetResolved = false;
     bool reviewing = false;
     bool terminal = false;
@@ -560,18 +580,22 @@ struct ScrollCaptureHost::Impl final {
     void loadIcons()
     {
         icons.reserve(fullToolbarActions().size() + 2U);
-        icons.push_back(decodeResourcePng(
-            instance, toolbarResourceId(dragHandleIcon(), dpiX)));
+        const auto loadIcon = [this](const ToolbarIconSpec& icon) {
+            return decodeResourcePng(
+                instance,
+                toolbarResourceId(icon, dpiX),
+                toolbarIconPixelEdge(icon, dpiX));
+        };
+        icons.push_back(loadIcon(dragHandleIcon()));
         for (const auto action : fullToolbarActions()) {
             const auto& icon = action == ToolbarAction::undo
                     || action == ToolbarAction::redo
                 ? disabledToolbarIcon(action)
                 : toolbarIcon(action);
-            icons.push_back(decodeResourcePng(
-                instance, toolbarResourceId(icon, dpiX)));
+            icons.push_back(loadIcon(icon));
         }
-        icons.push_back(decodeResourcePng(
-            instance, toolbarResourceId(dragHandleIcon(), dpiX)));
+        icons.push_back(loadIcon(dragHandleIcon()));
+        finishIcon = loadIcon(toolbarIcon(ToolbarAction::finishEditing));
     }
 
     void hideChrome() noexcept
@@ -795,6 +819,15 @@ struct ScrollCaptureHost::Impl final {
         DeleteDC(source);
     }
 
+    RECT iconRect(RECT button, const IconBitmap& icon) const noexcept
+    {
+        const auto x = button.left
+            + ((button.right - button.left) - icon.width) / 2;
+        const auto y = button.top
+            + ((button.bottom - button.top) - icon.height) / 2;
+        return {x, y, x + icon.width, y + icon.height};
+    }
+
     void paintToolbar(HDC dc, RECT client) noexcept
     {
         const auto background = CreateSolidBrush(RGB(
@@ -807,7 +840,10 @@ struct ScrollCaptureHost::Impl final {
         const auto side = scaledDip(ToolbarMetrics::buttonSizeDip, dpiX);
         const auto y = (client.bottom - side) / 2;
         int x = scaledDip(ToolbarMetrics::horizontalPaddingDip, dpiX);
-        if (!icons.empty()) drawIcon(dc, icons.front(), {x, y, x + side, y + side}, 255U);
+        if (!icons.empty()) {
+            const RECT button{x, y, x + side, y + side};
+            drawIcon(dc, icons.front(), iconRect(button, icons.front()), 255U);
+        }
         x += step;
         std::size_t iconIndex = 1U;
         const auto separatorBrush = CreateSolidBrush(RGB(172, 172, 172));
@@ -825,7 +861,8 @@ struct ScrollCaptureHost::Impl final {
                 }
             }
             if (iconIndex < icons.size()) {
-                drawIcon(dc, icons[iconIndex], button,
+                drawIcon(dc, icons[iconIndex],
+                    iconRect(button, icons[iconIndex]),
                     (!reviewing && action == ToolbarAction::scroll)
                         || (reviewing && (action == ToolbarAction::cancel
                             || action == ToolbarAction::pin
@@ -837,17 +874,8 @@ struct ScrollCaptureHost::Impl final {
             x += step;
             if (action == ToolbarAction::scroll) {
                 if (!reviewing) {
-                    const auto pen = CreatePen(PS_SOLID,
-                        (std::max)(1, scaledDip(1.25F, dpiX)), RGB(20, 20, 20));
-                    const auto oldPen = SelectObject(dc, pen);
-                    MoveToEx(dc, finishButton.left + scaledDip(3.0F, dpiX),
-                        finishButton.top + scaledDip(10.0F, dpiY), nullptr);
-                    LineTo(dc, finishButton.left + scaledDip(8.0F, dpiX),
-                        finishButton.top + scaledDip(15.0F, dpiY));
-                    LineTo(dc, finishButton.left + scaledDip(17.0F, dpiX),
-                        finishButton.top + scaledDip(5.0F, dpiY));
-                    SelectObject(dc, oldPen);
-                    DeleteObject(pen);
+                    drawIcon(dc, finishIcon,
+                        iconRect(finishButton, finishIcon), 255U);
                 }
                 x += step + scaledDip(ToolbarMetrics::groupGapDip, dpiX);
             } else {
@@ -865,7 +893,9 @@ struct ScrollCaptureHost::Impl final {
             }
         }
         if (iconIndex < icons.size()) {
-            drawIcon(dc, icons[iconIndex], {x, y, x + side, y + side}, 255U);
+            const RECT button{x, y, x + side, y + side};
+            drawIcon(dc, icons[iconIndex],
+                iconRect(button, icons[iconIndex]), 255U);
         }
         DeleteObject(separatorBrush);
     }

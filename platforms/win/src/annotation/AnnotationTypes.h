@@ -133,7 +133,7 @@ struct AnnotationStyle {
     bool textBold = false;
     bool textItalic = false;
     bool textOutlineEnabled = true;
-    AnnotationColor textOutlineColor{0, 0, 0, 255};
+    AnnotationColor textOutlineColor{255, 255, 255, 255};
 };
 
 constexpr bool operator==(
