@@ -1,6 +1,7 @@
 #include "app/AppHost.h"
 
 #include "app/HotKeyRegistrar.h"
+#include "app/PreferencesSettings.h"
 #include "app/SingleInstance.h"
 #include "app/TrayIcon.h"
 #include "capture/DisplayTopology.h"
@@ -25,6 +26,7 @@
 #include <objbase.h>
 
 #include <chrono>
+#include <array>
 #include <cstdio>
 #include <cwchar>
 #include <memory>
@@ -279,13 +281,15 @@ public:
             return CaptureExportResult::cancelled;
         }
 
-        wchar_t path[MAX_PATH] = L"XxSnap.png";
+        std::array<wchar_t, 1024> path{};
+        const auto suggested = suggestedCaptureFilename();
+        wcsncpy_s(path.data(), path.size(), suggested.c_str(), _TRUNCATE);
         OPENFILENAMEW dialog{};
         dialog.lStructSize = sizeof(dialog);
         dialog.hwndOwner = owner_;
         dialog.lpstrFilter = L"PNG \u56fe\u50cf (*.png)\0*.png\0\0";
-        dialog.lpstrFile = path;
-        dialog.nMaxFile = static_cast<DWORD>(std::size(path));
+        dialog.lpstrFile = path.data();
+        dialog.nMaxFile = static_cast<DWORD>(path.size());
         dialog.lpstrDefExt = L"png";
         dialog.lpstrTitle = L"\u4fdd\u5b58\u622a\u56fe";
         dialog.Flags = OFN_NOCHANGEDIR | OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
@@ -294,7 +298,7 @@ public:
                 ? CaptureExportResult::cancelled
                 : CaptureExportResult::failed;
         }
-        return savePngAtomically(pixels, path).has_value()
+        return savePngAtomically(pixels, path.data()).has_value()
             ? CaptureExportResult::failed
             : CaptureExportResult::completed;
     }

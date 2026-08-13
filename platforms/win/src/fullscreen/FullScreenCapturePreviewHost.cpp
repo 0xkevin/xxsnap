@@ -1,5 +1,6 @@
 #include "fullscreen/FullScreenCapturePreviewHost.h"
 
+#include "app/PreferencesSettings.h"
 #include "capture/DisplayTopology.h"
 #include "export/AnnotationComposer.h"
 #include "export/ClipboardWriter.h"
@@ -10,6 +11,7 @@
 #include <commdlg.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -226,17 +228,21 @@ struct FullScreenCapturePreviewHost::Impl final {
     void save() noexcept
     {
         if (!pixels.has_value()) return;
-        wchar_t path[MAX_PATH] = L"XxSnap.png";
+        std::array<wchar_t, 1024> path{};
+        const auto suggested = suggestedCaptureFilename();
+        wcsncpy_s(path.data(), path.size(), suggested.c_str(), _TRUNCATE);
         OPENFILENAMEW dialog{};
         dialog.lStructSize = sizeof(dialog);
         dialog.hwndOwner = window != nullptr ? window : dialogOwner;
         dialog.lpstrFilter = L"PNG \u56fe\u50cf (*.png)\0*.png\0\0";
-        dialog.lpstrFile = path;
-        dialog.nMaxFile = static_cast<DWORD>(std::size(path));
+        dialog.lpstrFile = path.data();
+        dialog.nMaxFile = static_cast<DWORD>(path.size());
         dialog.lpstrDefExt = L"png";
         dialog.lpstrTitle = L"\u4fdd\u5b58\u5168\u5c4f\u622a\u56fe";
         dialog.Flags = OFN_NOCHANGEDIR | OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
-        if (GetSaveFileNameW(&dialog)) savePngAtomically(*pixels, path);
+        if (GetSaveFileNameW(&dialog)) {
+            savePngAtomically(*pixels, path.data());
+        }
     }
 
     void pin() noexcept

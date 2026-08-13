@@ -1,5 +1,6 @@
 #include "pin/PinnedImageHost.h"
 
+#include "app/PreferencesSettings.h"
 #include "export/ClipboardWriter.h"
 #include "export/PngWriter.h"
 #include "pin/PinnedImageGeometry.h"
@@ -458,17 +459,21 @@ struct PinnedImageHost::Impl final {
 
     void save(Pin& pin) noexcept
     {
-        wchar_t path[MAX_PATH] = L"XxSnap.png";
+        std::array<wchar_t, 1024> path{};
+        const auto suggested = suggestedCaptureFilename();
+        wcsncpy_s(path.data(), path.size(), suggested.c_str(), _TRUNCATE);
         OPENFILENAMEW dialog{};
         dialog.lStructSize = sizeof(dialog);
         dialog.hwndOwner = pin.window != nullptr ? pin.window : dialogOwner;
         dialog.lpstrFilter = L"PNG 图像 (*.png)\0*.png\0\0";
-        dialog.lpstrFile = path;
-        dialog.nMaxFile = static_cast<DWORD>(std::size(path));
+        dialog.lpstrFile = path.data();
+        dialog.nMaxFile = static_cast<DWORD>(path.size());
         dialog.lpstrDefExt = L"png";
         dialog.lpstrTitle = L"保存贴图";
         dialog.Flags = OFN_NOCHANGEDIR | OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
-        if (GetSaveFileNameW(&dialog)) savePngAtomically(pin.pixels, path);
+        if (GetSaveFileNameW(&dialog)) {
+            savePngAtomically(pin.pixels, path.data());
+        }
     }
 
     void setOpacity(Pin& pin, BYTE opacity) noexcept
