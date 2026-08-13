@@ -662,6 +662,18 @@ target_link_libraries(
             windowscodecs ole32
 )
 
+add_library(xxsnap_diagnostic_support src/diagnostics/DiagnosticSupport.cpp)
+target_compile_features(xxsnap_diagnostic_support PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_diagnostic_support
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_diagnostic_support
+    PRIVATE xxsnap_windows_build_configuration
+            user32 shell32 comdlg32 version
+)
+
 add_library(
     xxsnap_capture_session_coordinator
     src/session/CaptureMemoryPlan.cpp
@@ -712,6 +724,7 @@ target_link_libraries(
         xxsnap_hot_key_settings
         xxsnap_preferences_settings
         xxsnap_preferences_window
+        xxsnap_diagnostic_support
         xxsnap_visual_resources
         xxsnap_windows_build_configuration
         comdlg32
@@ -1082,6 +1095,17 @@ if(BUILD_TESTING)
     add_test(NAME preferences_window COMMAND xxsnap_preferences_window_test)
 
     add_executable(
+        xxsnap_diagnostic_support_test
+        tests/TestDiagnosticSupport.cpp
+    )
+    target_compile_features(xxsnap_diagnostic_support_test PRIVATE cxx_std_17)
+    target_link_libraries(
+        xxsnap_diagnostic_support_test
+        PRIVATE xxsnap_diagnostic_support xxsnap_windows_build_configuration
+    )
+    add_test(NAME diagnostic_support COMMAND xxsnap_diagnostic_support_test)
+
+    add_executable(
         xxsnap_capture_session_coordinator_test
         tests/TestCaptureSessionCoordinator.cpp
     )
@@ -1335,6 +1359,7 @@ set(xxsnap_capture_session_targets
     xxsnap_launch_at_login
     xxsnap_preferences_settings
     xxsnap_preferences_window
+    xxsnap_diagnostic_support
     xxsnap_capture_session_coordinator
     xxsnap_windows
 )
@@ -1363,6 +1388,7 @@ if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_preferences_settings_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_launch_at_login_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_preferences_window_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_diagnostic_support_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_capture_session_coordinator_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_memory_budget_matrix_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_selection_composer_test)

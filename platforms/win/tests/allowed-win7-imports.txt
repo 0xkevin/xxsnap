@@ -146,6 +146,7 @@ MSIMG32.dll!AlphaBlend
 
 SHELL32.dll!Shell_NotifyIconW
 SHELL32.dll!ShellExecuteW
+SHELL32.dll!SHGetFolderPathW
 
 IMM32.dll!ImmGetCompositionStringW
 IMM32.dll!ImmGetContext
@@ -154,18 +155,24 @@ IMM32.dll!ImmReleaseContext
 KERNEL32.dll!AcquireSRWLockExclusive
 KERNEL32.dll!CloseHandle
 KERNEL32.dll!CreateEventW
+KERNEL32.dll!CreateDirectoryW
 KERNEL32.dll!CreateFileW
 KERNEL32.dll!CreateMutexW
 KERNEL32.dll!DeleteCriticalSection
 KERNEL32.dll!DeleteFileW
 KERNEL32.dll!EnterCriticalSection
 KERNEL32.dll!FindResourceW
+KERNEL32.dll!FindClose
+KERNEL32.dll!FindFirstFileW
+KERNEL32.dll!FindNextFileW
 KERNEL32.dll!FlushFileBuffers
 KERNEL32.dll!FreeLibrary
 KERNEL32.dll!GetCurrentProcess
 KERNEL32.dll!GetCurrentProcessId
 KERNEL32.dll!GetCurrentThreadId
 KERNEL32.dll!GetEnvironmentVariableW
+KERNEL32.dll!GetFileAttributesExW
+KERNEL32.dll!GetFileInformationByHandle
 KERNEL32.dll!GetLastError
 KERNEL32.dll!GetLocalTime
 KERNEL32.dll!GetModuleFileNameW
@@ -173,6 +180,7 @@ KERNEL32.dll!GetModuleHandleW
 KERNEL32.dll!GetProcAddress
 KERNEL32.dll!GetStartupInfoW
 KERNEL32.dll!GetSystemTimeAsFileTime
+KERNEL32.dll!GetSystemTime
 KERNEL32.dll!GlobalAlloc
 KERNEL32.dll!GlobalFree
 KERNEL32.dll!GlobalLock
@@ -190,6 +198,7 @@ KERNEL32.dll!MultiByteToWideChar
 KERNEL32.dll!MoveFileExW
 KERNEL32.dll!MulDiv
 KERNEL32.dll!QueryPerformanceCounter
+KERNEL32.dll!ReadFile
 KERNEL32.dll!ReleaseSRWLockExclusive
 KERNEL32.dll!ResetEvent
 KERNEL32.dll!RtlCaptureContext

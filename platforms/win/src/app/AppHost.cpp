@@ -10,6 +10,7 @@
 #include "capture/DxgiCaptureBackend.h"
 #include "capture/FallbackCaptureBackend.h"
 #include "capture/GdiCaptureBackend.h"
+#include "diagnostics/DiagnosticSupport.h"
 #include "export/AnnotationComposer.h"
 #include "export/ClipboardWriter.h"
 #include "export/PngWriter.h"
@@ -391,6 +392,10 @@ public:
         if (!createReceiverWindow()) {
             return HostInitializationResult::failed;
         }
+        diagnosticSupport_ = std::make_unique<DiagnosticSupportController>(
+            window_, diagnosticLog_);
+        diagnosticLog_.record(
+            "application", "info", "application_launched");
 
         auto single = SingleInstance::create(
             systemSingleInstanceApi(), [this] { startRegionCapture("wake"); });
@@ -585,6 +590,8 @@ private:
 
     void startRegionCapture(const char* trigger) noexcept
     {
+        diagnosticLog_.record(
+            "capture", "info", "region_capture_requested");
         if (coordinator_ && !teachingPenOverlay_) {
             const auto startedAt = std::chrono::steady_clock::now();
             const auto result = coordinator_->start();
@@ -617,6 +624,8 @@ private:
                 MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND);
         } else if (command == TrayCommand::donation) {
             showPreferences(PreferencesSection::donation);
+        } else if (command == TrayCommand::exportDiagnostics) {
+            if (diagnosticSupport_) diagnosticSupport_->exportDiagnostics();
         } else if (command == TrayCommand::about) {
             showPreferences(PreferencesSection::about);
         } else if (command == TrayCommand::exit && window_ != nullptr) {
@@ -681,6 +690,8 @@ private:
 
     void startFullScreenCapture() noexcept
     {
+        diagnosticLog_.record(
+            "capture", "info", "full_screen_capture_requested");
         if (teachingPenOverlay_ || !coordinator_ || !sessionServices_
             || coordinator_->state() != CaptureSessionState::idle) {
             return;
@@ -729,6 +740,8 @@ private:
 
     void startTextRecognition() noexcept
     {
+        diagnosticLog_.record(
+            "text_recognition", "info", "text_recognition_requested");
         if (!ocrCapture_ || ocrCapture_->busy()
             || !coordinator_
             || coordinator_->state() != CaptureSessionState::idle) {
@@ -744,6 +757,9 @@ private:
 
     void toggleTeachingPen() noexcept
     {
+        diagnosticLog_.record("teaching_pen", "info",
+            teachingPenOverlay_ ? "teaching_pen_closed"
+                                : "teaching_pen_requested");
         if (teachingPenOverlay_) {
             teachingPenOverlay_.reset();
             teachingPenDesktop_.reset();
@@ -850,6 +866,7 @@ private:
 
     void showSessionError(CaptureSessionErrorCode error) noexcept
     {
+        diagnosticLog_.record("capture", "error", "capture_session_failed");
         const wchar_t* text = sessionFailureText;
         if (error == CaptureSessionErrorCode::topologyChanged) {
             text = topologyChangedText;
@@ -870,6 +887,8 @@ private:
     std::unique_ptr<SingleInstance> singleInstance_;
     SystemPreferencesRegistry preferencesRegistry_;
     HotKeySettingsStore hotKeySettingsStore_{preferencesRegistry_};
+    DiagnosticLogStore diagnosticLog_;
+    std::unique_ptr<DiagnosticSupportController> diagnosticSupport_;
     std::unique_ptr<WinCaptureSessionServices> sessionServices_;
     std::unique_ptr<CaptureSessionCoordinator> coordinator_;
     std::unique_ptr<TrayIcon> tray_;
