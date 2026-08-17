@@ -1,4 +1,5 @@
 #include "annotation/AnnotationDocument.h"
+#include "annotation/NumberAnnotationMetrics.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -7,15 +8,6 @@
 
 namespace xxsnap::win {
 namespace {
-
-AnnotationRect arrowLineBounds(const ArrowLine& line) noexcept
-{
-    const auto left = (std::min)({line.start.x, line.end.x, line.control.x});
-    const auto top = (std::min)({line.start.y, line.end.y, line.control.y});
-    const auto right = (std::max)({line.start.x, line.end.x, line.control.x});
-    const auto bottom = (std::max)({line.start.y, line.end.y, line.control.y});
-    return {left, top, right - left, bottom - top};
-}
 
 bool hasUsableArrowLine(const ArrowLine& line) noexcept
 {
@@ -70,19 +62,284 @@ AnnotationId AnnotationDocument::addArrowLine(
     return id;
 }
 
+AnnotationId AnnotationDocument::addBrushPath(
+    BrushPath path,
+    AnnotationStyle style)
+{
+    if (path.points.size() < 2U || nextId_ == invalidAnnotationId) {
+        return invalidAnnotationId;
+    }
+    auto before = snapshot();
+    const auto id = nextId_++;
+    annotations_.push_back({
+        id,
+        AnnotationKind::brush,
+        brushPathBounds(path),
+        style,
+        0.0F,
+        std::nullopt,
+        std::move(path),
+    });
+    selectedId_.reset();
+    commit(std::move(before));
+    return id;
+}
+
+AnnotationId AnnotationDocument::addMarkerLine(
+    MarkerLine line,
+    AnnotationStyle style)
+{
+    if (nextId_ == invalidAnnotationId) {
+        return invalidAnnotationId;
+    }
+    auto before = snapshot();
+    const auto id = nextId_++;
+    annotations_.push_back({
+        id,
+        AnnotationKind::marker,
+        markerLineBounds(line),
+        style,
+        0.0F,
+        std::nullopt,
+        std::nullopt,
+        line,
+    });
+    selectedId_ = id;
+    commit(std::move(before));
+    return id;
+}
+
+AnnotationId AnnotationDocument::addMosaicStroke(
+    MosaicStroke stroke,
+    MosaicRedaction redaction,
+    AnnotationStyle style)
+{
+    if (stroke.points.empty() || nextId_ == invalidAnnotationId) {
+        return invalidAnnotationId;
+    }
+    redaction.value = (std::max)(1, redaction.value);
+    style.fillEnabled = false;
+    style.strokePattern = AnnotationStrokePattern::solid;
+    auto before = snapshot();
+    const auto id = nextId_++;
+    annotations_.push_back({
+        id, AnnotationKind::mosaicStroke, brushPathBounds(stroke), style,
+        0.0F, std::nullopt, std::nullopt, std::nullopt,
+        std::move(stroke), redaction,
+    });
+    selectedId_ = id;
+    commit(std::move(before));
+    return id;
+}
+
+AnnotationId AnnotationDocument::addMosaicRectangle(
+    AnnotationRect rect,
+    MosaicRedaction redaction,
+    AnnotationStyle style,
+    float rotationDegrees)
+{
+    rect = standardized(rect);
+    if (rect.width <= 0.0F || rect.height <= 0.0F
+        || nextId_ == invalidAnnotationId) {
+        return invalidAnnotationId;
+    }
+    redaction.value = (std::max)(1, redaction.value);
+    style.fillEnabled = false;
+    style.strokePattern = AnnotationStrokePattern::solid;
+    auto before = snapshot();
+    const auto id = nextId_++;
+    annotations_.push_back({
+        id, AnnotationKind::mosaicRectangle, rect, style, rotationDegrees,
+        std::nullopt, std::nullopt, std::nullopt, std::nullopt, redaction,
+    });
+    selectedId_ = id;
+    commit(std::move(before));
+    return id;
+}
+
+AnnotationId AnnotationDocument::addText(
+    AnnotationRect rect,
+    std::wstring text,
+    AnnotationStyle style,
+    float rotationDegrees)
+{
+    rect = standardized(rect);
+    if (rect.width <= 0.0F || rect.height <= 0.0F
+        || nextId_ == invalidAnnotationId) {
+        return invalidAnnotationId;
+    }
+    style.strokeWidthDip = 0.0F;
+    style.strokePattern = AnnotationStrokePattern::solid;
+    style.fillEnabled = false;
+    style.textSize = clampedTextSize(style.textSize);
+    auto before = snapshot();
+    const auto id = nextId_++;
+    annotations_.push_back({
+        id, AnnotationKind::text, rect, std::move(style), rotationDegrees,
+        std::nullopt, std::nullopt, std::nullopt, std::nullopt,
+        std::nullopt, std::move(text),
+    });
+    selectedId_ = id;
+    if (textEditBefore_.has_value()) {
+        textEditChanged_ = true;
+        ++revision_;
+        return id;
+    }
+    commit(std::move(before));
+    return id;
+}
+
+AnnotationId AnnotationDocument::addNumberMark(
+    AnnotationRect rect,
+    NumberMarkType type,
+    std::optional<int> sequenceIndex,
+    bool manualSequence,
+    std::uint64_t groupId,
+    AnnotationStyle style)
+{
+    rect = standardized(rect);
+    if (rect.width <= 0.0F || rect.height <= 0.0F
+        || nextId_ == invalidAnnotationId) {
+        return invalidAnnotationId;
+    }
+    if (type == NumberMarkType::number) {
+        sequenceIndex = clampedNumberValue(sequenceIndex.value_or(1));
+    } else {
+        sequenceIndex.reset();
+        manualSequence = false;
+        groupId = 0;
+    }
+    style.strokeWidthDip = 0.0F;
+    style.strokePattern = AnnotationStrokePattern::solid;
+    style.fillEnabled = false;
+    style.textSize = clampedNumberSize(style.textSize);
+    auto before = snapshot();
+    const auto id = nextId_++;
+    ShapeAnnotation annotation;
+    annotation.id = id;
+    annotation.kind = AnnotationKind::numberSequence;
+    annotation.rect = rect;
+    annotation.style = std::move(style);
+    annotation.numberMarkType = type;
+    annotation.numberSequenceIndex = sequenceIndex;
+    annotation.numberSequenceIsManual = manualSequence;
+    annotation.numberSequenceGroupId = groupId;
+    annotations_.push_back(std::move(annotation));
+    selectedId_ = id;
+    if (numberEditBefore_.has_value()) {
+        numberEditChanged_ = true;
+        ++revision_;
+        return id;
+    }
+    commit(std::move(before));
+    return id;
+}
+
+AnnotationId AnnotationDocument::addMagnifier(
+    AnnotationRect rect,
+    MagnifierShape shape,
+    float zoom,
+    AnnotationStyle style)
+{
+    rect = standardized(rect);
+    if (rect.width <= 0.0F || rect.height <= 0.0F
+        || nextId_ == invalidAnnotationId) {
+        return invalidAnnotationId;
+    }
+    style.strokePattern = AnnotationStrokePattern::solid;
+    style.fillEnabled = false;
+    auto before = snapshot();
+    const auto id = nextId_++;
+    ShapeAnnotation annotation;
+    annotation.id = id;
+    annotation.kind = AnnotationKind::magnifier;
+    annotation.rect = rect;
+    annotation.style = style;
+    annotation.magnifierShape = shape;
+    annotation.magnifierZoom = normalizedMagnifierZoom(zoom);
+    annotations_.push_back(std::move(annotation));
+    selectedId_ = id;
+    commit(std::move(before));
+    return id;
+}
+
 bool AnnotationDocument::remove(AnnotationId id)
 {
     const auto index = indexOf(id);
     if (!index.has_value()) {
         return false;
     }
-    auto before = snapshot();
+    std::optional<Snapshot> before;
+    if (!numberEditBefore_.has_value()) before = snapshot();
     annotations_.erase(annotations_.begin() + static_cast<std::ptrdiff_t>(*index));
+    for (auto& mask : eraserMasks_) {
+        mask.affectedAnnotationIds.erase(
+            std::remove(mask.affectedAnnotationIds.begin(),
+                mask.affectedAnnotationIds.end(), id),
+            mask.affectedAnnotationIds.end());
+    }
+    eraserMasks_.erase(
+        std::remove_if(eraserMasks_.begin(), eraserMasks_.end(),
+            [](const EraserMask& mask) {
+                return mask.affectedAnnotationIds.empty();
+            }),
+        eraserMasks_.end());
     if (selectedId_ == id) {
         selectedId_ = annotations_.empty()
             ? std::nullopt
             : std::optional<AnnotationId>{annotations_.back().id};
     }
+    if (numberEditBefore_.has_value()) {
+        numberEditChanged_ = true;
+        ++revision_;
+    } else {
+        commit(std::move(*before));
+    }
+    return true;
+}
+
+bool AnnotationDocument::addEraserMask(
+    AnnotationRect rect,
+    std::vector<AnnotationId> affectedAnnotationIds)
+{
+    rect = standardized(rect);
+    std::sort(affectedAnnotationIds.begin(), affectedAnnotationIds.end());
+    affectedAnnotationIds.erase(
+        std::remove_if(affectedAnnotationIds.begin(),
+            affectedAnnotationIds.end(), [this](AnnotationId id) {
+                const auto found = std::lower_bound(
+                    annotations_.begin(), annotations_.end(), id,
+                    [](const ShapeAnnotation& annotation,
+                       AnnotationId candidate) {
+                        return annotation.id < candidate;
+                    });
+                return id == invalidAnnotationId
+                    || found == annotations_.end() || found->id != id;
+            }),
+        affectedAnnotationIds.end());
+    affectedAnnotationIds.erase(
+        std::unique(affectedAnnotationIds.begin(), affectedAnnotationIds.end()),
+        affectedAnnotationIds.end());
+    if (rect.width < 3.0F || rect.height < 3.0F
+        || affectedAnnotationIds.empty()) {
+        return false;
+    }
+    auto before = snapshot();
+    eraserMasks_.push_back({rect, std::move(affectedAnnotationIds)});
+    selectedId_.reset();
+    commit(std::move(before));
+    return true;
+}
+
+bool AnnotationDocument::clearAnnotationsAndMasks()
+{
+    if (annotations_.empty() && eraserMasks_.empty()) {
+        return false;
+    }
+    auto before = snapshot();
+    annotations_.clear();
+    eraserMasks_.clear();
+    selectedId_.reset();
     commit(std::move(before));
     return true;
 }
@@ -92,7 +349,11 @@ bool AnnotationDocument::updateRect(AnnotationId id, AnnotationRect rect)
     auto* annotation = findMutable(id);
     rect = standardized(rect);
     if (annotation == nullptr
-        || !isShapeKind(annotation->kind)
+        || (!isShapeKind(annotation->kind)
+            && annotation->kind != AnnotationKind::mosaicRectangle
+            && annotation->kind != AnnotationKind::text
+            && annotation->kind != AnnotationKind::numberSequence
+            && annotation->kind != AnnotationKind::magnifier)
         || rect.width <= 0.0F
         || rect.height <= 0.0F
         || annotation->rect == rect) {
@@ -110,13 +371,18 @@ bool AnnotationDocument::move(AnnotationId id, AnnotationPoint offset)
     if (annotation == nullptr || offset == AnnotationPoint{}) {
         return false;
     }
-    if (annotation->kind == AnnotationKind::arrowLine
-        && annotation->arrowLine.has_value()) {
-        auto line = *annotation->arrowLine;
-        line.start = translated(line.start, offset);
-        line.end = translated(line.end, offset);
-        line.control = translated(line.control, offset);
-        return updateArrowLine(id, line);
+    if (isArrowLineAnnotation(*annotation)) {
+        return updateArrowLine(id, translated(*annotation->arrowLine, offset));
+    }
+    if (isBrushAnnotation(*annotation)) {
+        return updateBrushPath(id, translated(*annotation->brushPath, offset));
+    }
+    if (isMarkerAnnotation(*annotation)) {
+        return updateMarkerLine(id, translated(*annotation->markerLine, offset));
+    }
+    if (isMosaicStrokeAnnotation(*annotation)) {
+        return updateMosaicStroke(
+            id, translated(*annotation->mosaicStroke, offset));
     }
     return updateRect(id, translated(annotation->rect, offset));
 }
@@ -166,8 +432,7 @@ bool AnnotationDocument::updateArrowLine(AnnotationId id, ArrowLine line)
 {
     auto* annotation = findMutable(id);
     if (annotation == nullptr
-        || annotation->kind != AnnotationKind::arrowLine
-        || !annotation->arrowLine.has_value()
+        || !isArrowLineAnnotation(*annotation)
         || !hasUsableArrowLine(line)
         || *annotation->arrowLine == line) {
         return false;
@@ -177,6 +442,286 @@ bool AnnotationDocument::updateArrowLine(AnnotationId id, ArrowLine line)
     annotation->rect = arrowLineBounds(line);
     commit(std::move(before));
     return true;
+}
+
+bool AnnotationDocument::updateBrushPath(AnnotationId id, BrushPath path)
+{
+    auto* annotation = findMutable(id);
+    if (annotation == nullptr
+        || !isBrushAnnotation(*annotation)
+        || path.points.size() < 2U
+        || *annotation->brushPath == path) {
+        return false;
+    }
+    auto before = snapshot();
+    annotation->brushPath = std::move(path);
+    annotation->rect = brushPathBounds(*annotation->brushPath);
+    commit(std::move(before));
+    return true;
+}
+
+bool AnnotationDocument::updateMarkerLine(AnnotationId id, MarkerLine line)
+{
+    auto* annotation = findMutable(id);
+    if (annotation == nullptr
+        || !isMarkerAnnotation(*annotation)
+        || *annotation->markerLine == line) {
+        return false;
+    }
+    auto before = snapshot();
+    annotation->markerLine = line;
+    annotation->rect = markerLineBounds(line);
+    commit(std::move(before));
+    return true;
+}
+
+bool AnnotationDocument::updateMosaicStroke(
+    AnnotationId id,
+    MosaicStroke stroke)
+{
+    auto* annotation = findMutable(id);
+    if (annotation == nullptr || !isMosaicStrokeAnnotation(*annotation)
+        || stroke.points.empty() || *annotation->mosaicStroke == stroke) {
+        return false;
+    }
+    auto before = snapshot();
+    annotation->mosaicStroke = std::move(stroke);
+    annotation->rect = brushPathBounds(*annotation->mosaicStroke);
+    commit(std::move(before));
+    return true;
+}
+
+bool AnnotationDocument::updateMosaicRedaction(
+    AnnotationId id,
+    MosaicRedaction redaction)
+{
+    auto* annotation = findMutable(id);
+    redaction.value = clampedMosaicRedactionValue(redaction.value);
+    if (annotation == nullptr || !isMosaicAnnotation(*annotation)
+        || annotation->mosaicRedaction == redaction) {
+        return false;
+    }
+    auto before = snapshot();
+    annotation->mosaicRedaction = redaction;
+    if (mosaicRedactionEditBefore_.has_value()) {
+        mosaicRedactionEditChanged_ = true;
+        ++revision_;
+        return true;
+    }
+    commit(std::move(before));
+    return true;
+}
+
+bool AnnotationDocument::updateText(
+    AnnotationId id,
+    std::wstring text,
+    AnnotationRect rect)
+{
+    auto* annotation = findMutable(id);
+    rect = standardized(rect);
+    if (annotation == nullptr || !isTextAnnotation(*annotation)
+        || rect.width <= 0.0F || rect.height <= 0.0F
+        || (*annotation->text == text && annotation->rect == rect)) {
+        return false;
+    }
+    std::optional<Snapshot> before;
+    if (!textEditBefore_.has_value()) before = snapshot();
+    annotation->text = std::move(text);
+    annotation->rect = rect;
+    if (textEditBefore_.has_value()) {
+        textEditChanged_ = true;
+        ++revision_;
+        return true;
+    }
+    commit(std::move(*before));
+    return true;
+}
+
+bool AnnotationDocument::updateTextGeometry(
+    AnnotationId id,
+    AnnotationRect rect,
+    AnnotationStyle style)
+{
+    auto* annotation = findMutable(id);
+    rect = standardized(rect);
+    if (annotation == nullptr || !isTextAnnotation(*annotation)
+        || rect.width <= 0.0F || rect.height <= 0.0F
+        || (annotation->rect == rect && annotation->style == style)) {
+        return false;
+    }
+    std::optional<Snapshot> before;
+    if (!textEditBefore_.has_value()) before = snapshot();
+    annotation->rect = rect;
+    annotation->style = std::move(style);
+    if (textEditBefore_.has_value()) {
+        textEditChanged_ = true;
+        ++revision_;
+        return true;
+    }
+    commit(std::move(*before));
+    return true;
+}
+
+bool AnnotationDocument::updateNumberMark(
+    AnnotationId id,
+    NumberMarkType type,
+    std::optional<int> sequenceIndex,
+    bool manualSequence,
+    std::uint64_t groupId)
+{
+    auto* annotation = findMutable(id);
+    if (annotation == nullptr || !isNumberAnnotation(*annotation)) {
+        return false;
+    }
+    if (type == NumberMarkType::number) {
+        sequenceIndex = clampedNumberValue(sequenceIndex.value_or(1));
+    } else {
+        sequenceIndex.reset();
+        manualSequence = false;
+        groupId = 0;
+    }
+    if (annotation->numberMarkType == type
+        && annotation->numberSequenceIndex == sequenceIndex
+        && annotation->numberSequenceIsManual == manualSequence
+        && annotation->numberSequenceGroupId == groupId) {
+        return false;
+    }
+    std::optional<Snapshot> before;
+    if (!numberEditBefore_.has_value()) before = snapshot();
+    annotation->numberMarkType = type;
+    annotation->numberSequenceIndex = sequenceIndex;
+    annotation->numberSequenceIsManual = manualSequence;
+    annotation->numberSequenceGroupId = groupId;
+    if (numberEditBefore_.has_value()) {
+        numberEditChanged_ = true;
+        ++revision_;
+    } else {
+        commit(std::move(*before));
+    }
+    return true;
+}
+
+bool AnnotationDocument::updateNumberGeometry(
+    AnnotationId id,
+    AnnotationRect rect,
+    AnnotationStyle style)
+{
+    auto* annotation = findMutable(id);
+    rect = standardized(rect);
+    style.textSize = clampedNumberSize(style.textSize);
+    style.strokeWidthDip = 0.0F;
+    style.strokePattern = AnnotationStrokePattern::solid;
+    style.fillEnabled = false;
+    if (annotation == nullptr || !isNumberAnnotation(*annotation)
+        || rect.width <= 0.0F || rect.height <= 0.0F
+        || (annotation->rect == rect && annotation->style == style)) {
+        return false;
+    }
+    std::optional<Snapshot> before;
+    if (!numberEditBefore_.has_value()) before = snapshot();
+    annotation->rect = rect;
+    annotation->style = std::move(style);
+    if (numberEditBefore_.has_value()) {
+        numberEditChanged_ = true;
+        ++revision_;
+    } else {
+        commit(std::move(*before));
+    }
+    return true;
+}
+
+bool AnnotationDocument::updateMagnifier(
+    AnnotationId id,
+    MagnifierShape shape,
+    float zoom,
+    AnnotationStyle style)
+{
+    auto* annotation = findMutable(id);
+    zoom = normalizedMagnifierZoom(zoom);
+    style.strokePattern = AnnotationStrokePattern::solid;
+    style.fillEnabled = false;
+    if (annotation == nullptr || !isMagnifierAnnotation(*annotation)
+        || (annotation->magnifierShape == shape
+            && annotation->magnifierZoom == zoom
+            && annotation->style == style)) {
+        return false;
+    }
+    auto before = snapshot();
+    annotation->magnifierShape = shape;
+    annotation->magnifierZoom = zoom;
+    annotation->style = style;
+    commit(std::move(before));
+    return true;
+}
+
+void AnnotationDocument::beginMosaicRedactionEdit()
+{
+    if (!mosaicRedactionEditBefore_.has_value()) {
+        mosaicRedactionEditBefore_ = snapshot();
+        mosaicRedactionEditChanged_ = false;
+    }
+}
+
+void AnnotationDocument::endMosaicRedactionEdit()
+{
+    if (!mosaicRedactionEditBefore_.has_value()) {
+        return;
+    }
+    if (mosaicRedactionEditChanged_) {
+        undoHistory_.push_back({
+            std::move(*mosaicRedactionEditBefore_), snapshot()});
+        redoHistory_.clear();
+    }
+    mosaicRedactionEditBefore_.reset();
+    mosaicRedactionEditChanged_ = false;
+}
+
+void AnnotationDocument::beginTextEdit()
+{
+    if (!textEditBefore_.has_value()) {
+        textEditBefore_ = snapshot();
+        textEditChanged_ = false;
+    }
+}
+
+void AnnotationDocument::endTextEdit(bool keepChanges)
+{
+    if (!textEditBefore_.has_value()) {
+        return;
+    }
+    if (!keepChanges) {
+        restore(*textEditBefore_);
+        ++revision_;
+    } else if (textEditChanged_) {
+        undoHistory_.push_back({std::move(*textEditBefore_), snapshot()});
+        redoHistory_.clear();
+    }
+    textEditBefore_.reset();
+    textEditChanged_ = false;
+}
+
+void AnnotationDocument::beginNumberEdit()
+{
+    if (!numberEditBefore_.has_value()) {
+        numberEditBefore_ = snapshot();
+        numberEditChanged_ = false;
+    }
+}
+
+void AnnotationDocument::endNumberEdit(bool keepChanges)
+{
+    if (!numberEditBefore_.has_value()) {
+        return;
+    }
+    if (!keepChanges) {
+        restore(*numberEditBefore_);
+        ++revision_;
+    } else if (numberEditChanged_) {
+        undoHistory_.push_back({std::move(*numberEditBefore_), snapshot()});
+        redoHistory_.clear();
+    }
+    numberEditBefore_.reset();
+    numberEditChanged_ = false;
 }
 
 bool AnnotationDocument::select(AnnotationId id) noexcept
@@ -207,6 +752,11 @@ const ShapeAnnotation* AnnotationDocument::find(AnnotationId id) const noexcept
 const std::vector<ShapeAnnotation>& AnnotationDocument::annotations() const noexcept
 {
     return annotations_;
+}
+
+const std::vector<EraserMask>& AnnotationDocument::eraserMasks() const noexcept
+{
+    return eraserMasks_;
 }
 
 bool AnnotationDocument::canUndo() const noexcept
@@ -271,7 +821,7 @@ ShapeAnnotation* AnnotationDocument::findMutable(AnnotationId id) noexcept
 
 AnnotationDocument::Snapshot AnnotationDocument::snapshot() const
 {
-    return {annotations_, selectedId_};
+    return {annotations_, eraserMasks_, selectedId_};
 }
 
 void AnnotationDocument::commit(Snapshot before)
@@ -284,6 +834,7 @@ void AnnotationDocument::commit(Snapshot before)
 void AnnotationDocument::restore(const Snapshot& state)
 {
     annotations_ = state.annotations;
+    eraserMasks_ = state.eraserMasks;
     selectedId_ = state.selectedId;
 }
 

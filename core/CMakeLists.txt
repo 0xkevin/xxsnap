@@ -7,6 +7,17 @@ target_include_directories(snipory_core_portable
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+add_library(snipory_core_scroll
+    src/scroll/FrameFingerprint.cpp
+    src/scroll/ScrollStitchSession.cpp
+    src/scroll/VerticalOverlapMatcher.cpp
+)
+target_compile_features(snipory_core_scroll PUBLIC cxx_std_17)
+target_include_directories(snipory_core_scroll
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
 function(snipory_core_add_portable_test target_name test_name source_file)
     add_executable(${target_name} ${source_file})
     target_compile_features(${target_name} PRIVATE cxx_std_17)
@@ -25,14 +36,15 @@ if(BUILD_TESTING)
         pixel_buffer
         tests/TestPixelBuffer.cpp
     )
+    add_executable(test_portable_scroll tests/TestPortableScroll.cpp)
+    target_compile_features(test_portable_scroll PRIVATE cxx_std_17)
+    target_link_libraries(test_portable_scroll PRIVATE snipory_core_scroll)
+    add_test(NAME portable_scroll COMMAND test_portable_scroll)
 endif()
 
 if(XXSNAP_BUILD_QT_CORE)
     add_library(snipory_core
         src/annotation/AnnotationRenderer.cpp
-        src/scroll/FrameFingerprint.cpp
-        src/scroll/ScrollStitchSession.cpp
-        src/scroll/VerticalOverlapMatcher.cpp
         src/usecases/SnapshotExportUseCase.cpp
     )
     set_source_files_properties(
@@ -47,6 +59,7 @@ if(XXSNAP_BUILD_QT_CORE)
     target_link_libraries(snipory_core
         PUBLIC
             snipory_core_portable
+            snipory_core_scroll
             Qt6::Core
             Qt6::Gui
     )

@@ -26,6 +26,7 @@ using xxsnap::win::TrayCommand;
 using xxsnap::win::TrayIcon;
 using xxsnap::win::TrayIconApi;
 using xxsnap::win::TrayMenuItem;
+using xxsnap::win::TrayMenuItems;
 
 int failureCount = 0;
 
@@ -163,7 +164,7 @@ public:
 
     std::optional<TrayCommand> showContextMenu(
         HWND,
-        const std::array<TrayMenuItem, 2>& items,
+        const TrayMenuItems& items,
         DWORD& error) noexcept override
     {
         ++menuCalls;
@@ -184,7 +185,7 @@ public:
     std::wstring taskbarMessageName;
     std::vector<NotifyCall> calls;
     int menuCalls = 0;
-    std::array<TrayMenuItem, 2> menuItems{};
+    TrayMenuItems menuItems{};
     std::function<void()> onShowContextMenu;
 };
 
@@ -210,6 +211,8 @@ void testTrayLifecycleMenuAndExplorerRestart()
     CHECK(result.value->taskbarCreatedMessage() == api.taskbarMessage);
 
     tray = std::move(result.value);
+    CHECK(tray->setMenuShortcuts({{
+        L"Ctrl+`", L"Ctrl+Shift+1", L"Ctrl+3", L"Ctrl+2"}}));
     CHECK(tray->handleMessage(api.taskbarMessage, 0, 0));
     CHECK(api.calls.size() == 4U);
     CHECK(api.calls[2].operation == NIM_ADD);
@@ -225,9 +228,26 @@ void testTrayLifecycleMenuAndExplorerRestart()
     CHECK(tray == nullptr);
     CHECK(api.menuCalls == 1);
     CHECK(api.menuItems[0].command == TrayCommand::regionCapture);
-    CHECK(std::wstring(api.menuItems[0].label) == L"\u533a\u57df\u622a\u56fe");
-    CHECK(api.menuItems[1].command == TrayCommand::exit);
-    CHECK(std::wstring(api.menuItems[1].label) == L"\u9000\u51fa");
+    CHECK(api.menuItems[0].label
+        == L"\u533a\u57df\u622a\u56fe\tCtrl+`");
+    CHECK(api.menuItems[1].command == TrayCommand::fullScreenCapture);
+    CHECK(api.menuItems[1].label
+        == L"\u5168\u5c4f\u622a\u56fe\tCtrl+Shift+1");
+    CHECK(api.menuItems[2].command == TrayCommand::textRecognition);
+    CHECK(api.menuItems[2].label
+        == L"\u6587\u5b57\u8bc6\u522b\tCtrl+3");
+    CHECK(api.menuItems[3].command == TrayCommand::teachingPen);
+    CHECK(api.menuItems[3].label == L"\u6559\u7b14\tCtrl+2");
+    CHECK(api.menuItems[4].separator);
+    CHECK(api.menuItems[5].command == TrayCommand::preferences);
+    CHECK(api.menuItems[5].label == L"\u504f\u597d\u8bbe\u7f6e\u2026");
+    CHECK(api.menuItems[6].command == TrayCommand::checkForUpdates);
+    CHECK(api.menuItems[7].command == TrayCommand::donation);
+    CHECK(api.menuItems[8].command == TrayCommand::help);
+    CHECK(api.menuItems[9].command == TrayCommand::exportDiagnostics);
+    CHECK(api.menuItems[10].command == TrayCommand::about);
+    CHECK(api.menuItems[11].command == TrayCommand::exit);
+    CHECK(api.menuItems[11].label == L"\u9000\u51fa");
     CHECK(api.calls.back().operation == NIM_DELETE);
 }
 
@@ -244,6 +264,7 @@ void testTrayMenuLoopMaySynchronouslyDestroyTray()
         [&](TrayCommand) { ++callbackCalls; });
     CHECK(result.value != nullptr);
     tray = std::move(result.value);
+    CHECK(tray->setMenuShortcuts({{L"Ctrl+`", L"", L"", L""}}));
     api.onShowContextMenu = [&] { tray.reset(); };
     auto* trayDuringMenu = tray.get();
     CHECK(trayDuringMenu->handleMessage(
@@ -252,6 +273,9 @@ void testTrayMenuLoopMaySynchronouslyDestroyTray()
         MAKELPARAM(WM_RBUTTONUP, xxsnap::win::trayIconIdentifier)));
     CHECK(tray == nullptr);
     CHECK(callbackCalls == 1);
+    CHECK(api.menuItems[0].label
+        == L"\u533a\u57df\u622a\u56fe\tCtrl+`");
+    CHECK(api.menuItems[1].label == L"\u5168\u5c4f\u622a\u56fe");
 
     FakeTrayIconApi wrongIconApi;
     auto wrongIconResult = TrayIcon::create(
@@ -317,7 +341,8 @@ public:
     {
         registrations.push_back({window, identifier, modifiers, virtualKey});
         error = registerError;
-        return registerSucceeds;
+        const auto call = registerCalls++;
+        return registerSucceeds && call != failRegisterCall;
     }
 
     bool unregisterHotKey(HWND window, int identifier, DWORD& error) noexcept override
@@ -330,6 +355,8 @@ public:
     }
 
     bool registerSucceeds = true;
+    int registerCalls = 0;
+    int failRegisterCall = -1;
     DWORD registerError = ERROR_SUCCESS;
     bool unregisterSucceeds = true;
     DWORD unregisterError = ERROR_SUCCESS;
@@ -342,7 +369,7 @@ public:
 void testAllDefaultMappingsAndMvpRegistration()
 {
     constexpr auto bindings = xxsnap::win::defaultAppHotKeys();
-    static_assert(bindings.size() == 4U);
+    static_assert(bindings.size() == 5U);
     CHECK((bindings[0] == HotKeyBinding{
         HotKeyCommand::regionCapture, MOD_CONTROL, VK_OEM_3}));
     CHECK((bindings[1] == HotKeyBinding{
@@ -351,6 +378,9 @@ void testAllDefaultMappingsAndMvpRegistration()
         HotKeyCommand::ocr, MOD_CONTROL, '3'}));
     CHECK((bindings[3] == HotKeyBinding{
         HotKeyCommand::teachingPen, MOD_CONTROL, '2'}));
+    CHECK((bindings[4] == HotKeyBinding{
+        HotKeyCommand::restoreMostRecentlyHiddenPinnedImage,
+        MOD_CONTROL, '1'}));
 
     FakeHotKeyApi api;
     int callbackCalls = 0;
@@ -361,16 +391,71 @@ void testAllDefaultMappingsAndMvpRegistration()
     });
     const auto window = reinterpret_cast<HWND>(0x301);
     CHECK(registrar->registerMvpRegionCapture(window));
+    CHECK(registrar->isRegistered(HotKeyCommand::regionCapture));
     CHECK(api.registrations.size() == 1U);
     CHECK(api.registrations[0].modifiers == MOD_CONTROL);
     CHECK(api.registrations[0].virtualKey == VK_OEM_3);
+    int restoreCalls = 0;
+    int fullScreenCalls = 0;
+    int ocrCalls = 0;
+    int teachingPenCalls = 0;
+    CHECK(registrar->registerFullScreenCapture(
+        window, [&] { ++fullScreenCalls; }));
+    CHECK(registrar->isRegistered(HotKeyCommand::fullScreen));
+    CHECK(api.registrations.size() == 2U);
+    CHECK(api.registrations[1].identifier
+        == xxsnap::win::fullScreenCaptureHotKeyIdentifier);
+    CHECK(api.registrations[1].modifiers == (MOD_CONTROL | MOD_SHIFT));
+    CHECK(api.registrations[1].virtualKey == '1');
+    CHECK(registrar->handleMessage(
+        WM_HOTKEY,
+        static_cast<WPARAM>(
+            xxsnap::win::fullScreenCaptureHotKeyIdentifier)));
+    CHECK(fullScreenCalls == 1);
+    CHECK(registrar->registerOcr(window, [&] { ++ocrCalls; }));
+    CHECK(registrar->isRegistered(HotKeyCommand::ocr));
+    CHECK(api.registrations.size() == 3U);
+    CHECK(api.registrations[2].identifier
+        == xxsnap::win::ocrHotKeyIdentifier);
+    CHECK(api.registrations[2].modifiers == MOD_CONTROL);
+    CHECK(api.registrations[2].virtualKey == '3');
+    CHECK(registrar->handleMessage(
+        WM_HOTKEY,
+        static_cast<WPARAM>(xxsnap::win::ocrHotKeyIdentifier)));
+    CHECK(ocrCalls == 1);
+    CHECK(registrar->registerTeachingPen(
+        window, [&] { ++teachingPenCalls; }));
+    CHECK(registrar->isRegistered(HotKeyCommand::teachingPen));
+    CHECK(api.registrations.size() == 4U);
+    CHECK(api.registrations[3].identifier
+        == xxsnap::win::teachingPenHotKeyIdentifier);
+    CHECK(api.registrations[3].modifiers == MOD_CONTROL);
+    CHECK(api.registrations[3].virtualKey == '2');
+    CHECK(registrar->handleMessage(
+        WM_HOTKEY,
+        static_cast<WPARAM>(xxsnap::win::teachingPenHotKeyIdentifier)));
+    CHECK(teachingPenCalls == 1);
+    CHECK(registrar->registerRestorePinnedImage(
+        window, [&] { ++restoreCalls; }));
+    CHECK(registrar->isRegistered(
+        HotKeyCommand::restoreMostRecentlyHiddenPinnedImage));
+    CHECK(api.registrations.size() == 5U);
+    CHECK(api.registrations[4].identifier
+        == xxsnap::win::restorePinnedImageHotKeyIdentifier);
+    CHECK(api.registrations[4].modifiers == MOD_CONTROL);
+    CHECK(api.registrations[4].virtualKey == '1');
+    CHECK(registrar->handleMessage(
+        WM_HOTKEY,
+        static_cast<WPARAM>(
+            xxsnap::win::restorePinnedImageHotKeyIdentifier)));
+    CHECK(restoreCalls == 1);
     auto* registrarDuringCallback = registrar.get();
     CHECK(registrarDuringCallback->handleMessage(
         WM_HOTKEY,
         static_cast<WPARAM>(xxsnap::win::regionCaptureHotKeyIdentifier)));
     CHECK(callbackCalls == 1);
     CHECK(registrar == nullptr);
-    CHECK(api.unregisterCalls == 1);
+    CHECK(api.unregisterCalls == 5);
 }
 
 void testHotKeyConflictAndCleanupAreExplicit()
@@ -380,16 +465,46 @@ void testHotKeyConflictAndCleanupAreExplicit()
     conflict.registerError = ERROR_HOTKEY_ALREADY_REGISTERED;
     HotKeyRegistrar failed(conflict, [] {});
     CHECK(!failed.registerMvpRegionCapture(reinterpret_cast<HWND>(0x311)));
+    CHECK(!failed.isRegistered(HotKeyCommand::regionCapture));
     CHECK(failed.lastError().has_value());
     CHECK(failed.lastError()->nativeCode == ERROR_HOTKEY_ALREADY_REGISTERED);
     CHECK(conflict.registrations.size() == 1U);
     CHECK(conflict.unregisterCalls == 0);
+
+    FakeHotKeyApi restoreConflict;
+    HotKeyRegistrar restoreFailed(restoreConflict, [] {});
+    const auto restoreWindow = reinterpret_cast<HWND>(0x312);
+    CHECK(restoreFailed.registerMvpRegionCapture(restoreWindow));
+    restoreConflict.registerSucceeds = false;
+    restoreConflict.registerError = ERROR_HOTKEY_ALREADY_REGISTERED;
+    CHECK(!restoreFailed.registerRestorePinnedImage(
+        restoreWindow, [] {}));
+    CHECK(restoreFailed.lastError().has_value());
+    CHECK(restoreFailed.lastError()->nativeCode
+        == ERROR_HOTKEY_ALREADY_REGISTERED);
+
+    FakeHotKeyApi disabledApi;
+    auto disabledBindings = xxsnap::win::defaultAppHotKeys();
+    disabledBindings[2] = disabledHotKey(HotKeyCommand::ocr);
+    HotKeyRegistrar initiallyDisabled(
+        disabledApi, [] {}, disabledBindings);
+    const auto disabledWindow = reinterpret_cast<HWND>(0x313);
+    CHECK(initiallyDisabled.registerMvpRegionCapture(disabledWindow));
+    CHECK(initiallyDisabled.registerOcr(disabledWindow, [] {}));
+    CHECK(disabledApi.registrations.size() == 1U);
+    CHECK(!initiallyDisabled.isRegistered(HotKeyCommand::ocr));
+    CHECK(initiallyDisabled.rebind(xxsnap::win::defaultAppHotKeys()[2]));
+    CHECK(initiallyDisabled.isRegistered(HotKeyCommand::ocr));
+    CHECK(disabledApi.registrations.size() == 2U);
+    CHECK(initiallyDisabled.unregister());
+    CHECK(!initiallyDisabled.rebind(xxsnap::win::defaultAppHotKeys()[2]));
 
     FakeHotKeyApi api;
     {
         HotKeyRegistrar registered(api, [] {});
         CHECK(registered.registerMvpRegionCapture(reinterpret_cast<HWND>(0x321)));
         CHECK(registered.unregister());
+        CHECK(!registered.isRegistered(HotKeyCommand::regionCapture));
         CHECK(registered.unregister());
     }
     CHECK(api.unregisterCalls == 1);
@@ -408,6 +523,44 @@ void testHotKeyConflictAndCleanupAreExplicit()
     CHECK(unregisterFailure.unregisterCalls == 2);
 }
 
+void testHotKeyRebindIsImmediateAndRollsBackOnConflict()
+{
+    FakeHotKeyApi api;
+    HotKeyRegistrar registrar(api, [] {});
+    const auto window = reinterpret_cast<HWND>(0x341);
+    CHECK(registrar.registerMvpRegionCapture(window));
+    CHECK(registrar.registerFullScreenCapture(window, [] {}));
+    CHECK(registrar.registerOcr(window, [] {}));
+    CHECK(registrar.registerTeachingPen(window, [] {}));
+    CHECK(registrar.registerRestorePinnedImage(window, [] {}));
+
+    const auto disabled = disabledHotKey(HotKeyCommand::ocr);
+    CHECK(registrar.rebind(disabled));
+    CHECK(!registrar.isRegistered(HotKeyCommand::ocr));
+    CHECK(registrar.binding(HotKeyCommand::ocr) == disabled);
+    CHECK(!registrar.handleMessage(
+        WM_HOTKEY, static_cast<WPARAM>(xxsnap::win::ocrHotKeyIdentifier)));
+
+    const HotKeyBinding replacement{
+        HotKeyCommand::ocr, MOD_CONTROL | MOD_ALT, 'O'};
+    CHECK(registrar.rebind(replacement));
+    CHECK(registrar.isRegistered(HotKeyCommand::ocr));
+    CHECK(registrar.binding(HotKeyCommand::ocr) == replacement);
+    CHECK(api.unregisteredIdentifier == xxsnap::win::ocrHotKeyIdentifier);
+    CHECK(api.registrations.back().modifiers == (MOD_CONTROL | MOD_ALT));
+    CHECK(api.registrations.back().virtualKey == 'O');
+
+    api.registerError = ERROR_HOTKEY_ALREADY_REGISTERED;
+    api.failRegisterCall = api.registerCalls;
+    const HotKeyBinding conflict{
+        HotKeyCommand::ocr, MOD_CONTROL | MOD_SHIFT, 'O'};
+    CHECK(!registrar.rebind(conflict));
+    CHECK(registrar.isRegistered(HotKeyCommand::ocr));
+    CHECK(registrar.binding(HotKeyCommand::ocr) == replacement);
+    CHECK(registrar.lastError().has_value());
+    CHECK(registrar.lastError()->nativeCode == ERROR_HOTKEY_ALREADY_REGISTERED);
+}
+
 } // namespace
 
 int main()
@@ -418,6 +571,7 @@ int main()
     testTrayMenuLoopMaySynchronouslyDestroyTray();
     testAllDefaultMappingsAndMvpRegistration();
     testHotKeyConflictAndCleanupAreExplicit();
+    testHotKeyRebindIsImmediateAndRollsBackOnConflict();
 
     if (failureCount != 0) {
         std::cerr << failureCount << " app entry service check(s) failed\n";

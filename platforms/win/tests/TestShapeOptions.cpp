@@ -165,6 +165,13 @@ void testArrowLineOptionsMatchMacGeometryAndEndpointRules()
     CHECK(state.selectArrowType(ArrowEndpoint::end, ArrowType::hollowArrow));
     CHECK(state.startArrowType() == ArrowType::none);
     CHECK(state.endArrowType() == ArrowType::hollowArrow);
+    CHECK(!state.selectArrowType(ArrowEndpoint::start, ArrowType::none));
+    CHECK(state.startArrowType() == ArrowType::none);
+    CHECK(state.endArrowType() == ArrowType::hollowArrow);
+    CHECK(state.selectArrowType(ArrowEndpoint::start, ArrowType::solidArrow));
+    CHECK(!state.selectArrowType(ArrowEndpoint::end, ArrowType::none));
+    CHECK(state.startArrowType() == ArrowType::solidArrow);
+    CHECK(state.endArrowType() == ArrowType::none);
 
     const auto layout = arrowLineOptionsLayout({100, 200}, 20);
     CHECK((layout.toolbar == AnnotationRect{100, 200, 526, 40}));
@@ -184,6 +191,211 @@ void testArrowLineOptionsMatchMacGeometryAndEndpointRules()
     CHECK(hitTestArrowTypeMenu(menu, {20, 170}) == 6U);
 }
 
+void testBrushOptionsMatchMacGeometry()
+{
+    BrushOptionsState state;
+    CHECK(state.style().strokeWidthDip == 3.0F);
+    CHECK(state.style().strokePattern == AnnotationStrokePattern::solid);
+    CHECK(state.selectedPaletteIndex() == 0U);
+    CHECK(state.setStrokeWidth(7.0F));
+    CHECK(!state.setStrokeWidth(6.0F));
+    CHECK(state.setStrokePattern(AnnotationStrokePattern::dashLongShort));
+    CHECK(!state.setStrokePattern(AnnotationStrokePattern::sketchSolid));
+
+    const auto layout = brushOptionsLayout({100, 200}, 20);
+    CHECK((layout.toolbar == AnnotationRect{100, 200, 418, 40}));
+    CHECK((layout.strokeWidths[0] == AnnotationRect{110, 210, 20, 20}));
+    CHECK((layout.strokeStyle == AnnotationRect{196, 210, 94, 20}));
+    CHECK((layout.colorSwatches[0] == AnnotationRect{314, 205, 12, 12}));
+    CHECK((layout.colorSwatches[20] == AnnotationRect{476, 204, 32, 32}));
+    CHECK(layout.separators.size() == 2U);
+    CHECK((layout.separators[0] == AnnotationRect{187.25F, 214, 1.5F, 12}));
+    CHECK((layout.separators[1] == AnnotationRect{302.25F, 214, 1.5F, 12}));
+    CHECK((brushOptionHitTest(layout, {110, 220})
+        == BrushOptionHit{BrushOptionControl::strokeWidth, 0}));
+    CHECK((brushOptionHitTest(layout, {197, 220})
+        == BrushOptionHit{BrushOptionControl::strokeStyle, 0}));
+}
+
+void testMarkerOptionsMatchMacGeometry()
+{
+    MarkerOptionsState state;
+    CHECK(state.style().strokeWidthDip == 18.0F);
+    CHECK((state.style().strokeColor == AnnotationColor{179, 235, 0, 255}));
+    CHECK(state.style().strokePattern == AnnotationStrokePattern::solid);
+    CHECK(state.selectedPaletteIndex() == 16U);
+    CHECK(state.setStrokeWidth(14.0F));
+    CHECK(!state.setStrokeWidth(7.0F));
+
+    const auto layout = markerOptionsLayout({100, 200}, 20);
+    CHECK((layout.toolbar == AnnotationRect{100, 200, 306, 40}));
+    CHECK((layout.strokeWidths[0] == AnnotationRect{110, 210, 20, 20}));
+    CHECK((layout.colorSwatches[0] == AnnotationRect{202, 205, 12, 12}));
+    CHECK((layout.colorSwatches[20] == AnnotationRect{364, 204, 32, 32}));
+    CHECK(layout.separators.size() == 1U);
+    CHECK((layout.separators[0] == AnnotationRect{190.25F, 214, 1.5F, 12}));
+    CHECK((markerOptionHitTest(layout, {110, 220})
+        == MarkerOptionHit{MarkerOptionControl::strokeWidth, 0}));
+    CHECK((markerOptionHitTest(layout, {203, 210})
+        == MarkerOptionHit{MarkerOptionControl::palette, 0}));
+}
+
+void testMosaicOptionsMatchMacGeometryAndRanges()
+{
+    MosaicOptionsState state;
+    CHECK(state.kind() == AnnotationKind::mosaicStroke);
+    CHECK(state.style().strokeWidthDip == 15.0F);
+    CHECK(state.redaction().type == MosaicRedactionType::pixelMosaic);
+    CHECK(state.redaction().value == 8);
+    CHECK(state.setStrokeWidth(35.0F));
+    CHECK(!state.setStrokeWidth(22.0F));
+    CHECK(state.setKind(AnnotationKind::mosaicRectangle));
+    CHECK(state.toggleRedactionType());
+    CHECK(state.redaction().type == MosaicRedactionType::gaussianBlur);
+    CHECK(state.setRedactionValue(100));
+    CHECK(state.redaction().value == 20);
+    CHECK(state.setRedactionValue(1));
+    CHECK(state.redaction().value == 5);
+    CHECK(state.toggleRedactionType());
+    CHECK(state.redaction().type == MosaicRedactionType::pixelMosaic);
+    CHECK(state.redaction().value == 8);
+
+    const auto layout = mosaicOptionsLayout({100, 200});
+    CHECK((layout.toolbar == AnnotationRect{100, 200, 252, 28}));
+    CHECK((layout.strokeWidths[0] == AnnotationRect{110, 204, 20, 20}));
+    CHECK((layout.rectangleMode == AnnotationRect{188, 204, 20, 20}));
+    CHECK((layout.redactionType == AnnotationRect{218, 204, 20, 20}));
+    CHECK((layout.redactionValue == AnnotationRect{248, 204, 94, 20}));
+    CHECK((mosaicOptionHitTest(layout, {190, 210})
+        == MosaicOptionHit{MosaicOptionControl::rectangleMode, 0}));
+    CHECK(mosaicValueForPoint(layout, {layout.valueTrack.x, 210}) == 5);
+    CHECK(mosaicValueForPoint(layout,
+        {layout.valueTrack.x + layout.valueTrack.width, 210}) == 20);
+}
+
+void testTextOptionsMatchMacGeometryAndMenus()
+{
+    TextOptionsState state;
+    CHECK(state.style().textFontFamily == L"Microsoft YaHei");
+    CHECK(state.style().textSize == 8.0F);
+    CHECK(state.style().textOutlineEnabled);
+    CHECK(state.selectedPaletteIndex() == 0U);
+    CHECK(state.toggleBold());
+    CHECK(state.toggleItalic());
+    CHECK(state.setTextSize(100.0F));
+    CHECK(state.style().textSize == 72.0F);
+    CHECK(state.setTextSize(1.0F));
+    CHECK(state.style().textSize == 3.0F);
+    CHECK(state.setFontFamily(L"Arial"));
+
+    const auto layout = textOptionsLayout({100, 200}, 20U);
+    CHECK((layout.toolbar == AnnotationRect{100, 200, 554, 40}));
+    CHECK((layout.bold == AnnotationRect{110, 210, 22, 20}));
+    CHECK((layout.italic == AnnotationRect{138, 210, 22, 20}));
+    CHECK((layout.outline == AnnotationRect{166, 210, 22, 20}));
+    CHECK((layout.fontFamily == AnnotationRect{208, 210, 154, 20}));
+    CHECK((layout.textSize == AnnotationRect{382, 210, 48, 20}));
+    CHECK((textOptionHitTest(layout, {120, 220})
+        == TextOptionHit{TextOptionControl::bold, 0U}));
+    CHECK((textOptionHitTest(layout, {400, 220})
+        == TextOptionHit{TextOptionControl::textSize, 0U}));
+
+    const auto popup = popupMenuLayout(layout.textSize, 10U, 800.0F);
+    CHECK(popup.items.size() == 10U);
+    CHECK(popup.menu.width == layout.textSize.width);
+    CHECK(popup.menu.height == 248.0F);
+    CHECK(popupMenuHitTest(popup, {
+        popup.items[4].x + 2.0F, popup.items[4].y + 2.0F}) == 4U);
+}
+
+void testNumberOptionsMatchMacGeometryTypesAndSizes()
+{
+    NumberOptionsState state;
+    CHECK(state.type() == NumberMarkType::number);
+    CHECK(state.style().textSize == 3.0F);
+    CHECK(state.selectedPaletteIndex() == 0U);
+    CHECK(numberMarkDiameter(1.0F) == 15.0F);
+    CHECK(numberMarkDiameter(3.0F) == 21.0F);
+    CHECK(numberMarkDiameter(14.0F) == 47.0F);
+    CHECK(numberMarkDiameter(72.0F) == 221.0F);
+    CHECK(state.setType(NumberMarkType::check));
+    CHECK((state.style().strokeColor == AnnotationColor{52, 199, 89, 255}));
+    CHECK(state.setType(NumberMarkType::cross));
+    CHECK((state.style().strokeColor == AnnotationColor{255, 59, 48, 255}));
+    CHECK(state.setSize(100.0F));
+    CHECK(state.style().textSize == 72.0F);
+
+    const auto layout = numberOptionsLayout({100, 200}, 20U);
+    CHECK((layout.toolbar == AnnotationRect{100, 200, 352, 40}));
+    CHECK((layout.markType == AnnotationRect{110, 210, 48, 20}));
+    CHECK((layout.size == AnnotationRect{178, 210, 48, 20}));
+    CHECK((numberOptionHitTest(layout, {120, 220})
+        == NumberOptionHit{NumberOptionControl::markType, 0U}));
+    CHECK((numberOptionHitTest(layout, {190, 220})
+        == NumberOptionHit{NumberOptionControl::size, 0U}));
+    const auto typeMenu = numberTypeMenuLayout(
+        layout.markType, 800.0F);
+    CHECK(typeMenu.items.size() == 3U);
+    CHECK(typeMenu.menu.width == 56.0F);
+    CHECK(typeMenu.menu.height == 86.0F);
+    CHECK(numberSizeValues.size() == 20U);
+}
+
+void testMagnifierOptionsMatchMacGeometryAndDefaults()
+{
+    MagnifierOptionsState state;
+    CHECK(state.shape() == MagnifierShape::rectangle);
+    CHECK(state.zoom() == 2.0F);
+    CHECK(state.style().strokeWidthDip == 2.0F);
+    CHECK(state.style().strokePattern == AnnotationStrokePattern::solid);
+    CHECK(!state.style().fillEnabled);
+    CHECK((state.style().strokeColor == AnnotationColor{0, 122, 255, 255}));
+    CHECK(!state.selectedPaletteIndex().has_value());
+    CHECK(state.setShape(MagnifierShape::circle));
+    CHECK(state.setZoom(3.6F));
+    CHECK(state.zoom() == 4.0F);
+    CHECK(!state.setStrokeWidth(3.0F));
+    CHECK(state.setStrokeWidth(7.0F));
+
+    const auto layout = magnifierOptionsLayout({100, 200}, 20U);
+    CHECK((layout.toolbar == AnnotationRect{100, 200, 440, 40}));
+    CHECK((layout.strokeWidths[0] == AnnotationRect{110, 210, 20, 20}));
+    CHECK((layout.rectangleMode == AnnotationRect{192, 210, 26, 20}));
+    CHECK((layout.circleMode == AnnotationRect{224, 210, 22, 20}));
+    CHECK((layout.zoom == AnnotationRect{260, 210, 58, 20}));
+    CHECK((layout.colorSwatches[0] == AnnotationRect{336, 205, 12, 12}));
+    CHECK((layout.colorSwatches[20] == AnnotationRect{498, 204, 32, 32}));
+    CHECK((layout.separators[0] == AnnotationRect{185.25F, 214, 1.5F, 12}));
+    CHECK((layout.separators[1] == AnnotationRect{253.25F, 214, 1.5F, 12}));
+    CHECK((layout.separators[2] == AnnotationRect{327.25F, 214, 1.5F, 12}));
+    CHECK((magnifierOptionHitTest(layout, {110, 220})
+        == MagnifierOptionHit{MagnifierOptionControl::strokeWidth, 0U}));
+    CHECK((magnifierOptionHitTest(layout, {230, 220})
+        == MagnifierOptionHit{MagnifierOptionControl::circleMode, 0U}));
+    CHECK((magnifierOptionHitTest(layout, {280, 220})
+        == MagnifierOptionHit{MagnifierOptionControl::zoom, 0U}));
+    const auto popup = popupMenuLayout(layout.zoom, 4U, 800.0F);
+    CHECK(popup.items.size() == 4U);
+    CHECK(popup.menu.height == 104.0F);
+}
+
+void testEraserOptionsUseExactMacGeometry()
+{
+    const auto layout = eraserOptionsLayout({100, 200});
+    CHECK((layout.toolbar == AnnotationRect{100, 200, 100, 28}));
+    CHECK((layout.pointMode == AnnotationRect{108, 204, 20, 20}));
+    CHECK((layout.rectangleMode == AnnotationRect{132, 204, 20, 20}));
+    CHECK((layout.clearAll == AnnotationRect{172, 204, 20, 20}));
+    CHECK((layout.separator == AnnotationRect{161.25F, 208, 1.5F, 12}));
+    CHECK(eraserOptionHitTest(layout, {118, 214})->control
+        == EraserOptionControl::pointMode);
+    CHECK(eraserOptionHitTest(layout, {142, 214})->control
+        == EraserOptionControl::rectangleMode);
+    CHECK(eraserOptionHitTest(layout, {182, 214})->control
+        == EraserOptionControl::clearAll);
+    CHECK(!eraserOptionHitTest(layout, {162, 214}).has_value());
+}
+
 } // namespace
 
 int main()
@@ -195,5 +407,12 @@ int main()
     testOneRowAndClampedPaletteLayouts();
     testSharedHitGeometryAndMenus();
     testArrowLineOptionsMatchMacGeometryAndEndpointRules();
+    testBrushOptionsMatchMacGeometry();
+    testMarkerOptionsMatchMacGeometry();
+    testMosaicOptionsMatchMacGeometryAndRanges();
+    testTextOptionsMatchMacGeometryAndMenus();
+    testNumberOptionsMatchMacGeometryTypesAndSizes();
+    testMagnifierOptionsMatchMacGeometryAndDefaults();
+    testEraserOptionsUseExactMacGeometry();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

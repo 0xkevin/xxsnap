@@ -42,6 +42,22 @@ void testExactMacToolbarGeometry()
     CHECK((layout.trailingDragHandle == ToolbarRect{542.0F, 24.0F, 20.0F, 20.0F}));
 }
 
+void testTeachingPenToolbarMatchesMacCompactGeometry()
+{
+    const auto layout = computeTeachingPenToolbarLayout(
+        {360.0F, 420.0F}, {0.0F, 0.0F, 800.0F, 600.0F});
+    CHECK((layout.bounds == ToolbarRect{366.0F, 426.0F, 56.0F, 168.0F}));
+    CHECK(layout.items.size() == teachingPenToolbarActions().size());
+    CHECK((layout.items[0].rect == ToolbarRect{370.0F, 430.0F, 20.0F, 20.0F}));
+    CHECK((layout.items[1].rect == ToolbarRect{398.0F, 430.0F, 20.0F, 20.0F}));
+    CHECK((layout.items[10].rect == ToolbarRect{370.0F, 570.0F, 20.0F, 20.0F}));
+    CHECK((layout.items[11].rect == ToolbarRect{398.0F, 570.0F, 20.0F, 20.0F}));
+
+    const auto corner = computeTeachingPenToolbarLayout(
+        {796.0F, 596.0F}, {0.0F, 0.0F, 800.0F, 600.0F});
+    CHECK((corner.bounds == ToolbarRect{734.0F, 422.0F, 56.0F, 168.0F}));
+}
+
 void testHitTestingUsesButtonRectsOnly()
 {
     const auto layout = computeMainToolbarLayout(
@@ -65,6 +81,7 @@ void testHitTestingUsesButtonRectsOnly()
 int main()
 {
     testExactMacToolbarGeometry();
+    testTeachingPenToolbarMatchesMacCompactGeometry();
     testHitTestingUsesButtonRectsOnly();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

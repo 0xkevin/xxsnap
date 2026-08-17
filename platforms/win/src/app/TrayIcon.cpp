@@ -50,7 +50,7 @@ public:
 
     std::optional<TrayCommand> showContextMenu(
         HWND owner,
-        const std::array<TrayMenuItem, 2>& items,
+        const TrayMenuItems& items,
         DWORD& error) noexcept override
     {
         const auto menu = CreatePopupMenu();
@@ -59,11 +59,19 @@ public:
             return std::nullopt;
         }
         for (const auto& item : items) {
+            if (item.separator) {
+                if (!AppendMenuW(menu, MF_SEPARATOR, 0, nullptr)) {
+                    error = GetLastError();
+                    DestroyMenu(menu);
+                    return std::nullopt;
+                }
+                continue;
+            }
             if (!AppendMenuW(
                     menu,
                     MF_STRING,
                     static_cast<UINT_PTR>(item.command),
-                    item.label)) {
+                    item.label.c_str())) {
                 error = GetLastError();
                 DestroyMenu(menu);
                 return std::nullopt;
@@ -94,6 +102,33 @@ public:
         if (command == static_cast<UINT>(TrayCommand::regionCapture)) {
             return TrayCommand::regionCapture;
         }
+        if (command == static_cast<UINT>(TrayCommand::fullScreenCapture)) {
+            return TrayCommand::fullScreenCapture;
+        }
+        if (command == static_cast<UINT>(TrayCommand::textRecognition)) {
+            return TrayCommand::textRecognition;
+        }
+        if (command == static_cast<UINT>(TrayCommand::teachingPen)) {
+            return TrayCommand::teachingPen;
+        }
+        if (command == static_cast<UINT>(TrayCommand::preferences)) {
+            return TrayCommand::preferences;
+        }
+        if (command == static_cast<UINT>(TrayCommand::checkForUpdates)) {
+            return TrayCommand::checkForUpdates;
+        }
+        if (command == static_cast<UINT>(TrayCommand::donation)) {
+            return TrayCommand::donation;
+        }
+        if (command == static_cast<UINT>(TrayCommand::help)) {
+            return TrayCommand::help;
+        }
+        if (command == static_cast<UINT>(TrayCommand::exportDiagnostics)) {
+            return TrayCommand::exportDiagnostics;
+        }
+        if (command == static_cast<UINT>(TrayCommand::about)) {
+            return TrayCommand::about;
+        }
         if (command == static_cast<UINT>(TrayCommand::exit)) {
             return TrayCommand::exit;
         }
@@ -106,10 +141,12 @@ public:
 struct TrayIcon::State final {
     explicit State(CommandCallback sourceCallback)
         : callback(std::move(sourceCallback))
+        , menuItems(mvpTrayMenuItems())
     {
     }
 
     CommandCallback callback;
+    TrayMenuItems menuItems;
     std::optional<TrayIconError> lastError;
 };
 
@@ -241,6 +278,24 @@ UINT TrayIcon::taskbarCreatedMessage() const noexcept
     return taskbarCreatedMessage_;
 }
 
+bool TrayIcon::setMenuShortcuts(
+    const TrayMenuShortcuts& shortcuts) noexcept
+{
+    try {
+        auto updated = mvpTrayMenuItems();
+        for (std::size_t index = 0; index < shortcuts.size(); ++index) {
+            if (!shortcuts[index].empty()) {
+                updated[index].label += L'\t';
+                updated[index].label += shortcuts[index];
+            }
+        }
+        state_->menuItems.swap(updated);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
 void TrayIcon::dispatch(TrayCommand command) noexcept
 {
     const auto state = state_;
@@ -284,7 +339,7 @@ bool TrayIcon::handleMessage(UINT message, WPARAM, LPARAM lParam) noexcept
     const auto owner = owner_;
     DWORD error = ERROR_SUCCESS;
     const auto command = api->showContextMenu(
-        owner, mvpTrayMenuItems(), error);
+        owner, state->menuItems, error);
     if (!command.has_value()) {
         if (error != ERROR_SUCCESS) {
             state->lastError = TrayIconError{TrayIconErrorCode::menuFailed, error};

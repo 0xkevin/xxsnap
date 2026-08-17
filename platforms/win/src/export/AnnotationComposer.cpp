@@ -1,16 +1,655 @@
 #include "export/AnnotationComposer.h"
+#include "annotation/MarkerMetrics.h"
 
 #include <d2d1.h>
 #include <objbase.h>
 #include <wincodec.h>
 
 #include <cstdint>
+#include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstring>
 #include <limits>
+#include <new>
+#include <unordered_map>
 #include <utility>
 
 namespace xxsnap::win {
 namespace {
+
+float markerColorLuminance(AnnotationColor color) noexcept
+{
+    return (0.2126F * static_cast<float>(color.red)
+        + 0.7152F * static_cast<float>(color.green)
+        + 0.0722F * static_cast<float>(color.blue)) / 255.0F;
+}
+
+float distanceSquaredFromSegment(
+    float x, float y,
+    float startX, float startY,
+    float endX, float endY) noexcept
+{
+    const auto dx = endX - startX;
+    const auto dy = endY - startY;
+    const auto lengthSquared = dx * dx + dy * dy;
+    if (lengthSquared < 0.25F) {
+        const auto pointDx = x - startX;
+        const auto pointDy = y - startY;
+        return pointDx * pointDx + pointDy * pointDy;
+    }
+    const auto progress = (std::max)(0.0F, (std::min)(1.0F,
+        ((x - startX) * dx + (y - startY) * dy) / lengthSquared));
+    const auto pointDx = x - (startX + progress * dx);
+    const auto pointDy = y - (startY + progress * dy);
+    return pointDx * pointDx + pointDy * pointDy;
+}
+
+bool mosaicMaskContains(
+    const ShapeAnnotation& annotation,
+    float dipX,
+    float dipY) noexcept
+{
+    if (isMosaicStrokeAnnotation(annotation)) {
+        const auto& points = annotation.mosaicStroke->points;
+        const auto radius = (std::max)(0.5F,
+            annotation.style.strokeWidthDip / 2.0F);
+        const auto radiusSquared = radius * radius;
+        if (points.size() == 1U) {
+            const auto dx = dipX - points.front().x;
+            const auto dy = dipY - points.front().y;
+            return dx * dx + dy * dy <= radiusSquared;
+        }
+        for (std::size_t index = 1U; index < points.size(); ++index) {
+            if (distanceSquaredFromSegment(
+                    dipX, dipY,
+                    points[index - 1U].x, points[index - 1U].y,
+                    points[index].x, points[index].y) <= radiusSquared) {
+                return true;
+            }
+        }
+        return false;
+    }
+    if (!isMosaicRectangleAnnotation(annotation)) {
+        return false;
+    }
+    const auto rect = standardized(annotation.rect);
+    const auto centerX = rect.x + rect.width / 2.0F;
+    const auto centerY = rect.y + rect.height / 2.0F;
+    const auto radians = -annotation.rotationDegrees
+        * 3.14159265358979323846F / 180.0F;
+    const auto sine = std::sin(radians);
+    const auto cosine = std::cos(radians);
+    const auto dx = dipX - centerX;
+    const auto dy = dipY - centerY;
+    const auto x = centerX + dx * cosine - dy * sine;
+    const auto y = centerY + dx * sine + dy * cosine;
+    return x >= rect.x && y >= rect.y
+        && x <= rect.x + rect.width && y <= rect.y + rect.height;
+}
+
+void pixelateSnapshot(
+    const std::vector<std::byte>& source,
+    std::vector<std::byte>& redacted,
+    std::int64_t width,
+    std::int64_t height,
+    std::uint64_t stride,
+    int block,
+    std::int64_t originX,
+    std::int64_t originY) noexcept
+{
+    block = (std::max)(1, block);
+    const auto floorToBlock = [block](std::int64_t value) {
+        auto quotient = value / block;
+        if (value < 0 && value % block != 0) {
+            --quotient;
+        }
+        return quotient * block;
+    };
+    const auto firstTop = floorToBlock(originY) - originY;
+    const auto firstLeft = floorToBlock(originX) - originX;
+    for (std::int64_t blockTop = firstTop;
+         blockTop < height; blockTop += block) {
+        const auto top = (std::max<std::int64_t>)(0, blockTop);
+        const auto bottom = (std::min)(height, blockTop + block);
+        if (top >= bottom) {
+            continue;
+        }
+        for (std::int64_t blockLeft = firstLeft;
+             blockLeft < width; blockLeft += block) {
+            const auto left = (std::max<std::int64_t>)(0, blockLeft);
+            const auto right = (std::min)(width, blockLeft + block);
+            if (left >= right) {
+                continue;
+            }
+            std::uint64_t blue = 0, green = 0, red = 0, alpha = 0;
+            std::uint64_t count = 0;
+            for (auto y = top; y < bottom; ++y) {
+                for (auto x = left; x < right; ++x) {
+                    const auto offset = static_cast<std::size_t>(
+                        static_cast<std::uint64_t>(y) * stride
+                        + static_cast<std::uint64_t>(x) * 4U);
+                    blue += std::to_integer<unsigned>(source[offset]);
+                    green += std::to_integer<unsigned>(source[offset + 1U]);
+                    red += std::to_integer<unsigned>(source[offset + 2U]);
+                    alpha += std::to_integer<unsigned>(source[offset + 3U]);
+                    ++count;
+                }
+            }
+            const std::array<std::byte, 4> average{
+                static_cast<std::byte>(blue / count),
+                static_cast<std::byte>(green / count),
+                static_cast<std::byte>(red / count),
+                static_cast<std::byte>(alpha / count),
+            };
+            for (auto y = top; y < bottom; ++y) {
+                for (auto x = left; x < right; ++x) {
+                    const auto offset = static_cast<std::size_t>(
+                        static_cast<std::uint64_t>(y) * stride
+                        + static_cast<std::uint64_t>(x) * 4U);
+                    std::copy(average.begin(), average.end(),
+                        redacted.begin() + static_cast<std::ptrdiff_t>(offset));
+                }
+            }
+        }
+    }
+}
+
+void boxBlurSnapshot(
+    const std::vector<std::byte>& source,
+    std::vector<std::byte>& redacted,
+    std::int64_t width,
+    std::int64_t height,
+    std::uint64_t stride,
+    int radius)
+{
+    radius = (std::max)(1, radius);
+    auto horizontal = source;
+    for (std::int64_t y = 0; y < height; ++y) {
+        std::array<std::uint64_t, 4> sums{};
+        const auto addColumn = [&](std::int64_t x, bool add) {
+            x = (std::max<std::int64_t>)(0,
+                (std::min<std::int64_t>)(width - 1, x));
+            const auto offset = static_cast<std::size_t>(
+                static_cast<std::uint64_t>(y) * stride
+                + static_cast<std::uint64_t>(x) * 4U);
+            for (std::size_t channel = 0; channel < 4U; ++channel) {
+                const auto value = std::to_integer<unsigned>(
+                    source[offset + channel]);
+                add ? sums[channel] += value : sums[channel] -= value;
+            }
+        };
+        for (int x = -radius; x <= radius; ++x) addColumn(x, true);
+        const auto count = static_cast<std::uint64_t>(radius * 2 + 1);
+        for (std::int64_t x = 0; x < width; ++x) {
+            const auto offset = static_cast<std::size_t>(
+                static_cast<std::uint64_t>(y) * stride
+                + static_cast<std::uint64_t>(x) * 4U);
+            for (std::size_t channel = 0; channel < 4U; ++channel) {
+                horizontal[offset + channel]
+                    = static_cast<std::byte>(sums[channel] / count);
+            }
+            addColumn(x - radius, false);
+            addColumn(x + radius + 1, true);
+        }
+    }
+    redacted = horizontal;
+    for (std::int64_t x = 0; x < width; ++x) {
+        std::array<std::uint64_t, 4> sums{};
+        const auto addRow = [&](std::int64_t y, bool add) {
+            y = (std::max<std::int64_t>)(0,
+                (std::min<std::int64_t>)(height - 1, y));
+            const auto offset = static_cast<std::size_t>(
+                static_cast<std::uint64_t>(y) * stride
+                + static_cast<std::uint64_t>(x) * 4U);
+            for (std::size_t channel = 0; channel < 4U; ++channel) {
+                const auto value = std::to_integer<unsigned>(
+                    horizontal[offset + channel]);
+                add ? sums[channel] += value : sums[channel] -= value;
+            }
+        };
+        for (int y = -radius; y <= radius; ++y) addRow(y, true);
+        const auto count = static_cast<std::uint64_t>(radius * 2 + 1);
+        for (std::int64_t y = 0; y < height; ++y) {
+            const auto offset = static_cast<std::size_t>(
+                static_cast<std::uint64_t>(y) * stride
+                + static_cast<std::uint64_t>(x) * 4U);
+            for (std::size_t channel = 0; channel < 4U; ++channel) {
+                redacted[offset + channel]
+                    = static_cast<std::byte>(sums[channel] / count);
+            }
+            addRow(y - radius, false);
+            addRow(y + radius + 1, true);
+        }
+    }
+}
+
+struct PixelRegion {
+    std::int64_t left = 0;
+    std::int64_t top = 0;
+    std::int64_t right = 0;
+    std::int64_t bottom = 0;
+
+    std::int64_t width() const noexcept { return right - left; }
+    std::int64_t height() const noexcept { return bottom - top; }
+    bool empty() const noexcept { return left >= right || top >= bottom; }
+};
+
+std::int64_t floorToMultiple(std::int64_t value, int multiple) noexcept
+{
+    auto quotient = value / multiple;
+    if (value < 0 && value % multiple != 0) {
+        --quotient;
+    }
+    return quotient * multiple;
+}
+
+PixelRegion mosaicOutputRegion(
+    const ShapeAnnotation& annotation,
+    float scaleX,
+    float scaleY,
+    std::int64_t width,
+    std::int64_t height) noexcept
+{
+    auto bounds = standardized(annotation.rect);
+    if (isMosaicStrokeAnnotation(annotation)) {
+        const auto radius = annotation.style.strokeWidthDip / 2.0F;
+        bounds = {bounds.x - radius, bounds.y - radius,
+            bounds.width + radius * 2.0F,
+            bounds.height + radius * 2.0F};
+    } else {
+        const auto radians = annotation.rotationDegrees
+            * 3.14159265358979323846F / 180.0F;
+        const auto halfWidth = bounds.width / 2.0F;
+        const auto halfHeight = bounds.height / 2.0F;
+        const auto rotatedHalfWidth = std::abs(std::cos(radians)) * halfWidth
+            + std::abs(std::sin(radians)) * halfHeight;
+        const auto rotatedHalfHeight = std::abs(std::sin(radians)) * halfWidth
+            + std::abs(std::cos(radians)) * halfHeight;
+        const auto centerX = bounds.x + halfWidth;
+        const auto centerY = bounds.y + halfHeight;
+        bounds = {centerX - rotatedHalfWidth, centerY - rotatedHalfHeight,
+            rotatedHalfWidth * 2.0F, rotatedHalfHeight * 2.0F};
+    }
+    return {
+        (std::max<std::int64_t>)(0,
+            static_cast<std::int64_t>(std::floor(bounds.x * scaleX))),
+        (std::max<std::int64_t>)(0,
+            static_cast<std::int64_t>(std::floor(bounds.y * scaleY))),
+        (std::min<std::int64_t>)(width,
+            static_cast<std::int64_t>(std::ceil(
+                (bounds.x + bounds.width) * scaleX))),
+        (std::min<std::int64_t>)(height,
+            static_cast<std::int64_t>(std::ceil(
+                (bounds.y + bounds.height) * scaleY))),
+    };
+}
+
+PixelRegion mosaicProcessingRegion(
+    PixelRegion output,
+    MosaicRedaction redaction,
+    std::int64_t width,
+    std::int64_t height,
+    std::int64_t contentOriginX,
+    std::int64_t contentOriginY) noexcept
+{
+    if (redaction.type == MosaicRedactionType::gaussianBlur) {
+        return {
+            (std::max<std::int64_t>)(0, output.left - redaction.value),
+            (std::max<std::int64_t>)(0, output.top - redaction.value),
+            (std::min)(width, output.right + redaction.value),
+            (std::min)(height, output.bottom + redaction.value),
+        };
+    }
+    const auto block = (std::max)(1, redaction.value);
+    const auto left = floorToMultiple(
+        contentOriginX + output.left, block) - contentOriginX;
+    const auto top = floorToMultiple(
+        contentOriginY + output.top, block) - contentOriginY;
+    const auto right = floorToMultiple(
+        contentOriginX + output.right - 1, block) + block - contentOriginX;
+    const auto bottom = floorToMultiple(
+        contentOriginY + output.bottom - 1, block) + block - contentOriginY;
+    return {
+        (std::max<std::int64_t>)(0, left),
+        (std::max<std::int64_t>)(0, top),
+        (std::min)(width, right),
+        (std::min)(height, bottom),
+    };
+}
+
+std::vector<std::byte> copyRegion(
+    const PixelBuffer& pixels,
+    PixelRegion region)
+{
+    const auto stride = static_cast<std::uint64_t>(region.width()) * 4U;
+    std::vector<std::byte> result(
+        static_cast<std::size_t>(stride)
+            * static_cast<std::size_t>(region.height()));
+    for (std::int64_t row = 0; row < region.height(); ++row) {
+        const auto* source = pixels.data()
+            + static_cast<std::uint64_t>(region.top + row) * pixels.stride()
+            + static_cast<std::uint64_t>(region.left) * 4U;
+        std::memcpy(result.data() + static_cast<std::size_t>(row * stride),
+            source, static_cast<std::size_t>(stride));
+    }
+    return result;
+}
+
+void restoreRegion(
+    PixelBuffer& pixels,
+    PixelRegion region,
+    const std::vector<std::byte>& source) noexcept
+{
+    const auto rowBytes = static_cast<std::size_t>(region.width()) * 4U;
+    for (std::int64_t row = 0; row < region.height(); ++row) {
+        auto* destination = pixels.data()
+            + static_cast<std::uint64_t>(region.top + row) * pixels.stride()
+            + static_cast<std::uint64_t>(region.left) * 4U;
+        std::memcpy(destination,
+            source.data() + static_cast<std::size_t>(row) * rowBytes,
+            rowBytes);
+    }
+}
+
+void composeMosaic(
+    PixelBuffer& pixels,
+    const ShapeAnnotation& annotation,
+    UINT dpiX,
+    UINT dpiY,
+    std::int64_t contentOriginX,
+    std::int64_t contentOriginY)
+{
+    if (!isMosaicAnnotation(annotation)) {
+        return;
+    }
+    const auto scaleX = static_cast<float>(dpiX == 0U ? 96U : dpiX) / 96.0F;
+    const auto scaleY = static_cast<float>(dpiY == 0U ? 96U : dpiY) / 96.0F;
+    auto redaction = *annotation.mosaicRedaction;
+    redaction.value = clampedMosaicRedactionValue(redaction.value);
+    const auto output = mosaicOutputRegion(annotation, scaleX, scaleY,
+        pixels.width(), pixels.height());
+    if (output.empty()) {
+        return;
+    }
+    const auto processing = mosaicProcessingRegion(output, redaction,
+        pixels.width(), pixels.height(), contentOriginX, contentOriginY);
+    auto source = copyRegion(pixels, processing);
+    auto redacted = source;
+    const auto localStride = static_cast<std::uint64_t>(processing.width()) * 4U;
+    if (redaction.type == MosaicRedactionType::pixelMosaic) {
+        pixelateSnapshot(source, redacted,
+            processing.width(), processing.height(), localStride,
+            redaction.value,
+            contentOriginX + processing.left,
+            contentOriginY + processing.top);
+    } else {
+        boxBlurSnapshot(source, redacted,
+            processing.width(), processing.height(), localStride,
+            redaction.value);
+    }
+    for (auto y = output.top; y < output.bottom; ++y) {
+        for (auto x = output.left; x < output.right; ++x) {
+            if (!mosaicMaskContains(annotation,
+                    (static_cast<float>(x) + 0.5F) / scaleX,
+                    (static_cast<float>(y) + 0.5F) / scaleY)) {
+                continue;
+            }
+            const auto destinationOffset = static_cast<std::size_t>(
+                static_cast<std::uint64_t>(y) * pixels.stride()
+                + static_cast<std::uint64_t>(x) * 4U);
+            const auto sourceOffset = static_cast<std::size_t>(
+                static_cast<std::uint64_t>(y - processing.top) * localStride
+                + static_cast<std::uint64_t>(x - processing.left) * 4U);
+            std::memcpy(pixels.data() + destinationOffset,
+                redacted.data() + sourceOffset, 4U);
+        }
+    }
+}
+
+void composeMarker(
+    PixelBuffer& pixels,
+    const ShapeAnnotation& annotation,
+    UINT dpiX,
+    UINT dpiY) noexcept
+{
+    if (!isMarkerAnnotation(annotation)) {
+        return;
+    }
+    const auto scaleX = static_cast<float>(dpiX == 0U ? 96U : dpiX) / 96.0F;
+    const auto scaleY = static_cast<float>(dpiY == 0U ? 96U : dpiY) / 96.0F;
+    const auto line = *annotation.markerLine;
+    const auto startX = line.start.x * scaleX;
+    const auto startY = line.start.y * scaleY;
+    const auto endX = line.end.x * scaleX;
+    const auto endY = line.end.y * scaleY;
+    const auto radius = annotation.style.strokeWidthDip
+        * (scaleX + scaleY) / 4.0F;
+
+    constexpr int sampleCount = 17;
+    auto darkSamples = 0;
+    auto validSamples = 0;
+    for (int index = 0; index < sampleCount; ++index) {
+        const auto progress = static_cast<float>(index)
+            / static_cast<float>(sampleCount - 1);
+        const auto x = static_cast<std::int64_t>(
+            std::round(startX + (endX - startX) * progress));
+        const auto y = static_cast<std::int64_t>(
+            std::round(startY + (endY - startY) * progress));
+        if (x < 0 || y < 0 || x >= pixels.width() || y >= pixels.height()) {
+            continue;
+        }
+        const auto* pixel = pixels.data()
+            + static_cast<std::uint64_t>(y) * pixels.stride()
+            + static_cast<std::uint64_t>(x) * 4U;
+        ++validSamples;
+        const auto luminance = (0.2126F * std::to_integer<unsigned>(pixel[2])
+            + 0.7152F * std::to_integer<unsigned>(pixel[1])
+            + 0.0722F * std::to_integer<unsigned>(pixel[0])) / 255.0F;
+        darkSamples += luminance < 0.12F ? 1 : 0;
+    }
+    const auto normalBlend = validSamples > 0
+        && darkSamples >= (std::max)(1, validSamples * 3 / 4);
+    auto color = annotation.style.strokeColor;
+    if (normalBlend && markerColorLuminance(color) < 0.18F) {
+        color = {255, 255, 255, 255};
+    }
+    const auto left = (std::max<std::int64_t>)(0,
+        static_cast<std::int64_t>(std::floor((std::min)(startX, endX) - radius)));
+    const auto top = (std::max<std::int64_t>)(0,
+        static_cast<std::int64_t>(std::floor((std::min)(startY, endY) - radius)));
+    const auto right = (std::min<std::int64_t>)(pixels.width() - 1,
+        static_cast<std::int64_t>(std::ceil((std::max)(startX, endX) + radius)));
+    const auto bottom = (std::min<std::int64_t>)(pixels.height() - 1,
+        static_cast<std::int64_t>(std::ceil((std::max)(startY, endY) + radius)));
+    const std::array<std::uint32_t, 3> source{
+        color.blue, color.green, color.red};
+    const auto radiusSquared = radius * radius;
+    for (auto y = top; y <= bottom; ++y) {
+        for (auto x = left; x <= right; ++x) {
+            if (distanceSquaredFromSegment(
+                    static_cast<float>(x) + 0.5F,
+                    static_cast<float>(y) + 0.5F,
+                    startX, startY, endX, endY) > radiusSquared) {
+                continue;
+            }
+            auto* pixel = pixels.data()
+                + static_cast<std::uint64_t>(y) * pixels.stride()
+                + static_cast<std::uint64_t>(x) * 4U;
+            for (std::size_t channel = 0; channel < 3U; ++channel) {
+                const auto destination = std::to_integer<unsigned>(pixel[channel]);
+                const auto blended = normalBlend
+                    ? source[channel]
+                    : source[channel] * destination / 255U;
+                pixel[channel] = static_cast<std::byte>(
+                    (blended * markerMetrics::opacityByte
+                        + destination * (255U - markerMetrics::opacityByte)
+                        + 127U)
+                        / 255U);
+            }
+            pixel[3] = std::byte{0xFF};
+        }
+    }
+}
+
+struct MagnifierGeometry {
+    float sourceLeft = 0.0F;
+    float sourceTop = 0.0F;
+    float sourceRight = 0.0F;
+    float sourceBottom = 0.0F;
+    float drawLeft = 0.0F;
+    float drawTop = 0.0F;
+    float drawWidth = 0.0F;
+    float drawHeight = 0.0F;
+};
+
+std::optional<MagnifierGeometry> magnifierGeometry(
+    AnnotationRect destination,
+    float zoom,
+    float sourceWidth,
+    float sourceHeight,
+    float contentXOffset,
+    float contentYOffset) noexcept
+{
+    destination = standardized(destination);
+    if (destination.width <= 0.0F || destination.height <= 0.0F
+        || sourceWidth <= 0.0F || sourceHeight <= 0.0F) {
+        return std::nullopt;
+    }
+    zoom = normalizedMagnifierZoom(zoom);
+    const auto requestedWidth = destination.width / zoom;
+    const auto requestedHeight = destination.height / zoom;
+    const auto centeredLeft = destination.x
+        + destination.width / 2.0F - requestedWidth / 2.0F;
+    const auto shiftedLeft = centeredLeft - contentXOffset / zoom;
+    const auto shiftedFits = shiftedLeft >= 0.0F
+        && shiftedLeft + requestedWidth <= sourceWidth
+        && destination.x > 0.0F
+        && destination.x + destination.width < sourceWidth;
+    const auto requestedLeft = shiftedFits ? shiftedLeft : centeredLeft;
+    const auto requestedTop = destination.y
+        + destination.height / 2.0F - requestedHeight / 2.0F;
+    const auto sourceLeft = (std::max)(0.0F, std::floor(requestedLeft));
+    const auto sourceTop = (std::max)(0.0F, std::floor(requestedTop));
+    const auto sourceRight = (std::min)(sourceWidth,
+        std::ceil(requestedLeft + requestedWidth));
+    const auto sourceBottom = (std::min)(sourceHeight,
+        std::ceil(requestedTop + requestedHeight));
+    if (sourceLeft >= sourceRight || sourceTop >= sourceBottom) {
+        return std::nullopt;
+    }
+    const auto xScale = destination.width / (std::max)(requestedWidth, 1.0F);
+    const auto yScale = destination.height / (std::max)(requestedHeight, 1.0F);
+    const auto drawWidth = (sourceRight - sourceLeft) * xScale;
+    const auto drawHeight = (sourceBottom - sourceTop) * yScale;
+    const auto visibleLeft = (std::max)(0.0F, destination.x);
+    const auto visibleTop = (std::max)(0.0F, destination.y);
+    const auto visibleRight = (std::min)(sourceWidth,
+        destination.x + destination.width);
+    const auto visibleBottom = (std::min)(sourceHeight,
+        destination.y + destination.height);
+    const auto drawLeft = sourceLeft <= 0.0F && requestedLeft < 0.0F
+        ? visibleLeft
+        : sourceRight >= sourceWidth
+            && requestedLeft + requestedWidth > sourceWidth
+        ? visibleRight - drawWidth
+        : destination.x + (sourceLeft - requestedLeft) * xScale;
+    const auto drawTop = sourceTop <= 0.0F && requestedTop < 0.0F
+        ? visibleTop
+        : sourceBottom >= sourceHeight
+            && requestedTop + requestedHeight > sourceHeight
+        ? visibleBottom - drawHeight
+        : destination.y + (sourceTop - requestedTop) * yScale;
+    return MagnifierGeometry{
+        sourceLeft, sourceTop, sourceRight, sourceBottom,
+        drawLeft, drawTop - contentYOffset, drawWidth, drawHeight};
+}
+
+void composeMagnifierContent(
+    PixelBuffer& pixels,
+    const std::byte* sourcePixels,
+    std::uint64_t sourceStride,
+    const ShapeAnnotation& annotation,
+    UINT dpiX,
+    UINT dpiY) noexcept
+{
+    if (!isMagnifierAnnotation(annotation)
+        || sourcePixels == nullptr) {
+        return;
+    }
+    const auto scaleX = static_cast<float>(dpiX == 0U ? 96U : dpiX) / 96.0F;
+    const auto scaleY = static_cast<float>(dpiY == 0U ? 96U : dpiY) / 96.0F;
+    const auto rect = standardized(annotation.rect);
+    const AnnotationRect destination{
+        rect.x * scaleX,
+        rect.y * scaleY,
+        rect.width * scaleX,
+        rect.height * scaleY,
+    };
+    const auto geometry = magnifierGeometry(
+        destination,
+        *annotation.magnifierZoom,
+        static_cast<float>(pixels.width()),
+        static_cast<float>(pixels.height()),
+        12.0F * scaleX,
+        3.0F * scaleY);
+    if (!geometry.has_value()) {
+        return;
+    }
+    const auto left = (std::max<std::int64_t>)(0,
+        static_cast<std::int64_t>(std::floor(destination.x)));
+    const auto top = (std::max<std::int64_t>)(0,
+        static_cast<std::int64_t>(std::floor(destination.y)));
+    const auto right = (std::min<std::int64_t>)(pixels.width(),
+        static_cast<std::int64_t>(std::ceil(
+            destination.x + destination.width)));
+    const auto bottom = (std::min<std::int64_t>)(pixels.height(),
+        static_cast<std::int64_t>(std::ceil(
+            destination.y + destination.height)));
+    const auto centerX = destination.x + destination.width / 2.0F;
+    const auto centerY = destination.y + destination.height / 2.0F;
+    const auto radiusX = destination.width / 2.0F;
+    const auto radiusY = destination.height / 2.0F;
+    for (auto y = top; y < bottom; ++y) {
+        for (auto x = left; x < right; ++x) {
+            const auto sampleX = static_cast<float>(x) + 0.5F;
+            const auto sampleY = static_cast<float>(y) + 0.5F;
+            if (*annotation.magnifierShape == MagnifierShape::circle) {
+                const auto dx = (sampleX - centerX) / radiusX;
+                const auto dy = (sampleY - centerY) / radiusY;
+                if (dx * dx + dy * dy > 1.0F) {
+                    continue;
+                }
+            }
+            if (sampleX < geometry->drawLeft
+                || sampleY < geometry->drawTop
+                || sampleX >= geometry->drawLeft + geometry->drawWidth
+                || sampleY >= geometry->drawTop + geometry->drawHeight) {
+                continue;
+            }
+            const auto sourceX = (std::min<std::int64_t>)(
+                static_cast<std::int64_t>(geometry->sourceRight) - 1,
+                static_cast<std::int64_t>(geometry->sourceLeft
+                    + (sampleX - geometry->drawLeft)
+                        / geometry->drawWidth
+                        * (geometry->sourceRight - geometry->sourceLeft)));
+            const auto sourceY = (std::min<std::int64_t>)(
+                static_cast<std::int64_t>(geometry->sourceBottom) - 1,
+                static_cast<std::int64_t>(geometry->sourceTop
+                    + (sampleY - geometry->drawTop)
+                        / geometry->drawHeight
+                        * (geometry->sourceBottom - geometry->sourceTop)));
+            const auto sourceOffset = static_cast<std::size_t>(
+                static_cast<std::uint64_t>(sourceY) * sourceStride
+                + static_cast<std::uint64_t>(sourceX) * 4U);
+            const auto destinationOffset = static_cast<std::size_t>(
+                static_cast<std::uint64_t>(y) * pixels.stride()
+                + static_cast<std::uint64_t>(x) * 4U);
+            std::memcpy(pixels.data() + destinationOffset,
+                sourcePixels + sourceOffset, 4U);
+        }
+    }
+}
 
 template<typename Interface>
 class ComPtr final {
@@ -109,13 +748,133 @@ std::optional<CaptureError> copyBitmapToBuffer(
     return std::nullopt;
 }
 
+std::optional<CaptureError> copyBitmapRegion(
+    IWICBitmap* bitmap,
+    PixelRegion region,
+    std::vector<std::byte>& destination)
+{
+    if (region.empty()
+        || region.left > (std::numeric_limits<INT>::max)()
+        || region.top > (std::numeric_limits<INT>::max)()
+        || region.width() > (std::numeric_limits<INT>::max)()
+        || region.height() > (std::numeric_limits<INT>::max)()) {
+        return compositionError(E_INVALIDARG);
+    }
+    const WICRect rectangle{
+        static_cast<INT>(region.left),
+        static_cast<INT>(region.top),
+        static_cast<INT>(region.width()),
+        static_cast<INT>(region.height()),
+    };
+    ComPtr<IWICBitmapLock> lock;
+    auto result = bitmap->Lock(&rectangle, WICBitmapLockRead, lock.put());
+    if (FAILED(result)) return compositionError(result);
+    UINT stride = 0;
+    UINT size = 0;
+    BYTE* source = nullptr;
+    result = lock->GetStride(&stride);
+    if (SUCCEEDED(result)) result = lock->GetDataPointer(&size, &source);
+    const auto rowBytes = static_cast<std::uint64_t>(region.width()) * 4U;
+    const auto required = static_cast<std::uint64_t>(stride)
+            * static_cast<std::uint64_t>(region.height() - 1)
+        + rowBytes;
+    if (FAILED(result) || source == nullptr
+        || stride < rowBytes || required > size) {
+        return compositionError(FAILED(result) ? result : E_INVALIDARG);
+    }
+    try {
+        destination.resize(static_cast<std::size_t>(rowBytes)
+            * static_cast<std::size_t>(region.height()));
+    } catch (const std::bad_alloc&) {
+        return compositionError(E_OUTOFMEMORY);
+    }
+    for (std::int64_t row = 0; row < region.height(); ++row) {
+        std::memcpy(destination.data()
+                + static_cast<std::size_t>(row)
+                    * static_cast<std::size_t>(rowBytes),
+            source + static_cast<std::uint64_t>(row) * stride,
+            static_cast<std::size_t>(rowBytes));
+    }
+    return std::nullopt;
+}
+
+std::optional<CaptureError> restoreBitmapRegion(
+    IWICBitmap* bitmap,
+    PixelRegion region,
+    const std::vector<std::byte>& source) noexcept
+{
+    if (region.empty()
+        || region.left > (std::numeric_limits<INT>::max)()
+        || region.top > (std::numeric_limits<INT>::max)()
+        || region.width() > (std::numeric_limits<INT>::max)()
+        || region.height() > (std::numeric_limits<INT>::max)()) {
+        return compositionError(E_INVALIDARG);
+    }
+    const auto rowBytes = static_cast<std::uint64_t>(region.width()) * 4U;
+    if (source.size() < rowBytes * static_cast<std::uint64_t>(region.height())) {
+        return compositionError(E_INVALIDARG);
+    }
+    const WICRect rectangle{
+        static_cast<INT>(region.left),
+        static_cast<INT>(region.top),
+        static_cast<INT>(region.width()),
+        static_cast<INT>(region.height()),
+    };
+    ComPtr<IWICBitmapLock> lock;
+    auto result = bitmap->Lock(&rectangle, WICBitmapLockWrite, lock.put());
+    if (FAILED(result)) return compositionError(result);
+    UINT stride = 0;
+    UINT size = 0;
+    BYTE* destination = nullptr;
+    result = lock->GetStride(&stride);
+    if (SUCCEEDED(result)) {
+        result = lock->GetDataPointer(&size, &destination);
+    }
+    const auto required = static_cast<std::uint64_t>(stride)
+            * static_cast<std::uint64_t>(region.height() - 1)
+        + rowBytes;
+    if (FAILED(result) || destination == nullptr
+        || stride < rowBytes || required > size) {
+        return compositionError(FAILED(result) ? result : E_INVALIDARG);
+    }
+    for (std::int64_t row = 0; row < region.height(); ++row) {
+        std::memcpy(destination + static_cast<std::uint64_t>(row) * stride,
+            source.data() + static_cast<std::size_t>(row)
+                * static_cast<std::size_t>(rowBytes),
+            static_cast<std::size_t>(rowBytes));
+    }
+    return std::nullopt;
+}
+
+HRESULT createAnnotationRenderTarget(
+    ID2D1Factory* factory,
+    IWICBitmap* bitmap,
+    UINT dpiX,
+    UINT dpiY,
+    ComPtr<ID2D1RenderTarget>& renderTarget) noexcept
+{
+    const auto properties = D2D1::RenderTargetProperties(
+        D2D1_RENDER_TARGET_TYPE_SOFTWARE,
+        D2D1::PixelFormat(
+            DXGI_FORMAT_B8G8R8A8_UNORM,
+            D2D1_ALPHA_MODE_PREMULTIPLIED),
+        dpiX == 0U ? 96.0F : static_cast<float>(dpiX),
+        dpiY == 0U ? 96.0F : static_cast<float>(dpiY));
+    return factory->CreateWicBitmapRenderTarget(
+        bitmap, properties, renderTarget.put());
+}
+
 } // namespace
 
 std::optional<CaptureError> composeAnnotations(
     PixelBuffer& pixels,
     const AnnotationRenderPlan& plan,
     UINT dpiX,
-    UINT dpiY) noexcept
+    UINT dpiY,
+    std::int64_t contentOriginX,
+    std::int64_t contentOriginY,
+    const PixelBuffer* magnifierSource,
+    const std::vector<EraserMask>& eraserMasks) noexcept
 {
     if (plan.items.empty()) {
         return std::nullopt;
@@ -126,6 +885,30 @@ std::optional<CaptureError> composeAnnotations(
         || pixels.format()
             != snipory::core::portable::PixelFormat::bgra8Premultiplied) {
         return compositionError(E_INVALIDARG);
+    }
+
+    std::vector<std::byte> original;
+    const PixelBuffer* source = magnifierSource;
+    if (source != nullptr
+        && (source->width() != pixels.width()
+            || source->height() != pixels.height()
+            || source->format() != pixels.format()
+            || source->byteCount() < pixels.byteCount())) {
+        source = nullptr;
+    }
+    if (source == nullptr && std::any_of(plan.items.begin(), plan.items.end(),
+            [](const auto& item) {
+                return isMagnifierAnnotation(item.annotation);
+            })) {
+        try {
+            original.assign(
+                pixels.data(), pixels.data() + pixels.byteCount());
+        } catch (const std::bad_alloc&) {
+            return compositionError(E_OUTOFMEMORY);
+        }
+        // The fallback preserves the export path, where no immutable raw
+        // selection buffer is available.
+        source = nullptr;
     }
 
     const auto comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
@@ -162,26 +945,234 @@ std::optional<CaptureError> composeAnnotations(
 
     ComPtr<ID2D1RenderTarget> renderTarget;
     if (!failure.has_value() && SUCCEEDED(result)) {
-        const auto properties = D2D1::RenderTargetProperties(
-            D2D1_RENDER_TARGET_TYPE_SOFTWARE,
-            D2D1::PixelFormat(
-                DXGI_FORMAT_B8G8R8A8_UNORM,
-                D2D1_ALPHA_MODE_PREMULTIPLIED),
-            dpiX == 0U ? 96.0F : static_cast<float>(dpiX),
-            dpiY == 0U ? 96.0F : static_cast<float>(dpiY));
-        result = d2dFactory->CreateWicBitmapRenderTarget(
-            bitmap.get(), properties, renderTarget.put());
+        result = createAnnotationRenderTarget(
+            d2dFactory.get(), bitmap.get(), dpiX, dpiY, renderTarget);
     }
+    auto pixelsContainLatestResult = false;
     if (!failure.has_value() && SUCCEEDED(result)) {
-        renderTarget->BeginDraw();
+        const auto flushBitmapToPixels = [&]() noexcept {
+            renderTarget.reset();
+            failure = copyBitmapToBuffer(bitmap.get(), pixels);
+            pixelsContainLatestResult = !failure.has_value();
+            return !failure.has_value();
+        };
+        const auto recreateRenderTarget = [&]() noexcept {
+            result = createAnnotationRenderTarget(
+                d2dFactory.get(), bitmap.get(), dpiX, dpiY, renderTarget);
+            return SUCCEEDED(result);
+        };
+        const auto resumeRenderingFromPixels = [&]() noexcept {
+            failure = copyBufferToBitmap(pixels, bitmap.get());
+            if (failure.has_value()) {
+                return false;
+            }
+            pixelsContainLatestResult = false;
+            return recreateRenderTarget();
+        };
+        const auto ensurePixelsCurrent = [&]() noexcept {
+            return pixelsContainLatestResult || flushBitmapToPixels();
+        };
+        const auto ensureBitmapCurrent = [&]() noexcept {
+            return !pixelsContainLatestResult || resumeRenderingFromPixels();
+        };
         AnnotationRenderer renderer(d2dFactory.get());
-        result = renderer.draw(renderTarget.get(), plan);
-        if (SUCCEEDED(result)) {
-            result = renderTarget->EndDraw();
+        std::unordered_map<AnnotationId, std::vector<const EraserMask*>>
+            masksByAnnotation;
+        try {
+            for (const auto& mask : eraserMasks) {
+                for (const auto id : mask.affectedAnnotationIds) {
+                    masksByAnnotation[id].push_back(&mask);
+                }
+            }
+        } catch (const std::bad_alloc&) {
+            failure = compositionError(E_OUTOFMEMORY);
+        }
+        const auto maskRegion = [dpiX, dpiY, &pixels](
+            const EraserMask& mask) {
+            const auto scaleX = static_cast<double>(dpiX == 0U ? 96U : dpiX)
+                / 96.0;
+            const auto scaleY = static_cast<double>(dpiY == 0U ? 96U : dpiY)
+                / 96.0;
+            const auto rect = standardized(mask.rect);
+            return PixelRegion{
+                (std::max<std::int64_t>)(0,
+                    static_cast<std::int64_t>(std::floor(
+                        (rect.x - 1.0) * scaleX))),
+                (std::max<std::int64_t>)(0,
+                    static_cast<std::int64_t>(std::floor(
+                        (rect.y - 1.0) * scaleY))),
+                (std::min<std::int64_t>)(pixels.width(),
+                    static_cast<std::int64_t>(std::ceil(
+                        (rect.x + rect.width + 1.0) * scaleX))),
+                (std::min<std::int64_t>)(pixels.height(),
+                    static_cast<std::int64_t>(std::ceil(
+                        (rect.y + rect.height + 1.0) * scaleY))),
+            };
+        };
+        std::size_t index = 0U;
+        while (!failure.has_value() && index < plan.items.size()) {
+            const auto& item = plan.items[index];
+            const auto maskEntry = masksByAnnotation.find(item.annotation.id);
+            const auto* itemMasks = maskEntry == masksByAnnotation.end()
+                ? nullptr : &maskEntry->second;
+            if (itemMasks == nullptr) {
+                if (isMagnifierAnnotation(item.annotation)) {
+                    if (!ensurePixelsCurrent()) break;
+                    composeMagnifierContent(pixels,
+                        source != nullptr ? source->data() : original.data(),
+                        source != nullptr ? source->stride() : pixels.stride(),
+                        item.annotation, dpiX, dpiY);
+                    if (!ensureBitmapCurrent()) break;
+                    AnnotationRenderPlan magnifierPlan;
+                    magnifierPlan.items.push_back(item);
+                    renderTarget->BeginDraw();
+                    result = renderer.draw(renderTarget.get(), magnifierPlan);
+                    if (SUCCEEDED(result)) result = renderTarget->EndDraw();
+                    if (FAILED(result)) break;
+                    ++index;
+                    pixelsContainLatestResult = false;
+                    continue;
+                }
+                if (isMarkerAnnotation(item.annotation)
+                    || isMosaicAnnotation(item.annotation)) {
+                    if (!ensurePixelsCurrent()) break;
+                    do {
+                        const auto& current = plan.items[index].annotation;
+                        if (isMarkerAnnotation(current)) {
+                            composeMarker(pixels, current, dpiX, dpiY);
+                        } else {
+                            try {
+                                composeMosaic(pixels, current,
+                                    dpiX, dpiY,
+                                    contentOriginX, contentOriginY);
+                            } catch (const std::bad_alloc&) {
+                                failure = compositionError(E_OUTOFMEMORY);
+                                break;
+                            }
+                        }
+                        ++index;
+                    } while (index < plan.items.size()
+                        && masksByAnnotation.find(
+                            plan.items[index].annotation.id)
+                            == masksByAnnotation.end()
+                        && (isMarkerAnnotation(
+                                plan.items[index].annotation)
+                            || isMosaicAnnotation(
+                                plan.items[index].annotation)));
+                    if (failure.has_value()) break;
+                    pixelsContainLatestResult = true;
+                    continue;
+                }
+                if (!ensureBitmapCurrent()) break;
+                AnnotationRenderPlan runPlan;
+                do {
+                    runPlan.items.push_back(plan.items[index]);
+                    ++index;
+                } while (index < plan.items.size()
+                    && masksByAnnotation.find(plan.items[index].annotation.id)
+                        == masksByAnnotation.end()
+                    && !isMarkerAnnotation(plan.items[index].annotation)
+                    && !isMosaicAnnotation(plan.items[index].annotation)
+                    && !isMagnifierAnnotation(plan.items[index].annotation));
+                renderTarget->BeginDraw();
+                result = renderer.draw(renderTarget.get(), runPlan);
+                if (SUCCEEDED(result)) result = renderTarget->EndDraw();
+                if (FAILED(result)) break;
+                pixelsContainLatestResult = false;
+                continue;
+            }
+
+            std::vector<std::pair<PixelRegion, std::vector<std::byte>>>
+                maskBackups;
+            const auto usesPixels = isMagnifierAnnotation(item.annotation)
+                || isMarkerAnnotation(item.annotation)
+                || isMosaicAnnotation(item.annotation);
+            if (usesPixels && !ensurePixelsCurrent()) break;
+            if (!usesPixels && !ensureBitmapCurrent()) break;
+            if (!usesPixels) renderTarget.reset();
+            try {
+                maskBackups.reserve(itemMasks->size());
+                for (const auto* mask : *itemMasks) {
+                    const auto region = maskRegion(*mask);
+                    if (region.empty()) continue;
+                    maskBackups.push_back({region, {}});
+                    if (usesPixels) {
+                        maskBackups.back().second = copyRegion(pixels, region);
+                    } else {
+                        failure = copyBitmapRegion(bitmap.get(), region,
+                            maskBackups.back().second);
+                        if (failure.has_value()) break;
+                    }
+                }
+            } catch (const std::bad_alloc&) {
+                failure = compositionError(E_OUTOFMEMORY);
+            }
+            if (failure.has_value()) break;
+            if (!usesPixels && !recreateRenderTarget()) break;
+
+            const auto restoreBitmapMasks = [&]() noexcept {
+                renderTarget.reset();
+                for (const auto& backup : maskBackups) {
+                    failure = restoreBitmapRegion(
+                        bitmap.get(), backup.first, backup.second);
+                    if (failure.has_value()) return false;
+                }
+                pixelsContainLatestResult = false;
+                return recreateRenderTarget();
+            };
+            if (isMagnifierAnnotation(item.annotation)) {
+                composeMagnifierContent(pixels,
+                    source != nullptr ? source->data() : original.data(),
+                    source != nullptr ? source->stride() : pixels.stride(),
+                    item.annotation, dpiX, dpiY);
+                if (!ensureBitmapCurrent()) {
+                    break;
+                }
+                AnnotationRenderPlan magnifierPlan;
+                magnifierPlan.items.push_back(item);
+                renderTarget->BeginDraw();
+                result = renderer.draw(renderTarget.get(), magnifierPlan);
+                if (SUCCEEDED(result)) {
+                    result = renderTarget->EndDraw();
+                }
+                if (FAILED(result)) {
+                    break;
+                }
+                if (!restoreBitmapMasks()) break;
+            } else if (isMarkerAnnotation(item.annotation)
+                || isMosaicAnnotation(item.annotation)) {
+                if (isMarkerAnnotation(item.annotation)) {
+                    composeMarker(pixels, item.annotation, dpiX, dpiY);
+                } else {
+                    try {
+                        composeMosaic(pixels, item.annotation,
+                            dpiX, dpiY, contentOriginX, contentOriginY);
+                    } catch (const std::bad_alloc&) {
+                        failure = compositionError(E_OUTOFMEMORY);
+                        break;
+                    }
+                }
+                pixelsContainLatestResult = true;
+            } else {
+                AnnotationRenderPlan itemPlan;
+                itemPlan.items.push_back(item);
+                renderTarget->BeginDraw();
+                result = renderer.draw(renderTarget.get(), itemPlan);
+                if (SUCCEEDED(result)) result = renderTarget->EndDraw();
+                if (FAILED(result)) break;
+                if (!restoreBitmapMasks()) break;
+            }
+            if (pixelsContainLatestResult) {
+                for (const auto& backup : maskBackups) {
+                    restoreRegion(pixels, backup.first, backup.second);
+                }
+            }
+            ++index;
         }
     }
     renderTarget.reset();
-    if (!failure.has_value() && SUCCEEDED(result)) {
+    if (!pixelsContainLatestResult
+        && !failure.has_value() && SUCCEEDED(result)) {
         failure = copyBitmapToBuffer(bitmap.get(), pixels);
     }
     if (!failure.has_value() && FAILED(result)) {

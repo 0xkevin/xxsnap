@@ -1,4 +1,5 @@
 #include "annotation/AnnotationDocument.h"
+#include "annotation/NumberAnnotationMetrics.h"
 
 #include <cstdlib>
 #include <iostream>
@@ -156,6 +157,200 @@ void testArrowLineCommandsPreserveCurveGeometryAndHistory()
     CHECK(document.find(id)->arrowLine == line);
 }
 
+void testBrushPathHistoryAndBounds()
+{
+    AnnotationDocument document;
+    const BrushPath path{{{10, 20}, {35, 8}, {80, 50}}};
+    const auto id = document.addBrushPath(path);
+    CHECK(id != invalidAnnotationId);
+    CHECK(document.find(id)->kind == AnnotationKind::brush);
+    CHECK(document.find(id)->brushPath == path);
+    CHECK((document.find(id)->rect == AnnotationRect{10, 8, 70, 42}));
+    CHECK(document.move(id, {5, -3}));
+    CHECK((document.find(id)->brushPath->points[0]
+        == AnnotationPoint{15, 17}));
+    CHECK((document.find(id)->brushPath->points[2]
+        == AnnotationPoint{85, 47}));
+    CHECK(document.undo());
+    CHECK(document.find(id)->brushPath == path);
+}
+
+void testMarkerLineHistoryAndZeroLengthDot()
+{
+    AnnotationDocument document;
+    const MarkerLine dot{{30, 40}, {30, 40}};
+    const auto id = document.addMarkerLine(dot);
+    CHECK(id != invalidAnnotationId);
+    CHECK(document.find(id)->kind == AnnotationKind::marker);
+    CHECK(document.find(id)->markerLine == dot);
+    CHECK((document.find(id)->rect == AnnotationRect{30, 40, 0, 0}));
+    CHECK(document.move(id, {5, -3}));
+    CHECK((document.find(id)->markerLine
+        == MarkerLine{{35, 37}, {35, 37}}));
+    CHECK(document.updateMarkerLine(id, {{10, 20}, {90, 60}}));
+    CHECK((document.find(id)->rect == AnnotationRect{10, 20, 80, 40}));
+    CHECK(document.undo());
+    CHECK((document.find(id)->markerLine
+        == MarkerLine{{35, 37}, {35, 37}}));
+}
+
+void testMosaicSliderDragCreatesOneUndoEntry()
+{
+    AnnotationDocument document;
+    const auto id = document.addMosaicRectangle(
+        {10, 20, 80, 40}, {MosaicRedactionType::pixelMosaic, 8});
+    CHECK(id != invalidAnnotationId);
+    document.beginMosaicRedactionEdit();
+    CHECK(document.updateMosaicRedaction(
+        id, {MosaicRedactionType::pixelMosaic, 10}));
+    CHECK(document.updateMosaicRedaction(
+        id, {MosaicRedactionType::pixelMosaic, 15}));
+    CHECK(document.updateMosaicRedaction(
+        id, {MosaicRedactionType::pixelMosaic, 20}));
+    document.endMosaicRedactionEdit();
+    CHECK(document.find(id)->mosaicRedaction->value == 20);
+    CHECK(document.undo());
+    CHECK(document.find(id)->mosaicRedaction->value == 8);
+    CHECK(document.undo());
+    CHECK(document.find(id) == nullptr);
+}
+
+void testTextEditTransactionKeepsUnicodeAndCancelsAtomically()
+{
+    AnnotationDocument document;
+    AnnotationStyle style;
+    style.textFontFamily = L"Microsoft YaHei";
+    document.beginTextEdit();
+    const auto id = document.addText({10, 20, 40, 24}, L"", style);
+    CHECK(id != invalidAnnotationId);
+    CHECK(document.updateText(id, L"中文", {10, 20, 80, 30}));
+    auto larger = style;
+    larger.textSize = 12.0F;
+    CHECK(document.updateTextGeometry(id, {10, 20, 100, 45}, larger));
+    document.endTextEdit(true);
+    CHECK(*document.find(id)->text == L"中文");
+    CHECK(document.find(id)->style.textSize == 12.0F);
+    CHECK(document.undo());
+    CHECK(document.find(id) == nullptr);
+    CHECK(document.redo());
+    CHECK(*document.find(id)->text == L"中文");
+
+    document.beginTextEdit();
+    CHECK(document.updateText(id, L"临时", {10, 20, 90, 30}));
+    document.endTextEdit(false);
+    CHECK(*document.find(id)->text == L"中文");
+}
+
+void testNumberMarksClampPayloadAndEditAsOneUndoStep()
+{
+    AnnotationDocument document;
+    AnnotationStyle style;
+    style.textSize = 100.0F;
+    const auto first = document.addNumberMark(
+        {10, 20, 21, 21}, NumberMarkType::number, 0, false, 7, style);
+    CHECK(first != invalidAnnotationId);
+    CHECK(document.find(first)->numberSequenceIndex == 1);
+    CHECK(document.find(first)->style.textSize == 72.0F);
+    const auto checkId = document.addNumberMark(
+        {40, 20, 21, 21}, NumberMarkType::check, 99, true, 7, style);
+    CHECK(checkId != invalidAnnotationId);
+    CHECK(!document.find(checkId)->numberSequenceIndex.has_value());
+    CHECK(document.find(checkId)->numberSequenceGroupId == 0U);
+
+    document.beginNumberEdit();
+    CHECK(document.updateNumberMark(
+        first, NumberMarkType::number, 9999, true, 7));
+    auto resized = document.find(first)->style;
+    resized.textSize = 24.0F;
+    CHECK(document.updateNumberGeometry(
+        first, numberMarkRect({80, 80}, 24.0F), resized));
+    document.endNumberEdit(true);
+    CHECK(document.find(first)->numberSequenceIndex == 999);
+    CHECK(document.find(first)->style.textSize == 24.0F);
+    CHECK(document.undo());
+    CHECK(document.find(first)->numberSequenceIndex == 1);
+    CHECK(document.find(first)->style.textSize == 72.0F);
+
+    document.beginNumberEdit();
+    CHECK(document.updateNumberMark(
+        first, NumberMarkType::cross, std::nullopt, false, 0));
+    document.endNumberEdit(false);
+    CHECK(document.find(first)->numberMarkType == NumberMarkType::number);
+}
+
+void testMagnifierCommandsNormalizeStyleAndRemainReversible()
+{
+    AnnotationDocument document;
+    AnnotationStyle style;
+    style.strokeColor = {1, 2, 3, 99};
+    style.fillEnabled = true;
+    style.strokePattern = AnnotationStrokePattern::dashLong;
+    const auto id = document.addMagnifier(
+        {10, 20, 80, 60}, MagnifierShape::circle, 2.8F, style);
+    CHECK(id != invalidAnnotationId);
+    const auto* annotation = document.find(id);
+    CHECK(isMagnifierAnnotation(*annotation));
+    CHECK(annotation->magnifierShape == MagnifierShape::circle);
+    CHECK(annotation->magnifierZoom == 3.0F);
+    CHECK(annotation->style.strokePattern == AnnotationStrokePattern::solid);
+    CHECK(!annotation->style.fillEnabled);
+
+    CHECK(document.updateMagnifier(
+        id, MagnifierShape::rectangle, 3.8F, annotation->style));
+    CHECK(document.find(id)->magnifierShape == MagnifierShape::rectangle);
+    CHECK(document.find(id)->magnifierZoom == 4.0F);
+    CHECK(document.move(id, {5, -10}));
+    CHECK((document.find(id)->rect == AnnotationRect{15, 10, 80, 60}));
+    CHECK(document.updateRect(id, {20, 30, 40, 50}));
+    CHECK(document.undo());
+    CHECK((document.find(id)->rect == AnnotationRect{15, 10, 80, 60}));
+    CHECK(document.undo());
+    CHECK((document.find(id)->rect == AnnotationRect{10, 20, 80, 60}));
+    CHECK(document.undo());
+    CHECK(document.find(id)->magnifierShape == MagnifierShape::circle);
+}
+
+void testEraserMasksParticipateInHistoryAndPruneDeletedAnnotations()
+{
+    AnnotationDocument document;
+    const auto first = document.addShape(
+        AnnotationKind::rectangle, {0, 0, 40, 40});
+    const auto second = document.addShape(
+        AnnotationKind::ellipse, {20, 20, 40, 40});
+    const auto maskAdded = document.addEraserMask(
+        {10, 10, 20, 20}, {second, first, second, 9999});
+    CHECK(maskAdded);
+    CHECK(document.eraserMasks().size() == 1U);
+    CHECK(document.eraserMasks()[0].affectedAnnotationIds
+        == std::vector<AnnotationId>({first, second}));
+
+    CHECK(document.remove(first));
+    CHECK(document.eraserMasks().size() == 1U);
+    CHECK(document.eraserMasks()[0].affectedAnnotationIds
+        == std::vector<AnnotationId>({second}));
+    CHECK(document.undo());
+    CHECK(document.find(first) != nullptr);
+    CHECK(document.eraserMasks()[0].affectedAnnotationIds.size() == 2U);
+    CHECK(document.redo());
+    CHECK(document.find(first) == nullptr);
+
+    CHECK(document.remove(second));
+    CHECK(document.eraserMasks().empty());
+    CHECK(document.undo());
+    CHECK(document.find(second) != nullptr);
+    CHECK(document.eraserMasks().size() == 1U);
+
+    CHECK(document.clearAnnotationsAndMasks());
+    CHECK(document.annotations().empty());
+    CHECK(document.eraserMasks().empty());
+    CHECK(document.undo());
+    CHECK(document.find(second) != nullptr);
+    CHECK(document.eraserMasks().size() == 1U);
+    CHECK(document.redo());
+    CHECK(document.annotations().empty());
+    CHECK(document.eraserMasks().empty());
+}
+
 } // namespace
 
 int main()
@@ -165,5 +360,12 @@ int main()
     testInvalidAndNoOpEditsDoNotPolluteHistory();
     testNewCommandInvalidatesRedoAndSelectionIsSafe();
     testArrowLineCommandsPreserveCurveGeometryAndHistory();
+    testBrushPathHistoryAndBounds();
+    testMarkerLineHistoryAndZeroLengthDot();
+    testMosaicSliderDragCreatesOneUndoEntry();
+    testTextEditTransactionKeepsUnicodeAndCancelsAtomically();
+    testNumberMarksClampPayloadAndEditAsOneUndoStep();
+    testMagnifierCommandsNormalizeStyleAndRemainReversible();
+    testEraserMasksParticipateInHistoryAndPruneDeletedAnnotations();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

@@ -36,6 +36,10 @@ TransitionResult CaptureSessionStateMachine::dispatch(SessionEvent event) noexce
         }
         break;
     case CaptureSessionState::ready:
+        if (event == SessionEvent::resumeSelection) {
+            state_ = CaptureSessionState::selecting;
+            return TransitionResult::accepted;
+        }
         if (event == SessionEvent::exportStarted) {
             state_ = CaptureSessionState::exporting;
             return TransitionResult::accepted;

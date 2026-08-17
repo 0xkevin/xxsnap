@@ -14,6 +14,7 @@ enum class SessionEvent {
     start,
     captureSucceeded,
     selectionCreated,
+    resumeSelection,
     exportStarted,
     complete,
     cancel,

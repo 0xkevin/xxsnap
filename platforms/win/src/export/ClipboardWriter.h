@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <optional>
+#include <string>
 #include <variant>
 #include <vector>
 
@@ -28,6 +29,17 @@ struct ClipboardWriteResult {
 
     bool succeeded() const noexcept;
     bool partial() const noexcept;
+};
+
+struct ClipboardTextWriteResult {
+    bool written = false;
+    std::optional<ExportError> error;
+    std::optional<ExportError> closeError;
+
+    bool succeeded() const noexcept
+    {
+        return written && !error.has_value() && !closeError.has_value();
+    }
 };
 
 class ClipboardApi {
@@ -74,6 +86,15 @@ ClipboardWriteResult writeClipboard(
 
 ClipboardWriteResult writeClipboard(
     const PixelBuffer& pixels,
+    HWND owner = nullptr) noexcept;
+
+ClipboardTextWriteResult writeClipboardText(
+    const std::wstring& text,
+    HWND owner,
+    ClipboardApi& api) noexcept;
+
+ClipboardTextWriteResult writeClipboardText(
+    const std::wstring& text,
     HWND owner = nullptr) noexcept;
 
 } // namespace xxsnap::win
