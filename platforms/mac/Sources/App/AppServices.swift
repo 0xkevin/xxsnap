@@ -10,6 +10,12 @@ enum LaunchAtLoginStatus: Equatable {
     case notFound
 }
 
+enum LaunchAtLoginOperationError: Error, Equatable {
+    case requiresApproval
+    case invalidSignature
+    case serviceUnavailable
+}
+
 @MainActor
 protocol LaunchAtLoginManaging: AnyObject {
     var status: LaunchAtLoginStatus { get }
@@ -18,9 +24,23 @@ protocol LaunchAtLoginManaging: AnyObject {
 }
 
 @MainActor
-final class LaunchAtLoginManager: LaunchAtLoginManaging {
+protocol SystemLaunchAtLoginServicing: AnyObject {
+    var status: LaunchAtLoginStatus { get }
+    func register() throws
+    func unregister() async throws
+    func openSystemSettings()
+}
+
+@MainActor
+final class SystemLaunchAtLoginService: SystemLaunchAtLoginServicing {
+    private let service: SMAppService
+
+    init(service: SMAppService = .mainApp) {
+        self.service = service
+    }
+
     var status: LaunchAtLoginStatus {
-        switch SMAppService.mainApp.status {
+        switch service.status {
         case .notRegistered:
             return .notRegistered
         case .enabled:
@@ -34,16 +54,76 @@ final class LaunchAtLoginManager: LaunchAtLoginManaging {
         }
     }
 
-    func setEnabled(_ isEnabled: Bool) async throws {
-        if isEnabled {
-            try SMAppService.mainApp.register()
-        } else {
-            try await SMAppService.mainApp.unregister()
-        }
+    func register() throws {
+        try service.register()
+    }
+
+    func unregister() async throws {
+        try await service.unregister()
     }
 
     func openSystemSettings() {
         SMAppService.openSystemSettingsLoginItems()
+    }
+}
+
+@MainActor
+final class LaunchAtLoginManager: LaunchAtLoginManaging {
+    private let service: any SystemLaunchAtLoginServicing
+
+    init() {
+        service = SystemLaunchAtLoginService()
+    }
+
+    init(service: any SystemLaunchAtLoginServicing) {
+        self.service = service
+    }
+
+    var status: LaunchAtLoginStatus {
+        service.status
+    }
+
+    func setEnabled(_ isEnabled: Bool) async throws {
+        if isEnabled {
+            guard status != .enabled else { return }
+            do {
+                try service.register()
+            } catch {
+                let code = (error as NSError).code
+                if code == Int(kSMErrorAlreadyRegistered) {
+                    return
+                }
+                throw Self.operationError(from: error)
+            }
+        } else {
+            guard status != .notRegistered, status != .notFound else { return }
+            do {
+                try await service.unregister()
+            } catch {
+                let code = (error as NSError).code
+                if code == Int(kSMErrorJobNotFound) {
+                    return
+                }
+                throw Self.operationError(from: error)
+            }
+        }
+    }
+
+    func openSystemSettings() {
+        service.openSystemSettings()
+    }
+
+    private static func operationError(from error: Error) -> Error {
+        switch (error as NSError).code {
+        case Int(kSMErrorLaunchDeniedByUser):
+            return LaunchAtLoginOperationError.requiresApproval
+        case Int(kSMErrorInvalidSignature):
+            return LaunchAtLoginOperationError.invalidSignature
+        case Int(kSMErrorServiceUnavailable):
+            return LaunchAtLoginOperationError.serviceUnavailable
+        default:
+            return error
+        }
     }
 }
 

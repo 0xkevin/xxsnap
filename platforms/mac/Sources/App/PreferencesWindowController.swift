@@ -80,6 +80,12 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
         window.animationBehavior = .documentWindow
         window.center()
         super.init(window: window)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applicationDidBecomeActive(_:)),
+            name: NSApplication.didBecomeActiveNotification,
+            object: NSApp
+        )
         configureToolbar()
         rebuildContent()
     }
@@ -186,6 +192,8 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
 
     private func makeGeneralPage() -> NSView {
         let launchSwitch = NSSwitch()
+        launchSwitch.identifier = NSUserInterfaceItemIdentifier("launchAtLogin")
+        launchSwitch.toolTip = strings.launchAtLoginDetail
         launchSwitch.target = self
         launchSwitch.action = #selector(toggleLaunchAtLogin(_:))
 
@@ -213,7 +221,6 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
             systemSettingsButton.isHidden = false
         case .notFound:
             launchSwitch.state = .off
-            launchSwitch.isEnabled = false
             launchStatus.stringValue = strings.serviceUnavailable
         }
 
@@ -801,6 +808,8 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
             guard let self else { return }
             do {
                 try await self.launchAtLoginManager.setEnabled(sender.state == .on)
+            } catch let error as LaunchAtLoginOperationError {
+                self.presentError(self.strings.launchAtLoginError(error))
             } catch {
                 self.presentError(error.localizedDescription)
             }
@@ -810,6 +819,11 @@ final class PreferencesWindowController: NSWindowController, NSToolbarDelegate, 
 
     @objc private func openLoginItemSettings() {
         launchAtLoginManager.openSystemSettings()
+    }
+
+    @objc private func applicationDidBecomeActive(_ notification: Notification) {
+        guard selectedSection == .general, window?.isVisible == true else { return }
+        rebuildContent()
     }
 
     @objc private func changeLanguage(_ sender: NSPopUpButton) {

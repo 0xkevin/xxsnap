@@ -104,6 +104,8 @@ final class HelpManualTests: XCTestCase {
         XCTAssertTrue(captureText.contains("Command+Shift+1"))
         XCTAssertTrue(captureText.contains("修改或禁用"))
         XCTAssertTrue(captureText.contains("菜单或设置"))
+        XCTAssertTrue(captureText.contains("开机自启动"))
+        XCTAssertTrue(captureText.contains("登录项与扩展"))
 
         let pin = try XCTUnwrap(document.chapters.first { $0.id == "pin" })
         XCTAssertEqual(pin.imageNames.count, 4)
@@ -267,6 +269,8 @@ final class HelpManualTests: XCTestCase {
         XCTAssertTrue(text.contains("only the save progress window remains"))
         XCTAssertTrue(text.contains("Esc does not cancel saving"))
         XCTAssertTrue(text.contains("Cancel Saving"))
+        XCTAssertTrue(text.contains("Launch at login"))
+        XCTAssertTrue(text.contains("Login Items & Extensions"))
 
         for obsoleteText in [
             "automatic scrolling",

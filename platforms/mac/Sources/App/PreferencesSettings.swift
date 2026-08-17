@@ -353,7 +353,23 @@ struct PreferencesStrings {
     }
     var openSystemSettings: String { isEnglish ? "Open System Settings" : "打开系统设置" }
     var serviceUnavailable: String {
-        isEnglish ? "The login item service is unavailable." : "开机启动服务不可用。"
+        isEnglish
+            ? "The login item could not be found. Move XxSnap to Applications, then try again."
+            : "未找到开机启动服务。请将 XxSnap 移到“应用程序”文件夹后重试。"
+    }
+    func launchAtLoginError(_ error: LaunchAtLoginOperationError) -> String {
+        switch error {
+        case .requiresApproval:
+            return needsApproval
+        case .invalidSignature:
+            return isEnglish
+                ? "This copy of XxSnap has an invalid code signature and cannot be added as a login item. Please reinstall the official version."
+                : "当前 XxSnap 的代码签名无效，无法添加为登录项。请重新安装官方版本。"
+        case .serviceUnavailable:
+            return isEnglish
+                ? "macOS could not access the login item service. Try again after restarting XxSnap."
+                : "macOS 暂时无法访问开机启动服务，请重新启动 XxSnap 后重试。"
+        }
     }
     var captureShortcut: String { isEnglish ? "Capture" : "截图" }
     var captureShortcutDetail: String {
