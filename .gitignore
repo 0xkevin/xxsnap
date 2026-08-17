@@ -16,3 +16,5 @@ xcuserdata/
 .superpowers/
 docs/*
 !docs/macOS打包发布手册.md
+!docs/marketing/
+!docs/marketing/*.md
