@@ -1,18 +1,30 @@
 #include "app/AppHost.h"
 
+#include "app/CaptureSound.h"
 #include "app/HotKeyRegistrar.h"
+#include "app/HotKeySettings.h"
+#include "app/HelpWindow.h"
+#include "app/PreferencesSettings.h"
+#include "app/PreferencesWindow.h"
+#include "app/ShortcutFeedback.h"
 #include "app/SingleInstance.h"
 #include "app/TrayIcon.h"
 #include "capture/DisplayTopology.h"
 #include "capture/DxgiCaptureBackend.h"
 #include "capture/FallbackCaptureBackend.h"
 #include "capture/GdiCaptureBackend.h"
+#include "diagnostics/DiagnosticSupport.h"
 #include "export/AnnotationComposer.h"
 #include "export/ClipboardWriter.h"
 #include "export/PngWriter.h"
 #include "export/SelectionComposer.h"
+#include "fullscreen/FullScreenCapturePreviewHost.h"
+#include "ocr/OcrCaptureHost.h"
+#include "pin/PinnedImageHost.h"
 #include "resource.h"
 #include "session/CaptureSessionCoordinator.h"
+#include "session/CaptureMemoryPlan.h"
+#include "scroll/ScrollCaptureHost.h"
 #include "support/RuntimeApis.h"
 
 #include <Windows.h>
@@ -20,6 +32,7 @@
 #include <objbase.h>
 
 #include <chrono>
+#include <array>
 #include <cstdio>
 #include <cwchar>
 #include <memory>
@@ -36,6 +49,14 @@ constexpr wchar_t receiverClassName[] = L"XxSnap.HiddenTopLevelWindow.v1";
 constexpr wchar_t applicationName[] = L"XxSnap";
 constexpr wchar_t hotKeyConflictText[] =
     L"Ctrl+` \u5df2\u88ab\u5176\u4ed6\u7a0b\u5e8f\u5360\u7528\uff0c\u4ecd\u53ef\u4ece\u6258\u76d8\u542f\u52a8\u533a\u57df\u622a\u56fe\u3002";
+constexpr wchar_t restorePinHotKeyConflictText[] =
+    L"Ctrl+1 \u5df2\u88ab\u5176\u4ed6\u7a0b\u5e8f\u5360\u7528\uff0c\u4ecd\u53ef\u53cc\u51fb\u6216\u53f3\u952e\u8d34\u56fe\u7ee7\u7eed\u64cd\u4f5c\u3002";
+constexpr wchar_t fullScreenHotKeyConflictText[] =
+    L"Ctrl+Shift+1 \u5df2\u88ab\u5176\u4ed6\u7a0b\u5e8f\u5360\u7528\uff0c\u4ecd\u53ef\u4ece\u6258\u76d8\u542f\u52a8\u5168\u5c4f\u622a\u56fe\u3002";
+constexpr wchar_t ocrHotKeyConflictText[] =
+    L"Ctrl+3 \u5df2\u88ab\u5176\u4ed6\u7a0b\u5e8f\u5360\u7528\uff0c\u4ecd\u53ef\u4ece\u6258\u76d8\u542f\u52a8\u6587\u5b57\u8bc6\u522b\u3002";
+constexpr wchar_t teachingPenHotKeyConflictText[] =
+    L"Ctrl+2 \u5df2\u88ab\u5176\u4ed6\u7a0b\u5e8f\u5360\u7528\uff0c\u4ecd\u53ef\u4ece\u6258\u76d8\u542f\u52a8\u6559\u7b14\u3002";
 constexpr wchar_t topologyChangedText[] =
     L"\u663e\u793a\u5668\u914d\u7f6e\u8fde\u7eed\u53d8\u5316\uff0c\u672c\u6b21\u622a\u56fe\u5df2\u53d6\u6d88\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002";
 constexpr wchar_t clipboardFailureText[] =
@@ -43,6 +64,11 @@ constexpr wchar_t clipboardFailureText[] =
 constexpr wchar_t sessionFailureText[] =
     L"\u672c\u6b21\u622a\u56fe\u672a\u5b8c\u6210\uff0c\u8bf7\u91cd\u8bd5\u3002";
 constexpr wchar_t captureMetricsPathVariable[] = L"XXSNAP_CAPTURE_METRICS_PATH";
+constexpr wchar_t interactiveTestingVariable[] = L"XXSNAP_INTERACTIVE_TESTING";
+constexpr UINT testOcrMessage = WM_APP + 0x7A;
+constexpr UINT testPreferencesMessage = WM_APP + 0x7B;
+constexpr UINT testHelpMessage = WM_APP + 0x7C;
+constexpr UINT testShortcutFeedbackMessage = WM_APP + 0x7D;
 
 void appendCaptureTiming(
     const char* trigger,
@@ -117,6 +143,7 @@ public:
         , owner_(owner)
         , runtimeApis_(runtimeApis)
         , fallback_(dxgi_, gdi_)
+        , pinnedImages_(instance, owner)
         , errorCallback_(std::move(errorCallback))
     {
     }
@@ -143,6 +170,10 @@ public:
         RestartCallback restartCallback,
         ActionCallback actionCallback) override
     {
+        targetProcessId_ = 0U;
+        if (const auto foreground = GetForegroundWindow()) {
+            GetWindowThreadProcessId(foreground, &targetProcessId_);
+        }
         overlay_.reset();
         auto result = OverlayHost::create(
             instance_, desktop, std::move(restartCallback),
@@ -163,8 +194,61 @@ public:
         return overlay_ ? overlay_->selection() : std::nullopt;
     }
 
+    bool beginScrollCapture(
+        PixelRect selectionRect,
+        std::size_t maximumAcceptedBytes,
+        ScrollCaptureCallback callback) override
+    {
+        if (!overlay_ || scrollCapture_ || !callback) return false;
+        const auto annotation = overlay_->annotationSnapshot();
+        if (!overlay_->suspendForScrollCapture()) return false;
+        scrollCapture_ = ScrollCaptureHost::create(
+            instance_, selectionRect, targetProcessId_,
+            annotation.dpiX, annotation.dpiY, maximumAcceptedBytes,
+            [this, callback = std::move(callback)](
+                ScrollCaptureHostResult result) mutable {
+                ScrollCaptureCompletion completion;
+                switch (result.status) {
+                case ScrollCaptureHostStatus::completed:
+                    completion.status = ScrollCaptureCompletionStatus::completed;
+                    completion.pixels = std::move(result.pixels);
+                    completion.action = result.action
+                            == ScrollCaptureHostExportAction::save
+                        ? OverlayInputAction::save
+                        : result.action == ScrollCaptureHostExportAction::pin
+                        ? OverlayInputAction::pin
+                        : OverlayInputAction::copy;
+                    break;
+                case ScrollCaptureHostStatus::cancelled:
+                    completion.status = ScrollCaptureCompletionStatus::cancelled;
+                    break;
+                case ScrollCaptureHostStatus::failed:
+                    completion.status = ScrollCaptureCompletionStatus::failed;
+                    break;
+                }
+                callback(std::move(completion));
+            });
+        if (!scrollCapture_) {
+            overlay_->resumeAfterScrollCapture();
+            return false;
+        }
+        return true;
+    }
+
+    void cancelScrollCapture() noexcept override
+    {
+        scrollCapture_.reset();
+    }
+
+    bool resumeOverlayAfterScrollCapture() noexcept override
+    {
+        scrollCapture_.reset();
+        return overlay_ && overlay_->resumeAfterScrollCapture();
+    }
+
     void closeOverlay() noexcept override
     {
+        scrollCapture_.reset();
         overlay_.reset();
     }
 
@@ -183,7 +267,11 @@ public:
                 *pixels,
                 annotations.plan,
                 annotations.dpiX,
-                annotations.dpiY)) {
+                annotations.dpiY,
+                selectionRect.x,
+                selectionRect.y,
+                nullptr,
+                annotations.eraserMasks)) {
             return *compositionError;
         }
         return composition;
@@ -202,13 +290,15 @@ public:
             return CaptureExportResult::cancelled;
         }
 
-        wchar_t path[MAX_PATH] = L"XxSnap.png";
+        std::array<wchar_t, 1024> path{};
+        const auto suggested = suggestedCaptureFilename();
+        wcsncpy_s(path.data(), path.size(), suggested.c_str(), _TRUNCATE);
         OPENFILENAMEW dialog{};
         dialog.lStructSize = sizeof(dialog);
         dialog.hwndOwner = owner_;
         dialog.lpstrFilter = L"PNG \u56fe\u50cf (*.png)\0*.png\0\0";
-        dialog.lpstrFile = path;
-        dialog.nMaxFile = static_cast<DWORD>(std::size(path));
+        dialog.lpstrFile = path.data();
+        dialog.nMaxFile = static_cast<DWORD>(path.size());
         dialog.lpstrDefExt = L"png";
         dialog.lpstrTitle = L"\u4fdd\u5b58\u622a\u56fe";
         dialog.Flags = OFN_NOCHANGEDIR | OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
@@ -217,9 +307,18 @@ public:
                 ? CaptureExportResult::cancelled
                 : CaptureExportResult::failed;
         }
-        return savePngAtomically(pixels, path).has_value()
+        return savePngAtomically(pixels, path.data()).has_value()
             ? CaptureExportResult::failed
             : CaptureExportResult::completed;
+    }
+
+    CaptureExportResult pinSelection(
+        PixelBuffer pixels,
+        PixelRect sourceRect) noexcept override
+    {
+        return pinnedImages_.pin(std::move(pixels), sourceRect)
+            ? CaptureExportResult::completed
+            : CaptureExportResult::failed;
     }
 
     void reportError(CaptureSessionErrorCode error) noexcept override
@@ -243,6 +342,16 @@ public:
         return fallback_.lastBackend();
     }
 
+    bool restoreMostRecentlyHiddenPinnedImage() noexcept
+    {
+        return pinnedImages_.restoreMostRecentlyHidden();
+    }
+
+    PinnedImageHost& pinnedImages() noexcept
+    {
+        return pinnedImages_;
+    }
+
 private:
     HINSTANCE instance_ = nullptr;
     HWND owner_ = nullptr;
@@ -250,7 +359,10 @@ private:
     DxgiCaptureBackend dxgi_;
     GdiCaptureBackend gdi_;
     FallbackCaptureBackend fallback_;
+    PinnedImageHost pinnedImages_;
     std::unique_ptr<OverlayHost> overlay_;
+    std::unique_ptr<ScrollCaptureHost> scrollCapture_;
+    DWORD targetProcessId_ = 0U;
     ErrorCallback errorCallback_;
 };
 
@@ -264,8 +376,13 @@ public:
 
     ~Host()
     {
+        shortcutFeedback_.reset();
         hotKey_.reset();
         tray_.reset();
+        preferencesWindow_.reset();
+        fullScreenPreview_.reset();
+        teachingPenOverlay_.reset();
+        teachingPenDesktop_.reset();
         coordinator_.reset();
         sessionServices_.reset();
         singleInstance_.reset();
@@ -281,6 +398,10 @@ public:
         if (!createReceiverWindow()) {
             return HostInitializationResult::failed;
         }
+        diagnosticSupport_ = std::make_unique<DiagnosticSupportController>(
+            window_, diagnosticLog_);
+        diagnosticLog_.record(
+            "application", "info", "application_launched");
 
         auto single = SingleInstance::create(
             systemSingleInstanceApi(), [this] { startRegionCapture("wake"); });
@@ -313,7 +434,11 @@ public:
         tray_ = std::move(trayResult.value);
 
         hotKey_ = std::make_unique<HotKeyRegistrar>(
-            systemHotKeyApi(), [this] { startRegionCapture("hotkey"); });
+            systemHotKeyApi(), [this] {
+                showShortcutFeedback(HotKeyCommand::regionCapture);
+                startRegionCapture("hotkey");
+            },
+            hotKeySettingsStore_.load());
         if (!hotKey_->registerMvpRegionCapture(window_)) {
             if (!tray_->showHotKeyConflict(hotKeyConflictText)) {
                 MessageBoxW(
@@ -321,6 +446,71 @@ public:
                     MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
             }
         }
+        if (!hotKey_->registerRestorePinnedImage(window_, [this] {
+            showShortcutFeedback(
+                HotKeyCommand::restoreMostRecentlyHiddenPinnedImage);
+            if (!coordinator_ || !coordinator_->pinCurrentSelection()) {
+                if (sessionServices_) {
+                    sessionServices_->restoreMostRecentlyHiddenPinnedImage();
+                }
+            }
+        })) {
+            if (!tray_->showHotKeyConflict(restorePinHotKeyConflictText)) {
+                MessageBoxW(window_, restorePinHotKeyConflictText,
+                    applicationName,
+                    MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
+            }
+        }
+        if (!hotKey_->registerFullScreenCapture(
+                window_, [this] {
+                    showShortcutFeedback(HotKeyCommand::fullScreen);
+                    startFullScreenCapture();
+                })) {
+            if (!tray_->showHotKeyConflict(fullScreenHotKeyConflictText)) {
+                MessageBoxW(window_, fullScreenHotKeyConflictText,
+                    applicationName,
+                    MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
+            }
+        }
+        if (!hotKey_->registerOcr(window_, [this] {
+                showShortcutFeedback(HotKeyCommand::ocr);
+                startTextRecognition();
+            })) {
+            if (!tray_->showHotKeyConflict(ocrHotKeyConflictText)) {
+                MessageBoxW(window_, ocrHotKeyConflictText,
+                    applicationName,
+                    MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
+            }
+        }
+        if (!hotKey_->registerTeachingPen(
+                window_, [this] {
+                    showShortcutFeedback(HotKeyCommand::teachingPen);
+                    toggleTeachingPen();
+                })) {
+            if (!tray_->showHotKeyConflict(teachingPenHotKeyConflictText)) {
+                MessageBoxW(window_, teachingPenHotKeyConflictText,
+                    applicationName,
+                    MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
+            }
+        }
+        refreshTrayMenuShortcuts();
+        shortcutFeedback_ = ShortcutFeedbackController::create(
+            instance_, window_, preferencesSettingsStore_,
+            [this](UINT modifiers, UINT virtualKey) {
+                for (const auto binding : currentHotKeyBindings()) {
+                    if (matchesHotKeyBinding(
+                            binding, modifiers, virtualKey)) {
+                        return true;
+                    }
+                }
+                return false;
+            });
+        ocrCapture_ = std::make_unique<OcrCaptureHost>(
+            instance_, window_, runtimeApis_, [this] {
+                if (teachingPenOverlay_) {
+                    teachingPenOverlay_->resumeInputAfterRecognition();
+                }
+            });
         startRegionCapture("launch");
         return HostInitializationResult::primary;
     }
@@ -399,6 +589,33 @@ private:
         if (tray_ && tray_->handleMessage(message, wParam, lParam)) {
             return 0;
         }
+        if (message == testOcrMessage
+            && GetEnvironmentVariableW(
+                interactiveTestingVariable, nullptr, 0) > 1) {
+            startTextRecognition();
+            return 0;
+        }
+        if (message == testPreferencesMessage
+            && GetEnvironmentVariableW(
+                interactiveTestingVariable, nullptr, 0) > 1) {
+            showPreferences(PreferencesSection::general);
+            return 0;
+        }
+        if (message == testHelpMessage
+            && GetEnvironmentVariableW(
+                interactiveTestingVariable, nullptr, 0) > 1) {
+            showHelp();
+            return 0;
+        }
+        if (message == testShortcutFeedbackMessage
+            && GetEnvironmentVariableW(
+                interactiveTestingVariable, nullptr, 0) > 1) {
+            if (shortcutFeedback_) {
+                shortcutFeedback_->showForTesting(
+                    MOD_CONTROL | MOD_SHIFT, '1');
+            }
+            return 0;
+        }
         switch (message) {
         case WM_CLOSE:
             DestroyWindow(window);
@@ -420,7 +637,9 @@ private:
 
     void startRegionCapture(const char* trigger) noexcept
     {
-        if (coordinator_) {
+        diagnosticLog_.record(
+            "capture", "info", "region_capture_requested");
+        if (coordinator_ && !teachingPenOverlay_) {
             const auto startedAt = std::chrono::steady_clock::now();
             const auto result = coordinator_->start();
             const auto finishedAt = std::chrono::steady_clock::now();
@@ -435,17 +654,321 @@ private:
         }
     }
 
+    void showShortcutFeedback(HotKeyCommand command) noexcept
+    {
+        if (shortcutFeedback_ && hotKey_) {
+            shortcutFeedback_->showAppShortcut(hotKey_->binding(command));
+        }
+    }
+
     void handleTrayCommand(TrayCommand command) noexcept
     {
         if (command == TrayCommand::regionCapture) {
             startRegionCapture("tray");
+        } else if (command == TrayCommand::fullScreenCapture) {
+            startFullScreenCapture();
+        } else if (command == TrayCommand::textRecognition) {
+            startTextRecognition();
+        } else if (command == TrayCommand::teachingPen) {
+            toggleTeachingPen();
+        } else if (command == TrayCommand::preferences) {
+            showPreferences(PreferencesSection::general);
+        } else if (command == TrayCommand::checkForUpdates) {
+            MessageBoxW(window_, L"已是最新版本", applicationName,
+                MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND);
+        } else if (command == TrayCommand::donation) {
+            showPreferences(PreferencesSection::donation);
+        } else if (command == TrayCommand::help) {
+            showHelp();
+        } else if (command == TrayCommand::exportDiagnostics) {
+            if (diagnosticSupport_) diagnosticSupport_->exportDiagnostics();
+        } else if (command == TrayCommand::about) {
+            showPreferences(PreferencesSection::about);
         } else if (command == TrayCommand::exit && window_ != nullptr) {
             PostMessageW(window_, WM_CLOSE, 0, 0);
         }
     }
 
+    void showPreferences(PreferencesSection section) noexcept
+    {
+        if (!preferencesWindow_) {
+            preferencesWindow_ = PreferencesWindow::create(
+                instance_, window_, PreferencesShortcutCallbacks{
+                    [this] { return currentHotKeyBindings(); },
+                    [this](HotKeyBinding binding) {
+                        return applyHotKeyBinding(binding);
+                    },
+                    [this] { return resetHotKeyBindings(); },
+                });
+        }
+        if (preferencesWindow_) preferencesWindow_->show(section);
+    }
+
+    void showHelp() noexcept
+    {
+        if (!helpWindow_) {
+            helpWindow_ = HelpWindow::create(instance_, window_);
+        }
+        if (helpWindow_) helpWindow_->show();
+    }
+
+    std::array<HotKeyBinding, 5> currentHotKeyBindings() const noexcept
+    {
+        auto bindings = hotKeySettingsStore_.load();
+        if (hotKey_) {
+            for (auto& binding : bindings) {
+                binding = hotKey_->binding(binding.command);
+            }
+        }
+        return bindings;
+    }
+
+    bool applyHotKeyBinding(HotKeyBinding binding) noexcept
+    {
+        if (!hotKey_) return false;
+        const auto previous = hotKey_->binding(binding.command);
+        if (!hotKey_->rebind(binding)) {
+            refreshTrayMenuShortcuts();
+            return false;
+        }
+        if (hotKeySettingsStore_.save(binding)) {
+            refreshTrayMenuShortcuts();
+            return true;
+        }
+        hotKey_->rebind(previous);
+        refreshTrayMenuShortcuts();
+        return false;
+    }
+
+    bool resetHotKeyBindings() noexcept
+    {
+        if (!hotKey_) return false;
+        const auto previous = currentHotKeyBindings();
+        std::size_t applied = 0;
+        for (const auto binding : defaultAppHotKeys()) {
+            if (!hotKey_->rebind(binding)) {
+                for (std::size_t index = 0; index < applied; ++index) {
+                    hotKey_->rebind(previous[index]);
+                }
+                refreshTrayMenuShortcuts();
+                return false;
+            }
+            ++applied;
+        }
+        if (hotKeySettingsStore_.reset()) {
+            refreshTrayMenuShortcuts();
+            return true;
+        }
+        for (const auto binding : previous) hotKey_->rebind(binding);
+        refreshTrayMenuShortcuts();
+        return false;
+    }
+
+    void refreshTrayMenuShortcuts() noexcept
+    {
+        if (!tray_ || !hotKey_) return;
+        try {
+            constexpr std::array commands{
+                HotKeyCommand::regionCapture,
+                HotKeyCommand::fullScreen,
+                HotKeyCommand::ocr,
+                HotKeyCommand::teachingPen,
+            };
+            TrayMenuShortcuts shortcuts{};
+            for (std::size_t index = 0; index < commands.size(); ++index) {
+                const auto command = commands[index];
+                if (hotKey_->isRegistered(command)) {
+                    const auto binding = hotKey_->binding(command);
+                    shortcuts[index] = shortcutDisplayText(
+                        binding.modifiers, binding.virtualKey);
+                }
+            }
+            tray_->setMenuShortcuts(shortcuts);
+        } catch (...) {
+        }
+    }
+
+    void startFullScreenCapture() noexcept
+    {
+        diagnosticLog_.record(
+            "capture", "info", "full_screen_capture_requested");
+        if (teachingPenOverlay_ || !coordinator_ || !sessionServices_
+            || coordinator_->state() != CaptureSessionState::idle) {
+            return;
+        }
+        try {
+            auto topologyResult = sessionServices_->snapshotTopology();
+            const auto* topology = topologyResult.value();
+            if (topology == nullptr) {
+                showSessionError(CaptureSessionErrorCode::topologyFailed);
+                return;
+            }
+            const auto memoryPlan = planFrozenDesktopMemory(
+                topology->displays(), defaultCaptureSessionMemoryLimit);
+            if (memoryPlan.status != CaptureMemoryPlanStatus::fits) {
+                showSessionError(CaptureSessionErrorCode::memoryLimitExceeded);
+                return;
+            }
+            MemoryBudget captureBudget(defaultCaptureSessionMemoryLimit);
+            auto captured = sessionServices_->capture(*topology, captureBudget);
+            auto* desktop = std::get_if<FrozenDesktop>(&captured);
+            if (desktop == nullptr) {
+                showSessionError(CaptureSessionErrorCode::captureFailed);
+                return;
+            }
+            const auto bounds = topology->virtualBounds();
+            MemoryBudget compositionBudget(defaultCaptureSessionMemoryLimit);
+            auto composition = composeSelection(
+                bounds, *desktop, compositionBudget);
+            auto* pixels = std::get_if<PixelBuffer>(&composition);
+            if (pixels == nullptr) {
+                showSessionError(CaptureSessionErrorCode::compositionFailed);
+                return;
+            }
+            if (!fullScreenPreview_) {
+                fullScreenPreview_ =
+                    std::make_unique<FullScreenCapturePreviewHost>(
+                        instance_, window_, sessionServices_->pinnedImages());
+            }
+            if (!fullScreenPreview_->show(std::move(*pixels), bounds)) {
+                showSessionError(CaptureSessionErrorCode::overlayFailed);
+                return;
+            }
+            playFullScreenCaptureSound(instance_);
+        } catch (...) {
+            showSessionError(CaptureSessionErrorCode::allocationFailed);
+        }
+    }
+
+    void startTextRecognition() noexcept
+    {
+        diagnosticLog_.record(
+            "text_recognition", "info", "text_recognition_requested");
+        if (!ocrCapture_ || ocrCapture_->busy()
+            || !coordinator_
+            || coordinator_->state() != CaptureSessionState::idle) {
+            return;
+        }
+        const auto teachingWasSuspended = teachingPenOverlay_
+            && teachingPenOverlay_->suspendInputForRecognition();
+        if (!ocrCapture_->start() && teachingWasSuspended
+            && teachingPenOverlay_) {
+            teachingPenOverlay_->resumeInputAfterRecognition();
+        }
+    }
+
+    void toggleTeachingPen() noexcept
+    {
+        diagnosticLog_.record("teaching_pen", "info",
+            teachingPenOverlay_ ? "teaching_pen_closed"
+                                : "teaching_pen_requested");
+        if (teachingPenOverlay_) {
+            teachingPenOverlay_.reset();
+            teachingPenDesktop_.reset();
+            return;
+        }
+        startTeachingPen();
+    }
+
+    void startTeachingPen() noexcept
+    {
+        if (!coordinator_ || !sessionServices_
+            || coordinator_->state() != CaptureSessionState::idle
+            || teachingPenOverlay_) {
+            return;
+        }
+        try {
+            auto topologyResult = sessionServices_->snapshotTopology();
+            const auto* topology = topologyResult.value();
+            if (topology == nullptr) {
+                showSessionError(CaptureSessionErrorCode::topologyFailed);
+                return;
+            }
+            const auto memoryPlan = planFrozenDesktopMemory(
+                topology->displays(), defaultCaptureSessionMemoryLimit);
+            if (memoryPlan.status != CaptureMemoryPlanStatus::fits) {
+                showSessionError(CaptureSessionErrorCode::memoryLimitExceeded);
+                return;
+            }
+            MemoryBudget captureBudget(defaultCaptureSessionMemoryLimit);
+            auto captured = sessionServices_->capture(*topology, captureBudget);
+            auto* desktop = std::get_if<FrozenDesktop>(&captured);
+            if (desktop == nullptr) {
+                showSessionError(CaptureSessionErrorCode::captureFailed);
+                return;
+            }
+            teachingPenDesktop_ = std::make_unique<FrozenDesktop>(
+                std::move(*desktop));
+            auto created = OverlayHost::createTeachingPen(
+                instance_, *teachingPenDesktop_,
+                [this] {
+                    teachingPenOverlay_.reset();
+                    teachingPenDesktop_.reset();
+                    startTeachingPen();
+                },
+                [this](OverlayInputAction action) {
+                    finishTeachingPen(action);
+                });
+            teachingPenOverlay_ = std::move(created.value);
+            if (!teachingPenOverlay_) {
+                teachingPenDesktop_.reset();
+                showSessionError(CaptureSessionErrorCode::overlayFailed);
+                return;
+            }
+            teachingPenOverlay_->show();
+        } catch (...) {
+            teachingPenOverlay_.reset();
+            teachingPenDesktop_.reset();
+            showSessionError(CaptureSessionErrorCode::allocationFailed);
+        }
+    }
+
+    void finishTeachingPen(OverlayInputAction action) noexcept
+    {
+        if (!teachingPenOverlay_ || !teachingPenDesktop_) return;
+        if (action != OverlayInputAction::copy
+            && action != OverlayInputAction::save) {
+            teachingPenOverlay_.reset();
+            teachingPenDesktop_.reset();
+            return;
+        }
+        try {
+            const auto bounds = teachingPenDesktop_->topology.virtualBounds();
+            const auto annotation = teachingPenOverlay_->annotationSnapshot();
+            MemoryBudget budget(defaultCaptureSessionMemoryLimit);
+            auto composition = composeSelection(
+                bounds, *teachingPenDesktop_, budget);
+            auto* pixels = std::get_if<PixelBuffer>(&composition);
+            if (pixels == nullptr || composeAnnotations(
+                    *pixels,
+                    annotation.plan,
+                    annotation.dpiX,
+                    annotation.dpiY,
+                    bounds.x,
+                    bounds.y,
+                    nullptr,
+                    annotation.eraserMasks).has_value()) {
+                teachingPenOverlay_.reset();
+                teachingPenDesktop_.reset();
+                showSessionError(CaptureSessionErrorCode::compositionFailed);
+                return;
+            }
+            teachingPenOverlay_.reset();
+            teachingPenDesktop_.reset();
+            if (sessionServices_->exportSelection(*pixels, action)
+                == CaptureExportResult::failed) {
+                showSessionError(CaptureSessionErrorCode::exportFailed);
+            }
+        } catch (...) {
+            teachingPenOverlay_.reset();
+            teachingPenDesktop_.reset();
+            showSessionError(CaptureSessionErrorCode::allocationFailed);
+        }
+    }
+
     void showSessionError(CaptureSessionErrorCode error) noexcept
     {
+        diagnosticLog_.record("capture", "error", "capture_session_failed");
         const wchar_t* text = sessionFailureText;
         if (error == CaptureSessionErrorCode::topologyChanged) {
             text = topologyChangedText;
@@ -464,10 +987,22 @@ private:
     RuntimeApis& runtimeApis_;
     HWND window_ = nullptr;
     std::unique_ptr<SingleInstance> singleInstance_;
+    SystemPreferencesRegistry preferencesRegistry_;
+    PreferencesSettingsStore preferencesSettingsStore_{preferencesRegistry_};
+    HotKeySettingsStore hotKeySettingsStore_{preferencesRegistry_};
+    DiagnosticLogStore diagnosticLog_;
+    std::unique_ptr<DiagnosticSupportController> diagnosticSupport_;
     std::unique_ptr<WinCaptureSessionServices> sessionServices_;
     std::unique_ptr<CaptureSessionCoordinator> coordinator_;
     std::unique_ptr<TrayIcon> tray_;
     std::unique_ptr<HotKeyRegistrar> hotKey_;
+    std::unique_ptr<ShortcutFeedbackController> shortcutFeedback_;
+    std::unique_ptr<PreferencesWindow> preferencesWindow_;
+    std::unique_ptr<HelpWindow> helpWindow_;
+    std::unique_ptr<FullScreenCapturePreviewHost> fullScreenPreview_;
+    std::unique_ptr<OcrCaptureHost> ocrCapture_;
+    std::unique_ptr<FrozenDesktop> teachingPenDesktop_;
+    std::unique_ptr<OverlayHost> teachingPenOverlay_;
 };
 
 } // namespace

@@ -45,6 +45,20 @@
     {
       "fixedColor" : false,
       "generated" : {
+        "100" : "platforms/win/resources/toolbar/100/done.png",
+        "125" : "platforms/win/resources/toolbar/125/done.png",
+        "150" : "platforms/win/resources/toolbar/150/done.png",
+        "200" : "platforms/win/resources/toolbar/200/done.png"
+      },
+      "insetDip" : 0,
+      "logicalSizeDip" : 20,
+      "name" : "done",
+      "sha256" : "4bcae00fd749b2fd3edaff645f665039cacb70751509b2e272281a5e11e635d4",
+      "source" : "platforms/mac/Resources/Icons/done.svg"
+    },
+    {
+      "fixedColor" : false,
+      "generated" : {
         "100" : "platforms/win/resources/toolbar/100/eraser-tool.png",
         "125" : "platforms/win/resources/toolbar/125/eraser-tool.png",
         "150" : "platforms/win/resources/toolbar/150/eraser-tool.png",
@@ -251,6 +265,20 @@
       "name" : "text-tool",
       "sha256" : "0dca7b1ce6b289f5ef33b43d15a137fd796f9483edad20f0fc991ca42cf1c21c",
       "source" : "platforms/mac/Resources/Icons/text-tool.svg"
+    },
+    {
+      "fixedColor" : false,
+      "generated" : {
+        "100" : "platforms/win/resources/toolbar/100/trash.png",
+        "125" : "platforms/win/resources/toolbar/125/trash.png",
+        "150" : "platforms/win/resources/toolbar/150/trash.png",
+        "200" : "platforms/win/resources/toolbar/200/trash.png"
+      },
+      "insetDip" : 2,
+      "logicalSizeDip" : 16,
+      "name" : "trash",
+      "sha256" : "7fd272a8464f421697ec9eaf8ad3fd670f03fffe009a9269784617eecfd83b99",
+      "source" : "platforms/mac/Resources/Icons/trash.svg"
     },
     {
       "fixedColor" : true,

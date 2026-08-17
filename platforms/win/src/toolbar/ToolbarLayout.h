@@ -45,6 +45,15 @@ MainToolbarLayout computeMainToolbarLayout(
     ToolbarPoint origin,
     const std::vector<ToolbarAction>& actions);
 
+MainToolbarLayout computeTeachingPenToolbarLayout(
+    ToolbarPoint pointer,
+    ToolbarRect bounds);
+
+ToolbarPoint attachedTeachingPenToolbarOrigin(
+    ToolbarRect toolbar,
+    ToolbarRect bounds,
+    float attachedHeight) noexcept;
+
 std::optional<ToolbarAction> toolbarActionAt(
     const MainToolbarLayout& layout,
     ToolbarPoint point) noexcept;

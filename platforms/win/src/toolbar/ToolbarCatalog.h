@@ -26,6 +26,7 @@ enum class ToolbarAction : std::uint8_t {
     pin,
     save,
     copy,
+    finishEditing,
 };
 
 struct ToolbarIconSpec {
@@ -73,6 +74,39 @@ inline constexpr std::array terminalActions{
     ToolbarAction::cancel,
     ToolbarAction::save,
     ToolbarAction::copy,
+};
+
+inline constexpr std::array pinnedEditorActions{
+    ToolbarAction::rectangle,
+    ToolbarAction::polyline,
+    ToolbarAction::pen,
+    ToolbarAction::marker,
+    ToolbarAction::eyedropper,
+    ToolbarAction::mosaic,
+    ToolbarAction::text,
+    ToolbarAction::number,
+    ToolbarAction::magnifier,
+    ToolbarAction::eraser,
+    ToolbarAction::undo,
+    ToolbarAction::redo,
+    ToolbarAction::save,
+    ToolbarAction::copy,
+    ToolbarAction::finishEditing,
+};
+
+inline constexpr std::array teachingPenActions{
+    ToolbarAction::pen,
+    ToolbarAction::rectangle,
+    ToolbarAction::polyline,
+    ToolbarAction::marker,
+    ToolbarAction::text,
+    ToolbarAction::number,
+    ToolbarAction::mosaic,
+    ToolbarAction::eyedropper,
+    ToolbarAction::eraser,
+    ToolbarAction::magnifier,
+    ToolbarAction::copy,
+    ToolbarAction::save,
 };
 
 inline constexpr std::array imageResources{
@@ -217,16 +251,35 @@ inline constexpr std::array imageResources{
         IDR_TOOLBAR_200_COPY_TO_CLIPBOARD_PNG,
     },
     ToolbarIconSpec{
+        L"trash", 2.0F, false,
+        IDR_TOOLBAR_100_TRASH_PNG,
+        IDR_TOOLBAR_125_TRASH_PNG,
+        IDR_TOOLBAR_150_TRASH_PNG,
+        IDR_TOOLBAR_200_TRASH_PNG,
+    },
+    ToolbarIconSpec{
         L"refresh-svgrepo-com3", 4.0F, true,
         IDR_TOOLBAR_100_REFRESH_SVGREPO_COM3_PNG,
         IDR_TOOLBAR_125_REFRESH_SVGREPO_COM3_PNG,
         IDR_TOOLBAR_150_REFRESH_SVGREPO_COM3_PNG,
         IDR_TOOLBAR_200_REFRESH_SVGREPO_COM3_PNG,
     },
+    ToolbarIconSpec{
+        L"done", 0.0F, false,
+        IDR_TOOLBAR_100_DONE_PNG,
+        IDR_TOOLBAR_125_DONE_PNG,
+        IDR_TOOLBAR_150_DONE_PNG,
+        IDR_TOOLBAR_200_DONE_PNG,
+    },
 };
 
-inline constexpr std::array<std::size_t, fullActions.size()> actionIconIndices{
+inline constexpr std::size_t trashIconIndex = 20U;
+inline constexpr std::size_t rotationIconIndex = 21U;
+inline constexpr std::size_t finishEditingIconIndex = 22U;
+
+inline constexpr std::array<std::size_t, fullActions.size() + 1U> actionIconIndices{
     1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 17, 18, 19,
+    finishEditingIconIndex,
 };
 
 } // namespace toolbar_catalog_detail
@@ -239,6 +292,16 @@ constexpr const auto& fullToolbarActions() noexcept
 constexpr const auto& terminalToolbarActions() noexcept
 {
     return toolbar_catalog_detail::terminalActions;
+}
+
+constexpr const auto& pinnedEditorToolbarActions() noexcept
+{
+    return toolbar_catalog_detail::pinnedEditorActions;
+}
+
+constexpr const auto& teachingPenToolbarActions() noexcept
+{
+    return toolbar_catalog_detail::teachingPenActions;
 }
 
 constexpr const ToolbarIconSpec& toolbarIcon(ToolbarAction action) noexcept
@@ -284,12 +347,23 @@ constexpr const ToolbarIconSpec& dragHandleIcon() noexcept
 
 constexpr const ToolbarIconSpec& rotationHandleIcon() noexcept
 {
-    return toolbar_catalog_detail::imageResources.back();
+    return toolbar_catalog_detail::imageResources[
+        toolbar_catalog_detail::rotationIconIndex];
+}
+
+constexpr std::size_t eraserTrashIconIndex() noexcept
+{
+    return toolbar_catalog_detail::trashIconIndex;
+}
+
+constexpr const ToolbarIconSpec& eraserTrashIcon() noexcept
+{
+    return toolbar_catalog_detail::imageResources[eraserTrashIconIndex()];
 }
 
 constexpr std::size_t rotationHandleIconIndex() noexcept
 {
-    return toolbar_catalog_detail::imageResources.size() - 1U;
+    return toolbar_catalog_detail::rotationIconIndex;
 }
 
 constexpr const auto& toolbarImageResources() noexcept
@@ -311,6 +385,17 @@ constexpr int toolbarResourceId(
         return icon.resourceIdAt144Dpi;
     }
     return icon.resourceIdAt192Dpi;
+}
+
+constexpr int toolbarIconPixelEdge(
+    const ToolbarIconSpec& icon,
+    std::uint32_t dpi) noexcept
+{
+    const auto safeDpi = dpi == 0U ? 96U : dpi;
+    const auto logicalEdge = ToolbarMetrics::buttonSizeDip
+        - icon.insetDip * 2.0F;
+    return static_cast<int>(
+        logicalEdge * static_cast<float>(safeDpi) / 96.0F + 0.5F);
 }
 
 constexpr float extraGapAfter(ToolbarAction action) noexcept

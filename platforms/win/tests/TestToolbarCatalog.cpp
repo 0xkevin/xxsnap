@@ -1,4 +1,5 @@
 #include "toolbar/ToolbarCatalog.h"
+#include "resource.h"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -72,6 +73,27 @@ void testCatalogContract()
 
     static_assert(arraysEqual(fullToolbarActions(), expected));
     static_assert(terminalToolbarActions().size() == 3);
+    static_assert(pinnedEditorToolbarActions().size() == 15);
+    static_assert(pinnedEditorToolbarActions().back()
+        == ToolbarAction::finishEditing);
+    constexpr std::array teachingPenExpected{
+        ToolbarAction::pen,
+        ToolbarAction::rectangle,
+        ToolbarAction::polyline,
+        ToolbarAction::marker,
+        ToolbarAction::text,
+        ToolbarAction::number,
+        ToolbarAction::mosaic,
+        ToolbarAction::eyedropper,
+        ToolbarAction::eraser,
+        ToolbarAction::magnifier,
+        ToolbarAction::copy,
+        ToolbarAction::save,
+    };
+    static_assert(arraysEqual(
+        teachingPenToolbarActions(), teachingPenExpected));
+    CHECK(std::wstring_view(toolbarIcon(ToolbarAction::finishEditing).resourceName)
+        == L"done");
     CHECK(toolbarIcon(ToolbarAction::rectangle).insetDip == 0.0F);
     static_assert(toolbarIcon(ToolbarAction::number).insetDip == 3.0F);
     static_assert(toolbarIcon(ToolbarAction::scroll).insetDip == 0.0F);
@@ -82,9 +104,10 @@ void testCatalogContract()
     static_assert(extraGapAfter(ToolbarAction::redo) == 8.0F);
     static_assert(extraGapAfter(ToolbarAction::copy) == 0.0F);
 
-    CHECK(toolbarImageResources().size() == 21U);
+    CHECK(toolbarImageResources().size() == 23U);
+    CHECK(std::wstring_view(eraserTrashIcon().resourceName) == L"trash");
     static_assert(dragHandleIcon().resourceIdAt96Dpi > 0);
-    const auto& rotationHandle = toolbarImageResources().back();
+    const auto& rotationHandle = rotationHandleIcon();
     CHECK(rotationHandle.insetDip == 4.0F);
     CHECK(rotationHandle.fixedColor);
     CHECK(rotationHandle.resourceIdAt96Dpi > 0);
@@ -95,6 +118,14 @@ void testCatalogContract()
     static_assert(toolbarResourceId(dragHandleIcon(), 121) == dragHandleIcon().resourceIdAt144Dpi);
     static_assert(toolbarResourceId(dragHandleIcon(), 145) == dragHandleIcon().resourceIdAt192Dpi);
     static_assert(toolbarResourceId(dragHandleIcon(), 240) == dragHandleIcon().resourceIdAt192Dpi);
+    static_assert(toolbarIconPixelEdge(toolbarIcon(ToolbarAction::pen), 96U)
+        == 16);
+    static_assert(toolbarIconPixelEdge(toolbarIcon(ToolbarAction::pen), 144U)
+        == 24);
+    static_assert(toolbarIconPixelEdge(toolbarIcon(ToolbarAction::scroll), 144U)
+        == 30);
+    static_assert(toolbarIconPixelEdge(
+        toolbarIcon(ToolbarAction::finishEditing), 192U) == 40);
 
     for (const auto action : fullToolbarActions()) {
         const auto& icon = toolbarIcon(action);
@@ -177,41 +208,44 @@ void testAllEmbeddedResourcesDecode()
         IID_PPV_ARGS(&factory))));
     if (factory) {
         for (const auto& icon : toolbarImageResources()) {
-            const auto expectedEdge = [&icon](UINT scalePercent) {
-                const auto logicalEdge = ToolbarMetrics::buttonSizeDip
-                    - icon.insetDip * 2.0F;
-                return static_cast<UINT>(
-                    logicalEdge * static_cast<float>(scalePercent) / 100.0F
-                    + 0.5F);
-            };
             checkEmbeddedPng(
-                factory.Get(), icon.resourceIdAt96Dpi, expectedEdge(100U));
+                factory.Get(), icon.resourceIdAt96Dpi,
+                toolbarIconPixelEdge(icon, 96U));
             checkEmbeddedPng(
-                factory.Get(), icon.resourceIdAt120Dpi, expectedEdge(125U));
+                factory.Get(), icon.resourceIdAt120Dpi,
+                toolbarIconPixelEdge(icon, 120U));
             checkEmbeddedPng(
-                factory.Get(), icon.resourceIdAt144Dpi, expectedEdge(150U));
+                factory.Get(), icon.resourceIdAt144Dpi,
+                toolbarIconPixelEdge(icon, 144U));
             checkEmbeddedPng(
-                factory.Get(), icon.resourceIdAt192Dpi, expectedEdge(200U));
+                factory.Get(), icon.resourceIdAt192Dpi,
+                toolbarIconPixelEdge(icon, 192U));
         }
     }
     factory.Reset();
     CoUninitialize();
 }
 
-void testCustomCursorResourcesLoad()
+void testEmbeddedEraserCursorMatchesMacHotspot()
 {
-    const auto module = GetModuleHandleW(nullptr);
-    CHECK(module != nullptr);
-    CHECK(LoadCursorW(
-        module, MAKEINTRESOURCEW(IDC_XXSNAP_CROSSHAIR)) != nullptr);
-    CHECK(LoadCursorW(
-        module, MAKEINTRESOURCEW(IDC_XXSNAP_ROTATION)) != nullptr);
+    const auto cursor = LoadCursorW(
+        GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDC_XXSNAP_ERASER));
+    CHECK(cursor != nullptr);
+    if (cursor == nullptr) return;
+
+    ICONINFO info{};
+    CHECK(GetIconInfo(cursor, &info));
+    CHECK(!info.fIcon);
+    CHECK(info.xHotspot == 11U);
+    CHECK(info.yHotspot == 21U);
+    if (info.hbmMask != nullptr) DeleteObject(info.hbmMask);
+    if (info.hbmColor != nullptr) DeleteObject(info.hbmColor);
 }
 
 int main()
 {
     testCatalogContract();
     testAllEmbeddedResourcesDecode();
-    testCustomCursorResourcesLoad();
+    testEmbeddedEraserCursorMatchesMacHotspot();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

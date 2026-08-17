@@ -146,7 +146,9 @@ public:
     {
         ++setCalls;
         formats.push_back(format);
-        if ((format == CF_DIBV5 && failDibSet) || (format == pngFormat && failPngSet)) {
+        if ((format == CF_DIBV5 && failDibSet)
+            || (format == CF_UNICODETEXT && failTextSet)
+            || (format == pngFormat && failPngSet)) {
             error = ERROR_INVALID_DATA;
             return nullptr;
         }
@@ -177,6 +179,7 @@ public:
     bool failEmpty = false;
     bool failRegister = false;
     bool failDibSet = false;
+    bool failTextSet = false;
     bool failPngSet = false;
     bool failClose = false;
     int openCalls = 0;
@@ -199,6 +202,38 @@ public:
     std::vector<UINT> formats;
     std::vector<DWORD> sleeps;
 };
+
+void testWritesUnicodeTextAndTransfersOwnership()
+{
+    FakeClipboardApi api;
+    const std::wstring text = L"XxSnap \u6587\u5b57\u8bc6\u522b";
+    const auto result = writeClipboardText(text, nullptr, api);
+    CHECK(result.succeeded());
+    CHECK(api.openCalls == 1);
+    CHECK(api.emptyCalls == 1);
+    CHECK(api.allocateCalls == 1);
+    CHECK(api.setCalls == 1);
+    CHECK(api.formats.size() == 1U);
+    CHECK(api.formats.front() == CF_UNICODETEXT);
+    CHECK(api.transferred.size() == 1U);
+    CHECK(api.freeCalls == 0);
+    CHECK(api.closeCalls == 1);
+}
+
+void testTextClipboardRetriesAndReleasesOnFailure()
+{
+    FakeClipboardApi api;
+    api.openFailures = 2;
+    api.failTextSet = true;
+    const auto result = writeClipboardText(L"text", nullptr, api);
+    CHECK(!result.succeeded());
+    CHECK(result.error.has_value());
+    CHECK(result.error->code == ExportErrorCode::clipboardSetTextFailed);
+    CHECK(api.openCalls == 3);
+    CHECK(api.sleeps == std::vector<DWORD>({10U, 25U}));
+    CHECK(api.freeCalls == 1);
+    CHECK(api.closeCalls == 1);
+}
 
 void testBuildsTopDownBgraDibV5WithoutConsumingPixels()
 {
@@ -417,6 +452,8 @@ void testCloseFailureRemainsVisibleAfterTwoEarlierFailures()
 
 int main()
 {
+    testWritesUnicodeTextAndTransfersOwnership();
+    testTextClipboardRetriesAndReleasesOnFailure();
     static_assert(noexcept(convertPremultipliedToStraightBgra(
         std::declval<const PixelBuffer&>())));
     static_assert(noexcept(buildDibV5(std::declval<const PixelBuffer&>())));

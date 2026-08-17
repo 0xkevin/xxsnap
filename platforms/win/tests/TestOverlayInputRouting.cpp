@@ -1,6 +1,10 @@
 #include "overlay/OverlayHost.h"
+#include "capture/DisplayTopology.h"
 
+#include <algorithm>
 #include <cstdint>
+#include <chrono>
+#include <cstring>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -13,16 +17,15 @@ using snipory::core::portable::PixelRect;
 using xxsnap::win::OverlayInputAction;
 using xxsnap::win::OverlayInputPlatform;
 using xxsnap::win::OverlayInputRouter;
+using xxsnap::win::OverlayMode;
 using xxsnap::win::OverlayInputStatus;
 using xxsnap::win::OverlayCursorStyle;
 using xxsnap::win::OverlaySurface;
+using xxsnap::win::NumberMarkType;
 using xxsnap::win::SelectionPhase;
 using xxsnap::win::ShapeEditorKey;
 using xxsnap::win::AnnotationColor;
 using xxsnap::win::AnnotationRect;
-using xxsnap::win::ToolbarAction;
-using xxsnap::win::computeOverlayLayout;
-using xxsnap::win::fullToolbarActions;
 
 int failureCount = 0;
 
@@ -83,6 +86,18 @@ public:
         return chosenColor;
     }
 
+    bool shiftPressed() noexcept override
+    {
+        return shiftDown;
+    }
+
+    bool copyText(const std::wstring& text) noexcept override
+    {
+        copiedText = text;
+        ++copyTextCalls;
+        return copyTextSucceeds;
+    }
+
     bool captureSucceeds = true;
     bool releaseSucceeds = true;
     bool registerSucceeds = true;
@@ -98,8 +113,48 @@ public:
     int unregisterCalls = 0;
     int chooseColorCalls = 0;
     HWND chosenColorWindow = nullptr;
+    bool shiftDown = false;
+    bool copyTextSucceeds = true;
+    int copyTextCalls = 0;
+    std::wstring copiedText;
     std::optional<AnnotationColor> chosenColor = AnnotationColor{1, 2, 3, 255};
 };
+
+std::unique_ptr<xxsnap::win::FrozenDesktop> solidDesktop(
+    AnnotationColor color)
+{
+    using namespace xxsnap::win;
+    std::vector<DisplayDescriptor> descriptors{{
+        L"desktop",
+        {-640, 0, 1280, 360},
+        96U,
+        96U,
+        DISPLAYCONFIG_ROTATION_IDENTITY,
+    }};
+    const auto topologyResult = buildDisplayTopologySnapshot(descriptors);
+    if (!topologyResult.hasValue()) {
+        return nullptr;
+    }
+    snipory::core::portable::MemoryBudget budget(8U * 1024U * 1024U);
+    auto allocation = snipory::core::portable::PixelBuffer::allocate(
+        1280, 360, budget);
+    if (!allocation.value) {
+        return nullptr;
+    }
+    for (std::size_t offset = 0U;
+         offset < allocation.value->byteCount(); offset += 4U) {
+        allocation.value->data()[offset] = static_cast<std::byte>(color.blue);
+        allocation.value->data()[offset + 1U] = static_cast<std::byte>(color.green);
+        allocation.value->data()[offset + 2U] = static_cast<std::byte>(color.red);
+        allocation.value->data()[offset + 3U] = std::byte{0xFF};
+    }
+    std::vector<FrozenDisplay> displays;
+    displays.emplace_back(descriptors.front(), std::move(*allocation.value));
+    return std::make_unique<FrozenDesktop>(
+        *topologyResult.value(),
+        std::move(displays),
+        std::chrono::steady_clock::time_point{});
+}
 
 const HWND leftWindow = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(1));
 const HWND rightWindow = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(2));
@@ -119,6 +174,163 @@ void createReadySelection(OverlayInputRouter& router)
     router.platformPointerUp(PixelPoint{120, 280});
     CHECK(router.phase() == SelectionPhase::ready);
     CHECK((router.selection() == PixelRect{-140, 80, 260, 200}));
+}
+
+void testPinToolbarTransfersTheReadySelection()
+{
+    FakePlatform platform;
+    std::vector<OverlayInputAction> actions;
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform,
+        [&actions](OverlayInputAction action) { actions.push_back(action); },
+        true);
+    createReadySelection(router);
+    const auto owner = router.presentations()[1];
+    const auto pin = std::find_if(
+        owner.toolbarItems.begin(), owner.toolbarItems.end(),
+        [](const auto& item) {
+            return item.action == xxsnap::win::ToolbarAction::pin;
+        });
+    CHECK(pin != owner.toolbarItems.end());
+    if (pin != owner.toolbarItems.end()) {
+        CHECK(router.pointerDown(rightWindow, pin->centerPhysical));
+    }
+    CHECK(actions.size() == 1U);
+    CHECK(actions.front() == OverlayInputAction::pin);
+    CHECK(router.status() == OverlayInputStatus::completed);
+}
+
+void testCtrlOnePinsTheReadySelection()
+{
+    FakePlatform platform;
+    std::vector<OverlayInputAction> actions;
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform,
+        [&actions](OverlayInputAction action) { actions.push_back(action); },
+        true);
+    createReadySelection(router);
+    CHECK(router.keyPressed(ShapeEditorKey::pin, true, false));
+    CHECK(actions.size() == 1U);
+    CHECK(actions.front() == OverlayInputAction::pin);
+}
+
+void testPinnedImageEditorLocksSelectionAndFinishesWithoutCaptureActions()
+{
+    FakePlatform platform;
+    std::vector<OverlayInputAction> actions;
+    const auto window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(3));
+    OverlayInputRouter router(
+        PixelRect{40, 60, 500, 300},
+        {{window, PixelRect{40, 60, 500, 300}, 96, 96}},
+        platform,
+        [&actions](OverlayInputAction action) { actions.push_back(action); },
+        true, nullptr, OverlayMode::pinnedImageEditor);
+    router.lockSelection({40, 60, 500, 300});
+    CHECK(router.phase() == SelectionPhase::ready);
+    const auto presentation = router.presentations().front();
+    CHECK(presentation.pinnedImageEditor);
+    CHECK(presentation.toolbarItems.size()
+        == xxsnap::win::pinnedEditorToolbarActions().size());
+    CHECK(std::none_of(presentation.toolbarItems.begin(),
+        presentation.toolbarItems.end(), [](const auto& item) {
+            return item.action == xxsnap::win::ToolbarAction::scroll
+                || item.action == xxsnap::win::ToolbarAction::cancel
+                || item.action == xxsnap::win::ToolbarAction::pin;
+        }));
+    const auto finish = std::find_if(presentation.toolbarItems.begin(),
+        presentation.toolbarItems.end(), [](const auto& item) {
+            return item.action == xxsnap::win::ToolbarAction::finishEditing;
+        });
+    CHECK(finish != presentation.toolbarItems.end());
+    if (finish != presentation.toolbarItems.end()) {
+        CHECK(router.pointerDown(window, finish->centerPhysical));
+    }
+    CHECK(actions.size() == 1U);
+    CHECK(actions.front() == OverlayInputAction::finishEditing);
+}
+
+void testPinnedImageEditorEscapeFinishesInsteadOfCancelling()
+{
+    FakePlatform platform;
+    std::vector<OverlayInputAction> actions;
+    const auto window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(3));
+    OverlayInputRouter router(
+        PixelRect{40, 60, 500, 300},
+        {{window, PixelRect{40, 60, 500, 300}, 96, 96}},
+        platform,
+        [&actions](OverlayInputAction action) { actions.push_back(action); },
+        true, nullptr, OverlayMode::pinnedImageEditor);
+    router.lockSelection({40, 60, 500, 300});
+
+    router.escapePressed();
+
+    CHECK(actions.size() == 1U);
+    CHECK(actions.front() == OverlayInputAction::finishEditing);
+    CHECK(router.status() == OverlayInputStatus::completed);
+}
+
+void testPinnedImageEditorStandaloneShiftRequestsToolbarHideOnRelease()
+{
+    FakePlatform platform;
+    std::vector<OverlayInputAction> actions;
+    const auto window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(3));
+    OverlayInputRouter router(
+        PixelRect{40, 60, 500, 300},
+        {{window, PixelRect{40, 60, 500, 300}, 96, 96}},
+        platform,
+        [&actions](OverlayInputAction action) { actions.push_back(action); },
+        true, nullptr, OverlayMode::pinnedImageEditor);
+    router.lockSelection({40, 60, 500, 300});
+
+    CHECK(router.pinnedImageShiftChanged(true, false, false));
+    CHECK(actions.empty());
+    CHECK(router.pinnedImageShiftChanged(false, false, false));
+    CHECK(actions == std::vector<OverlayInputAction>{
+        OverlayInputAction::hideEditingToolbar});
+    CHECK(router.status() == OverlayInputStatus::active);
+}
+
+void testPinnedImageEditorShiftToggleCancelsForMixedInput()
+{
+    FakePlatform platform;
+    std::vector<OverlayInputAction> actions;
+    const auto window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(3));
+    OverlayInputRouter router(
+        PixelRect{40, 60, 500, 300},
+        {{window, PixelRect{40, 60, 500, 300}, 96, 96}},
+        platform,
+        [&actions](OverlayInputAction action) { actions.push_back(action); },
+        true, nullptr, OverlayMode::pinnedImageEditor);
+    router.lockSelection({40, 60, 500, 300});
+
+    CHECK(router.pinnedImageShiftChanged(true, false, false));
+    CHECK(!router.pinnedImageShiftChanged(true, false, true));
+    CHECK(!router.pinnedImageShiftChanged(false, false, false));
+    CHECK(actions.empty());
+
+    CHECK(router.pinnedImageShiftChanged(true, false, false));
+    router.cancelPinnedImageShiftShortcut();
+    CHECK(!router.pinnedImageShiftChanged(false, false, false));
+    CHECK(actions.empty());
+}
+
+void testPinnedImageEditorAlwaysOnTopShortcutIsNonTerminal()
+{
+    FakePlatform platform;
+    std::vector<OverlayInputAction> actions;
+    const auto window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(3));
+    OverlayInputRouter router(
+        PixelRect{40, 60, 500, 300},
+        {{window, PixelRect{40, 60, 500, 300}, 96, 96}},
+        platform,
+        [&actions](OverlayInputAction action) { actions.push_back(action); },
+        true, nullptr, OverlayMode::pinnedImageEditor);
+    router.lockSelection({40, 60, 500, 300});
+
+    CHECK(router.togglePinnedImageAlwaysOnTop());
+    CHECK(actions == std::vector<OverlayInputAction>{
+        OverlayInputAction::togglePinnedImageAlwaysOnTop});
+    CHECK(router.status() == OverlayInputStatus::active);
 }
 
 PixelPoint dipCenterAt144Dpi(AnnotationRect rect)
@@ -409,6 +621,28 @@ void testRestartShutdownReleasesCaptureAndHotKeyWithoutCancelAction()
     CHECK(actions.empty());
 }
 
+void testScrollToolbarSuspendsOverlayWithoutCompletingRouter()
+{
+    FakePlatform platform;
+    std::vector<OverlayInputAction> actions;
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform,
+        [&actions](OverlayInputAction action) { actions.push_back(action); },
+        true);
+    CHECK(router.activateEscapeHotKey(leftWindow));
+    createReadySelection(router);
+    const auto owner = router.presentations()[1];
+    CHECK(owner.toolbarItems.size() == 17U);
+    CHECK(owner.toolbarItems[10].action
+        == xxsnap::win::ToolbarAction::scroll);
+    CHECK(router.pointerDown(
+        rightWindow, owner.toolbarItems[10].centerPhysical));
+    CHECK(actions.size() == 1U);
+    CHECK(actions.front() == OverlayInputAction::scrollCapture);
+    CHECK(router.status() == OverlayInputStatus::active);
+    CHECK(platform.unregisterCalls == 1);
+}
+
 void testShapeToolIsNonTerminalAndEditsThroughSharedPresentation()
 {
     FakePlatform platform;
@@ -422,7 +656,7 @@ void testShapeToolIsNonTerminalAndEditsThroughSharedPresentation()
     createReadySelection(router);
 
     auto owner = router.presentations()[1];
-    CHECK(owner.toolbarItems.size() == 7U);
+    CHECK(owner.toolbarItems.size() == 17U);
     const auto rectangle = owner.toolbarItems[0];
     CHECK(rectangle.action == xxsnap::win::ToolbarAction::rectangle);
     const auto capturesBeforeTool = platform.captureCalls;
@@ -475,9 +709,13 @@ void testShapeToolIsNonTerminalAndEditsThroughSharedPresentation()
 
     owner = router.presentations()[1];
     CHECK(owner.annotationPlan.items.size() == 1U);
-    CHECK(owner.toolbarItems[2].action == xxsnap::win::ToolbarAction::undo);
-    CHECK(owner.toolbarItems[2].enabled);
-    CHECK(router.pointerDown(rightWindow, owner.toolbarItems[2].centerPhysical));
+    const auto undo = std::find_if(owner.toolbarItems.begin(),
+        owner.toolbarItems.end(), [](const auto& item) {
+            return item.action == xxsnap::win::ToolbarAction::undo;
+        });
+    CHECK(undo != owner.toolbarItems.end());
+    CHECK(undo->enabled);
+    CHECK(router.pointerDown(rightWindow, undo->centerPhysical));
     CHECK(router.annotationDocument().annotations().empty());
     CHECK(actions.empty());
 
@@ -496,7 +734,7 @@ void testArrowToolUsesMacOptionsMenuAndCreatesEditableCurve()
     createReadySelection(router);
 
     auto owner = router.presentations()[1];
-    CHECK(owner.toolbarItems.size() == 7U);
+    CHECK(owner.toolbarItems.size() == 17U);
     CHECK(owner.toolbarItems[1].action == xxsnap::win::ToolbarAction::polyline);
     CHECK(router.pointerDown(
         rightWindow, owner.toolbarItems[1].centerPhysical));
@@ -511,8 +749,63 @@ void testArrowToolUsesMacOptionsMenuAndCreatesEditableCurve()
     CHECK(owner.arrowLineOptions->arrowTypeMenu.has_value());
     CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
         owner.arrowLineOptions->arrowTypeMenu->items[5])));
-    CHECK(router.presentations()[1]
-        .arrowLineOptions->state.startArrowType() == xxsnap::win::ArrowType::bar);
+    owner = router.presentations()[1];
+    CHECK(owner.arrowLineOptions->state.startArrowType()
+        == xxsnap::win::ArrowType::bar);
+    CHECK(!owner.arrowLineOptions->arrowTypeMenu.has_value());
+
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.arrowLineOptions->layout.startArrowType)));
+    owner = router.presentations()[1];
+    CHECK(owner.arrowLineOptions->arrowTypeMenu.has_value());
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.arrowLineOptions->arrowTypeMenu->items[5])));
+    CHECK(!router.presentations()[1]
+        .arrowLineOptions->arrowTypeMenu.has_value());
+
+    owner = router.presentations()[1];
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.arrowLineOptions->layout.strokeStyle)));
+    owner = router.presentations()[1];
+    CHECK(owner.arrowLineOptions->strokePatternMenu.has_value());
+    if (!owner.arrowLineOptions->strokePatternMenu.has_value()) {
+        return;
+    }
+    const auto strokeItem = owner.arrowLineOptions->strokePatternMenu->items[5];
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        strokeItem)));
+    owner = router.presentations()[1];
+    if (!owner.arrowLineOptions.has_value()) {
+        CHECK(owner.arrowLineOptions.has_value());
+        return;
+    }
+    CHECK(owner.arrowLineOptions->state.style().strokePattern
+        == xxsnap::win::AnnotationStrokePattern::sketchDashed);
+
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.arrowLineOptions->layout.endArrowType)));
+    owner = router.presentations()[1];
+    CHECK(owner.arrowLineOptions->arrowTypeMenu.has_value());
+    CHECK(owner.arrowLineOptions->arrowTypeMenuEndpoint
+        == xxsnap::win::ArrowEndpoint::end);
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.arrowLineOptions->arrowTypeMenu->items[6])));
+    owner = router.presentations()[1];
+    CHECK(owner.arrowLineOptions->state.endArrowType()
+        == xxsnap::win::ArrowType::dot);
+    CHECK(!owner.arrowLineOptions->arrowTypeMenu.has_value());
+
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.arrowLineOptions->layout.colorSwatches[2])));
+    owner = router.presentations()[1];
+    CHECK(owner.arrowLineOptions->state.style().strokeColor
+        == xxsnap::win::macShapePalette()[2]);
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.arrowLineOptions->layout.colorSwatches.back())));
+    CHECK(platform.chooseColorCalls == 1);
+    owner = router.presentations()[1];
+    CHECK((owner.arrowLineOptions->state.style().strokeColor
+        == AnnotationColor{1, 2, 3, 255}));
 
     CHECK(router.pointerDown(rightWindow, PixelPoint{40, 90}));
     platform.cursor = PixelPoint{180, 190};
@@ -524,10 +817,14 @@ void testArrowToolUsesMacOptionsMenuAndCreatesEditableCurve()
     CHECK(created.kind == xxsnap::win::AnnotationKind::arrowLine);
     CHECK(created.arrowLine.has_value());
     CHECK(created.arrowLine->startArrowType == xxsnap::win::ArrowType::bar);
+    CHECK(created.arrowLine->endArrowType == xxsnap::win::ArrowType::dot);
+    CHECK(created.style.strokePattern
+        == xxsnap::win::AnnotationStrokePattern::sketchDashed);
+    CHECK((created.style.strokeColor == AnnotationColor{1, 2, 3, 255}));
     CHECK(router.presentations()[1].annotationPlan.lineHandles.size() == 3U);
 }
 
-void testShapeCanBeCreatedOutsideLockedSelectionOnOverlay()
+void testBrushToolUsesMacOptionsAndShiftStraightLine()
 {
     FakePlatform platform;
     OverlayInputRouter router(
@@ -535,107 +832,626 @@ void testShapeCanBeCreatedOutsideLockedSelectionOnOverlay()
     createReadySelection(router);
 
     auto owner = router.presentations()[1];
+    CHECK(owner.toolbarItems[2].action == xxsnap::win::ToolbarAction::pen);
     CHECK(router.pointerDown(
-        rightWindow, owner.toolbarItems[0].centerPhysical));
-    CHECK(router.cursorStyle(rightWindow, PixelPoint{200, 20})
-        == OverlayCursorStyle::crosshair);
-
-    CHECK(router.pointerDown(rightWindow, PixelPoint{200, 20}));
-    CHECK(router.cursorStyle(rightWindow, PixelPoint{320, 60})
-        == OverlayCursorStyle::crosshair);
-    router.platformPointerMove(PixelPoint{320, 60});
-    router.platformPointerUp(PixelPoint{320, 60});
-
-    CHECK(router.annotationDocument().annotations().size() == 1U);
-    if (!router.annotationDocument().annotations().empty()) {
-        const auto rect = router.annotationDocument().annotations()[0].rect;
-        CHECK(rect.y < 0.0F);
-        CHECK(rect.width > 70.0F);
-        CHECK(rect.height > 20.0F);
+        rightWindow, owner.toolbarItems[2].centerPhysical));
+    owner = router.presentations()[1];
+    CHECK(owner.toolbarItems[2].selected);
+    CHECK(owner.brushOptions.has_value());
+    if (!owner.brushOptions.has_value()) {
+        return;
     }
+    CHECK(owner.brushOptions->state.style().strokeWidthDip == 3.0F);
+    CHECK(owner.brushOptions->layout.toolbar.width == 418.0F);
 
-    CHECK(router.cursorStyle(rightWindow, PixelPoint{235, 20})
-        == OverlayCursorStyle::move);
-    CHECK(router.pointerDown(rightWindow, PixelPoint{235, 20}));
-    CHECK(router.cursorStyle(rightWindow, PixelPoint{400, 100})
-        == OverlayCursorStyle::move);
-    router.platformPointerUp(PixelPoint{235, 20});
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.brushOptions->layout.strokeWidths[2])));
+    owner = router.presentations()[1];
+    CHECK(owner.brushOptions->state.style().strokeWidthDip == 7.0F);
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.brushOptions->layout.strokeStyle)));
+    owner = router.presentations()[1];
+    CHECK(owner.brushOptions->strokePatternMenu.has_value());
+    CHECK(owner.brushOptions->strokePatternMenu->items.size() == 4U);
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.brushOptions->strokePatternMenu->items[3])));
+    owner = router.presentations()[1];
+    CHECK(owner.brushOptions->state.style().strokePattern
+        == xxsnap::win::AnnotationStrokePattern::dashLongShort);
+    CHECK(router.cursorStyle(rightWindow, PixelPoint{40, 90})
+        == OverlayCursorStyle::brush);
+
+    CHECK(router.pointerDown(rightWindow, PixelPoint{40, 90}));
+    platform.shiftDown = true;
+    platform.cursor = PixelPoint{180, 190};
+    router.pointerMove(rightWindow, PixelPoint{180, 190});
+    router.pointerUp(rightWindow, PixelPoint{180, 190});
+    CHECK(router.annotationDocument().annotations().size() == 1U);
+    const auto& created = router.annotationDocument().annotations().front();
+    CHECK(created.kind == xxsnap::win::AnnotationKind::brush);
+    CHECK(created.brushPath.has_value());
+    CHECK(created.brushPath->points.size() == 2U);
+    CHECK(created.style.strokeWidthDip == 7.0F);
+    CHECK(created.style.strokePattern
+        == xxsnap::win::AnnotationStrokePattern::dashLongShort);
+    CHECK(!router.annotationDocument().selectedId().has_value());
+    CHECK(router.presentations()[1].annotationPlan.lineHandles.empty());
 }
 
-void testShapeCanvasAndCursorChromeSpanTheFullOverlay()
+void testMarkerToolUsesMacOptionsAndShiftSnapping()
+{
+    FakePlatform platform;
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform, {}, true);
+    createReadySelection(router);
+    auto owner = router.presentations()[1];
+    CHECK(owner.toolbarItems[3].action == xxsnap::win::ToolbarAction::marker);
+    CHECK(router.pointerDown(
+        rightWindow, owner.toolbarItems[3].centerPhysical));
+    owner = router.presentations()[1];
+    CHECK(owner.toolbarItems[3].selected);
+    CHECK(owner.markerOptions.has_value());
+    if (!owner.markerOptions.has_value()) {
+        return;
+    }
+    CHECK(owner.markerOptions->layout.toolbar.width == 306.0F);
+    CHECK(owner.markerOptions->state.style().strokeWidthDip == 18.0F);
+    CHECK((owner.markerOptions->state.style().strokeColor
+        == AnnotationColor{179, 235, 0, 255}));
+    CHECK(router.cursorStyle(rightWindow, PixelPoint{100, 100})
+        == OverlayCursorStyle::marker);
+    CHECK(router.markerCursorStyle().has_value());
+    CHECK((router.markerCursorStyle()->strokeColor
+        == AnnotationColor{179, 235, 0, 255}));
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.markerOptions->layout.strokeWidths[0])));
+    CHECK(router.presentations()[1]
+        .markerOptions->state.style().strokeWidthDip == 14.0F);
+
+    CHECK(router.pointerDown(rightWindow, PixelPoint{40, 90}));
+    platform.shiftDown = true;
+    platform.cursor = PixelPoint{180, 140};
+    router.pointerMove(rightWindow, PixelPoint{180, 140});
+    router.pointerUp(rightWindow, PixelPoint{180, 140});
+    CHECK(router.annotationDocument().annotations().size() == 1U);
+    const auto& created = router.annotationDocument().annotations().front();
+    CHECK(created.kind == xxsnap::win::AnnotationKind::marker);
+    CHECK(created.markerLine.has_value());
+    CHECK(created.style.strokeWidthDip == 14.0F);
+    CHECK(router.annotationDocument().selectedId() == created.id);
+    CHECK(router.presentations()[1].annotationPlan.lineHandles.size() == 2U);
+}
+
+void testEyedropperSamplesCopiesAndMeasuresLikeMac()
+{
+    FakePlatform platform;
+    const auto desktop = solidDesktop({10, 20, 30, 255});
+    CHECK(desktop != nullptr);
+    if (!desktop) {
+        return;
+    }
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform, {}, true,
+        desktop.get());
+    createReadySelection(router);
+    const auto owner = router.presentations()[1];
+    const auto eyedropper = std::find_if(
+        owner.toolbarItems.begin(), owner.toolbarItems.end(),
+        [](const auto& item) {
+            return item.action == xxsnap::win::ToolbarAction::eyedropper;
+        });
+    CHECK(eyedropper != owner.toolbarItems.end());
+    if (eyedropper == owner.toolbarItems.end()) {
+        return;
+    }
+    CHECK(router.pointerDown(rightWindow, eyedropper->centerPhysical));
+    const auto selectedOwner = router.presentations()[1];
+    CHECK(std::find_if(
+        selectedOwner.toolbarItems.begin(),
+        selectedOwner.toolbarItems.end(),
+        [](const auto& item) {
+            return item.action == xxsnap::win::ToolbarAction::eyedropper
+                && item.selected;
+        }) != selectedOwner.toolbarItems.end());
+
+    router.pointerMove(rightWindow, PixelPoint{20, 100});
+    auto presentation = router.presentations()[1];
+    CHECK(presentation.eyedropper.has_value());
+    CHECK((presentation.eyedropper->color
+        == AnnotationColor{10, 20, 30, 255}));
+    CHECK(router.cursorStyle(rightWindow, PixelPoint{20, 100})
+        == OverlayCursorStyle::eyedropperLight);
+    CHECK(router.keyPressed(ShapeEditorKey::copy, false, false));
+    CHECK(platform.copiedText == L"#0A141E");
+    CHECK(router.presentations()[1]
+        .eyedropper->copySuccessMillisecondsRemaining > 0U);
+    CHECK(router.eyedropperShiftPressed());
+    CHECK(router.keyPressed(ShapeEditorKey::copy, false, false));
+    CHECK(platform.copiedText == L"10, 20, 30");
+
+    CHECK(router.pointerDown(rightWindow, PixelPoint{20, 100}));
+    router.pointerMove(rightWindow, PixelPoint{23, 104});
+    CHECK(router.pointerDown(rightWindow, PixelPoint{23, 104}));
+    presentation = router.presentations()[1];
+    CHECK(presentation.eyedropper->measurementStart.has_value());
+    CHECK(presentation.eyedropper->measurementEnd.has_value());
+    CHECK(presentation.eyedropper->measurementLabel == L"5 px");
+
+    CHECK(router.keyPressed(ShapeEditorKey::eyedropper, false, false));
+    CHECK(!router.presentations()[1].eyedropper.has_value());
+}
+
+void testShapeCannotBeCreatedOutsideLockedSelectionOnOverlay()
 {
     FakePlatform platform;
     OverlayInputRouter router(
         PixelRect{-640, 0, 1280, 360}, surfaces(), platform, {}, true);
     createReadySelection(router);
 
-    CHECK(router.cursorStyle(rightWindow, PixelPoint{60, 120})
-        == OverlayCursorStyle::crosshair);
-    CHECK(router.pointerDown(rightWindow, PixelPoint{60, 120}));
-    CHECK(router.cursorStyle(rightWindow, PixelPoint{60, 120})
-        == OverlayCursorStyle::move);
-    router.platformPointerUp(PixelPoint{60, 120});
-    CHECK(router.cursorStyle(rightWindow, PixelPoint{60, 120})
-        == OverlayCursorStyle::crosshair);
-
     auto owner = router.presentations()[1];
     CHECK(router.pointerDown(
         rightWindow, owner.toolbarItems[0].centerPhysical));
+    CHECK(router.pointerDown(rightWindow, PixelPoint{200, 20}));
+    CHECK(router.annotationDocument().annotations().empty());
+}
 
-    const auto mainToolbar = computeOverlayLayout({
-        PixelRect{0, 0, 640, 360},
-        *router.selection(),
-        144,
-        144,
-        0.0F,
-        true,
-        std::vector<ToolbarAction>{
-            fullToolbarActions().begin(), fullToolbarActions().end()},
-    }).toolbar;
-    const PixelPoint dragHandlePoint{
-        static_cast<std::int64_t>(
-            (mainToolbar.leadingDragHandle.x
-                + mainToolbar.leadingDragHandle.width / 2.0F) * 1.5F),
-        static_cast<std::int64_t>(
-            (mainToolbar.leadingDragHandle.y
-                + mainToolbar.leadingDragHandle.height / 2.0F) * 1.5F),
-    };
-    CHECK(router.cursorStyle(rightWindow, dragHandlePoint)
-        == OverlayCursorStyle::arrow);
-
-    auto options = *router.presentations()[1].shapeOptions;
-    CHECK(router.pointerDown(
-        rightWindow, dipCenterAt144Dpi(options.layout.strokeStyle)));
-    const auto menu = router.presentations()[1]
-        .shapeOptions->strokePatternMenu;
-    CHECK(menu.has_value());
-    if (menu.has_value()) {
-        CHECK(router.cursorStyle(
-            rightWindow, dipCenterAt144Dpi(menu->menu))
-            == OverlayCursorStyle::arrow);
-        CHECK(router.pointerDown(
-            rightWindow, dipCenterAt144Dpi(menu->items[0])));
+void testMosaicToolbarOptionsAndLiveComposite()
+{
+    FakePlatform platform;
+    auto desktop = solidDesktop({40, 90, 140, 255});
+    CHECK(desktop != nullptr);
+    if (!desktop) {
+        return;
     }
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform, {}, true,
+        desktop.get());
+    createReadySelection(router);
 
-    options = *router.presentations()[1].shapeOptions;
+    auto owner = router.presentations()[1];
+    CHECK(owner.toolbarItems[5].action
+        == xxsnap::win::ToolbarAction::mosaic);
     CHECK(router.pointerDown(
-        rightWindow, dipCenterAt144Dpi(options.layout.rectangleDisclosure)));
-    const auto panel = router.presentations()[1]
-        .shapeOptions->cornerRadiusPanel;
-    CHECK(panel.has_value());
-    if (panel.has_value()) {
-        CHECK(router.cursorStyle(
-            rightWindow, dipCenterAt144Dpi(panel->panel))
-            == OverlayCursorStyle::arrow);
-    }
+        rightWindow, owner.toolbarItems[5].centerPhysical));
+    owner = router.presentations()[1];
+    CHECK(owner.mosaicOptions.has_value());
+    CHECK(owner.mosaicOptions->layout.toolbar.width == 252.0F);
+    CHECK(owner.mosaicOptions->state.redaction().type
+        == xxsnap::win::MosaicRedactionType::pixelMosaic);
 
-    CHECK(router.pointerDown(leftWindow, PixelPoint{100, 140}));
-    router.platformPointerMove(PixelPoint{-420, 220});
-    router.platformPointerUp(PixelPoint{-420, 220});
+    CHECK(router.pointerDown(rightWindow, PixelPoint{20, 100}));
+    platform.cursor = PixelPoint{90, 150};
+    router.pointerMove(rightWindow, PixelPoint{90, 150});
+    router.pointerUp(rightWindow, PixelPoint{90, 150});
     CHECK(router.annotationDocument().annotations().size() == 1U);
-    if (!router.annotationDocument().annotations().empty()) {
-        CHECK(router.annotationDocument().annotations()[0].rect.x < -100.0F);
+    owner = router.presentations()[1];
+    CHECK(owner.annotationComposite != nullptr);
+    CHECK(owner.annotationPlan.items.empty());
+
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.mosaicOptions->layout.redactionType)));
+    owner = router.presentations()[1];
+    CHECK(owner.mosaicOptions->state.redaction().type
+        == xxsnap::win::MosaicRedactionType::gaussianBlur);
+    const auto valueLayout = owner.mosaicOptions->layout;
+    const PixelPoint valueStart{
+        static_cast<std::int64_t>(
+            valueLayout.valueTrack.x * 1.5F + 0.5F),
+        static_cast<std::int64_t>(
+            (valueLayout.valueTrack.y + 2.0F) * 1.5F + 0.5F),
+    };
+    CHECK(router.pointerDown(rightWindow, valueStart));
+    platform.cursor = PixelPoint{
+        static_cast<std::int64_t>((valueLayout.valueTrack.x
+            + valueLayout.valueTrack.width) * 1.5F + 0.5F),
+        valueStart.y,
+    };
+    router.pointerMove(rightWindow, platform.cursor.value());
+    router.pointerUp(rightWindow, platform.cursor.value());
+    owner = router.presentations()[1];
+    CHECK(owner.mosaicOptions->state.redaction().value == 20);
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.mosaicOptions->layout.rectangleMode)));
+    owner = router.presentations()[1];
+    CHECK(owner.mosaicOptions->state.kind()
+        == xxsnap::win::AnnotationKind::mosaicRectangle);
+}
+
+void testTextToolbarAcceptsUnicodeAndUsesRealPopupMenus()
+{
+    FakePlatform platform;
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform, {}, true);
+    createReadySelection(router);
+    auto owner = router.presentations()[1];
+    CHECK(owner.toolbarItems[6].action == xxsnap::win::ToolbarAction::text);
+    CHECK(router.keyPressed(ShapeEditorKey::text, false, false));
+    owner = router.presentations()[1];
+    CHECK(owner.textOptions.has_value());
+    CHECK(owner.textOptions->state.style().textFontFamily
+        == L"Microsoft YaHei");
+    CHECK(router.pointerDown(rightWindow, PixelPoint{30, 100}));
+    router.pointerUp(rightWindow, PixelPoint{30, 100});
+    CHECK(router.textInput(L"中文"));
+    CHECK(router.textInput(L"A"));
+    CHECK(router.keyPressed(ShapeEditorKey::left, false, false));
+    CHECK(router.textInput(L"测"));
+    CHECK(router.keyPressed(ShapeEditorKey::text, false, false));
+    CHECK(router.annotationDocument().annotations().size() == 1U);
+    CHECK(*router.annotationDocument().annotations()[0].text == L"中文测A");
+
+    owner = router.presentations()[1];
+    CHECK(router.keyPressed(ShapeEditorKey::text, false, false));
+    owner = router.presentations()[1];
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.textOptions->layout.fontFamily)));
+    owner = router.presentations()[1];
+    CHECK(owner.textOptions->popupMenu.has_value());
+    CHECK(!owner.textOptions->popupLabels.empty());
+    if (!owner.textOptions->popupLabels.empty()) {
+        CHECK(owner.textOptions->popupLabels[0] == L"Microsoft YaHei");
     }
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.textOptions->layout.textSize)));
+    owner = router.presentations()[1];
+    CHECK(owner.textOptions->popupMenu.has_value());
+    CHECK(owner.textOptions->selectedPopupIndex.has_value());
+    if (owner.textOptions->selectedPopupIndex.has_value()) {
+        CHECK(owner.textOptions->popupLabels[
+            *owner.textOptions->selectedPopupIndex] == L"8");
+    }
+}
+
+void testNumberToolbarCreatesSequenceAndSupportsDoubleClickEditing()
+{
+    FakePlatform platform;
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform, {}, true);
+    createReadySelection(router);
+    CHECK(router.keyPressed(ShapeEditorKey::number, false, false));
+    auto owner = router.presentations()[1];
+    CHECK(owner.numberOptions.has_value());
+    CHECK(owner.numberOptions->state.style().textSize == 3.0F);
+    auto cursor = router.numberCursorState();
+    CHECK(cursor.has_value());
+    CHECK(cursor->type == NumberMarkType::number);
+    CHECK(cursor->value == 1);
+    CHECK(cursor->color == owner.numberOptions->state.style().strokeColor);
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.numberOptions->layout.markType)));
+    owner = router.presentations()[1];
+    CHECK(owner.numberOptions->popupMenu.has_value());
+    CHECK(owner.numberOptions->popupLabels.size() == 3U);
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.numberOptions->layout.markType)));
+
+    platform.cursor = PixelPoint{30, 100};
+    CHECK(router.pointerDown(rightWindow, PixelPoint{30, 100}));
+    router.pointerUp(rightWindow, PixelPoint{30, 100});
+    cursor = router.numberCursorState();
+    CHECK(cursor.has_value());
+    CHECK(cursor->value == 2);
+    platform.cursor = PixelPoint{100, 100};
+    CHECK(router.pointerDown(rightWindow, PixelPoint{100, 100}));
+    router.pointerUp(rightWindow, PixelPoint{100, 100});
+    CHECK(router.annotationDocument().annotations().size() == 2U);
+    CHECK(router.annotationDocument().annotations()[0].numberSequenceIndex == 1);
+    CHECK(router.annotationDocument().annotations()[1].numberSequenceIndex == 2);
+
+    CHECK(router.pointerDown(rightWindow, PixelPoint{30, 100}, 2));
+    CHECK(router.isEditingInlineValue());
+    CHECK(router.keyPressed(ShapeEditorKey::backspace, false, false));
+    CHECK(router.textInput(L"9"));
+    CHECK(router.keyPressed(ShapeEditorKey::enter, false, false));
+    CHECK(router.annotationDocument().annotations()[0].numberSequenceIndex == 9);
+    CHECK(router.annotationDocument().annotations()[0].numberSequenceIsManual);
+}
+
+void testMagnifierToolbarMatchesMacOptionsAndUsesComposite()
+{
+    FakePlatform platform;
+    auto desktop = solidDesktop({40, 90, 140, 255});
+    CHECK(desktop != nullptr);
+    if (!desktop) return;
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform, {}, true,
+        desktop.get());
+    createReadySelection(router);
+    CHECK(router.keyPressed(ShapeEditorKey::magnifier, false, false));
+    auto owner = router.presentations()[1];
+    CHECK(owner.toolbarItems.size() == 17U);
+    CHECK(owner.toolbarItems[8].action
+        == xxsnap::win::ToolbarAction::magnifier);
+    CHECK(owner.toolbarItems[8].selected);
+    CHECK(owner.magnifierOptions.has_value());
+    CHECK(owner.magnifierOptions->layout.toolbar.width == 440.0F);
+    CHECK(owner.magnifierOptions->state.shape()
+        == xxsnap::win::MagnifierShape::rectangle);
+    CHECK(owner.magnifierOptions->state.zoom() == 2.0F);
+    CHECK((owner.magnifierOptions->state.style().strokeColor
+        == AnnotationColor{0, 122, 255, 255}));
+
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.magnifierOptions->layout.circleMode)));
+    owner = router.presentations()[1];
+    CHECK(owner.magnifierOptions->state.shape()
+        == xxsnap::win::MagnifierShape::circle);
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.magnifierOptions->layout.zoom)));
+    owner = router.presentations()[1];
+    CHECK(owner.magnifierOptions->zoomMenu.has_value());
+    CHECK(owner.magnifierOptions->zoomMenu->items.size() == 4U);
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.magnifierOptions->zoomMenu->items[2])));
+    owner = router.presentations()[1];
+    CHECK(owner.magnifierOptions->state.zoom() == 3.0F);
+    CHECK(!owner.magnifierOptions->zoomMenu.has_value());
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.magnifierOptions->layout.colorSwatches.back())));
+    CHECK(platform.chooseColorCalls == 1);
+    CHECK(platform.chosenColorWindow == rightWindow);
+    owner = router.presentations()[1];
+    CHECK((owner.magnifierOptions->state.style().strokeColor
+        == AnnotationColor{1, 2, 3, 255}));
+
+    platform.shiftDown = true;
+    platform.cursor = PixelPoint{20, 100};
+    CHECK(router.pointerDown(rightWindow, PixelPoint{20, 100}));
+    platform.cursor = PixelPoint{90, 140};
+    router.pointerMove(rightWindow, *platform.cursor);
+    router.pointerUp(rightWindow, *platform.cursor);
+    CHECK(router.annotationDocument().annotations().size() == 1U);
+    const auto& annotation = router.annotationDocument().annotations()[0];
+    CHECK(isMagnifierAnnotation(annotation));
+    CHECK(annotation.magnifierShape
+        == xxsnap::win::MagnifierShape::circle);
+    CHECK(annotation.magnifierZoom == 3.0F);
+    CHECK((annotation.style.strokeColor == AnnotationColor{1, 2, 3, 255}));
+    CHECK(annotation.rect.width == annotation.rect.height);
+    owner = router.presentations()[1];
+    CHECK(owner.annotationComposite != nullptr);
+    CHECK(owner.annotationPlan.items.empty());
+    CHECK(!owner.annotationPlan.resizeHandles.empty());
+    CHECK(!owner.annotationPlan.rotationHandle.has_value());
+}
+
+void testEraserToolbarUsesMacLayoutAndModes()
+{
+    FakePlatform platform;
+    auto desktop = solidDesktop({40, 90, 140, 255});
+    CHECK(desktop != nullptr);
+    if (!desktop) return;
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform, {}, true,
+        desktop.get());
+    createReadySelection(router);
+    CHECK(router.keyPressed(ShapeEditorKey::eraser, false, false));
+    auto owner = router.presentations()[1];
+    CHECK(owner.toolbarItems[9].action
+        == xxsnap::win::ToolbarAction::eraser);
+    CHECK(owner.toolbarItems[9].selected);
+    CHECK(owner.eraserOptions.has_value());
+    CHECK((owner.eraserOptions->layout.toolbar
+        == AnnotationRect{owner.eraserOptions->layout.toolbar.x,
+            owner.eraserOptions->layout.toolbar.y, 100, 28}));
+    CHECK(owner.eraserOptions->mode == xxsnap::win::EraserMode::point);
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.eraserOptions->layout.rectangleMode)));
+    owner = router.presentations()[1];
+    CHECK(owner.eraserOptions->mode == xxsnap::win::EraserMode::rectangle);
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.eraserOptions->layout.pointMode)));
+    CHECK(router.presentations()[1].eraserOptions->mode
+        == xxsnap::win::EraserMode::point);
+}
+
+void testRectangleEraserRoutesFromOutsideLockedSelection()
+{
+    FakePlatform platform;
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform, {}, true);
+    createReadySelection(router);
+    const auto lockedSelection = router.selection();
+
+    auto owner = router.presentations()[1];
+    CHECK(router.pointerDown(rightWindow, owner.toolbarItems[0].centerPhysical));
+    CHECK(router.pointerDown(rightWindow, PixelPoint{10, 100}));
+    platform.cursor = PixelPoint{100, 180};
+    router.pointerMove(rightWindow, PixelPoint{100, 180});
+    router.pointerUp(rightWindow, PixelPoint{100, 180});
+    CHECK(router.annotationDocument().annotations().size() == 1U);
+    const auto annotationId = router.annotationDocument().annotations()[0].id;
+
+    CHECK(router.keyPressed(ShapeEditorKey::eraser, false, false));
+    owner = router.presentations()[1];
+    CHECK(owner.eraserOptions.has_value());
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.eraserOptions->layout.rectangleMode)));
+    CHECK(router.cursorStyle(rightWindow, PixelPoint{200, 200})
+        == OverlayCursorStyle::crosshair);
+    const auto capturesBefore = platform.captureCalls;
+    CHECK(router.pointerDown(rightWindow, PixelPoint{200, 200}));
+    CHECK(platform.captureCalls == capturesBefore + 1);
+    platform.cursor = PixelPoint{40, 120};
+    router.pointerMove(rightWindow, PixelPoint{40, 120});
+    CHECK(router.presentations()[1].annotationPlan.eraserPreview.has_value());
+    router.pointerUp(rightWindow, PixelPoint{40, 120});
+    CHECK(router.phase() == SelectionPhase::ready);
+    CHECK(router.selection() == lockedSelection);
+    CHECK(router.annotationDocument().eraserMasks().size() == 1U);
+    CHECK((router.annotationDocument().eraserMasks()[0].affectedAnnotationIds
+        == std::vector<xxsnap::win::AnnotationId>{annotationId}));
+}
+
+void testTextRecognitionAutoCompletesWithoutCaptureChrome()
+{
+    FakePlatform platform;
+    std::vector<OverlayInputAction> actions;
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform,
+        [&actions](OverlayInputAction action) { actions.push_back(action); },
+        false, nullptr, OverlayMode::textRecognition);
+    auto presentations = router.presentations();
+    CHECK(presentations.size() == 2U);
+    CHECK(presentations[0].textRecognition);
+    CHECK(presentations[1].textRecognition);
+    CHECK(!presentations[0].showActions);
+    CHECK(!presentations[1].showActions);
+    CHECK(presentations[0].toolbarItems.empty());
+    CHECK(router.cursorStyle(leftWindow, PixelPoint{300, 100})
+        == OverlayCursorStyle::crosshair);
+
+    CHECK(router.pointerDown(leftWindow, PixelPoint{500, 80}));
+    platform.cursor = PixelPoint{120, 280};
+    router.pointerMove(leftWindow, PixelPoint{500, 80});
+    router.pointerUp(leftWindow, PixelPoint{500, 80});
+    CHECK(router.status() == OverlayInputStatus::completed);
+    CHECK(actions == std::vector<OverlayInputAction>{
+        OverlayInputAction::recognizeText});
+    CHECK((router.selection() == PixelRect{-140, 80, 260, 200}));
+}
+
+void testTeachingPenStartsFullScreenWithBrushAndHiddenToolbar()
+{
+    FakePlatform platform;
+    std::vector<OverlayInputAction> actions;
+    const auto window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(3));
+    OverlayInputRouter router(
+        PixelRect{0, 0, 800, 600},
+        {{window, PixelRect{0, 0, 800, 600}, 96, 96}},
+        platform,
+        [&actions](OverlayInputAction action) { actions.push_back(action); },
+        true, nullptr, OverlayMode::teachingPen);
+
+    CHECK(router.phase() == SelectionPhase::ready);
+    CHECK((router.selection() == PixelRect{0, 0, 800, 600}));
+    const auto hidden = router.presentations().front();
+    CHECK(hidden.teachingPen);
+    CHECK(!hidden.showActions);
+    CHECK(hidden.toolbarItems.empty());
+
+    CHECK(router.rightPointerDown(window, {360, 420}));
+    const auto shown = router.presentations().front();
+    CHECK(shown.showActions);
+    CHECK(shown.toolbarItems.size()
+        == xxsnap::win::teachingPenToolbarActions().size());
+    CHECK(shown.toolbarItems.front().action == xxsnap::win::ToolbarAction::pen);
+    CHECK(shown.toolbarItems.front().selected);
+    CHECK((shown.toolbarItems.front().rectPhysical
+        == PixelRect{370, 430, 20, 20}));
+
+    CHECK(router.rightPointerDown(window, {360, 420}));
+    CHECK(!router.presentations().front().showActions);
+    CHECK(actions.empty());
+}
+
+void testTeachingPenToolbarSelectionAndCanvasDrawingMatchMac()
+{
+    FakePlatform platform;
+    std::vector<OverlayInputAction> actions;
+    const auto window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(3));
+    OverlayInputRouter router(
+        PixelRect{0, 0, 800, 600},
+        {{window, PixelRect{0, 0, 800, 600}, 96, 96}},
+        platform,
+        [&actions](OverlayInputAction action) { actions.push_back(action); },
+        true, nullptr, OverlayMode::teachingPen);
+
+    CHECK(router.rightPointerDown(window, {360, 420}));
+    const auto shown = router.presentations().front();
+    const auto rectangle = std::find_if(
+        shown.toolbarItems.begin(), shown.toolbarItems.end(), [](const auto& item) {
+            return item.action == xxsnap::win::ToolbarAction::rectangle;
+        });
+    CHECK(rectangle != shown.toolbarItems.end());
+    if (rectangle == shown.toolbarItems.end()) return;
+    CHECK(router.pointerDown(window, rectangle->centerPhysical));
+    const auto rectangleOptions = router.presentations().front();
+    CHECK(rectangleOptions.showActions);
+    CHECK(rectangleOptions.shapeOptions.has_value());
+    if (rectangleOptions.shapeOptions.has_value()) {
+        CHECK(rectangleOptions.shapeOptions->state.style().cornerRadiusDip
+            == 0.0F);
+        CHECK(!rectangleOptions.shapeOptions->cornerRadiusPanel.has_value());
+    }
+
+    platform.cursor = PixelPoint{180, 160};
+    CHECK(router.pointerDown(window, {100, 100}));
+    router.pointerMove(window, {180, 160});
+    router.pointerUp(window, {180, 160});
+    CHECK(!router.presentations().front().showActions);
+    CHECK(router.annotationDocument().annotations().size() == 1U);
+    CHECK(router.annotationDocument().annotations().front().kind
+        == xxsnap::win::AnnotationKind::rectangle);
+    CHECK(router.annotationDocument().annotations().front()
+        .style.cornerRadiusDip == 0.0F);
+}
+
+void testTeachingPenTextDefaultsToNoOutline()
+{
+    FakePlatform platform;
+    const auto window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(3));
+    OverlayInputRouter router(
+        PixelRect{0, 0, 800, 600},
+        {{window, PixelRect{0, 0, 800, 600}, 96, 96}},
+        platform, [](OverlayInputAction) {}, true, nullptr,
+        OverlayMode::teachingPen);
+
+    CHECK(router.rightPointerDown(window, {360, 420}));
+    const auto shown = router.presentations().front();
+    const auto textTool = std::find_if(
+        shown.toolbarItems.begin(), shown.toolbarItems.end(), [](const auto& item) {
+            return item.action == xxsnap::win::ToolbarAction::text;
+        });
+    CHECK(textTool != shown.toolbarItems.end());
+    if (textTool == shown.toolbarItems.end()) return;
+    CHECK(router.pointerDown(window, textTool->centerPhysical));
+    const auto selected = router.presentations().front();
+    CHECK(selected.textOptions.has_value());
+    if (selected.textOptions.has_value()) {
+        CHECK(!selected.textOptions->state.style().textOutlineEnabled);
+    }
+}
+
+void testTeachingPenEscapeAndCopyUseMacCompletionSemantics()
+{
+    FakePlatform platform;
+    std::vector<OverlayInputAction> actions;
+    const auto window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(3));
+    OverlayInputRouter router(
+        PixelRect{0, 0, 800, 600},
+        {{window, PixelRect{0, 0, 800, 600}, 96, 96}},
+        platform,
+        [&actions](OverlayInputAction action) { actions.push_back(action); },
+        true, nullptr, OverlayMode::teachingPen);
+
+    router.escapePressed();
+    CHECK(router.status() == OverlayInputStatus::active);
+    CHECK(actions.empty());
+    router.escapePressed();
+    CHECK(router.status() == OverlayInputStatus::cancelled);
+    CHECK(actions == std::vector<OverlayInputAction>{OverlayInputAction::cancel});
+
+    actions.clear();
+    OverlayInputRouter copyRouter(
+        PixelRect{0, 0, 800, 600},
+        {{window, PixelRect{0, 0, 800, 600}, 96, 96}},
+        platform,
+        [&actions](OverlayInputAction action) { actions.push_back(action); },
+        true, nullptr, OverlayMode::teachingPen);
+    CHECK(copyRouter.rightPointerDown(window, {360, 420}));
+    const auto shown = copyRouter.presentations().front();
+    const auto copy = std::find_if(
+        shown.toolbarItems.begin(), shown.toolbarItems.end(), [](const auto& item) {
+            return item.action == xxsnap::win::ToolbarAction::copy;
+        });
+    CHECK(copy != shown.toolbarItems.end());
+    if (copy != shown.toolbarItems.end()) {
+        CHECK(copyRouter.pointerDown(window, copy->centerPhysical));
+    }
+    CHECK(copyRouter.status() == OverlayInputStatus::completed);
+    CHECK(actions == std::vector<OverlayInputAction>{OverlayInputAction::copy});
+    CHECK((copyRouter.selection() == PixelRect{0, 0, 800, 600}));
 }
 
 } // namespace
@@ -645,6 +1461,13 @@ int main()
     testCrossWindowRoutingUsesVirtualPhysicalCoordinates();
     testActionHandleBodyAndBlankPriority();
     testAllToolbarActionsFireExactlyOnceWithoutStartingCapture();
+    testPinToolbarTransfersTheReadySelection();
+    testCtrlOnePinsTheReadySelection();
+    testPinnedImageEditorLocksSelectionAndFinishesWithoutCaptureActions();
+    testPinnedImageEditorEscapeFinishesInsteadOfCancelling();
+    testPinnedImageEditorStandaloneShiftRequestsToolbarHideOnRelease();
+    testPinnedImageEditorShiftToggleCancelsForMixedInput();
+    testPinnedImageEditorAlwaysOnTopShortcutIsNonTerminal();
     testToolbarPresentationUsesSharedPhysicalRects();
     testOnePixelOutsideToolbarItemsDoesNotFireAction();
     testCancelSourcesAreIdempotentAndCaptureFailureFailsClosed();
@@ -652,9 +1475,23 @@ int main()
     testEscapeUnregisterFailureIsObservableAndRetriedOnDestruction();
     testTerminalCallbackMaySynchronouslyDestroyRouter();
     testRestartShutdownReleasesCaptureAndHotKeyWithoutCancelAction();
+    testScrollToolbarSuspendsOverlayWithoutCompletingRouter();
     testShapeToolIsNonTerminalAndEditsThroughSharedPresentation();
     testArrowToolUsesMacOptionsMenuAndCreatesEditableCurve();
-    testShapeCanBeCreatedOutsideLockedSelectionOnOverlay();
-    testShapeCanvasAndCursorChromeSpanTheFullOverlay();
+    testBrushToolUsesMacOptionsAndShiftStraightLine();
+    testMarkerToolUsesMacOptionsAndShiftSnapping();
+    testEyedropperSamplesCopiesAndMeasuresLikeMac();
+    testShapeCannotBeCreatedOutsideLockedSelectionOnOverlay();
+    testMosaicToolbarOptionsAndLiveComposite();
+    testTextToolbarAcceptsUnicodeAndUsesRealPopupMenus();
+    testNumberToolbarCreatesSequenceAndSupportsDoubleClickEditing();
+    testMagnifierToolbarMatchesMacOptionsAndUsesComposite();
+    testEraserToolbarUsesMacLayoutAndModes();
+    testRectangleEraserRoutesFromOutsideLockedSelection();
+    testTextRecognitionAutoCompletesWithoutCaptureChrome();
+    testTeachingPenStartsFullScreenWithBrushAndHiddenToolbar();
+    testTeachingPenToolbarSelectionAndCanvasDrawingMatchMac();
+    testTeachingPenTextDefaultsToNoOutline();
+    testTeachingPenEscapeAndCopyUseMacCompletionSemantics();
     return failureCount == 0 ? 0 : 1;
 }

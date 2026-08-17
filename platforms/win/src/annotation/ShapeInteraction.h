@@ -43,11 +43,21 @@ public:
         AnnotationPoint point,
         AnnotationStyle style = {},
         float rotationDegrees = 0.0F) noexcept;
+    bool beginMosaicRectangleDrawing(
+        AnnotationPoint point,
+        AnnotationStyle style,
+        MosaicRedaction redaction,
+        float rotationDegrees = 0.0F) noexcept;
+    bool beginMagnifierDrawing(
+        AnnotationPoint point,
+        MagnifierShape shape,
+        float zoom,
+        AnnotationStyle style) noexcept;
     bool beginMove(AnnotationId id, AnnotationPoint point) noexcept;
     bool beginResize(AnnotationId id, ShapeResizeHandle handle) noexcept;
     bool beginRotation(AnnotationId id, AnnotationPoint point) noexcept;
 
-    void update(AnnotationPoint point) noexcept;
+    void update(AnnotationPoint point, bool constrainSquare = false) noexcept;
     bool commit();
     void cancel() noexcept;
 
@@ -68,6 +78,13 @@ public:
         AnnotationPoint point) const noexcept;
 
 private:
+    bool beginDrawingInternal(
+        AnnotationKind kind,
+        AnnotationPoint point,
+        AnnotationStyle style,
+        float rotationDegrees,
+        std::optional<MosaicRedaction> mosaicRedaction) noexcept;
+    bool commitDrawingPreview();
     static AnnotationPoint handlePoint(
         AnnotationRect rect,
         ShapeResizeHandle handle) noexcept;
@@ -81,7 +98,7 @@ private:
 
     AnnotationPoint clampPoint(AnnotationPoint point) const noexcept;
     AnnotationRect clampRect(AnnotationRect rect) const noexcept;
-    void updateDrawing(AnnotationPoint point) noexcept;
+    void updateDrawing(AnnotationPoint point, bool constrainSquare) noexcept;
     void updateMoving(AnnotationPoint point) noexcept;
     void updateResizing(AnnotationPoint point) noexcept;
     void updateRotating(AnnotationPoint point) noexcept;

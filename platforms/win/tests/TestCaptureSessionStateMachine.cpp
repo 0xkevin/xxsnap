@@ -57,12 +57,14 @@ CaptureSessionStateMachine machineIn(CaptureSessionState targetState)
     return machine;
 }
 
-constexpr std::array<TransitionCase, 35> transitions{{
+constexpr std::array<TransitionCase, 40> transitions{{
     {CaptureSessionState::idle, SessionEvent::start, TransitionResult::accepted,
      CaptureSessionState::capturing},
     {CaptureSessionState::idle, SessionEvent::captureSucceeded,
      TransitionResult::invalidTransition, CaptureSessionState::idle},
     {CaptureSessionState::idle, SessionEvent::selectionCreated,
+     TransitionResult::invalidTransition, CaptureSessionState::idle},
+    {CaptureSessionState::idle, SessionEvent::resumeSelection,
      TransitionResult::invalidTransition, CaptureSessionState::idle},
     {CaptureSessionState::idle, SessionEvent::exportStarted,
      TransitionResult::invalidTransition, CaptureSessionState::idle},
@@ -79,6 +81,8 @@ constexpr std::array<TransitionCase, 35> transitions{{
      TransitionResult::accepted, CaptureSessionState::selecting},
     {CaptureSessionState::capturing, SessionEvent::selectionCreated,
      TransitionResult::invalidTransition, CaptureSessionState::capturing},
+    {CaptureSessionState::capturing, SessionEvent::resumeSelection,
+     TransitionResult::invalidTransition, CaptureSessionState::capturing},
     {CaptureSessionState::capturing, SessionEvent::exportStarted,
      TransitionResult::invalidTransition, CaptureSessionState::capturing},
     {CaptureSessionState::capturing, SessionEvent::complete,
@@ -94,6 +98,8 @@ constexpr std::array<TransitionCase, 35> transitions{{
      TransitionResult::invalidTransition, CaptureSessionState::selecting},
     {CaptureSessionState::selecting, SessionEvent::selectionCreated,
      TransitionResult::accepted, CaptureSessionState::ready},
+    {CaptureSessionState::selecting, SessionEvent::resumeSelection,
+     TransitionResult::invalidTransition, CaptureSessionState::selecting},
     {CaptureSessionState::selecting, SessionEvent::exportStarted,
      TransitionResult::invalidTransition, CaptureSessionState::selecting},
     {CaptureSessionState::selecting, SessionEvent::complete,
@@ -109,6 +115,8 @@ constexpr std::array<TransitionCase, 35> transitions{{
      TransitionResult::invalidTransition, CaptureSessionState::ready},
     {CaptureSessionState::ready, SessionEvent::selectionCreated,
      TransitionResult::invalidTransition, CaptureSessionState::ready},
+    {CaptureSessionState::ready, SessionEvent::resumeSelection,
+     TransitionResult::accepted, CaptureSessionState::selecting},
     {CaptureSessionState::ready, SessionEvent::exportStarted,
      TransitionResult::accepted, CaptureSessionState::exporting},
     {CaptureSessionState::ready, SessionEvent::complete,
@@ -124,6 +132,8 @@ constexpr std::array<TransitionCase, 35> transitions{{
      TransitionResult::invalidTransition, CaptureSessionState::exporting},
     {CaptureSessionState::exporting, SessionEvent::selectionCreated,
      TransitionResult::invalidTransition, CaptureSessionState::exporting},
+    {CaptureSessionState::exporting, SessionEvent::resumeSelection,
+     TransitionResult::invalidTransition, CaptureSessionState::exporting},
     {CaptureSessionState::exporting, SessionEvent::exportStarted,
      TransitionResult::invalidTransition, CaptureSessionState::exporting},
     {CaptureSessionState::exporting, SessionEvent::complete, TransitionResult::accepted,
@@ -134,7 +144,7 @@ constexpr std::array<TransitionCase, 35> transitions{{
      CaptureSessionState::idle},
 }};
 
-static_assert(transitions.size() == 5U * 7U);
+static_assert(transitions.size() == 5U * 8U);
 
 } // namespace
 

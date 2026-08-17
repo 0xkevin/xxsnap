@@ -305,6 +305,35 @@ void testWindowAndResourceContracts()
     CHECK(xxsnap::win::toolbarResourceId(
         xxsnap::win::toolbarIcon(xxsnap::win::ToolbarAction::copy), 192)
         == IDR_TOOLBAR_200_COPY_TO_CLIPBOARD_PNG);
+    CHECK(LoadCursorW(
+        GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDC_XXSNAP_EYEDROPPER))
+        != nullptr);
+    CHECK(LoadCursorW(GetModuleHandleW(nullptr),
+        MAKEINTRESOURCEW(IDC_XXSNAP_EYEDROPPER_LIGHT)) != nullptr);
+    CHECK(LoadCursorW(GetModuleHandleW(nullptr),
+        MAKEINTRESOURCEW(IDC_XXSNAP_BRUSH)) != nullptr);
+}
+
+void testEyedropperUsesMacPanelGeometryAndFormats()
+{
+    const auto layout = xxsnap::win::eyedropperPanelLayout(
+        {620.0F, 340.0F}, {0.0F, 0.0F, 640.0F, 360.0F});
+    CHECK_RECT((DipRect{layout.panel.x, layout.panel.y,
+        layout.panel.width, layout.panel.height}),
+        (DipRect{422.0F, 138.0F, 184.0F, 188.0F}));
+    CHECK_RECT((DipRect{layout.magnifier.x, layout.magnifier.y,
+        layout.magnifier.width, layout.magnifier.height}),
+        (DipRect{422.0F, 138.0F, 184.0F, 96.0F}));
+    CHECK_RECT((DipRect{layout.info.x, layout.info.y,
+        layout.info.width, layout.info.height}),
+        (DipRect{422.0F, 234.0F, 184.0F, 92.0F}));
+    CHECK(xxsnap::win::eyedropperColorText(
+        {10, 20, 30, 255}, xxsnap::win::EyedropperCopyMode::hex)
+        == L"#0A141E");
+    CHECK(xxsnap::win::eyedropperColorText(
+        {10, 20, 30, 255}, xxsnap::win::EyedropperCopyMode::rgb)
+        == L"10, 20, 30");
+    CHECK(xxsnap::win::eyedropperPixelLength({0, 0}, {3, 4}) == 5);
 }
 
 void testDpiRestartNotificationIsSingleAndFailClosed()
@@ -392,6 +421,14 @@ void testEmbeddedToolbarResources()
              icon.resourceIdAt192Dpi});
     }
     expectedResourceIds.push_back(IDR_PALETTE_TOOL_PNG);
+    expectedResourceIds.insert(expectedResourceIds.end(), {
+        IDR_TEXT_BOLD_PNG,
+        IDR_TEXT_BOLD_SELECTED_PNG,
+        IDR_TEXT_ITALIC_PNG,
+        IDR_TEXT_ITALIC_SELECTED_PNG,
+        IDR_TEXT_STROKE_PNG,
+        IDR_TEXT_STROKE_SELECTED_PNG,
+    });
 
     constexpr std::array<unsigned char, 8> pngSignature{
         0x89U, 0x50U, 0x4EU, 0x47U, 0x0DU, 0x0AU, 0x1AU, 0x0AU};
@@ -419,6 +456,36 @@ void testEmbeddedToolbarResources()
         }
     }
 
+    const auto alipay = FindResourceW(module,
+        MAKEINTRESOURCEW(IDR_DONATION_ALIPAY), MAKEINTRESOURCEW(10));
+    CHECK(alipay != nullptr);
+    if (alipay != nullptr) {
+        const auto loaded = LoadResource(module, alipay);
+        const auto* bytes = static_cast<const unsigned char*>(
+            loaded == nullptr ? nullptr : LockResource(loaded));
+        CHECK(bytes != nullptr);
+        CHECK(SizeofResource(module, alipay) >= 2U);
+        if (bytes != nullptr && SizeofResource(module, alipay) >= 2U) {
+            CHECK(bytes[0] == 0xFFU && bytes[1] == 0xD8U);
+        }
+    }
+    const auto wechatPay = FindResourceW(module,
+        MAKEINTRESOURCEW(IDR_DONATION_WECHATPAY), MAKEINTRESOURCEW(10));
+    CHECK(wechatPay != nullptr);
+    if (wechatPay != nullptr) {
+        const auto loaded = LoadResource(module, wechatPay);
+        const auto* bytes = static_cast<const unsigned char*>(
+            loaded == nullptr ? nullptr : LockResource(loaded));
+        CHECK(bytes != nullptr);
+        CHECK(SizeofResource(module, wechatPay) >= pngSignature.size());
+        if (bytes != nullptr
+            && SizeofResource(module, wechatPay) >= pngSignature.size()) {
+            for (std::size_t index = 0; index < pngSignature.size(); ++index) {
+                CHECK(bytes[index] == pngSignature[index]);
+            }
+        }
+    }
+
     std::vector<int> embeddedResourceIds;
     CHECK(EnumResourceNamesW(
         module,
@@ -426,6 +493,8 @@ void testEmbeddedToolbarResources()
         &collectIntegerResourceName,
         reinterpret_cast<LONG_PTR>(&embeddedResourceIds)) != FALSE);
     std::sort(embeddedResourceIds.begin(), embeddedResourceIds.end());
+    expectedResourceIds.push_back(IDR_DONATION_ALIPAY);
+    expectedResourceIds.push_back(IDR_DONATION_WECHATPAY);
     std::sort(expectedResourceIds.begin(), expectedResourceIds.end());
     CHECK(embeddedResourceIds == expectedResourceIds);
 }
@@ -441,6 +510,7 @@ int main()
     testCrossDisplaySelectionChromeOwnership();
     testMacToolbarSideCandidatesAtEveryDpi();
     testWindowAndResourceContracts();
+    testEyedropperUsesMacPanelGeometryAndFormats();
     testDpiRestartNotificationIsSingleAndFailClosed();
     testDirectWriteConfigurationFailuresAreExplicit();
     testEmbeddedToolbarResources();

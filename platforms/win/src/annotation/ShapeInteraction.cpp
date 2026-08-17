@@ -1,6 +1,9 @@
 #include "annotation/ShapeInteraction.h"
+#include "annotation/NumberAnnotationMetrics.h"
+#include "annotation/TextAnnotationRenderer.h"
 
 #include <array>
+#include <cmath>
 
 namespace xxsnap::win {
 namespace {
@@ -135,9 +138,47 @@ bool ShapeInteraction::beginDrawing(
     AnnotationStyle style,
     float rotationDegrees) noexcept
 {
+    if (!isShapeKind(kind)) {
+        return false;
+    }
+    return beginDrawingInternal(
+        kind, point, style, rotationDegrees, std::nullopt);
+}
+
+bool ShapeInteraction::beginMosaicRectangleDrawing(
+    AnnotationPoint point,
+    AnnotationStyle style,
+    MosaicRedaction redaction,
+    float rotationDegrees) noexcept
+{
+    return beginDrawingInternal(AnnotationKind::mosaicRectangle,
+        point, style, rotationDegrees, redaction);
+}
+
+bool ShapeInteraction::beginMagnifierDrawing(
+    AnnotationPoint point,
+    MagnifierShape shape,
+    float zoom,
+    AnnotationStyle style) noexcept
+{
+    if (!beginDrawingInternal(AnnotationKind::magnifier,
+            point, style, 0.0F, std::nullopt)) {
+        return false;
+    }
+    preview_->magnifierShape = shape;
+    preview_->magnifierZoom = normalizedMagnifierZoom(zoom);
+    return true;
+}
+
+bool ShapeInteraction::beginDrawingInternal(
+    AnnotationKind kind,
+    AnnotationPoint point,
+    AnnotationStyle style,
+    float rotationDegrees,
+    std::optional<MosaicRedaction> mosaicRedaction) noexcept
+{
     cancel();
-    if (!isShapeKind(kind)
-        || bounds_.width <= 0.0F
+    if (bounds_.width <= 0.0F
         || bounds_.height <= 0.0F) {
         return false;
     }
@@ -149,6 +190,11 @@ bool ShapeInteraction::beginDrawing(
         {startPoint_.x, startPoint_.y, 0.0F, 0.0F},
         style,
         rotationDegrees,
+        std::nullopt,
+        std::nullopt,
+        std::nullopt,
+        std::nullopt,
+        mosaicRedaction,
     };
     mode_ = ShapeInteractionMode::drawing;
     return true;
@@ -219,11 +265,13 @@ bool ShapeInteraction::beginRotation(
     return true;
 }
 
-void ShapeInteraction::update(AnnotationPoint point) noexcept
+void ShapeInteraction::update(
+    AnnotationPoint point,
+    bool constrainSquare) noexcept
 {
     switch (mode_) {
     case ShapeInteractionMode::drawing:
-        updateDrawing(point);
+        updateDrawing(point, constrainSquare);
         break;
     case ShapeInteractionMode::moving:
         updateMoving(point);
@@ -250,16 +298,20 @@ bool ShapeInteraction::commit()
     case ShapeInteractionMode::drawing:
         if (preview_->rect.width >= minimumShapeSizeDip
             && preview_->rect.height >= minimumShapeSizeDip) {
-            changed = document_.addShape(
-                preview_->kind,
-                preview_->rect,
-                preview_->style,
-                preview_->rotationDegrees) != invalidAnnotationId;
+            changed = commitDrawingPreview();
         }
         break;
     case ShapeInteractionMode::moving:
-    case ShapeInteractionMode::resizing:
         changed = document_.updateRect(targetId_, preview_->rect);
+        break;
+    case ShapeInteractionMode::resizing:
+        changed = isNumberAnnotation(*preview_)
+            ? document_.updateNumberGeometry(
+                targetId_, preview_->rect, preview_->style)
+            : isTextAnnotation(*preview_)
+            ? document_.updateTextGeometry(
+                targetId_, preview_->rect, preview_->style)
+            : document_.updateRect(targetId_, preview_->rect);
         break;
     case ShapeInteractionMode::rotating:
         changed = document_.updateRotation(
@@ -271,6 +323,35 @@ bool ShapeInteraction::commit()
 
     cancel();
     return changed;
+}
+
+bool ShapeInteraction::commitDrawingPreview()
+{
+    if (!preview_.has_value()) {
+        return false;
+    }
+    switch (preview_->kind) {
+    case AnnotationKind::rectangle:
+    case AnnotationKind::ellipse:
+        return document_.addShape(preview_->kind, preview_->rect,
+                   preview_->style, preview_->rotationDegrees)
+            != invalidAnnotationId;
+    case AnnotationKind::mosaicRectangle:
+        return preview_->mosaicRedaction.has_value()
+            && document_.addMosaicRectangle(preview_->rect,
+                   *preview_->mosaicRedaction, preview_->style,
+                   preview_->rotationDegrees)
+                != invalidAnnotationId;
+    case AnnotationKind::magnifier:
+        return preview_->magnifierShape.has_value()
+            && preview_->magnifierZoom.has_value()
+            && document_.addMagnifier(preview_->rect,
+                   *preview_->magnifierShape, *preview_->magnifierZoom,
+                   preview_->style)
+                != invalidAnnotationId;
+    default:
+        return false;
+    }
 }
 
 void ShapeInteraction::cancel() noexcept
@@ -450,12 +531,23 @@ AnnotationRect ShapeInteraction::clampRect(AnnotationRect rect) const noexcept
     return rect;
 }
 
-void ShapeInteraction::updateDrawing(AnnotationPoint point) noexcept
+void ShapeInteraction::updateDrawing(
+    AnnotationPoint point,
+    bool constrainSquare) noexcept
 {
     if (!preview_.has_value()) {
         return;
     }
     point = clampPoint(point);
+    if (preview_->kind == AnnotationKind::magnifier && constrainSquare) {
+        const auto deltaX = point.x - startPoint_.x;
+        const auto deltaY = point.y - startPoint_.y;
+        const auto side = maximum(
+            absoluteValue(deltaX), absoluteValue(deltaY));
+        point.x = startPoint_.x + (deltaX < 0.0F ? -side : side);
+        point.y = startPoint_.y + (deltaY < 0.0F ? -side : side);
+        point = clampPoint(point);
+    }
     preview_->rect = standardized({
         startPoint_.x,
         startPoint_.y,
@@ -522,7 +614,50 @@ void ShapeInteraction::updateResizing(AnnotationPoint point) noexcept
     const auto resized = standardized({left, top, right - left, bottom - top});
     if (resized.width >= minimumShapeSizeDip
         && resized.height >= minimumShapeSizeDip) {
-        preview_->rect = resized;
+        if (isNumberAnnotation(*preview_)) {
+            const AnnotationPoint center{
+                startRect_.x + startRect_.width / 2.0F,
+                startRect_.y + startRect_.height / 2.0F,
+            };
+            const auto startDx = startRect_.width / 2.0F;
+            const auto startDy = startRect_.height / 2.0F;
+            const auto startDistance = maximum(
+                1.0F, static_cast<float>(std::hypot(startDx, startDy)));
+            const auto currentDistance = maximum(
+                1.0F, static_cast<float>(std::hypot(
+                    point.x - center.x, point.y - center.y)));
+            const auto* original = document_.find(targetId_);
+            const auto originalSize = original != nullptr
+                ? original->style.textSize : preview_->style.textSize;
+            preview_->style.textSize = clampedNumberSize(
+                originalSize * currentDistance / startDistance);
+            preview_->rect = numberMarkRect(
+                center, preview_->style.textSize);
+        } else if (isTextAnnotation(*preview_)) {
+            const auto widthScale = resized.width
+                / (std::max)(minimumShapeSizeDip, startRect_.width);
+            const auto heightScale = resized.height
+                / (std::max)(minimumShapeSizeDip, startRect_.height);
+            const auto scale = (std::max)(widthScale, heightScale);
+            const auto* original = document_.find(targetId_);
+            const auto originalSize = original != nullptr
+                ? original->style.textSize : preview_->style.textSize;
+            preview_->style.textSize = clampedTextSize(originalSize * scale);
+            const AnnotationPoint center{
+                resized.x + resized.width / 2.0F,
+                resized.y + resized.height / 2.0F,
+            };
+            const auto measured = measuredTextRect(
+                {center.x, center.y}, *preview_->text, preview_->style);
+            preview_->rect = {
+                center.x - measured.width / 2.0F,
+                center.y - measured.height / 2.0F,
+                measured.width,
+                measured.height,
+            };
+        } else {
+            preview_->rect = resized;
+        }
     }
 }
 

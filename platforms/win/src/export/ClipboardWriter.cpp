@@ -403,4 +403,84 @@ void Win32ClipboardApi::sleep(DWORD milliseconds) noexcept
     Sleep(milliseconds);
 }
 
+ClipboardTextWriteResult writeClipboardText(
+    const std::wstring& text,
+    HWND owner,
+    ClipboardApi& api) noexcept
+{
+    ClipboardTextWriteResult result;
+    if (text.empty()
+        || text.size() > ((std::numeric_limits<std::size_t>::max)()
+                / sizeof(wchar_t)) - 1U) {
+        result.error = failure(ExportErrorCode::invalidArgument, E_INVALIDARG);
+        return result;
+    }
+    const auto byteCount = (text.size() + 1U) * sizeof(wchar_t);
+    if (!openWithBackoff(owner, api)) {
+        result.error = failure(
+            ExportErrorCode::clipboardOpenFailed,
+            win32Error(api.lastError()));
+        return result;
+    }
+    struct ClipboardCloser final {
+        ClipboardApi& api;
+        ClipboardTextWriteResult& result;
+        ~ClipboardCloser()
+        {
+            if (!api.closeClipboard()) {
+                result.closeError = failure(
+                    ExportErrorCode::clipboardCloseFailed,
+                    win32Error(api.lastError()));
+            }
+        }
+    } closer{api, result};
+
+    if (!api.emptyClipboard()) {
+        result.error = failure(
+            ExportErrorCode::clipboardEmptyFailed,
+            win32Error(api.lastError()));
+        return result;
+    }
+    HGLOBAL handle = api.allocateGlobal(byteCount);
+    if (handle == nullptr) {
+        result.error = failure(
+            ExportErrorCode::clipboardAllocationFailed,
+            win32Error(api.lastError()));
+        return result;
+    }
+    OwnedGlobalMemory owned(api, handle);
+    void* destination = api.lockGlobal(handle);
+    if (destination == nullptr) {
+        result.error = failure(
+            ExportErrorCode::clipboardLockFailed,
+            win32Error(api.lastError()));
+        return result;
+    }
+    std::memcpy(destination, text.c_str(), byteCount);
+    api.clearLastError();
+    if (!api.unlockGlobal(handle) && api.lastError() != ERROR_SUCCESS) {
+        result.error = failure(
+            ExportErrorCode::clipboardLockFailed,
+            win32Error(api.lastError()));
+        return result;
+    }
+    if (api.setClipboardData(CF_UNICODETEXT, handle) == nullptr) {
+        result.error = failure(
+            ExportErrorCode::clipboardSetTextFailed,
+            win32Error(api.lastError()));
+        return result;
+    }
+    owned.release();
+    result.written = true;
+    return result;
+}
+
+ClipboardTextWriteResult writeClipboardText(
+    const std::wstring& text,
+    HWND owner) noexcept
+{
+    Win32ClipboardApi api;
+    return writeClipboardText(text, owner, api);
+}
+
 } // namespace xxsnap::win

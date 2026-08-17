@@ -59,7 +59,22 @@ set_property(
         "${PROJECT_SOURCE_DIR}/platforms/win/resources/icons/Snipory.ico"
         "${PROJECT_SOURCE_DIR}/platforms/win/resources/cursors/xxsnap-crosshair.cur"
         "${PROJECT_SOURCE_DIR}/platforms/win/resources/cursors/xxsnap-rotation.cur"
+        "${PROJECT_SOURCE_DIR}/platforms/win/resources/cursors/xxsnap-eyedropper.cur"
+        "${PROJECT_SOURCE_DIR}/platforms/win/resources/cursors/xxsnap-eyedropper-light.cur"
+        "${PROJECT_SOURCE_DIR}/platforms/win/resources/cursors/xxsnap-eraser.cur"
         "${PROJECT_SOURCE_DIR}/platforms/mac/Resources/Icons/palette-tool.png"
+        "${PROJECT_SOURCE_DIR}/platforms/win/resources/icons/text-bold.png"
+        "${PROJECT_SOURCE_DIR}/platforms/win/resources/icons/text-bold-selected.png"
+        "${PROJECT_SOURCE_DIR}/platforms/win/resources/icons/text-italic.png"
+        "${PROJECT_SOURCE_DIR}/platforms/win/resources/icons/text-italic-selected.png"
+        "${PROJECT_SOURCE_DIR}/platforms/win/resources/icons/text-stroke.png"
+        "${PROJECT_SOURCE_DIR}/platforms/win/resources/icons/text-stroke-selected.png"
+        "${PROJECT_SOURCE_DIR}/platforms/win/resources/icons/ocr-correct.bmp"
+        "${PROJECT_SOURCE_DIR}/platforms/win/resources/icons/ocr-failed.bmp"
+        "${PROJECT_SOURCE_DIR}/platforms/mac/Resources/Icons/correct.svg"
+        "${PROJECT_SOURCE_DIR}/platforms/mac/Resources/Icons/failed.svg"
+        "${PROJECT_SOURCE_DIR}/platforms/win/resources/sounds/fullscreencutsound.wav"
+        "${PROJECT_SOURCE_DIR}/platforms/win/resources/sounds/notification.wav"
         ${XXSNAP_TOOLBAR_ASSET_FILES}
 )
 add_library(xxsnap_visual_resources INTERFACE)
@@ -203,6 +218,70 @@ target_link_libraries(
 )
 
 add_library(
+    xxsnap_scroll_capture_session
+    src/scroll/ScrollCaptureSession.cpp
+)
+target_compile_features(xxsnap_scroll_capture_session PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_scroll_capture_session
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_scroll_capture_session
+    PUBLIC snipory_core_scroll snipory_core_portable
+)
+
+add_library(
+    xxsnap_scroll_capture_target_detector
+    src/scroll/ScrollCaptureTargetDetector.cpp
+)
+target_compile_features(
+    xxsnap_scroll_capture_target_detector PUBLIC cxx_std_17
+)
+target_include_directories(
+    xxsnap_scroll_capture_target_detector
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_scroll_capture_target_detector
+    PUBLIC snipory_core_portable
+    PRIVATE ole32
+)
+
+add_library(
+    xxsnap_scroll_region_capturer
+    src/scroll/ScrollRegionCapturer.cpp
+)
+target_compile_features(xxsnap_scroll_region_capturer PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_scroll_region_capturer
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_scroll_region_capturer
+    PUBLIC xxsnap_gdi_capture_backend snipory_core_scroll
+)
+
+add_library(
+    xxsnap_scroll_capture_host
+    src/scroll/ScrollCaptureHost.cpp
+)
+
+target_compile_features(xxsnap_scroll_capture_host PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_scroll_capture_host
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_scroll_capture_host
+    PUBLIC xxsnap_scroll_capture_session
+           xxsnap_scroll_capture_target_detector
+           xxsnap_scroll_region_capturer
+           xxsnap_toolbar_layout
+    PRIVATE gdi32 user32 ole32 windowscodecs msimg32
+)
+
+add_library(
     xxsnap_annotation_composer
     src/export/AnnotationComposer.cpp
 )
@@ -248,6 +327,23 @@ target_link_libraries(
 )
 
 add_library(
+    xxsnap_pinned_image_host
+    src/pin/PinnedImageGeometry.cpp
+    src/pin/PinnedImageHost.cpp
+)
+target_compile_features(xxsnap_pinned_image_host PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_pinned_image_host
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_pinned_image_host
+    PUBLIC xxsnap_clipboard_writer xxsnap_png_writer snipory_core_portable
+    PRIVATE xxsnap_preferences_settings xxsnap_windows_build_configuration
+            user32 gdi32 comdlg32
+)
+
+add_library(
     xxsnap_toolbar_layout
     src/toolbar/ToolbarLayout.cpp
 )
@@ -286,9 +382,24 @@ target_include_directories(
     xxsnap_shape_interaction
     PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
+add_library(
+    xxsnap_text_annotation_renderer
+    src/annotation/TextAnnotationRenderer.cpp
+)
+target_compile_features(xxsnap_text_annotation_renderer PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_text_annotation_renderer
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_text_annotation_renderer
+    PUBLIC xxsnap_annotation_document
+    PRIVATE d2d1 dwrite
+)
+
 target_link_libraries(
     xxsnap_shape_interaction
-    PUBLIC xxsnap_annotation_document
+    PUBLIC xxsnap_annotation_document xxsnap_text_annotation_renderer
 )
 
 add_library(
@@ -304,6 +415,10 @@ target_include_directories(
 add_library(
     xxsnap_annotation_renderer
     src/annotation/AnnotationRenderer.cpp
+    src/annotation/ArrowLineRenderer.cpp
+    src/annotation/BrushRenderer.cpp
+    src/annotation/MarkerRenderer.cpp
+    src/annotation/NumberAnnotationRenderer.cpp
 )
 target_compile_features(xxsnap_annotation_renderer PUBLIC cxx_std_17)
 target_include_directories(
@@ -312,12 +427,16 @@ target_include_directories(
 )
 target_link_libraries(
     xxsnap_annotation_renderer
-    PUBLIC xxsnap_annotation_document
-    PRIVATE d2d1
+    PUBLIC xxsnap_annotation_document xxsnap_text_annotation_renderer
+    PRIVATE d2d1 dwrite
 )
 
 add_library(
     xxsnap_shape_editor_controller
+    src/annotation/ArrowLineInteraction.cpp
+    src/annotation/BrushInteraction.cpp
+    src/annotation/MarkerInteraction.cpp
+    src/annotation/MosaicInteraction.cpp
     src/annotation/ShapeEditorController.cpp
 )
 target_compile_features(xxsnap_shape_editor_controller PUBLIC cxx_std_17)
@@ -333,6 +452,7 @@ target_link_libraries(
 
 add_library(
     xxsnap_overlay_renderer
+    src/overlay/Eyedropper.cpp
     src/overlay/OverlayRenderer.cpp
 )
 target_compile_features(xxsnap_overlay_renderer PUBLIC cxx_std_17)
@@ -364,7 +484,7 @@ target_include_directories(
 target_link_libraries(
     xxsnap_overlay_window
     PUBLIC xxsnap_overlay_renderer
-    PRIVATE xxsnap_windows_build_configuration user32 gdi32
+    PRIVATE xxsnap_windows_build_configuration user32 gdi32 imm32
 )
 
 add_library(
@@ -382,7 +502,98 @@ target_link_libraries(
     xxsnap_overlay_host
     PUBLIC xxsnap_overlay_window xxsnap_selection_model
            xxsnap_shape_editor_controller
-    PRIVATE xxsnap_windows_build_configuration user32 comdlg32
+    PRIVATE xxsnap_selection_composer xxsnap_annotation_composer
+            xxsnap_windows_build_configuration user32 comdlg32
+)
+target_link_libraries(
+    xxsnap_pinned_image_host
+    PRIVATE xxsnap_overlay_host xxsnap_annotation_composer
+            xxsnap_display_topology
+)
+
+add_library(
+    xxsnap_full_screen_capture_preview_host
+    src/fullscreen/FullScreenCapturePreviewHost.cpp
+)
+target_compile_features(
+    xxsnap_full_screen_capture_preview_host PUBLIC cxx_std_17
+)
+target_include_directories(
+    xxsnap_full_screen_capture_preview_host
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_full_screen_capture_preview_host
+    PUBLIC xxsnap_pinned_image_host xxsnap_overlay_host
+    PRIVATE xxsnap_preferences_settings xxsnap_annotation_composer
+            xxsnap_display_topology
+            xxsnap_windows_build_configuration user32 gdi32 comdlg32
+)
+
+add_library(
+    xxsnap_quirc
+    third_party/quirc/decode.c
+    third_party/quirc/identify.c
+    third_party/quirc/quirc.c
+    third_party/quirc/version_db.c
+)
+target_include_directories(
+    xxsnap_quirc PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/third_party/quirc"
+)
+if(MSVC)
+    target_compile_options(xxsnap_quirc PRIVATE /wd4244 /wd4018 /wd4100 /wd4457 /wd4389)
+endif()
+
+add_library(
+    xxsnap_ocr_engine
+    src/ocr/OcrEngine.cpp
+    src/ocr/QrCodeEngine.cpp
+)
+target_compile_features(xxsnap_ocr_engine PUBLIC cxx_std_20)
+target_include_directories(
+    xxsnap_ocr_engine PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_ocr_engine
+    PUBLIC snipory_core_portable
+    PRIVATE xxsnap_quirc
+    PRIVATE xxsnap_windows_build_configuration ole32
+)
+if(XXSNAP_WINDOWS_FAMILY STREQUAL "modern")
+    target_link_libraries(xxsnap_ocr_engine PRIVATE windowsapp)
+endif()
+
+add_library(xxsnap_capture_sound src/app/CaptureSound.cpp)
+target_compile_features(xxsnap_capture_sound PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_capture_sound
+    PUBLIC
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/resources"
+)
+target_link_libraries(
+    xxsnap_capture_sound
+    PRIVATE xxsnap_windows_build_configuration winmm
+)
+
+add_library(
+    xxsnap_ocr_capture_host
+    src/ocr/OcrCaptureHost.cpp
+    src/ocr/OcrResultPresenter.cpp
+)
+target_compile_features(xxsnap_ocr_capture_host PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_ocr_capture_host PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_ocr_capture_host
+    PUBLIC xxsnap_ocr_engine xxsnap_overlay_host
+    PRIVATE xxsnap_dxgi_capture_backend xxsnap_gdi_capture_backend
+            xxsnap_fallback_capture_backend xxsnap_display_topology
+            xxsnap_selection_composer xxsnap_clipboard_writer
+            xxsnap_preferences_settings xxsnap_capture_sound
+            xxsnap_windows_build_configuration
+            ole32 user32 gdi32
 )
 
 add_library(xxsnap_single_instance src/app/SingleInstance.cpp)
@@ -416,6 +627,90 @@ target_include_directories(
 target_link_libraries(
     xxsnap_hot_key_registrar
     PRIVATE xxsnap_windows_build_configuration user32
+)
+
+add_library(xxsnap_hot_key_settings src/app/HotKeySettings.cpp)
+target_compile_features(xxsnap_hot_key_settings PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_hot_key_settings
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_hot_key_settings
+    PUBLIC xxsnap_hot_key_registrar xxsnap_preferences_settings
+    PRIVATE xxsnap_windows_build_configuration
+)
+
+add_library(xxsnap_launch_at_login src/app/LaunchAtLogin.cpp)
+target_compile_features(xxsnap_launch_at_login PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_launch_at_login
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_launch_at_login
+    PRIVATE xxsnap_windows_build_configuration advapi32
+)
+
+add_library(xxsnap_preferences_settings src/app/PreferencesSettings.cpp)
+target_compile_features(xxsnap_preferences_settings PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_preferences_settings
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_preferences_settings
+    PRIVATE xxsnap_windows_build_configuration advapi32
+)
+
+add_library(xxsnap_shortcut_feedback src/app/ShortcutFeedback.cpp)
+target_compile_features(xxsnap_shortcut_feedback PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_shortcut_feedback
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_shortcut_feedback
+    PUBLIC xxsnap_hot_key_registrar xxsnap_preferences_settings
+    PRIVATE xxsnap_windows_build_configuration user32 gdi32
+)
+
+add_library(xxsnap_preferences_window src/app/PreferencesWindow.cpp)
+target_compile_features(xxsnap_preferences_window PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_preferences_window
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/resources"
+)
+target_link_libraries(
+    xxsnap_preferences_window
+    PUBLIC xxsnap_preferences_settings
+    PRIVATE xxsnap_launch_at_login xxsnap_windows_build_configuration
+            user32 gdi32 shell32 version
+            windowscodecs ole32
+)
+
+add_library(xxsnap_help_window src/app/HelpWindow.cpp)
+target_compile_features(xxsnap_help_window PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_help_window
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_help_window
+    PRIVATE xxsnap_windows_build_configuration user32 gdi32
+)
+
+add_library(xxsnap_diagnostic_support src/diagnostics/DiagnosticSupport.cpp)
+target_compile_features(xxsnap_diagnostic_support PUBLIC cxx_std_17)
+target_include_directories(
+    xxsnap_diagnostic_support
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    xxsnap_diagnostic_support
+    PRIVATE xxsnap_windows_build_configuration
+            user32 shell32 comdlg32 version
 )
 
 add_library(
@@ -454,6 +749,10 @@ target_link_libraries(
         xxsnap_dxgi_capture_backend
         xxsnap_gdi_capture_backend
         xxsnap_fallback_capture_backend
+        xxsnap_scroll_capture_host
+        xxsnap_pinned_image_host
+        xxsnap_full_screen_capture_preview_host
+        xxsnap_ocr_capture_host
         xxsnap_selection_composer
         xxsnap_annotation_composer
         xxsnap_png_writer
@@ -461,6 +760,13 @@ target_link_libraries(
         xxsnap_single_instance
         xxsnap_tray_icon
         xxsnap_hot_key_registrar
+        xxsnap_hot_key_settings
+        xxsnap_preferences_settings
+        xxsnap_shortcut_feedback
+        xxsnap_capture_sound
+        xxsnap_preferences_window
+        xxsnap_help_window
+        xxsnap_diagnostic_support
         xxsnap_visual_resources
         xxsnap_windows_build_configuration
         comdlg32
@@ -522,6 +828,23 @@ if(BUILD_TESTING)
         PRIVATE xxsnap_selection_model
     )
     add_test(NAME selection_model COMMAND xxsnap_selection_model_test)
+
+    add_executable(
+        xxsnap_pinned_image_geometry_test
+        tests/TestPinnedImageGeometry.cpp
+    )
+    target_compile_features(
+        xxsnap_pinned_image_geometry_test PRIVATE cxx_std_17
+    )
+    target_link_libraries(
+        xxsnap_pinned_image_geometry_test
+        PRIVATE xxsnap_pinned_image_host
+                xxsnap_full_screen_capture_preview_host
+    )
+    add_test(
+        NAME pinned_image_geometry
+        COMMAND xxsnap_pinned_image_geometry_test
+    )
 
     add_executable(
         xxsnap_display_topology_test
@@ -599,7 +922,9 @@ if(BUILD_TESTING)
     target_compile_features(xxsnap_toolbar_catalog_test PRIVATE cxx_std_17)
     target_include_directories(
         xxsnap_toolbar_catalog_test
-        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/src"
+            "${CMAKE_CURRENT_SOURCE_DIR}/resources"
     )
     target_link_libraries(
         xxsnap_toolbar_catalog_test
@@ -778,6 +1103,81 @@ if(BUILD_TESTING)
     add_test(NAME app_entry_services COMMAND xxsnap_app_entry_services_test)
 
     add_executable(
+        xxsnap_preferences_settings_test
+        tests/TestPreferencesSettings.cpp
+    )
+    target_compile_features(xxsnap_preferences_settings_test PRIVATE cxx_std_17)
+    target_link_libraries(
+        xxsnap_preferences_settings_test
+        PRIVATE xxsnap_preferences_settings xxsnap_hot_key_settings
+                xxsnap_windows_build_configuration
+    )
+    add_test(NAME preferences_settings COMMAND xxsnap_preferences_settings_test)
+
+    add_executable(
+        xxsnap_shortcut_feedback_test tests/TestShortcutFeedback.cpp
+    )
+    target_compile_features(xxsnap_shortcut_feedback_test PRIVATE cxx_std_17)
+    target_link_libraries(
+        xxsnap_shortcut_feedback_test
+        PRIVATE xxsnap_shortcut_feedback xxsnap_windows_build_configuration
+    )
+    add_test(NAME shortcut_feedback COMMAND xxsnap_shortcut_feedback_test)
+
+    add_executable(
+        xxsnap_capture_sound_test tests/TestCaptureSound.cpp
+    )
+    target_compile_features(xxsnap_capture_sound_test PRIVATE cxx_std_17)
+    target_link_libraries(
+        xxsnap_capture_sound_test
+        PRIVATE xxsnap_capture_sound xxsnap_visual_resources
+                xxsnap_windows_build_configuration
+    )
+    add_dependencies(xxsnap_capture_sound_test xxsnap_visual_assets)
+    add_test(NAME capture_sound COMMAND xxsnap_capture_sound_test)
+
+    add_executable(
+        xxsnap_launch_at_login_test
+        tests/TestLaunchAtLogin.cpp
+    )
+    target_compile_features(xxsnap_launch_at_login_test PRIVATE cxx_std_17)
+    target_link_libraries(
+        xxsnap_launch_at_login_test
+        PRIVATE xxsnap_launch_at_login xxsnap_windows_build_configuration
+    )
+    add_test(NAME launch_at_login COMMAND xxsnap_launch_at_login_test)
+
+    add_executable(
+        xxsnap_preferences_window_test
+        tests/TestPreferencesWindow.cpp
+    )
+    target_compile_features(xxsnap_preferences_window_test PRIVATE cxx_std_17)
+    target_link_libraries(
+        xxsnap_preferences_window_test
+        PRIVATE xxsnap_preferences_window xxsnap_windows_build_configuration
+    )
+    add_test(NAME preferences_window COMMAND xxsnap_preferences_window_test)
+
+    add_executable(xxsnap_help_window_test tests/TestHelpWindow.cpp)
+    target_compile_features(xxsnap_help_window_test PRIVATE cxx_std_17)
+    target_link_libraries(
+        xxsnap_help_window_test
+        PRIVATE xxsnap_help_window xxsnap_windows_build_configuration
+    )
+    add_test(NAME help_window COMMAND xxsnap_help_window_test)
+
+    add_executable(
+        xxsnap_diagnostic_support_test
+        tests/TestDiagnosticSupport.cpp
+    )
+    target_compile_features(xxsnap_diagnostic_support_test PRIVATE cxx_std_17)
+    target_link_libraries(
+        xxsnap_diagnostic_support_test
+        PRIVATE xxsnap_diagnostic_support xxsnap_windows_build_configuration
+    )
+    add_test(NAME diagnostic_support COMMAND xxsnap_diagnostic_support_test)
+
+    add_executable(
         xxsnap_capture_session_coordinator_test
         tests/TestCaptureSessionCoordinator.cpp
     )
@@ -820,6 +1220,54 @@ if(BUILD_TESTING)
     add_test(NAME selection_composer COMMAND xxsnap_selection_composer_test)
 
     add_executable(
+        xxsnap_scroll_capture_session_test
+        tests/TestScrollCaptureSession.cpp
+    )
+    target_compile_features(
+        xxsnap_scroll_capture_session_test PRIVATE cxx_std_17
+    )
+    target_link_libraries(
+        xxsnap_scroll_capture_session_test
+        PRIVATE xxsnap_scroll_capture_session
+    )
+    add_test(
+        NAME scroll_capture_session
+        COMMAND xxsnap_scroll_capture_session_test
+    )
+
+    add_executable(
+        xxsnap_scroll_capture_target_detector_test
+        tests/TestScrollCaptureTargetDetector.cpp
+    )
+    target_compile_features(
+        xxsnap_scroll_capture_target_detector_test PRIVATE cxx_std_17
+    )
+    target_link_libraries(
+        xxsnap_scroll_capture_target_detector_test
+        PRIVATE xxsnap_scroll_capture_target_detector
+    )
+    add_test(
+        NAME scroll_capture_target_detector
+        COMMAND xxsnap_scroll_capture_target_detector_test
+    )
+
+    add_executable(
+        xxsnap_scroll_region_capturer_test
+        tests/TestScrollRegionCapturer.cpp
+    )
+    target_compile_features(
+        xxsnap_scroll_region_capturer_test PRIVATE cxx_std_17
+    )
+    target_link_libraries(
+        xxsnap_scroll_region_capturer_test
+        PRIVATE xxsnap_scroll_region_capturer
+    )
+    add_test(
+        NAME scroll_region_capturer
+        COMMAND xxsnap_scroll_region_capturer_test
+    )
+
+    add_executable(
         xxsnap_annotation_composer_test
         tests/TestAnnotationComposer.cpp
     )
@@ -840,6 +1288,26 @@ if(BUILD_TESTING)
         PRIVATE xxsnap_clipboard_writer xxsnap_windows_build_configuration
     )
     add_test(NAME clipboard_writer COMMAND xxsnap_clipboard_writer_test)
+
+    configure_file(
+        tests/fixtures/qr-xxsnap-2026.bmp
+        "${CMAKE_CURRENT_BINARY_DIR}/fixtures/qr-xxsnap-2026.bmp"
+        COPYONLY
+    )
+    add_executable(
+        xxsnap_ocr_engine_test
+        tests/TestOcrEngine.cpp
+    )
+    target_compile_features(xxsnap_ocr_engine_test PRIVATE cxx_std_20)
+    target_link_libraries(
+        xxsnap_ocr_engine_test
+        PRIVATE xxsnap_ocr_engine xxsnap_windows_build_configuration user32 gdi32
+    )
+    add_test(NAME ocr_engine COMMAND xxsnap_ocr_engine_test)
+    set_tests_properties(
+        ocr_engine PROPERTIES
+        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/fixtures"
+    )
 
     add_executable(
         xxsnap_png_writer_test
@@ -872,6 +1340,80 @@ if(BUILD_TESTING)
         xxsnap_interactive_startup_verifier PRIVATE cxx_std_17
     )
     target_link_libraries(xxsnap_interactive_startup_verifier PRIVATE user32)
+
+    add_executable(
+        xxsnap_interactive_pin_verifier EXCLUDE_FROM_ALL
+        ${CMAKE_SOURCE_DIR}/tools/windows/verify-interactive-pin.cpp
+    )
+    target_compile_features(xxsnap_interactive_pin_verifier PRIVATE cxx_std_17)
+    target_link_libraries(xxsnap_interactive_pin_verifier PRIVATE user32)
+
+    add_executable(
+        xxsnap_interactive_fullscreen_verifier EXCLUDE_FROM_ALL
+        ${CMAKE_SOURCE_DIR}/tools/windows/verify-interactive-fullscreen.cpp
+    )
+    target_compile_features(
+        xxsnap_interactive_fullscreen_verifier PRIVATE cxx_std_17
+    )
+    target_link_libraries(
+        xxsnap_interactive_fullscreen_verifier PRIVATE user32 gdi32
+    )
+
+    add_executable(
+        xxsnap_interactive_ocr_verifier EXCLUDE_FROM_ALL
+        ${CMAKE_SOURCE_DIR}/tools/windows/verify-interactive-ocr.cpp
+    )
+    target_compile_features(
+        xxsnap_interactive_ocr_verifier PRIVATE cxx_std_17
+    )
+    target_link_libraries(
+        xxsnap_interactive_ocr_verifier PRIVATE user32 gdi32
+    )
+
+    add_executable(
+        xxsnap_interactive_teaching_pen_verifier EXCLUDE_FROM_ALL
+        ${CMAKE_SOURCE_DIR}/tools/windows/verify-interactive-teaching-pen.cpp
+    )
+    target_compile_features(
+        xxsnap_interactive_teaching_pen_verifier PRIVATE cxx_std_17
+    )
+    target_link_libraries(
+        xxsnap_interactive_teaching_pen_verifier PRIVATE user32 gdi32
+    )
+
+    add_executable(
+        xxsnap_interactive_preferences_verifier EXCLUDE_FROM_ALL
+        ${CMAKE_SOURCE_DIR}/tools/windows/verify-interactive-preferences.cpp
+    )
+    target_compile_features(
+        xxsnap_interactive_preferences_verifier PRIVATE cxx_std_17
+    )
+    target_link_libraries(
+        xxsnap_interactive_preferences_verifier
+        PRIVATE xxsnap_preferences_settings user32 gdi32 advapi32
+    )
+
+    add_executable(
+        xxsnap_interactive_help_verifier EXCLUDE_FROM_ALL
+        ${CMAKE_SOURCE_DIR}/tools/windows/verify-interactive-help.cpp
+    )
+    target_compile_features(
+        xxsnap_interactive_help_verifier PRIVATE cxx_std_17
+    )
+    target_link_libraries(
+        xxsnap_interactive_help_verifier PRIVATE user32 gdi32
+    )
+
+    add_executable(
+        xxsnap_interactive_shortcut_feedback_verifier EXCLUDE_FROM_ALL
+        ${CMAKE_SOURCE_DIR}/tools/windows/verify-interactive-shortcut-feedback.cpp
+    )
+    target_compile_features(
+        xxsnap_interactive_shortcut_feedback_verifier PRIVATE cxx_std_17
+    )
+    target_link_libraries(
+        xxsnap_interactive_shortcut_feedback_verifier PRIVATE user32
+    )
 endif()
 
 set(xxsnap_capture_session_targets
@@ -882,6 +1424,10 @@ set(xxsnap_capture_session_targets
     xxsnap_dxgi_capture_backend
     xxsnap_fallback_capture_backend
     xxsnap_selection_composer
+    xxsnap_scroll_capture_session
+    xxsnap_scroll_capture_target_detector
+    xxsnap_scroll_region_capturer
+    xxsnap_scroll_capture_host
     xxsnap_annotation_composer
     xxsnap_png_writer
     xxsnap_clipboard_writer
@@ -895,15 +1441,28 @@ set(xxsnap_capture_session_targets
     xxsnap_overlay_renderer
     xxsnap_overlay_window
     xxsnap_overlay_host
+    xxsnap_pinned_image_host
+    xxsnap_full_screen_capture_preview_host
+    xxsnap_quirc
+    xxsnap_ocr_engine
+    xxsnap_ocr_capture_host
     xxsnap_single_instance
     xxsnap_tray_icon
     xxsnap_hot_key_registrar
+    xxsnap_hot_key_settings
+    xxsnap_launch_at_login
+    xxsnap_preferences_settings
+    xxsnap_shortcut_feedback
+    xxsnap_preferences_window
+    xxsnap_help_window
+    xxsnap_diagnostic_support
     xxsnap_capture_session_coordinator
     xxsnap_windows
 )
 if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_capture_session_state_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_selection_model_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_pinned_image_geometry_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_display_topology_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_gdi_capture_test)
     if(XXSNAP_WINDOWS_FAMILY STREQUAL "modern")
@@ -922,14 +1481,31 @@ if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_overlay_layout_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_overlay_input_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_app_entry_services_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_preferences_settings_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_shortcut_feedback_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_launch_at_login_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_preferences_window_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_help_window_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_diagnostic_support_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_capture_session_coordinator_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_memory_budget_matrix_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_selection_composer_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_scroll_capture_session_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_scroll_capture_target_detector_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_scroll_region_capturer_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_annotation_composer_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_clipboard_writer_test)
+    list(APPEND xxsnap_capture_session_targets xxsnap_ocr_engine_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_png_writer_test)
     list(APPEND xxsnap_capture_session_targets xxsnap_interactive_session_launcher)
     list(APPEND xxsnap_capture_session_targets xxsnap_interactive_startup_verifier)
+    list(APPEND xxsnap_capture_session_targets xxsnap_interactive_pin_verifier)
+    list(APPEND xxsnap_capture_session_targets xxsnap_interactive_fullscreen_verifier)
+    list(APPEND xxsnap_capture_session_targets xxsnap_interactive_ocr_verifier)
+    list(APPEND xxsnap_capture_session_targets
+        xxsnap_interactive_teaching_pen_verifier)
+    list(APPEND xxsnap_capture_session_targets
+        xxsnap_interactive_shortcut_feedback_verifier)
 endif()
 
 if(MSVC)

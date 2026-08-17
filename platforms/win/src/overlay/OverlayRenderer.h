@@ -8,6 +8,7 @@
 #include "annotation/AnnotationRenderer.h"
 #include "annotation/ShapeOptions.h"
 #include "overlay/VisualStyleCatalog.h"
+#include "overlay/Eyedropper.h"
 #include "toolbar/ToolbarLayout.h"
 
 #include <Windows.h>
@@ -72,9 +73,68 @@ struct OverlayArrowLineOptionsRenderState {
     std::optional<ArrowEndpoint> arrowTypeMenuEndpoint;
 };
 
+struct OverlayBrushOptionsRenderState {
+    BrushOptionsLayout layout;
+    BrushOptionsState state;
+    std::optional<StrokePatternMenuLayout> strokePatternMenu;
+};
+
+struct OverlayMarkerOptionsRenderState {
+    MarkerOptionsLayout layout;
+    MarkerOptionsState state;
+};
+
+struct OverlayMosaicOptionsRenderState {
+    MosaicOptionsLayout layout;
+    MosaicOptionsState state;
+};
+
+struct OverlayTextOptionsRenderState {
+    TextOptionsLayout layout;
+    TextOptionsState state;
+    std::optional<PopupMenuLayout> popupMenu;
+    std::vector<std::wstring> popupLabels;
+    std::optional<std::size_t> selectedPopupIndex;
+};
+
+struct OverlayNumberOptionsRenderState {
+    NumberOptionsLayout layout;
+    NumberOptionsState state;
+    std::optional<PopupMenuLayout> popupMenu;
+    std::optional<NumberPopupMenu> popupKind;
+    std::vector<std::wstring> popupLabels;
+    std::optional<std::size_t> selectedPopupIndex;
+};
+
+struct OverlayMagnifierOptionsRenderState {
+    MagnifierOptionsLayout layout;
+    MagnifierOptionsState state;
+    std::optional<PopupMenuLayout> zoomMenu;
+};
+
+struct OverlayEraserOptionsRenderState {
+    EraserOptionsLayout layout;
+    EraserMode mode = EraserMode::point;
+};
+
+struct OverlayEyedropperRenderState {
+    AnnotationPoint pointer{};
+    AnnotationColor color{};
+    std::array<AnnotationColor, 81> magnifier{};
+    EyedropperCopyMode copyMode = EyedropperCopyMode::hex;
+    std::uint32_t copySuccessMillisecondsRemaining = 0;
+    std::optional<AnnotationPoint> measurementStart;
+    std::optional<AnnotationPoint> measurementEnd;
+    std::wstring measurementLabel;
+};
+
 struct OverlayRenderState {
     std::optional<PixelRect> selection;
     bool showActions = true;
+    bool pinnedImageEditor = false;
+    bool textRecognition = false;
+    bool teachingPen = false;
+    std::optional<MainToolbarLayout> teachingPenToolbar;
     std::vector<ToolbarAction> toolbarActions{
         terminalToolbarActions().begin(),
         terminalToolbarActions().end(),
@@ -83,8 +143,17 @@ struct OverlayRenderState {
     bool canUndo = false;
     bool canRedo = false;
     AnnotationRenderPlan annotationPlan;
+    std::shared_ptr<const PixelBuffer> annotationComposite;
     std::optional<OverlayShapeOptionsRenderState> shapeOptions;
     std::optional<OverlayArrowLineOptionsRenderState> arrowLineOptions;
+    std::optional<OverlayBrushOptionsRenderState> brushOptions;
+    std::optional<OverlayMarkerOptionsRenderState> markerOptions;
+    std::optional<OverlayMosaicOptionsRenderState> mosaicOptions;
+    std::optional<OverlayTextOptionsRenderState> textOptions;
+    std::optional<OverlayNumberOptionsRenderState> numberOptions;
+    std::optional<OverlayMagnifierOptionsRenderState> magnifierOptions;
+    std::optional<OverlayEraserOptionsRenderState> eraserOptions;
+    std::optional<OverlayEyedropperRenderState> eyedropper;
 };
 
 float physicalPixelsToDip(std::int64_t pixels, std::uint32_t dpi) noexcept;
