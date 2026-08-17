@@ -255,6 +255,10 @@
             {
               "question": "Can I preview a Full Screen Capture before saving it?",
               "answer": "Yes. Start Full Screen Capture from the menu or its current shortcut, which is Command+Shift+1 by default. The result opens in a preview first, so you can check it before copying, saving, or opening the editor."
+            },
+            {
+              "question": "How do I start XxSnap automatically after signing in?",
+              "answer": "Open XxSnap Settings and turn on Launch at login in General. If macOS asks for approval, click Open System Settings and allow XxSnap under General > Login Items & Extensions. When you return to XxSnap, the switch automatically reflects the latest system status."
             }
           ]
         }

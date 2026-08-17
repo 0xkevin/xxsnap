@@ -1,5 +1,6 @@
 import Carbon.HIToolbox
 import CoreImage.CIFilterBuiltins
+import ServiceManagement
 import XCTest
 @testable import xxsnap
 
@@ -822,6 +823,220 @@ final class AppSettingsTests: XCTestCase {
         )
         XCTAssertTrue(imageViews.contains(where: { $0.image === NSApp.applicationIconImage }))
         XCTAssertFalse(NSApp.applicationIconImage.isTemplate)
+    }
+
+    @MainActor
+    func testGeneralPreferencesRefreshLaunchAtLoginStatusWhenApplicationBecomesActive() throws {
+        let settingsStore = FakeAppSettingsStore()
+        let launchAtLoginManager = FakeLaunchAtLoginManager()
+        let controller = PreferencesWindowController(
+            settingsStore: settingsStore,
+            preferencesSettingsStore: FakePreferencesSettingsStore(),
+            hotKeyController: makeHotKeyController(
+                store: settingsStore,
+                registrar: FakeGlobalHotKeyRegistrar()
+            ),
+            launchAtLoginManager: launchAtLoginManager,
+            updateChecker: FakeUpdateChecker()
+        )
+        defer { controller.close() }
+
+        controller.show(section: .general)
+        let initialSwitch = try XCTUnwrap(
+            descendants(of: controller.window?.contentView, matching: NSSwitch.self).first {
+                $0.identifier?.rawValue == "launchAtLogin"
+            }
+        )
+        XCTAssertEqual(initialSwitch.state, .off)
+
+        launchAtLoginManager.status = .enabled
+        NotificationCenter.default.post(
+            name: NSApplication.didBecomeActiveNotification,
+            object: NSApp
+        )
+
+        let refreshedSwitch = try XCTUnwrap(
+            descendants(of: controller.window?.contentView, matching: NSSwitch.self).first {
+                $0.identifier?.rawValue == "launchAtLogin"
+            }
+        )
+        XCTAssertEqual(refreshedSwitch.state, .on)
+    }
+
+    @MainActor
+    func testGeneralPreferencesAllowRetryWhenLoginItemServiceWasNotFound() throws {
+        let settingsStore = FakeAppSettingsStore()
+        let launchAtLoginManager = FakeLaunchAtLoginManager()
+        launchAtLoginManager.status = .notFound
+        let controller = PreferencesWindowController(
+            settingsStore: settingsStore,
+            preferencesSettingsStore: FakePreferencesSettingsStore(),
+            hotKeyController: makeHotKeyController(
+                store: settingsStore,
+                registrar: FakeGlobalHotKeyRegistrar()
+            ),
+            launchAtLoginManager: launchAtLoginManager,
+            updateChecker: FakeUpdateChecker()
+        )
+        defer { controller.close() }
+
+        controller.show(section: .general)
+        let launchSwitch = try XCTUnwrap(
+            descendants(of: controller.window?.contentView, matching: NSSwitch.self).first {
+                $0.identifier?.rawValue == "launchAtLogin"
+            }
+        )
+
+        XCTAssertTrue(launchSwitch.isEnabled)
+        XCTAssertTrue(
+            descendants(of: controller.window?.contentView, matching: NSTextField.self)
+                .contains { $0.stringValue == PreferencesStrings(language: .zhHans).serviceUnavailable }
+        )
+    }
+
+    @MainActor
+    func testGeneralPreferencesToggleUpdatesTheSystemLoginItem() async throws {
+        let settingsStore = FakeAppSettingsStore()
+        let launchAtLoginManager = FakeLaunchAtLoginManager()
+        let changed = expectation(description: "login item changed")
+        launchAtLoginManager.didSetEnabled = { changed.fulfill() }
+        let controller = PreferencesWindowController(
+            settingsStore: settingsStore,
+            preferencesSettingsStore: FakePreferencesSettingsStore(),
+            hotKeyController: makeHotKeyController(
+                store: settingsStore,
+                registrar: FakeGlobalHotKeyRegistrar()
+            ),
+            launchAtLoginManager: launchAtLoginManager,
+            updateChecker: FakeUpdateChecker()
+        )
+        defer { controller.close() }
+
+        controller.show(section: .general)
+        let launchSwitch = try XCTUnwrap(
+            descendants(of: controller.window?.contentView, matching: NSSwitch.self).first {
+                $0.identifier?.rawValue == "launchAtLogin"
+            }
+        )
+        launchSwitch.performClick(nil)
+
+        await fulfillment(of: [changed], timeout: 1)
+        XCTAssertEqual(launchAtLoginManager.requestedEnabledStates, [true])
+        let refreshedSwitch = try XCTUnwrap(
+            descendants(of: controller.window?.contentView, matching: NSSwitch.self).first {
+                $0.identifier?.rawValue == "launchAtLogin"
+            }
+        )
+        XCTAssertEqual(refreshedSwitch.state, .on)
+    }
+
+    @MainActor
+    func testLaunchAtLoginManagerRegistersAndUnregistersTheMainApplication() async throws {
+        let service = FakeSystemLaunchAtLoginService(status: .notRegistered)
+        let manager = LaunchAtLoginManager(service: service)
+
+        try await manager.setEnabled(true)
+
+        XCTAssertEqual(service.registerCount, 1)
+        XCTAssertEqual(manager.status, .enabled)
+
+        try await manager.setEnabled(false)
+
+        XCTAssertEqual(service.unregisterCount, 1)
+        XCTAssertEqual(manager.status, .notRegistered)
+    }
+
+    @MainActor
+    func testLaunchAtLoginManagerSkipsOperationsWhenStateAlreadyMatches() async throws {
+        let service = FakeSystemLaunchAtLoginService(status: .enabled)
+        let manager = LaunchAtLoginManager(service: service)
+
+        try await manager.setEnabled(true)
+        service.status = .notRegistered
+        try await manager.setEnabled(false)
+
+        XCTAssertEqual(service.registerCount, 0)
+        XCTAssertEqual(service.unregisterCount, 0)
+    }
+
+    @MainActor
+    func testLaunchAtLoginManagerReportsWhenMacOSRequiresApproval() async {
+        let service = FakeSystemLaunchAtLoginService(status: .notRegistered)
+        service.registerError = NSError(
+            domain: "ServiceManagement",
+            code: Int(kSMErrorLaunchDeniedByUser)
+        )
+        let manager = LaunchAtLoginManager(service: service)
+
+        do {
+            try await manager.setEnabled(true)
+            XCTFail("Expected approval requirement")
+        } catch {
+            XCTAssertEqual(error as? LaunchAtLoginOperationError, .requiresApproval)
+        }
+    }
+
+    @MainActor
+    func testLaunchAtLoginManagerTreatsAlreadyRegisteredRaceAsSuccess() async throws {
+        let service = FakeSystemLaunchAtLoginService(status: .notRegistered)
+        service.registerError = NSError(
+            domain: "ServiceManagement",
+            code: Int(kSMErrorAlreadyRegistered)
+        )
+        let manager = LaunchAtLoginManager(service: service)
+
+        try await manager.setEnabled(true)
+
+        XCTAssertEqual(service.registerCount, 1)
+    }
+
+    @MainActor
+    func testLaunchAtLoginManagerMapsSignatureAndServiceErrors() async {
+        let cases: [(Int, LaunchAtLoginOperationError)] = [
+            (Int(kSMErrorInvalidSignature), .invalidSignature),
+            (Int(kSMErrorServiceUnavailable), .serviceUnavailable)
+        ]
+
+        for (code, expectedError) in cases {
+            let service = FakeSystemLaunchAtLoginService(status: .notRegistered)
+            service.registerError = NSError(domain: "ServiceManagement", code: code)
+            let manager = LaunchAtLoginManager(service: service)
+
+            do {
+                try await manager.setEnabled(true)
+                XCTFail("Expected launch-at-login error for code \(code)")
+            } catch {
+                XCTAssertEqual(error as? LaunchAtLoginOperationError, expectedError)
+            }
+        }
+    }
+
+    @MainActor
+    func testLaunchAtLoginManagerTreatsMissingJobDuringUnregisterAsSuccess() async throws {
+        let service = FakeSystemLaunchAtLoginService(status: .enabled)
+        service.unregisterError = NSError(
+            domain: "ServiceManagement",
+            code: Int(kSMErrorJobNotFound)
+        )
+        let manager = LaunchAtLoginManager(service: service)
+
+        try await manager.setEnabled(false)
+
+        XCTAssertEqual(service.unregisterCount, 1)
+    }
+
+    func testLaunchAtLoginErrorsHaveLocalizedRecoveryMessages() {
+        let chinese = PreferencesStrings(language: .zhHans)
+        let english = PreferencesStrings(language: .english)
+
+        for error in [
+            LaunchAtLoginOperationError.invalidSignature,
+            LaunchAtLoginOperationError.serviceUnavailable
+        ] {
+            XCTAssertFalse(chinese.launchAtLoginError(error).isEmpty)
+            XCTAssertFalse(english.launchAtLoginError(error).isEmpty)
+            XCTAssertNotEqual(chinese.launchAtLoginError(error), english.launchAtLoginError(error))
+        }
     }
 
     @MainActor
@@ -2617,9 +2832,44 @@ private final class FakeSystemShortcutMonitor: SystemShortcutMonitoring {
 @MainActor
 private final class FakeLaunchAtLoginManager: LaunchAtLoginManaging {
     var status: LaunchAtLoginStatus = .notRegistered
+    var didSetEnabled: (() -> Void)?
+    private(set) var requestedEnabledStates: [Bool] = []
 
     func setEnabled(_ isEnabled: Bool) async throws {
+        requestedEnabledStates.append(isEnabled)
         status = isEnabled ? .enabled : .notRegistered
+        didSetEnabled?()
+    }
+
+    func openSystemSettings() {}
+}
+
+@MainActor
+private final class FakeSystemLaunchAtLoginService: SystemLaunchAtLoginServicing {
+    var status: LaunchAtLoginStatus
+    var registerError: Error?
+    var unregisterError: Error?
+    private(set) var registerCount = 0
+    private(set) var unregisterCount = 0
+
+    init(status: LaunchAtLoginStatus) {
+        self.status = status
+    }
+
+    func register() throws {
+        registerCount += 1
+        if let registerError {
+            throw registerError
+        }
+        status = .enabled
+    }
+
+    func unregister() async throws {
+        unregisterCount += 1
+        if let unregisterError {
+            throw unregisterError
+        }
+        status = .notRegistered
     }
 
     func openSystemSettings() {}
