@@ -343,8 +343,12 @@ final class AppUpdateController: UpdateChecking {
     private let currentVersion: String
     private let currentBuild: Int
     private let networkMonitor: any CommercialNetworkMonitoring
+    private let downloader: any AppUpdateDownloading
+    private let installer: any AppUpdateInstalling
+    private let applicationURL: URL
     private var periodicTask: Task<Void, Never>?
     private var checkTask: Task<UpdateCheckResult, Never>?
+    private var updateTask: Task<Void, Never>?
     private var state: UpdateCheckResult = .upToDate
     private var isPresenting = false
     private var started = false
@@ -353,13 +357,18 @@ final class AppUpdateController: UpdateChecking {
     init(
         bundle: Bundle = .main,
         fetcher: (any AppUpdatePolicyFetching)? = nil,
-        networkMonitor: (any CommercialNetworkMonitoring)? = nil
+        networkMonitor: (any CommercialNetworkMonitoring)? = nil,
+        downloader: (any AppUpdateDownloading)? = nil,
+        installer: (any AppUpdateInstalling)? = nil
     ) throws {
         self.fetcher = try fetcher ?? AppUpdatePolicyClient(bundle: bundle)
         verifier = try CommercialSignatureVerifier(bundle: bundle)
         currentVersion = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
         currentBuild = Int(bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0") ?? 0
         self.networkMonitor = networkMonitor ?? SystemAppUpdateNetworkMonitor()
+        self.downloader = downloader ?? AppUpdateDownloadService()
+        self.installer = installer ?? SystemAppUpdateInstaller(bundle: bundle)
+        applicationURL = bundle.bundleURL
     }
 
     var blocksAppUse: Bool {
@@ -417,7 +426,7 @@ final class AppUpdateController: UpdateChecking {
     }
 
     func presentUpdateResult(_ result: UpdateCheckResult, manual: Bool) {
-        guard !isPresenting else { return }
+        guard !isPresenting, updateTask == nil else { return }
         switch result {
         case .upToDate where !manual, .unavailable where !manual:
             return
@@ -434,13 +443,20 @@ final class AppUpdateController: UpdateChecking {
             alert.informativeText = "XxSnap \(currentVersion) (\(currentBuild))"
             alert.addButton(withTitle: strings.confirm)
         case let .available(release):
-            configureUpdateAlert(alert, release: release, title: strings.updateAvailableTitle, detail: release.releaseNotes)
+            configureUpdateAlert(
+                alert,
+                release: release,
+                title: strings.updateAvailableTitle,
+                detail: release.releaseNotes,
+                strings: strings
+            )
         case let .grace(release, deadline):
             configureUpdateAlert(
                 alert,
                 release: release,
                 title: strings.updateGraceTitle,
-                detail: strings.updateGraceDetail(deadline: deadline)
+                detail: strings.updateGraceDetail(deadline: deadline),
+                strings: strings
             )
         case let .required(release, deadline):
             alert.alertStyle = .critical
@@ -458,10 +474,10 @@ final class AppUpdateController: UpdateChecking {
         let response = alert.runModal()
         switch result {
         case let .available(release), let .grace(release, _):
-            if response == .alertFirstButtonReturn { open(release) }
+            if response == .alertFirstButtonReturn { beginUpdate(release, strings: strings) }
         case let .required(release, _):
             if response == .alertFirstButtonReturn {
-                open(release)
+                beginUpdate(release, strings: strings)
             } else {
                 NSApplication.shared.terminate(nil)
             }
@@ -501,18 +517,98 @@ final class AppUpdateController: UpdateChecking {
         _ alert: NSAlert,
         release: AppUpdateRelease,
         title: String,
-        detail: String
+        detail: String,
+        strings: PreferencesStrings
     ) {
-        let strings = PreferencesStrings(language: currentLanguage)
         alert.messageText = title
         alert.informativeText = detail.isEmpty ? "XxSnap \(release.version)" : detail
         alert.addButton(withTitle: strings.downloadUpdate)
         alert.addButton(withTitle: strings.later)
     }
 
-    private func open(_ release: AppUpdateRelease) {
-        guard AppUpdateRelease.isAllowedDownloadURL(release.downloadURL) else { return }
-        NSWorkspace.shared.open(release.downloadURL)
+    private func beginUpdate(_ release: AppUpdateRelease, strings: PreferencesStrings) {
+        guard updateTask == nil,
+              AppUpdateRelease.isAllowedDownloadURL(release.downloadURL)
+        else { return }
+        let progress = UpdateProgressWindowController(version: release.version, strings: strings)
+        progress.onCancel = { [weak self] in
+            self?.downloader.cancel()
+        }
+        progress.update(stage: .downloading(nil))
+        progress.show()
+
+        updateTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            var acceptsDownloadProgress = true
+            do {
+                let downloadedURL = try await downloader.download(release: release) { [weak progress] value in
+                    guard acceptsDownloadProgress else { return }
+                    progress?.update(stage: .downloading(value))
+                }
+                acceptsDownloadProgress = false
+                defer { cleanupDownload(downloadedURL) }
+                progress.update(stage: .verifying)
+                let prepared = try await Task.detached(priority: .userInitiated) { [installer] in
+                    try installer.prepare(downloadURL: downloadedURL, release: release)
+                }.value
+                progress.update(stage: .installing)
+                try await Task.detached(priority: .userInitiated) { [installer] in
+                    try installer.install(prepared)
+                }.value
+                progress.close()
+                updateTask = nil
+                relaunchInstalledApplication()
+            } catch {
+                acceptsDownloadProgress = false
+                progress.close()
+                updateTask = nil
+                presentUpdateFailure(error, strings: strings)
+            }
+        }
+    }
+
+    private func cleanupDownload(_ fileURL: URL) {
+        try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent())
+    }
+
+    private func presentUpdateFailure(_ error: Error, strings: PreferencesStrings) {
+        let alert = NSAlert()
+        if error as? AppUpdateInstallationError == .cancelled {
+            alert.messageText = strings.updateCancelledTitle
+            alert.informativeText = ""
+        } else {
+            alert.alertStyle = .warning
+            alert.messageText = strings.updateFailedTitle
+            let detail = strings.updateFailureReason(error)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            alert.informativeText = detail.isEmpty
+                ? strings.updateFailedDetail
+                : "\(strings.updateFailedDetail)\n\n\(detail)"
+        }
+        alert.addButton(withTitle: strings.confirm)
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+    }
+
+    private func relaunchInstalledApplication() {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = [
+            "-c",
+            "pid=\"$1\"; app=\"$2\"; count=0; while /bin/kill -0 \"$pid\" 2>/dev/null && [ \"$count\" -lt 300 ]; do /bin/sleep 0.2; count=$((count + 1)); done; /usr/bin/open \"$app\"",
+            "xxsnap-relaunch",
+            String(ProcessInfo.processInfo.processIdentifier),
+            applicationURL.path,
+        ]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            NSApplication.shared.terminate(nil)
+        } catch {
+            NSWorkspace.shared.open(applicationURL)
+            NSApplication.shared.terminate(nil)
+        }
     }
 }
 
