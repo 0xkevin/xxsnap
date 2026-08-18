@@ -46,16 +46,26 @@
 
 1. 正式 DMG 文件名固定为 `XxSnap-<MARKETING_VERSION>-universal.dmg`，例如 `XxSnap-1.0.0-universal.dmg`。
 2. DMG 文件名不得包含构建号或内部状态，包括但不限于 `build2`、`internal`、`unsigned`、`unnotarized`。构建号只存在于应用元数据、后台版本记录和 `manifest.json` 中。
-3. 最终交付目录至少包含以下三个文件，缺少任意一个都视为打包未完成：
+3. 最终交付目录至少包含以下五个文件，缺少任意一个都视为打包未完成：
 
    ```text
    dist/<MARKETING_VERSION>/
    ├── XxSnap-<MARKETING_VERSION>-universal.dmg
    ├── manifest.json
-   └── checksums.txt
+   ├── checksums.txt
+   ├── release-notes-zh-CN.md
+   └── release-notes-en.md
    ```
 
 4. 如果同一版本号存在历史构建，生成新包时必须先保留历史产物或使用独立临时目录，未经用户确认不得覆盖旧包；最终上传的 DMG 文件名仍遵循标准名称。
+5. `release-notes-zh-CN.md` 和 `release-notes-en.md` 必须分别提供面向用户的中文、英文发布说明，标题必须包含准确的版本号和构建号，正文应说明本次新增、优化和修复内容，不得复制旧版本说明或遗漏本次主要功能。
+
+### 平台隔离
+
+1. macOS 与 Windows 必须独立构建、独立测试、独立打包。用户只要求某个平台时，不得构建、复制或交付另一平台的安装包、可执行文件、调试文件或资源。
+2. 从 `main` 发布 macOS 版本时，`main` 可以包含已经合并的 Windows 源码，但 macOS Xcode 工程、归档和 DMG 不得引用或携带 `platforms/win`、Windows 构建目录或 Windows 产物；Windows 代码的存在不得改变 macOS 功能和打包结果。
+3. 交付前必须检查最终安装介质的内容，确认其中只有目标平台应用及必要的安装入口；不得仅根据构建命令推断平台隔离已经生效。
+4. 除非用户明确要求同时发布多个平台，否则不得因为版本号相同、分支已合并或自动化脚本默认行为而联动打包其他平台。
 
 ### `manifest.json` 和校验文件
 
@@ -90,4 +100,4 @@
 
 ### 发布交付清单
 
-交付前必须明确报告并核对：来源 `main` 提交 SHA、用户可见版本号、括号内构建号、DMG 文件名、文件大小、SHA-256、双架构结果、签名与公证状态、`manifest.json` 校验结果，以及未执行或失败的测试。用户明确允许跳过 Developer ID 或公证时，可以生成对应包，但仍不得遗漏 manifest 和 checksum，并且必须在交付说明中明确风险。
+交付前必须明确报告并核对：来源 `main` 提交 SHA、用户可见版本号、括号内构建号、DMG 文件名、文件大小、SHA-256、双架构结果、签名与公证状态、`manifest.json` 校验结果、中英文发布说明、目标平台隔离检查，以及未执行或失败的测试。用户明确允许跳过 Developer ID 或公证时，可以生成对应包，但仍不得遗漏 manifest、checksum 和中英文发布说明，并且必须在交付说明中明确风险。
