@@ -8,8 +8,8 @@ settings:
     CLANG_CXX_LANGUAGE_STANDARD: c++20
     HEADER_SEARCH_PATHS: "$(PROJECT_DIR)/../../core/include"
     GENERATE_INFOPLIST_FILE: YES
-    CURRENT_PROJECT_VERSION: 4
-    MARKETING_VERSION: 1.2.0
+    CURRENT_PROJECT_VERSION: 5
+    MARKETING_VERSION: 1.2.1
 targets:
   xxsnap:
     type: application

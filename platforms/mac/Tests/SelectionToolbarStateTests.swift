@@ -6641,7 +6641,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_cursorStyle(at: point), .crosshair)
     }
 
-    func testOverlayWindowUsesLightBrushCursorOnBlackBackground() {
+    func testOverlayWindowUsesOutlinedBrushCursorOnBlackBackground() {
         let image = solidImage(size: NSSize(width: 500, height: 400), color: .black)
         let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
         let selection = NSRect(x: 100, y: 100, width: 200, height: 120)
@@ -6649,7 +6649,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_setLockedSelectionRect(selection)
         window.test_activateShapeTool(.brush)
 
-        XCTAssertEqual(window.test_cursorStyle(at: point), .brushLight)
+        XCTAssertEqual(window.test_cursorStyle(at: point), .brush)
     }
 
     func testOverlayWindowUsesLightEyedropperCursorOnBlackBackground() throws {
@@ -15416,12 +15416,19 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertNotNil(Bundle.main.url(forResource: "trash", withExtension: "svg"))
     }
 
-    func testCurrentColorToolbarIconsUseTemplateTint() {
-        XCTAssertFalse(SelectionToolbarState.usesFixedColorToolbarIconResource("pencil-tool"))
-        XCTAssertFalse(SelectionToolbarState.usesFixedColorToolbarIconResource("arrow"))
-        XCTAssertFalse(SelectionToolbarState.usesFixedColorToolbarIconResource("mosaic-tool"))
-        XCTAssertFalse(SelectionToolbarState.usesFixedColorToolbarIconResource("straw-ranging"))
-        XCTAssertTrue(SelectionToolbarState.usesFixedColorToolbarIconResource("undo-enabled"))
+    func testToolbarIconColorTreatmentMatchesResourceArtwork() {
+        XCTAssertFalse(
+            SelectionToolbarState.shouldTintToolbarIconResource("pencil-tool", selected: false)
+        )
+        XCTAssertTrue(
+            SelectionToolbarState.shouldTintToolbarIconResource("pencil-tool", selected: true)
+        )
+        XCTAssertTrue(
+            SelectionToolbarState.shouldTintToolbarIconResource("arrow", selected: false)
+        )
+        XCTAssertFalse(
+            SelectionToolbarState.shouldTintToolbarIconResource("undo-enabled", selected: true)
+        )
     }
 
     func testMosaicToolbarButtonUsesMasaike2Resource() {
@@ -16463,6 +16470,28 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertGreaterThan(iconPixel.blue, iconPixel.red)
         XCTAssertGreaterThan(iconPixel.blue, iconPixel.green)
         XCTAssertLessThan(pixelDistance(selectedBackgroundPixel, unselectedBackgroundPixel), 8)
+    }
+
+    func testSelectedPencilToolbarIconIsBlueInScreenshotAndTeachingPen() throws {
+        let image = solidImage(size: NSSize(width: 900, height: 520), color: .white)
+        let screenshot = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        screenshot.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+
+        let teachingPen = SelectionOverlayWindow(
+            backgroundImage: image,
+            configuration: .teachingPen(windowFrame: NSRect(origin: .zero, size: image.size))
+        ) { _ in }
+        teachingPen.test_rightMouseDown(at: NSPoint(x: 360, y: 420))
+
+        for window in [screenshot, teachingPen] {
+            window.test_activateShapeTool(.brush)
+            let button = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .pen))
+            let overlayImage = try XCTUnwrap(window.test_renderedOverlayImage())
+            let iconPixel = try XCTUnwrap(firstBlueDominantPixel(in: overlayImage, rect: button))
+
+            XCTAssertGreaterThan(iconPixel.blue, iconPixel.red)
+            XCTAssertGreaterThan(iconPixel.blue, iconPixel.green)
+        }
     }
 
     func testSelectedEyedropperToolbarIconIsBlueWithoutSelectedBackground() throws {

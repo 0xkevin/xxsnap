@@ -626,10 +626,9 @@ extension NSCursor {
         return NSCursor(image: image, hotSpot: center)
     }
 
-    static let xxsnapBrush: NSCursor = brushCursor(tint: nil)
-    static let xxsnapBrushLight: NSCursor = brushCursor(tint: .white)
+    static let xxsnapBrush: NSCursor = brushCursor()
 
-    private static func brushCursor(tint: NSColor?) -> NSCursor {
+    private static func brushCursor() -> NSCursor {
         let size = NSSize(width: 24, height: 24)
         // Hot spot at the pencil tip (lower-left area of the icon).
         // This ensures the drawn line follows the tip, not the cursor center.
@@ -649,10 +648,6 @@ extension NSCursor {
                 operation: .copy,
                 fraction: 1.0
             )
-            if let tint {
-                tint.setFill()
-                NSRect(x: inset, y: inset, width: iconSize, height: iconSize).fill(using: .sourceAtop)
-            }
             scaled.unlockFocus()
             return NSCursor(image: scaled, hotSpot: tipHotSpot)
         }
@@ -666,10 +661,6 @@ extension NSCursor {
             image.lockFocus()
             NSGraphicsContext.current?.imageInterpolation = .high
             symbol.draw(in: NSRect(x: inset, y: inset, width: iconSize, height: iconSize))
-            if let tint {
-                tint.setFill()
-                NSRect(x: inset, y: inset, width: iconSize, height: iconSize).fill(using: .sourceAtop)
-            }
             image.unlockFocus()
             return NSCursor(image: image, hotSpot: tipHotSpot)
         }
@@ -3707,6 +3698,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         _ style: SelectionToolbarState.OverlayCursorStyle,
         at point: NSPoint
     ) -> SelectionToolbarState.OverlayCursorStyle {
+        if style == .brush {
+            return .brush
+        }
         guard shouldUseLightCursor(at: point) else {
             return style
         }
@@ -3726,8 +3720,6 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
             return .resizeBottomLeftLight
         case .resizeBottomRight:
             return .resizeBottomRightLight
-        case .brush:
-            return .brushLight
         case .marker:
             return .markerLight
         case .eyedropper:
@@ -4286,7 +4278,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
     private func cursorRectCursorForActiveShapeTool() -> NSCursor {
         if currentShapeKind == .brush {
-            return selectionPrefersLightCursor(lockedSelectionRect?.standardized) ? NSCursor.xxsnapBrushLight : NSCursor.xxsnapBrush
+            return NSCursor.xxsnapBrush
         }
         if currentShapeKind == .marker {
             let color = selectionPrefersLightCursor(lockedSelectionRect?.standardized) ? NSColor.white : currentStyle.strokeColor
@@ -4414,7 +4406,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         case .brush:
             return NSCursor.xxsnapBrush
         case .brushLight:
-            return NSCursor.xxsnapBrushLight
+            return NSCursor.xxsnapBrush
         case .eyedropper:
             return NSCursor.xxsnapEyedropper
         case .eyedropperLight:
@@ -16277,9 +16269,9 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
 
         let resourceName = name.replacingOccurrences(of: "toolbar-", with: "")
         let imageInset = toolbarIconInset(for: resourceName)
-        let usesFixedColorResource = SelectionToolbarState.usesFixedColorToolbarIconResource(resourceName)
-        if drawToolbarImage(named: resourceName, in: rect, template: !usesFixedColorResource, enabled: enabled, selected: selected, inset: imageInset, tintColor: color)
-            || drawToolbarImage(named: name, in: rect, template: !usesFixedColorResource, enabled: enabled, selected: selected, inset: imageInset, tintColor: color) {
+        let shouldTintResource = SelectionToolbarState.shouldTintToolbarIconResource(resourceName, selected: selected)
+        if drawToolbarImage(named: resourceName, in: rect, template: shouldTintResource, enabled: enabled, selected: selected, inset: imageInset, tintColor: color)
+            || drawToolbarImage(named: name, in: rect, template: shouldTintResource, enabled: enabled, selected: selected, inset: imageInset, tintColor: color) {
             return
         }
 

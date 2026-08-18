@@ -1735,18 +1735,18 @@ private final class PinnedImageContentView: NSView {
     private func drawToolbarIcon(named name: String, in rect: NSRect, enabled: Bool, selected: Bool) {
         let resourceName = name.replacingOccurrences(of: "toolbar-", with: "")
         let imageInset = SelectionToolbarState.toolbarIconInset(for: resourceName)
-        let usesFixedColorResource = SelectionToolbarState.usesFixedColorToolbarIconResource(resourceName)
+        let shouldTintResource = SelectionToolbarState.shouldTintToolbarIconResource(resourceName, selected: selected)
         if drawToolbarImage(
             named: resourceName,
             in: rect,
-            template: !usesFixedColorResource,
+            template: shouldTintResource,
             enabled: enabled,
             selected: selected,
             inset: imageInset
         ) || drawToolbarImage(
             named: name,
             in: rect,
-            template: !usesFixedColorResource,
+            template: shouldTintResource,
             enabled: enabled,
             selected: selected,
             inset: imageInset
