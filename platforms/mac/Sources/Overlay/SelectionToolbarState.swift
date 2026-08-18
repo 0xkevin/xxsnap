@@ -490,12 +490,14 @@ enum SelectionToolbarState {
 
     static let eraserCursorIconResourceName = "eraser-tool"
 
-    static func usesFixedColorToolbarIconResource(_ resourceName: String) -> Bool {
+    static func shouldTintToolbarIconResource(_ resourceName: String, selected: Bool) -> Bool {
         switch resourceName {
+        case "pencil-tool":
+            return selected
         case "undo-enabled", "undo-disabled", "redo-enabled", "redo-disabled":
-            return true
-        default:
             return false
+        default:
+            return true
         }
     }
 

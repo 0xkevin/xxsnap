@@ -93,7 +93,7 @@ brush_hotspot=$(od -An -tu1 -j10 -N4 "$brush" | xargs)
 brush_visible_bounds=$(magick identify -format '%@' "$brush")
 if [ "$brush_dimensions" != "32x32" ] \
     || [ "$brush_hotspot" != "10 0 22 0" ] \
-    || [ "$brush_visible_bounds" != "16x16+8+8" ]; then
+    || [ "$brush_visible_bounds" != "18x18+7+7" ]; then
     echo "Windows brush cursor must preserve the 18px Mac pencil and translated (10,22) hotspot; got $brush_dimensions, $brush_hotspot, $brush_visible_bounds." >&2
     exit 1
 fi
