@@ -398,17 +398,31 @@ struct SystemAppUpdateInstaller: AppUpdateInstalling, @unchecked Sendable {
         let result = try AppUpdateProcessRunner.run(
             "/usr/bin/codesign",
             arguments: ["-d", "-r-", applicationURL.path],
+            captureStandardOutput: true,
             ignoreFailure: true
         )
         guard result.status == 0,
-              let output = String(data: result.standardError, encoding: .utf8),
-              let requirement = output
-                .split(separator: "\n")
-                .first(where: { $0.hasPrefix("designated => ") })?
-                .dropFirst("designated => ".count),
-              !requirement.isEmpty
+              let requirement = designatedRequirement(
+                  standardOutput: result.standardOutput,
+                  standardError: result.standardError
+              )
         else { throw AppUpdateInstallationError.signatureInvalid }
-        return String(requirement)
+        return requirement
+    }
+
+    static func designatedRequirement(standardOutput: Data, standardError: Data) -> String? {
+        let prefix = "designated => "
+        for data in [standardOutput, standardError] {
+            guard let output = String(data: data, encoding: .utf8) else { continue }
+            if let requirement = output
+                .split(separator: "\n")
+                .first(where: { $0.hasPrefix(prefix) })?
+                .dropFirst(prefix.count),
+               !requirement.isEmpty {
+                return String(requirement)
+            }
+        }
+        return nil
     }
 
     private static func installedSignerRequirement(for applicationURL: URL) throws -> String {

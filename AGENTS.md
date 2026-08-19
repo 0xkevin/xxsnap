@@ -44,21 +44,23 @@
 
 ### 文件名和目录
 
-1. 正式 DMG 文件名固定为 `XxSnap-<MARKETING_VERSION>-universal.dmg`，例如 `XxSnap-1.0.0-universal.dmg`。
-2. DMG 文件名不得包含构建号或内部状态，包括但不限于 `build2`、`internal`、`unsigned`、`unnotarized`。构建号只存在于应用元数据、后台版本记录和 `manifest.json` 中。
+1. 正式 DMG 文件名固定为 `XxSnap-<MARKETING_VERSION>-<CURRENT_PROJECT_VERSION>-universal.dmg`，例如 `XxSnap-1.0.0-2-universal.dmg`。构建号只保留纯数字，不加 `build` 前缀，并且必须与应用元数据、后台版本记录和 `manifest.json` 完全一致。
+2. DMG 文件名除规定的版本号、构建号和架构外，不得包含内部状态，包括但不限于 `internal`、`unsigned`、`unnotarized`。
 3. 最终交付目录至少包含以下五个文件，缺少任意一个都视为打包未完成：
 
    ```text
    dist/<MARKETING_VERSION>/
-   ├── XxSnap-<MARKETING_VERSION>-universal.dmg
+   ├── XxSnap-<MARKETING_VERSION>-<CURRENT_PROJECT_VERSION>-universal.dmg
    ├── manifest.json
    ├── checksums.txt
    ├── release-notes-zh-CN.md
    └── release-notes-en.md
    ```
 
-4. 如果同一版本号存在历史构建，生成新包时必须先保留历史产物或使用独立临时目录，未经用户确认不得覆盖旧包；最终上传的 DMG 文件名仍遵循标准名称。
+4. 如果同一版本号存在历史构建，生成新包时必须先保留历史产物或使用独立临时目录，未经用户确认不得覆盖旧包；不同构建使用各自包含构建号的标准 DMG 文件名。
 5. `release-notes-zh-CN.md` 和 `release-notes-en.md` 必须分别提供面向用户的中文、英文发布说明，标题必须包含准确的版本号和构建号，正文应说明本次新增、优化和修复内容，不得复制旧版本说明或遗漏本次主要功能。
+6. DMG 挂载卷必须使用 XxSnap Logo：从最终 `.app` 的 `Contents/Resources/xxsnap.icns` 复制为卷根目录的 `.VolumeIcon.icns`，隐藏该文件，并在最终压缩前为可写挂载卷根目录设置 Finder 自定义图标属性。不得使用占位图标、其他产品图标或仅依赖打包机 Finder 缓存。
+7. 交付前必须实际挂载最终 DMG，确认卷根目录包含与应用资源一致的 `.VolumeIcon.icns`，卷带有 Finder 自定义图标属性，并且可见内容仅包含 `XxSnap.app` 和 `Applications` 安装入口。
 
 ### 平台隔离
 
@@ -77,7 +79,7 @@
      "buildNumber": 2,
      "minimumMacOSVersion": "14.0",
      "architecture": "universal2",
-     "fileName": "XxSnap-1.0.0-universal.dmg",
+     "fileName": "XxSnap-1.0.0-2-universal.dmg",
      "fileSize": 12076842,
      "sha256": "<64 位小写 SHA-256>",
      "publishedAt": null
