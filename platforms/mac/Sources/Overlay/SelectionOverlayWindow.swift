@@ -418,7 +418,7 @@ extension NSCursor {
         let iconSize: CGFloat = 18
         let inset = (size.width - iconSize) / 2
 
-        if let image = svgImage(named: SelectionToolbarState.eraserCursorIconResourceName) {
+        if let image = svgImage(named: SelectionToolbarState.eraserIconResourceName) {
             let cursorImage = NSImage(size: size)
             cursorImage.lockFocus()
             NSGraphicsContext.current?.imageInterpolation = .high
@@ -14838,7 +14838,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         if let eraserButton = layout.eraserPointMode {
             drawToolbarButton(
                 eraserButton,
-                symbol: "toolbar-eraser-tool",
+                symbol: SelectionToolbarState.eraserToolbarSymbolName,
                 selected: eraserMode == .point,
                 enabled: true
             )
@@ -16617,7 +16617,7 @@ private final class SelectionOverlayView: NSView, NSTextViewDelegate {
         case .magnifier:
             return "toolbar-zoom-in-tool"
         case .eraser:
-            return "toolbar-eraser-tool"
+            return SelectionToolbarState.eraserToolbarSymbolName
         case .undo:
             return enabled ? "toolbar-undo-enabled" : "toolbar-undo-disabled"
         case .redo:

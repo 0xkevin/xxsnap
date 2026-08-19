@@ -959,7 +959,7 @@ private final class PinnedImageContentView: NSView {
             case .magnifier:
                 return "toolbar-zoom-in-tool"
             case .eraser:
-                return "toolbar-eraser-tool"
+                return SelectionToolbarState.eraserToolbarSymbolName
             case .undo:
                 return "toolbar-undo-disabled"
             case .redo:
@@ -1197,6 +1197,10 @@ private final class PinnedImageContentView: NSView {
 
     fileprivate var editingToolbarTitles: [String] {
         EditingToolbarButton.pinnedToolbarCases.map(\.title)
+    }
+
+    fileprivate var editingToolbarEraserIconName: String? {
+        EditingToolbarButton.eraser.iconName
     }
 
     fileprivate var currentEditingToolTitle: String {
@@ -2177,6 +2181,10 @@ extension PinnedImageWindowController {
 
     var test_editingToolbarIconRects: [NSRect] {
         contentView?.editingToolbarIconRectsForTesting ?? []
+    }
+
+    var test_editingToolbarEraserIconName: String? {
+        contentView?.editingToolbarEraserIconName
     }
 
     var test_editingToolbarRect: NSRect {

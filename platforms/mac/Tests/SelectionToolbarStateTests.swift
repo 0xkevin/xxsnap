@@ -15437,14 +15437,40 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_symbolName(for: .mosaic), "toolbar-masaike2")
     }
 
+    @MainActor
     func testEraserCursorUsesSameResourceAsToolbarButton() throws {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         let toolbarSymbol = try XCTUnwrap(window.test_symbolName(for: .eraser))
         let toolbarResource = toolbarSymbol.replacingOccurrences(of: "toolbar-", with: "")
+        let pinnedImage = PinnedImageWindowController(
+            image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+            screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
+        )
 
-        XCTAssertEqual(toolbarResource, "eraser-tool")
-        XCTAssertEqual(SelectionToolbarState.eraserCursorIconResourceName, toolbarResource)
+        XCTAssertEqual(toolbarResource, "eraser")
+        XCTAssertEqual(SelectionToolbarState.eraserIconResourceName, toolbarResource)
+        XCTAssertEqual(SelectionToolbarState.eraserToolbarSymbolName, toolbarSymbol)
+        XCTAssertEqual(pinnedImage.test_editingToolbarEraserIconName, toolbarSymbol)
         XCTAssertNotNil(Bundle.main.url(forResource: toolbarResource, withExtension: "svg"))
+    }
+
+    func testTeachingPenEraserUsesIconCursorExceptForRectangleMode() throws {
+        let frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        let window = SelectionOverlayWindow(
+            backgroundImage: solidImage(size: frame.size, color: .white),
+            configuration: .teachingPen(windowFrame: frame)
+        ) { _ in }
+        window.test_activateEraserTool()
+        window.test_rightMouseDown(at: NSPoint(x: 360, y: 420))
+
+        XCTAssertEqual(window.test_symbolName(for: .eraser), "toolbar-eraser")
+        XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: 160, y: 160)), .eraser)
+
+        let rectanglePoint = try XCTUnwrap(window.test_eraserRectangleOptionPoint())
+        window.test_mouseDown(at: rectanglePoint)
+        window.test_mouseUp(at: rectanglePoint)
+
+        XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: 160, y: 160)), .crosshair)
     }
 
     func testMosaicPreviewProgressMapsRangeEndpoints() {
@@ -16486,6 +16512,28 @@ final class SelectionToolbarStateTests: XCTestCase {
         for window in [screenshot, teachingPen] {
             window.test_activateShapeTool(.brush)
             let button = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .pen))
+            let overlayImage = try XCTUnwrap(window.test_renderedOverlayImage())
+            let iconPixel = try XCTUnwrap(firstBlueDominantPixel(in: overlayImage, rect: button))
+
+            XCTAssertGreaterThan(iconPixel.blue, iconPixel.red)
+            XCTAssertGreaterThan(iconPixel.blue, iconPixel.green)
+        }
+    }
+
+    func testSelectedEraserToolbarIconIsBlueInScreenshotAndTeachingPen() throws {
+        let image = solidImage(size: NSSize(width: 900, height: 520), color: .white)
+        let screenshot = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        screenshot.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+
+        let teachingPen = SelectionOverlayWindow(
+            backgroundImage: image,
+            configuration: .teachingPen(windowFrame: NSRect(origin: .zero, size: image.size))
+        ) { _ in }
+        teachingPen.test_rightMouseDown(at: NSPoint(x: 360, y: 420))
+
+        for window in [screenshot, teachingPen] {
+            window.test_activateEraserTool()
+            let button = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .eraser))
             let overlayImage = try XCTUnwrap(window.test_renderedOverlayImage())
             let iconPixel = try XCTUnwrap(firstBlueDominantPixel(in: overlayImage, rect: button))
 
