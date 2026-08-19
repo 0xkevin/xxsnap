@@ -795,12 +795,17 @@ final class UpdateAvailableWindowController: NSWindowController, NSWindowDelegat
     }
 
     private func configureReleaseNotes(_ releaseNotes: String, accessibilityLabel: String) {
-        releaseNotesTextView.string = releaseNotes
         releaseNotesTextView.isEditable = false
         releaseNotesTextView.isSelectable = true
+        releaseNotesTextView.isRichText = true
+        releaseNotesTextView.isAutomaticLinkDetectionEnabled = false
         releaseNotesTextView.drawsBackground = false
         releaseNotesTextView.font = .systemFont(ofSize: 13.5)
         releaseNotesTextView.textColor = .labelColor
+        releaseNotesTextView.linkTextAttributes = [
+            .foregroundColor: NSColor.linkColor,
+            .underlineStyle: NSUnderlineStyle.single.rawValue,
+        ]
         releaseNotesTextView.textContainerInset = NSSize(width: 12, height: 12)
         releaseNotesTextView.isHorizontallyResizable = false
         releaseNotesTextView.isVerticallyResizable = true
@@ -814,6 +819,9 @@ final class UpdateAvailableWindowController: NSWindowController, NSWindowDelegat
         releaseNotesTextView.textContainer?.containerSize = NSSize(
             width: 456,
             height: CGFloat.greatestFiniteMagnitude
+        )
+        releaseNotesTextView.textStorage?.setAttributedString(
+            UpdateReleaseNotesMarkdownRenderer.render(releaseNotes)
         )
         if let layoutManager = releaseNotesTextView.layoutManager,
            let textContainer = releaseNotesTextView.textContainer {
@@ -841,6 +849,264 @@ final class UpdateAvailableWindowController: NSWindowController, NSWindowDelegat
 
     @objc private func laterPressed() {
         NSApp.stopModal(withCode: .alertSecondButtonReturn)
+    }
+}
+
+@MainActor
+private enum UpdateReleaseNotesMarkdownRenderer {
+    private enum BlockStyle {
+        case body
+        case heading(Int)
+        case list
+        case code
+
+        var isCode: Bool {
+            if case .code = self { return true }
+            return false
+        }
+    }
+
+    private struct CodeFence {
+        let delimiter: Character
+        let length: Int
+
+        static func opening(in line: String) -> CodeFence? {
+            guard let delimiter = line.first, delimiter == "`" || delimiter == "~" else {
+                return nil
+            }
+            let length = line.prefix(while: { $0 == delimiter }).count
+            guard length >= 3 else { return nil }
+            let info = line.dropFirst(length)
+            guard delimiter != "`" || !info.contains("`") else { return nil }
+            return CodeFence(delimiter: delimiter, length: length)
+        }
+
+        func closes(_ line: String) -> Bool {
+            let closingLength = line.prefix(while: { $0 == delimiter }).count
+            guard closingLength >= length else { return false }
+            return line.dropFirst(closingLength).allSatisfy(\.isWhitespace)
+        }
+    }
+
+    private static let bodyFont = NSFont.systemFont(ofSize: 13.5)
+    private static let firstLevelHeadingFont = NSFont.systemFont(ofSize: 18, weight: .semibold)
+    private static let secondLevelHeadingFont = NSFont.systemFont(ofSize: 16, weight: .semibold)
+    private static let thirdLevelHeadingFont = NSFont.systemFont(ofSize: 14.5, weight: .semibold)
+    private static let minorHeadingFont = NSFont.systemFont(ofSize: 13.5, weight: .semibold)
+    private static let codeFont = NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular)
+    private static let bodyParagraphStyle = makeParagraphStyle(for: .body)
+    private static let headingParagraphStyle = makeParagraphStyle(for: .heading(1))
+    private static let listParagraphStyle = makeParagraphStyle(for: .list)
+    private static let codeParagraphStyle = makeParagraphStyle(for: .code)
+
+    static func render(_ markdown: String) -> NSAttributedString {
+        let normalized = markdown
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        let lines = normalized.split(separator: "\n", omittingEmptySubsequences: false)
+        let result = NSMutableAttributedString(string: "")
+        var codeFence: CodeFence?
+
+        for (index, rawLine) in lines.enumerated() {
+            let line = String(rawLine)
+            let trimmedLine = line.trimmingCharacters(in: .whitespaces)
+            var isFenceDelimiter = false
+
+            if let activeFence = codeFence {
+                if activeFence.closes(trimmedLine) {
+                    codeFence = nil
+                    isFenceDelimiter = true
+                } else {
+                    result.append(attributedLine(line, prefix: "", style: .code))
+                }
+            } else if let openingFence = CodeFence.opening(in: trimmedLine) {
+                codeFence = openingFence
+                isFenceDelimiter = true
+            } else if let heading = headingContent(in: trimmedLine) {
+                result.append(attributedLine(heading.text, prefix: "", style: .heading(heading.level)))
+            } else if let item = unorderedListContent(in: trimmedLine) {
+                result.append(attributedLine(item, prefix: "• ", style: .list))
+            } else if let item = orderedListContent(in: trimmedLine) {
+                result.append(attributedLine(item.text, prefix: "\(item.number). ", style: .list))
+            } else {
+                result.append(attributedLine(line, prefix: "", style: .body))
+            }
+
+            if index < lines.count - 1, !isFenceDelimiter {
+                result.append(NSAttributedString(string: "\n"))
+            }
+        }
+
+        return result
+    }
+
+    private static func attributedLine(
+        _ markdown: String,
+        prefix: String,
+        style: BlockStyle
+    ) -> NSAttributedString {
+        let font = font(for: style)
+        let color: NSColor = style.isCode ? .secondaryLabelColor : .labelColor
+        let paragraphStyle = paragraphStyle(for: style)
+        let result = NSMutableAttributedString(
+            string: prefix,
+            attributes: [
+                .font: font,
+                .foregroundColor: color,
+                .paragraphStyle: paragraphStyle,
+            ]
+        )
+        let content = style.isCode
+            ? NSMutableAttributedString(
+                string: markdown,
+                attributes: [.font: font, .foregroundColor: color]
+            )
+            : inlineMarkdown(markdown, baseFont: font, color: color)
+        result.append(content)
+        if result.length > 0 {
+            result.addAttribute(
+                .paragraphStyle,
+                value: paragraphStyle,
+                range: NSRange(location: 0, length: result.length)
+            )
+            if style.isCode {
+                result.addAttribute(
+                    .backgroundColor,
+                    value: NSColor.quaternaryLabelColor,
+                    range: NSRange(location: 0, length: result.length)
+                )
+            }
+        }
+        return result
+    }
+
+    private static func inlineMarkdown(
+        _ markdown: String,
+        baseFont: NSFont,
+        color: NSColor
+    ) -> NSMutableAttributedString {
+        var options = AttributedString.MarkdownParsingOptions()
+        options.interpretedSyntax = .inlineOnlyPreservingWhitespace
+        let parsed = (try? NSAttributedString(markdown: markdown, options: options))
+            ?? NSAttributedString(string: markdown)
+        let result = NSMutableAttributedString(attributedString: parsed)
+        let fullRange = NSRange(location: 0, length: result.length)
+        result.addAttributes([.font: baseFont, .foregroundColor: color], range: fullRange)
+
+        var inlineRuns: [(NSRange, UInt)] = []
+        result.enumerateAttribute(
+            .inlinePresentationIntent,
+            in: fullRange
+        ) { value, range, _ in
+            guard let value = value as? NSNumber else { return }
+            inlineRuns.append((range, value.uintValue))
+        }
+        for (range, rawIntent) in inlineRuns {
+            let intent = InlinePresentationIntent(rawValue: rawIntent)
+            let resolvedFont: NSFont
+            if intent.contains(.code) {
+                resolvedFont = .monospacedSystemFont(ofSize: baseFont.pointSize - 0.5, weight: .regular)
+                result.addAttribute(.backgroundColor, value: NSColor.quaternaryLabelColor, range: range)
+            } else {
+                var traits: NSFontTraitMask = []
+                if intent.contains(.stronglyEmphasized) { traits.insert(.boldFontMask) }
+                if intent.contains(.emphasized) { traits.insert(.italicFontMask) }
+                resolvedFont = traits.isEmpty
+                    ? baseFont
+                    : NSFontManager.shared.convert(baseFont, toHaveTrait: traits)
+            }
+            result.addAttribute(.font, value: resolvedFont, range: range)
+            result.removeAttribute(.inlinePresentationIntent, range: range)
+        }
+
+        var blockedLinks: [NSRange] = []
+        result.enumerateAttribute(.link, in: fullRange) { value, range, _ in
+            let url = (value as? URL) ?? (value as? String).flatMap(URL.init(string:))
+            guard let scheme = url?.scheme?.lowercased(), ["http", "https"].contains(scheme) else {
+                blockedLinks.append(range)
+                return
+            }
+        }
+        for range in blockedLinks {
+            result.removeAttribute(.link, range: range)
+        }
+
+        return result
+    }
+
+    private static func headingContent(in line: String) -> (level: Int, text: String)? {
+        let level = line.prefix(while: { $0 == "#" }).count
+        guard (1...6).contains(level) else { return nil }
+        let markerEnd = line.index(line.startIndex, offsetBy: level)
+        guard markerEnd < line.endIndex, line[markerEnd].isWhitespace else { return nil }
+        return (level, String(line[line.index(after: markerEnd)...]))
+    }
+
+    private static func unorderedListContent(in line: String) -> String? {
+        for marker in ["- ", "* ", "+ "] where line.hasPrefix(marker) {
+            return String(line.dropFirst(marker.count))
+        }
+        return nil
+    }
+
+    private static func orderedListContent(in line: String) -> (number: String, text: String)? {
+        let digits = line.prefix(while: { $0.isNumber })
+        guard !digits.isEmpty else { return nil }
+        let markerIndex = line.index(line.startIndex, offsetBy: digits.count)
+        guard markerIndex < line.endIndex, line[markerIndex] == "." || line[markerIndex] == ")" else {
+            return nil
+        }
+        let contentIndex = line.index(after: markerIndex)
+        guard contentIndex < line.endIndex, line[contentIndex].isWhitespace else { return nil }
+        return (String(digits), String(line[line.index(after: contentIndex)...]))
+    }
+
+    private static func font(for style: BlockStyle) -> NSFont {
+        switch style {
+        case .body, .list:
+            return bodyFont
+        case let .heading(level):
+            switch level {
+            case 1: return firstLevelHeadingFont
+            case 2: return secondLevelHeadingFont
+            case 3: return thirdLevelHeadingFont
+            default: return minorHeadingFont
+            }
+        case .code:
+            return codeFont
+        }
+    }
+
+    private static func paragraphStyle(for style: BlockStyle) -> NSParagraphStyle {
+        switch style {
+        case .body: return bodyParagraphStyle
+        case .heading: return headingParagraphStyle
+        case .list: return listParagraphStyle
+        case .code: return codeParagraphStyle
+        }
+    }
+
+    private static func makeParagraphStyle(for style: BlockStyle) -> NSParagraphStyle {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = 3
+        paragraph.paragraphSpacing = 6
+        switch style {
+        case .body:
+            break
+        case .heading:
+            paragraph.paragraphSpacingBefore = 5
+            paragraph.paragraphSpacing = 8
+        case .list:
+            paragraph.firstLineHeadIndent = 0
+            paragraph.headIndent = 16
+            paragraph.paragraphSpacing = 3
+        case .code:
+            paragraph.firstLineHeadIndent = 8
+            paragraph.headIndent = 8
+            paragraph.tailIndent = -8
+            paragraph.paragraphSpacing = 1
+        }
+        return paragraph
     }
 }
 
