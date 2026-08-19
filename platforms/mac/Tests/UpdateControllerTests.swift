@@ -48,6 +48,143 @@ final class UpdateControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testUpdateDialogRendersMarkdownReleaseNotes() throws {
+        let markdown = """
+        # Highlights
+
+        - Added **bold text**
+        - Improved *italic text* and `inline code`
+        1. Kept numbered lists
+
+        Read the [release page](https://xxsnap.xxsofts.com/releases/).
+        """
+        let controller = makeUpdateDialog(releaseNotes: markdown)
+        let rendered = try XCTUnwrap(controller.releaseNotesTextView.textStorage)
+
+        XCTAssertFalse(rendered.string.contains("# Highlights"))
+        XCTAssertTrue(rendered.string.contains("Highlights"))
+        XCTAssertTrue(rendered.string.contains("• Added bold text"))
+        XCTAssertTrue(rendered.string.contains("1. Kept numbered lists"))
+
+        let headingRange = (rendered.string as NSString).range(of: "Highlights")
+        let headingFont = try XCTUnwrap(
+            rendered.attribute(.font, at: headingRange.location, effectiveRange: nil) as? NSFont
+        )
+        XCTAssertGreaterThan(headingFont.pointSize, 13.5)
+
+        let boldRange = (rendered.string as NSString).range(of: "bold text")
+        let boldFont = try XCTUnwrap(rendered.attribute(.font, at: boldRange.location, effectiveRange: nil) as? NSFont)
+        XCTAssertTrue(NSFontManager.shared.traits(of: boldFont).contains(.boldFontMask))
+
+        let italicRange = (rendered.string as NSString).range(of: "italic text")
+        let italicFont = try XCTUnwrap(
+            rendered.attribute(.font, at: italicRange.location, effectiveRange: nil) as? NSFont
+        )
+        XCTAssertTrue(NSFontManager.shared.traits(of: italicFont).contains(.italicFontMask))
+
+        let codeRange = (rendered.string as NSString).range(of: "inline code")
+        let codeFont = try XCTUnwrap(rendered.attribute(.font, at: codeRange.location, effectiveRange: nil) as? NSFont)
+        XCTAssertTrue(NSFontManager.shared.traits(of: codeFont).contains(.fixedPitchFontMask))
+
+        let linkRange = (rendered.string as NSString).range(of: "release page")
+        XCTAssertEqual(
+            rendered.attribute(.link, at: linkRange.location, effectiveRange: nil) as? URL,
+            URL(string: "https://xxsnap.xxsofts.com/releases/")
+        )
+    }
+
+    @MainActor
+    func testUpdateDialogOnlyActivatesWebLinksInMarkdown() throws {
+        let controller = makeUpdateDialog(
+            releaseNotes: """
+            [HTTPS](https://xxsnap.xxsofts.com/) [HTTP](http://xxsnap.xxsofts.com/)
+            [JavaScript](javascript:alert(1)) [File](file:///tmp/release-notes)
+            [Data](data:text/plain,hello) [Custom](xxsnap://release)
+            <https://xxsnap.xxsofts.com/releases/>
+            """
+        )
+        let rendered = try XCTUnwrap(controller.releaseNotesTextView.textStorage)
+        let renderedString = rendered.string as NSString
+        let httpsRange = renderedString.range(of: "HTTPS")
+        let httpRange = renderedString.range(of: "HTTP", options: [], range: NSRange(location: 6, length: renderedString.length - 6))
+
+        XCTAssertEqual(
+            rendered.attribute(.link, at: httpsRange.location, effectiveRange: nil) as? URL,
+            URL(string: "https://xxsnap.xxsofts.com/")
+        )
+        XCTAssertEqual(
+            rendered.attribute(.link, at: httpRange.location, effectiveRange: nil) as? URL,
+            URL(string: "http://xxsnap.xxsofts.com/")
+        )
+        for label in ["JavaScript", "File", "Data", "Custom"] {
+            let range = renderedString.range(of: label)
+            XCTAssertNil(rendered.attribute(.link, at: range.location, effectiveRange: nil))
+        }
+        let autoLinkRange = renderedString.range(of: "https://xxsnap.xxsofts.com/releases/")
+        XCTAssertEqual(
+            rendered.attribute(.link, at: autoLinkRange.location, effectiveRange: nil) as? URL,
+            URL(string: "https://xxsnap.xxsofts.com/releases/")
+        )
+    }
+
+    @MainActor
+    func testUpdateDialogPreservesMarkdownSyntaxInsideCodeBlocks() throws {
+        let controller = makeUpdateDialog(
+            releaseNotes: """
+            ```json
+            {"message":"**literal markdown**"}
+            ```
+            ## Parsed after code
+            """
+        )
+        let rendered = try XCTUnwrap(controller.releaseNotesTextView.textStorage)
+        let literalRange = (rendered.string as NSString).range(of: "**literal markdown**")
+
+        XCTAssertNotEqual(literalRange.location, NSNotFound)
+        let font = try XCTUnwrap(
+            rendered.attribute(.font, at: literalRange.location, effectiveRange: nil) as? NSFont
+        )
+        XCTAssertTrue(NSFontManager.shared.traits(of: font).contains(.fixedPitchFontMask))
+
+        let headingRange = (rendered.string as NSString).range(of: "Parsed after code")
+        let headingFont = try XCTUnwrap(
+            rendered.attribute(.font, at: headingRange.location, effectiveRange: nil) as? NSFont
+        )
+        XCTAssertGreaterThan(headingFont.pointSize, 13.5)
+    }
+
+    @MainActor
+    func testUpdateDialogUsesMatchingMarkdownCodeFences() throws {
+        let controller = makeUpdateDialog(
+            releaseNotes: """
+            ````markdown
+            ```example
+            [Literal link](https://example.com/)
+            ```
+            ````
+            ~~~json
+            {"message":"**tilde literal**"}
+            ~~~
+            """
+        )
+        let rendered = try XCTUnwrap(controller.releaseNotesTextView.textStorage)
+        let renderedString = rendered.string as NSString
+        let fenceLikeRange = renderedString.range(of: "```example")
+        let literalLinkRange = renderedString.range(of: "Literal link")
+        let tildeLiteralRange = renderedString.range(of: "**tilde literal**")
+
+        XCTAssertNotEqual(fenceLikeRange.location, NSNotFound)
+        XCTAssertNotEqual(tildeLiteralRange.location, NSNotFound)
+        XCTAssertNil(rendered.attribute(.link, at: literalLinkRange.location, effectiveRange: nil))
+        for range in [fenceLikeRange, literalLinkRange, tildeLiteralRange] {
+            let font = try XCTUnwrap(
+                rendered.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont
+            )
+            XCTAssertTrue(NSFontManager.shared.traits(of: font).contains(.fixedPitchFontMask))
+        }
+    }
+
+    @MainActor
     func testUpdateDialogReturnsDownloadResponse() {
         let controller = makeUpdateDialog()
         DispatchQueue.main.async {
