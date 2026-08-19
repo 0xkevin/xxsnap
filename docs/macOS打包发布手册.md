@@ -99,7 +99,7 @@ export COMMERCIAL_PUBLIC_KEY="后台当前 commercial-ed25519-2026-01 公钥"
 export RELEASE_DIR="$PWD/dist/$VERSION"
 export ARCHIVE_PATH="$RELEASE_DIR/XxSnap.xcarchive"
 export APP_PATH="$ARCHIVE_PATH/Products/Applications/XxSnap.app"
-export DMG_NAME="XxSnap-$VERSION-universal.dmg"
+export DMG_NAME="XxSnap-$VERSION-$BUILD_NUMBER-universal.dmg"
 export DMG_PATH="$RELEASE_DIR/$DMG_NAME"
 ```
 
@@ -176,23 +176,48 @@ codesign -dv --verbose=4 "$APP_PATH" 2>&1 | grep -E "Authority|TeamIdentifier|Ru
 ### [Mac]
 
 ```bash
+set -euo pipefail
+
 export DMG_STAGE="$(mktemp -d)"
+export DMG_RW_PATH="$RELEASE_DIR/.XxSnap-$VERSION-$BUILD_NUMBER-rw.dmg"
 ditto "$APP_PATH" "$DMG_STAGE/XxSnap.app"
 ln -s /Applications "$DMG_STAGE/Applications"
+test -f "$APP_PATH/Contents/Resources/xxsnap.icns"
+ditto "$APP_PATH/Contents/Resources/xxsnap.icns" "$DMG_STAGE/.VolumeIcon.icns"
 
 hdiutil create \
   -volname "XxSnap" \
   -srcfolder "$DMG_STAGE" \
   -ov \
-  -format UDZO \
-  "$DMG_PATH"
+  -format UDRW \
+  "$DMG_RW_PATH"
 
 rm -rf "$DMG_STAGE"
+
+export DMG_ATTACH_OUTPUT="$(hdiutil attach -readwrite -nobrowse "$DMG_RW_PATH")"
+export DMG_MOUNT_PATH="$(printf '%s\n' "$DMG_ATTACH_OUTPUT" | awk -F '\t' '$NF ~ /^\/Volumes\// { print $NF; exit }')"
+test -n "$DMG_MOUNT_PATH"
+SetFile -a V "$DMG_MOUNT_PATH/.VolumeIcon.icns"
+SetFile -a C "$DMG_MOUNT_PATH"
+hdiutil detach "$DMG_MOUNT_PATH"
+
+hdiutil convert "$DMG_RW_PATH" -format UDZO -ov -o "$DMG_PATH"
+rm -f "$DMG_RW_PATH"
+
 codesign --force --sign "$SIGN_IDENTITY" --timestamp "$DMG_PATH"
 xcrun notarytool submit "$DMG_PATH" --keychain-profile "xxsnap-notary" --wait
 xcrun stapler staple "$DMG_PATH"
 xcrun stapler validate "$DMG_PATH"
 spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG_PATH"
+
+export DMG_ATTACH_OUTPUT="$(hdiutil attach -readonly -nobrowse "$DMG_PATH")"
+export DMG_MOUNT_PATH="$(printf '%s\n' "$DMG_ATTACH_OUTPUT" | awk -F '\t' '$NF ~ /^\/Volumes\// { print $NF; exit }')"
+test -n "$DMG_MOUNT_PATH"
+cmp "$APP_PATH/Contents/Resources/xxsnap.icns" "$DMG_MOUNT_PATH/.VolumeIcon.icns"
+GetFileInfo -a "$DMG_MOUNT_PATH" | grep -q 'C'
+test -d "$DMG_MOUNT_PATH/XxSnap.app"
+test -L "$DMG_MOUNT_PATH/Applications"
+hdiutil detach "$DMG_MOUNT_PATH"
 ```
 
 `notarytool` 必须显示 `Accepted`。不是 `Accepted` 就停止，不要上传后台。
@@ -226,7 +251,7 @@ printf '%s  %s\n' "$SHA256" "$DMG_NAME" > "$RELEASE_DIR/checksums.txt"
 
 ```text
 dist/1.0.0/
-├── XxSnap-1.0.0-universal.dmg
+├── XxSnap-1.0.0-1-universal.dmg
 ├── manifest.json
 └── checksums.txt
 ```
@@ -264,7 +289,7 @@ dist/1.0.0/
 ```bash
 curl -fsS "https://download.xxsofts.com/api/v1/releases/latest?locale=zh-CN"
 curl -fsS "https://download.xxsofts.com/api/v1/releases/update-policy?locale=zh-CN"
-curl -fsSI "https://download.xxsofts.com/files/$VERSION/$DMG_NAME"
+curl -fsSI "https://download.xxsofts.com/files/$VERSION/$BUILD_NUMBER/$DMG_NAME"
 open "https://xxsnap.xxsofts.com/zh-CN/"
 open "https://xxsnap.xxsofts.com/zh-CN/releases/"
 ```

@@ -491,6 +491,34 @@ final class UpdateControllerTests: XCTestCase {
         XCTAssertNotNil(parsedRequirement)
     }
 
+    func testInstallerReadsDesignatedRequirementFromCodesignStandardOutput() {
+        let requirement = "identifier \"com.xxsnap.mac\" and anchor apple generic"
+        let standardOutput = Data("designated => \(requirement)\n".utf8)
+        let standardError = Data("Executable=/Applications/XxSnap.app/Contents/MacOS/XxSnap\n".utf8)
+
+        XCTAssertEqual(
+            SystemAppUpdateInstaller.designatedRequirement(
+                standardOutput: standardOutput,
+                standardError: standardError
+            ),
+            requirement
+        )
+    }
+
+    func testInstallerFallsBackToDesignatedRequirementFromCodesignStandardError() {
+        let requirement = "identifier \"com.xxsnap.mac\" and anchor apple generic"
+        let standardOutput = Data("Executable=/Applications/XxSnap.app/Contents/MacOS/XxSnap\n".utf8)
+        let standardError = Data("designated => \(requirement)\n".utf8)
+
+        XCTAssertEqual(
+            SystemAppUpdateInstaller.designatedRequirement(
+                standardOutput: standardOutput,
+                standardError: standardError
+            ),
+            requirement
+        )
+    }
+
     func testInstallerCleanupPreservesOriginalCommandFailure() throws {
         let workspace = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
