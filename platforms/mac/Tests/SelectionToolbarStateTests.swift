@@ -15447,7 +15447,7 @@ final class SelectionToolbarStateTests: XCTestCase {
             screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
         )
 
-        XCTAssertEqual(toolbarResource, "eraser")
+        XCTAssertEqual(toolbarResource, "eraser2")
         XCTAssertEqual(SelectionToolbarState.eraserIconResourceName, toolbarResource)
         XCTAssertEqual(SelectionToolbarState.eraserToolbarSymbolName, toolbarSymbol)
         XCTAssertEqual(pinnedImage.test_editingToolbarEraserIconName, toolbarSymbol)
@@ -15463,7 +15463,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_activateEraserTool()
         window.test_rightMouseDown(at: NSPoint(x: 360, y: 420))
 
-        XCTAssertEqual(window.test_symbolName(for: .eraser), "toolbar-eraser")
+        XCTAssertEqual(window.test_symbolName(for: .eraser), "toolbar-eraser2")
         XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: 160, y: 160)), .eraser)
 
         let rectanglePoint = try XCTUnwrap(window.test_eraserRectangleOptionPoint())
@@ -15471,6 +15471,25 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_mouseUp(at: rectanglePoint)
 
         XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: 160, y: 160)), .crosshair)
+    }
+
+    func testEraser2ResourceKeepsItsInteriorTransparent() throws {
+        let resourceURL = try XCTUnwrap(Bundle.main.url(forResource: "eraser2", withExtension: "svg"))
+        let source = try XCTUnwrap(NSImage(contentsOf: resourceURL))
+        let rendered = NSImage(size: NSSize(width: 160, height: 140))
+        rendered.lockFocus()
+        NSColor.clear.setFill()
+        NSRect(x: 0, y: 0, width: 160, height: 140).fill()
+        source.draw(in: NSRect(x: 0, y: 0, width: 160, height: 140))
+        rendered.unlockFocus()
+
+        let upperInterior = try XCTUnwrap(rgbaRenderPixel(in: rendered, at: NSPoint(x: 100, y: 100)))
+        let lowerInterior = try XCTUnwrap(rgbaRenderPixel(in: rendered, at: NSPoint(x: 45, y: 50)))
+        let outline = try XCTUnwrap(rgbaRenderPixel(in: rendered, at: NSPoint(x: 95, y: 132)))
+
+        XCTAssertLessThan(upperInterior.alpha, 10)
+        XCTAssertLessThan(lowerInterior.alpha, 10)
+        XCTAssertGreaterThan(outline.alpha, 200)
     }
 
     func testMosaicPreviewProgressMapsRangeEndpoints() {
