@@ -7,6 +7,100 @@ import XCTest
 final class UpdateControllerTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
+    @MainActor
+    func testUpdateDialogKeepsFixedSizeAndScrollsLongReleaseNotes() throws {
+        let notes = (1...80).map { "\($0). 更新说明内容" }.joined(separator: "\n")
+        let release = AppUpdateRelease(
+            version: "1.4.0",
+            buildNumber: 8,
+            downloadURL: URL(string: "https://download.xxsofts.com/api/v1/downloads/latest")!,
+            sha256: String(repeating: "a", count: 64),
+            releaseNotes: notes
+        )
+        let controller = UpdateAvailableWindowController(
+            release: release,
+            title: "发现新版本",
+            notice: nil,
+            currentVersion: "1.3.0",
+            currentBuild: 6,
+            strings: PreferencesStrings(language: .zhHans)
+        )
+
+        let window = try XCTUnwrap(controller.window)
+        window.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(window.contentLayoutRect.width, 560, accuracy: 0.5)
+        XCTAssertEqual(window.contentLayoutRect.height, 520, accuracy: 0.5)
+        XCTAssertFalse(window.styleMask.contains(.resizable))
+        XCTAssertTrue(controller.releaseNotesScrollView.hasVerticalScroller)
+        XCTAssertTrue(controller.releaseNotesTextView.isVerticallyResizable)
+        XCTAssertEqual(controller.releaseNotesTextView.string, notes)
+        XCTAssertGreaterThan(
+            controller.releaseNotesTextView.frame.height,
+            controller.releaseNotesScrollView.contentSize.height
+        )
+        let contentView = try XCTUnwrap(window.contentView)
+        let downloadButtonFrame = controller.downloadButton.convert(
+            controller.downloadButton.bounds,
+            to: contentView
+        )
+        XCTAssertLessThanOrEqual(downloadButtonFrame.maxY, 72)
+    }
+
+    @MainActor
+    func testUpdateDialogReturnsDownloadResponse() {
+        let controller = makeUpdateDialog()
+        DispatchQueue.main.async {
+            controller.downloadButton.performClick(nil)
+        }
+
+        XCTAssertEqual(controller.runModal(), .alertFirstButtonReturn)
+    }
+
+    @MainActor
+    func testUpdateDialogCloseReturnsLaterResponse() throws {
+        let controller = makeUpdateDialog()
+        let window = try XCTUnwrap(controller.window)
+        DispatchQueue.main.async {
+            window.performClose(nil)
+        }
+
+        XCTAssertEqual(controller.runModal(), .alertSecondButtonReturn)
+    }
+
+    func testUpdateVersionTitleIncludesVersionAndBuildInBothLanguages() {
+        XCTAssertEqual(
+            PreferencesStrings(language: .zhHans).updateVersionReady("1.4.0", build: 8),
+            "XxSnap 1.4.0（8）现已推出"
+        )
+        XCTAssertEqual(
+            PreferencesStrings(language: .english).updateVersionReady("1.4.0", build: 8),
+            "XxSnap 1.4.0 (8) is now available"
+        )
+    }
+
+    @MainActor
+    private func makeUpdateDialog(
+        releaseNotes: String = "Update notes",
+        notice: String? = nil
+    ) -> UpdateAvailableWindowController {
+        let release = AppUpdateRelease(
+            version: "1.4.0",
+            buildNumber: 8,
+            downloadURL: URL(string: "https://download.xxsofts.com/api/v1/downloads/latest")!,
+            sha256: String(repeating: "a", count: 64),
+            releaseNotes: releaseNotes
+        )
+        return UpdateAvailableWindowController(
+            release: release,
+            title: "发现新版本",
+            notice: notice,
+            currentVersion: "1.3.0",
+            currentBuild: 6,
+            strings: PreferencesStrings(language: .zhHans)
+        )
+    }
+
     func testSemanticVersionComparisonUsesBuildNumberForEqualVersions() throws {
         XCTAssertLessThan(try XCTUnwrap(AppUpdateVersion("1.9.9")), try XCTUnwrap(AppUpdateVersion("2.0.0")))
         XCTAssertLessThan(try XCTUnwrap(AppUpdateVersion("1.0.0-beta.1")), try XCTUnwrap(AppUpdateVersion("1.0.0")))
