@@ -161,7 +161,7 @@
 		E7A9EEB71B31B972ACB793FD /* aspect-ratio-fill.svg in Resources */ = {isa = PBXBuildFile; fileRef = D93F12B422A82EA37CD7152A /* aspect-ratio-fill.svg */; };
 		E7DD4142D94657722C9D65FA /* CommercialAccessControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C4919377BCC3AB0F5C0602A /* CommercialAccessControllerTests.swift */; };
 		E7F0249EB5C8A5140C6AE264 /* command.svg in Resources */ = {isa = PBXBuildFile; fileRef = 5488EB0674968851889D879B /* command.svg */; };
-		E96975FD2FD94C344AB04F2E /* eraser2.svg in Resources */ = {isa = PBXBuildFile; fileRef = 8A3B065B82B4C93A390C41DB /* eraser2.svg */; };
+		E96975FD2FD94C344AB04F2E /* eraser.svg in Resources */ = {isa = PBXBuildFile; fileRef = 8A3B065B82B4C93A390C41DB /* eraser.svg */; };
 		EC17683ED05A631C8A90A7EE /* xxsnap.icns in Resources */ = {isa = PBXBuildFile; fileRef = E06F5FA13C638ADE764DDA8B /* xxsnap.icns */; };
 		EE445F0857133B6869C92F0C /* pencil-tool.png in Resources */ = {isa = PBXBuildFile; fileRef = 4A4C435A1B83D9BC6C75D4F1 /* pencil-tool.png */; };
 		F8365189DAE642AC6E7A2BA5 /* AppSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E58F0FBF019037172C857FC /* AppSettingsTests.swift */; };
@@ -261,7 +261,7 @@
 		87E61F5F06550FEF28BD42ED /* ScrollCaptureTargetDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollCaptureTargetDetector.swift; sourceTree = "<group>"; };
 		8893A747827DD404754D9C22 /* ScrollActivityMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollActivityMonitor.swift; sourceTree = "<group>"; };
 		8A2205AED8C5F363A0B466E2 /* ScreenCaptureService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenCaptureService.swift; sourceTree = "<group>"; };
-		8A3B065B82B4C93A390C41DB /* eraser2.svg */ = {isa = PBXFileReference; path = eraser2.svg; sourceTree = "<group>"; };
+		8A3B065B82B4C93A390C41DB /* eraser.svg */ = {isa = PBXFileReference; path = eraser.svg; sourceTree = "<group>"; };
 		8DBA2905AF84F7451A848B40 /* CommercialDeviceIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommercialDeviceIdentity.swift; sourceTree = "<group>"; };
 		90511938797AF565EB5E63DF /* palette-tool.svg */ = {isa = PBXFileReference; path = "palette-tool.svg"; sourceTree = "<group>"; };
 		90744D11E6558739B43E552E /* ScrollCaptureSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollCaptureSession.swift; sourceTree = "<group>"; };
@@ -620,7 +620,7 @@
 				EA1456E9C1DB9C6E2F8EF8F5 /* done.svg */,
 				3EA6D152633E6E31441322EA /* eraser-tool.png */,
 				B26783A4C11DFDC68390DE99 /* eraser-tool.svg */,
-				8A3B065B82B4C93A390C41DB /* eraser2.svg */,
+				8A3B065B82B4C93A390C41DB /* eraser.svg */,
 				30F8BFFDF14E4559FB86BF58 /* eyedropper.svg */,
 				ECA614CE136AB9553AE27D92 /* failed.svg */,
 				6569DD68B9D82807BFE9B8B4 /* highlighter-tool.png */,
@@ -785,7 +785,7 @@
 				CE181A4102A4A6C1E3D5AD22 /* done.svg in Resources */,
 				8B88348E80AD052EBD21197B /* eraser-tool.png in Resources */,
 				875D73FF8B4029D231901AE2 /* eraser-tool.svg in Resources */,
-				E96975FD2FD94C344AB04F2E /* eraser2.svg in Resources */,
+				E96975FD2FD94C344AB04F2E /* eraser.svg in Resources */,
 				576F043C01E6CBB1493C8100 /* eyedropper.svg in Resources */,
 				2DEAE858DF2C0E205CCBC300 /* failed.svg in Resources */,
 				1EC56CC7E8E855F22CC8ACFE /* fullscreencutsound.mp3 in Resources */,

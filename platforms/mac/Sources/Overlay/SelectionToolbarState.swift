@@ -488,7 +488,7 @@ enum SelectionToolbarState {
         }
     }
 
-    static let eraserIconResourceName = "eraser2"
+    static let eraserIconResourceName = "eraser"
     static let eraserToolbarSymbolName = "toolbar-\(eraserIconResourceName)"
 
     static func shouldTintToolbarIconResource(_ resourceName: String, selected: Bool) -> Bool {
