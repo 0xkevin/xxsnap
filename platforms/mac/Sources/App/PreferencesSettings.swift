@@ -483,6 +483,18 @@ struct PreferencesStrings {
         }
     }
     var updateAvailableTitle: String { isEnglish ? "Update Available" : "发现新版本" }
+    func updateVersionReady(_ version: String, build: Int) -> String {
+        isEnglish
+            ? "XxSnap \(version) (\(build)) is now available"
+            : "XxSnap \(version)（\(build)）现已推出"
+    }
+    func updateCurrentVersion(_ version: String, build: Int) -> String {
+        isEnglish ? "Current version: \(version) (\(build))" : "当前版本 \(version)（\(build)）"
+    }
+    var updateReleaseNotesTitle: String { isEnglish ? "What's New" : "本次更新" }
+    var updateNoReleaseNotes: String {
+        isEnglish ? "No release notes are available for this version." : "本版本暂无更新说明。"
+    }
     var updateGraceTitle: String { isEnglish ? "Update Required Soon" : "请在截止时间前更新" }
     var updateRequiredTitle: String { isEnglish ? "Update Required" : "必须更新后才能继续使用" }
     var updateUnavailableTitle: String { isEnglish ? "Unable to Check for Updates" : "暂时无法检查更新" }

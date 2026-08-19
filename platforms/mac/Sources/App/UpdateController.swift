@@ -436,28 +436,34 @@ final class AppUpdateController: UpdateChecking {
         isPresenting = true
         defer { isPresenting = false }
         let strings = PreferencesStrings(language: currentLanguage)
+        switch result {
+        case let .available(release):
+            presentAvailableUpdate(
+                release: release,
+                title: strings.updateAvailableTitle,
+                notice: nil,
+                strings: strings
+            )
+            return
+        case let .grace(release, deadline):
+            presentAvailableUpdate(
+                release: release,
+                title: strings.updateGraceTitle,
+                notice: strings.updateGraceDetail(deadline: deadline),
+                strings: strings
+            )
+            return
+        default:
+            break
+        }
         let alert = NSAlert()
         switch result {
         case .upToDate:
             alert.messageText = strings.upToDate
             alert.informativeText = "XxSnap \(currentVersion) (\(currentBuild))"
             alert.addButton(withTitle: strings.confirm)
-        case let .available(release):
-            configureUpdateAlert(
-                alert,
-                release: release,
-                title: strings.updateAvailableTitle,
-                detail: release.releaseNotes,
-                strings: strings
-            )
-        case let .grace(release, deadline):
-            configureUpdateAlert(
-                alert,
-                release: release,
-                title: strings.updateGraceTitle,
-                detail: strings.updateGraceDetail(deadline: deadline),
-                strings: strings
-            )
+        case .available, .grace:
+            return
         case let .required(release, deadline):
             alert.alertStyle = .critical
             alert.messageText = strings.updateRequiredTitle
@@ -473,8 +479,6 @@ final class AppUpdateController: UpdateChecking {
         NSApp.activate(ignoringOtherApps: true)
         let response = alert.runModal()
         switch result {
-        case let .available(release), let .grace(release, _):
-            if response == .alertFirstButtonReturn { beginUpdate(release, strings: strings) }
         case let .required(release, _):
             if response == .alertFirstButtonReturn {
                 beginUpdate(release, strings: strings)
@@ -513,17 +517,23 @@ final class AppUpdateController: UpdateChecking {
         onStateChange?()
     }
 
-    private func configureUpdateAlert(
-        _ alert: NSAlert,
+    private func presentAvailableUpdate(
         release: AppUpdateRelease,
         title: String,
-        detail: String,
+        notice: String?,
         strings: PreferencesStrings
     ) {
-        alert.messageText = title
-        alert.informativeText = detail.isEmpty ? "XxSnap \(release.version)" : detail
-        alert.addButton(withTitle: strings.downloadUpdate)
-        alert.addButton(withTitle: strings.later)
+        let dialog = UpdateAvailableWindowController(
+            release: release,
+            title: title,
+            notice: notice,
+            currentVersion: currentVersion,
+            currentBuild: currentBuild,
+            strings: strings
+        )
+        if dialog.runModal() == .alertFirstButtonReturn {
+            beginUpdate(release, strings: strings)
+        }
     }
 
     private func beginUpdate(_ release: AppUpdateRelease, strings: PreferencesStrings) {
@@ -609,6 +619,228 @@ final class AppUpdateController: UpdateChecking {
             NSWorkspace.shared.open(applicationURL)
             NSApplication.shared.terminate(nil)
         }
+    }
+}
+
+@MainActor
+final class UpdateAvailableWindowController: NSWindowController, NSWindowDelegate {
+    static let contentSize = NSSize(width: 560, height: 520)
+
+    let releaseNotesScrollView = NSScrollView()
+    let releaseNotesTextView = NSTextView(frame: NSRect(x: 0, y: 0, width: 480, height: 0))
+
+    let downloadButton = NSButton()
+    private let laterButton = NSButton()
+
+    init(
+        release: AppUpdateRelease,
+        title: String,
+        notice: String?,
+        currentVersion: String,
+        currentBuild: Int,
+        strings: PreferencesStrings
+    ) {
+        let panel = NSPanel(
+            contentRect: NSRect(origin: .zero, size: Self.contentSize),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = title
+        panel.isReleasedWhenClosed = false
+        panel.isMovableByWindowBackground = true
+        panel.hidesOnDeactivate = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        super.init(window: panel)
+        panel.delegate = self
+        configureContent(
+            release: release,
+            notice: notice,
+            currentVersion: currentVersion,
+            currentBuild: currentBuild,
+            strings: strings
+        )
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    func runModal() -> NSApplication.ModalResponse {
+        guard let window else { return .abort }
+        NSApp.activate(ignoringOtherApps: true)
+        window.center()
+        showWindow(nil)
+        window.makeKeyAndOrderFront(nil)
+        let response = NSApp.runModal(for: window)
+        window.orderOut(nil)
+        return response
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        if NSApp.modalWindow === sender {
+            NSApp.stopModal(withCode: .alertSecondButtonReturn)
+        }
+        return true
+    }
+
+    private func configureContent(
+        release: AppUpdateRelease,
+        notice: String?,
+        currentVersion: String,
+        currentBuild: Int,
+        strings: PreferencesStrings
+    ) {
+        guard let contentView = window?.contentView else { return }
+
+        let iconView = NSImageView(image: NSApp.applicationIconImage)
+        iconView.imageScaling = .scaleProportionallyUpOrDown
+        iconView.setAccessibilityLabel("XxSnap")
+
+        let versionTitle = NSTextField(
+            labelWithString: strings.updateVersionReady(
+                release.version,
+                build: release.buildNumber
+            )
+        )
+        versionTitle.font = .systemFont(ofSize: 22, weight: .semibold)
+        versionTitle.textColor = .labelColor
+
+        let currentVersionLabel = NSTextField(
+            labelWithString: strings.updateCurrentVersion(currentVersion, build: currentBuild)
+        )
+        currentVersionLabel.font = .systemFont(ofSize: 13)
+        currentVersionLabel.textColor = .secondaryLabelColor
+
+        let headingStack = NSStackView(views: [versionTitle, currentVersionLabel])
+        headingStack.orientation = .vertical
+        headingStack.alignment = .leading
+        headingStack.spacing = 7
+        if let notice, !notice.isEmpty {
+            let noticeLabel = NSTextField(wrappingLabelWithString: notice)
+            noticeLabel.font = .systemFont(ofSize: 12)
+            noticeLabel.textColor = .systemOrange
+            noticeLabel.maximumNumberOfLines = 2
+            headingStack.addArrangedSubview(noticeLabel)
+            noticeLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 390).isActive = true
+        }
+
+        let releaseNotesTitle = NSTextField(labelWithString: strings.updateReleaseNotesTitle)
+        releaseNotesTitle.font = .systemFont(ofSize: 15, weight: .semibold)
+        releaseNotesTitle.textColor = .labelColor
+
+        configureReleaseNotes(
+            release.releaseNotes.isEmpty ? strings.updateNoReleaseNotes : release.releaseNotes,
+            accessibilityLabel: strings.updateReleaseNotesTitle
+        )
+
+        let separator = NSBox()
+        separator.boxType = .separator
+
+        laterButton.title = strings.later
+        laterButton.bezelStyle = .rounded
+        laterButton.controlSize = .large
+        laterButton.keyEquivalent = "\u{1b}"
+        laterButton.target = self
+        laterButton.action = #selector(laterPressed)
+
+        downloadButton.title = strings.downloadUpdate
+        downloadButton.bezelStyle = .rounded
+        downloadButton.controlSize = .large
+        downloadButton.keyEquivalent = "\r"
+        downloadButton.target = self
+        downloadButton.action = #selector(downloadPressed)
+
+        let buttonStack = NSStackView(views: [laterButton, downloadButton])
+        buttonStack.orientation = .horizontal
+        buttonStack.alignment = .centerY
+        buttonStack.spacing = 10
+
+        for view in [iconView, headingStack, releaseNotesTitle, releaseNotesScrollView, separator, buttonStack] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            contentView.addSubview(view)
+        }
+        laterButton.translatesAutoresizingMaskIntoConstraints = false
+        downloadButton.translatesAutoresizingMaskIntoConstraints = false
+
+        NSLayoutConstraint.activate([
+            iconView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 28),
+            iconView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 28),
+            iconView.widthAnchor.constraint(equalToConstant: 72),
+            iconView.heightAnchor.constraint(equalToConstant: 72),
+
+            headingStack.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 20),
+            headingStack.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -28),
+            headingStack.centerYAnchor.constraint(equalTo: iconView.centerYAnchor),
+
+            releaseNotesTitle.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 28),
+            releaseNotesTitle.topAnchor.constraint(equalTo: iconView.bottomAnchor, constant: 26),
+
+            releaseNotesScrollView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 28),
+            releaseNotesScrollView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -28),
+            releaseNotesScrollView.topAnchor.constraint(equalTo: releaseNotesTitle.bottomAnchor, constant: 10),
+            releaseNotesScrollView.bottomAnchor.constraint(equalTo: separator.topAnchor, constant: -20),
+
+            separator.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            separator.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -72),
+
+            buttonStack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -28),
+            buttonStack.centerYAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -36),
+            laterButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 88),
+            downloadButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 120),
+        ])
+
+        window?.initialFirstResponder = downloadButton
+        contentView.layoutSubtreeIfNeeded()
+    }
+
+    private func configureReleaseNotes(_ releaseNotes: String, accessibilityLabel: String) {
+        releaseNotesTextView.string = releaseNotes
+        releaseNotesTextView.isEditable = false
+        releaseNotesTextView.isSelectable = true
+        releaseNotesTextView.drawsBackground = false
+        releaseNotesTextView.font = .systemFont(ofSize: 13.5)
+        releaseNotesTextView.textColor = .labelColor
+        releaseNotesTextView.textContainerInset = NSSize(width: 12, height: 12)
+        releaseNotesTextView.isHorizontallyResizable = false
+        releaseNotesTextView.isVerticallyResizable = true
+        releaseNotesTextView.autoresizingMask = [.width]
+        releaseNotesTextView.minSize = .zero
+        releaseNotesTextView.maxSize = NSSize(
+            width: CGFloat.greatestFiniteMagnitude,
+            height: CGFloat.greatestFiniteMagnitude
+        )
+        releaseNotesTextView.textContainer?.widthTracksTextView = true
+        releaseNotesTextView.textContainer?.containerSize = NSSize(
+            width: 456,
+            height: CGFloat.greatestFiniteMagnitude
+        )
+        if let layoutManager = releaseNotesTextView.layoutManager,
+           let textContainer = releaseNotesTextView.textContainer {
+            layoutManager.ensureLayout(for: textContainer)
+            let textHeight = layoutManager.usedRect(for: textContainer).height
+            releaseNotesTextView.frame.size.height = max(260, textHeight + 24)
+        }
+
+        releaseNotesScrollView.documentView = releaseNotesTextView
+        releaseNotesScrollView.hasVerticalScroller = true
+        releaseNotesScrollView.hasHorizontalScroller = false
+        releaseNotesScrollView.autohidesScrollers = true
+        releaseNotesScrollView.drawsBackground = true
+        releaseNotesScrollView.backgroundColor = .controlBackgroundColor
+        releaseNotesScrollView.borderType = .bezelBorder
+        releaseNotesScrollView.wantsLayer = true
+        releaseNotesScrollView.layer?.cornerRadius = 10
+        releaseNotesScrollView.layer?.masksToBounds = true
+        releaseNotesScrollView.setAccessibilityLabel(accessibilityLabel)
+    }
+
+    @objc private func downloadPressed() {
+        NSApp.stopModal(withCode: .alertFirstButtonReturn)
+    }
+
+    @objc private func laterPressed() {
+        NSApp.stopModal(withCode: .alertSecondButtonReturn)
     }
 }
 
