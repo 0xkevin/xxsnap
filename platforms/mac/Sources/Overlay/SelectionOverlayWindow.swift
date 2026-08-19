@@ -419,13 +419,28 @@ extension NSCursor {
         let inset = (size.width - iconSize) / 2
 
         if let image = svgImage(named: SelectionToolbarState.eraserIconResourceName) {
+            let targetRect = NSRect(x: inset, y: inset, width: iconSize, height: iconSize)
             let cursorImage = NSImage(size: size)
             cursorImage.lockFocus()
             NSGraphicsContext.current?.imageInterpolation = .high
+            for offset in [
+                NSPoint(x: -1, y: -1), NSPoint(x: 0, y: -1), NSPoint(x: 1, y: -1),
+                NSPoint(x: -1, y: 0), NSPoint(x: 1, y: 0),
+                NSPoint(x: -1, y: 1), NSPoint(x: 0, y: 1), NSPoint(x: 1, y: 1),
+            ] {
+                image.draw(
+                    in: targetRect.offsetBy(dx: offset.x, dy: offset.y),
+                    from: .zero,
+                    operation: .sourceOver,
+                    fraction: 1.0
+                )
+            }
+            NSColor.white.setFill()
+            NSRect(origin: .zero, size: size).fill(using: .sourceAtop)
             image.draw(
-                in: NSRect(x: inset, y: inset, width: iconSize, height: iconSize),
+                in: targetRect,
                 from: .zero,
-                operation: .copy,
+                operation: .sourceOver,
                 fraction: 1.0
             )
             cursorImage.unlockFocus()

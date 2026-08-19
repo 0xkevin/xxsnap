@@ -15492,6 +15492,21 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertGreaterThan(outline.alpha, 200)
     }
 
+    func testEraserCursorHasContrastOnLightAndDarkBackgrounds() throws {
+        let pixels = try rgbaBytes(in: NSCursor.xxsnapEraser.image)
+        var hasOpaqueDarkPixel = false
+        var hasOpaqueLightPixel = false
+
+        for index in stride(from: 0, to: pixels.count, by: 4) where pixels[index + 3] > 200 {
+            let brightness = Int(pixels[index]) + Int(pixels[index + 1]) + Int(pixels[index + 2])
+            hasOpaqueDarkPixel = hasOpaqueDarkPixel || brightness < 120
+            hasOpaqueLightPixel = hasOpaqueLightPixel || brightness > 645
+        }
+
+        XCTAssertTrue(hasOpaqueDarkPixel)
+        XCTAssertTrue(hasOpaqueLightPixel)
+    }
+
     func testMosaicPreviewProgressMapsRangeEndpoints() {
         XCTAssertEqual(SelectionToolbarState.mosaicPreviewProgress(for: 5), 0, accuracy: 0.001)
         XCTAssertEqual(SelectionToolbarState.mosaicPreviewProgress(for: 12), 7.0 / 15.0, accuracy: 0.001)
