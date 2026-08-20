@@ -5327,7 +5327,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         let options = try XCTUnwrap(window.test_optionsToolbarRect)
         let pointMode = try XCTUnwrap(window.test_eraserPointOptionRect)
         let rectangleMode = try XCTUnwrap(window.test_eraserRectangleOptionRect)
-        XCTAssertEqual(options.width, 34, accuracy: 0.5)
+        XCTAssertEqual(options.width, try XCTUnwrap(window.test_mainToolbarRect()).width, accuracy: 0.5)
         XCTAssertEqual(options.height, 60, accuracy: 0.5)
         XCTAssertEqual(pointMode.midX, options.midX, accuracy: 0.5)
         XCTAssertEqual(rectangleMode.midX, options.midX, accuracy: 0.5)
