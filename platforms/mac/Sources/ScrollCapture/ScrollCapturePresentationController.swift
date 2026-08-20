@@ -13,6 +13,11 @@ private enum ScrollCapturePreviewVerticalAnchor: Equatable {
     case bottom
 }
 
+private struct ScrollCaptureSavingVisibility {
+    let warningWasVisible: Bool
+    let boundaryWasVisible: Bool
+}
+
 enum ScrollCaptureOverlayState: Equatable {
     case inactive
     case capturing
@@ -81,6 +86,7 @@ final class ScrollCapturePresentationController: NSObject {
     private var boundaryDismissTask: DispatchWorkItem?
     private var hasStarted = false
     private var stopped = false
+    private var savingVisibility: ScrollCaptureSavingVisibility?
 
     init(
         toolbarFrame: NSRect,
@@ -381,16 +387,31 @@ final class ScrollCapturePresentationController: NSObject {
 
     func hideForSaving() {
         guard hasStarted, !stopped else { return }
+        if savingVisibility == nil {
+            savingVisibility = ScrollCaptureSavingVisibility(
+                warningWasVisible: warningPanel.isVisible,
+                boundaryWasVisible: boundaryPanel.isVisible
+            )
+        }
         [controlPanel, previewPanel, warningPanel, boundaryPanel].forEach { $0.orderOut(nil) }
     }
 
     func restoreAfterSaveFailure() {
         guard hasStarted, !stopped else { return }
+        let visibility = savingVisibility
+        savingVisibility = nil
         controlPanel.orderFrontRegardless()
         previewPanel.orderFrontRegardless()
+        if visibility?.warningWasVisible == true, !warningLabel.isHidden {
+            warningPanel.orderFrontRegardless()
+        }
+        if visibility?.boundaryWasVisible == true, boundaryIsTop != nil {
+            boundaryPanel.orderFrontRegardless()
+        }
     }
 
     private func cleanup() {
+        savingVisibility = nil
         if let boundsObserver {
             NotificationCenter.default.removeObserver(boundsObserver)
             self.boundsObserver = nil

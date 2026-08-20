@@ -35,6 +35,48 @@ final class ScrollCapturePresentationTests: XCTestCase {
     }
 
     @MainActor
+    func testSuperLongWarningCentersInsideCaptureSelection() throws {
+        let selection = NSRect(x: 120, y: 180, width: 760, height: 720)
+        let controller = SuperLongCaptureWarningWindowController(
+            language: .zhHans,
+            selectionFrame: selection
+        )
+
+        controller.show()
+
+        let frame = try XCTUnwrap(controller.window?.frame)
+        XCTAssertEqual(frame.midX, selection.midX, accuracy: 0.5)
+        XCTAssertEqual(frame.midY, selection.midY, accuracy: 0.5)
+        XCTAssertGreaterThanOrEqual(frame.minX, selection.minX)
+        XCTAssertLessThanOrEqual(frame.maxX, selection.maxX)
+        XCTAssertGreaterThanOrEqual(frame.minY, selection.minY)
+        XCTAssertLessThanOrEqual(frame.maxY, selection.maxY)
+    }
+
+    @MainActor
+    func testSuperLongWarningStaysInsideVisibleScreenForSmallEdgeSelection() throws {
+        let visibleFrame = try XCTUnwrap(NSScreen.screens.first?.visibleFrame)
+        let selection = NSRect(
+            x: visibleFrame.maxX - 12,
+            y: visibleFrame.maxY - 12,
+            width: 8,
+            height: 8
+        )
+        let controller = SuperLongCaptureWarningWindowController(
+            language: .zhHans,
+            selectionFrame: selection
+        )
+
+        controller.show()
+
+        let frame = try XCTUnwrap(controller.window?.frame)
+        XCTAssertGreaterThanOrEqual(frame.minX, visibleFrame.minX)
+        XCTAssertLessThanOrEqual(frame.maxX, visibleFrame.maxX)
+        XCTAssertGreaterThanOrEqual(frame.minY, visibleFrame.minY)
+        XCTAssertLessThanOrEqual(frame.maxY, visibleFrame.maxY)
+    }
+
+    @MainActor
     func testSuperLongSaveProgressIsDeterminateMonotonicAndEscDoesNotCancel() throws {
         var cancelCount = 0
         let controller = SuperLongCaptureSaveProgressWindowController(
@@ -74,6 +116,31 @@ final class ScrollCapturePresentationTests: XCTestCase {
         let frame = try XCTUnwrap(controller.window?.frame)
         XCTAssertEqual(frame.midX, selection.midX, accuracy: 0.5)
         XCTAssertEqual(frame.midY, selection.midY, accuracy: 0.5)
+    }
+
+    @MainActor
+    func testSuperLongSaveProgressStaysInsideVisibleScreenForSmallEdgeSelection() throws {
+        let visibleFrame = try XCTUnwrap(NSScreen.screens.first?.visibleFrame)
+        let selection = NSRect(
+            x: visibleFrame.minX + 4,
+            y: visibleFrame.minY + 4,
+            width: 8,
+            height: 8
+        )
+        let controller = SuperLongCaptureSaveProgressWindowController(
+            destination: URL(fileURLWithPath: "/tmp/capture.png"),
+            selectionFrame: selection,
+            language: .zhHans,
+            onCancel: {}
+        )
+
+        controller.show()
+
+        let frame = try XCTUnwrap(controller.window?.frame)
+        XCTAssertGreaterThanOrEqual(frame.minX, visibleFrame.minX)
+        XCTAssertLessThanOrEqual(frame.maxX, visibleFrame.maxX)
+        XCTAssertGreaterThanOrEqual(frame.minY, visibleFrame.minY)
+        XCTAssertLessThanOrEqual(frame.maxY, visibleFrame.maxY)
     }
 
     @MainActor
@@ -350,6 +417,46 @@ final class ScrollCapturePresentationTests: XCTestCase {
         XCTAssertNil(controller.test_warningText)
         controller.start()
         XCTAssertFalse(controller.test_hasVisiblePanels)
+    }
+
+    func testSaveFailureRestoreReturnsWarningVisibleBeforeSaving() {
+        let controller = makeController()
+        controller.start()
+        controller.setWarning("Low confidence")
+        XCTAssertEqual(controller.test_visiblePanelKinds, ["control", "preview", "warning"])
+
+        controller.hideForSaving()
+        XCTAssertTrue(controller.test_visiblePanelKinds.isEmpty)
+
+        controller.restoreAfterSaveFailure()
+        XCTAssertEqual(controller.test_visiblePanelKinds, ["control", "preview", "warning"])
+        controller.stop()
+    }
+
+    func testSaveFailureRestoreDoesNotRevealOptionalPanelsHiddenBeforeSaving() {
+        let controller = makeController()
+        controller.start()
+        XCTAssertEqual(controller.test_visiblePanelKinds, ["control", "preview"])
+
+        controller.hideForSaving()
+        controller.restoreAfterSaveFailure()
+
+        XCTAssertEqual(controller.test_visiblePanelKinds, ["control", "preview"])
+        controller.stop()
+    }
+
+    func testSaveFailureRestoreReturnsBoundaryNoticeVisibleBeforeSaving() {
+        let controller = makeController()
+        controller.start()
+        controller.test_showBoundaryAlert(isTopBoundary: true)
+        XCTAssertEqual(controller.test_visiblePanelKinds, ["control", "preview", "boundary"])
+
+        controller.hideForSaving()
+        XCTAssertTrue(controller.test_visiblePanelKinds.isEmpty)
+
+        controller.restoreAfterSaveFailure()
+        XCTAssertEqual(controller.test_visiblePanelKinds, ["control", "preview", "boundary"])
+        controller.stop()
     }
 
     func testTerminalActionsCanBeRearmedAfterRecoverableFailure() {
