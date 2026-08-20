@@ -278,7 +278,9 @@ target_link_libraries(
            xxsnap_scroll_capture_target_detector
            xxsnap_scroll_region_capturer
            xxsnap_toolbar_layout
-    PRIVATE gdi32 user32 ole32 windowscodecs msimg32
+    PRIVATE xxsnap_annotation_composer xxsnap_display_topology
+            xxsnap_overlay_host
+            gdi32 user32 ole32 windowscodecs msimg32
 )
 
 add_library(
@@ -330,6 +332,7 @@ add_library(
     xxsnap_pinned_image_host
     src/pin/PinnedImageGeometry.cpp
     src/pin/PinnedImageHost.cpp
+    src/pin/PinnedImageShadow.cpp
 )
 target_compile_features(xxsnap_pinned_image_host PUBLIC cxx_std_17)
 target_include_directories(
@@ -1233,6 +1236,26 @@ if(BUILD_TESTING)
     add_test(
         NAME scroll_capture_session
         COMMAND xxsnap_scroll_capture_session_test
+    )
+
+    add_executable(
+        xxsnap_long_image_editor_geometry_test
+        tests/TestLongImageEditorGeometry.cpp
+    )
+    target_compile_features(
+        xxsnap_long_image_editor_geometry_test PRIVATE cxx_std_17
+    )
+    target_include_directories(
+        xxsnap_long_image_editor_geometry_test
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    target_link_libraries(
+        xxsnap_long_image_editor_geometry_test
+        PRIVATE snipory_core_portable
+    )
+    add_test(
+        NAME long_image_editor_geometry
+        COMMAND xxsnap_long_image_editor_geometry_test
     )
 
     add_executable(

@@ -35,6 +35,39 @@ inline constexpr int overlaySaveHotKeyIdentifier = 0x5856;
 inline constexpr int overlayCopyHotKeyIdentifier = 0x5857;
 inline constexpr int overlayDeleteHotKeyIdentifier = 0x5858;
 inline constexpr int overlayPinHotKeyIdentifier = 0x5859;
+inline constexpr int overlayToolbarHotKeyIdentifierBase = 0x5860;
+
+struct OverlayToolbarHotKey {
+    ToolbarAction action;
+    bool shift;
+};
+
+constexpr int overlayToolbarHotKeyIdentifier(
+    ToolbarAction action, bool shift) noexcept
+{
+    return overlayToolbarHotKeyIdentifierBase
+        + static_cast<int>(action) * 2 + (shift ? 1 : 0);
+}
+
+constexpr std::optional<OverlayToolbarHotKey> overlayToolbarHotKey(
+    WPARAM identifier) noexcept
+{
+    if (identifier < static_cast<WPARAM>(overlayToolbarHotKeyIdentifierBase)) {
+        return std::nullopt;
+    }
+    const auto offset = static_cast<std::size_t>(identifier)
+        - static_cast<std::size_t>(overlayToolbarHotKeyIdentifierBase);
+    const auto actionIndex = offset / 2U;
+    if (actionIndex >= static_cast<std::size_t>(ToolbarAction::count)) {
+        return std::nullopt;
+    }
+    const auto action = static_cast<ToolbarAction>(actionIndex);
+    const auto& shortcut = toolbarTooltip(action);
+    if (shortcut.control || shortcut.virtualKey == VK_ESCAPE) {
+        return std::nullopt;
+    }
+    return OverlayToolbarHotKey{action, (offset % 2U) != 0U};
+}
 
 constexpr bool isOverlayEscapeHotKey(WPARAM identifier) noexcept
 {
@@ -76,9 +109,16 @@ enum class OverlayCursorStyle : std::uint8_t {
     resizeUpDown,
     resizeTopLeftBottomRight,
     resizeTopRightBottomLeft,
+    moveLight,
+    resizeLeftRightLight,
+    resizeUpDownLight,
+    resizeTopLeftBottomRightLight,
+    resizeTopRightBottomLeftLight,
     rotation,
     brush,
+    brushLight,
     marker,
+    markerLight,
     mosaic,
     numberMark,
     numberCheck,
@@ -116,6 +156,7 @@ enum class OverlayWindowInputKind {
     keyUp,
     textInput,
     mouseWheel,
+    pointerLeave,
     cancelShiftShortcut,
 };
 
@@ -156,6 +197,7 @@ public:
     void hide() noexcept;
     void setAlwaysOnTop(bool enabled) noexcept;
     void setKeyboardInputAlwaysEnabled(bool enabled) noexcept;
+    void setDisplay(const FrozenDisplay& display) noexcept;
     void setSelection(
         std::optional<PixelRect> selection,
         bool showActions = true) noexcept;
@@ -208,6 +250,7 @@ private:
     float markerCursorStrokeWidthDip_ = 0.0F;
     bool markerCursorIsMosaic_ = false;
     bool markerCursorIsNumber_ = false;
+    bool trackingMouseLeave_ = false;
     NumberMarkType numberCursorType_ = NumberMarkType::number;
     int numberCursorValue_ = 1;
     std::optional<OverlayRendererError> lastRendererError_;

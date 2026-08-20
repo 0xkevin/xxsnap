@@ -28,6 +28,10 @@ enum class ShapeEditorKey : std::uint8_t {
     save,
     copy,
     pin,
+    rectangle,
+    polyline,
+    pen,
+    marker,
     eyedropper,
     mosaic,
     text,
@@ -247,6 +251,7 @@ private:
     std::optional<AnnotationPoint> eraserRectangleCurrent_;
     bool eraserPointInteractionActive_ = false;
     std::optional<AnnotationId> editingNumberId_;
+    std::optional<AnnotationId> numberTypeFollowerId_;
     std::wstring numberEditBuffer_;
     std::size_t numberCaretPosition_ = 0U;
     std::uint64_t currentNumberGroupId_ = 0;

@@ -74,6 +74,7 @@ void testBrushDrawsFreehandPath()
     CHECK((freehand.brushPath->points.front() == AnnotationPoint{20, 30}));
     CHECK((freehand.brushPath->points.back() == AnnotationPoint{100, 80}));
     CHECK(!editor.document().selectedId().has_value());
+    CHECK(editor.cursorStyleAt({40, 50}) == ShapeCursorStyle::brush);
 
     CHECK(editor.pointerDown({200, 200}));
     editor.pointerMove({240, 240}, true);
@@ -128,6 +129,7 @@ void testMarkerDrawsSnappedLineDotAndEditsEndpoints()
     CHECK(editor.document().find(id)->style.strokeWidthDip == 22.0F);
     CHECK(editor.document().selectedId() == id);
     CHECK(editor.renderPlan({}, true).lineHandles.size() == 2U);
+    CHECK(editor.cursorStyleAt(line.start) == ShapeCursorStyle::marker);
 
     CHECK(editor.handleKey(ShapeEditorKey::escapeKey, false, false)
         == ShapeEditorKeyResult::consumed);
@@ -433,6 +435,23 @@ void testEyedropperMatchesMacToolSelectionAndEscape()
     CHECK(editor.isMarkerToolActive());
 }
 
+void testMacToolShortcutsSelectPrimaryAnnotationTools()
+{
+    ShapeEditorController editor({0, 0, 300, 200});
+    CHECK(editor.handleKey(ShapeEditorKey::rectangle, false, false)
+        == ShapeEditorKeyResult::consumed);
+    CHECK(editor.toolbarState().selectedAction() == ToolbarAction::rectangle);
+    CHECK(editor.handleKey(ShapeEditorKey::polyline, false, false)
+        == ShapeEditorKeyResult::consumed);
+    CHECK(editor.toolbarState().selectedAction() == ToolbarAction::polyline);
+    CHECK(editor.handleKey(ShapeEditorKey::pen, false, false)
+        == ShapeEditorKeyResult::consumed);
+    CHECK(editor.toolbarState().selectedAction() == ToolbarAction::pen);
+    CHECK(editor.handleKey(ShapeEditorKey::marker, false, false)
+        == ShapeEditorKeyResult::consumed);
+    CHECK(editor.toolbarState().selectedAction() == ToolbarAction::marker);
+}
+
 void testMosaicCreatesStrokeAndRotatableRectangle()
 {
     ShapeEditorController editor({0, 0, 300, 200});
@@ -473,6 +492,26 @@ void testMosaicCreatesStrokeAndRotatableRectangle()
     CHECK(editor.pointerUp({230, 100}));
     CHECK(editor.document().find(rectangleId)->rotationDegrees != 0.0F);
     CHECK(!editor.pointerDown({-20, -20}));
+}
+
+void testMosaicDrawingTakesPriorityOverNonMosaicBordersLikeMac()
+{
+    ShapeEditorController editor({0, 0, 300, 200});
+    CHECK(editor.handleToolbarAction(ToolbarAction::rectangle));
+    CHECK(editor.pointerDown({20, 20}));
+    editor.pointerMove({100, 100});
+    CHECK(editor.pointerUp({100, 100}));
+    const auto rectangleId = editor.document().annotations().front().id;
+
+    CHECK(editor.handleToolbarAction(ToolbarAction::mosaic));
+    CHECK(editor.pointerDown({20, 60}));
+    editor.pointerMove({70, 60});
+    CHECK(editor.pointerUp({70, 60}));
+    CHECK(editor.document().annotations().size() == 2U);
+    CHECK(isMosaicStrokeAnnotation(
+        editor.document().annotations().back()));
+    CHECK((editor.document().find(rectangleId)->rect
+        == AnnotationRect{20, 20, 80, 80}));
 }
 
 void testTextCreatesUnicodeAndEditsAtCaret()
@@ -594,6 +633,35 @@ void testNumberToolMatchesMacSequenceEditingAndControls()
     CHECK(editor.numberOptions().style().textSize == 24.0F);
     CHECK(editor.selectNumberType(NumberMarkType::cross));
     CHECK(editor.cursorStyleAt({40, 40}) == ShapeCursorStyle::numberCross);
+}
+
+void testNewNumberMarkOnlyFollowsTypeAfterExplicitReselection()
+{
+    ShapeEditorController editor({0, 0, 500, 400});
+    CHECK(editor.handleKey(ShapeEditorKey::number, false, false)
+        == ShapeEditorKeyResult::consumed);
+    CHECK(editor.selectNumberType(NumberMarkType::check));
+    CHECK(editor.pointerDown({80, 80}));
+    editor.pointerUp({80, 80});
+
+    const auto firstId = editor.document().annotations().front().id;
+    const auto firstStyle = editor.document().find(firstId)->style;
+    CHECK(editor.selectNumberType(NumberMarkType::cross));
+    CHECK(editor.document().find(firstId)->numberMarkType
+        == NumberMarkType::check);
+    CHECK(editor.document().find(firstId)->style == firstStyle);
+
+    CHECK(editor.pointerDown({160, 80}));
+    editor.pointerUp({160, 80});
+    CHECK(editor.document().annotations().back().numberMarkType
+        == NumberMarkType::cross);
+
+    CHECK(editor.pointerDown({80, 80}));
+    editor.pointerUp({80, 80});
+    CHECK(editor.selectNumberType(NumberMarkType::number));
+    CHECK(editor.document().find(firstId)->numberMarkType
+        == NumberMarkType::number);
+    CHECK(editor.document().find(firstId)->numberSequenceIndex.has_value());
 }
 
 void testNumberSequenceGroupsManualMarksResizeAndHistory()
@@ -788,7 +856,7 @@ void testEraserMatchesMacPointRectangleAndClearSemantics()
     const auto preview = editor.eraserRectanglePreview();
     CHECK(preview.has_value());
     CHECK((preview.value_or(AnnotationRect{})
-        == AnnotationRect{-10, 10, 80, 60}));
+        == AnnotationRect{0, 10, 70, 60}));
     CHECK(editor.renderPlan({}, true).eraserPreview == preview);
     CHECK(editor.pointerUp({70, 70}));
     CHECK(editor.document().find(first) != nullptr);
@@ -863,9 +931,12 @@ int main()
     testBrushDrawsFreehandPath();
     testMarkerDrawsSnappedLineDotAndEditsEndpoints();
     testEyedropperMatchesMacToolSelectionAndEscape();
+    testMacToolShortcutsSelectPrimaryAnnotationTools();
     testMosaicCreatesStrokeAndRotatableRectangle();
+    testMosaicDrawingTakesPriorityOverNonMosaicBordersLikeMac();
     testTextCreatesUnicodeAndEditsAtCaret();
     testNumberToolMatchesMacSequenceEditingAndControls();
+    testNewNumberMarkOnlyFollowsTypeAfterExplicitReselection();
     testNumberSequenceGroupsManualMarksResizeAndHistory();
     testMagnifierMatchesMacCreationOptionsAndEditing();
     testEraserMatchesMacPointRectangleAndClearSemantics();

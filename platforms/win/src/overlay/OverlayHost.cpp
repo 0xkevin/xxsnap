@@ -18,6 +18,40 @@
 namespace xxsnap::win {
 namespace {
 
+AnnotationRenderPlan scaledRenderPlan(
+    AnnotationRenderPlan plan,
+    float scale)
+{
+    if (scale == 1.0F) return plan;
+    const auto point = [scale](AnnotationPoint value) {
+        return AnnotationPoint{value.x * scale, value.y * scale};
+    };
+    const auto rect = [scale](AnnotationRect value) {
+        return AnnotationRect{
+            value.x * scale, value.y * scale,
+            value.width * scale, value.height * scale,
+        };
+    };
+    for (auto& item : plan.items) {
+        item.annotation = scaled(std::move(item.annotation), scale, scale);
+    }
+    for (auto& value : plan.resizeHandles) value = point(value);
+    for (auto& value : plan.lineHandles) value = point(value);
+    if (plan.rotationHandle) plan.rotationHandle = point(*plan.rotationHandle);
+    if (plan.textCaret) plan.textCaret = rect(*plan.textCaret);
+    if (plan.textCaretRotationCenter) {
+        plan.textCaretRotationCenter = point(*plan.textCaretRotationCenter);
+    }
+    if (plan.textDeleteHandle) {
+        plan.textDeleteHandle = point(*plan.textDeleteHandle);
+    }
+    if (plan.numberOutline) plan.numberOutline = rect(*plan.numberOutline);
+    for (auto& value : plan.numberHandles) value.second = rect(value.second);
+    if (plan.numberCaret) plan.numberCaret = rect(*plan.numberCaret);
+    if (plan.eraserPreview) plan.eraserPreview = rect(*plan.eraserPreview);
+    return plan;
+}
+
 std::int64_t saturatingAdd(std::int64_t lhs, std::int64_t rhs) noexcept
 {
     constexpr auto minimum = (std::numeric_limits<std::int64_t>::min)();
@@ -411,6 +445,39 @@ public:
         return true;
     }
 
+    bool registerToolbarHotKeys(HWND window) noexcept override
+    {
+        if (window == nullptr) return false;
+        for (std::size_t index = 0;
+             index < static_cast<std::size_t>(ToolbarAction::count); ++index) {
+            const auto action = static_cast<ToolbarAction>(index);
+            const auto& shortcut = toolbarTooltip(action);
+            if (shortcut.control || shortcut.virtualKey == VK_ESCAPE) continue;
+            RegisterHotKey(window,
+                overlayToolbarHotKeyIdentifier(action, false),
+                0, shortcut.virtualKey);
+            RegisterHotKey(window,
+                overlayToolbarHotKeyIdentifier(action, true),
+                MOD_SHIFT, shortcut.virtualKey);
+        }
+        return true;
+    }
+
+    bool unregisterToolbarHotKeys(HWND window) noexcept override
+    {
+        for (std::size_t index = 0;
+             index < static_cast<std::size_t>(ToolbarAction::count); ++index) {
+            const auto action = static_cast<ToolbarAction>(index);
+            const auto& shortcut = toolbarTooltip(action);
+            if (shortcut.control || shortcut.virtualKey == VK_ESCAPE) continue;
+            UnregisterHotKey(
+                window, overlayToolbarHotKeyIdentifier(action, false));
+            UnregisterHotKey(
+                window, overlayToolbarHotKeyIdentifier(action, true));
+        }
+        return true;
+    }
+
     std::optional<AnnotationColor> chooseColor(
         HWND owner,
         AnnotationColor current) noexcept override
@@ -474,7 +541,8 @@ OverlayInputRouter::OverlayInputRouter(
     bool shapeAnnotationsEnabled,
     const FrozenDesktop* desktop,
     OverlayMode mode)
-    : model_(snipory::core::portable::standardized(virtualBounds))
+    : virtualBounds_(snipory::core::portable::standardized(virtualBounds))
+    , model_(virtualBounds_)
     , surfaces_(std::move(surfaces))
     , platform_(platform)
     , actionCallback_(std::move(actionCallback))
@@ -514,12 +582,36 @@ void OverlayInputRouter::lockSelection(PixelRect selection) noexcept
     ensureEditor();
 }
 
+void OverlayInputRouter::setAnnotationViewport(
+    AnnotationPoint origin,
+    float scale,
+    AnnotationRect canvasBounds,
+    const FrozenDesktop* desktop) noexcept
+{
+    if (dragging_) {
+        releaseInteraction();
+    }
+    annotationViewportOrigin_ = origin;
+    annotationViewportScale_ = (std::max)(scale, 0.0001F);
+    annotationCanvasBounds_ = standardized(canvasBounds);
+    desktop_ = desktop;
+    rawSelectionCache_.reset();
+    rawSelectionCacheSelection_.reset();
+    cursorContrastSelection_.reset();
+    cursorContrastPrefersLight_.reset();
+    annotationCompositeCache_.reset();
+    if (editor_ != nullptr) {
+        editor_->setCanvasBounds(*annotationCanvasBounds_);
+    }
+}
+
 std::vector<ToolbarAction> OverlayInputRouter::toolbarActions() const
 {
     if (mode_ == OverlayMode::textRecognition) {
         return {};
     }
-    if (mode_ == OverlayMode::pinnedImageEditor) {
+    if (mode_ == OverlayMode::pinnedImageEditor
+        || mode_ == OverlayMode::longImageEditor) {
         return {
             pinnedEditorToolbarActions().begin(),
             pinnedEditorToolbarActions().end(),
@@ -542,11 +634,49 @@ std::vector<ToolbarAction> OverlayInputRouter::toolbarActions() const
 bool OverlayInputRouter::toolbarActionEnabled(
     ToolbarAction action) const noexcept
 {
-    if (mode_ == OverlayMode::pinnedImageEditor
+    if ((mode_ == OverlayMode::pinnedImageEditor
+            || mode_ == OverlayMode::longImageEditor)
         && action == ToolbarAction::finishEditing) {
         return true;
     }
     return editor_ == nullptr || editor_->toolbarState().isEnabled(action);
+}
+
+bool OverlayInputRouter::performToolbarAction(ToolbarAction action) noexcept
+{
+    if (status_ != OverlayInputStatus::active
+        || !toolbarActionEnabled(action)) {
+        return false;
+    }
+    hoveredToolbarWindow_ = nullptr;
+    hoveredToolbarAction_.reset();
+    hoveredToolbarTooltipText_.clear();
+    if (action == ToolbarAction::cancel) {
+        cancelOnce();
+    } else if (action == ToolbarAction::pin) {
+        completeOnce(OverlayInputAction::pin);
+    } else if (action == ToolbarAction::save) {
+        completeOnce(OverlayInputAction::save);
+    } else if (action == ToolbarAction::copy) {
+        completeOnce(OverlayInputAction::copy);
+    } else if (action == ToolbarAction::finishEditing) {
+        completeOnce(OverlayInputAction::finishEditing);
+    } else if (action == ToolbarAction::scroll) {
+        releaseInteraction();
+        deactivateEscapeHotKey();
+        emitTerminal(OverlayInputAction::scrollCapture);
+    } else if (editor_ != nullptr) {
+        editor_->handleToolbarAction(action);
+        if (editor_->isEyedropperToolActive()) {
+            clearEyedropperState();
+            refreshEyedropperComposite();
+        } else {
+            clearEyedropperState();
+        }
+    } else {
+        return false;
+    }
+    return true;
 }
 
 void OverlayInputRouter::ensureEditor() noexcept
@@ -563,12 +693,15 @@ void OverlayInputRouter::ensureEditor() noexcept
     const auto selection = snipory::core::portable::standardized(
         *model_.selection());
     const auto& surface = surfaces_[*owner];
-    const AnnotationRect bounds{
-        0.0F,
-        0.0F,
-        physicalPixelsToDip(selection.width, surface.dpiX),
-        physicalPixelsToDip(selection.height, surface.dpiY),
+    const AnnotationRect viewportBounds{
+        physicalPixelsToDip(
+            virtualBounds_.x - selection.x, surface.dpiX),
+        physicalPixelsToDip(
+            virtualBounds_.y - selection.y, surface.dpiY),
+        physicalPixelsToDip(virtualBounds_.width, surface.dpiX),
+        physicalPixelsToDip(virtualBounds_.height, surface.dpiY),
     };
+    const auto bounds = annotationCanvasBounds_.value_or(viewportBounds);
     if (!editor_) {
         try {
             editor_ = std::make_unique<ShapeEditorController>(bounds);
@@ -639,8 +772,14 @@ std::optional<AnnotationPoint> OverlayInputRouter::annotationPoint(
         *model_.selection());
     const auto& owner = surfaces_[*editorOwnerIndex_];
     return AnnotationPoint{
-        physicalPixelsToDip(virtualPoint.x - selection.x, owner.dpiX),
-        physicalPixelsToDip(virtualPoint.y - selection.y, owner.dpiY),
+        annotationViewportOrigin_.x
+            + physicalPixelsToDip(
+                virtualPoint.x - selection.x, owner.dpiX)
+                / annotationViewportScale_,
+        annotationViewportOrigin_.y
+            + physicalPixelsToDip(
+                virtualPoint.y - selection.y, owner.dpiY)
+                / annotationViewportScale_,
     };
 }
 
@@ -702,13 +841,30 @@ OverlayInputRouter::composeCurrentSelection() const noexcept
         auto* pixels = output.value.get();
         if (editor_ != nullptr && editorOwnerIndex_.has_value()) {
             const auto& owner = surfaces_[*editorOwnerIndex_];
-            const auto plan = editor_->renderPlan({}, false);
+            const auto plan = scaledRenderPlan(editor_->renderPlan({
+                -annotationViewportOrigin_.x,
+                -annotationViewportOrigin_.y,
+            }, false), annotationViewportScale_);
+            auto eraserMasks = editor_->document().eraserMasks();
+            if (mode_ == OverlayMode::longImageEditor) {
+                for (auto& mask : eraserMasks) {
+                    mask.rect = translated(mask.rect, {
+                        -annotationViewportOrigin_.x,
+                        -annotationViewportOrigin_.y,
+                    });
+                    mask = scaled(
+                        std::move(mask), annotationViewportScale_,
+                        annotationViewportScale_);
+                }
+            }
             if (composeAnnotations(
                     *pixels, plan, owner.dpiX, owner.dpiY,
-                    model_.selection()->x,
-                    model_.selection()->y,
+                    mode_ == OverlayMode::longImageEditor
+                        ? 0 : model_.selection()->x,
+                    mode_ == OverlayMode::longImageEditor
+                        ? 0 : model_.selection()->y,
                     rawSelectionCache_.get(),
-                    editor_->document().eraserMasks()).has_value()) {
+                    eraserMasks).has_value()) {
                 return std::nullopt;
             }
         }
@@ -1163,6 +1319,7 @@ bool OverlayInputRouter::activateEscapeHotKey(HWND owner) noexcept
     escapeHotKeyWindow_ = owner;
     if (shapeAnnotationsEnabled_) {
         editorHotKeysRegistered_ = platform_.registerEditorHotKeys(owner);
+        toolbarHotKeysRegistered_ = platform_.registerToolbarHotKeys(owner);
     }
     return true;
 }
@@ -1175,6 +1332,10 @@ bool OverlayInputRouter::deactivateEscapeHotKey() noexcept
     if (editorHotKeysRegistered_) {
         platform_.unregisterEditorHotKeys(escapeHotKeyWindow_);
         editorHotKeysRegistered_ = false;
+    }
+    if (toolbarHotKeysRegistered_) {
+        platform_.unregisterToolbarHotKeys(escapeHotKeyWindow_);
+        toolbarHotKeysRegistered_ = false;
     }
     if (!platform_.unregisterEscapeHotKey(
             escapeHotKeyWindow_, overlayEscapeHotKeyIdentifier)) {
@@ -1248,7 +1409,8 @@ std::vector<OverlayPresentation> OverlayInputRouter::presentations() const
         presentation.selection = model_.selection();
         presentation.showActions = owner.has_value() && *owner == index;
         presentation.pinnedImageEditor
-            = mode_ == OverlayMode::pinnedImageEditor;
+            = mode_ == OverlayMode::pinnedImageEditor
+            || mode_ == OverlayMode::longImageEditor;
         presentation.textRecognition
             = mode_ == OverlayMode::textRecognition;
         presentation.teachingPen
@@ -1293,25 +1455,44 @@ std::vector<OverlayPresentation> OverlayInputRouter::presentations() const
                     toolbarActionEnabled(item.action),
                 });
             }
+            if (hoveredToolbarWindow_ == surface.window
+                && hoveredToolbarAction_.has_value()) {
+                const auto hovered = std::find_if(
+                    presentation.toolbarItems.begin(),
+                    presentation.toolbarItems.end(),
+                    [this](const auto& item) {
+                        return item.action == *hoveredToolbarAction_;
+                    });
+                if (hovered != presentation.toolbarItems.end()) {
+                    presentation.toolbarTooltip
+                        = OverlayPresentationToolbarTooltip{
+                            hoveredToolbarTooltipText_,
+                            hovered->rectPhysical,
+                        };
+                }
+            }
         }
         if (editor_ != nullptr
             && (editorOwnerIndex_ == index
                 || mode_ == OverlayMode::teachingPen)) {
             const auto selection = snipory::core::portable::standardized(
                 *presentation.selection);
-            presentation.annotationPlan = editor_->renderPlan({
+            presentation.annotationPlan = scaledRenderPlan(editor_->renderPlan({
                 physicalPixelsToDip(
-                    selection.x - surface.physicalBounds.x, surface.dpiX),
+                    selection.x - surface.physicalBounds.x, surface.dpiX)
+                        / annotationViewportScale_
+                    - annotationViewportOrigin_.x,
                 physicalPixelsToDip(
-                    selection.y - surface.physicalBounds.y, surface.dpiY),
-            });
+                    selection.y - surface.physicalBounds.y, surface.dpiY)
+                        / annotationViewportScale_
+                    - annotationViewportOrigin_.y,
+            }), annotationViewportScale_);
             const auto requiresComposite = !editor_->document().eraserMasks().empty()
                 || std::any_of(
                 presentation.annotationPlan.items.begin(),
                 presentation.annotationPlan.items.end(),
                 [](const auto& item) {
-                    return isMosaicAnnotation(item.annotation)
-                        || isMagnifierAnnotation(item.annotation);
+                    return isMosaicAnnotation(item.annotation);
                 });
             if (requiresComposite && desktop_ != nullptr) {
                 const auto cachedSelectionMatches
@@ -1343,7 +1524,7 @@ std::vector<OverlayPresentation> OverlayInputRouter::presentations() const
                 }
                 if (annotationCompositeCache_ != nullptr) {
                     presentation.annotationComposite = annotationCompositeCache_;
-                    presentation.annotationPlan.items.clear();
+                    presentation.annotationPlanOutsideSelectionOnly = true;
                 }
             } else {
                 annotationCompositeCache_.reset();
@@ -1638,32 +1819,8 @@ bool OverlayInputRouter::pointerDown(
         return true;
     }
     if (const auto action = hitToolbarAction(*surface, clientPoint)) {
-        if (!toolbarActionEnabled(*action)) {
-            return true;
-        }
-        if (*action == ToolbarAction::cancel) {
-            cancelOnce();
-        } else if (*action == ToolbarAction::pin) {
-            completeOnce(OverlayInputAction::pin);
-        } else if (*action == ToolbarAction::save) {
-            completeOnce(OverlayInputAction::save);
-        } else if (*action == ToolbarAction::copy) {
-            completeOnce(OverlayInputAction::copy);
-        } else if (*action == ToolbarAction::finishEditing) {
-            completeOnce(OverlayInputAction::finishEditing);
-        } else if (*action == ToolbarAction::scroll) {
-            releaseInteraction();
-            deactivateEscapeHotKey();
-            emitTerminal(OverlayInputAction::scrollCapture);
-        } else if (editor_ != nullptr) {
-            editor_->handleToolbarAction(*action);
-            if (editor_->isEyedropperToolActive()) {
-                clearEyedropperState();
-                refreshEyedropperComposite();
-            } else {
-                clearEyedropperState();
-            }
-        }
+        if (!toolbarActionEnabled(*action)) return true;
+        performToolbarAction(*action);
         return true;
     }
     if (editor_ != nullptr && editorOwnerIndex_.has_value()
@@ -2075,21 +2232,15 @@ OverlayCursorStyle OverlayInputRouter::cursorStyle(
         if (!eyedropperPointIsValid(virtualPoint)) {
             return OverlayCursorStyle::arrow;
         }
-        if (eyedropperSampleColor_.has_value()) {
-            const auto color = *eyedropperSampleColor_;
-            const auto luminance = (0.2126F * color.red
-                + 0.7152F * color.green + 0.0722F * color.blue) / 255.0F;
-            if (luminance < 0.45F) {
-                return OverlayCursorStyle::eyedropperLight;
-            }
-        }
-        return OverlayCursorStyle::eyedropper;
+        return backgroundAwareCursorStyle(
+            OverlayCursorStyle::eyedropper, virtualPoint, *surface);
     }
     if (editor_ != nullptr) {
         if (const auto local = annotationPoint(virtualPoint)) {
             const auto shapeStyle = editor_->cursorStyleAt(*local);
             if (shapeStyle != ShapeCursorStyle::arrow) {
-                return cursorStyleForShape(shapeStyle);
+                return backgroundAwareCursorStyle(
+                    cursorStyleForShape(shapeStyle), virtualPoint, *surface);
             }
         }
     }
@@ -2099,10 +2250,13 @@ OverlayCursorStyle OverlayInputRouter::cursorStyle(
     }
 
     if (model_.phase() == SelectionPhase::moving) {
-        return OverlayCursorStyle::move;
+        return backgroundAwareCursorStyle(
+            OverlayCursorStyle::move, virtualPoint, *surface);
     }
     if (model_.phase() == SelectionPhase::resizing) {
-        return cursorStyleForSelectionHandle(model_.activeHandle());
+        return backgroundAwareCursorStyle(
+            cursorStyleForSelectionHandle(model_.activeHandle()),
+            virtualPoint, *surface);
     }
     if (model_.phase() == SelectionPhase::ready) {
         const auto radius = (std::max<std::int64_t>)(
@@ -2115,9 +2269,142 @@ OverlayCursorStyle OverlayInputRouter::cursorStyle(
     return OverlayCursorStyle::crosshair;
 }
 
+bool OverlayInputRouter::selectionPrefersLightCursor() const noexcept
+{
+    if (!model_.selection().has_value() || desktop_ == nullptr) {
+        return false;
+    }
+    const auto selection = snipory::core::portable::standardized(
+        *model_.selection());
+    const auto cacheMatches = cursorContrastSelection_.has_value()
+        && *cursorContrastSelection_ == selection
+        && cursorContrastPrefersLight_.has_value();
+    if (cacheMatches) {
+        return *cursorContrastPrefersLight_;
+    }
+
+    cursorContrastSelection_ = selection;
+    cursorContrastPrefersLight_ = false;
+    if (selection.width <= 0 || selection.height <= 0) {
+        return false;
+    }
+
+    constexpr std::int64_t maximumSamplesPerAxis = 24;
+    const auto columns = (std::max<std::int64_t>)(
+        1, (std::min)(maximumSamplesPerAxis, selection.width));
+    const auto rows = (std::max<std::int64_t>)(
+        1, (std::min)(maximumSamplesPerAxis, selection.height));
+    long double total = 0.0L;
+    std::uint64_t count = 0U;
+    for (std::int64_t row = 0; row < rows; ++row) {
+        for (std::int64_t column = 0; column < columns; ++column) {
+            const PixelPoint point{
+                selection.x + static_cast<std::int64_t>(
+                    (static_cast<long double>(column) + 0.5L)
+                    * static_cast<long double>(selection.width)
+                    / static_cast<long double>(columns)),
+                selection.y + static_cast<std::int64_t>(
+                    (static_cast<long double>(row) + 0.5L)
+                    * static_cast<long double>(selection.height)
+                    / static_cast<long double>(rows)),
+            };
+            for (const auto& display : desktop_->displays) {
+                const auto bounds = snipory::core::portable::standardized(
+                    display.descriptor.pixelBounds);
+                if (!contains(bounds, point)) continue;
+                const auto x = point.x - bounds.x;
+                const auto y = point.y - bounds.y;
+                if (x < 0 || y < 0 || x >= display.pixels.width()
+                    || y >= display.pixels.height()) {
+                    break;
+                }
+                const auto offset = static_cast<std::uint64_t>(y)
+                    * display.pixels.stride()
+                    + static_cast<std::uint64_t>(x) * 4U;
+                if (offset + 2U >= display.pixels.byteCount()) break;
+                const auto* pixel = display.pixels.data() + offset;
+                const auto blue = std::to_integer<unsigned int>(pixel[0]);
+                const auto green = std::to_integer<unsigned int>(pixel[1]);
+                const auto red = std::to_integer<unsigned int>(pixel[2]);
+                total += (0.2126L * red + 0.7152L * green + 0.0722L * blue)
+                    / 255.0L;
+                ++count;
+                break;
+            }
+        }
+    }
+    if (count > 0U) {
+        cursorContrastPrefersLight_ = total / count < 0.5L;
+    }
+    return *cursorContrastPrefersLight_;
+}
+
+bool OverlayInputRouter::shouldUseLightCursor(
+    PixelPoint virtualPoint,
+    const OverlaySurface& surface) const noexcept
+{
+    if (!model_.selection().has_value()) return false;
+    auto hitRect = snipory::core::portable::standardized(*model_.selection());
+    const auto margin = dipLengthToPhysicalPixels(
+        16.0F, (std::max)(surface.dpiX, surface.dpiY));
+    hitRect.x -= margin;
+    hitRect.y -= margin;
+    hitRect.width += margin * 2;
+    hitRect.height += margin * 2;
+    return contains(hitRect, virtualPoint) && selectionPrefersLightCursor();
+}
+
+OverlayCursorStyle OverlayInputRouter::backgroundAwareCursorStyle(
+    OverlayCursorStyle style,
+    PixelPoint virtualPoint,
+    const OverlaySurface& surface) const noexcept
+{
+    if (!shouldUseLightCursor(virtualPoint, surface)) return style;
+    switch (style) {
+    case OverlayCursorStyle::move:
+        return OverlayCursorStyle::moveLight;
+    case OverlayCursorStyle::resizeLeftRight:
+        return OverlayCursorStyle::resizeLeftRightLight;
+    case OverlayCursorStyle::resizeUpDown:
+        return OverlayCursorStyle::resizeUpDownLight;
+    case OverlayCursorStyle::resizeTopLeftBottomRight:
+        return OverlayCursorStyle::resizeTopLeftBottomRightLight;
+    case OverlayCursorStyle::resizeTopRightBottomLeft:
+        return OverlayCursorStyle::resizeTopRightBottomLeftLight;
+    case OverlayCursorStyle::brush:
+        return OverlayCursorStyle::brushLight;
+    case OverlayCursorStyle::marker:
+        return OverlayCursorStyle::markerLight;
+    case OverlayCursorStyle::eyedropper:
+        return OverlayCursorStyle::eyedropperLight;
+    default:
+        return style;
+    }
+}
+
 void OverlayInputRouter::pointerMove(HWND source, PixelPoint clientPoint) noexcept
 {
     if (dragging_) cancelPinnedImageShiftShortcut();
+    if (!dragging_ && status_ == OverlayInputStatus::active) {
+        if (const auto* surface = surfaceFor(source)) {
+            const auto action = hitToolbarAction(*surface, clientPoint);
+            if (action != hoveredToolbarAction_) {
+                hoveredToolbarTooltipText_ = action.has_value()
+                    ? toolbarTooltipText(*action)
+                    : std::wstring{};
+            }
+            hoveredToolbarWindow_ = source;
+            hoveredToolbarAction_ = action;
+        } else {
+            hoveredToolbarWindow_ = nullptr;
+            hoveredToolbarAction_.reset();
+            hoveredToolbarTooltipText_.clear();
+        }
+    } else {
+        hoveredToolbarWindow_ = nullptr;
+        hoveredToolbarAction_.reset();
+        hoveredToolbarTooltipText_.clear();
+    }
     if (status_ == OverlayInputStatus::active
         && editor_ != nullptr && editor_->isEyedropperToolActive()) {
         if (const auto* surface = surfaceFor(source)) {
@@ -2135,6 +2422,14 @@ void OverlayInputRouter::pointerMove(HWND source, PixelPoint clientPoint) noexce
         return;
     }
     platformPointerMove(*point);
+}
+
+void OverlayInputRouter::pointerLeave(HWND source) noexcept
+{
+    if (hoveredToolbarWindow_ != source) return;
+    hoveredToolbarWindow_ = nullptr;
+    hoveredToolbarAction_.reset();
+    hoveredToolbarTooltipText_.clear();
 }
 
 void OverlayInputRouter::pointerUp(HWND, PixelPoint) noexcept
@@ -2243,7 +2538,8 @@ void OverlayInputRouter::escapePressed() noexcept
             return;
         }
     }
-    if (mode_ == OverlayMode::pinnedImageEditor) {
+    if (mode_ == OverlayMode::pinnedImageEditor
+        || mode_ == OverlayMode::longImageEditor) {
         completeOnce(OverlayInputAction::finishEditing);
     } else {
         cancelOnce();
@@ -2253,6 +2549,43 @@ void OverlayInputRouter::escapePressed() noexcept
 void OverlayInputRouter::cancelPressed() noexcept
 {
     cancelOnce();
+}
+
+bool OverlayInputRouter::toolbarShortcutPressed(
+    std::uint32_t virtualKey,
+    bool control,
+    bool shift,
+    bool alt) noexcept
+{
+    if (status_ != OverlayInputStatus::active) return false;
+    for (const auto action : toolbarActions()) {
+        if (!toolbarShortcutMatches(
+                action, virtualKey, control, shift, alt)) {
+            continue;
+        }
+        const auto plainToolShortcut = !toolbarTooltip(action).control
+            && action != ToolbarAction::cancel
+            && action != ToolbarAction::finishEditing;
+        if (plainToolShortcut && isEditingInlineValue()) return true;
+        performToolbarAction(action);
+        return true;
+    }
+    return false;
+}
+
+void OverlayInputRouter::synchronizeToolbarHotKeys() noexcept
+{
+    const auto shouldRegister = status_ == OverlayInputStatus::active
+        && escapeHotKeyWindow_ != nullptr && shapeAnnotationsEnabled_
+        && !isEditingInlineValue();
+    if (shouldRegister == toolbarHotKeysRegistered_) return;
+    if (shouldRegister) {
+        toolbarHotKeysRegistered_
+            = platform_.registerToolbarHotKeys(escapeHotKeyWindow_);
+    } else {
+        platform_.unregisterToolbarHotKeys(escapeHotKeyWindow_);
+        toolbarHotKeysRegistered_ = false;
+    }
 }
 
 bool OverlayInputRouter::keyPressed(
@@ -2323,6 +2656,14 @@ bool OverlayInputRouter::mouseWheel(int delta) noexcept
         return false;
     }
     return editor_->scrollPopupMenu(delta > 0 ? -3 : 3);
+}
+
+bool OverlayInputRouter::longImageScrollAllowed() const noexcept
+{
+    return mode_ == OverlayMode::longImageEditor
+        && status_ == OverlayInputStatus::active
+        && !dragging_
+        && !isEditingInlineValue();
 }
 
 bool OverlayInputRouter::isEditingInlineValue() const noexcept
@@ -2489,19 +2830,26 @@ std::pair<UINT, UINT> OverlayInputRouter::annotationDpi() const noexcept
 }
 
 std::optional<AnnotationStyle>
-OverlayInputRouter::markerCursorStyle() const noexcept
+OverlayInputRouter::markerCursorStyle(bool light) const noexcept
 {
-    return editor_ != nullptr && editor_->isMarkerToolActive()
-        ? std::optional<AnnotationStyle>{editor_->markerOptions().style()}
-        : std::nullopt;
+    if (editor_ == nullptr || !editor_->isMarkerToolActive()) {
+        return std::nullopt;
+    }
+    auto style = editor_->markerOptions().style();
+    style.strokeWidthDip *= annotationViewportScale_;
+    if (light) style.strokeColor = {255, 255, 255, 255};
+    return style;
 }
 
 std::optional<AnnotationStyle>
 OverlayInputRouter::mosaicCursorStyle() const noexcept
 {
-    return editor_ != nullptr && editor_->isMosaicToolActive()
-        ? std::optional<AnnotationStyle>{editor_->mosaicOptions().style()}
-        : std::nullopt;
+    if (editor_ == nullptr || !editor_->isMosaicToolActive()) {
+        return std::nullopt;
+    }
+    auto style = editor_->mosaicOptions().style();
+    style.strokeWidthDip *= annotationViewportScale_;
+    return style;
 }
 
 std::optional<NumberCursorState>
@@ -2522,6 +2870,9 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
     const FrozenDesktop* desktop = nullptr;
     RestartCallback restartCallback;
     ActionCallback actionCallback;
+    ScrollCallback scrollCallback;
+    std::optional<AnnotationRect> longImageCanvasBounds;
+    float longImageDisplayScale = 1.0F;
     std::unique_ptr<OverlayInputPlatform> platform;
     std::vector<std::unique_ptr<OverlayWindow>> windows;
     std::unique_ptr<OverlayInputRouter> router;
@@ -2597,7 +2948,14 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
             router->textInput(input.text);
             break;
         case OverlayWindowInputKind::mouseWheel:
-            router->mouseWheel(input.wheelDelta);
+            if (!router->mouseWheel(input.wheelDelta)
+                && router->longImageScrollAllowed()
+                && scrollCallback) {
+                scrollCallback(input.wheelDelta);
+            }
+            break;
+        case OverlayWindowInputKind::pointerLeave:
+            router->pointerLeave(source);
             break;
         case OverlayWindowInputKind::cancelShiftShortcut:
             router->cancelPinnedImageShiftShortcut();
@@ -2615,6 +2973,11 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
             if (input.virtualKey == 'T' && input.control && !input.shift
                 && !input.alt
                 && router->togglePinnedImageAlwaysOnTop()) {
+                break;
+            }
+            if (router->toolbarShortcutPressed(
+                    static_cast<std::uint32_t>(input.virtualKey),
+                    input.control, input.shift, input.alt)) {
                 break;
             }
             ShapeEditorKey key;
@@ -2640,47 +3003,8 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
             case VK_END:
                 key = ShapeEditorKey::end;
                 break;
-            case 'Z':
-                key = ShapeEditorKey::z;
-                break;
-            case 'S':
-                key = ShapeEditorKey::save;
-                break;
             case 'C':
                 key = ShapeEditorKey::copy;
-                break;
-            case '1':
-                key = ShapeEditorKey::pin;
-                break;
-            case 'P':
-                key = ShapeEditorKey::eyedropper;
-                break;
-            case 'M':
-                key = ShapeEditorKey::mosaic;
-                break;
-            case 'T':
-                if (router->isEditingInlineValue()) {
-                    return;
-                }
-                key = ShapeEditorKey::text;
-                break;
-            case 'N':
-                if (router->isEditingInlineValue()) {
-                    return;
-                }
-                key = ShapeEditorKey::number;
-                break;
-            case 'G':
-                if (router->isEditingInlineValue()) {
-                    return;
-                }
-                key = ShapeEditorKey::magnifier;
-                break;
-            case 'E':
-                if (router->isEditingInlineValue()) {
-                    return;
-                }
-                key = ShapeEditorKey::eraser;
                 break;
             default:
                 return;
@@ -2697,6 +3021,7 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
             }
             break;
         }
+        router->synchronizeToolbarHotKeys();
         if (router
             && (input.kind == OverlayWindowInputKind::pointerDown
                 || input.kind == OverlayWindowInputKind::pointerMove
@@ -2709,9 +3034,13 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
                 });
             if (found != windows.end()) {
                 if (style == OverlayCursorStyle::marker
+                    || style == OverlayCursorStyle::markerLight
                     || style == OverlayCursorStyle::mosaic) {
-                    const auto dotStyle = style == OverlayCursorStyle::marker
-                        ? router->markerCursorStyle()
+                    const auto markerStyle = style == OverlayCursorStyle::marker
+                        || style == OverlayCursorStyle::markerLight;
+                    const auto dotStyle = markerStyle
+                        ? router->markerCursorStyle(
+                            style == OverlayCursorStyle::markerLight)
                         : router->mosaicCursorStyle();
                     if (const auto marker = dotStyle) {
                         if (style == OverlayCursorStyle::mosaic) {
@@ -2757,6 +3086,8 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
                 state.annotationPlan = current[index].annotationPlan;
                 state.annotationComposite
                     = current[index].annotationComposite;
+                state.annotationPlanOutsideSelectionOnly
+                    = current[index].annotationPlanOutsideSelectionOnly;
                 state.toolbarActions.clear();
                 state.toolbarActions.reserve(current[index].toolbarItems.size());
                 for (const auto& item : current[index].toolbarItems) {
@@ -2769,6 +3100,26 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
                     } else if (item.action == ToolbarAction::redo) {
                         state.canRedo = item.enabled;
                     }
+                }
+                if (current[index].toolbarTooltip.has_value()) {
+                    const auto& tooltip = *current[index].toolbarTooltip;
+                    const auto dpiX = desktop != nullptr
+                            && index < desktop->displays.size()
+                        ? desktop->displays[index].descriptor.dpiX
+                        : 96U;
+                    const auto dpiY = desktop != nullptr
+                            && index < desktop->displays.size()
+                        ? desktop->displays[index].descriptor.dpiY
+                        : 96U;
+                    state.toolbarTooltip = OverlayToolbarTooltipRenderState{
+                        {
+                            physicalPixelsToDip(tooltip.anchor.x, dpiX),
+                            physicalPixelsToDip(tooltip.anchor.y, dpiY),
+                            physicalPixelsToDip(tooltip.anchor.width, dpiX),
+                            physicalPixelsToDip(tooltip.anchor.height, dpiY),
+                        },
+                        tooltip.text,
+                    };
                 }
                 if (current[index].shapeOptions.has_value()) {
                     const auto& options = *current[index].shapeOptions;
@@ -3080,6 +3431,80 @@ OverlayHostCreateResult OverlayHost::createPinnedImageEditor(
     }
 }
 
+OverlayHostCreateResult OverlayHost::createLongImageEditor(
+    HINSTANCE instance,
+    const FrozenDesktop& desktop,
+    AnnotationRect canvasBounds,
+    ScrollCallback scrollCallback,
+    ActionCallback actionCallback)
+{
+    if (desktop.displays.size() != 1U) {
+        return {nullptr, OverlayHostError{OverlayHostErrorCode::noDisplays}};
+    }
+    try {
+        auto impl = std::make_shared<Impl>();
+        impl->instance = instance;
+        impl->desktop = &desktop;
+        impl->longImageCanvasBounds = standardized(canvasBounds);
+        const auto sourceWidth = dipLengthToPhysicalPixels(
+            canvasBounds.width, desktop.displays.front().descriptor.dpiX);
+        impl->longImageDisplayScale = sourceWidth > 0
+            ? static_cast<float>(
+                desktop.displays.front().descriptor.pixelBounds.width)
+                / static_cast<float>(sourceWidth)
+            : 1.0F;
+        impl->scrollCallback = std::move(scrollCallback);
+        impl->actionCallback = std::move(actionCallback);
+        impl->platform = std::make_unique<SystemOverlayInputPlatform>();
+        const std::weak_ptr<Impl> weak = impl;
+        auto created = OverlayWindow::create(
+            instance, desktop.displays.front(), [] {},
+            [weak](HWND source, const OverlayWindowInput& input) {
+                if (const auto locked = weak.lock()) {
+                    locked->handleInput(source, input);
+                }
+            });
+        if (!created.value) {
+            return {nullptr, OverlayHostError{
+                OverlayHostErrorCode::windowCreationFailed,
+                created.error.has_value() ? created.error->systemError
+                                          : ERROR_GEN_FAILURE,
+                created.error}};
+        }
+        impl->windows.push_back(std::move(created.value));
+        impl->windows.front()->setKeyboardInputAlwaysEnabled(true);
+        const auto& descriptor = desktop.displays.front().descriptor;
+        std::vector<OverlaySurface> surfaces{{
+            impl->windows.front()->handle(), descriptor.pixelBounds,
+            descriptor.dpiX, descriptor.dpiY,
+        }};
+        impl->router = std::make_unique<OverlayInputRouter>(
+            descriptor.pixelBounds, std::move(surfaces), *impl->platform,
+            [weak](OverlayInputAction action) {
+                if (const auto locked = weak.lock()) {
+                    locked->dispatchAction(action);
+                }
+            },
+            true, &desktop, OverlayMode::longImageEditor);
+        impl->router->lockSelection(descriptor.pixelBounds);
+        impl->router->setAnnotationViewport(
+            {}, impl->longImageDisplayScale, canvasBounds, &desktop);
+        if (!impl->router->activateEscapeHotKey(
+                impl->windows.front()->handle())
+            || !impl->refresh()) {
+            return {nullptr, OverlayHostError{
+                OverlayHostErrorCode::escapeHotKeyRegistrationFailed,
+                GetLastError(), std::nullopt}};
+        }
+        return {std::unique_ptr<OverlayHost>(
+            new OverlayHost(std::move(impl))), std::nullopt};
+    } catch (const std::bad_alloc&) {
+        return {nullptr, OverlayHostError{
+            OverlayHostErrorCode::outOfMemory,
+            ERROR_NOT_ENOUGH_MEMORY, std::nullopt}};
+    }
+}
+
 void OverlayHost::show() noexcept
 {
     const auto impl = impl_;
@@ -3103,6 +3528,28 @@ void OverlayHost::setAlwaysOnTop(bool enabled) noexcept
     for (const auto& window : impl->windows) {
         window->setAlwaysOnTop(enabled);
     }
+}
+
+bool OverlayHost::updateLongImageViewport(
+    const FrozenDesktop& desktop,
+    AnnotationPoint origin) noexcept
+{
+    const auto impl = impl_;
+    if (!impl || !impl->router || impl->windows.size() != 1U
+        || desktop.displays.size() != 1U) {
+        return false;
+    }
+    impl->desktop = &desktop;
+    impl->windows.front()->setDisplay(desktop.displays.front());
+    if (!impl->longImageCanvasBounds.has_value()) {
+        return false;
+    }
+    impl->router->setAnnotationViewport(
+        origin,
+        impl->longImageDisplayScale,
+        *impl->longImageCanvasBounds,
+        &desktop);
+    return impl->refresh();
 }
 
 bool OverlayHost::suspendForScrollCapture() noexcept

@@ -4,6 +4,7 @@
 #include "export/ClipboardWriter.h"
 #include "export/PngWriter.h"
 #include "pin/PinnedImageGeometry.h"
+#include "pin/PinnedImageShadow.h"
 #include "capture/DisplayTopology.h"
 #include "export/AnnotationComposer.h"
 #include "overlay/OverlayHost.h"
@@ -23,7 +24,6 @@ namespace xxsnap::win {
 namespace {
 
 constexpr wchar_t pinnedImageWindowClass[] = L"XxSnapPinnedImageWindow";
-constexpr COLORREF transparentColor = RGB(1, 2, 3);
 constexpr wchar_t editCompositionFailureText[] =
     L"\u65e0\u6cd5\u5e94\u7528\u8d34\u56fe\u7f16\u8f91\uff0c\u539f\u56fe\u5df2\u4fdd\u7559\u3002";
 
@@ -180,9 +180,6 @@ struct PinnedImageHost::Impl final {
                 static_cast<int>(imageRect.height + pinnedImageShadowOutset * 2),
                 nullptr, nullptr, instance, pin.get());
             if (window == nullptr) return false;
-            SetLayeredWindowAttributes(
-                window, transparentColor, pin->opacity,
-                LWA_COLORKEY | LWA_ALPHA);
             pins.push_back(std::move(pin));
             ShowWindow(window, SW_SHOWNORMAL);
             SetWindowPos(window, HWND_TOPMOST, 0, 0, 0, 0,
@@ -195,62 +192,132 @@ struct PinnedImageHost::Impl final {
         }
     }
 
+    void updateLayeredWindow(Pin& pin) noexcept
+    {
+        RECT client{};
+        if (!GetClientRect(pin.window, &client)) return;
+        const auto width = client.right - client.left;
+        const auto height = client.bottom - client.top;
+        if (width <= 0 || height <= 0
+            || pin.pixels.stride() > (std::numeric_limits<UINT>::max)()) {
+            return;
+        }
+        const auto widthSize = static_cast<std::size_t>(width);
+        const auto heightSize = static_cast<std::size_t>(height);
+        if (widthSize > (std::numeric_limits<std::size_t>::max)()
+                / 4U / heightSize) {
+            return;
+        }
+        const auto targetByteCount = widthSize * heightSize * 4U;
+        RECT windowRect{};
+        if (!GetWindowRect(pin.window, &windowRect)) return;
+
+        const auto screenDc = GetDC(nullptr);
+        if (screenDc == nullptr) return;
+        const auto memoryDc = CreateCompatibleDC(screenDc);
+        if (memoryDc == nullptr) {
+            ReleaseDC(nullptr, screenDc);
+            return;
+        }
+        BITMAPINFO targetInfo{};
+        targetInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        targetInfo.bmiHeader.biWidth = width;
+        targetInfo.bmiHeader.biHeight = -height;
+        targetInfo.bmiHeader.biPlanes = 1U;
+        targetInfo.bmiHeader.biBitCount = 32U;
+        targetInfo.bmiHeader.biCompression = BI_RGB;
+        void* targetBits = nullptr;
+        const auto bitmap = CreateDIBSection(
+            screenDc, &targetInfo, DIB_RGB_COLORS, &targetBits, nullptr, 0U);
+        if (bitmap == nullptr || targetBits == nullptr) {
+            if (bitmap != nullptr) DeleteObject(bitmap);
+            DeleteDC(memoryDc);
+            ReleaseDC(nullptr, screenDc);
+            return;
+        }
+        const auto previousBitmap = SelectObject(memoryDc, bitmap);
+        auto* destination = static_cast<std::uint8_t*>(targetBits);
+        const PixelRect imageRect{
+            pinnedImageShadowOutset,
+            pinnedImageShadowOutset,
+            width - pinnedImageShadowOutset * 2,
+            height - pinnedImageShadowOutset * 2,
+        };
+        std::memset(destination, 0, targetByteCount);
+        const auto writeShadowPixel = [&](LONG x, LONG y) {
+            const auto shadow = pinnedImageShadowPixel({x, y}, imageRect);
+            const auto offset = (static_cast<std::size_t>(y)
+                * static_cast<std::size_t>(width)
+                + static_cast<std::size_t>(x)) * 4U;
+            destination[offset + 0U] = shadow.blue;
+            destination[offset + 1U] = shadow.green;
+            destination[offset + 2U] = shadow.red;
+            destination[offset + 3U] = shadow.alpha;
+        };
+        const auto imageLeft = static_cast<LONG>(imageRect.x);
+        const auto imageTop = static_cast<LONG>(imageRect.y);
+        const auto imageRight = static_cast<LONG>(imageRect.x + imageRect.width);
+        const auto imageBottom = static_cast<LONG>(imageRect.y + imageRect.height);
+        for (LONG y = 0; y < imageTop; ++y) {
+            for (LONG x = 0; x < width; ++x) writeShadowPixel(x, y);
+        }
+        for (LONG y = imageBottom; y < height; ++y) {
+            for (LONG x = 0; x < width; ++x) writeShadowPixel(x, y);
+        }
+        for (LONG y = imageTop; y < imageBottom; ++y) {
+            for (LONG x = 0; x < imageLeft; ++x) writeShadowPixel(x, y);
+            for (LONG x = imageRight; x < width; ++x) writeShadowPixel(x, y);
+        }
+
+        BITMAPINFO sourceInfo{};
+        sourceInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        sourceInfo.bmiHeader.biWidth = static_cast<LONG>(pin.pixels.width());
+        sourceInfo.bmiHeader.biHeight = -static_cast<LONG>(pin.pixels.height());
+        sourceInfo.bmiHeader.biPlanes = 1U;
+        sourceInfo.bmiHeader.biBitCount = 32U;
+        sourceInfo.bmiHeader.biCompression = BI_RGB;
+        SetStretchBltMode(memoryDc, HALFTONE);
+        SetBrushOrgEx(memoryDc, 0, 0, nullptr);
+        StretchDIBits(memoryDc,
+            static_cast<int>(imageRect.x), static_cast<int>(imageRect.y),
+            static_cast<int>(imageRect.width),
+            static_cast<int>(imageRect.height),
+            0, 0,
+            static_cast<int>(pin.pixels.width()),
+            static_cast<int>(pin.pixels.height()),
+            pin.pixels.data(), &sourceInfo, DIB_RGB_COLORS, SRCCOPY);
+        for (std::int64_t y = imageRect.y;
+             y < imageRect.y + imageRect.height; ++y) {
+            for (std::int64_t x = imageRect.x;
+                 x < imageRect.x + imageRect.width; ++x) {
+                const auto offset = (static_cast<std::size_t>(y)
+                    * static_cast<std::size_t>(width)
+                    + static_cast<std::size_t>(x)) * 4U;
+                destination[offset + 3U] = 255U;
+            }
+        }
+
+        POINT destinationPoint{windowRect.left, windowRect.top};
+        POINT sourcePoint{};
+        SIZE windowSize{width, height};
+        BLENDFUNCTION blend{
+            AC_SRC_OVER, 0U, pin.opacity, AC_SRC_ALPHA,
+        };
+        UpdateLayeredWindow(pin.window, screenDc,
+            &destinationPoint, &windowSize, memoryDc, &sourcePoint,
+            0U, &blend, ULW_ALPHA);
+
+        SelectObject(memoryDc, previousBitmap);
+        DeleteObject(bitmap);
+        DeleteDC(memoryDc);
+        ReleaseDC(nullptr, screenDc);
+    }
+
     void paint(Pin& pin) noexcept
     {
         PAINTSTRUCT paint{};
-        const auto dc = BeginPaint(pin.window, &paint);
-        RECT client{};
-        GetClientRect(pin.window, &client);
-        const auto transparent = CreateSolidBrush(transparentColor);
-        FillRect(dc, &client, transparent);
-        DeleteObject(transparent);
-
-        const RECT image{
-            static_cast<LONG>(pinnedImageShadowOutset),
-            static_cast<LONG>(pinnedImageShadowOutset),
-            client.right - static_cast<LONG>(pinnedImageShadowOutset),
-            client.bottom - static_cast<LONG>(pinnedImageShadowOutset),
-        };
-        const std::array<COLORREF, 5> glow{
-            RGB(63, 127, 205), RGB(58, 130, 220), RGB(52, 137, 231),
-            RGB(72, 153, 240), RGB(92, 166, 235),
-        };
-        for (std::size_t index = 0; index < glow.size(); ++index) {
-            const auto inset = static_cast<int>(index * 3U + 2U);
-            const auto pen = CreatePen(PS_SOLID, 2, glow[index]);
-            const auto oldPen = SelectObject(dc, pen);
-            const auto oldBrush = SelectObject(dc, GetStockObject(HOLLOW_BRUSH));
-            Rectangle(dc, image.left - inset, image.top - inset,
-                image.right + inset, image.bottom + inset);
-            SelectObject(dc, oldBrush);
-            SelectObject(dc, oldPen);
-            DeleteObject(pen);
-        }
-
-        if (pin.pixels.stride() <= (std::numeric_limits<UINT>::max)()) {
-            BITMAPINFO info{};
-            info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-            info.bmiHeader.biWidth = static_cast<LONG>(pin.pixels.width());
-            info.bmiHeader.biHeight = -static_cast<LONG>(pin.pixels.height());
-            info.bmiHeader.biPlanes = 1U;
-            info.bmiHeader.biBitCount = 32U;
-            info.bmiHeader.biCompression = BI_RGB;
-            SetStretchBltMode(dc, HALFTONE);
-            StretchDIBits(dc,
-                image.left, image.top,
-                image.right - image.left, image.bottom - image.top,
-                0, 0,
-                static_cast<int>(pin.pixels.width()),
-                static_cast<int>(pin.pixels.height()),
-                pin.pixels.data(), &info, DIB_RGB_COLORS, SRCCOPY);
-        }
-        const auto edgePen = CreatePen(PS_SOLID, 1, RGB(92, 166, 235));
-        const auto oldPen = SelectObject(dc, edgePen);
-        const auto oldBrush = SelectObject(dc, GetStockObject(HOLLOW_BRUSH));
-        Rectangle(dc, image.left, image.top, image.right, image.bottom);
-        SelectObject(dc, oldBrush);
-        SelectObject(dc, oldPen);
-        DeleteObject(edgePen);
+        BeginPaint(pin.window, &paint);
+        updateLayeredWindow(pin);
         EndPaint(pin.window, &paint);
     }
 
@@ -479,9 +546,7 @@ struct PinnedImageHost::Impl final {
     void setOpacity(Pin& pin, BYTE opacity) noexcept
     {
         pin.opacity = opacity;
-        SetLayeredWindowAttributes(
-            pin.window, transparentColor, pin.opacity,
-            LWA_COLORKEY | LWA_ALPHA);
+        updateLayeredWindow(pin);
     }
 
     void closeAll() noexcept

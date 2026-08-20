@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 #include "../../resources/resource.h"
 
@@ -27,6 +28,7 @@ enum class ToolbarAction : std::uint8_t {
     save,
     copy,
     finishEditing,
+    count,
 };
 
 struct ToolbarIconSpec {
@@ -37,6 +39,13 @@ struct ToolbarIconSpec {
     int resourceIdAt120Dpi;
     int resourceIdAt144Dpi;
     int resourceIdAt192Dpi;
+};
+
+struct ToolbarTooltipSpec {
+    const wchar_t* title;
+    std::uint32_t virtualKey;
+    bool control;
+    bool shift;
 };
 
 struct ToolbarMetrics {
@@ -107,6 +116,27 @@ inline constexpr std::array teachingPenActions{
     ToolbarAction::magnifier,
     ToolbarAction::copy,
     ToolbarAction::save,
+};
+
+inline constexpr std::array tooltips{
+    ToolbarTooltipSpec{L"形状", 'S', false, false},
+    ToolbarTooltipSpec{L"箭头线", 'A', false, false},
+    ToolbarTooltipSpec{L"画笔", 'B', false, false},
+    ToolbarTooltipSpec{L"荧光笔", 'H', false, false},
+    ToolbarTooltipSpec{L"取色 ｜ 测距", 'P', false, false},
+    ToolbarTooltipSpec{L"马赛克", 'M', false, false},
+    ToolbarTooltipSpec{L"文字", 'T', false, false},
+    ToolbarTooltipSpec{L"序号", 'N', false, false},
+    ToolbarTooltipSpec{L"放大镜", 'G', false, false},
+    ToolbarTooltipSpec{L"橡皮擦", 'E', false, false},
+    ToolbarTooltipSpec{L"滚动截图", 'R', false, false},
+    ToolbarTooltipSpec{L"撤销", 'Z', true, false},
+    ToolbarTooltipSpec{L"重做", 'Z', true, true},
+    ToolbarTooltipSpec{L"取消", 0x1BU, false, false},
+    ToolbarTooltipSpec{L"贴图", '1', true, false},
+    ToolbarTooltipSpec{L"保存", 'S', true, false},
+    ToolbarTooltipSpec{L"复制到剪切板", 'C', true, false},
+    ToolbarTooltipSpec{L"完成编辑", 0x1BU, false, false},
 };
 
 inline constexpr std::array imageResources{
@@ -302,6 +332,47 @@ constexpr const auto& pinnedEditorToolbarActions() noexcept
 constexpr const auto& teachingPenToolbarActions() noexcept
 {
     return toolbar_catalog_detail::teachingPenActions;
+}
+
+constexpr const ToolbarTooltipSpec& toolbarTooltip(
+    ToolbarAction action) noexcept
+{
+    return toolbar_catalog_detail::tooltips[static_cast<std::size_t>(action)];
+}
+
+inline std::wstring toolbarShortcutLabel(ToolbarAction action)
+{
+    const auto& shortcut = toolbarTooltip(action);
+    std::wstring label;
+    if (shortcut.control) label += L"Ctrl+";
+    if (shortcut.shift) label += L"Shift+";
+    if (shortcut.virtualKey == 0x1BU) {
+        label += L"ESC";
+    } else {
+        label.push_back(static_cast<wchar_t>(shortcut.virtualKey));
+    }
+    return label;
+}
+
+inline std::wstring toolbarTooltipText(ToolbarAction action)
+{
+    return std::wstring(toolbarTooltip(action).title) + L" ("
+        + toolbarShortcutLabel(action) + L")";
+}
+
+constexpr bool toolbarShortcutMatches(
+    ToolbarAction action,
+    std::uint32_t virtualKey,
+    bool control,
+    bool shift,
+    bool alt) noexcept
+{
+    const auto& shortcut = toolbarTooltip(action);
+    if (alt || virtualKey != shortcut.virtualKey
+        || control != shortcut.control) {
+        return false;
+    }
+    return !shortcut.control || shift == shortcut.shift;
 }
 
 constexpr const ToolbarIconSpec& toolbarIcon(ToolbarAction action) noexcept

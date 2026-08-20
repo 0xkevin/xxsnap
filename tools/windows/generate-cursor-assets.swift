@@ -201,21 +201,155 @@ for (name, tint) in [
 }
 
 let brushSource = repository
-    .appendingPathComponent("platforms/mac/Resources/Icons/pencil-tool.svg")
+    .appendingPathComponent(
+        "platforms/win/resources/icons/black-outline-white-pencil.svg"
+    )
 guard let brushImage = NSImage(contentsOf: brushSource) else {
     throw CocoaError(.fileReadCorruptFile)
 }
-let brushBitmap = try renderedBitmap(
-    for: brushImage,
-    destination: NSRect(x: 7, y: 7, width: 18, height: 18)
-)
-let brushOutput = outputDirectory.appendingPathComponent("xxsnap-brush.cur")
-try cursorData(
-    bitmap: brushBitmap,
-    hotSpot: NSPoint(x: 10, y: 22),
-    flipVertically: true
-).write(to: brushOutput, options: .atomic)
-print("Generated \(brushOutput.path) from the macOS pencil cursor SVG.")
+for name in ["xxsnap-brush.cur", "xxsnap-brush-light.cur"] {
+    let brushBitmap = try renderedBitmap(
+        for: brushImage,
+        destination: NSRect(x: 7, y: 7, width: 18, height: 18)
+    )
+    let brushOutput = outputDirectory.appendingPathComponent(name)
+    try cursorData(
+        bitmap: brushBitmap,
+        hotSpot: NSPoint(x: 10, y: 22),
+        flipVertically: true
+    ).write(to: brushOutput, options: .atomic)
+    print("Generated \(brushOutput.path) from the Windows pencil cursor SVG.")
+}
+
+private func moveCursorImage(foreground: NSColor, outline: NSColor) -> NSImage {
+    let size = NSSize(width: 28, height: 28)
+    let image = NSImage(size: size)
+    image.lockFocus()
+    if let symbol = NSImage(
+        systemSymbolName: "arrow.up.and.down.and.arrow.left.and.right",
+        accessibilityDescription: "Move"
+    )?.withSymbolConfiguration(
+        NSImage.SymbolConfiguration(pointSize: 22, weight: .light)
+    ) {
+        symbol.draw(in: NSRect(x: 3, y: 3, width: 22, height: 22))
+        foreground.setFill()
+        NSRect(x: 3, y: 3, width: 22, height: 22).fill(using: .sourceAtop)
+    } else {
+        let drawPath = { () -> NSBezierPath in
+            let path = NSBezierPath()
+            let center = NSPoint(x: 14, y: 14)
+            path.move(to: NSPoint(x: center.x, y: 4))
+            path.line(to: NSPoint(x: center.x, y: 24))
+            path.move(to: NSPoint(x: 4, y: center.y))
+            path.line(to: NSPoint(x: 24, y: center.y))
+            for (start, end) in [
+                (NSPoint(x: 14, y: 24), NSPoint(x: 10, y: 20)),
+                (NSPoint(x: 14, y: 24), NSPoint(x: 18, y: 20)),
+                (NSPoint(x: 14, y: 4), NSPoint(x: 10, y: 8)),
+                (NSPoint(x: 14, y: 4), NSPoint(x: 18, y: 8)),
+                (NSPoint(x: 4, y: 14), NSPoint(x: 8, y: 10)),
+                (NSPoint(x: 4, y: 14), NSPoint(x: 8, y: 18)),
+                (NSPoint(x: 24, y: 14), NSPoint(x: 20, y: 10)),
+                (NSPoint(x: 24, y: 14), NSPoint(x: 20, y: 18)),
+            ] {
+                path.move(to: start)
+                path.line(to: end)
+            }
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            return path
+        }
+        let outlinePath = drawPath()
+        outline.setStroke()
+        outlinePath.lineWidth = 4
+        outlinePath.stroke()
+        let path = drawPath()
+        foreground.setStroke()
+        path.lineWidth = 2
+        path.stroke()
+    }
+    image.unlockFocus()
+    return image
+}
+
+private func resizeCursorImage(
+    angle: CGFloat,
+    foreground: NSColor,
+    drawsOutline: Bool = true
+) -> NSImage {
+    let size = NSSize(width: 24, height: 24)
+    let center = NSPoint(x: 12, y: 12)
+    let image = NSImage(size: size)
+    image.lockFocus()
+    if let context = NSGraphicsContext.current?.cgContext {
+        context.translateBy(x: center.x, y: center.y)
+        context.rotate(by: angle)
+        context.translateBy(x: -center.x, y: -center.y)
+    }
+    let path = NSBezierPath()
+    for (start, end) in [
+        (NSPoint(x: 5, y: 12), NSPoint(x: 19, y: 12)),
+        (NSPoint(x: 5, y: 12), NSPoint(x: 9, y: 8)),
+        (NSPoint(x: 5, y: 12), NSPoint(x: 9, y: 16)),
+        (NSPoint(x: 19, y: 12), NSPoint(x: 15, y: 8)),
+        (NSPoint(x: 19, y: 12), NSPoint(x: 15, y: 16)),
+    ] {
+        path.move(to: start)
+        path.line(to: end)
+    }
+    path.lineCapStyle = .round
+    path.lineJoinStyle = .round
+    if drawsOutline {
+        NSColor.black.withAlphaComponent(0.75).setStroke()
+        path.lineWidth = 5
+        path.stroke()
+    }
+    foreground.setStroke()
+    path.lineWidth = 2
+    path.stroke()
+    image.unlockFocus()
+    return image
+}
+
+for (name, image) in [
+    ("xxsnap-move.cur", moveCursorImage(
+        foreground: .black, outline: NSColor.white.withAlphaComponent(0.9))),
+    ("xxsnap-move-light.cur", moveCursorImage(
+        foreground: .white, outline: NSColor.black.withAlphaComponent(0.75))),
+    ("xxsnap-resize-left-right.cur", resizeCursorImage(
+        angle: 0, foreground: .black)),
+    ("xxsnap-resize-left-right-light.cur", resizeCursorImage(
+        angle: 0, foreground: .white)),
+    ("xxsnap-resize-up-down.cur", resizeCursorImage(
+        angle: .pi / 2, foreground: .black)),
+    ("xxsnap-resize-up-down-light.cur", resizeCursorImage(
+        angle: .pi / 2, foreground: .white)),
+    ("xxsnap-resize-top-left-bottom-right.cur", resizeCursorImage(
+        angle: -.pi / 4, foreground: .black, drawsOutline: false)),
+    ("xxsnap-resize-top-left-bottom-right-light.cur", resizeCursorImage(
+        angle: -.pi / 4, foreground: .white, drawsOutline: false)),
+    ("xxsnap-resize-top-right-bottom-left.cur", resizeCursorImage(
+        angle: .pi / 4, foreground: .black, drawsOutline: false)),
+    ("xxsnap-resize-top-right-bottom-left-light.cur", resizeCursorImage(
+        angle: .pi / 4, foreground: .white, drawsOutline: false)),
+] {
+    let bitmap = try renderedBitmap(
+        for: image,
+        destination: NSRect(
+            x: (CGFloat(cursorSize) - image.size.width) / 2,
+            y: (CGFloat(cursorSize) - image.size.height) / 2,
+            width: image.size.width,
+            height: image.size.height
+        )
+    )
+    let destination = outputDirectory.appendingPathComponent(name)
+    try cursorData(
+        bitmap: bitmap,
+        hotSpot: NSPoint(x: 16, y: 16),
+        flipVertically: true
+    ).write(to: destination, options: .atomic)
+    print("Generated \(destination.path) from the macOS cursor geometry.")
+}
 
 let eraserSource = repository
     .appendingPathComponent("platforms/mac/Resources/Icons/eraser-tool.svg")
@@ -231,6 +365,10 @@ let eraserHotSpot = NSPoint(
     x: 7 + CGFloat(macCursorInset),
     y: 17 + CGFloat(macCursorInset)
 )
-try cursorData(bitmap: eraserBitmap, hotSpot: eraserHotSpot)
+try cursorData(
+    bitmap: eraserBitmap,
+    hotSpot: eraserHotSpot,
+    flipVertically: true
+)
     .write(to: eraserOutput, options: .atomic)
 print("Generated \(eraserOutput.path) from the macOS eraser cursor SVG.")

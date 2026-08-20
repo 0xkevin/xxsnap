@@ -62,6 +62,8 @@ let repositoryRoot = scriptURL
     .deletingLastPathComponent()
 let sourceDirectory = repositoryRoot
     .appendingPathComponent("platforms/mac/Resources/Icons", isDirectory: true)
+let windowsIconDirectory = repositoryRoot
+    .appendingPathComponent("platforms/win/resources/icons", isDirectory: true)
 let outputDirectory = repositoryRoot
     .appendingPathComponent("platforms/win/resources/toolbar", isDirectory: true)
 
@@ -80,6 +82,13 @@ func sha256(of data: Data) -> String {
 }
 
 func sourceURL(for name: String) throws -> (url: URL, isVector: Bool) {
+    if name == "pencil-tool" {
+        return (
+            windowsIconDirectory
+                .appendingPathComponent("black-outline-white-pencil.svg"),
+            true
+        )
+    }
     let svg = sourceDirectory.appendingPathComponent("\(name).svg")
     if fileManager.fileExists(atPath: svg.path) {
         return (svg, true)

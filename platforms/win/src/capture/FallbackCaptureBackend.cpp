@@ -1,6 +1,8 @@
 #include "capture/FallbackCaptureBackend.h"
 
+#include <chrono>
 #include <cstddef>
+#include <thread>
 #include <utility>
 #include <variant>
 
@@ -80,6 +82,9 @@ CaptureResult FallbackCaptureBackend::capture(
     lastBackend_ = CaptureBackendKind::fallback;
     return fallbackResult;
 #else
+    // Output duplication queues frames while no capture is active. Recreate it
+    // for each screenshot so a later session cannot freeze an older queued frame.
+    preferred_.reset();
     {
         auto preferredResult = preferred_.capture(snapshot, budget);
         auto* preferredError = std::get_if<CaptureError>(&preferredResult);
@@ -87,6 +92,37 @@ CaptureResult FallbackCaptureBackend::capture(
             if (!hasSuspiciouslyBlackDisplay(std::get<FrozenDesktop>(preferredResult))) {
                 lastBackend_ = CaptureBackendKind::preferred;
                 return preferredResult;
+            }
+            // Parallels can expose an all-black initialization frame followed
+            // by a partially composed frame when duplication is first created.
+            // Drain both before accepting the settled desktop frame.
+            preferredResult.emplace<1>(CaptureError{
+                CaptureErrorCode::noFrame, DXGI_ERROR_WAIT_TIMEOUT});
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            auto freshFrameResult = preferred_.capture(snapshot, budget);
+            const auto* freshFrameError
+                = std::get_if<CaptureError>(&freshFrameResult);
+            if (freshFrameError == nullptr) {
+                freshFrameResult.emplace<1>(CaptureError{
+                    CaptureErrorCode::noFrame, DXGI_ERROR_WAIT_TIMEOUT});
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                auto settledFrameResult = preferred_.capture(snapshot, budget);
+                const auto* settledFrameError
+                    = std::get_if<CaptureError>(&settledFrameResult);
+                if (settledFrameError == nullptr
+                    && !hasSuspiciouslyBlackDisplay(
+                        std::get<FrozenDesktop>(settledFrameResult))) {
+                    lastBackend_ = CaptureBackendKind::preferred;
+                    return settledFrameResult;
+                }
+                if (settledFrameError != nullptr
+                    && isTerminal(settledFrameError->code)) {
+                    lastBackend_ = CaptureBackendKind::preferred;
+                    return settledFrameResult;
+                }
+            } else if (isTerminal(freshFrameError->code)) {
+                lastBackend_ = CaptureBackendKind::preferred;
+                return freshFrameResult;
             }
         } else if (isTerminal(preferredError->code)) {
             lastBackend_ = CaptureBackendKind::preferred;

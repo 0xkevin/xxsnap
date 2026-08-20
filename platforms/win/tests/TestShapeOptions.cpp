@@ -338,6 +338,14 @@ void testNumberOptionsMatchMacGeometryTypesAndSizes()
     CHECK(typeMenu.items.size() == 3U);
     CHECK(typeMenu.menu.width == 56.0F);
     CHECK(typeMenu.menu.height == 86.0F);
+    CHECK((numberMarkIconRect(layout.markType, true)
+        == AnnotationRect{118, 213, 14, 14}));
+    CHECK((numberMarkIconRect(typeMenu.items[0], false)
+        == AnnotationRect{
+            typeMenu.items[0].x + 16.0F,
+            typeMenu.items[0].y + 5.0F,
+            16.0F,
+            16.0F}));
     CHECK(numberSizeValues.size() == 20U);
 }
 

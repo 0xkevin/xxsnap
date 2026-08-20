@@ -104,6 +104,28 @@ constexpr AnnotationRect numberMarkRect(
     };
 }
 
+constexpr AnnotationRect numberMarkIconRect(
+    AnnotationRect container,
+    bool reservesDisclosure) noexcept
+{
+    container = standardized(container);
+    const auto side = reservesDisclosure ? 14.0F : 16.0F;
+    if (reservesDisclosure) {
+        return {
+            container.x + 8.0F,
+            container.y + (container.height - side) / 2.0F,
+            side,
+            side,
+        };
+    }
+    return {
+        container.x + (container.width - side) / 2.0F,
+        container.y + (container.height - side) / 2.0F,
+        side,
+        side,
+    };
+}
+
 constexpr AnnotationRect numberOutlineRect(AnnotationRect rect) noexcept
 {
     rect = standardized(rect);

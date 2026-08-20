@@ -123,8 +123,8 @@
       "insetDip" : 2,
       "logicalSizeDip" : 16,
       "name" : "pencil-tool",
-      "sha256" : "94815b7f70f8e29f2e99f863439b087746b6f47c82c649dc6fb27ba144919aed",
-      "source" : "platforms/mac/Resources/Icons/pencil-tool.svg"
+      "sha256" : "4d64d68de69e474091b10fd4252d039aecf18337bb9067def4fe64cc513aebc1",
+      "source" : "platforms/win/resources/icons/black-outline-white-pencil.svg"
     },
     {
       "fixedColor" : false,

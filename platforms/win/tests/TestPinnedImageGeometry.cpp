@@ -1,8 +1,10 @@
 #include "pin/PinnedImageGeometry.h"
+#include "pin/PinnedImageShadow.h"
 #include "fullscreen/FullScreenCapturePreviewHost.h"
 
 #include <cstdlib>
 #include <iostream>
+#include <set>
 
 namespace {
 
@@ -10,6 +12,7 @@ using xxsnap::win::PinnedImageSize;
 using xxsnap::win::fittedPinnedImageSize;
 using xxsnap::win::fullScreenPreviewRect;
 using xxsnap::win::initialPinnedImageRect;
+using xxsnap::win::pinnedImageShadowPixel;
 using xxsnap::win::scaledPinnedImageSize;
 
 int failureCount = 0;
@@ -75,6 +78,25 @@ void testFullScreenPreviewMatchesMacBottomRightPlacement()
     CHECK(tall.y == 500);
 }
 
+void testPinnedImageShadowFadesSmoothlyWithoutBlueRings()
+{
+    const snipory::core::portable::PixelRect image{18, 18, 160, 90};
+    std::set<std::uint8_t> alphaValues;
+    std::uint8_t previousAlpha = 255U;
+    for (std::int64_t distance = 1; distance <= 18; ++distance) {
+        const auto pixel = pinnedImageShadowPixel(
+            {image.x - distance, image.y + image.height / 2}, image);
+        CHECK(pixel.alpha > 0U);
+        CHECK(pixel.alpha <= previousAlpha);
+        CHECK(pixel.blue > pixel.green);
+        CHECK(pixel.green > pixel.red);
+        CHECK(pixel.blue <= pixel.alpha);
+        alphaValues.insert(pixel.alpha);
+        previousAlpha = pixel.alpha;
+    }
+    CHECK(alphaValues.size() >= 12U);
+}
+
 } // namespace
 
 int main()
@@ -82,5 +104,6 @@ int main()
     testMacSizingContract();
     testInitialPlacementUsesSourceOrCentersFittedLongImage();
     testFullScreenPreviewMatchesMacBottomRightPlacement();
+    testPinnedImageShadowFadesSmoothlyWithoutBlueRings();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

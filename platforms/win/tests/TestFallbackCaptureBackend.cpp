@@ -107,6 +107,10 @@ public:
     {
         events_.push_back(Event::dxgiCapture);
         ++captureCalls;
+        if (suspiciousFramesRemaining > 0) {
+            --suspiciousFramesRemaining;
+            return successfulCapture(snapshot, budget, std::byte{0U});
+        }
         if (returnMostlyBlackFrame) {
             return mostlyBlackCapture(snapshot, budget);
         }
@@ -131,6 +135,7 @@ public:
     }
 
     std::vector<std::optional<CaptureError>> results;
+    int suspiciousFramesRemaining = 0;
     bool returnMostlyBlackFrame = false;
     bool returnBlackFrame = false;
     int captureCalls = 0;
@@ -173,7 +178,7 @@ const CaptureError* errorFrom(const CaptureResult& result)
     return error;
 }
 
-void testDxgiSuccessReturnsWithoutResetOrFallback()
+void testDxgiSuccessReturnsWithoutFallback()
 {
     std::vector<Event> events;
     FakeDxgi dxgi(events);
@@ -184,10 +189,37 @@ void testDxgiSuccessReturnsWithoutResetOrFallback()
     const auto result = backend.capture(snapshotFor(), budget);
 
     CHECK(std::holds_alternative<FrozenDesktop>(result));
-    CHECK((events == std::vector{Event::dxgiCapture}));
-    CHECK(dxgi.resetCalls == 0);
+    CHECK((events == std::vector{Event::dxgiReset, Event::dxgiCapture}));
+    CHECK(dxgi.resetCalls == 1);
     CHECK(gdi.captureCalls == 0);
     CHECK(backend.lastBackend() == CaptureBackendKind::preferred);
+}
+
+void testModernCaptureStartsWithFreshPreferredSession()
+{
+#if !defined(XXSNAP_LEGACY)
+    std::vector<Event> events;
+    FakeDxgi dxgi(events);
+    FakeGdi gdi(events);
+    FallbackCaptureBackend backend(dxgi, gdi);
+
+    MemoryBudget firstBudget(4U);
+    MemoryBudget secondBudget(4U);
+    const auto first = backend.capture(snapshotFor(), firstBudget);
+    const auto second = backend.capture(snapshotFor(), secondBudget);
+
+    CHECK(std::holds_alternative<FrozenDesktop>(first));
+    CHECK(std::holds_alternative<FrozenDesktop>(second));
+    CHECK((events == std::vector{
+        Event::dxgiReset,
+        Event::dxgiCapture,
+        Event::dxgiReset,
+        Event::dxgiCapture,
+    }));
+    CHECK(dxgi.resetCalls == 2);
+    CHECK(dxgi.captureCalls == 2);
+    CHECK(gdi.captureCalls == 0);
+#endif
 }
 
 void testAllBlackDxgiSuccessFallsBackToGdi()
@@ -202,9 +234,15 @@ void testAllBlackDxgiSuccessFallsBackToGdi()
     const auto result = backend.capture(snapshotFor(), budget);
 
     CHECK(std::holds_alternative<FrozenDesktop>(result));
-    CHECK((events == std::vector{Event::dxgiCapture, Event::gdiCapture}));
-    CHECK(dxgi.captureCalls == 1);
-    CHECK(dxgi.resetCalls == 0);
+    CHECK((events == std::vector{
+        Event::dxgiReset,
+        Event::dxgiCapture,
+        Event::dxgiCapture,
+        Event::dxgiCapture,
+        Event::gdiCapture,
+    }));
+    CHECK(dxgi.captureCalls == 3);
+    CHECK(dxgi.resetCalls == 1);
     CHECK(gdi.captureCalls == 1);
     CHECK(backend.lastBackend() == CaptureBackendKind::fallback);
 }
@@ -221,12 +259,44 @@ void testMostlyBlackDxgiSuccessFallsBackToGdi()
     const auto result = backend.capture(snapshotFor(10, 10), budget);
 
     CHECK(std::holds_alternative<FrozenDesktop>(result));
-    CHECK((events == std::vector{Event::dxgiCapture, Event::gdiCapture}));
+    CHECK((events == std::vector{
+        Event::dxgiReset,
+        Event::dxgiCapture,
+        Event::dxgiCapture,
+        Event::dxgiCapture,
+        Event::gdiCapture,
+    }));
     CHECK(gdi.captureCalls == 1);
     CHECK(backend.lastBackend() == CaptureBackendKind::fallback);
 }
 
-void testDeviceLostResetsOnceAndRetriesDxgiOnce()
+void testInitialBlackDxgiFrameRetriesSameSessionBeforeGdi()
+{
+#if !defined(XXSNAP_LEGACY)
+    std::vector<Event> events;
+    FakeDxgi dxgi(events);
+    dxgi.suspiciousFramesRemaining = 1;
+    FakeGdi gdi(events);
+    FallbackCaptureBackend backend(dxgi, gdi);
+    MemoryBudget budget(4U);
+
+    const auto result = backend.capture(snapshotFor(), budget);
+
+    CHECK(std::holds_alternative<FrozenDesktop>(result));
+    CHECK((events == std::vector{
+        Event::dxgiReset,
+        Event::dxgiCapture,
+        Event::dxgiCapture,
+        Event::dxgiCapture,
+    }));
+    CHECK(dxgi.resetCalls == 1);
+    CHECK(dxgi.captureCalls == 3);
+    CHECK(gdi.captureCalls == 0);
+    CHECK(backend.lastBackend() == CaptureBackendKind::preferred);
+#endif
+}
+
+void testDeviceLostResetsAgainAndRetriesDxgiOnce()
 {
     std::vector<Event> events;
     FakeDxgi dxgi(events);
@@ -242,11 +312,12 @@ void testDeviceLostResetsOnceAndRetriesDxgiOnce()
 
     CHECK(std::holds_alternative<FrozenDesktop>(result));
     CHECK((events == std::vector{
+        Event::dxgiReset,
         Event::dxgiCapture,
         Event::dxgiReset,
         Event::dxgiCapture,
     }));
-    CHECK(dxgi.resetCalls == 1);
+    CHECK(dxgi.resetCalls == 2);
     CHECK(gdi.captureCalls == 0);
     CHECK(backend.lastBackend() == CaptureBackendKind::preferred);
 }
@@ -267,6 +338,7 @@ void testFailedRetryFallsBackToGdiAndReturnsItsResultUnchanged()
     const auto result = backend.capture(snapshotFor(), budget);
 
     CHECK((events == std::vector{
+        Event::dxgiReset,
         Event::dxgiCapture,
         Event::dxgiReset,
         Event::dxgiCapture,
@@ -277,7 +349,7 @@ void testFailedRetryFallsBackToGdiAndReturnsItsResultUnchanged()
     CHECK(backend.lastBackend() == CaptureBackendKind::fallback);
 }
 
-void testSecondDeviceLostDoesNotResetTwice()
+void testSecondDeviceLostFallsBackWithoutThirdAttempt()
 {
     std::vector<Event> events;
     FakeDxgi dxgi(events);
@@ -293,17 +365,18 @@ void testSecondDeviceLostDoesNotResetTwice()
 
     CHECK(std::holds_alternative<FrozenDesktop>(result));
     CHECK((events == std::vector{
+        Event::dxgiReset,
         Event::dxgiCapture,
         Event::dxgiReset,
         Event::dxgiCapture,
         Event::gdiCapture,
     }));
-    CHECK(dxgi.resetCalls == 1);
+    CHECK(dxgi.resetCalls == 2);
     CHECK(gdi.captureCalls == 1);
     CHECK(backend.lastBackend() == CaptureBackendKind::fallback);
 }
 
-void testRecoverableErrorsFallBackDirectlyWithoutReset()
+void testRecoverableErrorsFallBackDirectly()
 {
     const std::array recoverable{
         CaptureErrorCode::accessDenied,
@@ -322,8 +395,12 @@ void testRecoverableErrorsFallBackDirectlyWithoutReset()
         const auto result = backend.capture(snapshotFor(), budget);
 
         CHECK(std::holds_alternative<FrozenDesktop>(result));
-        CHECK((events == std::vector{Event::dxgiCapture, Event::gdiCapture}));
-        CHECK(dxgi.resetCalls == 0);
+        CHECK((events == std::vector{
+            Event::dxgiReset,
+            Event::dxgiCapture,
+            Event::gdiCapture,
+        }));
+        CHECK(dxgi.resetCalls == 1);
         CHECK(gdi.captureCalls == 1);
         CHECK(backend.lastBackend() == CaptureBackendKind::fallback);
     }
@@ -348,8 +425,8 @@ void testTerminalErrorsNeverRetryOrFallBack()
         const auto result = backend.capture(snapshotFor(), budget);
 
         CHECK(errorFrom(result)->code == code);
-        CHECK((events == std::vector{Event::dxgiCapture}));
-        CHECK(dxgi.resetCalls == 0);
+        CHECK((events == std::vector{Event::dxgiReset, Event::dxgiCapture}));
+        CHECK(dxgi.resetCalls == 1);
         CHECK(gdi.captureCalls == 0);
         CHECK(backend.lastBackend() == CaptureBackendKind::preferred);
     }
@@ -371,6 +448,7 @@ void testTerminalRetryErrorReturnsImmediately()
 
     CHECK(errorFrom(result)->code == CaptureErrorCode::topologyChanged);
     CHECK((events == std::vector{
+        Event::dxgiReset,
         Event::dxgiCapture,
         Event::dxgiReset,
         Event::dxgiCapture,
@@ -651,7 +729,6 @@ void testLiveDxgiCaptureUsesRealGdiFallbackWhenRequired()
     const auto liveSnapshot = topology.hasValue()
         ? *topology.value()
         : snapshotFor();
-
     TrackingDxgi dxgi;
     TrackingGdi gdi;
     FallbackCaptureBackend backend(dxgi, gdi);
@@ -668,7 +745,7 @@ void testLiveDxgiCaptureUsesRealGdiFallbackWhenRequired()
     if (dxgi.results.front().has_value()) {
         const auto firstCode = dxgi.results.front()->code;
         if (firstCode == CaptureErrorCode::deviceLost) {
-            CHECK(dxgi.resetCalls == 1);
+            CHECK(dxgi.resetCalls == 2);
             CHECK(dxgi.results.size() == 2U);
             if (dxgi.results.size() == 2U && dxgi.results[1].has_value()) {
                 expectGdi = !terminalForSmoke(dxgi.results[1]->code);
@@ -709,13 +786,15 @@ int main(int argumentCount, char* arguments[])
         return 2;
     }
 
-    testDxgiSuccessReturnsWithoutResetOrFallback();
+    testDxgiSuccessReturnsWithoutFallback();
+    testModernCaptureStartsWithFreshPreferredSession();
     testAllBlackDxgiSuccessFallsBackToGdi();
     testMostlyBlackDxgiSuccessFallsBackToGdi();
-    testDeviceLostResetsOnceAndRetriesDxgiOnce();
+    testInitialBlackDxgiFrameRetriesSameSessionBeforeGdi();
+    testDeviceLostResetsAgainAndRetriesDxgiOnce();
     testFailedRetryFallsBackToGdiAndReturnsItsResultUnchanged();
-    testSecondDeviceLostDoesNotResetTwice();
-    testRecoverableErrorsFallBackDirectlyWithoutReset();
+    testSecondDeviceLostFallsBackWithoutThirdAttempt();
+    testRecoverableErrorsFallBackDirectly();
     testTerminalErrorsNeverRetryOrFallBack();
     testTerminalRetryErrorReturnsImmediately();
     testDxgiErrorMappingIsStableAndPreservesNativeCode();

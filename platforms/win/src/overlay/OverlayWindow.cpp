@@ -266,20 +266,29 @@ void OverlayWindow::setAlwaysOnTop(bool enabled) noexcept
 void OverlayWindow::setKeyboardInputAlwaysEnabled(bool enabled) noexcept
 {
     keyboardInputAlwaysEnabled_ = enabled;
-    updateTextInputActivation(enabled
-        || renderState_.selectedToolbarAction == ToolbarAction::text);
+    updateTextInputActivation(enabled || renderState_.selectedToolbarAction ==
+                                             ToolbarAction::text);
 }
 
-void OverlayWindow::setSelection(
-    std::optional<PixelRect> selection,
-    bool showActions) noexcept
-{
-    renderState_ = {};
-    renderState_.selection = selection;
-    renderState_.showActions = showActions;
-    if (window_ != nullptr) {
-        InvalidateRect(window_, nullptr, FALSE);
-    }
+void OverlayWindow::setDisplay(const FrozenDisplay &display) noexcept {
+  display_ = &display;
+  lastRendererError_ = renderer_.updateBackground(display);
+  if (lastRendererError_.has_value()) {
+    renderer_.discardDeviceResources();
+  }
+  if (window_ != nullptr) {
+    InvalidateRect(window_, nullptr, FALSE);
+  }
+}
+
+void OverlayWindow::setSelection(std::optional<PixelRect> selection,
+                                 bool showActions) noexcept {
+  renderState_ = {};
+  renderState_.selection = selection;
+  renderState_.showActions = showActions;
+  if (window_ != nullptr) {
+    InvalidateRect(window_, nullptr, FALSE);
+  }
 }
 
 void OverlayWindow::setRenderState(OverlayRenderState state) noexcept
@@ -574,19 +583,43 @@ HCURSOR OverlayWindow::cursor() const noexcept
             instance_, MAKEINTRESOURCEW(IDC_XXSNAP_CROSSHAIR));
         break;
     case OverlayCursorStyle::move:
-        result = LoadCursorW(nullptr, MAKEINTRESOURCEW(32646));
+        result = LoadCursorW(instance_, MAKEINTRESOURCEW(IDC_XXSNAP_MOVE));
         break;
     case OverlayCursorStyle::resizeLeftRight:
-        result = LoadCursorW(nullptr, MAKEINTRESOURCEW(32644));
+        result = LoadCursorW(
+            instance_, MAKEINTRESOURCEW(IDC_XXSNAP_RESIZE_LEFT_RIGHT));
         break;
     case OverlayCursorStyle::resizeUpDown:
-        result = LoadCursorW(nullptr, MAKEINTRESOURCEW(32645));
+        result = LoadCursorW(
+            instance_, MAKEINTRESOURCEW(IDC_XXSNAP_RESIZE_UP_DOWN));
         break;
     case OverlayCursorStyle::resizeTopLeftBottomRight:
-        result = LoadCursorW(nullptr, MAKEINTRESOURCEW(32642));
+        result = LoadCursorW(instance_,
+            MAKEINTRESOURCEW(IDC_XXSNAP_RESIZE_TOP_LEFT_BOTTOM_RIGHT));
         break;
     case OverlayCursorStyle::resizeTopRightBottomLeft:
-        result = LoadCursorW(nullptr, MAKEINTRESOURCEW(32643));
+        result = LoadCursorW(instance_,
+            MAKEINTRESOURCEW(IDC_XXSNAP_RESIZE_TOP_RIGHT_BOTTOM_LEFT));
+        break;
+    case OverlayCursorStyle::moveLight:
+        result = LoadCursorW(
+            instance_, MAKEINTRESOURCEW(IDC_XXSNAP_MOVE_LIGHT));
+        break;
+    case OverlayCursorStyle::resizeLeftRightLight:
+        result = LoadCursorW(instance_,
+            MAKEINTRESOURCEW(IDC_XXSNAP_RESIZE_LEFT_RIGHT_LIGHT));
+        break;
+    case OverlayCursorStyle::resizeUpDownLight:
+        result = LoadCursorW(instance_,
+            MAKEINTRESOURCEW(IDC_XXSNAP_RESIZE_UP_DOWN_LIGHT));
+        break;
+    case OverlayCursorStyle::resizeTopLeftBottomRightLight:
+        result = LoadCursorW(instance_,
+            MAKEINTRESOURCEW(IDC_XXSNAP_RESIZE_TOP_LEFT_BOTTOM_RIGHT_LIGHT));
+        break;
+    case OverlayCursorStyle::resizeTopRightBottomLeftLight:
+        result = LoadCursorW(instance_,
+            MAKEINTRESOURCEW(IDC_XXSNAP_RESIZE_TOP_RIGHT_BOTTOM_LEFT_LIGHT));
         break;
     case OverlayCursorStyle::rotation:
         result = LoadCursorW(
@@ -596,7 +629,12 @@ HCURSOR OverlayWindow::cursor() const noexcept
         result = LoadCursorW(
             instance_, MAKEINTRESOURCEW(IDC_XXSNAP_BRUSH));
         break;
+    case OverlayCursorStyle::brushLight:
+        result = LoadCursorW(
+            instance_, MAKEINTRESOURCEW(IDC_XXSNAP_BRUSH_LIGHT));
+        break;
     case OverlayCursorStyle::marker:
+    case OverlayCursorStyle::markerLight:
     case OverlayCursorStyle::mosaic:
     case OverlayCursorStyle::numberMark:
     case OverlayCursorStyle::numberCheck:
@@ -757,6 +795,11 @@ LRESULT OverlayWindow::handleMessage(
         dispatchInput({OverlayWindowInputKind::cancelShiftShortcut, {}});
         return 0;
     case WM_MOUSEMOVE:
+        if (!trackingMouseLeave_) {
+            TRACKMOUSEEVENT tracking{
+                sizeof(TRACKMOUSEEVENT), TME_LEAVE, window_, 0U};
+            trackingMouseLeave_ = TrackMouseEvent(&tracking) != FALSE;
+        }
         dispatchInput({
             OverlayWindowInputKind::pointerMove,
             PixelPoint{
@@ -764,6 +807,10 @@ LRESULT OverlayWindow::handleMessage(
                 static_cast<short>(HIWORD(lParam)),
             },
         });
+        return 0;
+    case WM_MOUSELEAVE:
+        trackingMouseLeave_ = false;
+        dispatchInput({OverlayWindowInputKind::pointerLeave, {}});
         return 0;
     case WM_MOUSEWHEEL: {
         dispatchInput({OverlayWindowInputKind::cancelShiftShortcut, {}});
@@ -790,6 +837,16 @@ LRESULT OverlayWindow::handleMessage(
     case WM_HOTKEY:
         if (isOverlayEscapeHotKey(wParam)) {
             dispatchInput({OverlayWindowInputKind::escape, {}});
+            return 0;
+        }
+        if (const auto shortcut = overlayToolbarHotKey(wParam)) {
+            dispatchInput({
+                OverlayWindowInputKind::keyDown,
+                {},
+                toolbarTooltip(shortcut->action).virtualKey,
+                false,
+                shortcut->shift,
+            });
             return 0;
         }
         switch (static_cast<int>(wParam)) {

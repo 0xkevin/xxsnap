@@ -2,12 +2,15 @@
 #include "capture/DisplayTopology.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <chrono>
 #include <cstring>
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -77,6 +80,18 @@ public:
             && identifier == registeredIdentifier;
     }
 
+    bool registerToolbarHotKeys(HWND) noexcept override
+    {
+        ++registerToolbarCalls;
+        return true;
+    }
+
+    bool unregisterToolbarHotKeys(HWND) noexcept override
+    {
+        ++unregisterToolbarCalls;
+        return true;
+    }
+
     std::optional<AnnotationColor> chooseColor(
         HWND window,
         AnnotationColor) noexcept override
@@ -111,6 +126,8 @@ public:
     int cursorCalls = 0;
     int registerCalls = 0;
     int unregisterCalls = 0;
+    int registerToolbarCalls = 0;
+    int unregisterToolbarCalls = 0;
     int chooseColorCalls = 0;
     HWND chosenColorWindow = nullptr;
     bool shiftDown = false;
@@ -154,6 +171,31 @@ std::unique_ptr<xxsnap::win::FrozenDesktop> solidDesktop(
         *topologyResult.value(),
         std::move(displays),
         std::chrono::steady_clock::time_point{});
+}
+
+void setDesktopPixel(
+    xxsnap::win::FrozenDesktop& desktop,
+    PixelPoint point,
+    AnnotationColor color)
+{
+    for (auto& display : desktop.displays) {
+        const auto bounds = display.descriptor.pixelBounds;
+        if (point.x < bounds.x || point.y < bounds.y
+            || point.x >= bounds.x + bounds.width
+            || point.y >= bounds.y + bounds.height) {
+            continue;
+        }
+        const auto x = point.x - bounds.x;
+        const auto y = point.y - bounds.y;
+        auto* pixel = display.pixels.data()
+            + static_cast<std::uint64_t>(y) * display.pixels.stride()
+            + static_cast<std::uint64_t>(x) * 4U;
+        pixel[0] = static_cast<std::byte>(color.blue);
+        pixel[1] = static_cast<std::byte>(color.green);
+        pixel[2] = static_cast<std::byte>(color.red);
+        pixel[3] = static_cast<std::byte>(color.alpha);
+        return;
+    }
 }
 
 const HWND leftWindow = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(1));
@@ -266,6 +308,26 @@ void testPinnedImageEditorEscapeFinishesInsteadOfCancelling()
 
     CHECK(actions.size() == 1U);
     CHECK(actions.front() == OverlayInputAction::finishEditing);
+    CHECK(router.status() == OverlayInputStatus::completed);
+}
+
+void testLongImageEditorEscapeFinishesInsteadOfCancelling()
+{
+    FakePlatform platform;
+    std::vector<OverlayInputAction> actions;
+    const auto window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(4));
+    OverlayInputRouter router(
+        PixelRect{40, 60, 500, 300},
+        {{window, PixelRect{40, 60, 500, 300}, 96, 96}},
+        platform,
+        [&actions](OverlayInputAction action) { actions.push_back(action); },
+        true, nullptr, OverlayMode::longImageEditor);
+    router.lockSelection({40, 60, 500, 300});
+
+    router.escapePressed();
+
+    CHECK(actions == std::vector<OverlayInputAction>{
+        OverlayInputAction::finishEditing});
     CHECK(router.status() == OverlayInputStatus::completed);
 }
 
@@ -643,6 +705,137 @@ void testScrollToolbarSuspendsOverlayWithoutCompletingRouter()
     CHECK(platform.unregisterCalls == 1);
 }
 
+void testToolbarHoverShowsMacShortcutTipAndRStartsScrollCapture()
+{
+    FakePlatform platform;
+    std::vector<OverlayInputAction> actions;
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform,
+        [&actions](OverlayInputAction action) { actions.push_back(action); },
+        true);
+    CHECK(router.activateEscapeHotKey(leftWindow));
+    createReadySelection(router);
+    const auto owner = router.presentations()[1];
+    const auto scroll = owner.toolbarItems[10];
+    const auto scrollHotKey = xxsnap::win::overlayToolbarHotKey(
+        xxsnap::win::overlayToolbarHotKeyIdentifier(
+            xxsnap::win::ToolbarAction::scroll, false));
+    CHECK(scrollHotKey.has_value());
+    CHECK(scrollHotKey.has_value()
+        && scrollHotKey->action == xxsnap::win::ToolbarAction::scroll);
+    CHECK(scrollHotKey.has_value() && !scrollHotKey->shift);
+    const auto shiftedPenHotKey = xxsnap::win::overlayToolbarHotKey(
+        xxsnap::win::overlayToolbarHotKeyIdentifier(
+            xxsnap::win::ToolbarAction::pen, true));
+    CHECK(shiftedPenHotKey.has_value());
+    CHECK(shiftedPenHotKey.has_value()
+        && shiftedPenHotKey->action == xxsnap::win::ToolbarAction::pen);
+    CHECK(shiftedPenHotKey.has_value() && shiftedPenHotKey->shift);
+    CHECK(!xxsnap::win::overlayToolbarHotKey(
+        xxsnap::win::overlayToolbarHotKeyIdentifier(
+            xxsnap::win::ToolbarAction::save, false)).has_value());
+
+    router.pointerMove(rightWindow, scroll.centerPhysical);
+
+    const auto hovered = router.presentations()[1];
+    CHECK(hovered.toolbarTooltip.has_value());
+    if (hovered.toolbarTooltip.has_value()) {
+        CHECK(hovered.toolbarTooltip->text == L"滚动截图 (R)");
+        CHECK(hovered.toolbarTooltip->anchor == scroll.rectPhysical);
+    }
+    router.pointerLeave(rightWindow);
+    CHECK(!router.presentations()[1].toolbarTooltip.has_value());
+
+    CHECK(!router.toolbarShortcutPressed('R', false, false, true));
+    CHECK(actions.empty());
+    CHECK(router.toolbarShortcutPressed('R', false, false, false));
+    CHECK(actions == std::vector<OverlayInputAction>{
+        OverlayInputAction::scrollCapture});
+    CHECK(platform.unregisterCalls == 1);
+}
+
+void testMacToolShortcutsSelectToolsAndDoNotInterruptInlineText()
+{
+    FakePlatform platform;
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform,
+        [](OverlayInputAction) {}, true);
+    createReadySelection(router);
+    CHECK(router.activateEscapeHotKey(leftWindow));
+    CHECK(platform.registerToolbarCalls == 1);
+    constexpr std::array shortcuts{
+        std::pair{'S', xxsnap::win::ToolbarAction::rectangle},
+        std::pair{'A', xxsnap::win::ToolbarAction::polyline},
+        std::pair{'B', xxsnap::win::ToolbarAction::pen},
+        std::pair{'H', xxsnap::win::ToolbarAction::marker},
+        std::pair{'P', xxsnap::win::ToolbarAction::eyedropper},
+        std::pair{'M', xxsnap::win::ToolbarAction::mosaic},
+        std::pair{'T', xxsnap::win::ToolbarAction::text},
+        std::pair{'N', xxsnap::win::ToolbarAction::number},
+        std::pair{'G', xxsnap::win::ToolbarAction::magnifier},
+        std::pair{'E', xxsnap::win::ToolbarAction::eraser},
+    };
+    for (const auto& [key, action] : shortcuts) {
+        CHECK(router.toolbarShortcutPressed(key, false, false, false));
+        const auto presentation = router.presentations()[1];
+        const auto item = std::find_if(presentation.toolbarItems.begin(),
+            presentation.toolbarItems.end(), [action](const auto& candidate) {
+                return candidate.action == action;
+            });
+        CHECK(item != presentation.toolbarItems.end());
+        CHECK(item != presentation.toolbarItems.end() && item->selected);
+    }
+
+    CHECK(router.toolbarShortcutPressed('T', false, false, false));
+    CHECK(router.pointerDown(rightWindow, {100, 100}));
+    CHECK(router.isEditingInlineValue());
+    router.synchronizeToolbarHotKeys();
+    CHECK(platform.unregisterToolbarCalls == 1);
+    CHECK(router.toolbarShortcutPressed('N', false, false, false));
+    CHECK(router.isEditingInlineValue());
+    CHECK(router.textInput(L"S"));
+    CHECK(router.isEditingInlineValue());
+    router.escapePressed();
+    router.synchronizeToolbarHotKeys();
+    CHECK(!router.isEditingInlineValue());
+    CHECK(platform.registerToolbarCalls == 2);
+}
+
+void testControlToolbarShortcutsRouteThroughCatalog()
+{
+    FakePlatform platform;
+    OverlayInputRouter historyRouter(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform,
+        [](OverlayInputAction) {}, true);
+    createReadySelection(historyRouter);
+    CHECK(historyRouter.toolbarShortcutPressed('S', false, false, false));
+    CHECK(historyRouter.pointerDown(rightWindow, {80, 80}));
+    platform.cursor = PixelPoint{140, 140};
+    historyRouter.pointerMove(rightWindow, {140, 140});
+    historyRouter.pointerUp(rightWindow, {140, 140});
+    CHECK(historyRouter.annotationDocument().annotations().size() == 1U);
+    CHECK(historyRouter.toolbarShortcutPressed('Z', true, false, false));
+    CHECK(historyRouter.annotationDocument().annotations().empty());
+    CHECK(historyRouter.toolbarShortcutPressed('Z', true, true, false));
+    CHECK(historyRouter.annotationDocument().annotations().size() == 1U);
+
+    constexpr std::array terminalShortcuts{
+        std::tuple{'S', xxsnap::win::OverlayInputAction::save},
+        std::tuple{'C', xxsnap::win::OverlayInputAction::copy},
+        std::tuple{'1', xxsnap::win::OverlayInputAction::pin},
+    };
+    for (const auto& [key, expected] : terminalShortcuts) {
+        std::vector<OverlayInputAction> actions;
+        OverlayInputRouter router(
+            PixelRect{-640, 0, 1280, 360}, surfaces(), platform,
+            [&actions](OverlayInputAction action) { actions.push_back(action); },
+            true);
+        createReadySelection(router);
+        CHECK(router.toolbarShortcutPressed(key, true, false, false));
+        CHECK(actions == std::vector<OverlayInputAction>{expected});
+    }
+}
+
 void testShapeToolIsNonTerminalAndEditsThroughSharedPresentation()
 {
     FakePlatform platform;
@@ -878,6 +1071,73 @@ void testBrushToolUsesMacOptionsAndShiftStraightLine()
     CHECK(router.presentations()[1].annotationPlan.lineHandles.empty());
 }
 
+void testDarkSelectionUsesMacLightToolCursors()
+{
+    FakePlatform platform;
+    auto desktop = solidDesktop({10, 10, 10, 255});
+    CHECK(desktop != nullptr);
+    if (!desktop) return;
+    setDesktopPixel(*desktop, PixelPoint{20, 100}, {255, 255, 255, 255});
+
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform, {}, true,
+        desktop.get());
+    createReadySelection(router);
+
+    auto owner = router.presentations()[1];
+    CHECK(router.pointerDown(
+        rightWindow, owner.toolbarItems[2].centerPhysical));
+    CHECK(router.cursorStyle(rightWindow, PixelPoint{40, 90})
+        == OverlayCursorStyle::brushLight);
+
+    owner = router.presentations()[1];
+    CHECK(router.pointerDown(
+        rightWindow, owner.toolbarItems[3].centerPhysical));
+    CHECK(router.cursorStyle(rightWindow, PixelPoint{40, 90})
+        == OverlayCursorStyle::markerLight);
+    CHECK(router.markerCursorStyle(true).has_value());
+    CHECK((router.markerCursorStyle(true)->strokeColor
+        == AnnotationColor{255, 255, 255, 255}));
+
+    owner = router.presentations()[1];
+    const auto eyedropper = std::find_if(
+        owner.toolbarItems.begin(), owner.toolbarItems.end(),
+        [](const auto& item) {
+            return item.action == xxsnap::win::ToolbarAction::eyedropper;
+        });
+    CHECK(eyedropper != owner.toolbarItems.end());
+    if (eyedropper == owner.toolbarItems.end()) return;
+    CHECK(router.pointerDown(rightWindow, eyedropper->centerPhysical));
+    router.pointerMove(rightWindow, PixelPoint{20, 100});
+    CHECK(router.cursorStyle(rightWindow, PixelPoint{20, 100})
+        == OverlayCursorStyle::eyedropperLight);
+}
+
+void testBrightSelectionKeepsMacDarkToolCursors()
+{
+    FakePlatform platform;
+    auto desktop = solidDesktop({240, 240, 240, 255});
+    CHECK(desktop != nullptr);
+    if (!desktop) return;
+
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform, {}, true,
+        desktop.get());
+    createReadySelection(router);
+
+    auto owner = router.presentations()[1];
+    CHECK(router.pointerDown(
+        rightWindow, owner.toolbarItems[2].centerPhysical));
+    CHECK(router.cursorStyle(rightWindow, PixelPoint{40, 90})
+        == OverlayCursorStyle::brush);
+
+    owner = router.presentations()[1];
+    CHECK(router.pointerDown(
+        rightWindow, owner.toolbarItems[3].centerPhysical));
+    CHECK(router.cursorStyle(rightWindow, PixelPoint{40, 90})
+        == OverlayCursorStyle::marker);
+}
+
 void testMarkerToolUsesMacOptionsAndShiftSnapping()
 {
     FakePlatform platform;
@@ -981,7 +1241,7 @@ void testEyedropperSamplesCopiesAndMeasuresLikeMac()
     CHECK(!router.presentations()[1].eyedropper.has_value());
 }
 
-void testShapeCannotBeCreatedOutsideLockedSelectionOnOverlay()
+void testShapeCanBeCreatedOutsideLockedSelectionLikeMac()
 {
     FakePlatform platform;
     OverlayInputRouter router(
@@ -991,8 +1251,14 @@ void testShapeCannotBeCreatedOutsideLockedSelectionOnOverlay()
     auto owner = router.presentations()[1];
     CHECK(router.pointerDown(
         rightWindow, owner.toolbarItems[0].centerPhysical));
+    CHECK(router.cursorStyle(rightWindow, PixelPoint{200, 20})
+        == OverlayCursorStyle::crosshair);
+    platform.cursor = PixelPoint{260, 60};
     CHECK(router.pointerDown(rightWindow, PixelPoint{200, 20}));
-    CHECK(router.annotationDocument().annotations().empty());
+    router.pointerMove(rightWindow, *platform.cursor);
+    router.pointerUp(rightWindow, *platform.cursor);
+    CHECK(router.annotationDocument().annotations().size() == 1U);
+    CHECK(router.annotationDocument().annotations().front().rect.y < 0.0F);
 }
 
 void testMosaicToolbarOptionsAndLiveComposite()
@@ -1026,7 +1292,8 @@ void testMosaicToolbarOptionsAndLiveComposite()
     CHECK(router.annotationDocument().annotations().size() == 1U);
     owner = router.presentations()[1];
     CHECK(owner.annotationComposite != nullptr);
-    CHECK(owner.annotationPlan.items.empty());
+    CHECK(owner.annotationPlan.items.size() == 1U);
+    CHECK(owner.annotationPlanOutsideSelectionOnly);
 
     CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
         owner.mosaicOptions->layout.redactionType)));
@@ -1209,8 +1476,8 @@ void testMagnifierToolbarMatchesMacOptionsAndUsesComposite()
     CHECK((annotation.style.strokeColor == AnnotationColor{1, 2, 3, 255}));
     CHECK(annotation.rect.width == annotation.rect.height);
     owner = router.presentations()[1];
-    CHECK(owner.annotationComposite != nullptr);
-    CHECK(owner.annotationPlan.items.empty());
+    CHECK(owner.annotationComposite == nullptr);
+    CHECK(owner.annotationPlan.items.size() == 1U);
     CHECK(!owner.annotationPlan.resizeHandles.empty());
     CHECK(!owner.annotationPlan.rotationHandle.has_value());
 }
@@ -1329,6 +1596,14 @@ void testTeachingPenStartsFullScreenWithBrushAndHiddenToolbar()
     CHECK(hidden.teachingPen);
     CHECK(!hidden.showActions);
     CHECK(hidden.toolbarItems.empty());
+    CHECK(router.cursorStyle(window, {100, 100})
+        == OverlayCursorStyle::brush);
+    platform.cursor = PixelPoint{160, 140};
+    CHECK(router.pointerDown(window, {100, 100}));
+    router.pointerMove(window, {160, 140});
+    router.pointerUp(window, {160, 140});
+    CHECK(router.cursorStyle(window, {120, 120})
+        == OverlayCursorStyle::brush);
 
     CHECK(router.rightPointerDown(window, {360, 420}));
     const auto shown = router.presentations().front();
@@ -1454,6 +1729,47 @@ void testTeachingPenEscapeAndCopyUseMacCompletionSemantics()
     CHECK((copyRouter.selection() == PixelRect{0, 0, 800, 600}));
 }
 
+void testLongImageViewportKeepsAnnotationsInFullImageCoordinates()
+{
+    FakePlatform platform;
+    const auto window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(4));
+    OverlayInputRouter router(
+        PixelRect{100, 100, 300, 600},
+        {{window, PixelRect{100, 100, 300, 600}, 96, 96}},
+        platform, [](OverlayInputAction) {}, true, nullptr,
+        OverlayMode::longImageEditor);
+    router.lockSelection({100, 100, 300, 600});
+    router.setAnnotationViewport(
+        {0.0F, 500.0F}, 2.0F,
+        {0.0F, 0.0F, 300.0F, 2000.0F}, nullptr);
+    CHECK(router.keyPressed(ShapeEditorKey::rectangle, false, false));
+    CHECK(router.pointerDown(window, {20, 100}));
+    CHECK(platform.captureCalls == 1);
+    CHECK(!router.longImageScrollAllowed());
+    platform.cursor = PixelPoint{180, 250};
+    router.pointerMove(window, {80, 150});
+    router.pointerUp(window, {80, 150});
+    CHECK(router.longImageScrollAllowed());
+    CHECK(router.annotationDocument().annotations().size() == 1U);
+    if (router.annotationDocument().annotations().empty()) return;
+    CHECK((router.annotationDocument().annotations().front().rect
+        == AnnotationRect{10.0F, 550.0F, 30.0F, 25.0F}));
+    const auto first = router.presentations().front();
+    CHECK(first.annotationPlan.items.size() == 1U);
+    if (!first.annotationPlan.items.empty()) {
+        CHECK((first.annotationPlan.items.front().annotation.rect
+            == AnnotationRect{20.0F, 100.0F, 60.0F, 50.0F}));
+    }
+    router.setAnnotationViewport(
+        {0.0F, 800.0F}, 2.0F,
+        {0.0F, 0.0F, 300.0F, 2000.0F}, nullptr);
+    const auto scrolled = router.presentations().front();
+    CHECK(scrolled.annotationPlan.items.size() == 1U);
+    if (!scrolled.annotationPlan.items.empty()) {
+        CHECK(scrolled.annotationPlan.items.front().annotation.rect.y == -500.0F);
+    }
+}
+
 } // namespace
 
 int main()
@@ -1465,6 +1781,7 @@ int main()
     testCtrlOnePinsTheReadySelection();
     testPinnedImageEditorLocksSelectionAndFinishesWithoutCaptureActions();
     testPinnedImageEditorEscapeFinishesInsteadOfCancelling();
+    testLongImageEditorEscapeFinishesInsteadOfCancelling();
     testPinnedImageEditorStandaloneShiftRequestsToolbarHideOnRelease();
     testPinnedImageEditorShiftToggleCancelsForMixedInput();
     testPinnedImageEditorAlwaysOnTopShortcutIsNonTerminal();
@@ -1476,12 +1793,17 @@ int main()
     testTerminalCallbackMaySynchronouslyDestroyRouter();
     testRestartShutdownReleasesCaptureAndHotKeyWithoutCancelAction();
     testScrollToolbarSuspendsOverlayWithoutCompletingRouter();
+    testToolbarHoverShowsMacShortcutTipAndRStartsScrollCapture();
+    testMacToolShortcutsSelectToolsAndDoNotInterruptInlineText();
+    testControlToolbarShortcutsRouteThroughCatalog();
     testShapeToolIsNonTerminalAndEditsThroughSharedPresentation();
     testArrowToolUsesMacOptionsMenuAndCreatesEditableCurve();
     testBrushToolUsesMacOptionsAndShiftStraightLine();
+    testDarkSelectionUsesMacLightToolCursors();
+    testBrightSelectionKeepsMacDarkToolCursors();
     testMarkerToolUsesMacOptionsAndShiftSnapping();
     testEyedropperSamplesCopiesAndMeasuresLikeMac();
-    testShapeCannotBeCreatedOutsideLockedSelectionOnOverlay();
+    testShapeCanBeCreatedOutsideLockedSelectionLikeMac();
     testMosaicToolbarOptionsAndLiveComposite();
     testTextToolbarAcceptsUnicodeAndUsesRealPopupMenus();
     testNumberToolbarCreatesSequenceAndSupportsDoubleClickEditing();
@@ -1493,5 +1815,6 @@ int main()
     testTeachingPenToolbarSelectionAndCanvasDrawingMatchMac();
     testTeachingPenTextDefaultsToNoOutline();
     testTeachingPenEscapeAndCopyUseMacCompletionSemantics();
+    testLongImageViewportKeepsAnnotationsInFullImageCoordinates();
     return failureCount == 0 ? 0 : 1;
 }

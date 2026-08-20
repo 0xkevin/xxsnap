@@ -136,6 +136,26 @@ void testCatalogContract()
     }
     CHECK(std::wstring_view(toolbarIcon(ToolbarAction::cancel).resourceName)
         == L"cancel-capture");
+
+    CHECK(std::wstring_view(toolbarTooltip(ToolbarAction::rectangle).title)
+        == L"形状");
+    CHECK(toolbarShortcutLabel(ToolbarAction::rectangle) == L"S");
+    CHECK(toolbarShortcutLabel(ToolbarAction::scroll) == L"R");
+    CHECK(toolbarShortcutLabel(ToolbarAction::undo) == L"Ctrl+Z");
+    CHECK(toolbarShortcutLabel(ToolbarAction::redo) == L"Ctrl+Shift+Z");
+    CHECK(toolbarShortcutLabel(ToolbarAction::pin) == L"Ctrl+1");
+    CHECK(toolbarShortcutLabel(ToolbarAction::finishEditing) == L"ESC");
+    CHECK(toolbarTooltipText(ToolbarAction::scroll) == L"滚动截图 (R)");
+    CHECK(toolbarShortcutMatches(
+        ToolbarAction::scroll, 'R', false, false, false));
+    CHECK(toolbarShortcutMatches(
+        ToolbarAction::rectangle, 'S', false, true, false));
+    CHECK(!toolbarShortcutMatches(
+        ToolbarAction::rectangle, 'S', true, false, false));
+    CHECK(toolbarShortcutMatches(
+        ToolbarAction::redo, 'Z', true, true, false));
+    CHECK(!toolbarShortcutMatches(
+        ToolbarAction::redo, 'Z', true, false, false));
 }
 
 void checkEmbeddedPng(

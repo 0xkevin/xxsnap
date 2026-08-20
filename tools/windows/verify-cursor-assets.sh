@@ -8,6 +8,7 @@ crosshair="$source_root/platforms/win/resources/cursors/xxsnap-crosshair.cur"
 rotation="$source_root/platforms/win/resources/cursors/xxsnap-rotation.cur"
 eraser="$source_root/platforms/win/resources/cursors/xxsnap-eraser.cur"
 brush="$source_root/platforms/win/resources/cursors/xxsnap-brush.cur"
+brush_light="$source_root/platforms/win/resources/cursors/xxsnap-brush-light.cur"
 eyedropper="$source_root/platforms/win/resources/cursors/xxsnap-eyedropper.cur"
 eyedropper_light="$source_root/platforms/win/resources/cursors/xxsnap-eyedropper-light.cur"
 
@@ -83,6 +84,17 @@ fi
 
 echo "Windows eraser cursor keeps the 18px macOS glyph without Win32 enlargement."
 
+eraser_orientation=$(magick "$eraser" \
+    -format '%[fx:p{11,21}.a] %[fx:p{11,8}.a]' info:)
+eraser_tip_alpha=${eraser_orientation%% *}
+eraser_opposite_alpha=${eraser_orientation#* }
+if [ "$eraser_tip_alpha" = "0" ] || [ "$eraser_opposite_alpha" != "0" ]; then
+    echo "Windows eraser glyph must point down toward the (11,21) hotspot; alpha tip/opposite were $eraser_tip_alpha/$eraser_opposite_alpha." >&2
+    exit 1
+fi
+
+echo "Windows eraser cursor points down toward its macOS hotspot."
+
 if [ ! -f "$brush" ]; then
     echo "Windows brush cursor is missing: $brush" >&2
     exit 1
@@ -93,12 +105,12 @@ brush_hotspot=$(od -An -tu1 -j10 -N4 "$brush" | xargs)
 brush_visible_bounds=$(magick identify -format '%@' "$brush")
 if [ "$brush_dimensions" != "32x32" ] \
     || [ "$brush_hotspot" != "10 0 22 0" ] \
-    || [ "$brush_visible_bounds" != "16x16+8+8" ]; then
-    echo "Windows brush cursor must preserve the 18px Mac pencil and translated (10,22) hotspot; got $brush_dimensions, $brush_hotspot, $brush_visible_bounds." >&2
+    || [ "$brush_visible_bounds" != "18x18+7+7" ]; then
+    echo "Windows brush cursor must preserve the 18px project pencil and translated (10,22) hotspot; got $brush_dimensions, $brush_hotspot, $brush_visible_bounds." >&2
     exit 1
 fi
 
-echo "Windows brush cursor keeps the 18px macOS pencil with its tip hotspot."
+echo "Windows brush cursor keeps the 18px project pencil with its tip hotspot."
 
 brush_orientation=$(magick "$brush" \
     -format '%[fx:p{10,22}.a] %[fx:p{10,8}.a]' info:)
@@ -110,6 +122,44 @@ if [ "$brush_tip_alpha" = "0" ] || [ "$brush_opposite_alpha" != "0" ]; then
 fi
 
 echo "Windows brush cursor points down toward its pencil-tip hotspot."
+
+for brush_cursor in "$brush" "$brush_light"; do
+    brush_dimensions=$(magick identify -format '%wx%h' "$brush_cursor")
+    brush_hotspot=$(od -An -tu1 -j10 -N4 "$brush_cursor" | xargs)
+    brush_visible_bounds=$(magick identify -format '%@' "$brush_cursor")
+    if [ "$brush_dimensions" != "32x32" ] \
+        || [ "$brush_hotspot" != "10 0 22 0" ] \
+        || [ "$brush_visible_bounds" != "18x18+7+7" ]; then
+        echo "Windows brush cursor variants must share the project pencil dimensions, bounds, and hotspot; got $brush_cursor: $brush_dimensions, $brush_hotspot, $brush_visible_bounds." >&2
+        exit 1
+    fi
+done
+
+if ! cmp -s "$brush" "$brush_light"; then
+    echo "Windows brush cursor variants must use the same black-outline white pencil on every background." >&2
+    exit 1
+fi
+
+for cursor_name in \
+    move move-light \
+    resize-left-right resize-left-right-light \
+    resize-up-down resize-up-down-light \
+    resize-top-left-bottom-right resize-top-left-bottom-right-light \
+    resize-top-right-bottom-left resize-top-right-bottom-left-light; do
+    cursor="$source_root/platforms/win/resources/cursors/xxsnap-$cursor_name.cur"
+    if [ ! -f "$cursor" ]; then
+        echo "Windows background-aware cursor is missing: $cursor" >&2
+        exit 1
+    fi
+    dimensions=$(magick identify -format '%wx%h' "$cursor")
+    hotspot=$(od -An -tu1 -j10 -N4 "$cursor" | xargs)
+    if [ "$dimensions" != "32x32" ] || [ "$hotspot" != "16 0 16 0" ]; then
+        echo "Windows background-aware cursor must use a 32x32 Mac canvas and centered hotspot; got $cursor_name: $dimensions, $hotspot." >&2
+        exit 1
+    fi
+done
+
+echo "Windows move and resize cursors provide matching dark/light Mac variants."
 
 for eyedropper_cursor in "$eyedropper" "$eyedropper_light"; do
     if [ ! -f "$eyedropper_cursor" ]; then

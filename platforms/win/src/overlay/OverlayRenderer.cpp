@@ -1,6 +1,7 @@
 #include "overlay/OverlayRenderer.h"
 
 #include "annotation/ArrowLineRenderer.h"
+#include "annotation/MagnifierGeometry.h"
 
 #include <d2d1.h>
 #include <d2d1helper.h>
@@ -458,8 +459,10 @@ struct OverlayRenderer::Impl final {
     {
         discardDeviceResources();
         measurementTextFormat.reset();
+        numberSymbolTextFormat.reset();
+        numberDigitTextFormat.reset();
         samplerValueTextFormat.reset();
-        samplerTextFormat.reset();
+        compactUiTextFormat.reset();
         textFormat.reset();
         wicFactory.reset();
         dwriteFactory.reset();
@@ -506,7 +509,7 @@ struct OverlayRenderer::Impl final {
     std::optional<OverlayRendererError> ensureFactories() noexcept
     {
         if (d2dFactory && dwriteFactory && wicFactory && textFormat
-            && samplerTextFormat && samplerValueTextFormat
+            && compactUiTextFormat && samplerValueTextFormat
             && measurementTextFormat) {
             return std::nullopt;
         }
@@ -619,7 +622,7 @@ struct OverlayRenderer::Impl final {
         };
         if (const auto formatError = createSamplerFormat(
                 12.0F, DWRITE_FONT_WEIGHT_MEDIUM,
-                DWRITE_TEXT_ALIGNMENT_CENTER, samplerTextFormat)) {
+                DWRITE_TEXT_ALIGNMENT_CENTER, compactUiTextFormat)) {
             return formatError;
         }
         if (const auto formatError = createSamplerFormat(
@@ -630,6 +633,43 @@ struct OverlayRenderer::Impl final {
         if (const auto formatError = createSamplerFormat(
                 12.0F, DWRITE_FONT_WEIGHT_SEMI_BOLD,
                 DWRITE_TEXT_ALIGNMENT_CENTER, measurementTextFormat)) {
+            return formatError;
+        }
+        const auto createNumberFormat = [this](
+            const wchar_t* family,
+            float size,
+            ComPtr<IDWriteTextFormat>& destination)
+                -> std::optional<OverlayRendererError> {
+            if (destination) return std::nullopt;
+            const auto result = dwriteFactory->CreateTextFormat(
+                family, nullptr, DWRITE_FONT_WEIGHT_BOLD,
+                DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+                size, L"", destination.put());
+            if (FAILED(result)) {
+                return error(
+                    OverlayRendererErrorCode::dwriteFactoryFailed, result);
+            }
+            const std::array configurationResults{
+                destination->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP),
+                destination->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER),
+                destination->SetParagraphAlignment(
+                    DWRITE_PARAGRAPH_ALIGNMENT_CENTER),
+            };
+            for (const auto configurationResult : configurationResults) {
+                if (const auto configurationError
+                    = checkTextFormatConfigurationResult(configurationResult)) {
+                    destination.reset();
+                    return configurationError;
+                }
+            }
+            return std::nullopt;
+        };
+        if (const auto formatError = createNumberFormat(
+                L"Consolas", 9.0F, numberDigitTextFormat)) {
+            return formatError;
+        }
+        if (const auto formatError = createNumberFormat(
+                L"Microsoft YaHei", 16.0F, numberSymbolTextFormat)) {
             return formatError;
         }
         return std::nullopt;
@@ -1166,7 +1206,7 @@ struct OverlayRenderer::Impl final {
         const auto valueText = std::to_wstring(value);
         renderTarget->DrawText(
             valueText.data(), static_cast<UINT32>(valueText.size()),
-            samplerTextFormat.get(), d2dRect(options.layout.valueLabel),
+            compactUiTextFormat.get(), d2dRect(options.layout.valueLabel),
             textBrush.get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
         return std::nullopt;
     }
@@ -1332,34 +1372,35 @@ struct OverlayRenderer::Impl final {
                 {centerX + 3.0F, centerY - 2.0F}, textBrush.get(), 1.0F);
         };
         const auto drawMark = [&](NumberMarkType type,
-                                  AnnotationRect rect,
-                                  ID2D1Brush* brush) {
-            rect.width -= 13.0F;
+                                  AnnotationRect container,
+                                  ID2D1Brush* brush,
+                                  bool reservesDisclosure) {
+            const auto rect = numberMarkIconRect(
+                container, reservesDisclosure);
             if (type == NumberMarkType::number) {
                 const auto center = D2D1::Point2F(
                     rect.x + rect.width / 2.0F,
                     rect.y + rect.height / 2.0F);
-                const auto circle = D2D1::Ellipse(center, 7.0F, 7.0F);
+                const auto radius = (rect.width - 3.0F) / 2.0F;
+                const auto circle = D2D1::Ellipse(center, radius, radius);
                 renderTarget->FillEllipse(&circle, brush);
                 const std::wstring label = L"1";
-                renderTarget->DrawText(label.data(), 1U, textFormat.get(),
-                    d2dRect(AnnotationRect{center.x - 6.0F,
-                        center.y - 7.0F, 12.0F, 14.0F}), whiteBrush.get(),
+                renderTarget->DrawText(label.data(), 1U,
+                    numberDigitTextFormat.get(), d2dRect(rect),
+                    whiteBrush.get(),
                     D2D1_DRAW_TEXT_OPTIONS_CLIP);
             } else {
                 const std::wstring label = type == NumberMarkType::check
                     ? L"✓" : L"×";
                 renderTarget->DrawText(
                     label.data(), static_cast<UINT32>(label.size()),
-                    textFormat.get(), d2dRect(rect), brush,
+                    numberSymbolTextFormat.get(), d2dRect(rect), brush,
                     D2D1_DRAW_TEXT_OPTIONS_CLIP);
             }
         };
         drawField(options.layout.markType);
-        textVariableBrush->SetColor(annotationColor(
-            options.state.style().strokeColor));
         drawMark(options.state.type(), options.layout.markType,
-            textVariableBrush.get());
+            textBrush.get(), true);
         drawField(options.layout.size);
         const auto sizeLabel = std::to_wstring(static_cast<int>(
             options.state.style().textSize + 0.5F));
@@ -1419,12 +1460,17 @@ struct OverlayRenderer::Impl final {
                 if (options.popupKind == NumberPopupMenu::markType) {
                     if (index < numberMarkTypes.size()) {
                         const auto& descriptor = numberMarkTypes[index];
-                        textVariableBrush->SetColor(annotationColor(
-                            descriptor.type == NumberMarkType::number
-                                ? options.state.style().strokeColor
-                                : descriptor.defaultColor));
+                        ID2D1Brush* markBrush = nullptr;
+                        if (descriptor.type == NumberMarkType::number) {
+                            markBrush = selected
+                                ? selectionBrush.get() : textBrush.get();
+                        } else {
+                            textVariableBrush->SetColor(annotationColor(
+                                descriptor.defaultColor));
+                            markBrush = textVariableBrush.get();
+                        }
                         drawMark(descriptor.type, item,
-                            textVariableBrush.get());
+                            markBrush, false);
                     }
                 } else {
                     item.x += 6.0F;
@@ -1796,7 +1842,7 @@ struct OverlayRenderer::Impl final {
         for (const auto& [text, rect] : rows) {
             renderTarget->DrawText(
                 text.data(), static_cast<UINT32>(text.size()),
-                samplerTextFormat.get(), d2dRect(rect),
+                compactUiTextFormat.get(), d2dRect(rect),
                 copySucceeded && text == copyHint
                     ? successBrush.get() : panelWhiteBrush.get(),
                 D2D1_DRAW_TEXT_OPTIONS_CLIP);
@@ -1842,6 +1888,136 @@ struct OverlayRenderer::Impl final {
             samplerValueTextFormat.get(), d2dRect(valueRect),
             panelWhiteBrush.get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
         return std::nullopt;
+    }
+
+    HRESULT drawMagnifierContents(
+        const AnnotationRenderPlan& plan,
+        DipRect overlayBounds) noexcept
+    {
+        if (!backgroundBitmap || !renderTarget) {
+            return E_FAIL;
+        }
+        for (const auto& item : plan.items) {
+            const auto& annotation = item.annotation;
+            if (!isMagnifierAnnotation(annotation)) continue;
+            const auto destination = standardized(annotation.rect);
+            const auto geometry = magnifierGeometry(
+                destination, *annotation.magnifierZoom,
+                overlayBounds.width, overlayBounds.height, 12.0F, 3.0F);
+            if (!geometry.has_value()) continue;
+
+            ComPtr<ID2D1Layer> clipLayer;
+            if (*annotation.magnifierShape == MagnifierShape::circle) {
+                ComPtr<ID2D1EllipseGeometry> clipGeometry;
+                auto result = d2dFactory->CreateEllipseGeometry(
+                    D2D1::Ellipse(
+                        D2D1::Point2F(
+                            destination.x + destination.width / 2.0F,
+                            destination.y + destination.height / 2.0F),
+                        destination.width / 2.0F,
+                        destination.height / 2.0F),
+                    clipGeometry.put());
+                if (FAILED(result)) return result;
+                result = renderTarget->CreateLayer(nullptr, clipLayer.put());
+                if (FAILED(result)) return result;
+                renderTarget->PushLayer(
+                    D2D1::LayerParameters(
+                        D2D1::InfiniteRect(), clipGeometry.get()),
+                    clipLayer.get());
+            } else {
+                renderTarget->PushAxisAlignedClip(
+                    d2dRect(destination), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            }
+
+            const auto drawRect = D2D1::RectF(
+                geometry->drawLeft,
+                geometry->drawTop,
+                geometry->drawLeft + geometry->drawWidth,
+                geometry->drawTop + geometry->drawHeight);
+            const auto sourceRect = D2D1::RectF(
+                geometry->sourceLeft,
+                geometry->sourceTop,
+                geometry->sourceRight,
+                geometry->sourceBottom);
+            renderTarget->DrawBitmap(
+                backgroundBitmap.get(), drawRect, 1.0F,
+                D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+                sourceRect);
+
+            if (clipLayer) {
+                renderTarget->PopLayer();
+            } else {
+                renderTarget->PopAxisAlignedClip();
+            }
+        }
+        return S_OK;
+    }
+
+    HRESULT drawAnnotationPlan(
+        const AnnotationRenderPlan& plan,
+        DipRect overlayBounds) noexcept
+    {
+        AnnotationRenderer annotationRenderer(d2dFactory.get());
+        if (std::none_of(plan.items.begin(), plan.items.end(),
+                [](const auto& item) {
+                    return isMagnifierAnnotation(item.annotation);
+                })) {
+            return annotationRenderer.draw(renderTarget.get(), plan);
+        }
+
+        AnnotationRenderPlan run;
+        run.items.reserve(plan.items.size());
+        const auto flushRun = [&]() -> HRESULT {
+            if (run.items.empty()) return S_OK;
+            const auto result = annotationRenderer.draw(
+                renderTarget.get(), run);
+            run.items.clear();
+            return result;
+        };
+        for (const auto& item : plan.items) {
+            if (!isMagnifierAnnotation(item.annotation)) {
+                run.items.push_back(item);
+                continue;
+            }
+            if (const auto result = flushRun(); FAILED(result)) return result;
+            AnnotationRenderPlan magnifierPlan;
+            magnifierPlan.items.push_back(item);
+            if (const auto result = drawMagnifierContents(
+                    magnifierPlan, overlayBounds); FAILED(result)) {
+                return result;
+            }
+            if (const auto result = annotationRenderer.draw(
+                    renderTarget.get(), magnifierPlan); FAILED(result)) {
+                return result;
+            }
+        }
+        if (const auto result = flushRun(); FAILED(result)) return result;
+
+        auto affordancePlan = plan;
+        affordancePlan.items.clear();
+        return annotationRenderer.draw(renderTarget.get(), affordancePlan);
+    }
+
+    HRESULT drawAnnotationPlanOutsideSelection(
+        const AnnotationRenderPlan& plan,
+        DipRect overlayBounds,
+        const std::array<DipRect, 4>& outsideRects) noexcept
+    {
+        AnnotationRenderPlan itemPlan;
+        itemPlan.items = plan.items;
+        for (const auto rect : outsideRects) {
+            if (rect.width <= 0.0F || rect.height <= 0.0F) continue;
+            renderTarget->PushAxisAlignedClip(
+                d2dRect(rect), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            const auto result = drawAnnotationPlan(itemPlan, overlayBounds);
+            renderTarget->PopAxisAlignedClip();
+            if (FAILED(result)) return result;
+        }
+
+        auto affordancePlan = plan;
+        affordancePlan.items.clear();
+        AnnotationRenderer annotationRenderer(d2dFactory.get());
+        return annotationRenderer.draw(renderTarget.get(), affordancePlan);
     }
 
     std::optional<OverlayRendererError> ensureEyedropperResources() noexcept
@@ -1927,6 +2103,27 @@ struct OverlayRenderer::Impl final {
         for (const auto& result : results) {
             if (result.has_value()) {
                 discardMosaicResources();
+                return result;
+            }
+        }
+        return std::nullopt;
+    }
+
+    std::optional<OverlayRendererError> ensureTooltipResources() noexcept
+    {
+        if (tooltipBackgroundBrush && tooltipTextBrush) {
+            return std::nullopt;
+        }
+        discardTooltipResources();
+        const std::array results{
+            createBrush(D2D1::ColorF(0.08F, 0.08F, 0.08F, 0.94F),
+                tooltipBackgroundBrush),
+            createBrush(D2D1::ColorF(D2D1::ColorF::White),
+                tooltipTextBrush),
+        };
+        for (const auto& result : results) {
+            if (result.has_value()) {
+                discardTooltipResources();
                 return result;
             }
         }
@@ -2093,13 +2290,9 @@ struct OverlayRenderer::Impl final {
             dpiX,
             dpiY);
         const auto hwndProperties = D2D1::HwndRenderTargetProperties(
-            window,
-            pixelSize,
-            D2D1_PRESENT_OPTIONS_IMMEDIATELY);
+            window, pixelSize, D2D1_PRESENT_OPTIONS_IMMEDIATELY);
         auto result = d2dFactory->CreateHwndRenderTarget(
-            targetProperties,
-            hwndProperties,
-            renderTarget.put());
+            targetProperties, hwndProperties, renderTarget.put());
         if (FAILED(result)) {
             return error(OverlayRendererErrorCode::renderTargetFailed, result);
         }
@@ -2114,14 +2307,13 @@ struct OverlayRenderer::Impl final {
             dpiX,
             dpiY);
         result = renderTarget->CreateBitmap(
-            bitmapSize,
-            display.pixels.data(),
-            static_cast<UINT32>(display.pixels.stride()),
-            bitmapProperties,
+            bitmapSize, display.pixels.data(),
+            static_cast<UINT32>(display.pixels.stride()), bitmapProperties,
             backgroundBitmap.put());
         if (FAILED(result)) {
             discardDeviceResources();
-            return error(OverlayRendererErrorCode::backgroundBitmapFailed, result);
+            return error(
+                OverlayRendererErrorCode::backgroundBitmapFailed, result);
         }
 
         constexpr auto resources = toolbarImageResources();
@@ -2136,34 +2328,51 @@ struct OverlayRenderer::Impl final {
         }
         if (const auto paletteError = createIconBitmap(
                 IDR_PALETTE_TOOL_PNG, paletteBitmap.put())) {
-            discardDeviceResources();
-            return paletteError;
+          discardDeviceResources();
+          return paletteError;
         }
         return std::nullopt;
     }
 
-    std::optional<OverlayRendererError> measureLabel(
-        const std::wstring& text,
-        float& width) noexcept
-    {
-        ComPtr<IDWriteTextLayout> textLayout;
-        const auto result = dwriteFactory->CreateTextLayout(
-            text.data(),
-            static_cast<UINT32>(text.size()),
-            textFormat.get(),
-            4096.0F,
-            VisualStyleCatalog::sizeLabelHeightDip,
-            textLayout.put());
-        if (FAILED(result)) {
-            return error(OverlayRendererErrorCode::drawFailed, result);
-        }
-        DWRITE_TEXT_METRICS metrics{};
-        const auto metricsResult = textLayout->GetMetrics(&metrics);
-        if (FAILED(metricsResult)) {
-            return error(OverlayRendererErrorCode::drawFailed, metricsResult);
-        }
-        width = metrics.widthIncludingTrailingWhitespace;
-        return std::nullopt;
+    std::optional<OverlayRendererError>
+    updateBackground(const FrozenDisplay &display) noexcept {
+      if (!renderTarget || !backgroundBitmap) {
+        return ensureDeviceResources(display);
+      }
+      if (display.pixels.width() <= 0 || display.pixels.height() <= 0 ||
+          display.pixels.stride() > (std::numeric_limits<UINT32>::max)()) {
+        return error(OverlayRendererErrorCode::invalidArgument, E_INVALIDARG);
+      }
+      const auto size = backgroundBitmap->GetPixelSize();
+      if (size.width != static_cast<UINT32>(display.pixels.width()) ||
+          size.height != static_cast<UINT32>(display.pixels.height())) {
+        return error(OverlayRendererErrorCode::invalidArgument, E_INVALIDARG);
+      }
+      const auto result = backgroundBitmap->CopyFromMemory(
+          nullptr, display.pixels.data(),
+          static_cast<UINT32>(display.pixels.stride()));
+      if (FAILED(result)) {
+        return error(OverlayRendererErrorCode::backgroundBitmapFailed, result);
+      }
+      return std::nullopt;
+    }
+
+    std::optional<OverlayRendererError> measureLabel(const std::wstring &text,
+                                                     float &width) noexcept {
+      ComPtr<IDWriteTextLayout> textLayout;
+      const auto result = dwriteFactory->CreateTextLayout(
+          text.data(), static_cast<UINT32>(text.size()), textFormat.get(),
+          4096.0F, VisualStyleCatalog::sizeLabelHeightDip, textLayout.put());
+      if (FAILED(result)) {
+        return error(OverlayRendererErrorCode::drawFailed, result);
+      }
+      DWRITE_TEXT_METRICS metrics{};
+      const auto metricsResult = textLayout->GetMetrics(&metrics);
+      if (FAILED(metricsResult)) {
+        return error(OverlayRendererErrorCode::drawFailed, metricsResult);
+      }
+      width = metrics.widthIncludingTrailingWhitespace;
+      return std::nullopt;
     }
 
     std::optional<OverlayRendererError> createBrush(
@@ -2528,6 +2737,70 @@ struct OverlayRenderer::Impl final {
         return std::nullopt;
     }
 
+    std::optional<OverlayRendererError> drawToolbarTooltip(
+        const OverlayToolbarTooltipRenderState& tooltip,
+        DipRect bounds) noexcept
+    {
+        if (const auto resourceError = ensureTooltipResources()) {
+            return resourceError;
+        }
+        if (!tooltipTextLayout || tooltipLayoutText != tooltip.text) {
+            tooltipTextLayout.reset();
+            tooltipLayoutText = tooltip.text;
+            auto result = dwriteFactory->CreateTextLayout(
+                tooltip.text.data(), static_cast<UINT32>(tooltip.text.size()),
+                compactUiTextFormat.get(), 4096.0F, 64.0F,
+                tooltipTextLayout.put());
+            if (FAILED(result)) {
+                return error(OverlayRendererErrorCode::drawFailed, result);
+            }
+            DWRITE_TEXT_METRICS metrics{};
+            result = tooltipTextLayout->GetMetrics(&metrics);
+            if (FAILED(result)) {
+                return error(OverlayRendererErrorCode::drawFailed, result);
+            }
+            tooltipContentWidth
+                = std::ceil(metrics.widthIncludingTrailingWhitespace);
+            tooltipContentHeight
+                = (std::max)(14.0F, std::ceil(metrics.height));
+            result = tooltipTextLayout->SetMaxWidth(tooltipContentWidth);
+            if (SUCCEEDED(result)) {
+                result = tooltipTextLayout->SetMaxHeight(tooltipContentHeight);
+            }
+            if (FAILED(result)) {
+                return error(OverlayRendererErrorCode::drawFailed, result);
+            }
+        }
+        constexpr float horizontalPadding = 16.0F;
+        constexpr float verticalPadding = 10.0F;
+        constexpr float gap = 8.0F;
+        constexpr float safeInset = 8.0F;
+        const auto width = tooltipContentWidth + horizontalPadding;
+        const auto height = tooltipContentHeight + verticalPadding;
+        DipRect rect{
+            tooltip.anchor.x + tooltip.anchor.width / 2.0F - width / 2.0F,
+            tooltip.anchor.y + tooltip.anchor.height + gap,
+            width,
+            height,
+        };
+        if (rect.y + rect.height > bounds.height - safeInset) {
+            rect.y = tooltip.anchor.y - gap - rect.height;
+        }
+        rect.x = (std::max)(safeInset,
+            (std::min)(rect.x, bounds.width - safeInset - rect.width));
+        rect.y = (std::max)(safeInset,
+            (std::min)(rect.y, bounds.height - safeInset - rect.height));
+        const auto rounded = D2D1::RoundedRect(d2dRect(rect), 5.0F, 5.0F);
+        renderTarget->FillRoundedRectangle(
+            &rounded, tooltipBackgroundBrush.get());
+        renderTarget->DrawTextLayout(
+            D2D1::Point2F(rect.x + horizontalPadding / 2.0F,
+                rect.y + verticalPadding / 2.0F),
+            tooltipTextLayout.get(), tooltipTextBrush.get(),
+            D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        return std::nullopt;
+    }
+
     std::optional<OverlayRendererError> draw(
         const FrozenDisplay& display,
         const OverlayRenderState& state)
@@ -2535,7 +2808,6 @@ struct OverlayRenderer::Impl final {
         if (const auto deviceError = ensureDeviceResources(display)) {
             return deviceError;
         }
-
         ComPtr<ID2D1SolidColorBrush> dimBrush;
         ComPtr<ID2D1SolidColorBrush> selectionBrush;
         ComPtr<ID2D1SolidColorBrush> handleStrokeBrush;
@@ -2624,9 +2896,7 @@ struct OverlayRenderer::Impl final {
             physicalPixelsToDip(display.pixels.height(), display.descriptor.dpiY),
         };
         renderTarget->DrawBitmap(
-            backgroundBitmap.get(),
-            d2dRect(overlayBounds),
-            1.0F,
+            backgroundBitmap.get(), d2dRect(overlayBounds), 1.0F,
             D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
 
         if (!state.selection.has_value()) {
@@ -2699,9 +2969,11 @@ struct OverlayRenderer::Impl final {
 
             if (!state.annotationPlan.items.empty()
                 || !state.annotationPlan.resizeHandles.empty()) {
-                AnnotationRenderer annotationRenderer(d2dFactory.get());
-                const auto annotationResult = annotationRenderer.draw(
-                    renderTarget.get(), state.annotationPlan);
+                const auto annotationResult
+                    = state.annotationPlanOutsideSelectionOnly
+                    ? drawAnnotationPlanOutsideSelection(
+                        state.annotationPlan, overlayBounds, layout.mask)
+                    : drawAnnotationPlan(state.annotationPlan, overlayBounds);
                 if (FAILED(annotationResult)) {
                     renderTarget->EndDraw();
                     return error(
@@ -2896,6 +3168,13 @@ struct OverlayRenderer::Impl final {
                     return eyedropperError;
                 }
             }
+            if (state.toolbarTooltip.has_value()) {
+                if (const auto tooltipError = drawToolbarTooltip(
+                        *state.toolbarTooltip, overlayBounds)) {
+                    renderTarget->EndDraw();
+                    return tooltipError;
+                }
+            }
         }
 
         const auto result = renderTarget->EndDraw();
@@ -2914,6 +3193,7 @@ struct OverlayRenderer::Impl final {
         discardEyedropperResources();
         discardMosaicResources();
         discardTextResources();
+        discardTooltipResources();
         annotationCompositeBitmap.reset();
         annotationCompositeSource.reset();
         paletteBitmap.reset();
@@ -2960,6 +3240,12 @@ struct OverlayRenderer::Impl final {
         for (auto& bitmap : textIconBitmaps) bitmap.reset();
     }
 
+    void discardTooltipResources() noexcept
+    {
+        tooltipBackgroundBrush.reset();
+        tooltipTextBrush.reset();
+    }
+
     HMODULE resourceModule = nullptr;
     HWND window = nullptr;
     bool comAttempted = false;
@@ -2968,9 +3254,11 @@ struct OverlayRenderer::Impl final {
     ComPtr<IDWriteFactory> dwriteFactory;
     ComPtr<IWICImagingFactory> wicFactory;
     ComPtr<IDWriteTextFormat> textFormat;
-    ComPtr<IDWriteTextFormat> samplerTextFormat;
+    ComPtr<IDWriteTextFormat> compactUiTextFormat;
     ComPtr<IDWriteTextFormat> samplerValueTextFormat;
     ComPtr<IDWriteTextFormat> measurementTextFormat;
+    ComPtr<IDWriteTextFormat> numberDigitTextFormat;
+    ComPtr<IDWriteTextFormat> numberSymbolTextFormat;
     ComPtr<ID2D1HwndRenderTarget> renderTarget;
     ComPtr<ID2D1Bitmap> backgroundBitmap;
     ComPtr<ID2D1Bitmap> paletteBitmap;
@@ -2997,6 +3285,12 @@ struct OverlayRenderer::Impl final {
     ComPtr<ID2D1SolidColorBrush> textForegroundBrush;
     ComPtr<ID2D1SolidColorBrush> textWhiteBrush;
     ComPtr<ID2D1SolidColorBrush> textVariableBrush;
+    ComPtr<ID2D1SolidColorBrush> tooltipBackgroundBrush;
+    ComPtr<ID2D1SolidColorBrush> tooltipTextBrush;
+    ComPtr<IDWriteTextLayout> tooltipTextLayout;
+    std::wstring tooltipLayoutText;
+    float tooltipContentWidth = 0.0F;
+    float tooltipContentHeight = 0.0F;
     std::array<ComPtr<ID2D1Bitmap>, 6> textIconBitmaps;
     ComPtr<ID2D1StrokeStyle> eyedropperWhiteStrokeStyle;
     ComPtr<ID2D1StrokeStyle> eyedropperBlueStrokeStyle;
@@ -3055,13 +3349,24 @@ std::optional<OverlayRendererError> OverlayRenderer::render(
     } catch (const std::bad_alloc&) {
         return error(OverlayRendererErrorCode::drawFailed, E_OUTOFMEMORY);
     } catch (...) {
-        return error(OverlayRendererErrorCode::drawFailed, E_FAIL);
+      return error(OverlayRendererErrorCode::drawFailed, E_FAIL);
     }
 }
 
-void OverlayRenderer::discardDeviceResources() noexcept
-{
-    impl_->discardDeviceResources();
+std::optional<OverlayRendererError>
+OverlayRenderer::updateBackground(const FrozenDisplay &display) noexcept {
+  try {
+    return impl_->updateBackground(display);
+  } catch (const std::bad_alloc &) {
+    return error(OverlayRendererErrorCode::backgroundBitmapFailed,
+                 E_OUTOFMEMORY);
+  } catch (...) {
+    return error(OverlayRendererErrorCode::backgroundBitmapFailed, E_FAIL);
+  }
+}
+
+void OverlayRenderer::discardDeviceResources() noexcept {
+  impl_->discardDeviceResources();
 }
 
 } // namespace xxsnap::win

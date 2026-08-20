@@ -60,6 +60,7 @@ struct OverlaySurface {
 enum class OverlayMode {
     capture,
     pinnedImageEditor,
+    longImageEditor,
     textRecognition,
     teachingPen,
 };
@@ -148,6 +149,11 @@ struct OverlayPresentationEyedropper {
     std::wstring measurementLabel;
 };
 
+struct OverlayPresentationToolbarTooltip {
+    std::wstring text;
+    PixelRect anchor{};
+};
+
 struct OverlayPresentation {
     std::optional<PixelRect> selection;
     bool showActions = false;
@@ -156,8 +162,10 @@ struct OverlayPresentation {
     bool teachingPen = false;
     std::optional<MainToolbarLayout> teachingPenToolbar;
     std::vector<OverlayPresentationToolbarItem> toolbarItems;
+    std::optional<OverlayPresentationToolbarTooltip> toolbarTooltip;
     AnnotationRenderPlan annotationPlan;
     std::shared_ptr<const PixelBuffer> annotationComposite;
+    bool annotationPlanOutsideSelectionOnly = false;
     std::optional<OverlayPresentationShapeOptions> shapeOptions;
     std::optional<OverlayPresentationArrowLineOptions> arrowLineOptions;
     std::optional<OverlayPresentationBrushOptions> brushOptions;
@@ -181,6 +189,8 @@ public:
     virtual bool unregisterEscapeHotKey(HWND window, int identifier) noexcept = 0;
     virtual bool registerEditorHotKeys(HWND) noexcept { return true; }
     virtual bool unregisterEditorHotKeys(HWND) noexcept { return true; }
+    virtual bool registerToolbarHotKeys(HWND) noexcept { return true; }
+    virtual bool unregisterToolbarHotKeys(HWND) noexcept { return true; }
     virtual std::optional<AnnotationColor> chooseColor(
         HWND, AnnotationColor) noexcept
     {
@@ -206,6 +216,11 @@ public:
         const FrozenDesktop* desktop = nullptr,
         OverlayMode mode = OverlayMode::capture);
     void lockSelection(PixelRect selection) noexcept;
+    void setAnnotationViewport(
+        AnnotationPoint origin,
+        float scale,
+        AnnotationRect canvasBounds,
+        const FrozenDesktop* desktop) noexcept;
     ~OverlayInputRouter();
 
     OverlayInputRouter(const OverlayInputRouter&) = delete;
@@ -217,6 +232,7 @@ public:
         int clickCount = 1) noexcept;
     bool rightPointerDown(HWND source, PixelPoint clientPoint) noexcept;
     void pointerMove(HWND source, PixelPoint clientPoint) noexcept;
+    void pointerLeave(HWND source) noexcept;
     void pointerUp(HWND source, PixelPoint clientPoint) noexcept;
     OverlayCursorStyle cursorStyle(
         HWND source, PixelPoint clientPoint) const noexcept;
@@ -230,8 +246,15 @@ public:
         ShapeEditorKey key,
         bool control,
         bool shift) noexcept;
+    bool toolbarShortcutPressed(
+        std::uint32_t virtualKey,
+        bool control,
+        bool shift,
+        bool alt) noexcept;
+    void synchronizeToolbarHotKeys() noexcept;
     bool textInput(std::wstring text);
     bool mouseWheel(int delta) noexcept;
+    bool longImageScrollAllowed() const noexcept;
     bool isEditingInlineValue() const noexcept;
     bool eyedropperShiftPressed() noexcept;
     bool pinnedImageShiftChanged(
@@ -247,7 +270,8 @@ public:
     std::vector<OverlayPresentation> presentations() const;
     const AnnotationDocument& annotationDocument() const noexcept;
     std::pair<UINT, UINT> annotationDpi() const noexcept;
-    std::optional<AnnotationStyle> markerCursorStyle() const noexcept;
+    std::optional<AnnotationStyle> markerCursorStyle(
+        bool light = false) const noexcept;
     std::optional<AnnotationStyle> mosaicCursorStyle() const noexcept;
     std::optional<NumberCursorState> numberCursorState() const noexcept;
 
@@ -264,6 +288,7 @@ private:
         const OverlaySurface& surface, float height) const noexcept;
     std::vector<ToolbarAction> toolbarActions() const;
     bool toolbarActionEnabled(ToolbarAction action) const noexcept;
+    bool performToolbarAction(ToolbarAction action) noexcept;
     void ensureEditor() noexcept;
     std::optional<AnnotationPoint> annotationPoint(
         PixelPoint virtualPoint) const noexcept;
@@ -297,7 +322,16 @@ private:
     void clearEyedropperState() noexcept;
     void updateEyedropper(PixelPoint virtualPoint, bool shift) noexcept;
     bool eyedropperPointIsValid(PixelPoint virtualPoint) const noexcept;
+    bool selectionPrefersLightCursor() const noexcept;
+    bool shouldUseLightCursor(
+        PixelPoint virtualPoint,
+        const OverlaySurface& surface) const noexcept;
+    OverlayCursorStyle backgroundAwareCursorStyle(
+        OverlayCursorStyle style,
+        PixelPoint virtualPoint,
+        const OverlaySurface& surface) const noexcept;
 
+    PixelRect virtualBounds_{};
     SelectionModel model_;
     std::vector<OverlaySurface> surfaces_;
     OverlayInputPlatform& platform_;
@@ -305,18 +339,27 @@ private:
     OverlayInputStatus status_ = OverlayInputStatus::active;
     HWND escapeHotKeyWindow_ = nullptr;
     bool editorHotKeysRegistered_ = false;
+    bool toolbarHotKeysRegistered_ = false;
     HWND captureWindow_ = nullptr;
     bool dragging_ = false;
     bool annotationDragging_ = false;
     bool mosaicValueDragging_ = false;
+    HWND hoveredToolbarWindow_ = nullptr;
+    std::optional<ToolbarAction> hoveredToolbarAction_;
+    std::wstring hoveredToolbarTooltipText_;
     bool releasingCapture_ = false;
     bool shapeAnnotationsEnabled_ = false;
     OverlayMode mode_ = OverlayMode::capture;
     std::optional<std::size_t> editorOwnerIndex_;
     std::unique_ptr<ShapeEditorController> editor_;
     const FrozenDesktop* desktop_ = nullptr;
+    AnnotationPoint annotationViewportOrigin_{};
+    float annotationViewportScale_ = 1.0F;
+    std::optional<AnnotationRect> annotationCanvasBounds_;
     mutable std::shared_ptr<const PixelBuffer> rawSelectionCache_;
     mutable std::optional<PixelRect> rawSelectionCacheSelection_;
+    mutable std::optional<PixelRect> cursorContrastSelection_;
+    mutable std::optional<bool> cursorContrastPrefersLight_;
     std::unique_ptr<PixelBuffer> eyedropperComposite_;
     mutable std::shared_ptr<const PixelBuffer> annotationCompositeCache_;
     mutable std::optional<PixelRect> annotationCompositeSelection_;
@@ -362,6 +405,7 @@ class OverlayHost final {
 public:
     using ActionCallback = OverlayInputRouter::ActionCallback;
     using RestartCallback = OverlayWindow::RestartCallback;
+    using ScrollCallback = std::function<void(int)>;
 
     ~OverlayHost();
     OverlayHost(const OverlayHost&) = delete;
@@ -377,6 +421,12 @@ public:
         const FrozenDesktop& desktop,
         ActionCallback actionCallback,
         bool alwaysOnTop = true);
+    static OverlayHostCreateResult createLongImageEditor(
+        HINSTANCE instance,
+        const FrozenDesktop& desktop,
+        AnnotationRect canvasBounds,
+        ScrollCallback scrollCallback,
+        ActionCallback actionCallback);
     static OverlayHostCreateResult createTextRecognition(
         HINSTANCE instance,
         const FrozenDesktop& desktop,
@@ -390,6 +440,9 @@ public:
 
     void show() noexcept;
     void setAlwaysOnTop(bool enabled) noexcept;
+    bool updateLongImageViewport(
+        const FrozenDesktop& desktop,
+        AnnotationPoint origin) noexcept;
     bool suspendForScrollCapture() noexcept;
     bool resumeAfterScrollCapture() noexcept;
     bool suspendInputForRecognition() noexcept;

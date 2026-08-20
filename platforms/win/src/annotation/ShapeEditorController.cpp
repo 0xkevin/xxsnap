@@ -632,6 +632,7 @@ bool ShapeEditorController::handleToolbarAction(ToolbarAction action)
                 NumberOptionsState activated;
                 numberOptions_ = activated;
                 currentNumberGroupId_ = nextNumberGroupId_++;
+                numberTypeFollowerId_.reset();
                 document_.clearSelection();
                 dismissPopovers();
             }
@@ -987,7 +988,8 @@ bool ShapeEditorController::selectNumberType(NumberMarkType type)
     const auto selected = document_.selectedId();
     const auto* annotation = selected.has_value()
         ? document_.find(*selected) : nullptr;
-    if (annotation == nullptr || !isNumberAnnotation(*annotation)) {
+    if (annotation == nullptr || !isNumberAnnotation(*annotation)
+        || numberTypeFollowerId_ != selected) {
         numberPopupMenu_.reset();
         return optionChanged;
     }
@@ -1678,6 +1680,7 @@ bool ShapeEditorController::pointerDown(
         return false;
     }
     if (isEraserToolActive()) {
+        point = clampedPoint(point, canvasBounds_);
         document_.clearSelection();
         if (eraserMode_ == EraserMode::point) {
             eraserPointInteractionActive_ = true;
@@ -1741,6 +1744,7 @@ bool ShapeEditorController::pointerDown(
                 if (!handle.has_value() || !containsRect(*handle, point)) {
                     continue;
                 }
+                numberTypeFollowerId_ = *selected;
                 if (kind == NumberHandleKind::deleteHandle) {
                     return removeNumberAndRenumber(*selected);
                 }
@@ -1807,6 +1811,7 @@ bool ShapeEditorController::pointerDown(
     }
     if (!containsRect(canvasBounds_, point)) {
         document_.clearSelection();
+        numberTypeFollowerId_.reset();
         return false;
     }
     if (brushToolActive_) {
@@ -1825,16 +1830,67 @@ bool ShapeEditorController::pointerDown(
             }
             return true;
         }
+        document_.clearSelection();
+        document_.beginTextEdit();
+        const auto rect = measuredTextRect(
+            point, L"", textOptions_.style());
+        const auto id = document_.addText(
+            rect, L"", textOptions_.style());
+        if (id == invalidAnnotationId) {
+            document_.endTextEdit(false);
+            return false;
+        }
+        editingTextId_ = id;
+        textCaretPosition_ = 0U;
+        return true;
     }
     if (isNumberToolActive()) {
         if (const auto number = numberAnnotationAt(point)) {
             document_.select(*number);
+            numberTypeFollowerId_ = *number;
             loadSelectedOptions();
             if (clickCount >= 2) {
                 return beginNumberEdit(*number);
             }
             return interaction_.beginMove(*number, point);
         }
+        document_.clearSelection();
+        numberTypeFollowerId_.reset();
+        if (currentNumberGroupId_ == 0) {
+            currentNumberGroupId_ = nextNumberGroupId_++;
+        }
+        const auto type = numberOptions_.type();
+        const auto value = type == NumberMarkType::number
+            ? std::optional<int>{nextNumberValue(currentNumberGroupId_)}
+            : std::nullopt;
+        const auto manual = type == NumberMarkType::number
+            && numberGroupIsManual(currentNumberGroupId_);
+        const auto id = document_.addNumberMark(
+            numberMarkRect(point, numberOptions_.style().textSize),
+            type, value, manual,
+            type == NumberMarkType::number ? currentNumberGroupId_ : 0,
+            numberOptions_.style());
+        syncHistory();
+        return id != invalidAnnotationId;
+    }
+    if (isMosaicToolActive()) {
+        if (const auto hit = annotationAtBorder(point)) {
+            const auto* annotation = document_.find(*hit);
+            if (annotation != nullptr && isMosaicAnnotation(*annotation)) {
+                document_.select(*hit);
+                loadSelectedOptions();
+                return isMosaicStrokeAnnotation(*annotation)
+                    ? mosaicInteraction_.beginMove(*hit, point)
+                    : interaction_.beginMove(*hit, point);
+            }
+        }
+        document_.clearSelection();
+        if (mosaicOptions_.kind() == AnnotationKind::mosaicRectangle) {
+            return interaction_.beginMosaicRectangleDrawing(
+                point, mosaicOptions_.style(), mosaicOptions_.redaction());
+        }
+        return mosaicInteraction_.beginDrawing(
+            point, mosaicOptions_.style(), mosaicOptions_.redaction());
     }
     if (const auto hit = annotationAtBorder(point); hit.has_value()) {
         document_.select(*hit);
@@ -1861,49 +1917,6 @@ bool ShapeEditorController::pointerDown(
             return mosaicInteraction_.beginMove(*hit, point);
         }
         return interaction_.beginMove(*hit, point);
-    }
-    if (isMosaicToolActive()) {
-        document_.clearSelection();
-        if (mosaicOptions_.kind() == AnnotationKind::mosaicRectangle) {
-            return interaction_.beginMosaicRectangleDrawing(
-                point, mosaicOptions_.style(), mosaicOptions_.redaction());
-        }
-        return mosaicInteraction_.beginDrawing(
-            point, mosaicOptions_.style(), mosaicOptions_.redaction());
-    }
-    if (isTextToolActive()) {
-        document_.clearSelection();
-        document_.beginTextEdit();
-        const auto rect = measuredTextRect(
-            point, L"", textOptions_.style());
-        const auto id = document_.addText(
-            rect, L"", textOptions_.style());
-        if (id == invalidAnnotationId) {
-            document_.endTextEdit(false);
-            return false;
-        }
-        editingTextId_ = id;
-        textCaretPosition_ = 0U;
-        return true;
-    }
-    if (isNumberToolActive()) {
-        document_.clearSelection();
-        if (currentNumberGroupId_ == 0) {
-            currentNumberGroupId_ = nextNumberGroupId_++;
-        }
-        const auto type = numberOptions_.type();
-        const auto value = type == NumberMarkType::number
-            ? std::optional<int>{nextNumberValue(currentNumberGroupId_)}
-            : std::nullopt;
-        const auto manual = type == NumberMarkType::number
-            && numberGroupIsManual(currentNumberGroupId_);
-        const auto id = document_.addNumberMark(
-            numberMarkRect(point, numberOptions_.style().textSize),
-            type, value, manual,
-            type == NumberMarkType::number ? currentNumberGroupId_ : 0,
-            numberOptions_.style());
-        syncHistory();
-        return id != invalidAnnotationId;
     }
     if (isMagnifierToolActive()) {
         document_.clearSelection();
@@ -1939,6 +1952,7 @@ void ShapeEditorController::pointerMove(
     bool shift)
 {
     if (eraserRectangleStart_.has_value()) {
+        point = clampedPoint(point, canvasBounds_);
         if (!eraserRectangleCurrent_.has_value()
             || !(*eraserRectangleCurrent_ == point)) {
             eraserRectangleCurrent_ = point;
@@ -1979,6 +1993,7 @@ bool ShapeEditorController::pointerUp(
         return true;
     }
     if (eraserRectangleStart_.has_value()) {
+        point = clampedPoint(point, canvasBounds_);
         eraserRectangleCurrent_ = point;
         const auto rect = eraserRectanglePreview().value_or(AnnotationRect{});
         eraserRectangleStart_.reset();
@@ -2085,6 +2100,13 @@ ShapeCursorStyle ShapeEditorController::cursorStyleAt(
         return ShapeCursorStyle::move;
     }
 
+    if (brushToolActive_) {
+        return ShapeCursorStyle::brush;
+    }
+    if (markerToolActive_) {
+        return ShapeCursorStyle::marker;
+    }
+
     if (const auto selected = document_.selectedId(); selected.has_value()) {
         const auto* annotation = document_.find(*selected);
         if (annotation != nullptr && isNumberAnnotation(*annotation)) {
@@ -2142,12 +2164,6 @@ ShapeCursorStyle ShapeEditorController::cursorStyleAt(
     }
     if (isTextToolActive() && textAnnotationAt(point).has_value()) {
         return ShapeCursorStyle::textInput;
-    }
-    if (brushToolActive_) {
-        return ShapeCursorStyle::brush;
-    }
-    if (markerToolActive_) {
-        return ShapeCursorStyle::marker;
     }
     if (isMosaicToolActive()) {
         return mosaicOptions_.kind() == AnnotationKind::mosaicStroke
@@ -2270,6 +2286,22 @@ ShapeEditorKeyResult ShapeEditorController::handleKey(
     }
     if (!control && key == ShapeEditorKey::eyedropper) {
         handleToolbarAction(ToolbarAction::eyedropper);
+        return ShapeEditorKeyResult::consumed;
+    }
+    if (!control && key == ShapeEditorKey::rectangle) {
+        handleToolbarAction(ToolbarAction::rectangle);
+        return ShapeEditorKeyResult::consumed;
+    }
+    if (!control && key == ShapeEditorKey::polyline) {
+        handleToolbarAction(ToolbarAction::polyline);
+        return ShapeEditorKeyResult::consumed;
+    }
+    if (!control && key == ShapeEditorKey::pen) {
+        handleToolbarAction(ToolbarAction::pen);
+        return ShapeEditorKeyResult::consumed;
+    }
+    if (!control && key == ShapeEditorKey::marker) {
+        handleToolbarAction(ToolbarAction::marker);
         return ShapeEditorKeyResult::consumed;
     }
     if (!control && key == ShapeEditorKey::mosaic) {
@@ -2628,6 +2660,7 @@ void ShapeEditorController::deactivateTool()
     textPopupMenu_.reset();
     popupScrollOffset_ = 0;
     numberPopupMenu_.reset();
+    numberTypeFollowerId_.reset();
     magnifierZoomMenuVisible_ = false;
 }
 

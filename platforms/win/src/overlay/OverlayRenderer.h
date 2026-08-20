@@ -128,6 +128,11 @@ struct OverlayEyedropperRenderState {
     std::wstring measurementLabel;
 };
 
+struct OverlayToolbarTooltipRenderState {
+    DipRect anchor{};
+    std::wstring text;
+};
+
 struct OverlayRenderState {
     std::optional<PixelRect> selection;
     bool showActions = true;
@@ -144,6 +149,7 @@ struct OverlayRenderState {
     bool canRedo = false;
     AnnotationRenderPlan annotationPlan;
     std::shared_ptr<const PixelBuffer> annotationComposite;
+    bool annotationPlanOutsideSelectionOnly = false;
     std::optional<OverlayShapeOptionsRenderState> shapeOptions;
     std::optional<OverlayArrowLineOptionsRenderState> arrowLineOptions;
     std::optional<OverlayBrushOptionsRenderState> brushOptions;
@@ -154,6 +160,7 @@ struct OverlayRenderState {
     std::optional<OverlayMagnifierOptionsRenderState> magnifierOptions;
     std::optional<OverlayEraserOptionsRenderState> eraserOptions;
     std::optional<OverlayEyedropperRenderState> eyedropper;
+    std::optional<OverlayToolbarTooltipRenderState> toolbarTooltip;
 };
 
 float physicalPixelsToDip(std::int64_t pixels, std::uint32_t dpi) noexcept;
@@ -201,16 +208,18 @@ public:
     std::optional<OverlayRendererError> resize(
         std::uint32_t width,
         std::uint32_t height) noexcept;
-    std::optional<OverlayRendererError> render(
-        const FrozenDisplay& display,
-        const std::optional<PixelRect>& selection,
-        bool showActions = true) noexcept;
-    std::optional<OverlayRendererError> render(
-        const FrozenDisplay& display,
-        const OverlayRenderState& state) noexcept;
+    std::optional<OverlayRendererError>
+    render(const FrozenDisplay &display,
+           const std::optional<PixelRect> &selection,
+           bool showActions = true) noexcept;
+    std::optional<OverlayRendererError>
+    render(const FrozenDisplay &display,
+           const OverlayRenderState &state) noexcept;
+    std::optional<OverlayRendererError>
+    updateBackground(const FrozenDisplay &display) noexcept;
     void discardDeviceResources() noexcept;
 
-private:
+  private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
