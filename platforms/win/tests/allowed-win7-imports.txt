@@ -101,11 +101,13 @@ USER32.dll!SetWindowRgn
 USER32.dll!SetWindowTextW
 USER32.dll!SetWindowsHookExW
 USER32.dll!ShowWindow
+USER32.dll!TrackMouseEvent
 USER32.dll!TrackPopupMenu
 USER32.dll!TranslateMessage
 USER32.dll!UnhookWindowsHookEx
 USER32.dll!UnregisterClassW
 USER32.dll!UnregisterHotKey
+USER32.dll!UpdateLayeredWindow
 USER32.dll!UpdateWindow
 
 d2d1.dll!#1
@@ -142,6 +144,7 @@ GDI32.dll!RoundRect
 GDI32.dll!SelectObject
 GDI32.dll!SetBkMode
 GDI32.dll!SetBkColor
+GDI32.dll!SetBrushOrgEx
 GDI32.dll!SetStretchBltMode
 GDI32.dll!SetTextColor
 GDI32.dll!StretchBlt
@@ -243,6 +246,7 @@ MSVCP140.dll!_Mtx_unlock
 MSVCP140.dll!_Query_perf_counter
 MSVCP140.dll!_Query_perf_frequency
 MSVCP140.dll!_Thrd_detach
+MSVCP140.dll!_Thrd_hardware_concurrency
 MSVCP140.dll!_Thrd_id
 MSVCP140.dll!_Thrd_join
 MSVCP140.dll!_Xtime_get_ticks
@@ -277,11 +281,13 @@ api-ms-win-crt-math-l1-1-0.dll!__setusermatherr
 api-ms-win-crt-math-l1-1-0.dll!_dclass
 api-ms-win-crt-math-l1-1-0.dll!_hypotf
 api-ms-win-crt-math-l1-1-0.dll!_libm_sse2_cos_precise
+api-ms-win-crt-math-l1-1-0.dll!_libm_sse2_exp_precise
 api-ms-win-crt-math-l1-1-0.dll!_libm_sse2_sin_precise
 api-ms-win-crt-math-l1-1-0.dll!_libm_sse2_sqrt_precise
 api-ms-win-crt-math-l1-1-0.dll!ceil
 api-ms-win-crt-math-l1-1-0.dll!ceilf
 api-ms-win-crt-math-l1-1-0.dll!cosf
+api-ms-win-crt-math-l1-1-0.dll!exp
 api-ms-win-crt-math-l1-1-0.dll!floor
 api-ms-win-crt-math-l1-1-0.dll!floorf
 api-ms-win-crt-math-l1-1-0.dll!hypot
