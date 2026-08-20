@@ -1,5 +1,36 @@
 import AppKit
 
+private func positionSuperLongCapturePanel(_ window: NSWindow, centeredIn selectionFrame: NSRect?) {
+    guard let selectionFrame, !selectionFrame.isEmpty else {
+        window.center()
+        return
+    }
+
+    guard let screen = NSScreen.screens.first(where: { NSMouseInRect(
+        NSPoint(x: selectionFrame.midX, y: selectionFrame.midY),
+        $0.frame,
+        false
+    ) }) ?? NSScreen.screens.first(where: { $0.frame.intersects(selectionFrame) }) else {
+        window.center()
+        return
+    }
+    let visibleSelection = selectionFrame.intersection(screen.visibleFrame)
+    let centeringFrame = visibleSelection.isEmpty ? selectionFrame : visibleSelection
+    let centeredOrigin = NSPoint(
+        x: centeringFrame.midX - window.frame.width / 2,
+        y: centeringFrame.midY - window.frame.height / 2
+    )
+    let maximumOrigin = NSPoint(
+        x: max(screen.visibleFrame.minX, screen.visibleFrame.maxX - window.frame.width),
+        y: max(screen.visibleFrame.minY, screen.visibleFrame.maxY - window.frame.height)
+    )
+
+    window.setFrameOrigin(NSPoint(
+        x: min(max(centeredOrigin.x, screen.visibleFrame.minX), maximumOrigin.x),
+        y: min(max(centeredOrigin.y, screen.visibleFrame.minY), maximumOrigin.y)
+    ))
+}
+
 private final class SuperLongCapturePanel: NSPanel {
     override func cancelOperation(_ sender: Any?) {
         // Saving a super-long capture is destructive only through the explicit button.
@@ -20,8 +51,10 @@ final class SuperLongCaptureWarningWindowController: NSWindowController {
     let noteLabel = NSTextField(wrappingLabelWithString: "")
     let limitLabel = NSTextField(wrappingLabelWithString: "")
     let continueButton = NSButton()
+    private let selectionFrame: NSRect?
 
-    init(language: AppLanguage) {
+    init(language: AppLanguage, selectionFrame: NSRect? = nil) {
+        self.selectionFrame = selectionFrame?.standardized
         let panel = Self.makePanel()
         super.init(window: panel)
         configure(language: language)
@@ -32,7 +65,7 @@ final class SuperLongCaptureWarningWindowController: NSWindowController {
 
     func show() {
         guard let window else { return }
-        window.center()
+        positionSuperLongCapturePanel(window, centeredIn: selectionFrame)
         window.orderFrontRegardless()
     }
 
@@ -166,14 +199,7 @@ final class SuperLongCaptureSaveProgressWindowController: NSWindowController {
     func show() {
         NSApp.activate(ignoringOtherApps: true)
         guard let window else { return }
-        if let selectionFrame, !selectionFrame.isEmpty {
-            window.setFrameOrigin(NSPoint(
-                x: selectionFrame.midX - window.frame.width / 2,
-                y: selectionFrame.midY - window.frame.height / 2
-            ))
-        } else {
-            window.center()
-        }
+        positionSuperLongCapturePanel(window, centeredIn: selectionFrame)
         window.orderFrontRegardless()
     }
 

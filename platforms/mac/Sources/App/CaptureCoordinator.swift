@@ -548,10 +548,10 @@ final class CaptureCoordinator {
             let refreshTargetApplication = self.captureTargetApplication
 
             let backgroundImage: NSImage?
-            if mode == .region {
+            if mode == .region || mode == .teachingPen {
                 do {
                     backgroundImage = try await desktopFallbackCapture()
-                    frozenDesktopImage = backgroundImage
+                    frozenDesktopImage = mode == .region ? backgroundImage : nil
                     diagnosticLogger.record(
                         category: diagnosticCategory(for: mode),
                         level: .debug,
@@ -996,7 +996,8 @@ final class CaptureCoordinator {
                 superLongModePresenter(outputHeight)
             } else {
                 let warning = SuperLongCaptureWarningWindowController(
-                    language: languageSnapshot.language
+                    language: languageSnapshot.language,
+                    selectionFrame: scrollCaptureSeed?.screenRect
                 )
                 superLongWarning = warning
                 warning.show()
@@ -1045,7 +1046,9 @@ final class CaptureCoordinator {
         superLongWarning = nil
         let directSaveURL: URL?
         if session.requiresSaveOnlyCompletion {
+            hideScrollCaptureVisualsForSaving()
             guard let destination = superLongSaveDestinationProvider() else {
+                restoreScrollCaptureVisualsAfterSaveInterruption()
                 scrollCapturePresentation?.resetTerminalActionsForRetry()
                 overlayWindow?.resetScrollCaptureTerminalActionsForRetry()
                 return
@@ -1068,7 +1071,7 @@ final class CaptureCoordinator {
                 }
             ))
             superLongSaveProgress = progress
-            retireScrollCaptureVisualsForSaving()
+            frozenDesktopImage = nil
             progress.show()
         }
         scrollCaptureTask = Task { @MainActor [weak self, weak session] in
@@ -1141,8 +1144,7 @@ final class CaptureCoordinator {
                 self.scrollCaptureFinishPending = false
                 self.scrollCapturePhase = .active
                 if directSaveURL != nil {
-                    self.overlayWindow?.present()
-                    self.scrollCapturePresentation?.restoreAfterSaveFailure()
+                    self.restoreScrollCaptureVisualsAfterSaveInterruption()
                 }
                 self.scrollCapturePresentation?.resetTerminalActionsForRetry()
                 self.overlayWindow?.resetScrollCaptureTerminalActionsForRetry()
@@ -1150,10 +1152,14 @@ final class CaptureCoordinator {
         }
     }
 
-    private func retireScrollCaptureVisualsForSaving() {
+    private func hideScrollCaptureVisualsForSaving() {
         scrollCapturePresentation?.hideForSaving()
         overlayWindow?.hideForScrollCaptureSave()
-        frozenDesktopImage = nil
+    }
+
+    private func restoreScrollCaptureVisualsAfterSaveInterruption() {
+        overlayWindow?.present()
+        scrollCapturePresentation?.restoreAfterSaveFailure()
     }
 
     private func finishCancelledSuperLongSave() {

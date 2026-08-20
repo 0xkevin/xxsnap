@@ -126,6 +126,7 @@
 		ACBA2CEE3D8AD0009F46D6C5 /* arrow.png in Resources */ = {isa = PBXBuildFile; fileRef = 597D9837A717D587B72F5C1F /* arrow.png */; };
 		AEC2E39E5A6FBAD1F6F3C0BA /* square_masaike.svg in Resources */ = {isa = PBXBuildFile; fileRef = AA6B91AB12760BD3E07E1301 /* square_masaike.svg */; };
 		AF991EF87AA0B3B1504801AF /* italic.svg in Resources */ = {isa = PBXBuildFile; fileRef = B1EC1FE01324243961249D53 /* italic.svg */; };
+		B315C20E87ED430B8EA9B8B6 /* eraser.svg in Resources */ = {isa = PBXBuildFile; fileRef = 6CDBCD8D13E536FE281D6E03 /* eraser.svg */; };
 		B44A5633FCA4FD4A5E38B1BA /* LongImageEditorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD6320A53870D172750D4810 /* LongImageEditorTests.swift */; };
 		B46CD44447EB5EBC1B6434B3 /* arrow-line.png in Resources */ = {isa = PBXBuildFile; fileRef = F59DFFE797088CFD27AE3EE4 /* arrow-line.png */; };
 		B6766A54195F847D1446CE1B /* scroll-capture.svg in Resources */ = {isa = PBXBuildFile; fileRef = 31142970D1AD9FA528A7EC7C /* scroll-capture.svg */; };
@@ -238,6 +239,7 @@
 		65E3B9B2366D43EB65277157 /* xxsnap.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = xxsnap.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		69C2B328D25C6F4DEFCD575D /* undo-enabled.svg */ = {isa = PBXFileReference; path = "undo-enabled.svg"; sourceTree = "<group>"; };
 		6B4E361FE112DA9E0E356959 /* HelpImagePreviewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpImagePreviewController.swift; sourceTree = "<group>"; };
+		6CDBCD8D13E536FE281D6E03 /* eraser.svg */ = {isa = PBXFileReference; path = eraser.svg; sourceTree = "<group>"; };
 		6CF1528BE8E858ED0EC7B863 /* AppUpdateDownloadService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdateDownloadService.swift; sourceTree = "<group>"; };
 		6E00E3D8E2129AD664A6BD69 /* redo-enabled.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "redo-enabled.png"; sourceTree = "<group>"; };
 		6F168719916830C9536C929C /* xxsnapTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = xxsnapTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -618,6 +620,7 @@
 				EA1456E9C1DB9C6E2F8EF8F5 /* done.svg */,
 				3EA6D152633E6E31441322EA /* eraser-tool.png */,
 				B26783A4C11DFDC68390DE99 /* eraser-tool.svg */,
+				6CDBCD8D13E536FE281D6E03 /* eraser.svg */,
 				30F8BFFDF14E4559FB86BF58 /* eyedropper.svg */,
 				ECA614CE136AB9553AE27D92 /* failed.svg */,
 				6569DD68B9D82807BFE9B8B4 /* highlighter-tool.png */,
@@ -782,6 +785,7 @@
 				CE181A4102A4A6C1E3D5AD22 /* done.svg in Resources */,
 				8B88348E80AD052EBD21197B /* eraser-tool.png in Resources */,
 				875D73FF8B4029D231901AE2 /* eraser-tool.svg in Resources */,
+				B315C20E87ED430B8EA9B8B6 /* eraser.svg in Resources */,
 				576F043C01E6CBB1493C8100 /* eyedropper.svg in Resources */,
 				2DEAE858DF2C0E205CCBC300 /* failed.svg in Resources */,
 				1EC56CC7E8E855F22CC8ACFE /* fullscreencutsound.mp3 in Resources */,
@@ -1013,7 +1017,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 9;
+				CURRENT_PROJECT_VERSION = 10;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -1156,7 +1160,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 9;
+				CURRENT_PROJECT_VERSION = 10;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
