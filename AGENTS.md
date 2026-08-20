@@ -32,30 +32,39 @@
 
 ### 版本号和构建号
 
-1. `platforms/mac/project.yml` 中的 `MARKETING_VERSION` 是用户可见版本号，使用 `主版本.次版本.修订号` 的语义版本格式，例如 `1.0.0`：
-   - 不兼容变化增加主版本；
-   - 向后兼容的新功能增加次版本；
-   - 向后兼容的缺陷修复增加修订号。
+1. `platforms/mac/project.yml` 中的 `MARKETING_VERSION` 是用户可见版本号，使用 `主版本.次版本.修订号` 的语义版本格式，例如 `1.0.0`。除非用户明确指定新的主版本或次版本方案，否则每次生成新的发布包都必须保持前两位不变，并将第三位修订号自动加 `1`。
 2. `CURRENT_PROJECT_VERSION` 是纯整数构建号，例如 `1`、`2`、`3`。每个已经上传、发布或交付给用户的新构建都必须严格递增，不得重复或回退；只在从未上传、发布或交付的本地失败构建中才允许复用。
-3. 同一用户可见版本重新发包时，只增加构建号。例如上一版已经发布为 `1.0.0（1）`，下一包仍使用版本号 `1.0.0` 时必须是 `1.0.0（2）`。升级用户可见版本时，构建号仍继续递增，不得自动重置为 `1`。
+3. 每次生成新的发布包时，`MARKETING_VERSION` 的第三位修订号和 `CURRENT_PROJECT_VERSION` 必须同时递增，不再允许只增加构建号而复用原用户可见版本。例如上一包是 `1.3.1（10）`，下一包必须是 `1.3.2（11）`。只有从未上传、发布或交付的本地失败包才允许复用原版本号和构建号。
 4. 中文界面或文档统一写作 `版本号（构建号）`，例如 `1.0.0（2）`；英文或纯 ASCII 环境写作 `1.0.0 (2)`。括号内只能填写纯整数构建号，不填写 `build`、版本号、日期、架构、渠道或签名状态。
 5. `MARKETING_VERSION` 与 `CURRENT_PROJECT_VERSION` 必须同时写入 `platforms/mac/project.yml` 和生成后的 Xcode 工程配置，并与最终 `.app` 的 `CFBundleShortVersionString`、`CFBundleVersion` 完全一致。正式打包不得只通过 `xcodebuild` 参数临时覆盖而不更新项目配置。
-6. 打包前必须查询当前已发布或已上传版本，确认下一个构建号；不得仅根据本地 `dist` 目录猜测。
+6. 打包前必须查询当前已发布或已上传版本，以其版本号和构建号为基准，同时计算下一个修订号和构建号；不得仅根据本地 `dist` 目录猜测。
 
 ### 文件名和目录
 
-1. 正式 DMG 文件名固定为 `XxSnap-<MARKETING_VERSION>-universal.dmg`，例如 `XxSnap-1.0.0-universal.dmg`。
-2. DMG 文件名不得包含构建号或内部状态，包括但不限于 `build2`、`internal`、`unsigned`、`unnotarized`。构建号只存在于应用元数据、后台版本记录和 `manifest.json` 中。
-3. 最终交付目录至少包含以下三个文件，缺少任意一个都视为打包未完成：
+1. 正式 DMG 文件名固定为 `XxSnap-<MARKETING_VERSION>-<CURRENT_PROJECT_VERSION>-universal.dmg`，例如 `XxSnap-1.0.0-2-universal.dmg`。构建号只保留纯数字，不加 `build` 前缀，并且必须与应用元数据、后台版本记录和 `manifest.json` 完全一致。
+2. DMG 文件名除规定的版本号、构建号和架构外，不得包含内部状态，包括但不限于 `internal`、`unsigned`、`unnotarized`。
+3. 最终交付目录至少包含以下五个文件，缺少任意一个都视为打包未完成：
 
    ```text
    dist/<MARKETING_VERSION>/
-   ├── XxSnap-<MARKETING_VERSION>-universal.dmg
+   ├── XxSnap-<MARKETING_VERSION>-<CURRENT_PROJECT_VERSION>-universal.dmg
    ├── manifest.json
-   └── checksums.txt
+   ├── checksums.txt
+   ├── release-notes-zh-CN.md
+   └── release-notes-en.md
    ```
 
-4. 如果同一版本号存在历史构建，生成新包时必须先保留历史产物或使用独立临时目录，未经用户确认不得覆盖旧包；最终上传的 DMG 文件名仍遵循标准名称。
+4. 如果同一版本号存在历史构建，生成新包时必须先保留历史产物或使用独立临时目录，未经用户确认不得覆盖旧包；不同构建使用各自包含构建号的标准 DMG 文件名。
+5. `release-notes-zh-CN.md` 和 `release-notes-en.md` 必须分别提供面向用户的中文、英文发布说明，标题必须包含准确的版本号和构建号，正文应说明本次新增、优化和修复内容，不得复制旧版本说明或遗漏本次主要功能。
+6. DMG 挂载卷必须使用 XxSnap Logo：从最终 `.app` 的 `Contents/Resources/xxsnap.icns` 复制为卷根目录的 `.VolumeIcon.icns`，隐藏该文件，并在最终压缩前为可写挂载卷根目录设置 Finder 自定义图标属性。不得使用占位图标、其他产品图标或仅依赖打包机 Finder 缓存。
+7. 交付前必须实际挂载最终 DMG，确认卷根目录包含与应用资源一致的 `.VolumeIcon.icns`，卷带有 Finder 自定义图标属性，并且可见内容仅包含 `XxSnap.app` 和 `Applications` 安装入口。
+
+### 平台隔离
+
+1. macOS 与 Windows 必须独立构建、独立测试、独立打包。用户只要求某个平台时，不得构建、复制或交付另一平台的安装包、可执行文件、调试文件或资源。
+2. 从 `main` 发布 macOS 版本时，`main` 可以包含已经合并的 Windows 源码，但 macOS Xcode 工程、归档和 DMG 不得引用或携带 `platforms/win`、Windows 构建目录或 Windows 产物；Windows 代码的存在不得改变 macOS 功能和打包结果。
+3. 交付前必须检查最终安装介质的内容，确认其中只有目标平台应用及必要的安装入口；不得仅根据构建命令推断平台隔离已经生效。
+4. 除非用户明确要求同时发布多个平台，否则不得因为版本号相同、分支已合并或自动化脚本默认行为而联动打包其他平台。
 
 ### `manifest.json` 和校验文件
 
@@ -67,7 +76,7 @@
      "buildNumber": 2,
      "minimumMacOSVersion": "14.0",
      "architecture": "universal2",
-     "fileName": "XxSnap-1.0.0-universal.dmg",
+     "fileName": "XxSnap-1.0.0-2-universal.dmg",
      "fileSize": 12076842,
      "sha256": "<64 位小写 SHA-256>",
      "publishedAt": null
@@ -90,4 +99,4 @@
 
 ### 发布交付清单
 
-交付前必须明确报告并核对：来源 `main` 提交 SHA、用户可见版本号、括号内构建号、DMG 文件名、文件大小、SHA-256、双架构结果、签名与公证状态、`manifest.json` 校验结果，以及未执行或失败的测试。用户明确允许跳过 Developer ID 或公证时，可以生成对应包，但仍不得遗漏 manifest 和 checksum，并且必须在交付说明中明确风险。
+交付前必须明确报告并核对：来源 `main` 提交 SHA、用户可见版本号、括号内构建号、DMG 文件名、文件大小、SHA-256、双架构结果、签名与公证状态、`manifest.json` 校验结果、中英文发布说明、目标平台隔离检查，以及未执行或失败的测试。用户明确允许跳过 Developer ID 或公证时，可以生成对应包，但仍不得遗漏 manifest、checksum 和中英文发布说明，并且必须在交付说明中明确风险。

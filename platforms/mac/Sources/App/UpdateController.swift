@@ -343,8 +343,12 @@ final class AppUpdateController: UpdateChecking {
     private let currentVersion: String
     private let currentBuild: Int
     private let networkMonitor: any CommercialNetworkMonitoring
+    private let downloader: any AppUpdateDownloading
+    private let installer: any AppUpdateInstalling
+    private let applicationURL: URL
     private var periodicTask: Task<Void, Never>?
     private var checkTask: Task<UpdateCheckResult, Never>?
+    private var updateTask: Task<Void, Never>?
     private var state: UpdateCheckResult = .upToDate
     private var isPresenting = false
     private var started = false
@@ -353,13 +357,18 @@ final class AppUpdateController: UpdateChecking {
     init(
         bundle: Bundle = .main,
         fetcher: (any AppUpdatePolicyFetching)? = nil,
-        networkMonitor: (any CommercialNetworkMonitoring)? = nil
+        networkMonitor: (any CommercialNetworkMonitoring)? = nil,
+        downloader: (any AppUpdateDownloading)? = nil,
+        installer: (any AppUpdateInstalling)? = nil
     ) throws {
         self.fetcher = try fetcher ?? AppUpdatePolicyClient(bundle: bundle)
         verifier = try CommercialSignatureVerifier(bundle: bundle)
         currentVersion = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
         currentBuild = Int(bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0") ?? 0
         self.networkMonitor = networkMonitor ?? SystemAppUpdateNetworkMonitor()
+        self.downloader = downloader ?? AppUpdateDownloadService()
+        self.installer = installer ?? SystemAppUpdateInstaller(bundle: bundle)
+        applicationURL = bundle.bundleURL
     }
 
     var blocksAppUse: Bool {
@@ -417,7 +426,7 @@ final class AppUpdateController: UpdateChecking {
     }
 
     func presentUpdateResult(_ result: UpdateCheckResult, manual: Bool) {
-        guard !isPresenting else { return }
+        guard !isPresenting, updateTask == nil else { return }
         switch result {
         case .upToDate where !manual, .unavailable where !manual:
             return
@@ -427,21 +436,34 @@ final class AppUpdateController: UpdateChecking {
         isPresenting = true
         defer { isPresenting = false }
         let strings = PreferencesStrings(language: currentLanguage)
+        switch result {
+        case let .available(release):
+            presentAvailableUpdate(
+                release: release,
+                title: strings.updateAvailableTitle,
+                notice: nil,
+                strings: strings
+            )
+            return
+        case let .grace(release, deadline):
+            presentAvailableUpdate(
+                release: release,
+                title: strings.updateGraceTitle,
+                notice: strings.updateGraceDetail(deadline: deadline),
+                strings: strings
+            )
+            return
+        default:
+            break
+        }
         let alert = NSAlert()
         switch result {
         case .upToDate:
             alert.messageText = strings.upToDate
             alert.informativeText = "XxSnap \(currentVersion) (\(currentBuild))"
             alert.addButton(withTitle: strings.confirm)
-        case let .available(release):
-            configureUpdateAlert(alert, release: release, title: strings.updateAvailableTitle, detail: release.releaseNotes)
-        case let .grace(release, deadline):
-            configureUpdateAlert(
-                alert,
-                release: release,
-                title: strings.updateGraceTitle,
-                detail: strings.updateGraceDetail(deadline: deadline)
-            )
+        case .available, .grace:
+            return
         case let .required(release, deadline):
             alert.alertStyle = .critical
             alert.messageText = strings.updateRequiredTitle
@@ -457,11 +479,9 @@ final class AppUpdateController: UpdateChecking {
         NSApp.activate(ignoringOtherApps: true)
         let response = alert.runModal()
         switch result {
-        case let .available(release), let .grace(release, _):
-            if response == .alertFirstButtonReturn { open(release) }
         case let .required(release, _):
             if response == .alertFirstButtonReturn {
-                open(release)
+                beginUpdate(release, strings: strings)
             } else {
                 NSApplication.shared.terminate(nil)
             }
@@ -497,22 +517,596 @@ final class AppUpdateController: UpdateChecking {
         onStateChange?()
     }
 
-    private func configureUpdateAlert(
-        _ alert: NSAlert,
+    private func presentAvailableUpdate(
         release: AppUpdateRelease,
         title: String,
-        detail: String
+        notice: String?,
+        strings: PreferencesStrings
     ) {
-        let strings = PreferencesStrings(language: currentLanguage)
-        alert.messageText = title
-        alert.informativeText = detail.isEmpty ? "XxSnap \(release.version)" : detail
-        alert.addButton(withTitle: strings.downloadUpdate)
-        alert.addButton(withTitle: strings.later)
+        let dialog = UpdateAvailableWindowController(
+            release: release,
+            title: title,
+            notice: notice,
+            currentVersion: currentVersion,
+            currentBuild: currentBuild,
+            strings: strings
+        )
+        if dialog.runModal() == .alertFirstButtonReturn {
+            beginUpdate(release, strings: strings)
+        }
     }
 
-    private func open(_ release: AppUpdateRelease) {
-        guard AppUpdateRelease.isAllowedDownloadURL(release.downloadURL) else { return }
-        NSWorkspace.shared.open(release.downloadURL)
+    private func beginUpdate(_ release: AppUpdateRelease, strings: PreferencesStrings) {
+        guard updateTask == nil,
+              AppUpdateRelease.isAllowedDownloadURL(release.downloadURL)
+        else { return }
+        let progress = UpdateProgressWindowController(version: release.version, strings: strings)
+        progress.onCancel = { [weak self] in
+            self?.downloader.cancel()
+        }
+        progress.update(stage: .downloading(nil))
+        progress.show()
+
+        updateTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            var acceptsDownloadProgress = true
+            do {
+                let downloadedURL = try await downloader.download(release: release) { [weak progress] value in
+                    guard acceptsDownloadProgress else { return }
+                    progress?.update(stage: .downloading(value))
+                }
+                acceptsDownloadProgress = false
+                defer { cleanupDownload(downloadedURL) }
+                progress.update(stage: .verifying)
+                let prepared = try await Task.detached(priority: .userInitiated) { [installer] in
+                    try installer.prepare(downloadURL: downloadedURL, release: release)
+                }.value
+                progress.update(stage: .installing)
+                try await Task.detached(priority: .userInitiated) { [installer] in
+                    try installer.install(prepared)
+                }.value
+                progress.close()
+                updateTask = nil
+                relaunchInstalledApplication()
+            } catch {
+                acceptsDownloadProgress = false
+                progress.close()
+                updateTask = nil
+                presentUpdateFailure(error, strings: strings)
+            }
+        }
+    }
+
+    private func cleanupDownload(_ fileURL: URL) {
+        try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent())
+    }
+
+    private func presentUpdateFailure(_ error: Error, strings: PreferencesStrings) {
+        let alert = NSAlert()
+        if error as? AppUpdateInstallationError == .cancelled {
+            alert.messageText = strings.updateCancelledTitle
+            alert.informativeText = ""
+        } else {
+            alert.alertStyle = .warning
+            alert.messageText = strings.updateFailedTitle
+            let detail = strings.updateFailureReason(error)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            alert.informativeText = detail.isEmpty
+                ? strings.updateFailedDetail
+                : "\(strings.updateFailedDetail)\n\n\(detail)"
+        }
+        alert.addButton(withTitle: strings.confirm)
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+    }
+
+    private func relaunchInstalledApplication() {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = [
+            "-c",
+            "pid=\"$1\"; app=\"$2\"; count=0; while /bin/kill -0 \"$pid\" 2>/dev/null && [ \"$count\" -lt 300 ]; do /bin/sleep 0.2; count=$((count + 1)); done; /usr/bin/open \"$app\"",
+            "xxsnap-relaunch",
+            String(ProcessInfo.processInfo.processIdentifier),
+            applicationURL.path,
+        ]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            NSApplication.shared.terminate(nil)
+        } catch {
+            NSWorkspace.shared.open(applicationURL)
+            NSApplication.shared.terminate(nil)
+        }
+    }
+}
+
+@MainActor
+final class UpdateAvailableWindowController: NSWindowController, NSWindowDelegate {
+    static let contentSize = NSSize(width: 560, height: 520)
+
+    let releaseNotesScrollView = NSScrollView()
+    let releaseNotesTextView = NSTextView(frame: NSRect(x: 0, y: 0, width: 480, height: 0))
+
+    let downloadButton = NSButton()
+    private let laterButton = NSButton()
+
+    init(
+        release: AppUpdateRelease,
+        title: String,
+        notice: String?,
+        currentVersion: String,
+        currentBuild: Int,
+        strings: PreferencesStrings
+    ) {
+        let panel = NSPanel(
+            contentRect: NSRect(origin: .zero, size: Self.contentSize),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = title
+        panel.isReleasedWhenClosed = false
+        panel.isMovableByWindowBackground = true
+        panel.hidesOnDeactivate = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        super.init(window: panel)
+        panel.delegate = self
+        configureContent(
+            release: release,
+            notice: notice,
+            currentVersion: currentVersion,
+            currentBuild: currentBuild,
+            strings: strings
+        )
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    func runModal() -> NSApplication.ModalResponse {
+        guard let window else { return .abort }
+        NSApp.activate(ignoringOtherApps: true)
+        window.center()
+        showWindow(nil)
+        window.makeKeyAndOrderFront(nil)
+        let response = NSApp.runModal(for: window)
+        window.orderOut(nil)
+        return response
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        if NSApp.modalWindow === sender {
+            NSApp.stopModal(withCode: .alertSecondButtonReturn)
+        }
+        return true
+    }
+
+    private func configureContent(
+        release: AppUpdateRelease,
+        notice: String?,
+        currentVersion: String,
+        currentBuild: Int,
+        strings: PreferencesStrings
+    ) {
+        guard let contentView = window?.contentView else { return }
+
+        let iconView = NSImageView(image: NSApp.applicationIconImage)
+        iconView.imageScaling = .scaleProportionallyUpOrDown
+        iconView.setAccessibilityLabel("XxSnap")
+
+        let versionTitle = NSTextField(
+            labelWithString: strings.updateVersionReady(
+                release.version,
+                build: release.buildNumber
+            )
+        )
+        versionTitle.font = .systemFont(ofSize: 22, weight: .semibold)
+        versionTitle.textColor = .labelColor
+
+        let currentVersionLabel = NSTextField(
+            labelWithString: strings.updateCurrentVersion(currentVersion, build: currentBuild)
+        )
+        currentVersionLabel.font = .systemFont(ofSize: 13)
+        currentVersionLabel.textColor = .secondaryLabelColor
+
+        let headingStack = NSStackView(views: [versionTitle, currentVersionLabel])
+        headingStack.orientation = .vertical
+        headingStack.alignment = .leading
+        headingStack.spacing = 7
+        if let notice, !notice.isEmpty {
+            let noticeLabel = NSTextField(wrappingLabelWithString: notice)
+            noticeLabel.font = .systemFont(ofSize: 12)
+            noticeLabel.textColor = .systemOrange
+            noticeLabel.maximumNumberOfLines = 2
+            headingStack.addArrangedSubview(noticeLabel)
+            noticeLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 390).isActive = true
+        }
+
+        let releaseNotesTitle = NSTextField(labelWithString: strings.updateReleaseNotesTitle)
+        releaseNotesTitle.font = .systemFont(ofSize: 15, weight: .semibold)
+        releaseNotesTitle.textColor = .labelColor
+
+        configureReleaseNotes(
+            release.releaseNotes.isEmpty ? strings.updateNoReleaseNotes : release.releaseNotes,
+            accessibilityLabel: strings.updateReleaseNotesTitle
+        )
+
+        let separator = NSBox()
+        separator.boxType = .separator
+
+        laterButton.title = strings.later
+        laterButton.bezelStyle = .rounded
+        laterButton.controlSize = .large
+        laterButton.keyEquivalent = "\u{1b}"
+        laterButton.target = self
+        laterButton.action = #selector(laterPressed)
+
+        downloadButton.title = strings.downloadUpdate
+        downloadButton.bezelStyle = .rounded
+        downloadButton.controlSize = .large
+        downloadButton.keyEquivalent = "\r"
+        downloadButton.target = self
+        downloadButton.action = #selector(downloadPressed)
+
+        let buttonStack = NSStackView(views: [laterButton, downloadButton])
+        buttonStack.orientation = .horizontal
+        buttonStack.alignment = .centerY
+        buttonStack.spacing = 10
+
+        for view in [iconView, headingStack, releaseNotesTitle, releaseNotesScrollView, separator, buttonStack] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            contentView.addSubview(view)
+        }
+        laterButton.translatesAutoresizingMaskIntoConstraints = false
+        downloadButton.translatesAutoresizingMaskIntoConstraints = false
+
+        NSLayoutConstraint.activate([
+            iconView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 28),
+            iconView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 28),
+            iconView.widthAnchor.constraint(equalToConstant: 72),
+            iconView.heightAnchor.constraint(equalToConstant: 72),
+
+            headingStack.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 20),
+            headingStack.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -28),
+            headingStack.centerYAnchor.constraint(equalTo: iconView.centerYAnchor),
+
+            releaseNotesTitle.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 28),
+            releaseNotesTitle.topAnchor.constraint(equalTo: iconView.bottomAnchor, constant: 26),
+
+            releaseNotesScrollView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 28),
+            releaseNotesScrollView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -28),
+            releaseNotesScrollView.topAnchor.constraint(equalTo: releaseNotesTitle.bottomAnchor, constant: 10),
+            releaseNotesScrollView.bottomAnchor.constraint(equalTo: separator.topAnchor, constant: -20),
+
+            separator.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            separator.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -72),
+
+            buttonStack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -28),
+            buttonStack.centerYAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -36),
+            laterButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 88),
+            downloadButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 120),
+        ])
+
+        window?.initialFirstResponder = downloadButton
+        contentView.layoutSubtreeIfNeeded()
+    }
+
+    private func configureReleaseNotes(_ releaseNotes: String, accessibilityLabel: String) {
+        releaseNotesTextView.isEditable = false
+        releaseNotesTextView.isSelectable = true
+        releaseNotesTextView.isRichText = true
+        releaseNotesTextView.isAutomaticLinkDetectionEnabled = false
+        releaseNotesTextView.drawsBackground = false
+        releaseNotesTextView.font = .systemFont(ofSize: 13.5)
+        releaseNotesTextView.textColor = .labelColor
+        releaseNotesTextView.linkTextAttributes = [
+            .foregroundColor: NSColor.linkColor,
+            .underlineStyle: NSUnderlineStyle.single.rawValue,
+        ]
+        releaseNotesTextView.textContainerInset = NSSize(width: 12, height: 12)
+        releaseNotesTextView.isHorizontallyResizable = false
+        releaseNotesTextView.isVerticallyResizable = true
+        releaseNotesTextView.autoresizingMask = [.width]
+        releaseNotesTextView.minSize = .zero
+        releaseNotesTextView.maxSize = NSSize(
+            width: CGFloat.greatestFiniteMagnitude,
+            height: CGFloat.greatestFiniteMagnitude
+        )
+        releaseNotesTextView.textContainer?.widthTracksTextView = true
+        releaseNotesTextView.textContainer?.containerSize = NSSize(
+            width: 456,
+            height: CGFloat.greatestFiniteMagnitude
+        )
+        releaseNotesTextView.textStorage?.setAttributedString(
+            UpdateReleaseNotesMarkdownRenderer.render(releaseNotes)
+        )
+        if let layoutManager = releaseNotesTextView.layoutManager,
+           let textContainer = releaseNotesTextView.textContainer {
+            layoutManager.ensureLayout(for: textContainer)
+            let textHeight = layoutManager.usedRect(for: textContainer).height
+            releaseNotesTextView.frame.size.height = max(260, textHeight + 24)
+        }
+
+        releaseNotesScrollView.documentView = releaseNotesTextView
+        releaseNotesScrollView.hasVerticalScroller = true
+        releaseNotesScrollView.hasHorizontalScroller = false
+        releaseNotesScrollView.autohidesScrollers = true
+        releaseNotesScrollView.drawsBackground = true
+        releaseNotesScrollView.backgroundColor = .controlBackgroundColor
+        releaseNotesScrollView.borderType = .bezelBorder
+        releaseNotesScrollView.wantsLayer = true
+        releaseNotesScrollView.layer?.cornerRadius = 10
+        releaseNotesScrollView.layer?.masksToBounds = true
+        releaseNotesScrollView.setAccessibilityLabel(accessibilityLabel)
+    }
+
+    @objc private func downloadPressed() {
+        NSApp.stopModal(withCode: .alertFirstButtonReturn)
+    }
+
+    @objc private func laterPressed() {
+        NSApp.stopModal(withCode: .alertSecondButtonReturn)
+    }
+}
+
+@MainActor
+private enum UpdateReleaseNotesMarkdownRenderer {
+    private enum BlockStyle {
+        case body
+        case heading(Int)
+        case list
+        case code
+
+        var isCode: Bool {
+            if case .code = self { return true }
+            return false
+        }
+    }
+
+    private struct CodeFence {
+        let delimiter: Character
+        let length: Int
+
+        static func opening(in line: String) -> CodeFence? {
+            guard let delimiter = line.first, delimiter == "`" || delimiter == "~" else {
+                return nil
+            }
+            let length = line.prefix(while: { $0 == delimiter }).count
+            guard length >= 3 else { return nil }
+            let info = line.dropFirst(length)
+            guard delimiter != "`" || !info.contains("`") else { return nil }
+            return CodeFence(delimiter: delimiter, length: length)
+        }
+
+        func closes(_ line: String) -> Bool {
+            let closingLength = line.prefix(while: { $0 == delimiter }).count
+            guard closingLength >= length else { return false }
+            return line.dropFirst(closingLength).allSatisfy(\.isWhitespace)
+        }
+    }
+
+    private static let bodyFont = NSFont.systemFont(ofSize: 13.5)
+    private static let firstLevelHeadingFont = NSFont.systemFont(ofSize: 18, weight: .semibold)
+    private static let secondLevelHeadingFont = NSFont.systemFont(ofSize: 16, weight: .semibold)
+    private static let thirdLevelHeadingFont = NSFont.systemFont(ofSize: 14.5, weight: .semibold)
+    private static let minorHeadingFont = NSFont.systemFont(ofSize: 13.5, weight: .semibold)
+    private static let codeFont = NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular)
+    private static let bodyParagraphStyle = makeParagraphStyle(for: .body)
+    private static let headingParagraphStyle = makeParagraphStyle(for: .heading(1))
+    private static let listParagraphStyle = makeParagraphStyle(for: .list)
+    private static let codeParagraphStyle = makeParagraphStyle(for: .code)
+
+    static func render(_ markdown: String) -> NSAttributedString {
+        let normalized = markdown
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        let lines = normalized.split(separator: "\n", omittingEmptySubsequences: false)
+        let result = NSMutableAttributedString(string: "")
+        var codeFence: CodeFence?
+
+        for (index, rawLine) in lines.enumerated() {
+            let line = String(rawLine)
+            let trimmedLine = line.trimmingCharacters(in: .whitespaces)
+            var isFenceDelimiter = false
+
+            if let activeFence = codeFence {
+                if activeFence.closes(trimmedLine) {
+                    codeFence = nil
+                    isFenceDelimiter = true
+                } else {
+                    result.append(attributedLine(line, prefix: "", style: .code))
+                }
+            } else if let openingFence = CodeFence.opening(in: trimmedLine) {
+                codeFence = openingFence
+                isFenceDelimiter = true
+            } else if let heading = headingContent(in: trimmedLine) {
+                result.append(attributedLine(heading.text, prefix: "", style: .heading(heading.level)))
+            } else if let item = unorderedListContent(in: trimmedLine) {
+                result.append(attributedLine(item, prefix: "• ", style: .list))
+            } else if let item = orderedListContent(in: trimmedLine) {
+                result.append(attributedLine(item.text, prefix: "\(item.number). ", style: .list))
+            } else {
+                result.append(attributedLine(line, prefix: "", style: .body))
+            }
+
+            if index < lines.count - 1, !isFenceDelimiter {
+                result.append(NSAttributedString(string: "\n"))
+            }
+        }
+
+        return result
+    }
+
+    private static func attributedLine(
+        _ markdown: String,
+        prefix: String,
+        style: BlockStyle
+    ) -> NSAttributedString {
+        let font = font(for: style)
+        let color: NSColor = style.isCode ? .secondaryLabelColor : .labelColor
+        let paragraphStyle = paragraphStyle(for: style)
+        let result = NSMutableAttributedString(
+            string: prefix,
+            attributes: [
+                .font: font,
+                .foregroundColor: color,
+                .paragraphStyle: paragraphStyle,
+            ]
+        )
+        let content = style.isCode
+            ? NSMutableAttributedString(
+                string: markdown,
+                attributes: [.font: font, .foregroundColor: color]
+            )
+            : inlineMarkdown(markdown, baseFont: font, color: color)
+        result.append(content)
+        if result.length > 0 {
+            result.addAttribute(
+                .paragraphStyle,
+                value: paragraphStyle,
+                range: NSRange(location: 0, length: result.length)
+            )
+            if style.isCode {
+                result.addAttribute(
+                    .backgroundColor,
+                    value: NSColor.quaternaryLabelColor,
+                    range: NSRange(location: 0, length: result.length)
+                )
+            }
+        }
+        return result
+    }
+
+    private static func inlineMarkdown(
+        _ markdown: String,
+        baseFont: NSFont,
+        color: NSColor
+    ) -> NSMutableAttributedString {
+        var options = AttributedString.MarkdownParsingOptions()
+        options.interpretedSyntax = .inlineOnlyPreservingWhitespace
+        let parsed = (try? NSAttributedString(markdown: markdown, options: options))
+            ?? NSAttributedString(string: markdown)
+        let result = NSMutableAttributedString(attributedString: parsed)
+        let fullRange = NSRange(location: 0, length: result.length)
+        result.addAttributes([.font: baseFont, .foregroundColor: color], range: fullRange)
+
+        var inlineRuns: [(NSRange, UInt)] = []
+        result.enumerateAttribute(
+            .inlinePresentationIntent,
+            in: fullRange
+        ) { value, range, _ in
+            guard let value = value as? NSNumber else { return }
+            inlineRuns.append((range, value.uintValue))
+        }
+        for (range, rawIntent) in inlineRuns {
+            let intent = InlinePresentationIntent(rawValue: rawIntent)
+            let resolvedFont: NSFont
+            if intent.contains(.code) {
+                resolvedFont = .monospacedSystemFont(ofSize: baseFont.pointSize - 0.5, weight: .regular)
+                result.addAttribute(.backgroundColor, value: NSColor.quaternaryLabelColor, range: range)
+            } else {
+                var traits: NSFontTraitMask = []
+                if intent.contains(.stronglyEmphasized) { traits.insert(.boldFontMask) }
+                if intent.contains(.emphasized) { traits.insert(.italicFontMask) }
+                resolvedFont = traits.isEmpty
+                    ? baseFont
+                    : NSFontManager.shared.convert(baseFont, toHaveTrait: traits)
+            }
+            result.addAttribute(.font, value: resolvedFont, range: range)
+            result.removeAttribute(.inlinePresentationIntent, range: range)
+        }
+
+        var blockedLinks: [NSRange] = []
+        result.enumerateAttribute(.link, in: fullRange) { value, range, _ in
+            let url = (value as? URL) ?? (value as? String).flatMap(URL.init(string:))
+            guard let scheme = url?.scheme?.lowercased(), ["http", "https"].contains(scheme) else {
+                blockedLinks.append(range)
+                return
+            }
+        }
+        for range in blockedLinks {
+            result.removeAttribute(.link, range: range)
+        }
+
+        return result
+    }
+
+    private static func headingContent(in line: String) -> (level: Int, text: String)? {
+        let level = line.prefix(while: { $0 == "#" }).count
+        guard (1...6).contains(level) else { return nil }
+        let markerEnd = line.index(line.startIndex, offsetBy: level)
+        guard markerEnd < line.endIndex, line[markerEnd].isWhitespace else { return nil }
+        return (level, String(line[line.index(after: markerEnd)...]))
+    }
+
+    private static func unorderedListContent(in line: String) -> String? {
+        for marker in ["- ", "* ", "+ "] where line.hasPrefix(marker) {
+            return String(line.dropFirst(marker.count))
+        }
+        return nil
+    }
+
+    private static func orderedListContent(in line: String) -> (number: String, text: String)? {
+        let digits = line.prefix(while: { $0.isNumber })
+        guard !digits.isEmpty else { return nil }
+        let markerIndex = line.index(line.startIndex, offsetBy: digits.count)
+        guard markerIndex < line.endIndex, line[markerIndex] == "." || line[markerIndex] == ")" else {
+            return nil
+        }
+        let contentIndex = line.index(after: markerIndex)
+        guard contentIndex < line.endIndex, line[contentIndex].isWhitespace else { return nil }
+        return (String(digits), String(line[line.index(after: contentIndex)...]))
+    }
+
+    private static func font(for style: BlockStyle) -> NSFont {
+        switch style {
+        case .body, .list:
+            return bodyFont
+        case let .heading(level):
+            switch level {
+            case 1: return firstLevelHeadingFont
+            case 2: return secondLevelHeadingFont
+            case 3: return thirdLevelHeadingFont
+            default: return minorHeadingFont
+            }
+        case .code:
+            return codeFont
+        }
+    }
+
+    private static func paragraphStyle(for style: BlockStyle) -> NSParagraphStyle {
+        switch style {
+        case .body: return bodyParagraphStyle
+        case .heading: return headingParagraphStyle
+        case .list: return listParagraphStyle
+        case .code: return codeParagraphStyle
+        }
+    }
+
+    private static func makeParagraphStyle(for style: BlockStyle) -> NSParagraphStyle {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = 3
+        paragraph.paragraphSpacing = 6
+        switch style {
+        case .body:
+            break
+        case .heading:
+            paragraph.paragraphSpacingBefore = 5
+            paragraph.paragraphSpacing = 8
+        case .list:
+            paragraph.firstLineHeadIndent = 0
+            paragraph.headIndent = 16
+            paragraph.paragraphSpacing = 3
+        case .code:
+            paragraph.firstLineHeadIndent = 8
+            paragraph.headIndent = 8
+            paragraph.tailIndent = -8
+            paragraph.paragraphSpacing = 1
+        }
+        return paragraph
     }
 }
 

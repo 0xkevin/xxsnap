@@ -429,7 +429,72 @@ struct PreferencesStrings {
     var confirm: String { isEnglish ? "OK" : "确定" }
     var later: String { isEnglish ? "Later" : "稍后" }
     var downloadUpdate: String { isEnglish ? "Download Update" : "立即下载更新" }
+    var updateDownloading: String { isEnglish ? "Downloading update…" : "正在下载更新…" }
+    func updateDownloadingProgress(_ percent: Int) -> String {
+        isEnglish ? "Downloading update… \(percent)%" : "正在下载更新… \(percent)%"
+    }
+    func updateProgressTitle(_ version: String) -> String {
+        isEnglish ? "Updating XxSnap to \(version)" : "正在更新 XxSnap 至 \(version)"
+    }
+    var updateVerifying: String {
+        isEnglish ? "Verifying the downloaded update…" : "正在校验更新文件…"
+    }
+    var updateInstalling: String {
+        isEnglish ? "Installing the update… XxSnap will restart automatically." : "正在安装更新，完成后将自动重启…"
+    }
+    var updateCancelledTitle: String { isEnglish ? "Update Cancelled" : "已取消更新" }
+    var updateFailedTitle: String { isEnglish ? "Unable to Install Update" : "更新安装失败" }
+    var updateFailedDetail: String {
+        isEnglish
+            ? "The current version was not changed. Review the reason below and try again."
+            : "当前版本未被替换，请查看下面的原因后重试。"
+    }
+    func updateFailureReason(_ error: Error) -> String {
+        guard let error = error as? AppUpdateInstallationError else {
+            return error.localizedDescription
+        }
+        switch error {
+        case .invalidDownload:
+            return isEnglish ? "The downloaded file is invalid." : "下载的更新文件无效。"
+        case .checksumMismatch:
+            return isEnglish ? "The file integrity check failed." : "更新文件完整性校验未通过。"
+        case .invalidDiskImage:
+            return isEnglish ? "The update disk image could not be opened." : "无法打开更新磁盘映像。"
+        case .applicationMissing:
+            return isEnglish ? "XxSnap was not found in the update." : "更新包中没有找到 XxSnap。"
+        case .identityMismatch:
+            return isEnglish ? "The update belongs to a different application." : "更新包的应用身份不匹配。"
+        case .versionMismatch:
+            return isEnglish ? "The update version does not match the server information." : "更新包版本与服务器信息不一致。"
+        case .signatureInvalid:
+            return isEnglish ? "The update has an invalid code signature." : "更新包代码签名无效。"
+        case .currentApplicationUnavailable:
+            return isEnglish
+                ? "Move XxSnap to Applications, reopen it, and try again."
+                : "请将 XxSnap 移到“应用程序”文件夹，重新打开后再试。"
+        case .permissionDenied:
+            return isEnglish ? "Installation permission was not granted." : "未获得覆盖安装所需的权限。"
+        case .commandTimedOut:
+            return isEnglish ? "The update installer timed out. Please try again." : "更新安装等待超时，请重试。"
+        case let .commandFailed(message):
+            return message
+        case .cancelled:
+            return isEnglish ? "The update was cancelled." : "更新已取消。"
+        }
+    }
     var updateAvailableTitle: String { isEnglish ? "Update Available" : "发现新版本" }
+    func updateVersionReady(_ version: String, build: Int) -> String {
+        isEnglish
+            ? "XxSnap \(version) (\(build)) is now available"
+            : "XxSnap \(version)（\(build)）现已推出"
+    }
+    func updateCurrentVersion(_ version: String, build: Int) -> String {
+        isEnglish ? "Current version: \(version) (\(build))" : "当前版本 \(version)（\(build)）"
+    }
+    var updateReleaseNotesTitle: String { isEnglish ? "What's New" : "本次更新" }
+    var updateNoReleaseNotes: String {
+        isEnglish ? "No release notes are available for this version." : "本版本暂无更新说明。"
+    }
     var updateGraceTitle: String { isEnglish ? "Update Required Soon" : "请在截止时间前更新" }
     var updateRequiredTitle: String { isEnglish ? "Update Required" : "必须更新后才能继续使用" }
     var updateUnavailableTitle: String { isEnglish ? "Unable to Check for Updates" : "暂时无法检查更新" }

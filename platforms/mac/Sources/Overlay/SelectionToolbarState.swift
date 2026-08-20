@@ -321,6 +321,7 @@ enum SelectionToolbarState {
         case resizeBottomRightLight
         case rotationHandle
         case eraser
+        case eraserLight
         case brush
         case brushLight
         case marker
@@ -481,6 +482,8 @@ enum SelectionToolbarState {
             return 3
         case "trash":
             return 3
+        case "eraser":
+            return 1
         case "arrow", "masaike2", "text-tool", "straw-ranging", "scroll-screen2", "undo-enabled", "undo-disabled", "redo-enabled", "redo-disabled":
             return 0
         default:
@@ -488,14 +491,17 @@ enum SelectionToolbarState {
         }
     }
 
-    static let eraserCursorIconResourceName = "eraser-tool"
+    static let eraserIconResourceName = "eraser"
+    static let eraserToolbarSymbolName = "toolbar-\(eraserIconResourceName)"
 
-    static func usesFixedColorToolbarIconResource(_ resourceName: String) -> Bool {
+    static func shouldTintToolbarIconResource(_ resourceName: String, selected: Bool) -> Bool {
         switch resourceName {
+        case "pencil-tool":
+            return selected
         case "undo-enabled", "undo-disabled", "redo-enabled", "redo-disabled":
-            return true
-        default:
             return false
+        default:
+            return true
         }
     }
 

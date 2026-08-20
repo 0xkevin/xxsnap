@@ -465,8 +465,8 @@ final class SelectionToolbarStateTests: XCTestCase {
     }
 
     @MainActor
-    func testTeachingPenPresentsWithoutCapturingWholeDesktopFirst() async {
-        let image = solidImage(size: NSSize(width: 320, height: 200), color: .white)
+    func testTeachingPenUsesDesktopSnapshotForLightToolCursorsWithoutDrawingIt() async {
+        let image = solidImage(size: NSSize(width: 320, height: 200), color: .black)
         var desktopCaptureCount = 0
         let coordinator = CaptureCoordinator(
             permissionCoordinator: FakeScreenCapturePermissionCoordinator(),
@@ -483,8 +483,20 @@ final class SelectionToolbarStateTests: XCTestCase {
         }
 
         XCTAssertTrue(coordinator.test_isTeachingPenOverlayActive)
-        XCTAssertEqual(desktopCaptureCount, 0)
-        XCTAssertNil(coordinator.test_overlayWindow?.test_backgroundImage)
+        XCTAssertEqual(desktopCaptureCount, 1)
+        let overlay = coordinator.test_overlayWindow
+        XCTAssertNil(overlay?.test_backgroundImage)
+
+        let canvasPoint = NSPoint(x: 160, y: 160)
+        overlay?.test_activateEraserTool()
+        XCTAssertEqual(overlay?.test_cursorStyle(at: canvasPoint), .eraserLight)
+        overlay?.test_cursorUpdate(at: canvasPoint)
+        XCTAssertTrue(NSCursor.current === NSCursor.xxsnapEraserLight)
+
+        overlay?.test_activateEyedropperTool()
+        XCTAssertEqual(overlay?.test_cursorStyle(at: canvasPoint), .eyedropperLight)
+        overlay?.test_cursorUpdate(at: canvasPoint)
+        XCTAssertTrue(NSCursor.current === NSCursor.xxsnapEyedropperLight)
         coordinator.test_overlayWindow?.cancel()
     }
 
@@ -520,6 +532,9 @@ final class SelectionToolbarStateTests: XCTestCase {
         )
         window.test_setLockedSelectionRect(selection)
         window.test_setAnnotations([annotation])
+        let canvasPoint = NSPoint(x: selection.midX, y: selection.midY)
+        window.test_activateEraserTool()
+        window.test_cursorUpdate(at: canvasPoint)
         let toolbarBefore = try XCTUnwrap(window.test_mainToolbarRect())
         XCTAssertNil(window.test_mainToolbarButtonRect(for: .finishEditing))
         XCTAssertNotNil(window.test_measurementControlPoint(.cornerStyle))
@@ -536,6 +551,8 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(ordinaryCompletionCount, 0)
         XCTAssertEqual(window.scrollCaptureOverlayState, .capturing)
         XCTAssertTrue(window.ignoresMouseEvents)
+        XCTAssertEqual(window.test_cursorStyle(at: canvasPoint), .arrow)
+        XCTAssertTrue(NSCursor.current === NSCursor.arrow)
         let toolbarAfter = try XCTUnwrap(window.test_mainToolbarRect())
         let scrollAfter = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .scroll))
         let finishAfter = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .finishEditing))
@@ -559,6 +576,94 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertNil(window.test_measurementControlPoint(.aspectRatioLock))
         XCTAssertNil(window.test_measurementControlPoint(.refresh))
         XCTAssertEqual(window.test_measurementLabelText, "300 x 220  px")
+    }
+
+    func testScrollCaptureOverridesEveryActiveToolCursorWithArrow() {
+        let image = solidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let selection = NSRect(x: 80, y: 60, width: 300, height: 220)
+        let canvasPoint = NSPoint(x: selection.midX, y: selection.midY)
+        let cases: [(String, (SelectionOverlayWindow) -> Void)] = [
+            ("rectangle", { $0.test_activateShapeTool(.rectangle) }),
+            ("brush", { $0.test_activateShapeTool(.brush) }),
+            ("marker", { $0.test_activateShapeTool(.marker) }),
+            ("mosaic", { $0.test_activateShapeTool(.mosaicStroke) }),
+            ("text", { $0.test_activateTextTool() }),
+            ("number", { $0.test_activateNumberTool() }),
+            ("magnifier", { $0.test_activateMagnifierTool() }),
+            ("eraser", { $0.test_activateEraserTool() }),
+            ("eyedropper", { $0.test_activateEyedropperTool() }),
+        ]
+
+        for (name, activateTool) in cases {
+            let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+            window.test_setLockedSelectionRect(selection)
+            activateTool(window)
+
+            window.test_beginScrollCapture()
+
+            XCTAssertEqual(window.test_cursorStyle(at: canvasPoint), .arrow, name)
+            window.test_cursorUpdate(at: canvasPoint)
+            XCTAssertTrue(NSCursor.current === NSCursor.arrow, name)
+        }
+    }
+
+    func testScrollCaptureCursorMonitorPassesEventsThroughAndCleansUpOnEveryExit() throws {
+        let image = solidImage(size: NSSize(width: 640, height: 420), color: .white)
+        let selection = NSRect(x: 80, y: 60, width: 300, height: 220)
+        let mouseMoved = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .mouseMoved,
+            location: NSPoint(x: selection.midX, y: selection.midY),
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 0,
+            pressure: 0
+        ))
+
+        let cancelledWindow = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        cancelledWindow.test_setLockedSelectionRect(selection)
+        XCTAssertFalse(cancelledWindow.test_hasScrollCaptureCursorMonitors)
+        cancelledWindow.test_beginScrollCapture()
+        XCTAssertTrue(cancelledWindow.ignoresMouseEvents)
+        XCTAssertTrue(cancelledWindow.test_hasScrollCaptureCursorMonitors)
+        NSCursor.xxsnapEraser.set()
+        let forwardedEvent = try XCTUnwrap(
+            cancelledWindow.test_handleInstalledScrollCaptureCursorMonitorEvent(mouseMoved)
+        )
+        XCTAssertTrue(forwardedEvent === mouseMoved)
+        XCTAssertTrue(NSCursor.current === NSCursor.arrow)
+        cancelledWindow.restoreAfterScrollCaptureCancellation()
+        XCTAssertFalse(cancelledWindow.ignoresMouseEvents)
+        XCTAssertFalse(cancelledWindow.test_hasScrollCaptureCursorMonitors)
+
+        let endedWindow = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        endedWindow.test_setLockedSelectionRect(selection)
+        endedWindow.test_beginScrollCapture()
+        XCTAssertTrue(endedWindow.test_hasScrollCaptureCursorMonitors)
+        endedWindow.endScrollCapturePassiveMode()
+        XCTAssertFalse(endedWindow.test_hasScrollCaptureCursorMonitors)
+
+        let finishedWindow = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        finishedWindow.test_setLockedSelectionRect(selection)
+        finishedWindow.test_beginScrollCapture()
+        XCTAssertTrue(finishedWindow.test_hasScrollCaptureCursorMonitors)
+        finishedWindow.finishScrollCaptureAndDismiss()
+        XCTAssertFalse(finishedWindow.test_hasScrollCaptureCursorMonitors)
+
+        let savingWindow = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        savingWindow.test_setLockedSelectionRect(selection)
+        savingWindow.test_beginScrollCapture()
+        savingWindow.hideForScrollCaptureSave()
+        XCTAssertFalse(savingWindow.test_hasScrollCaptureCursorMonitors)
+        NSCursor.xxsnapEraser.set()
+        _ = savingWindow.test_handleInstalledScrollCaptureCursorMonitorEvent(mouseMoved)
+        XCTAssertTrue(NSCursor.current === NSCursor.xxsnapEraser)
+        savingWindow.present()
+        XCTAssertTrue(savingWindow.test_hasScrollCaptureCursorMonitors)
+        savingWindow.cancel()
+        XCTAssertFalse(savingWindow.test_hasScrollCaptureCursorMonitors)
     }
 
     func testScrollCaptureHidesActiveOptionsToolbarUntilOrdinaryToolbarIsRestored() throws {
@@ -5222,7 +5327,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         let options = try XCTUnwrap(window.test_optionsToolbarRect)
         let pointMode = try XCTUnwrap(window.test_eraserPointOptionRect)
         let rectangleMode = try XCTUnwrap(window.test_eraserRectangleOptionRect)
-        XCTAssertEqual(options.width, 34, accuracy: 0.5)
+        XCTAssertEqual(options.width, try XCTUnwrap(window.test_mainToolbarRect()).width, accuracy: 0.5)
         XCTAssertEqual(options.height, 60, accuracy: 0.5)
         XCTAssertEqual(pointMode.midX, options.midX, accuracy: 0.5)
         XCTAssertEqual(rectangleMode.midX, options.midX, accuracy: 0.5)
@@ -6641,7 +6746,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_cursorStyle(at: point), .crosshair)
     }
 
-    func testOverlayWindowUsesLightBrushCursorOnBlackBackground() {
+    func testOverlayWindowUsesOutlinedBrushCursorOnBlackBackground() {
         let image = solidImage(size: NSSize(width: 500, height: 400), color: .black)
         let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
         let selection = NSRect(x: 100, y: 100, width: 200, height: 120)
@@ -6649,7 +6754,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_setLockedSelectionRect(selection)
         window.test_activateShapeTool(.brush)
 
-        XCTAssertEqual(window.test_cursorStyle(at: point), .brushLight)
+        XCTAssertEqual(window.test_cursorStyle(at: point), .brush)
     }
 
     func testOverlayWindowUsesLightEyedropperCursorOnBlackBackground() throws {
@@ -6664,6 +6769,65 @@ final class SelectionToolbarStateTests: XCTestCase {
         window.test_mouseUp(at: eyedropperPoint)
 
         XCTAssertEqual(window.test_cursorStyle(at: point), .eyedropperLight)
+    }
+
+    func testCaptureEyedropperChoosesCursorContrastAtPointerOnMixedBackground() {
+        let image = solidImage(size: NSSize(width: 500, height: 400), color: .white)
+        image.lockFocus()
+        NSColor.black.setFill()
+        NSRect(x: 140, y: 140, width: 40, height: 40).fill()
+        image.unlockFocus()
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        window.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 200, height: 120))
+        window.test_activateEyedropperTool()
+
+        let darkPoint = NSPoint(x: 160, y: 160)
+        let lightPoint = NSPoint(x: 240, y: 160)
+        XCTAssertEqual(window.test_cursorStyle(at: darkPoint), .eyedropperLight)
+        window.test_cursorUpdate(at: darkPoint)
+        XCTAssertTrue(NSCursor.current === NSCursor.xxsnapEyedropperLight)
+        XCTAssertEqual(window.test_cursorStyle(at: lightPoint), .eyedropper)
+        window.test_cursorUpdate(at: lightPoint)
+        XCTAssertTrue(NSCursor.current === NSCursor.xxsnapEyedropper)
+    }
+
+    func testTeachingPenEyedropperChoosesCursorContrastAtPointerOnMixedBackground() {
+        let frame = NSRect(x: 0, y: 0, width: 500, height: 400)
+        let image = solidImage(size: frame.size, color: .white)
+        image.lockFocus()
+        NSColor.black.setFill()
+        NSRect(x: 140, y: 140, width: 40, height: 40).fill()
+        image.unlockFocus()
+        let window = SelectionOverlayWindow(
+            backgroundImage: image,
+            configuration: .teachingPen(windowFrame: frame)
+        ) { _ in }
+        window.test_activateEyedropperTool()
+
+        let darkPoint = NSPoint(x: 160, y: 160)
+        let lightPoint = NSPoint(x: 240, y: 160)
+        XCTAssertNil(window.test_backgroundImage)
+        XCTAssertEqual(window.test_cursorStyle(at: darkPoint), .eyedropperLight)
+        window.test_cursorUpdate(at: darkPoint)
+        XCTAssertTrue(NSCursor.current === NSCursor.xxsnapEyedropperLight)
+        XCTAssertEqual(window.test_cursorStyle(at: lightPoint), .eyedropper)
+        window.test_cursorUpdate(at: lightPoint)
+        XCTAssertTrue(NSCursor.current === NSCursor.xxsnapEyedropper)
+    }
+
+    func testOverlayWindowChoosesEraserContrastAtPointerOnMixedBackground() {
+        let image = solidImage(size: NSSize(width: 500, height: 400), color: .white)
+        image.lockFocus()
+        NSColor.black.setFill()
+        NSRect(x: 140, y: 140, width: 40, height: 40).fill()
+        image.unlockFocus()
+        let window = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        let selection = NSRect(x: 100, y: 100, width: 200, height: 120)
+        window.test_setLockedSelectionRect(selection)
+        window.test_activateEraserTool()
+
+        XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: 160, y: 160)), .eraserLight)
+        XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: 240, y: 160)), .eraser)
     }
 
     func testOverlayWindowUsesLightMoveCursorOnBlackBackground() {
@@ -12765,6 +12929,8 @@ final class SelectionToolbarStateTests: XCTestCase {
         let presentation = FakeScrollCapturePresentation()
         let saveProgress = FakeSuperLongSaveProgress()
         let overlay = SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in }
+        var overlayWasHiddenWhenSavePanelOpened = false
+        var presentationWasHiddenWhenSavePanelOpened = false
         let coordinator = CaptureCoordinator(
             permissionCoordinator: PermissionCoordinator(),
             screenCaptureService: ScreenCaptureService(),
@@ -12774,7 +12940,9 @@ final class SelectionToolbarStateTests: XCTestCase {
                 return presentation
             },
             superLongSaveDestinationProvider: {
-                FileManager.default.temporaryDirectory.appendingPathComponent("in-progress.png")
+                overlayWasHiddenWhenSavePanelOpened = !overlay.isVisible
+                presentationWasHiddenWhenSavePanelOpened = presentation.hideForSavingCount == 1
+                return FileManager.default.temporaryDirectory.appendingPathComponent("in-progress.png")
             },
             superLongSaveProgressFactory: { context in
                 saveProgress.onCancel = context.onCancel
@@ -12791,6 +12959,8 @@ final class SelectionToolbarStateTests: XCTestCase {
         for _ in 0..<100 where session.finishSavingCount == 0 { await Task.yield() }
 
         XCTAssertEqual(saveProgress.showCount, 1)
+        XCTAssertTrue(overlayWasHiddenWhenSavePanelOpened)
+        XCTAssertTrue(presentationWasHiddenWhenSavePanelOpened)
         XCTAssertEqual(presentation.hideForSavingCount, 1)
         XCTAssertEqual(presentation.stopCount, 0)
         XCTAssertTrue(coordinator.test_overlayWindow === overlay)
@@ -12825,6 +12995,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         let destination = FileManager.default.temporaryDirectory
             .appendingPathComponent("xxsnap-coordinator-super-long-retry.png")
         var destinations: [URL?] = [nil, destination]
+        let overlay = SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in }
         let coordinator = CaptureCoordinator(
             permissionCoordinator: PermissionCoordinator(),
             screenCaptureService: ScreenCaptureService(),
@@ -12837,7 +13008,8 @@ final class SelectionToolbarStateTests: XCTestCase {
             superLongSaveDestinationProvider: { destinations.removeFirst() },
             scrollCaptureTargetDetector: FakeScrollCaptureTargetDetector()
         )
-        coordinator.test_installOverlayWindow(SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in })
+        coordinator.test_installOverlayWindow(overlay)
+        overlay.orderFrontRegardless()
         coordinator.test_requestScrollCapture(seed: seed)
         await Task.yield()
 
@@ -12845,6 +13017,9 @@ final class SelectionToolbarStateTests: XCTestCase {
         await Task.yield()
         XCTAssertTrue(coordinator.test_hasScrollCaptureSession)
         XCTAssertEqual(session.finishSavingCount, 0)
+        XCTAssertTrue(overlay.isVisible)
+        XCTAssertEqual(presentation.hideForSavingCount, 1)
+        XCTAssertEqual(presentation.restoreAfterSaveFailureCount, 1)
 
         presentation.onFinish?()
         for _ in 0..<100 where coordinator.test_hasScrollCaptureSession { await Task.yield() }
@@ -12873,13 +13048,16 @@ final class SelectionToolbarStateTests: XCTestCase {
             superLongSaveDestinationProvider: { destination },
             scrollCaptureTargetDetector: FakeScrollCaptureTargetDetector()
         )
-        coordinator.test_installOverlayWindow(SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in })
+        let overlay = SelectionOverlayWindow(backgroundImage: seed.frozenImage) { _ in }
+        coordinator.test_installOverlayWindow(overlay)
+        overlay.orderFrontRegardless()
         coordinator.test_requestScrollCapture(seed: seed)
         await Task.yield()
 
         presentation.onFinish?()
         for _ in 0..<100 where session.finishSavingCount < 1 { await Task.yield() }
         XCTAssertTrue(coordinator.test_hasScrollCaptureSession)
+        XCTAssertTrue(overlay.isVisible)
         XCTAssertEqual(presentation.hideForSavingCount, 1)
         XCTAssertEqual(presentation.restoreAfterSaveFailureCount, 1)
         XCTAssertEqual(presentation.stopCount, 0)
@@ -15388,6 +15566,7 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "redo-enabled"), 0)
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "redo-disabled"), 0)
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "pencil-tool"), 2)
+        XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "eraser"), 1)
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "straw-ranging"), 0)
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "trash"), 3)
         XCTAssertEqual(SelectionToolbarState.toolbarIconInset(for: "eyedropper"), 2)
@@ -15416,12 +15595,19 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertNotNil(Bundle.main.url(forResource: "trash", withExtension: "svg"))
     }
 
-    func testCurrentColorToolbarIconsUseTemplateTint() {
-        XCTAssertFalse(SelectionToolbarState.usesFixedColorToolbarIconResource("pencil-tool"))
-        XCTAssertFalse(SelectionToolbarState.usesFixedColorToolbarIconResource("arrow"))
-        XCTAssertFalse(SelectionToolbarState.usesFixedColorToolbarIconResource("mosaic-tool"))
-        XCTAssertFalse(SelectionToolbarState.usesFixedColorToolbarIconResource("straw-ranging"))
-        XCTAssertTrue(SelectionToolbarState.usesFixedColorToolbarIconResource("undo-enabled"))
+    func testToolbarIconColorTreatmentMatchesResourceArtwork() {
+        XCTAssertFalse(
+            SelectionToolbarState.shouldTintToolbarIconResource("pencil-tool", selected: false)
+        )
+        XCTAssertTrue(
+            SelectionToolbarState.shouldTintToolbarIconResource("pencil-tool", selected: true)
+        )
+        XCTAssertTrue(
+            SelectionToolbarState.shouldTintToolbarIconResource("arrow", selected: false)
+        )
+        XCTAssertFalse(
+            SelectionToolbarState.shouldTintToolbarIconResource("undo-enabled", selected: true)
+        )
     }
 
     func testMosaicToolbarButtonUsesMasaike2Resource() {
@@ -15430,14 +15616,109 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertEqual(window.test_symbolName(for: .mosaic), "toolbar-masaike2")
     }
 
+    @MainActor
     func testEraserCursorUsesSameResourceAsToolbarButton() throws {
         let window = SelectionOverlayWindow(backgroundImage: nil) { _ in }
         let toolbarSymbol = try XCTUnwrap(window.test_symbolName(for: .eraser))
         let toolbarResource = toolbarSymbol.replacingOccurrences(of: "toolbar-", with: "")
+        let pinnedImage = PinnedImageWindowController(
+            image: solidImage(size: NSSize(width: 120, height: 80), color: .white),
+            screenRect: NSRect(x: 40, y: 50, width: 120, height: 80)
+        )
 
-        XCTAssertEqual(toolbarResource, "eraser-tool")
-        XCTAssertEqual(SelectionToolbarState.eraserCursorIconResourceName, toolbarResource)
+        XCTAssertEqual(toolbarResource, "eraser")
+        XCTAssertEqual(SelectionToolbarState.eraserIconResourceName, toolbarResource)
+        XCTAssertEqual(SelectionToolbarState.eraserToolbarSymbolName, toolbarSymbol)
+        XCTAssertEqual(pinnedImage.test_editingToolbarEraserIconName, toolbarSymbol)
         XCTAssertNotNil(Bundle.main.url(forResource: toolbarResource, withExtension: "svg"))
+    }
+
+    func testTeachingPenEraserUsesIconCursorExceptForRectangleMode() throws {
+        let frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        let window = SelectionOverlayWindow(
+            backgroundImage: solidImage(size: frame.size, color: .white),
+            configuration: .teachingPen(windowFrame: frame)
+        ) { _ in }
+        window.test_activateEraserTool()
+        window.test_rightMouseDown(at: NSPoint(x: 360, y: 420))
+
+        XCTAssertEqual(window.test_symbolName(for: .eraser), "toolbar-eraser")
+        XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: 160, y: 160)), .eraser)
+
+        let rectanglePoint = try XCTUnwrap(window.test_eraserRectangleOptionPoint())
+        window.test_mouseDown(at: rectanglePoint)
+        window.test_mouseUp(at: rectanglePoint)
+
+        XCTAssertEqual(window.test_cursorStyle(at: NSPoint(x: 160, y: 160)), .crosshair)
+    }
+
+    func testTeachingPenCursorUpdateAppliesEraserAndEyedropperCursors() {
+        let frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        let window = SelectionOverlayWindow(
+            backgroundImage: solidImage(size: frame.size, color: .white),
+            configuration: .teachingPen(windowFrame: frame)
+        ) { _ in }
+        let canvasPoint = NSPoint(x: 160, y: 160)
+
+        XCTAssertTrue(window.test_tracksCursorUpdates)
+
+        window.test_activateEraserTool()
+        window.test_cursorUpdate(at: canvasPoint)
+        XCTAssertTrue(NSCursor.current === NSCursor.xxsnapEraser)
+
+        window.test_activateEyedropperTool()
+        window.test_cursorUpdate(at: canvasPoint)
+        XCTAssertTrue(NSCursor.current === NSCursor.xxsnapEyedropper)
+    }
+
+    func testEraserResourceRendersOpaqueArtworkOnTransparentBackground() throws {
+        let resourceURL = try XCTUnwrap(Bundle.main.url(forResource: "eraser", withExtension: "svg"))
+        let source = try XCTUnwrap(NSImage(contentsOf: resourceURL))
+        let rendered = NSImage(size: NSSize(width: 160, height: 140))
+        rendered.lockFocus()
+        NSColor.clear.setFill()
+        NSRect(x: 0, y: 0, width: 160, height: 140).fill()
+        source.draw(in: NSRect(x: 0, y: 0, width: 160, height: 140))
+        rendered.unlockFocus()
+
+        let pixels = try rgbaBytes(in: rendered)
+        let alphaValues = stride(from: 3, to: pixels.count, by: 4).map { pixels[$0] }
+
+        XCTAssertTrue(alphaValues.contains { $0 < 10 })
+        XCTAssertTrue(alphaValues.contains { $0 > 200 })
+    }
+
+    func testEraserCursorPreservesSVGShape() throws {
+        let resourceURL = try XCTUnwrap(Bundle.main.url(forResource: "eraser", withExtension: "svg"))
+        let source = try XCTUnwrap(NSImage(contentsOf: resourceURL))
+        let reference = NSImage(size: NSSize(width: 24, height: 24))
+        reference.lockFocus()
+        NSColor.clear.setFill()
+        NSRect(x: 0, y: 0, width: 24, height: 24).fill()
+        source.draw(in: NSRect(x: 3, y: 3, width: 18, height: 18))
+        reference.unlockFocus()
+
+        let referencePixels = try rgbaBytes(in: reference)
+        let expectedAlpha = stride(from: 3, to: referencePixels.count, by: 4).map { referencePixels[$0] }
+        let cursorPixels = try rgbaBytes(in: NSCursor.xxsnapEraser.image)
+        let actualAlpha = stride(from: 3, to: cursorPixels.count, by: 4).map { cursorPixels[$0] }
+        let lightCursorPixels = try rgbaBytes(in: NSCursor.xxsnapEraserLight.image)
+        let lightAlpha = stride(from: 3, to: lightCursorPixels.count, by: 4).map { lightCursorPixels[$0] }
+        var hasOpaqueDarkPixel = false
+        var hasOpaqueLightPixel = false
+        for index in stride(from: 0, to: cursorPixels.count, by: 4) where cursorPixels[index + 3] > 200 {
+            let brightness = Int(cursorPixels[index]) + Int(cursorPixels[index + 1]) + Int(cursorPixels[index + 2])
+            hasOpaqueDarkPixel = hasOpaqueDarkPixel || brightness < 120
+        }
+        for index in stride(from: 0, to: lightCursorPixels.count, by: 4) where lightCursorPixels[index + 3] > 200 {
+            let brightness = Int(lightCursorPixels[index]) + Int(lightCursorPixels[index + 1]) + Int(lightCursorPixels[index + 2])
+            hasOpaqueLightPixel = hasOpaqueLightPixel || brightness > 645
+        }
+
+        XCTAssertEqual(actualAlpha, expectedAlpha)
+        XCTAssertEqual(lightAlpha, expectedAlpha)
+        XCTAssertTrue(hasOpaqueDarkPixel)
+        XCTAssertTrue(hasOpaqueLightPixel)
     }
 
     func testMosaicPreviewProgressMapsRangeEndpoints() {
@@ -16463,6 +16744,50 @@ final class SelectionToolbarStateTests: XCTestCase {
         XCTAssertGreaterThan(iconPixel.blue, iconPixel.red)
         XCTAssertGreaterThan(iconPixel.blue, iconPixel.green)
         XCTAssertLessThan(pixelDistance(selectedBackgroundPixel, unselectedBackgroundPixel), 8)
+    }
+
+    func testSelectedPencilToolbarIconIsBlueInScreenshotAndTeachingPen() throws {
+        let image = solidImage(size: NSSize(width: 900, height: 520), color: .white)
+        let screenshot = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        screenshot.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+
+        let teachingPen = SelectionOverlayWindow(
+            backgroundImage: image,
+            configuration: .teachingPen(windowFrame: NSRect(origin: .zero, size: image.size))
+        ) { _ in }
+        teachingPen.test_rightMouseDown(at: NSPoint(x: 360, y: 420))
+
+        for window in [screenshot, teachingPen] {
+            window.test_activateShapeTool(.brush)
+            let button = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .pen))
+            let overlayImage = try XCTUnwrap(window.test_renderedOverlayImage())
+            let iconPixel = try XCTUnwrap(firstBlueDominantPixel(in: overlayImage, rect: button))
+
+            XCTAssertGreaterThan(iconPixel.blue, iconPixel.red)
+            XCTAssertGreaterThan(iconPixel.blue, iconPixel.green)
+        }
+    }
+
+    func testSelectedEraserToolbarIconIsBlueInScreenshotAndTeachingPen() throws {
+        let image = solidImage(size: NSSize(width: 900, height: 520), color: .white)
+        let screenshot = SelectionOverlayWindow(backgroundImage: image) { _ in }
+        screenshot.test_setLockedSelectionRect(NSRect(x: 100, y: 100, width: 300, height: 220))
+
+        let teachingPen = SelectionOverlayWindow(
+            backgroundImage: image,
+            configuration: .teachingPen(windowFrame: NSRect(origin: .zero, size: image.size))
+        ) { _ in }
+        teachingPen.test_rightMouseDown(at: NSPoint(x: 360, y: 420))
+
+        for window in [screenshot, teachingPen] {
+            window.test_activateEraserTool()
+            let button = try XCTUnwrap(window.test_mainToolbarButtonRect(for: .eraser))
+            let overlayImage = try XCTUnwrap(window.test_renderedOverlayImage())
+            let iconPixel = try XCTUnwrap(firstBlueDominantPixel(in: overlayImage, rect: button))
+
+            XCTAssertGreaterThan(iconPixel.blue, iconPixel.red)
+            XCTAssertGreaterThan(iconPixel.blue, iconPixel.green)
+        }
     }
 
     func testSelectedEyedropperToolbarIconIsBlueWithoutSelectedBackground() throws {

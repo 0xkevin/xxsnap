@@ -97,6 +97,7 @@ void testCatalogContract()
     CHECK(toolbarIcon(ToolbarAction::rectangle).insetDip == 0.0F);
     static_assert(toolbarIcon(ToolbarAction::number).insetDip == 3.0F);
     static_assert(toolbarIcon(ToolbarAction::scroll).insetDip == 0.0F);
+    static_assert(!toolbarIcon(ToolbarAction::pen).fixedColor);
     static_assert(toolbarIcon(ToolbarAction::undo).fixedColor);
     static_assert(toolbarIcon(ToolbarAction::redo).fixedColor);
     static_assert(extraGapAfter(ToolbarAction::eraser) == 8.0F);
