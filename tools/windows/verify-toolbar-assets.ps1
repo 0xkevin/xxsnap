@@ -8,7 +8,7 @@ $manifestPath = Join-Path $repoRoot "platforms\win\resources\toolbar\ToolbarAsse
 $expectedNames = @(
     "settings-more", "screenshot", "arrow", "pencil-tool", "highlighter-tool",
     "straw-ranging", "masaike2", "text-tool", "number-sequence",
-    "zoom-in-tool", "eraser-tool", "scroll-screen2",
+    "zoom-in-tool", "eraser", "scroll-screen2",
     "undo-enabled", "undo-disabled", "redo-enabled", "redo-disabled",
     "cancel-capture", "pin-to-screen", "save-to-file", "copy-to-clipboard", "done", "trash",
     "refresh-svgrepo-com3"
@@ -20,6 +20,9 @@ if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
 }
 
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+if ($manifest.version -ne 2) {
+    throw "Expected toolbar asset manifest version 2, found '$($manifest.version)'."
+}
 $assets = @($manifest.assets)
 if ($assets.Count -ne $expectedNames.Count) {
     throw "Expected $($expectedNames.Count) toolbar assets, found $($assets.Count)."
@@ -39,7 +42,7 @@ Add-Type -AssemblyName System.Drawing
 foreach ($asset in $assets) {
     foreach ($property in @(
         "name", "source", "sha256", "logicalSizeDip", "insetDip",
-        "fixedColor", "generated"
+        "fixedColor", "generated", "generatedSha256"
     )) {
         if ($null -eq $asset.PSObject.Properties[$property]) {
             throw "Toolbar asset '$($asset.name)' is missing '$property'."
@@ -63,6 +66,14 @@ foreach ($asset in $assets) {
         $imagePath = Join-Path $repoRoot ($generatedProperty.Value -replace "/", "\")
         if (-not (Test-Path -LiteralPath $imagePath -PathType Leaf)) {
             throw "Generated toolbar asset is missing: $imagePath"
+        }
+        $generatedHashProperty = $asset.generatedSha256.PSObject.Properties[$scale]
+        if ($null -eq $generatedHashProperty) {
+            throw "Toolbar asset '$($asset.name)' is missing generated hash '$scale'."
+        }
+        $generatedHash = (Get-FileHash -LiteralPath $imagePath -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($generatedHash -ne $generatedHashProperty.Value) {
+            throw "Generated toolbar asset hash mismatch: $imagePath"
         }
 
         $expectedEdge = [Math]::Round(

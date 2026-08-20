@@ -7,6 +7,7 @@ source_root=$(CDPATH= cd -- "$script_dir/../.." && pwd)
 crosshair="$source_root/platforms/win/resources/cursors/xxsnap-crosshair.cur"
 rotation="$source_root/platforms/win/resources/cursors/xxsnap-rotation.cur"
 eraser="$source_root/platforms/win/resources/cursors/xxsnap-eraser.cur"
+eraser_light="$source_root/platforms/win/resources/cursors/xxsnap-eraser-light.cur"
 brush="$source_root/platforms/win/resources/cursors/xxsnap-brush.cur"
 brush_light="$source_root/platforms/win/resources/cursors/xxsnap-brush-light.cur"
 eyedropper="$source_root/platforms/win/resources/cursors/xxsnap-eyedropper.cur"
@@ -67,22 +68,38 @@ fi
 
 echo "Windows rotation cursor keeps the macOS glyph without Win32 enlargement."
 
-if [ ! -f "$eraser" ]; then
-    echo "Windows eraser cursor is missing: $eraser" >&2
+for eraser_cursor in "$eraser" "$eraser_light"; do
+    if ! eraser_geometry=$(magick identify -format '%wx%h|%@' "$eraser_cursor"); then
+        echo "Unable to inspect Windows eraser cursor: $eraser_cursor" >&2
+        exit 1
+    fi
+    eraser_dimensions=${eraser_geometry%%|*}
+    eraser_visible_bounds=${eraser_geometry#*|}
+    eraser_hotspot=$(od -An -tu1 -j10 -N4 "$eraser_cursor" | xargs)
+    if [ "$eraser_dimensions" != "32x32" ] \
+        || [ "$eraser_hotspot" != "11 0 21 0" ] \
+        || [ "$eraser_visible_bounds" != "18x18+7+7" ]; then
+        echo "Windows eraser cursor must preserve the 18px Mac glyph and translated (11,21) hotspot; got $eraser_dimensions, $eraser_hotspot, $eraser_visible_bounds." >&2
+        exit 1
+    fi
+done
+
+echo "Windows eraser cursor variants keep the 18px macOS glyph without Win32 enlargement."
+
+eraser_alpha=$(magick "$eraser" -alpha extract -format '%#' info:)
+eraser_light_alpha=$(magick "$eraser_light" -alpha extract -format '%#' info:)
+eraser_tip_color=$(magick "$eraser" \
+    -format '%[fx:p{11,21}.r] %[fx:p{11,21}.g] %[fx:p{11,21}.b]' info:)
+eraser_light_tip_color=$(magick "$eraser_light" \
+    -format '%[fx:p{11,21}.r] %[fx:p{11,21}.g] %[fx:p{11,21}.b]' info:)
+if [ "$eraser_alpha" != "$eraser_light_alpha" ] \
+    || [ "$eraser_tip_color" != "0 0 0" ] \
+    || [ "$eraser_light_tip_color" != "1 1 1" ]; then
+    echo "Windows eraser cursor variants must share an alpha mask and use dark/light foreground colors; got $eraser_tip_color and $eraser_light_tip_color." >&2
     exit 1
 fi
 
-eraser_dimensions=$(magick identify -format '%wx%h' "$eraser")
-eraser_hotspot=$(od -An -tu1 -j10 -N4 "$eraser" | xargs)
-eraser_visible_bounds=$(magick identify -format '%@' "$eraser")
-if [ "$eraser_dimensions" != "32x32" ] \
-    || [ "$eraser_hotspot" != "11 0 21 0" ] \
-    || [ "$eraser_visible_bounds" != "18x16+7+8" ]; then
-    echo "Windows eraser cursor must preserve the 18px Mac glyph and translated (11,21) hotspot; got $eraser_dimensions, $eraser_hotspot, $eraser_visible_bounds." >&2
-    exit 1
-fi
-
-echo "Windows eraser cursor keeps the 18px macOS glyph without Win32 enlargement."
+echo "Windows eraser cursor variants preserve matching dark/light contrast masks."
 
 eraser_orientation=$(magick "$eraser" \
     -format '%[fx:p{11,21}.a] %[fx:p{11,8}.a]' info:)

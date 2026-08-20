@@ -33,7 +33,7 @@ private:
         return action <= ToolbarAction::scroll;
     }
 
-    std::array<bool, static_cast<std::size_t>(ToolbarAction::finishEditing) + 1U>
+    std::array<bool, static_cast<std::size_t>(ToolbarAction::count)>
         capabilities_{};
     std::optional<ToolbarAction> selectedAction_;
     bool canUndo_ = false;

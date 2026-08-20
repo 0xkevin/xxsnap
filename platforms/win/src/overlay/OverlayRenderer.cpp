@@ -2816,6 +2816,8 @@ struct OverlayRenderer::Impl final {
         ComPtr<ID2D1SolidColorBrush> toolbarBackgroundBrush;
         ComPtr<ID2D1SolidColorBrush> toolbarBorderBrush;
         ComPtr<ID2D1SolidColorBrush> toolbarSeparatorBrush;
+        ComPtr<ID2D1SolidColorBrush> teachingPenSeparatorBrush;
+        ComPtr<ID2D1SolidColorBrush> teachingPenSeparatorHighlightBrush;
         ComPtr<ID2D1SolidColorBrush> recognitionFillBrush;
 
         const std::array brushResults{
@@ -2841,6 +2843,10 @@ struct OverlayRenderer::Impl final {
                 VisualStyleCatalog::toolbarBackgroundAlpha), toolbarBackgroundBrush),
             createBrush(color(VisualStyleCatalog::toolbarBorderColor), toolbarBorderBrush),
             createBrush(D2D1::ColorF(0.0F, 0.0F, 0.0F, 0.15F), toolbarSeparatorBrush),
+            createBrush(D2D1::ColorF(0.0F, 0.0F, 0.0F, 0.10F),
+                teachingPenSeparatorBrush),
+            createBrush(D2D1::ColorF(1.0F, 1.0F, 1.0F, 0.48F),
+                teachingPenSeparatorHighlightBrush),
             createBrush(D2D1::ColorF(0.70F, 0.70F, 0.70F, 0.28F), recognitionFillBrush),
         };
         for (const auto& brushResult : brushResults) {
@@ -3070,6 +3076,20 @@ struct OverlayRenderer::Impl final {
                         renderTarget->FillRoundedRectangle(
                             &roundedSeparator, toolbarSeparatorBrush.get());
                     }
+                }
+                if (state.teachingPen
+                    && layout.toolbar.teachingPenActionSeparator.has_value()) {
+                    const auto separator = d2dRect(
+                        *layout.toolbar.teachingPenActionSeparator);
+                    renderTarget->FillRectangle(
+                        separator, teachingPenSeparatorBrush.get());
+                    const auto highlight = D2D1::RectF(
+                        separator.left,
+                        separator.top + 1.0F,
+                        separator.right,
+                        separator.bottom + 1.0F);
+                    renderTarget->FillRectangle(
+                        highlight, teachingPenSeparatorHighlightBrush.get());
                 }
                 if (!state.teachingPen) {
                     drawToolbarIcon(

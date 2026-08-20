@@ -47,7 +47,8 @@ void testCatalogContract()
     static_assert(ToolbarMetrics::heightDip == 28.0F);
     static_assert(ToolbarMetrics::buttonSizeDip == 20.0F);
     static_assert(ToolbarMetrics::buttonStepDip == 28.0F);
-    static_assert(ToolbarMetrics::horizontalPaddingDip == 4.0F);
+    static_assert(ToolbarMetrics::dragHandleStepDip == 24.0F);
+    static_assert(ToolbarMetrics::horizontalPaddingDip == 3.0F);
     static_assert(ToolbarMetrics::groupGapDip == 8.0F);
     static_assert(ToolbarMetrics::cornerRadiusDip == 6.0F);
 
@@ -89,12 +90,17 @@ void testCatalogContract()
         ToolbarAction::magnifier,
         ToolbarAction::copy,
         ToolbarAction::save,
+        ToolbarAction::clearAll,
     };
     static_assert(arraysEqual(
         teachingPenToolbarActions(), teachingPenExpected));
     CHECK(std::wstring_view(toolbarIcon(ToolbarAction::finishEditing).resourceName)
         == L"done");
-    CHECK(toolbarIcon(ToolbarAction::rectangle).insetDip == 0.0F);
+    CHECK(toolbarIcon(ToolbarAction::rectangle).insetDip == -1.0F);
+    CHECK(std::wstring_view(toolbarIcon(ToolbarAction::eraser).resourceName)
+        == L"eraser");
+    CHECK(toolbarIcon(ToolbarAction::eraser).insetDip == 1.0F);
+    CHECK(toolbarIcon(ToolbarAction::clearAll).insetDip == 3.0F);
     static_assert(toolbarIcon(ToolbarAction::number).insetDip == 3.0F);
     static_assert(toolbarIcon(ToolbarAction::scroll).insetDip == 0.0F);
     static_assert(!toolbarIcon(ToolbarAction::pen).fixedColor);
@@ -146,6 +152,8 @@ void testCatalogContract()
     CHECK(toolbarShortcutLabel(ToolbarAction::redo) == L"Ctrl+Shift+Z");
     CHECK(toolbarShortcutLabel(ToolbarAction::pin) == L"Ctrl+1");
     CHECK(toolbarShortcutLabel(ToolbarAction::finishEditing) == L"ESC");
+    CHECK(toolbarShortcutLabel(ToolbarAction::clearAll).empty());
+    CHECK(toolbarTooltipText(ToolbarAction::clearAll) == L"清除所有");
     CHECK(toolbarTooltipText(ToolbarAction::scroll) == L"滚动截图 (R)");
     CHECK(toolbarShortcutMatches(
         ToolbarAction::scroll, 'R', false, false, false));
@@ -247,10 +255,10 @@ void testAllEmbeddedResourcesDecode()
     CoUninitialize();
 }
 
-void testEmbeddedEraserCursorMatchesMacHotspot()
+void checkEmbeddedEraserCursor(int resourceId)
 {
     const auto cursor = LoadCursorW(
-        GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDC_XXSNAP_ERASER));
+        GetModuleHandleW(nullptr), MAKEINTRESOURCEW(resourceId));
     CHECK(cursor != nullptr);
     if (cursor == nullptr) return;
 
@@ -263,10 +271,16 @@ void testEmbeddedEraserCursorMatchesMacHotspot()
     if (info.hbmColor != nullptr) DeleteObject(info.hbmColor);
 }
 
+void testEmbeddedEraserCursorsMatchMacHotspot()
+{
+    checkEmbeddedEraserCursor(IDC_XXSNAP_ERASER);
+    checkEmbeddedEraserCursor(IDC_XXSNAP_ERASER_LIGHT);
+}
+
 int main()
 {
     testCatalogContract();
     testAllEmbeddedResourcesDecode();
-    testEmbeddedEraserCursorMatchesMacHotspot();
+    testEmbeddedEraserCursorsMatchMacHotspot();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

@@ -323,6 +323,7 @@ private:
     void updateEyedropper(PixelPoint virtualPoint, bool shift) noexcept;
     bool eyedropperPointIsValid(PixelPoint virtualPoint) const noexcept;
     bool selectionPrefersLightCursor() const noexcept;
+    bool pointPrefersLightCursor(PixelPoint virtualPoint) const noexcept;
     bool shouldUseLightCursor(
         PixelPoint virtualPoint,
         const OverlaySurface& surface) const noexcept;

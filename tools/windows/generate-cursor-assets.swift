@@ -352,23 +352,29 @@ for (name, image) in [
 }
 
 let eraserSource = repository
-    .appendingPathComponent("platforms/mac/Resources/Icons/eraser-tool.svg")
+    .appendingPathComponent("platforms/mac/Resources/Icons/eraser.svg")
 guard let eraserImage = NSImage(contentsOf: eraserSource) else {
     throw CocoaError(.fileReadCorruptFile)
 }
-let eraserBitmap = try renderedBitmap(
-    for: eraserImage,
-    destination: NSRect(x: 7, y: 7, width: 18, height: 18)
-)
-let eraserOutput = outputDirectory.appendingPathComponent("xxsnap-eraser.cur")
 let eraserHotSpot = NSPoint(
     x: 7 + CGFloat(macCursorInset),
     y: 17 + CGFloat(macCursorInset)
 )
-try cursorData(
-    bitmap: eraserBitmap,
-    hotSpot: eraserHotSpot,
-    flipVertically: true
-)
-    .write(to: eraserOutput, options: .atomic)
-print("Generated \(eraserOutput.path) from the macOS eraser cursor SVG.")
+for (name, tint) in [
+    ("xxsnap-eraser.cur", nil),
+    ("xxsnap-eraser-light.cur", NSColor.white),
+] as [(String, NSColor?)] {
+    let bitmap = try renderedBitmap(
+        for: eraserImage,
+        tint: tint,
+        destination: NSRect(x: 7, y: 7, width: 18, height: 18)
+    )
+    let destination = outputDirectory.appendingPathComponent(name)
+    try cursorData(
+        bitmap: bitmap,
+        hotSpot: eraserHotSpot,
+        flipVertically: true
+    )
+        .write(to: destination, options: .atomic)
+    print("Generated \(destination.path) from the macOS eraser cursor SVG.")
+}

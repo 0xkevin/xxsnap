@@ -37,6 +37,7 @@ struct MainToolbarLayout {
     ToolbarRect leadingDragHandle;
     ToolbarRect trailingDragHandle;
     std::vector<ToolbarItemLayout> items;
+    std::optional<ToolbarRect> teachingPenActionSeparator;
 };
 
 float toolbarWidth(const std::vector<ToolbarAction>& actions) noexcept;

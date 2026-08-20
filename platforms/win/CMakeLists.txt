@@ -62,6 +62,7 @@ set_property(
         "${PROJECT_SOURCE_DIR}/platforms/win/resources/cursors/xxsnap-eyedropper.cur"
         "${PROJECT_SOURCE_DIR}/platforms/win/resources/cursors/xxsnap-eyedropper-light.cur"
         "${PROJECT_SOURCE_DIR}/platforms/win/resources/cursors/xxsnap-eraser.cur"
+        "${PROJECT_SOURCE_DIR}/platforms/win/resources/cursors/xxsnap-eraser-light.cur"
         "${PROJECT_SOURCE_DIR}/platforms/mac/Resources/Icons/palette-tool.png"
         "${PROJECT_SOURCE_DIR}/platforms/win/resources/icons/text-bold.png"
         "${PROJECT_SOURCE_DIR}/platforms/win/resources/icons/text-bold-selected.png"

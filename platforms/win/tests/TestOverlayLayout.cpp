@@ -136,20 +136,20 @@ void testDeterministicManifest()
     CHECK_RECT(layout.overlayBounds, (DipRect{0, 0, 640, 360}));
     CHECK_RECT(layout.border, (DipRect{160, 90, 320, 180}));
     CHECK_RECT(layout.sizeLabel, (DipRect{160, 58, 98, 24}));
-    CHECK_RECT(layout.toolbar.bounds, (DipRect{336, 278, 144, 28}));
+    CHECK_RECT(layout.toolbar.bounds, (DipRect{345, 278, 135, 28}));
     CHECK(layout.toolbarItems.size() == 3U);
-    CHECK_RECT(layout.toolbarItems[0].rect, (DipRect{368, 282, 20, 20}));
-    CHECK_RECT(layout.toolbarItems[1].rect, (DipRect{396, 282, 20, 20}));
-    CHECK_RECT(layout.toolbarItems[2].rect, (DipRect{424, 282, 20, 20}));
+    CHECK_RECT(layout.toolbarItems[0].rect, (DipRect{372, 282, 20, 20}));
+    CHECK_RECT(layout.toolbarItems[1].rect, (DipRect{400, 282, 20, 20}));
+    CHECK_RECT(layout.toolbarItems[2].rect, (DipRect{428, 282, 20, 20}));
     CHECK(layout.sizeLabelText == L"320 x 180  px");
 
     const std::string expected =
         "{\"mask\":[[0,0,640,90],[0,90,160,180],[480,90,160,180],[0,270,640,90]],"
         "\"border\":[160,90,320,180],\"sizeLabel\":[160,58,98,24],"
-        "\"toolbar\":[336,278,144,28],\"toolbarItems\":["
-        "{\"action\":13,\"rect\":[368,282,20,20]},"
-        "{\"action\":15,\"rect\":[396,282,20,20]},"
-        "{\"action\":16,\"rect\":[424,282,20,20]}],"
+        "\"toolbar\":[345,278,135,28],\"toolbarItems\":["
+        "{\"action\":13,\"rect\":[372,282,20,20]},"
+        "{\"action\":15,\"rect\":[400,282,20,20]},"
+        "{\"action\":16,\"rect\":[428,282,20,20]}],"
         "\"handles\":[[155,85,10,10],[315,85,10,10],[475,85,10,10],"
         "[155,175,10,10],[475,175,10,10],[155,265,10,10],"
         "[315,265,10,10],[475,265,10,10]]}";
@@ -163,12 +163,12 @@ void testDpiScaling()
     constexpr std::array dpis{96U, 120U, 144U, 192U};
     for (const auto dpi : dpis) {
         const auto layout = fixedLayout(dpi);
-        CHECK(close(layout.toolbar.bounds.width, 144.0F));
+        CHECK(close(layout.toolbar.bounds.width, 135.0F));
         CHECK(close(layout.toolbar.bounds.height, 28.0F));
         CHECK(close(layout.toolbarItems[0].rect.width, 20.0F));
         CHECK(
             xxsnap::win::dipLengthToPhysicalPixels(layout.toolbar.bounds.width, dpi)
-            == static_cast<std::int64_t>(144U * dpi / 96U));
+            == static_cast<std::int64_t>((135U * dpi + 48U) / 96U));
         CHECK(
             xxsnap::win::dipLengthToPhysicalPixels(layout.toolbarItems[0].rect.width, dpi)
             == static_cast<std::int64_t>(20U * dpi / 96U));
@@ -180,7 +180,7 @@ void testDpiScaling()
 void testOverlayUsesSharedToolbarLayout()
 {
     const auto layout = fixedLayout(96U);
-    CHECK(layout.toolbar.bounds.width == 144.0F);
+    CHECK(layout.toolbar.bounds.width == 135.0F);
     CHECK(layout.toolbarItems.size() == 3U);
     CHECK(layout.toolbarItems[0].action == xxsnap::win::ToolbarAction::cancel);
     CHECK(layout.toolbarItems[1].action == xxsnap::win::ToolbarAction::save);
@@ -196,7 +196,7 @@ void testEdgePlacementAndClamping()
 
     const OverlayLayout nearTop = xxsnap::win::computeOverlayLayout({
         PixelRect{0, 0, 640, 360}, PixelRect{0, 2, 80, 20}, 96, 96, 72.0F});
-    CHECK_RECT(nearTop.toolbar.bounds, (DipRect{88, 10, 144, 28}));
+    CHECK_RECT(nearTop.toolbar.bounds, (DipRect{88, 10, 135, 28}));
     CHECK(!intersects(nearTop.toolbar.bounds, nearTop.border));
 
     const OverlayLayout nearRight = xxsnap::win::computeOverlayLayout({
@@ -250,7 +250,7 @@ void testCrossDisplaySelectionChromeOwnership()
     CHECK(left.showActions);
     CHECK(!right.showActions);
     CHECK(left.sizeLabel.width > 0.0F);
-    CHECK(left.toolbar.bounds.width == 144.0F);
+    CHECK(left.toolbar.bounds.width == 135.0F);
     CHECK_RECT(right.sizeLabel, (DipRect{}));
     CHECK_RECT(right.toolbar.bounds, (DipRect{}));
     CHECK(right.toolbarItems.empty());
@@ -273,7 +273,7 @@ void testMacToolbarSideCandidatesAtEveryDpi()
             80.0F,
             true,
         });
-        CHECK_RECT(rightSide.toolbar.bounds, (DipRect{508, 544, 144, 28}));
+        CHECK_RECT(rightSide.toolbar.bounds, (DipRect{508, 544, 135, 28}));
         CHECK(!intersects(rightSide.toolbar.bounds, (DipRect{200, 20, 300, 560})));
 
         const auto leftSide = xxsnap::win::computeOverlayLayout({
@@ -284,7 +284,7 @@ void testMacToolbarSideCandidatesAtEveryDpi()
             80.0F,
             true,
         });
-        CHECK_RECT(leftSide.toolbar.bounds, (DipRect{348, 544, 144, 28}));
+        CHECK_RECT(leftSide.toolbar.bounds, (DipRect{357, 544, 135, 28}));
         CHECK(!intersects(leftSide.toolbar.bounds, (DipRect{500, 20, 292, 560})));
     }
 }
@@ -312,6 +312,8 @@ void testWindowAndResourceContracts()
         MAKEINTRESOURCEW(IDC_XXSNAP_EYEDROPPER_LIGHT)) != nullptr);
     CHECK(LoadCursorW(GetModuleHandleW(nullptr),
         MAKEINTRESOURCEW(IDC_XXSNAP_BRUSH)) != nullptr);
+    CHECK(LoadCursorW(GetModuleHandleW(nullptr),
+        MAKEINTRESOURCEW(IDC_XXSNAP_ERASER_LIGHT)) != nullptr);
 }
 
 void testEyedropperUsesMacPanelGeometryAndFormats()

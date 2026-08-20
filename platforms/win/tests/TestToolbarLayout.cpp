@@ -28,34 +28,37 @@ std::vector<ToolbarAction> vectorOf(const Container& actions)
 
 void testExactMacToolbarGeometry()
 {
-    CHECK(toolbarWidth(vectorOf(terminalToolbarActions())) == 144.0F);
-    CHECK(toolbarWidth(vectorOf(fullToolbarActions())) == 560.0F);
+    CHECK(toolbarWidth(vectorOf(terminalToolbarActions())) == 135.0F);
+    CHECK(toolbarWidth(vectorOf(fullToolbarActions())) == 551.0F);
 
     const auto layout = computeMainToolbarLayout(
         {10.0F, 20.0F}, vectorOf(fullToolbarActions()));
-    CHECK((layout.bounds == ToolbarRect{10.0F, 20.0F, 560.0F, 28.0F}));
-    CHECK((layout.leadingDragHandle == ToolbarRect{14.0F, 24.0F, 20.0F, 20.0F}));
-    CHECK((layout.items.front().rect == ToolbarRect{42.0F, 24.0F, 20.0F, 20.0F}));
+    CHECK((layout.bounds == ToolbarRect{10.0F, 20.0F, 551.0F, 28.0F}));
+    CHECK((layout.leadingDragHandle == ToolbarRect{13.0F, 24.0F, 20.0F, 20.0F}));
+    CHECK((layout.items.front().rect == ToolbarRect{37.0F, 24.0F, 20.0F, 20.0F}));
     CHECK(layout.items[10].rect.x - layout.items[9].rect.x == 36.0F);
     CHECK(layout.items[11].rect.x - layout.items[10].rect.x == 36.0F);
     CHECK(layout.items[13].rect.x - layout.items[12].rect.x == 36.0F);
-    CHECK((layout.trailingDragHandle == ToolbarRect{542.0F, 24.0F, 20.0F, 20.0F}));
+    CHECK((layout.trailingDragHandle == ToolbarRect{533.0F, 24.0F, 20.0F, 20.0F}));
 }
 
 void testTeachingPenToolbarMatchesMacCompactGeometry()
 {
     const auto layout = computeTeachingPenToolbarLayout(
         {360.0F, 420.0F}, {0.0F, 0.0F, 800.0F, 600.0F});
-    CHECK((layout.bounds == ToolbarRect{366.0F, 426.0F, 56.0F, 168.0F}));
+    CHECK((layout.bounds == ToolbarRect{366.0F, 218.0F, 56.0F, 196.0F}));
     CHECK(layout.items.size() == teachingPenToolbarActions().size());
-    CHECK((layout.items[0].rect == ToolbarRect{370.0F, 430.0F, 20.0F, 20.0F}));
-    CHECK((layout.items[1].rect == ToolbarRect{398.0F, 430.0F, 20.0F, 20.0F}));
-    CHECK((layout.items[10].rect == ToolbarRect{370.0F, 570.0F, 20.0F, 20.0F}));
-    CHECK((layout.items[11].rect == ToolbarRect{398.0F, 570.0F, 20.0F, 20.0F}));
+    CHECK((layout.items[0].rect == ToolbarRect{370.0F, 222.0F, 20.0F, 20.0F}));
+    CHECK((layout.items[1].rect == ToolbarRect{398.0F, 222.0F, 20.0F, 20.0F}));
+    CHECK((layout.items[10].rect == ToolbarRect{370.0F, 362.0F, 20.0F, 20.0F}));
+    CHECK((layout.items[11].rect == ToolbarRect{398.0F, 362.0F, 20.0F, 20.0F}));
+    CHECK((layout.items[12].rect == ToolbarRect{384.0F, 390.0F, 20.0F, 20.0F}));
+    CHECK(layout.teachingPenActionSeparator
+        == std::optional<ToolbarRect>(ToolbarRect{373.0F, 357.0F, 42.0F, 1.0F}));
 
     const auto corner = computeTeachingPenToolbarLayout(
         {796.0F, 596.0F}, {0.0F, 0.0F, 800.0F, 600.0F});
-    CHECK((corner.bounds == ToolbarRect{734.0F, 422.0F, 56.0F, 168.0F}));
+    CHECK((corner.bounds == ToolbarRect{734.0F, 394.0F, 56.0F, 196.0F}));
 }
 
 void testHitTestingUsesButtonRectsOnly()

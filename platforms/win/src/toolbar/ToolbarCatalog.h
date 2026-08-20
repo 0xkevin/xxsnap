@@ -28,6 +28,7 @@ enum class ToolbarAction : std::uint8_t {
     save,
     copy,
     finishEditing,
+    clearAll,
     count,
 };
 
@@ -52,7 +53,8 @@ struct ToolbarMetrics {
     inline static constexpr float heightDip = 28.0F;
     inline static constexpr float buttonSizeDip = 20.0F;
     inline static constexpr float buttonStepDip = 28.0F;
-    inline static constexpr float horizontalPaddingDip = 4.0F;
+    inline static constexpr float dragHandleStepDip = 24.0F;
+    inline static constexpr float horizontalPaddingDip = 3.0F;
     inline static constexpr float groupGapDip = 8.0F;
     inline static constexpr float cornerRadiusDip = 6.0F;
 };
@@ -116,6 +118,7 @@ inline constexpr std::array teachingPenActions{
     ToolbarAction::magnifier,
     ToolbarAction::copy,
     ToolbarAction::save,
+    ToolbarAction::clearAll,
 };
 
 inline constexpr std::array tooltips{
@@ -137,6 +140,7 @@ inline constexpr std::array tooltips{
     ToolbarTooltipSpec{L"保存", 'S', true, false},
     ToolbarTooltipSpec{L"复制到剪切板", 'C', true, false},
     ToolbarTooltipSpec{L"完成编辑", 0x1BU, false, false},
+    ToolbarTooltipSpec{L"清除所有", 0U, false, false},
 };
 
 inline constexpr std::array imageResources{
@@ -148,7 +152,7 @@ inline constexpr std::array imageResources{
         IDR_TOOLBAR_200_SETTINGS_MORE_PNG,
     },
     ToolbarIconSpec{
-        L"screenshot", 0.0F, false,
+        L"screenshot", -1.0F, false,
         IDR_TOOLBAR_100_SCREENSHOT_PNG,
         IDR_TOOLBAR_125_SCREENSHOT_PNG,
         IDR_TOOLBAR_150_SCREENSHOT_PNG,
@@ -211,11 +215,11 @@ inline constexpr std::array imageResources{
         IDR_TOOLBAR_200_ZOOM_IN_TOOL_PNG,
     },
     ToolbarIconSpec{
-        L"eraser-tool", 2.0F, false,
-        IDR_TOOLBAR_100_ERASER_TOOL_PNG,
-        IDR_TOOLBAR_125_ERASER_TOOL_PNG,
-        IDR_TOOLBAR_150_ERASER_TOOL_PNG,
-        IDR_TOOLBAR_200_ERASER_TOOL_PNG,
+        L"eraser", 1.0F, false,
+        IDR_TOOLBAR_100_ERASER_PNG,
+        IDR_TOOLBAR_125_ERASER_PNG,
+        IDR_TOOLBAR_150_ERASER_PNG,
+        IDR_TOOLBAR_200_ERASER_PNG,
     },
     ToolbarIconSpec{
         L"scroll-screen2", 0.0F, false,
@@ -281,7 +285,7 @@ inline constexpr std::array imageResources{
         IDR_TOOLBAR_200_COPY_TO_CLIPBOARD_PNG,
     },
     ToolbarIconSpec{
-        L"trash", 2.0F, false,
+        L"trash", 3.0F, false,
         IDR_TOOLBAR_100_TRASH_PNG,
         IDR_TOOLBAR_125_TRASH_PNG,
         IDR_TOOLBAR_150_TRASH_PNG,
@@ -307,9 +311,10 @@ inline constexpr std::size_t trashIconIndex = 20U;
 inline constexpr std::size_t rotationIconIndex = 21U;
 inline constexpr std::size_t finishEditingIconIndex = 22U;
 
-inline constexpr std::array<std::size_t, fullActions.size() + 1U> actionIconIndices{
+inline constexpr std::array<std::size_t,
+    static_cast<std::size_t>(ToolbarAction::count)> actionIconIndices{
     1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 17, 18, 19,
-    finishEditingIconIndex,
+    finishEditingIconIndex, trashIconIndex,
 };
 
 } // namespace toolbar_catalog_detail
@@ -343,6 +348,7 @@ constexpr const ToolbarTooltipSpec& toolbarTooltip(
 inline std::wstring toolbarShortcutLabel(ToolbarAction action)
 {
     const auto& shortcut = toolbarTooltip(action);
+    if (shortcut.virtualKey == 0U) return {};
     std::wstring label;
     if (shortcut.control) label += L"Ctrl+";
     if (shortcut.shift) label += L"Shift+";
@@ -356,8 +362,11 @@ inline std::wstring toolbarShortcutLabel(ToolbarAction action)
 
 inline std::wstring toolbarTooltipText(ToolbarAction action)
 {
-    return std::wstring(toolbarTooltip(action).title) + L" ("
-        + toolbarShortcutLabel(action) + L")";
+    const auto shortcut = toolbarShortcutLabel(action);
+    return shortcut.empty()
+        ? std::wstring(toolbarTooltip(action).title)
+        : std::wstring(toolbarTooltip(action).title) + L" ("
+            + shortcut + L")";
 }
 
 constexpr bool toolbarShortcutMatches(
@@ -368,7 +377,8 @@ constexpr bool toolbarShortcutMatches(
     bool alt) noexcept
 {
     const auto& shortcut = toolbarTooltip(action);
-    if (alt || virtualKey != shortcut.virtualKey
+    if (shortcut.virtualKey == 0U || alt
+        || virtualKey != shortcut.virtualKey
         || control != shortcut.control) {
         return false;
     }

@@ -7,6 +7,7 @@ ToolbarState::ToolbarState() noexcept
     for (const auto action : terminalToolbarActions()) {
         capabilities_[indexOf(action)] = true;
     }
+    capabilities_[indexOf(ToolbarAction::clearAll)] = true;
 }
 
 std::vector<ToolbarAction> ToolbarState::visibleActions() const

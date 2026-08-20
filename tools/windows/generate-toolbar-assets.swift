@@ -19,6 +19,7 @@ struct AssetManifest: Encodable {
 struct AssetEntry: Encodable {
     let fixedColor: Bool
     let generated: [String: String]
+    let generatedSha256: [String: String]
     let insetDip: Double
     let logicalSizeDip: Int
     let name: String
@@ -28,7 +29,7 @@ struct AssetEntry: Encodable {
 
 let definitions = [
     AssetDefinition(name: "settings-more", insetDip: 2, fixedColor: false),
-    AssetDefinition(name: "screenshot", insetDip: 0, fixedColor: false),
+    AssetDefinition(name: "screenshot", insetDip: -1, fixedColor: false),
     AssetDefinition(name: "arrow", insetDip: 0, fixedColor: false),
     AssetDefinition(name: "pencil-tool", insetDip: 2, fixedColor: false),
     AssetDefinition(name: "highlighter-tool", insetDip: 2, fixedColor: false),
@@ -37,7 +38,7 @@ let definitions = [
     AssetDefinition(name: "text-tool", insetDip: 0, fixedColor: false),
     AssetDefinition(name: "number-sequence", insetDip: 3, fixedColor: false),
     AssetDefinition(name: "zoom-in-tool", insetDip: 2, fixedColor: false),
-    AssetDefinition(name: "eraser-tool", insetDip: 2, fixedColor: false),
+    AssetDefinition(name: "eraser", insetDip: 1, fixedColor: false),
     AssetDefinition(name: "scroll-screen2", insetDip: 0, fixedColor: false),
     AssetDefinition(name: "undo-enabled", insetDip: 0, fixedColor: true),
     AssetDefinition(name: "undo-disabled", insetDip: 0, fixedColor: true),
@@ -48,7 +49,7 @@ let definitions = [
     AssetDefinition(name: "save-to-file", insetDip: 2, fixedColor: false),
     AssetDefinition(name: "copy-to-clipboard", insetDip: 2, fixedColor: false),
     AssetDefinition(name: "done", insetDip: 0, fixedColor: false),
-    AssetDefinition(name: "trash", insetDip: 2, fixedColor: false),
+    AssetDefinition(name: "trash", insetDip: 3, fixedColor: false),
     AssetDefinition(name: "refresh-svgrepo-com3", insetDip: 4, fixedColor: true),
 ]
 
@@ -186,6 +187,7 @@ do {
                     "Invalid rendered size for \(definition.name)"])
         }
         var generated: [String: String] = [:]
+        var generatedSha256: [String: String] = [:]
 
         for scale in scales {
             let scaleDirectory = outputDirectory
@@ -204,11 +206,13 @@ do {
                 pixelEdge: pixelEdge)
             try png.write(to: output, options: .atomic)
             generated[String(scale)] = relativePath(for: output)
+            generatedSha256[String(scale)] = sha256(of: png)
         }
 
         entries.append(AssetEntry(
             fixedColor: definition.fixedColor,
             generated: generated,
+            generatedSha256: generatedSha256,
             insetDip: definition.insetDip,
             logicalSizeDip: logicalSizeDip,
             name: definition.name,
@@ -218,7 +222,7 @@ do {
 
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-    let manifest = AssetManifest(assets: entries, scales: scales, version: 1)
+    let manifest = AssetManifest(assets: entries, scales: scales, version: 2)
     var manifestData = try encoder.encode(manifest)
     manifestData.append(0x0A)
     try manifestData.write(

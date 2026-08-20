@@ -8,6 +8,12 @@
         "150" : "platforms/win/resources/toolbar/150/arrow.png",
         "200" : "platforms/win/resources/toolbar/200/arrow.png"
       },
+      "generatedSha256" : {
+        "100" : "2b79bd3bcdcfa7aab7a3a0e4f1bcd4fe8213d7a60fede4efc29da5d9fcef21a0",
+        "125" : "fbcc21790b6ea57d0c4677c986e4c2b5f0917d585267bdd286f98b566aaa0af9",
+        "150" : "5688376814552a1d28b2a4b6aa3d9124ec7184d4ca7e49b7896ec36b59a47132",
+        "200" : "ca4455a9ed7b5c6e73d785afeb28c35d9b09a6ce474dda4c83ce6a626d6064cd"
+      },
       "insetDip" : 0,
       "logicalSizeDip" : 20,
       "name" : "arrow",
@@ -21,6 +27,12 @@
         "125" : "platforms/win/resources/toolbar/125/cancel-capture.png",
         "150" : "platforms/win/resources/toolbar/150/cancel-capture.png",
         "200" : "platforms/win/resources/toolbar/200/cancel-capture.png"
+      },
+      "generatedSha256" : {
+        "100" : "1af999abc86f628715885df40ccfac7dc843d45efc95f4c4ea6b7092bd8319f2",
+        "125" : "40533b115e03a160b204d6c373040eacb2f1b2c86338bc75f3593d0006de2d72",
+        "150" : "9dd6d6d868b96d7cd0b828de160b8c11faa399f2c1b4f84d80181aad4263659a",
+        "200" : "346a6a3895f8e91f30be7ff0b978b91dd92058e539b2810809f43454bd62093f"
       },
       "insetDip" : 2,
       "logicalSizeDip" : 16,
@@ -36,6 +48,12 @@
         "150" : "platforms/win/resources/toolbar/150/copy-to-clipboard.png",
         "200" : "platforms/win/resources/toolbar/200/copy-to-clipboard.png"
       },
+      "generatedSha256" : {
+        "100" : "18080cea38f0b40bced1259fa64e884760b7317ba7b1534831a0d72d5a5656ba",
+        "125" : "5a7cc0a3caa9df54afb431b2e9405cbfb22983aa7ada77164ddd07929db05706",
+        "150" : "a3ba5db567b33cacebe302300151d93ea33c0ae9a364d84e7e0868e39447a257",
+        "200" : "f4da8ef4bbf1d534e0139320f17d2d94b42b8d5482ef0eafb82dea1e81e8402a"
+      },
       "insetDip" : 2,
       "logicalSizeDip" : 16,
       "name" : "copy-to-clipboard",
@@ -50,6 +68,12 @@
         "150" : "platforms/win/resources/toolbar/150/done.png",
         "200" : "platforms/win/resources/toolbar/200/done.png"
       },
+      "generatedSha256" : {
+        "100" : "9b33fb24cb1728f33f9824174d7e5c599a6ffddf6c7dd1371aa8e656129583c0",
+        "125" : "c6d257c155259601b3e568a88276f202603d4197ea688bd6beec08656029c7c6",
+        "150" : "697fe86a8bbb8991e870969df216619951a381d7e27d2b50a17485e9c9287472",
+        "200" : "a14825aaa577dc2de435386c7896923ba9ec7b92f941c07d59fb3f16d2261b87"
+      },
       "insetDip" : 0,
       "logicalSizeDip" : 20,
       "name" : "done",
@@ -59,16 +83,22 @@
     {
       "fixedColor" : false,
       "generated" : {
-        "100" : "platforms/win/resources/toolbar/100/eraser-tool.png",
-        "125" : "platforms/win/resources/toolbar/125/eraser-tool.png",
-        "150" : "platforms/win/resources/toolbar/150/eraser-tool.png",
-        "200" : "platforms/win/resources/toolbar/200/eraser-tool.png"
+        "100" : "platforms/win/resources/toolbar/100/eraser.png",
+        "125" : "platforms/win/resources/toolbar/125/eraser.png",
+        "150" : "platforms/win/resources/toolbar/150/eraser.png",
+        "200" : "platforms/win/resources/toolbar/200/eraser.png"
       },
-      "insetDip" : 2,
-      "logicalSizeDip" : 16,
-      "name" : "eraser-tool",
-      "sha256" : "4489e7a47bb61fd8f8ddf0ab22c8470c7f7ea453944ebeb849d6a84cfe5e304f",
-      "source" : "platforms/mac/Resources/Icons/eraser-tool.svg"
+      "generatedSha256" : {
+        "100" : "0dcb15ab687ad328a4ac5307387b7af6fbff504023a156e1f4fa75e991a70537",
+        "125" : "350a70bfe541d9713c3b90b807b2d109a8fb22604eae590a97b068ffe0e90cfe",
+        "150" : "be8d42bfa62f2a1cb975f1a9669acbe48c98a90d6aa96ae41c4d7d881e7b3785",
+        "200" : "1813c33cb8bccea8a3a53ee422c81f607b5e2e29ded582958195440642830b25"
+      },
+      "insetDip" : 1,
+      "logicalSizeDip" : 18,
+      "name" : "eraser",
+      "sha256" : "1b35296886e500e7e6413f076c08f0b6572a42184dff6226db73553f36cc949b",
+      "source" : "platforms/mac/Resources/Icons/eraser.svg"
     },
     {
       "fixedColor" : false,
@@ -77,6 +107,12 @@
         "125" : "platforms/win/resources/toolbar/125/highlighter-tool.png",
         "150" : "platforms/win/resources/toolbar/150/highlighter-tool.png",
         "200" : "platforms/win/resources/toolbar/200/highlighter-tool.png"
+      },
+      "generatedSha256" : {
+        "100" : "84a165698bdf03595e5d2dffe2d43c3b002b2eb3f1936285f286791fec9f1427",
+        "125" : "329653d26de0908e7844053b70882929214cc8aaf3e244a0337f44cc922a2e76",
+        "150" : "b45d6b8df2063a3cd0dd1a37e5ae1ae21d61a9a33a9e0015b9a535a180405855",
+        "200" : "85f6915ae025073ee87f72634f8a59e835ddf9da15881f3415c47ee897e6e2fe"
       },
       "insetDip" : 2,
       "logicalSizeDip" : 16,
@@ -92,6 +128,12 @@
         "150" : "platforms/win/resources/toolbar/150/masaike2.png",
         "200" : "platforms/win/resources/toolbar/200/masaike2.png"
       },
+      "generatedSha256" : {
+        "100" : "6d97f1e80e646a9de658602adf36cea749cb920b28d7155b76d20f6cb218d452",
+        "125" : "706fefd2baa0b6900974473fab651fd151e819a992c0faaaf46e788624302e87",
+        "150" : "2f8e463b5ecfa39051269799f185f68808b9cfec66435eeef21df27f5b50f1d6",
+        "200" : "3827aa13b12b58388ea696b1d73a8b4496df104faf0bc5067416931fa76b8785"
+      },
       "insetDip" : 0,
       "logicalSizeDip" : 20,
       "name" : "masaike2",
@@ -105,6 +147,12 @@
         "125" : "platforms/win/resources/toolbar/125/number-sequence.png",
         "150" : "platforms/win/resources/toolbar/150/number-sequence.png",
         "200" : "platforms/win/resources/toolbar/200/number-sequence.png"
+      },
+      "generatedSha256" : {
+        "100" : "50b904bbef0b2af24f5c483ea046fc160a8bdce4ace21fb118d28b2a3fddf674",
+        "125" : "d037e6d83bbed89e2382d68808cb6fa024cbc58b4c2eeae67b5b4898738a2a36",
+        "150" : "97d99016e2fb0e9b91b6d217982b37ab98fb855a80f28f3bf31cd97711ce0c86",
+        "200" : "ba73f02937250bb8c017ed2f330541aa58cc169b71a83b30687ca6ffa204d0db"
       },
       "insetDip" : 3,
       "logicalSizeDip" : 14,
@@ -120,6 +168,12 @@
         "150" : "platforms/win/resources/toolbar/150/pencil-tool.png",
         "200" : "platforms/win/resources/toolbar/200/pencil-tool.png"
       },
+      "generatedSha256" : {
+        "100" : "389ded2ca05df7866be7e1de9cb93c32203e480ef5665e9cb2d2e09584b62836",
+        "125" : "52a264b9890f1df4b1da7f8d30d3e4505f74269b1209aded702c908fcc7fba04",
+        "150" : "93f2a4cbeb6b9971e4222f81f392833318f823a08800371000c6f6c7ab9746f7",
+        "200" : "317e1d0cdddc03595fac8c22c927542cc07b217ee59ad87be8a6b3c7af862930"
+      },
       "insetDip" : 2,
       "logicalSizeDip" : 16,
       "name" : "pencil-tool",
@@ -133,6 +187,12 @@
         "125" : "platforms/win/resources/toolbar/125/pin-to-screen.png",
         "150" : "platforms/win/resources/toolbar/150/pin-to-screen.png",
         "200" : "platforms/win/resources/toolbar/200/pin-to-screen.png"
+      },
+      "generatedSha256" : {
+        "100" : "1a8879bdf19a3cb646ab52b54612844d7afa39ea7f8646b50fb7df2b8542c5c3",
+        "125" : "c1e8d7b1652cb25ead5eb95f90b62e4d380813c3e129ab812f0cb3bdccb79108",
+        "150" : "49568f3b8f09aeee47bb634617f9ef02cb680547683a0ab4f97c8989217eb222",
+        "200" : "864876508ff4a84bb6129b55d52a537f11f68db26af7eb022e4ddec4ce875bad"
       },
       "insetDip" : 2,
       "logicalSizeDip" : 16,
@@ -148,6 +208,12 @@
         "150" : "platforms/win/resources/toolbar/150/redo-disabled.png",
         "200" : "platforms/win/resources/toolbar/200/redo-disabled.png"
       },
+      "generatedSha256" : {
+        "100" : "419b93efb37bdb87dcb5a0a379fcf6183791b87b87f8b76c906c92af1478920c",
+        "125" : "8fcf1fdcc87050d7486fc822499b843ef60bea0cfb23a127cbc0084b204b0605",
+        "150" : "ada8f803f777e6926ca2bc2fa497b3edab0989863f05b4830f60edaf73b65f65",
+        "200" : "ca61729a34436c51254fd29524a6e393aecdb10f983f61d0080098017f7f03d5"
+      },
       "insetDip" : 0,
       "logicalSizeDip" : 20,
       "name" : "redo-disabled",
@@ -161,6 +227,12 @@
         "125" : "platforms/win/resources/toolbar/125/redo-enabled.png",
         "150" : "platforms/win/resources/toolbar/150/redo-enabled.png",
         "200" : "platforms/win/resources/toolbar/200/redo-enabled.png"
+      },
+      "generatedSha256" : {
+        "100" : "64eae25f69c9dbe43fafe9f56f0f1f07480658f9d662eec6c5bbbf96883f177e",
+        "125" : "5f81fd1d77306f3e72d9a0567b62fe029d3b453a232a19843d93e7c68de67f39",
+        "150" : "16a14f49c90b1c72f92ea9225cb74a1a1d2ed5710c8965d0602db2fb28878a00",
+        "200" : "a93d0f140b57954843fdbbb74dddd0dc5b4e2605d1b6e7fea73acbfdb68abc0e"
       },
       "insetDip" : 0,
       "logicalSizeDip" : 20,
@@ -176,6 +248,12 @@
         "150" : "platforms/win/resources/toolbar/150/refresh-svgrepo-com3.png",
         "200" : "platforms/win/resources/toolbar/200/refresh-svgrepo-com3.png"
       },
+      "generatedSha256" : {
+        "100" : "1ea3027c74f256cfb43ece0a13b39c15c1892ba9fd2f7c45a7eacc9448fb0ad5",
+        "125" : "27fb0c7ba332c784a3aeb1f7d121ce607fd58ce53b29a604b2df764bb603dd1c",
+        "150" : "7f65368b7ed4fd67cd1b5d0ff9d38953d7f6ef85c120605da0a7849b75800491",
+        "200" : "9807c02f09dafd0605c57282b153ff461e0362e2bb36ef305fe99025cea7dc20"
+      },
       "insetDip" : 4,
       "logicalSizeDip" : 12,
       "name" : "refresh-svgrepo-com3",
@@ -189,6 +267,12 @@
         "125" : "platforms/win/resources/toolbar/125/save-to-file.png",
         "150" : "platforms/win/resources/toolbar/150/save-to-file.png",
         "200" : "platforms/win/resources/toolbar/200/save-to-file.png"
+      },
+      "generatedSha256" : {
+        "100" : "5d869b6fa858e1534960801b25914003f13f2c7bf96f6550efcbb483bb591254",
+        "125" : "d904d4a4fedd1329b20e9bd8ce2fd881ae98371f86433d7f824498705d7be5dc",
+        "150" : "bbbff2f83bc4b6ba2c6fa2c3692437ae883d51781341fff2c4caed611ea3643e",
+        "200" : "20649fd8df37d18b2b15d03150601130043ebc66ab0e221b06312d055ab7e96c"
       },
       "insetDip" : 2,
       "logicalSizeDip" : 16,
@@ -204,8 +288,14 @@
         "150" : "platforms/win/resources/toolbar/150/screenshot.png",
         "200" : "platforms/win/resources/toolbar/200/screenshot.png"
       },
-      "insetDip" : 0,
-      "logicalSizeDip" : 20,
+      "generatedSha256" : {
+        "100" : "7724fc46b30f7ebd7cc7753398da80b0ec60135ffd06eebd4e9de5aa93697464",
+        "125" : "aa4bca29d470422e3ccba632ee331d5146382efd924315f10266ea6d9e767ea5",
+        "150" : "1c7eb2a2db980881f9803a1a4ab833cd1821fadce9adceff849023fc1944951c",
+        "200" : "7b15fbaf6438de2e77b111c7761ddc2b4137a619d91f21d74840516a30c6d6ca"
+      },
+      "insetDip" : -1,
+      "logicalSizeDip" : 22,
       "name" : "screenshot",
       "sha256" : "74162a63e5b459aa4ede961c6c958597bbc8bd7d55a0bc1820bc0fe02e0558b2",
       "source" : "platforms/mac/Resources/Icons/screenshot.svg"
@@ -217,6 +307,12 @@
         "125" : "platforms/win/resources/toolbar/125/scroll-screen2.png",
         "150" : "platforms/win/resources/toolbar/150/scroll-screen2.png",
         "200" : "platforms/win/resources/toolbar/200/scroll-screen2.png"
+      },
+      "generatedSha256" : {
+        "100" : "95614df67eea88faf70bcb111b82bcc6b05153b7910136b045a3d562675efe5b",
+        "125" : "8f35e977ffd676fe93ffb3306692389305fed3ef6c06aa2a7422a063ca99ebf6",
+        "150" : "feb38b402ad932123795dd31317ff23a05e1005aa3b221835a0da17e1e6c3461",
+        "200" : "393e3414b302ea3ff74df17256690c7783c1e5599c744b18721d344d6476d505"
       },
       "insetDip" : 0,
       "logicalSizeDip" : 20,
@@ -232,6 +328,12 @@
         "150" : "platforms/win/resources/toolbar/150/settings-more.png",
         "200" : "platforms/win/resources/toolbar/200/settings-more.png"
       },
+      "generatedSha256" : {
+        "100" : "248ad4d82f59920c3b8b922e99bb6117858c0c8aff75927bd725113465df5bec",
+        "125" : "7669f334249dfeb1d708420c2fbf68971aac03c2a62a7910d080e3186a6ed393",
+        "150" : "588603249f6412ab8983be5863c92abc1170c5fa82910042183d57bbb93f421d",
+        "200" : "a2947dd9b63947df934a5a4d471ffbe38e80240d07cb566d3162a31bb6b8486b"
+      },
       "insetDip" : 2,
       "logicalSizeDip" : 16,
       "name" : "settings-more",
@@ -245,6 +347,12 @@
         "125" : "platforms/win/resources/toolbar/125/straw-ranging.png",
         "150" : "platforms/win/resources/toolbar/150/straw-ranging.png",
         "200" : "platforms/win/resources/toolbar/200/straw-ranging.png"
+      },
+      "generatedSha256" : {
+        "100" : "b8ad97eb2bba7c3bc58b75856fb32aff172d5bd30ba5f77f81c3e11cb77fc5c1",
+        "125" : "0eacafe0f4df630b82085ddc0230fc56aa625b9ee694dce3d9a925cf6b72759d",
+        "150" : "60bd9728c7b932c06f0599e9e8c10a2f7509bcebed8b9b6e0d531ec11bfbc50f",
+        "200" : "ad2e110bf3140c5dbe2eaa17e6b556946edb1b652e8ba146af1679244040ceb4"
       },
       "insetDip" : 0,
       "logicalSizeDip" : 20,
@@ -260,6 +368,12 @@
         "150" : "platforms/win/resources/toolbar/150/text-tool.png",
         "200" : "platforms/win/resources/toolbar/200/text-tool.png"
       },
+      "generatedSha256" : {
+        "100" : "16feee0f775a8d391151e42297fdc40ddb8eca0d019fff76fa8dc9b9a076f3de",
+        "125" : "83fb52485e8820dd439122032d47afcd9b0321bdb7f1eadf605a1e71a7bdc177",
+        "150" : "6f697e69bc1fb123159a0cadf6ddcec0dc63834bab3fbc995bbdf0a2c02586e6",
+        "200" : "18e4138c99809af7b7451631e047e2315852a0193c97d969a6e4b441e260d5c9"
+      },
       "insetDip" : 0,
       "logicalSizeDip" : 20,
       "name" : "text-tool",
@@ -274,8 +388,14 @@
         "150" : "platforms/win/resources/toolbar/150/trash.png",
         "200" : "platforms/win/resources/toolbar/200/trash.png"
       },
-      "insetDip" : 2,
-      "logicalSizeDip" : 16,
+      "generatedSha256" : {
+        "100" : "7d9e136b5e72b15f427fdb6e4d76e9c9e610651273f29b74da0b79826df1128a",
+        "125" : "6b6e48a559c174b172c452c75ec1490148d8a3532598777124a58c9ed130ee0f",
+        "150" : "381f941f72b5cbaf3f64e9934482f8450ac1616c61f8dc770eec7f64331eb265",
+        "200" : "fc7a2d49bdc4f977b90bdd3a5c43f0365015a1bd86f6fee65a7a24e9cf8baff6"
+      },
+      "insetDip" : 3,
+      "logicalSizeDip" : 14,
       "name" : "trash",
       "sha256" : "7fd272a8464f421697ec9eaf8ad3fd670f03fffe009a9269784617eecfd83b99",
       "source" : "platforms/mac/Resources/Icons/trash.svg"
@@ -287,6 +407,12 @@
         "125" : "platforms/win/resources/toolbar/125/undo-disabled.png",
         "150" : "platforms/win/resources/toolbar/150/undo-disabled.png",
         "200" : "platforms/win/resources/toolbar/200/undo-disabled.png"
+      },
+      "generatedSha256" : {
+        "100" : "bb76feb4b7299af89d6f0c60f072dc82dc4b078a6ff72a5bd62fccd902b659b1",
+        "125" : "190eb118a587a51f86cb3d727a98920f38937c0ea45799532e9f43faa15c3f6c",
+        "150" : "f6b53bbced4b2fe6b4fc95e04b3489fec6b928e2ced3c896dbe3c9068e3f4cc6",
+        "200" : "9ded4fdd4c43d0527410295e6ce48f5edb7abbc9f4e96a3c79a5bbe24fc6f1f4"
       },
       "insetDip" : 0,
       "logicalSizeDip" : 20,
@@ -302,6 +428,12 @@
         "150" : "platforms/win/resources/toolbar/150/undo-enabled.png",
         "200" : "platforms/win/resources/toolbar/200/undo-enabled.png"
       },
+      "generatedSha256" : {
+        "100" : "b89b5d4c12706de7a2454923a1b953db1fc382d534f5cb65fa6f8491cbd0bb7a",
+        "125" : "723aabe0f9be862ca886d0d852c16ddc5d2ac645d2e3c4e716204a63843c4014",
+        "150" : "859eacc2a2d183d34c93b0554d374d1940af0661b4fac6c15db1e4e74a399528",
+        "200" : "1af92f91773f36c76794253cc87cf34c27f75c74fc94ef92eed0fe7dc329b20e"
+      },
       "insetDip" : 0,
       "logicalSizeDip" : 20,
       "name" : "undo-enabled",
@@ -316,6 +448,12 @@
         "150" : "platforms/win/resources/toolbar/150/zoom-in-tool.png",
         "200" : "platforms/win/resources/toolbar/200/zoom-in-tool.png"
       },
+      "generatedSha256" : {
+        "100" : "4ebdf79d795bc870ec6f72c090706732b2c1aa6f8269d532adddbd70226a9857",
+        "125" : "761f7c9cb261d23018154404254842fa38dd8ffea9bce077b8c722960156667b",
+        "150" : "1d0043ce2af4274140a55788c530ca2ebfea9868f455fe9e5736335393477ef2",
+        "200" : "d34fd77f2d5ee31dfa544946895a0ebdc2a0a7beb1c38cfa7846874a71339ac6"
+      },
       "insetDip" : 2,
       "logicalSizeDip" : 16,
       "name" : "zoom-in-tool",
@@ -329,5 +467,5 @@
     150,
     200
   ],
-  "version" : 1
+  "version" : 2
 }

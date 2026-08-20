@@ -73,6 +73,36 @@ bool contains(PixelRect rect, PixelPoint point) noexcept
         && point.y < saturatingAdd(rect.y, rect.height);
 }
 
+std::optional<long double> desktopPixelLuminance(
+    const FrozenDesktop& desktop,
+    PixelPoint point) noexcept
+{
+    for (const auto& display : desktop.displays) {
+        const auto bounds = snipory::core::portable::standardized(
+            display.descriptor.pixelBounds);
+        if (!contains(bounds, point)) continue;
+        const auto x = point.x - bounds.x;
+        const auto y = point.y - bounds.y;
+        if (x < 0 || y < 0 || x >= display.pixels.width()
+            || y >= display.pixels.height()) {
+            return std::nullopt;
+        }
+        const auto offset = static_cast<std::uint64_t>(y)
+            * display.pixels.stride()
+            + static_cast<std::uint64_t>(x) * 4U;
+        if (offset + 2U >= display.pixels.byteCount()) {
+            return std::nullopt;
+        }
+        const auto* pixel = display.pixels.data() + offset;
+        const auto blue = std::to_integer<unsigned int>(pixel[0]);
+        const auto green = std::to_integer<unsigned int>(pixel[1]);
+        const auto red = std::to_integer<unsigned int>(pixel[2]);
+        return (0.2126L * red + 0.7152L * green + 0.0722L * blue)
+            / 255.0L;
+    }
+    return std::nullopt;
+}
+
 bool contains(AnnotationRect rect, AnnotationPoint point) noexcept
 {
     rect = standardized(rect);
@@ -452,7 +482,7 @@ public:
              index < static_cast<std::size_t>(ToolbarAction::count); ++index) {
             const auto action = static_cast<ToolbarAction>(index);
             const auto& shortcut = toolbarTooltip(action);
-            if (shortcut.control || shortcut.virtualKey == VK_ESCAPE) continue;
+            if (!supportsOverlayToolbarHotKey(action)) continue;
             RegisterHotKey(window,
                 overlayToolbarHotKeyIdentifier(action, false),
                 0, shortcut.virtualKey);
@@ -468,8 +498,7 @@ public:
         for (std::size_t index = 0;
              index < static_cast<std::size_t>(ToolbarAction::count); ++index) {
             const auto action = static_cast<ToolbarAction>(index);
-            const auto& shortcut = toolbarTooltip(action);
-            if (shortcut.control || shortcut.virtualKey == VK_ESCAPE) continue;
+            if (!supportsOverlayToolbarHotKey(action)) continue;
             UnregisterHotKey(
                 window, overlayToolbarHotKeyIdentifier(action, false));
             UnregisterHotKey(
@@ -665,6 +694,8 @@ bool OverlayInputRouter::performToolbarAction(ToolbarAction action) noexcept
         releaseInteraction();
         deactivateEscapeHotKey();
         emitTerminal(OverlayInputAction::scrollCapture);
+    } else if (action == ToolbarAction::clearAll && editor_ != nullptr) {
+        editor_->handleToolbarAction(action);
     } else if (editor_ != nullptr) {
         editor_->handleToolbarAction(action);
         if (editor_->isEyedropperToolActive()) {
@@ -2263,8 +2294,10 @@ OverlayCursorStyle OverlayInputRouter::cursorStyle(
             1, dipLengthToPhysicalPixels(
                 VisualStyleCatalog::selectionHandleDiameterDip / 2.0F,
                 (std::max)(surface->dpiX, surface->dpiY)));
-        return cursorStyleForSelectionHandle(
-            model_.hitTest(virtualPoint, radius));
+        return backgroundAwareCursorStyle(
+            cursorStyleForSelectionHandle(model_.hitTest(virtualPoint, radius)),
+            virtualPoint,
+            *surface);
     }
     return OverlayCursorStyle::crosshair;
 }
@@ -2308,28 +2341,9 @@ bool OverlayInputRouter::selectionPrefersLightCursor() const noexcept
                     * static_cast<long double>(selection.height)
                     / static_cast<long double>(rows)),
             };
-            for (const auto& display : desktop_->displays) {
-                const auto bounds = snipory::core::portable::standardized(
-                    display.descriptor.pixelBounds);
-                if (!contains(bounds, point)) continue;
-                const auto x = point.x - bounds.x;
-                const auto y = point.y - bounds.y;
-                if (x < 0 || y < 0 || x >= display.pixels.width()
-                    || y >= display.pixels.height()) {
-                    break;
-                }
-                const auto offset = static_cast<std::uint64_t>(y)
-                    * display.pixels.stride()
-                    + static_cast<std::uint64_t>(x) * 4U;
-                if (offset + 2U >= display.pixels.byteCount()) break;
-                const auto* pixel = display.pixels.data() + offset;
-                const auto blue = std::to_integer<unsigned int>(pixel[0]);
-                const auto green = std::to_integer<unsigned int>(pixel[1]);
-                const auto red = std::to_integer<unsigned int>(pixel[2]);
-                total += (0.2126L * red + 0.7152L * green + 0.0722L * blue)
-                    / 255.0L;
+            if (const auto luminance = desktopPixelLuminance(*desktop_, point)) {
+                total += *luminance;
                 ++count;
-                break;
             }
         }
     }
@@ -2354,32 +2368,55 @@ bool OverlayInputRouter::shouldUseLightCursor(
     return contains(hitRect, virtualPoint) && selectionPrefersLightCursor();
 }
 
+bool OverlayInputRouter::pointPrefersLightCursor(
+    PixelPoint virtualPoint) const noexcept
+{
+    if (desktop_ == nullptr) return false;
+    const auto luminance = desktopPixelLuminance(*desktop_, virtualPoint);
+    return luminance.has_value() && *luminance < 0.5L;
+}
+
 OverlayCursorStyle OverlayInputRouter::backgroundAwareCursorStyle(
     OverlayCursorStyle style,
     PixelPoint virtualPoint,
     const OverlaySurface& surface) const noexcept
 {
-    if (!shouldUseLightCursor(virtualPoint, surface)) return style;
+    OverlayCursorStyle lightStyle;
+    bool usesPointSample = false;
     switch (style) {
     case OverlayCursorStyle::move:
-        return OverlayCursorStyle::moveLight;
+        lightStyle = OverlayCursorStyle::moveLight;
+        break;
     case OverlayCursorStyle::resizeLeftRight:
-        return OverlayCursorStyle::resizeLeftRightLight;
+        lightStyle = OverlayCursorStyle::resizeLeftRightLight;
+        break;
     case OverlayCursorStyle::resizeUpDown:
-        return OverlayCursorStyle::resizeUpDownLight;
+        lightStyle = OverlayCursorStyle::resizeUpDownLight;
+        break;
     case OverlayCursorStyle::resizeTopLeftBottomRight:
-        return OverlayCursorStyle::resizeTopLeftBottomRightLight;
+        lightStyle = OverlayCursorStyle::resizeTopLeftBottomRightLight;
+        break;
     case OverlayCursorStyle::resizeTopRightBottomLeft:
-        return OverlayCursorStyle::resizeTopRightBottomLeftLight;
-    case OverlayCursorStyle::brush:
-        return OverlayCursorStyle::brushLight;
+        lightStyle = OverlayCursorStyle::resizeTopRightBottomLeftLight;
+        break;
     case OverlayCursorStyle::marker:
-        return OverlayCursorStyle::markerLight;
+        lightStyle = OverlayCursorStyle::markerLight;
+        break;
     case OverlayCursorStyle::eyedropper:
-        return OverlayCursorStyle::eyedropperLight;
+        lightStyle = OverlayCursorStyle::eyedropperLight;
+        usesPointSample = true;
+        break;
+    case OverlayCursorStyle::eraser:
+        lightStyle = OverlayCursorStyle::eraserLight;
+        usesPointSample = true;
+        break;
     default:
         return style;
     }
+    const auto useLight = usesPointSample
+        ? pointPrefersLightCursor(virtualPoint)
+        : shouldUseLightCursor(virtualPoint, surface);
+    return useLight ? lightStyle : style;
 }
 
 void OverlayInputRouter::pointerMove(HWND source, PixelPoint clientPoint) noexcept

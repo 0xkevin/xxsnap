@@ -49,6 +49,14 @@ constexpr int overlayToolbarHotKeyIdentifier(
         + static_cast<int>(action) * 2 + (shift ? 1 : 0);
 }
 
+constexpr bool supportsOverlayToolbarHotKey(ToolbarAction action) noexcept
+{
+    const auto& shortcut = toolbarTooltip(action);
+    return shortcut.virtualKey != 0U
+        && !shortcut.control
+        && shortcut.virtualKey != VK_ESCAPE;
+}
+
 constexpr std::optional<OverlayToolbarHotKey> overlayToolbarHotKey(
     WPARAM identifier) noexcept
 {
@@ -62,8 +70,7 @@ constexpr std::optional<OverlayToolbarHotKey> overlayToolbarHotKey(
         return std::nullopt;
     }
     const auto action = static_cast<ToolbarAction>(actionIndex);
-    const auto& shortcut = toolbarTooltip(action);
-    if (shortcut.control || shortcut.virtualKey == VK_ESCAPE) {
+    if (!supportsOverlayToolbarHotKey(action)) {
         return std::nullopt;
     }
     return OverlayToolbarHotKey{action, (offset % 2U) != 0U};
@@ -127,6 +134,7 @@ enum class OverlayCursorStyle : std::uint8_t {
     eyedropper,
     eyedropperLight,
     eraser,
+    eraserLight,
 };
 
 class DpiRestartDecision final {

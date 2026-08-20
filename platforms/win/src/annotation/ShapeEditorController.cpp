@@ -503,6 +503,9 @@ bool ShapeEditorController::handleToolbarAction(ToolbarAction action)
     if (action != ToolbarAction::number && editingNumberId_.has_value()) {
         commitNumberEdit();
     }
+    if (action == ToolbarAction::clearAll) {
+        return applyEraserOptionHit({EraserOptionControl::clearAll});
+    }
     if (action == ToolbarAction::rectangle) {
         if (shapeToolActive_) {
             deactivateTool();

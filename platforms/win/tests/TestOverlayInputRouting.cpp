@@ -734,6 +734,9 @@ void testToolbarHoverShowsMacShortcutTipAndRStartsScrollCapture()
     CHECK(!xxsnap::win::overlayToolbarHotKey(
         xxsnap::win::overlayToolbarHotKeyIdentifier(
             xxsnap::win::ToolbarAction::save, false)).has_value());
+    CHECK(!xxsnap::win::overlayToolbarHotKey(
+        xxsnap::win::overlayToolbarHotKeyIdentifier(
+            xxsnap::win::ToolbarAction::clearAll, false)).has_value());
 
     router.pointerMove(rightWindow, scroll.centerPhysical);
 
@@ -1085,10 +1088,12 @@ void testDarkSelectionUsesMacLightToolCursors()
     createReadySelection(router);
 
     auto owner = router.presentations()[1];
+    CHECK(router.cursorStyle(rightWindow, PixelPoint{40, 90})
+        == OverlayCursorStyle::moveLight);
     CHECK(router.pointerDown(
         rightWindow, owner.toolbarItems[2].centerPhysical));
     CHECK(router.cursorStyle(rightWindow, PixelPoint{40, 90})
-        == OverlayCursorStyle::brushLight);
+        == OverlayCursorStyle::brush);
 
     owner = router.presentations()[1];
     CHECK(router.pointerDown(
@@ -1110,6 +1115,9 @@ void testDarkSelectionUsesMacLightToolCursors()
     CHECK(router.pointerDown(rightWindow, eyedropper->centerPhysical));
     router.pointerMove(rightWindow, PixelPoint{20, 100});
     CHECK(router.cursorStyle(rightWindow, PixelPoint{20, 100})
+        == OverlayCursorStyle::eyedropper);
+    router.pointerMove(rightWindow, PixelPoint{21, 100});
+    CHECK(router.cursorStyle(rightWindow, PixelPoint{21, 100})
         == OverlayCursorStyle::eyedropperLight);
 }
 
@@ -1502,6 +1510,11 @@ void testEraserToolbarUsesMacLayoutAndModes()
         == AnnotationRect{owner.eraserOptions->layout.toolbar.x,
             owner.eraserOptions->layout.toolbar.y, 100, 28}));
     CHECK(owner.eraserOptions->mode == xxsnap::win::EraserMode::point);
+    CHECK(router.cursorStyle(rightWindow, PixelPoint{40, 90})
+        == OverlayCursorStyle::eraserLight);
+    setDesktopPixel(*desktop, PixelPoint{40, 90}, {255, 255, 255, 255});
+    CHECK(router.cursorStyle(rightWindow, PixelPoint{40, 90})
+        == OverlayCursorStyle::eraser);
     CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
         owner.eraserOptions->layout.rectangleMode)));
     owner = router.presentations()[1];
@@ -1613,7 +1626,7 @@ void testTeachingPenStartsFullScreenWithBrushAndHiddenToolbar()
     CHECK(shown.toolbarItems.front().action == xxsnap::win::ToolbarAction::pen);
     CHECK(shown.toolbarItems.front().selected);
     CHECK((shown.toolbarItems.front().rectPhysical
-        == PixelRect{370, 430, 20, 20}));
+        == PixelRect{370, 222, 20, 20}));
 
     CHECK(router.rightPointerDown(window, {360, 420}));
     CHECK(!router.presentations().front().showActions);
@@ -1660,6 +1673,20 @@ void testTeachingPenToolbarSelectionAndCanvasDrawingMatchMac()
         == xxsnap::win::AnnotationKind::rectangle);
     CHECK(router.annotationDocument().annotations().front()
         .style.cornerRadiusDip == 0.0F);
+
+    CHECK(router.rightPointerDown(window, {360, 420}));
+    const auto clearToolbar = router.presentations().front();
+    const auto clearAll = std::find_if(
+        clearToolbar.toolbarItems.begin(), clearToolbar.toolbarItems.end(),
+        [](const auto& item) {
+            return item.action == xxsnap::win::ToolbarAction::clearAll;
+        });
+    CHECK(clearAll != clearToolbar.toolbarItems.end());
+    if (clearAll != clearToolbar.toolbarItems.end()) {
+        CHECK(router.pointerDown(window, clearAll->centerPhysical));
+    }
+    CHECK(router.annotationDocument().annotations().empty());
+    CHECK(router.status() == OverlayInputStatus::active);
 }
 
 void testTeachingPenTextDefaultsToNoOutline()

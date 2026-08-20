@@ -1,5 +1,7 @@
 #include "toolbar/ToolbarLayout.h"
 
+#include <algorithm>
+
 namespace xxsnap::win {
 namespace {
 
@@ -21,11 +23,11 @@ constexpr float clamp(float value, float lower, float upper) noexcept
 float toolbarWidth(const std::vector<ToolbarAction>& actions) noexcept
 {
     float width = ToolbarMetrics::horizontalPaddingDip
-        + ToolbarMetrics::buttonStepDip;
+        + ToolbarMetrics::dragHandleStepDip;
     for (const auto action : actions) {
         width += ToolbarMetrics::buttonStepDip + extraGapAfter(action);
     }
-    return width + ToolbarMetrics::buttonStepDip;
+    return width + ToolbarMetrics::dragHandleStepDip;
 }
 
 MainToolbarLayout computeMainToolbarLayout(
@@ -45,7 +47,7 @@ MainToolbarLayout computeMainToolbarLayout(
     };
 
     float x = origin.x + ToolbarMetrics::horizontalPaddingDip
-        + ToolbarMetrics::buttonStepDip;
+        + ToolbarMetrics::dragHandleStepDip;
     const float y = origin.y
         + (ToolbarMetrics::heightDip - ToolbarMetrics::buttonSizeDip) / 2.0F;
     layout.items.reserve(actions.size());
@@ -58,7 +60,8 @@ MainToolbarLayout computeMainToolbarLayout(
     }
 
     layout.trailingDragHandle = {
-        x,
+        x - (ToolbarMetrics::dragHandleStepDip
+            - ToolbarMetrics::buttonSizeDip),
         y,
         ToolbarMetrics::buttonSizeDip,
         ToolbarMetrics::buttonSizeDip,
@@ -73,9 +76,11 @@ MainToolbarLayout computeTeachingPenToolbarLayout(
     constexpr float margin = 4.0F;
     constexpr float gap = 6.0F;
     constexpr float width = 56.0F;
-    constexpr float height = 168.0F;
+    constexpr float height = 196.0F;
     constexpr float cell = 20.0F;
     constexpr float cellGap = 8.0F;
+    constexpr float separatorHorizontalInset = 7.0F;
+    constexpr float separatorHeight = 1.0F;
     const ToolbarRect safe{
         bounds.x + margin,
         bounds.y + margin,
@@ -94,17 +99,33 @@ MainToolbarLayout computeTeachingPenToolbarLayout(
     layout.items.reserve(teachingPenToolbarActions().size());
     for (std::size_t index = 0;
          index < teachingPenToolbarActions().size(); ++index) {
+        const auto action = teachingPenToolbarActions()[index];
         const auto column = index % 2U;
         const auto row = index / 2U;
+        const auto itemX = action == ToolbarAction::clearAll
+            ? x + (width - cell) / 2.0F
+            : x + margin + static_cast<float>(column) * (cell + cellGap);
         layout.items.push_back({
-            teachingPenToolbarActions()[index],
+            action,
             {
-                x + margin + static_cast<float>(column) * (cell + cellGap),
+                itemX,
                 y + margin + static_cast<float>(row) * (cell + cellGap),
                 cell,
                 cell,
             },
         });
+    }
+    const auto actionGroupStart = std::find_if(
+        layout.items.begin(), layout.items.end(), [](const auto& item) {
+            return item.action == ToolbarAction::copy;
+        });
+    if (actionGroupStart != layout.items.end()) {
+        layout.teachingPenActionSeparator = ToolbarRect{
+            x + separatorHorizontalInset,
+            actionGroupStart->rect.y - cellGap / 2.0F - separatorHeight,
+            width - separatorHorizontalInset * 2.0F,
+            separatorHeight,
+        };
     }
     return layout;
 }

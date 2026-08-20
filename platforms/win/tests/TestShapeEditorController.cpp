@@ -562,6 +562,39 @@ void testTextCreatesUnicodeAndEditsAtCaret()
     CHECK(editor.document().find(id)->style.textSize == 8.0F);
 }
 
+void testClearAllFinalizesInlineEditsBeforeClearing()
+{
+    ShapeEditorController textEditor({0, 0, 400, 300});
+    CHECK(textEditor.handleToolbarAction(ToolbarAction::text));
+    CHECK(textEditor.pointerDown({60, 80}));
+    CHECK(textEditor.insertText(L"draft"));
+    CHECK(textEditor.isEditingInlineValue());
+    CHECK(textEditor.handleToolbarAction(ToolbarAction::clearAll));
+    CHECK(!textEditor.isEditingInlineValue());
+    CHECK(textEditor.document().annotations().empty());
+    CHECK(textEditor.handleToolbarAction(ToolbarAction::rectangle));
+    CHECK(textEditor.document().annotations().empty());
+    CHECK(textEditor.handleKey(ShapeEditorKey::z, true, false)
+        == ShapeEditorKeyResult::consumed);
+    CHECK(textEditor.document().annotations().size() == 1U);
+    CHECK(isTextAnnotation(textEditor.document().annotations().front()));
+
+    ShapeEditorController numberEditor({0, 0, 400, 300});
+    CHECK(numberEditor.handleToolbarAction(ToolbarAction::number));
+    CHECK(numberEditor.pointerDown({80, 80}));
+    CHECK(numberEditor.pointerDown({80, 80}, false, 2));
+    CHECK(numberEditor.isEditingNumber());
+    CHECK(numberEditor.handleToolbarAction(ToolbarAction::clearAll));
+    CHECK(!numberEditor.isEditingNumber());
+    CHECK(numberEditor.document().annotations().empty());
+    CHECK(numberEditor.handleToolbarAction(ToolbarAction::rectangle));
+    CHECK(numberEditor.document().annotations().empty());
+    CHECK(numberEditor.handleKey(ShapeEditorKey::z, true, false)
+        == ShapeEditorKeyResult::consumed);
+    CHECK(numberEditor.document().annotations().size() == 1U);
+    CHECK(isNumberAnnotation(numberEditor.document().annotations().front()));
+}
+
 void testNumberToolMatchesMacSequenceEditingAndControls()
 {
     ShapeEditorController editor({0, 0, 500, 400});
@@ -935,6 +968,7 @@ int main()
     testMosaicCreatesStrokeAndRotatableRectangle();
     testMosaicDrawingTakesPriorityOverNonMosaicBordersLikeMac();
     testTextCreatesUnicodeAndEditsAtCaret();
+    testClearAllFinalizesInlineEditsBeforeClearing();
     testNumberToolMatchesMacSequenceEditingAndControls();
     testNewNumberMarkOnlyFollowsTypeAfterExplicitReselection();
     testNumberSequenceGroupsManualMarksResizeAndHistory();
