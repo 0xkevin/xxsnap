@@ -22,6 +22,7 @@ using xxsnap::win::OverlayInputPlatform;
 using xxsnap::win::OverlayInputRouter;
 using xxsnap::win::OverlayMode;
 using xxsnap::win::OverlayInputStatus;
+using xxsnap::win::overlayActionPreservesWindows;
 using xxsnap::win::OverlayCursorStyle;
 using xxsnap::win::OverlaySurface;
 using xxsnap::win::NumberMarkType;
@@ -703,6 +704,14 @@ void testScrollToolbarSuspendsOverlayWithoutCompletingRouter()
     CHECK(actions.front() == OverlayInputAction::scrollCapture);
     CHECK(router.status() == OverlayInputStatus::active);
     CHECK(platform.unregisterCalls == 1);
+}
+
+void testScrollCapturePreservesOverlayWindowsForSuspensionAndResume()
+{
+    CHECK(overlayActionPreservesWindows(OverlayInputAction::scrollCapture));
+    CHECK(overlayActionPreservesWindows(
+        OverlayInputAction::togglePinnedImageAlwaysOnTop));
+    CHECK(!overlayActionPreservesWindows(OverlayInputAction::copy));
 }
 
 void testToolbarHoverShowsMacShortcutTipAndRStartsScrollCapture()
@@ -1820,6 +1829,7 @@ int main()
     testTerminalCallbackMaySynchronouslyDestroyRouter();
     testRestartShutdownReleasesCaptureAndHotKeyWithoutCancelAction();
     testScrollToolbarSuspendsOverlayWithoutCompletingRouter();
+    testScrollCapturePreservesOverlayWindowsForSuspensionAndResume();
     testToolbarHoverShowsMacShortcutTipAndRStartsScrollCapture();
     testMacToolShortcutsSelectToolsAndDoNotInterruptInlineText();
     testControlToolbarShortcutsRouteThroughCatalog();

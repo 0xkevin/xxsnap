@@ -229,7 +229,6 @@ public:
                 callback(std::move(completion));
             });
         if (!scrollCapture_) {
-            overlay_->resumeAfterScrollCapture();
             return false;
         }
         return true;

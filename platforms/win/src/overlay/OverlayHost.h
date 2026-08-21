@@ -36,6 +36,13 @@ enum class OverlayInputAction {
     recognizeText,
 };
 
+constexpr bool overlayActionPreservesWindows(
+    OverlayInputAction action) noexcept
+{
+    return action == OverlayInputAction::scrollCapture
+        || action == OverlayInputAction::togglePinnedImageAlwaysOnTop;
+}
+
 enum class OverlayInputStatus {
     active,
     cancelled,

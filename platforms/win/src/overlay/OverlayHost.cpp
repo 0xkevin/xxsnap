@@ -2929,7 +2929,7 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
 
     void dispatchAction(OverlayInputAction action)
     {
-        if (action != OverlayInputAction::togglePinnedImageAlwaysOnTop) {
+        if (!overlayActionPreservesWindows(action)) {
             closeWindows();
         }
         ActionCallback callback = actionCallback;

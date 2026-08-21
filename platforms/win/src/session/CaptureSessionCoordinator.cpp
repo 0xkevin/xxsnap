@@ -218,7 +218,14 @@ void CaptureSessionCoordinator::handleAction(OverlayInputAction action) noexcept
         if (!started) {
             scrollCaptureMayBeOpen_ = false;
             scrollCaptureSelection_.reset();
-            fail(CaptureSessionErrorCode::scrollCaptureFailed);
+            if (stateMachine_.dispatch(SessionEvent::resumeSelection)
+                    != TransitionResult::accepted
+                || !services_.resumeOverlayAfterScrollCapture()) {
+                fail(CaptureSessionErrorCode::scrollCaptureFailed);
+                return;
+            }
+            lastError_ = CaptureSessionErrorCode::scrollCaptureFailed;
+            services_.reportError(*lastError_);
         }
         return;
     }

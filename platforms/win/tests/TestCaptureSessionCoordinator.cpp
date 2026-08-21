@@ -290,8 +290,26 @@ void testScrollCaptureStartAndRuntimeFailuresAreReported()
     CaptureSessionCoordinator first(startFailure);
     CHECK(first.start() == CaptureSessionStartResult::started);
     startFailure.emit(OverlayInputAction::scrollCapture);
-    CHECK(first.state() == CaptureSessionState::idle);
+    CHECK(first.state() == CaptureSessionState::selecting);
     CHECK(first.lastError() == CaptureSessionErrorCode::scrollCaptureFailed);
+    CHECK(startFailure.resumeOverlayCalls == 1);
+    CHECK(startFailure.closeCalls == 0);
+    CHECK(startFailure.reportedErrors == std::vector<CaptureSessionErrorCode>{
+        CaptureSessionErrorCode::scrollCaptureFailed});
+
+    FakeServices resumeFailure;
+    resumeFailure.beginScrollSucceeds = false;
+    resumeFailure.resumeOverlaySucceeds = false;
+    CaptureSessionCoordinator failedRecovery(resumeFailure);
+    CHECK(failedRecovery.start() == CaptureSessionStartResult::started);
+    resumeFailure.emit(OverlayInputAction::scrollCapture);
+    CHECK(failedRecovery.state() == CaptureSessionState::idle);
+    CHECK(failedRecovery.lastError()
+        == CaptureSessionErrorCode::scrollCaptureFailed);
+    CHECK(resumeFailure.resumeOverlayCalls == 1);
+    CHECK(resumeFailure.closeCalls == 1);
+    CHECK(resumeFailure.reportedErrors == std::vector<CaptureSessionErrorCode>{
+        CaptureSessionErrorCode::scrollCaptureFailed});
 
     FakeServices runtimeFailure;
     CaptureSessionCoordinator second(runtimeFailure);
