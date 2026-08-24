@@ -2387,18 +2387,6 @@ OverlayCursorStyle OverlayInputRouter::backgroundAwareCursorStyle(
     case OverlayCursorStyle::move:
         lightStyle = OverlayCursorStyle::moveLight;
         break;
-    case OverlayCursorStyle::resizeLeftRight:
-        lightStyle = OverlayCursorStyle::resizeLeftRightLight;
-        break;
-    case OverlayCursorStyle::resizeUpDown:
-        lightStyle = OverlayCursorStyle::resizeUpDownLight;
-        break;
-    case OverlayCursorStyle::resizeTopLeftBottomRight:
-        lightStyle = OverlayCursorStyle::resizeTopLeftBottomRightLight;
-        break;
-    case OverlayCursorStyle::resizeTopRightBottomLeft:
-        lightStyle = OverlayCursorStyle::resizeTopRightBottomLeftLight;
-        break;
     case OverlayCursorStyle::marker:
         lightStyle = OverlayCursorStyle::markerLight;
         break;

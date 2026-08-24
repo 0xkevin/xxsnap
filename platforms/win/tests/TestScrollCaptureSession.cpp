@@ -1,4 +1,5 @@
 #include "scroll/ScrollCaptureSession.h"
+#include "scroll/ScrollCaptureSamplingState.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -65,12 +66,12 @@ std::uint8_t pixelAt(
     return static_cast<std::uint8_t>(buffer.data()[offset]);
 }
 
-void testMacSessionStateAndWheelDirection()
+void testWindowsSessionStateAndWheelDirection()
 {
     CHECK(ScrollCaptureSession::directionForWheelDelta(120)
-        == ScrollDirection::Down);
-    CHECK(ScrollCaptureSession::directionForWheelDelta(-120)
         == ScrollDirection::Up);
+    CHECK(ScrollCaptureSession::directionForWheelDelta(-120)
+        == ScrollDirection::Down);
     CHECK(ScrollCaptureSession::directionForWheelDelta(0)
         == ScrollDirection::Undetermined);
     CHECK(!ScrollCaptureSession::requiresSaveOnlyForHeight(29'000));
@@ -84,14 +85,14 @@ void testMacSessionStateAndWheelDirection()
     CHECK(update.preview.has_value());
     CHECK(update.preview->height == 140);
 
-    CHECK(session.append(viewport(60), 120, update));
+    CHECK(session.append(viewport(60), -120, update));
     CHECK(update.append.kind == AppendKind::AcceptedAppend);
     CHECK(update.append.direction == ScrollDirection::Down);
     CHECK(update.preview.has_value());
     CHECK(update.append.outputHeight == 200);
     CHECK(!update.warning.has_value());
 
-    CHECK(session.append(viewport(60), 120, update));
+    CHECK(session.append(viewport(60), -120, update));
     CHECK(update.append.kind == AppendKind::DuplicateDiscarded);
     CHECK(!update.preview.has_value());
     const auto final = session.finish(16U * 1024U * 1024U);
@@ -101,6 +102,39 @@ void testMacSessionStateAndWheelDirection()
     CHECK(pixelAt(*final, 0, 0) == documentPixel(0, 0));
     CHECK(pixelAt(*final, 119, 199) == documentPixel(119, 199));
     CHECK(session.phase() == ScrollCapturePhase::finished);
+}
+
+void testCaptureSamplingTracksWheelAndScrollbarActivity()
+{
+    xxsnap::win::ScrollCaptureSamplingState sampling;
+    CHECK(!sampling.takePendingWheelDelta().has_value());
+
+    sampling.noteWheel(-40);
+    sampling.noteWheel(-80);
+    CHECK(sampling.takePendingWheelDelta() == -120);
+    CHECK(!sampling.takePendingWheelDelta().has_value());
+
+    sampling.beginPointerDrag(true);
+    sampling.notePointerMove();
+    CHECK(sampling.takePendingWheelDelta() == 0);
+    sampling.endPointerDrag();
+    CHECK(sampling.takePendingWheelDelta() == 0);
+
+    sampling.beginPointerDrag(false);
+    sampling.notePointerMove();
+    sampling.endPointerDrag();
+    CHECK(!sampling.takePendingWheelDelta().has_value());
+}
+
+void testScrollbarSamplingInfersDirectionWithoutWheelDelta()
+{
+    ScrollCaptureSession session(16U * 1024U * 1024U);
+    ScrollCaptureUpdate update;
+    CHECK(session.start(viewport(0), update));
+    CHECK(session.append(viewport(60), 0, update));
+    CHECK(update.append.kind == AppendKind::AcceptedAppend);
+    CHECK(update.append.direction == ScrollDirection::Down);
+    CHECK(update.append.outputHeight == 200);
 }
 
 void testCancelAndResourcePause()
@@ -131,7 +165,9 @@ void testCancelAndResourcePause()
 
 int main()
 {
-    testMacSessionStateAndWheelDirection();
+    testWindowsSessionStateAndWheelDirection();
+    testCaptureSamplingTracksWheelAndScrollbarActivity();
+    testScrollbarSamplingInfersDirectionWithoutWheelDelta();
     testCancelAndResourcePause();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

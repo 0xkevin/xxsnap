@@ -144,8 +144,8 @@ snipory::core::scroll::ScrollDirection
 ScrollCaptureSession::directionForWheelDelta(int wheelDelta) noexcept
 {
     using snipory::core::scroll::ScrollDirection;
-    if (wheelDelta > 0) return ScrollDirection::Down;
-    if (wheelDelta < 0) return ScrollDirection::Up;
+    if (wheelDelta > 0) return ScrollDirection::Up;
+    if (wheelDelta < 0) return ScrollDirection::Down;
     return ScrollDirection::Undetermined;
 }
 

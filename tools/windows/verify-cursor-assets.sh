@@ -4,6 +4,8 @@ set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 source_root=$(CDPATH= cd -- "$script_dir/../.." && pwd)
+overlay_window="$source_root/platforms/win/src/overlay/OverlayWindow.cpp"
+resource_file="$source_root/platforms/win/resources/xxsnap.rc"
 crosshair="$source_root/platforms/win/resources/cursors/xxsnap-crosshair.cur"
 rotation="$source_root/platforms/win/resources/cursors/xxsnap-rotation.cur"
 eraser="$source_root/platforms/win/resources/cursors/xxsnap-eraser.cur"
@@ -157,12 +159,7 @@ if ! cmp -s "$brush" "$brush_light"; then
     exit 1
 fi
 
-for cursor_name in \
-    move move-light \
-    resize-left-right resize-left-right-light \
-    resize-up-down resize-up-down-light \
-    resize-top-left-bottom-right resize-top-left-bottom-right-light \
-    resize-top-right-bottom-left resize-top-right-bottom-left-light; do
+for cursor_name in move move-light; do
     cursor="$source_root/platforms/win/resources/cursors/xxsnap-$cursor_name.cur"
     if [ ! -f "$cursor" ]; then
         echo "Windows background-aware cursor is missing: $cursor" >&2
@@ -176,7 +173,21 @@ for cursor_name in \
     fi
 done
 
-echo "Windows move and resize cursors provide matching dark/light Mac variants."
+echo "Windows move cursors provide matching dark/light Mac variants."
+
+for system_cursor in IDC_SIZEWE IDC_SIZENS IDC_SIZENWSE IDC_SIZENESW; do
+    if ! grep -q "LoadCursor(nullptr, $system_cursor)" "$overlay_window"; then
+        echo "Windows resize cursors must load the system $system_cursor cursor." >&2
+        exit 1
+    fi
+done
+
+if grep -q 'XXSNAP_RESIZE' "$resource_file"; then
+    echo "Windows resize cursors must not embed project-drawn cursor resources." >&2
+    exit 1
+fi
+
+echo "Windows resize handles use native system cursors."
 
 for eyedropper_cursor in "$eyedropper" "$eyedropper_light"; do
     if [ ! -f "$eyedropper_cursor" ]; then

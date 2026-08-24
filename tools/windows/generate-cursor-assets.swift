@@ -272,66 +272,11 @@ private func moveCursorImage(foreground: NSColor, outline: NSColor) -> NSImage {
     return image
 }
 
-private func resizeCursorImage(
-    angle: CGFloat,
-    foreground: NSColor,
-    drawsOutline: Bool = true
-) -> NSImage {
-    let size = NSSize(width: 24, height: 24)
-    let center = NSPoint(x: 12, y: 12)
-    let image = NSImage(size: size)
-    image.lockFocus()
-    if let context = NSGraphicsContext.current?.cgContext {
-        context.translateBy(x: center.x, y: center.y)
-        context.rotate(by: angle)
-        context.translateBy(x: -center.x, y: -center.y)
-    }
-    let path = NSBezierPath()
-    for (start, end) in [
-        (NSPoint(x: 5, y: 12), NSPoint(x: 19, y: 12)),
-        (NSPoint(x: 5, y: 12), NSPoint(x: 9, y: 8)),
-        (NSPoint(x: 5, y: 12), NSPoint(x: 9, y: 16)),
-        (NSPoint(x: 19, y: 12), NSPoint(x: 15, y: 8)),
-        (NSPoint(x: 19, y: 12), NSPoint(x: 15, y: 16)),
-    ] {
-        path.move(to: start)
-        path.line(to: end)
-    }
-    path.lineCapStyle = .round
-    path.lineJoinStyle = .round
-    if drawsOutline {
-        NSColor.black.withAlphaComponent(0.75).setStroke()
-        path.lineWidth = 5
-        path.stroke()
-    }
-    foreground.setStroke()
-    path.lineWidth = 2
-    path.stroke()
-    image.unlockFocus()
-    return image
-}
-
 for (name, image) in [
     ("xxsnap-move.cur", moveCursorImage(
         foreground: .black, outline: NSColor.white.withAlphaComponent(0.9))),
     ("xxsnap-move-light.cur", moveCursorImage(
         foreground: .white, outline: NSColor.black.withAlphaComponent(0.75))),
-    ("xxsnap-resize-left-right.cur", resizeCursorImage(
-        angle: 0, foreground: .black)),
-    ("xxsnap-resize-left-right-light.cur", resizeCursorImage(
-        angle: 0, foreground: .white)),
-    ("xxsnap-resize-up-down.cur", resizeCursorImage(
-        angle: .pi / 2, foreground: .black)),
-    ("xxsnap-resize-up-down-light.cur", resizeCursorImage(
-        angle: .pi / 2, foreground: .white)),
-    ("xxsnap-resize-top-left-bottom-right.cur", resizeCursorImage(
-        angle: -.pi / 4, foreground: .black, drawsOutline: false)),
-    ("xxsnap-resize-top-left-bottom-right-light.cur", resizeCursorImage(
-        angle: -.pi / 4, foreground: .white, drawsOutline: false)),
-    ("xxsnap-resize-top-right-bottom-left.cur", resizeCursorImage(
-        angle: .pi / 4, foreground: .black, drawsOutline: false)),
-    ("xxsnap-resize-top-right-bottom-left-light.cur", resizeCursorImage(
-        angle: .pi / 4, foreground: .white, drawsOutline: false)),
 ] {
     let bitmap = try renderedBitmap(
         for: image,

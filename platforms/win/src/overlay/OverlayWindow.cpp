@@ -586,40 +586,20 @@ HCURSOR OverlayWindow::cursor() const noexcept
         result = LoadCursorW(instance_, MAKEINTRESOURCEW(IDC_XXSNAP_MOVE));
         break;
     case OverlayCursorStyle::resizeLeftRight:
-        result = LoadCursorW(
-            instance_, MAKEINTRESOURCEW(IDC_XXSNAP_RESIZE_LEFT_RIGHT));
+        result = LoadCursor(nullptr, IDC_SIZEWE);
         break;
     case OverlayCursorStyle::resizeUpDown:
-        result = LoadCursorW(
-            instance_, MAKEINTRESOURCEW(IDC_XXSNAP_RESIZE_UP_DOWN));
+        result = LoadCursor(nullptr, IDC_SIZENS);
         break;
     case OverlayCursorStyle::resizeTopLeftBottomRight:
-        result = LoadCursorW(instance_,
-            MAKEINTRESOURCEW(IDC_XXSNAP_RESIZE_TOP_LEFT_BOTTOM_RIGHT));
+        result = LoadCursor(nullptr, IDC_SIZENWSE);
         break;
     case OverlayCursorStyle::resizeTopRightBottomLeft:
-        result = LoadCursorW(instance_,
-            MAKEINTRESOURCEW(IDC_XXSNAP_RESIZE_TOP_RIGHT_BOTTOM_LEFT));
+        result = LoadCursor(nullptr, IDC_SIZENESW);
         break;
     case OverlayCursorStyle::moveLight:
         result = LoadCursorW(
             instance_, MAKEINTRESOURCEW(IDC_XXSNAP_MOVE_LIGHT));
-        break;
-    case OverlayCursorStyle::resizeLeftRightLight:
-        result = LoadCursorW(instance_,
-            MAKEINTRESOURCEW(IDC_XXSNAP_RESIZE_LEFT_RIGHT_LIGHT));
-        break;
-    case OverlayCursorStyle::resizeUpDownLight:
-        result = LoadCursorW(instance_,
-            MAKEINTRESOURCEW(IDC_XXSNAP_RESIZE_UP_DOWN_LIGHT));
-        break;
-    case OverlayCursorStyle::resizeTopLeftBottomRightLight:
-        result = LoadCursorW(instance_,
-            MAKEINTRESOURCEW(IDC_XXSNAP_RESIZE_TOP_LEFT_BOTTOM_RIGHT_LIGHT));
-        break;
-    case OverlayCursorStyle::resizeTopRightBottomLeftLight:
-        result = LoadCursorW(instance_,
-            MAKEINTRESOURCEW(IDC_XXSNAP_RESIZE_TOP_RIGHT_BOTTOM_LEFT_LIGHT));
         break;
     case OverlayCursorStyle::rotation:
         result = LoadCursorW(

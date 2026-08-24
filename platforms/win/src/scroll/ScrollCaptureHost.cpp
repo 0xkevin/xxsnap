@@ -5,6 +5,7 @@
 #include "overlay/OverlayHost.h"
 #include "overlay/VisualStyleCatalog.h"
 #include "scroll/LongImageEditorGeometry.h"
+#include "scroll/ScrollCaptureSamplingState.h"
 #include "scroll/ScrollCaptureSession.h"
 #include "scroll/ScrollCaptureTargetDetector.h"
 #include "scroll/ScrollRegionCapturer.h"
@@ -36,6 +37,9 @@ constexpr wchar_t scrollCaptureWindowClass[] = L"XxSnapScrollCaptureChromeWindow
 constexpr UINT scrollWheelMessage = WM_APP + 0x41U;
 constexpr UINT scrollFinishMessage = WM_APP + 0x42U;
 constexpr UINT scrollCancelMessage = WM_APP + 0x43U;
+constexpr UINT scrollPointerDownMessage = WM_APP + 0x44U;
+constexpr UINT scrollPointerMoveMessage = WM_APP + 0x45U;
+constexpr UINT scrollPointerUpMessage = WM_APP + 0x46U;
 constexpr UINT_PTR captureTimerIdentifier = 1U;
 constexpr UINT captureSettleMilliseconds = 110U;
 
@@ -273,7 +277,7 @@ struct ScrollCaptureHost::Impl final
     PixelRect toolbarBounds{};
     PixelRect previewBounds{};
     RECT finishButton{};
-    int pendingWheelDelta = 0;
+    ScrollCaptureSamplingState sampling;
     snipory::core::scroll::ScrollDirection direction =
         snipory::core::scroll::ScrollDirection::Undetermined;
     std::optional<snipory::core::scroll::ScrollFrame> preview;
@@ -292,6 +296,7 @@ struct ScrollCaptureHost::Impl final
     bool targetResolved = false;
     bool reviewing = false;
     bool terminal = false;
+    bool captureTimerScheduled = false;
 
     static Impl *active;
 
@@ -301,6 +306,7 @@ struct ScrollCaptureHost::Impl final
     {
         terminal = true;
         if (toolbarWindow != nullptr) KillTimer(toolbarWindow, captureTimerIdentifier);
+        captureTimerScheduled = false;
         if (mouseHook != nullptr) UnhookWindowsHookEx(mouseHook);
         if (keyboardHook != nullptr) UnhookWindowsHookEx(keyboardHook);
         mouseHook = nullptr;
@@ -317,13 +323,25 @@ struct ScrollCaptureHost::Impl final
     static LRESULT CALLBACK hookMouse(int code, WPARAM wParam, LPARAM lParam)
     {
         auto *self = active;
-        if (code >= 0 && self != nullptr && !self->terminal &&
-            wParam == WM_MOUSEWHEEL) {
+        if (code >= 0 && self != nullptr && !self->terminal) {
             const auto *data = reinterpret_cast<const MSLLHOOKSTRUCT *>(lParam);
-            if (data != nullptr && pointInside(self->selection, data->pt)) {
+            if (data == nullptr) {
+                return CallNextHookEx(nullptr, code, wParam, lParam);
+            }
+            if (wParam == WM_MOUSEWHEEL && pointInside(self->selection, data->pt)) {
                 const auto delta = GET_WHEEL_DELTA_WPARAM(data->mouseData);
                 PostMessageW(self->toolbarWindow, scrollWheelMessage,
                              static_cast<WPARAM>(static_cast<INT_PTR>(delta)), 0);
+            } else if (wParam == WM_LBUTTONDOWN) {
+                const auto capturesTarget = pointInside(self->selection, data->pt)
+                    || self->pointTargetsCaptureProcess(data->pt);
+                PostMessageW(self->toolbarWindow, scrollPointerDownMessage,
+                             capturesTarget ? 1U : 0U, 0);
+            } else if (wParam == WM_MOUSEMOVE
+                       && (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0) {
+                PostMessageW(self->toolbarWindow, scrollPointerMoveMessage, 0, 0);
+            } else if (wParam == WM_LBUTTONUP) {
+                PostMessageW(self->toolbarWindow, scrollPointerUpMessage, 0, 0);
             }
         }
         return CallNextHookEx(nullptr, code, wParam, lParam);
@@ -383,15 +401,27 @@ struct ScrollCaptureHost::Impl final
             return 0;
         case scrollWheelMessage:
             if (session.phase() == ScrollCapturePhase::paused) return 0;
-            pendingWheelDelta = static_cast<int>(static_cast<INT_PTR>(wParam));
-            KillTimer(toolbarWindow, captureTimerIdentifier);
-            SetTimer(toolbarWindow, captureTimerIdentifier, captureSettleMilliseconds,
-                     nullptr);
+            sampling.noteWheel(static_cast<int>(static_cast<INT_PTR>(wParam)));
+            scheduleCapture();
+            return 0;
+        case scrollPointerDownMessage:
+            sampling.beginPointerDrag(wParam != 0U);
+            return 0;
+        case scrollPointerMoveMessage:
+            sampling.notePointerMove();
+            scheduleCapture();
+            return 0;
+        case scrollPointerUpMessage:
+            sampling.endPointerDrag();
+            scheduleCapture();
             return 0;
         case WM_TIMER:
             if (wParam == captureTimerIdentifier) {
                 KillTimer(toolbarWindow, captureTimerIdentifier);
-                captureNextFrame();
+                captureTimerScheduled = false;
+                if (const auto wheelDelta = sampling.takePendingWheelDelta()) {
+                    captureNextFrame(*wheelDelta);
+                }
                 return 0;
             }
             break;
@@ -456,6 +486,27 @@ struct ScrollCaptureHost::Impl final
             return false;
         }
         return true;
+    }
+
+    bool pointTargetsCaptureProcess(POINT point) const noexcept
+    {
+        if (targetProcessId == 0U) return false;
+        const auto window = WindowFromPoint(point);
+        if (window == nullptr) return false;
+        DWORD processId = 0U;
+        GetWindowThreadProcessId(window, &processId);
+        return processId == targetProcessId;
+    }
+
+    void scheduleCapture() noexcept
+    {
+        if (terminal || captureTimerScheduled || !sampling.hasPendingSample()
+            || session.phase() == ScrollCapturePhase::paused) {
+            return;
+        }
+        captureTimerScheduled = SetTimer(
+            toolbarWindow, captureTimerIdentifier, captureSettleMilliseconds, nullptr)
+            != 0U;
     }
 
     bool createWindows() noexcept
@@ -592,13 +643,11 @@ struct ScrollCaptureHost::Impl final
         }
     }
 
-    void captureNextFrame() noexcept
+    void captureNextFrame(int wheelDelta) noexcept
     {
-        if (terminal || pendingWheelDelta == 0 ||
-            session.phase() == ScrollCapturePhase::paused) {
+        if (terminal || session.phase() == ScrollCapturePhase::paused) {
             return;
         }
-        const auto wheelDelta = std::exchange(pendingWheelDelta, 0);
         hideChrome();
         auto frame = capturer.capture(selection);
         showChrome();
@@ -617,7 +666,10 @@ struct ScrollCaptureHost::Impl final
             InvalidateRect(previewWindow, nullptr, FALSE);
             return;
         }
-        direction = update.append.direction;
+        if (update.append.direction
+            != snipory::core::scroll::ScrollDirection::Undetermined) {
+            direction = update.append.direction;
+        }
         if (update.preview.has_value()) preview = std::move(update.preview);
         updateCaptureNotice();
         InvalidateRect(previewWindow, nullptr, FALSE);
@@ -820,6 +872,7 @@ struct ScrollCaptureHost::Impl final
     {
         if (terminal) return;
         KillTimer(toolbarWindow, captureTimerIdentifier);
+        captureTimerScheduled = false;
         auto final = session.finish(maximumAcceptedBytes);
         if (!final.has_value()) {
             updateCaptureNotice();
