@@ -1382,7 +1382,7 @@ void testTextToolbarAcceptsUnicodeAndUsesRealPopupMenus()
     CHECK(owner.textOptions->selectedPopupIndex.has_value());
     if (owner.textOptions->selectedPopupIndex.has_value()) {
         CHECK(owner.textOptions->popupLabels[
-            *owner.textOptions->selectedPopupIndex] == L"8");
+            *owner.textOptions->selectedPopupIndex] == L"6");
     }
 }
 
@@ -1395,7 +1395,7 @@ void testNumberToolbarCreatesSequenceAndSupportsDoubleClickEditing()
     CHECK(router.keyPressed(ShapeEditorKey::number, false, false));
     auto owner = router.presentations()[1];
     CHECK(owner.numberOptions.has_value());
-    CHECK(owner.numberOptions->state.style().textSize == 3.0F);
+    CHECK(owner.numberOptions->state.style().textSize == 2.0F);
     auto cursor = router.numberCursorState();
     CHECK(cursor.has_value());
     CHECK(cursor->type == NumberMarkType::number);

@@ -177,6 +177,22 @@ void testNumberPlanUsesDedicatedMacControlsAndCaret()
     CHECK(!plan.rotationHandle.has_value());
 }
 
+void testLockedEditingPlanKeepsCaretWithoutManipulationHandles()
+{
+    AnnotationDocument document;
+    AnnotationStyle style;
+    style.textSize = textDefaultSize;
+    const auto id = document.addText({20, 30, 80, 24}, L"", style);
+    CHECK(id != invalidAnnotationId);
+    const auto plan = buildAnnotationRenderPlan(
+        document, std::nullopt, {}, false,
+        AnnotationEditingState{id, 0U});
+    CHECK(plan.textCaret.has_value());
+    CHECK(plan.resizeHandles.empty());
+    CHECK(!plan.textDeleteHandle.has_value());
+    CHECK(!plan.rotationHandle.has_value());
+}
+
 void testMagnifierPlanUsesEightHandlesWithoutRotation()
 {
     AnnotationDocument document;
@@ -863,6 +879,7 @@ int main()
     testBrushPlanTranslatesPathAndUsesInsetEndpointHandles();
     testMarkerPlanTranslatesLineAndUsesInsetEndpointHandles();
     testNumberPlanUsesDedicatedMacControlsAndCaret();
+    testLockedEditingPlanKeepsCaretWithoutManipulationHandles();
     testMagnifierPlanUsesEightHandlesWithoutRotation();
     testMacDashPatternsAreAbsoluteDips();
     testStrokeMenuSketchSampleUsesExactMacJitter();

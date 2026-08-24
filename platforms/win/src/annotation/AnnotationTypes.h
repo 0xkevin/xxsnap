@@ -11,7 +11,7 @@ namespace xxsnap::win {
 
 inline constexpr float textMinimumSize = 3.0F;
 inline constexpr float textMaximumSize = 72.0F;
-inline constexpr float textDefaultSize = 8.0F;
+inline constexpr float textDefaultSize = 6.0F;
 inline constexpr wchar_t textDefaultFontFamily[] = L"Microsoft YaHei";
 
 constexpr float clampedTextSize(float size) noexcept

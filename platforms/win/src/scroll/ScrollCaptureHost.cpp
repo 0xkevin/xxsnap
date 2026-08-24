@@ -595,14 +595,54 @@ struct ScrollCaptureHost::Impl final
         }
     }
 
+    std::array<HWND, 3> hideChromeIntersectingCapture() noexcept
+    {
+        std::array<HWND, 3> hidden{};
+        const std::array<std::pair<HWND, PixelRect>, 3> chrome{{
+            {borderWindow, selection},
+            {toolbarWindow, toolbarBounds},
+            {previewWindow, previewBounds},
+        }};
+        for (std::size_t index = 0; index < chrome.size(); ++index) {
+            const auto [window, bounds] = chrome[index];
+            const auto right = bounds.x + bounds.width;
+            const auto bottom = bounds.y + bounds.height;
+            const auto selectionRight = selection.x + selection.width;
+            const auto selectionBottom = selection.y + selection.height;
+            const auto overlaps = bounds.x < selectionRight
+                && right > selection.x
+                && bounds.y < selectionBottom
+                && bottom > selection.y;
+            if (window != nullptr && overlaps) {
+                ShowWindow(window, SW_HIDE);
+                hidden[index] = window;
+            }
+        }
+        GdiFlush();
+        return hidden;
+    }
+
+    void restoreChromeAfterCapture(
+        const std::array<HWND, 3>& hidden) noexcept
+    {
+        for (const auto window : hidden) {
+            if (window == nullptr) continue;
+            ShowWindow(window, SW_SHOWNOACTIVATE);
+            SetWindowPos(window, HWND_TOPMOST, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE
+                             | SWP_SHOWWINDOW);
+            InvalidateRect(window, nullptr, FALSE);
+        }
+    }
+
     void captureNextFrame(int wheelDelta) noexcept
     {
         if (terminal || session.phase() == ScrollCapturePhase::paused) {
             return;
         }
-        hideChrome();
+        const auto hiddenChrome = hideChromeIntersectingCapture();
         auto frame = capturer.capture(selection);
-        showChrome();
+        restoreChromeAfterCapture(hiddenChrome);
         if (!frame.has_value()) {
             session.pause(ScrollCapturePauseReason::captureFailure);
             updateCaptureNotice();
@@ -930,7 +970,7 @@ struct ScrollCaptureHost::Impl final
         } else if (window == toolbarWindow) {
             paintToolbar(dc, client);
         } else if (window == previewWindow) {
-            paintPreview(dc, client);
+            paintPreviewBuffered(dc, client);
         }
         EndPaint(window, &paint);
     }
@@ -1085,6 +1125,37 @@ struct ScrollCaptureHost::Impl final
         SelectObject(dc, oldPen);
         DeleteObject(blue);
         paintCaptureNotice(dc, client);
+    }
+
+    void paintPreviewBuffered(HDC dc, RECT client) noexcept
+    {
+        const auto width = client.right - client.left;
+        const auto height = client.bottom - client.top;
+        if (width <= 0 || height <= 0) return;
+        const auto bufferDc = CreateCompatibleDC(dc);
+        BITMAPINFO info{};
+        info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        info.bmiHeader.biWidth = width;
+        info.bmiHeader.biHeight = -height;
+        info.bmiHeader.biPlanes = 1U;
+        info.bmiHeader.biBitCount = 32U;
+        info.bmiHeader.biCompression = BI_RGB;
+        void* bits = nullptr;
+        const auto bitmap = CreateDIBSection(
+            dc, &info, DIB_RGB_COLORS, &bits, nullptr, 0U);
+        if (bufferDc == nullptr || bitmap == nullptr || bits == nullptr) {
+            if (bitmap != nullptr) DeleteObject(bitmap);
+            if (bufferDc != nullptr) DeleteDC(bufferDc);
+            paintPreview(dc, client);
+            return;
+        }
+        const auto previous = SelectObject(bufferDc, bitmap);
+        paintPreview(bufferDc, client);
+        BitBlt(dc, client.left, client.top, width, height,
+               bufferDc, 0, 0, SRCCOPY);
+        SelectObject(bufferDc, previous);
+        DeleteObject(bitmap);
+        DeleteDC(bufferDc);
     }
 
     void paintCaptureNotice(HDC dc, RECT client) noexcept

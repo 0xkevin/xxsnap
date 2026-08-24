@@ -31,7 +31,7 @@ void testDefaultStyleMatchesMac()
     CHECK(!defaultStyle.fillEnabled);
     CHECK(defaultStyle.fillColor == macDefaultRed);
     CHECK(defaultStyle.cornerRadiusDip == 0.0F);
-    CHECK(defaultStyle.textSize == 8.0F);
+    CHECK(defaultStyle.textSize == 6.0F);
     CHECK(defaultStyle.textFontFamily == L"Microsoft YaHei");
     CHECK(defaultStyle.textOutlineEnabled);
     CHECK(defaultStyle.textOutlineColor == macTextOutlineWhite);

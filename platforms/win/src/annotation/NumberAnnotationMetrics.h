@@ -10,7 +10,7 @@ namespace xxsnap::win {
 
 inline constexpr float numberMinimumSize = 1.0F;
 inline constexpr float numberMaximumSize = 72.0F;
-inline constexpr float numberDefaultSize = 3.0F;
+inline constexpr float numberDefaultSize = 2.0F;
 inline constexpr int numberMinimumValue = 1;
 inline constexpr int numberMaximumValue = 999;
 

@@ -522,7 +522,7 @@ void testTextCreatesUnicodeAndEditsAtCaret()
     CHECK(editor.isTextToolActive());
     CHECK(editor.textOptions().style().textFontFamily
         == L"Microsoft YaHei");
-    CHECK(editor.textOptions().style().textSize == 8.0F);
+    CHECK(editor.textOptions().style().textSize == 6.0F);
     CHECK(editor.pointerDown({60, 80}));
     CHECK(editor.isEditingInlineValue());
     CHECK(editor.insertText(L"中文AB"));
@@ -559,7 +559,7 @@ void testTextCreatesUnicodeAndEditsAtCaret()
     CHECK(editor.setTextSize(12.0F));
     CHECK(editor.document().find(id)->style.textSize == 12.0F);
     CHECK(editor.cancelTextEdit());
-    CHECK(editor.document().find(id)->style.textSize == 8.0F);
+    CHECK(editor.document().find(id)->style.textSize == 6.0F);
 }
 
 void testClearAllFinalizesInlineEditsBeforeClearing()
@@ -603,7 +603,7 @@ void testNumberToolMatchesMacSequenceEditingAndControls()
     CHECK(editor.isNumberToolActive());
     CHECK(editor.cursorStyleAt({40, 40}) == ShapeCursorStyle::numberMark);
     CHECK(editor.numberOptions().type() == NumberMarkType::number);
-    CHECK(editor.numberOptions().style().textSize == 3.0F);
+    CHECK(editor.numberOptions().style().textSize == 2.0F);
 
     CHECK(editor.pointerDown({80, 80}));
     CHECK(editor.pointerDown({80, 80}));

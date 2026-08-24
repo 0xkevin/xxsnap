@@ -277,7 +277,7 @@ void testTextOptionsMatchMacGeometryAndMenus()
 {
     TextOptionsState state;
     CHECK(state.style().textFontFamily == L"Microsoft YaHei");
-    CHECK(state.style().textSize == 8.0F);
+    CHECK(state.style().textSize == 6.0F);
     CHECK(state.style().textOutlineEnabled);
     CHECK(state.selectedPaletteIndex() == 0U);
     CHECK(state.toggleBold());
@@ -312,7 +312,7 @@ void testNumberOptionsMatchMacGeometryTypesAndSizes()
 {
     NumberOptionsState state;
     CHECK(state.type() == NumberMarkType::number);
-    CHECK(state.style().textSize == 3.0F);
+    CHECK(state.style().textSize == 2.0F);
     CHECK(state.selectedPaletteIndex() == 0U);
     CHECK(numberMarkDiameter(1.0F) == 15.0F);
     CHECK(numberMarkDiameter(3.0F) == 21.0F);

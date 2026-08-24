@@ -413,11 +413,20 @@ AnnotationRenderPlan buildAnnotationRenderPlan(
         plan.items.push_back({annotation, true, std::nullopt});
     }
 
-    if (!showEditingAffordances) {
-        return plan;
-    }
     const ShapeAnnotation* editing = nullptr;
-    if (preview.has_value()
+    if (editingState.has_value()) {
+        for (auto& item : plan.items) {
+            if (item.annotation.id == editingState->id) {
+                editing = &item.annotation;
+                if (editingState->draftText.has_value()
+                    && isNumberAnnotation(item.annotation)) {
+                    item.numberDraft = editingState->draftText;
+                }
+                break;
+            }
+        }
+    }
+    if (editing == nullptr && preview.has_value()
         && preview->id != invalidAnnotationId
         && !plan.items.empty()) {
         editing = &plan.items.back().annotation;
@@ -439,16 +448,6 @@ AnnotationRenderPlan buildAnnotationRenderPlan(
         return plan;
     }
 
-    if (editingState.has_value() && editingState->draftText.has_value()) {
-        for (auto& item : plan.items) {
-            if (item.annotation.id == editingState->id
-                && isNumberAnnotation(item.annotation)) {
-                item.numberDraft = editingState->draftText;
-                break;
-            }
-        }
-    }
-
     if (editingState.has_value() && editing->id == editingState->id
         && isTextAnnotation(*editing)) {
         plan.textCaret = textCaretRect(
@@ -459,6 +458,17 @@ AnnotationRenderPlan buildAnnotationRenderPlan(
             rect.x + rect.width / 2.0F,
             rect.y + rect.height / 2.0F,
         };
+    }
+
+    if (editingState.has_value() && editing->id == editingState->id
+        && isNumberAnnotation(*editing)) {
+        plan.numberCaret = numberCaretRect(
+            *editing, editingState->caretPosition,
+            editingState->draftText);
+    }
+
+    if (!showEditingAffordances) {
+        return plan;
     }
 
     if (isNumberAnnotation(*editing)) {
@@ -497,12 +507,6 @@ AnnotationRenderPlan buildAnnotationRenderPlan(
             && (manual || adjacentExists(value + 1));
         plan.numberDecrementEnabled = value > numberMinimumValue
             && (manual || adjacentExists(value - 1));
-        if (editingState.has_value()
-            && editing->id == editingState->id) {
-            plan.numberCaret = numberCaretRect(
-                *editing, editingState->caretPosition,
-                editingState->draftText);
-        }
         return plan;
     }
 
