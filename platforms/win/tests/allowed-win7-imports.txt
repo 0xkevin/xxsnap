@@ -86,6 +86,7 @@ USER32.dll!RegisterClassExW
 USER32.dll!RegisterClipboardFormatW
 USER32.dll!RegisterHotKey
 USER32.dll!RegisterWindowMessageW
+USER32.dll!RedrawWindow
 USER32.dll!ReleaseCapture
 USER32.dll!ReleaseDC
 USER32.dll!SendMessageW

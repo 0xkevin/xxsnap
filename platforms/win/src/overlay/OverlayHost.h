@@ -165,6 +165,7 @@ struct OverlayPresentation {
     std::optional<PixelRect> selection;
     bool showActions = false;
     bool pinnedImageEditor = false;
+    bool longImageEditor = false;
     bool textRecognition = false;
     bool teachingPen = false;
     std::optional<MainToolbarLayout> teachingPenToolbar;
@@ -183,6 +184,7 @@ struct OverlayPresentation {
     std::optional<OverlayPresentationMagnifierOptions> magnifierOptions;
     std::optional<OverlayPresentationEraserOptions> eraserOptions;
     std::optional<OverlayPresentationEyedropper> eyedropper;
+    std::optional<std::wstring> sizeLabelText;
 };
 
 class OverlayInputPlatform {
@@ -228,6 +230,7 @@ public:
         float scale,
         AnnotationRect canvasBounds,
         const FrozenDesktop* desktop) noexcept;
+    void setSizeLabelText(std::wstring text);
     ~OverlayInputRouter();
 
     OverlayInputRouter(const OverlayInputRouter&) = delete;
@@ -367,6 +370,7 @@ private:
     AnnotationPoint annotationViewportOrigin_{};
     float annotationViewportScale_ = 1.0F;
     std::optional<AnnotationRect> annotationCanvasBounds_;
+    std::optional<std::wstring> sizeLabelText_;
     mutable std::shared_ptr<const PixelBuffer> rawSelectionCache_;
     mutable std::optional<PixelRect> rawSelectionCacheSelection_;
     mutable std::optional<PixelRect> cursorContrastSelection_;

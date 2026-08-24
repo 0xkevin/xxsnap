@@ -5,6 +5,7 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <cwchar>
 
 namespace {
@@ -123,8 +124,43 @@ int wmain(int argc, wchar_t** argv)
                 }
             }
             Sleep(2'000U);
-            result = WaitForSingleObject(process.hProcess, 0U) == WAIT_TIMEOUT
-                ? ERROR_SUCCESS : ERROR_PROCESS_ABORTED;
+            if (WaitForSingleObject(process.hProcess, 0U) != WAIT_TIMEOUT) {
+                result = ERROR_PROCESS_ABORTED;
+            } else {
+                sendKey(VK_RETURN);
+                sendKey(VK_RETURN, true);
+                const auto editor = waitForWindow(
+                    process.dwProcessId, overlayClassName, 10'000U);
+                if (editor == nullptr) {
+                    result = ERROR_TIMEOUT;
+                } else {
+                    const auto style = static_cast<DWORD>(
+                        GetWindowLongPtrW(editor, GWL_STYLE));
+                    wchar_t title[256]{};
+                    GetWindowTextW(editor, title, static_cast<int>(_countof(title)));
+                    RECT before{};
+                    GetWindowRect(editor, &before);
+                    const auto titleX = before.left
+                        + (std::min)(160L, (std::max)(40L,
+                            (before.right - before.left) / 3));
+                    const auto titleY = before.top + 12L;
+                    sendMouse(MOUSEEVENTF_MOVE, titleX, titleY);
+                    sendMouse(MOUSEEVENTF_MOVE | MOUSEEVENTF_LEFTDOWN,
+                        titleX, titleY);
+                    Sleep(100U);
+                    sendMouse(MOUSEEVENTF_MOVE, titleX + 80L, titleY + 60L);
+                    sendMouse(MOUSEEVENTF_MOVE | MOUSEEVENTF_LEFTUP,
+                        titleX + 80L, titleY + 60L);
+                    Sleep(250U);
+                    RECT after{};
+                    GetWindowRect(editor, &after);
+                    const auto moved = std::abs(after.left - before.left) >= 40L
+                        && std::abs(after.top - before.top) >= 30L;
+                    result = (style & WS_CAPTION) != 0U
+                            && std::wcsstr(title, L"px") != nullptr && moved
+                        ? ERROR_SUCCESS : ERROR_INVALID_STATE;
+                }
+            }
         }
     }
 

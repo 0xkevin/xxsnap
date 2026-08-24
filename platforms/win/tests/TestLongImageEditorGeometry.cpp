@@ -35,11 +35,29 @@ void testScrollOffsetClampsAndMapsToFullImageCoordinates()
     CHECK(clampedLongImageOffset(9000, layout) == layout.maximumSourceOffset);
     CHECK(longImageAnnotationOrigin(321, 144).y == 214.0F);
 }
+
+void testPreviewMatchesImageAspectRatioAndClampsBesideSelection()
+{
+    const auto preview = longImagePreviewBounds(
+        {0, 0, 1920, 1040}, {100, 100, 800, 600}, 600, 2400, 96, 96);
+    CHECK(preview.width == 120);
+    CHECK(preview.height == 480);
+    CHECK(preview.x == 908);
+    CHECK(preview.y == 100);
+
+    const auto leftPreview = longImagePreviewBounds(
+        {0, 0, 1280, 720}, {950, 50, 300, 500}, 300, 600, 96, 96);
+    CHECK(leftPreview.width == 240);
+    CHECK(leftPreview.height == 480);
+    CHECK(leftPreview.x == 702);
+    CHECK(leftPreview.y == 50);
+}
 } // namespace
 
 int main()
 {
     testNarrowCaptureUsesImageWidthWithoutBlankMargins();
     testScrollOffsetClampsAndMapsToFullImageCoordinates();
+    testPreviewMatchesImageAspectRatioAndClampsBesideSelection();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

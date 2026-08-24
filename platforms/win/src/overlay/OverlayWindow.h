@@ -28,6 +28,16 @@ constexpr DWORD overlayWindowExtendedStyle() noexcept
     return WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
 }
 
+constexpr DWORD editorWindowStyle() noexcept
+{
+    return WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
+}
+
+constexpr DWORD editorWindowExtendedStyle() noexcept
+{
+    return WS_EX_APPWINDOW;
+}
+
 inline constexpr int overlayEscapeHotKeyIdentifier = 0x5853;
 inline constexpr int overlayUndoHotKeyIdentifier = 0x5854;
 inline constexpr int overlayRedoHotKeyIdentifier = 0x5855;
@@ -195,6 +205,12 @@ public:
         const FrozenDisplay& display,
         RestartCallback restartCallback,
         InputCallback inputCallback = {});
+    static OverlayWindowCreateResult createEditor(
+        HINSTANCE instance,
+        const FrozenDisplay& display,
+        std::wstring title,
+        RestartCallback restartCallback,
+        InputCallback inputCallback = {});
 
     HWND handle() const noexcept;
     void show() noexcept;
@@ -220,7 +236,16 @@ private:
         HINSTANCE instance,
         const FrozenDisplay& display,
         RestartCallback restartCallback,
-        InputCallback inputCallback);
+        InputCallback inputCallback,
+        bool framedEditor);
+
+    static OverlayWindowCreateResult createWithChrome(
+        HINSTANCE instance,
+        const FrozenDisplay& display,
+        std::wstring title,
+        RestartCallback restartCallback,
+        InputCallback inputCallback,
+        bool framedEditor);
 
     static LRESULT CALLBACK windowProcedure(
         HWND window,
@@ -250,6 +275,7 @@ private:
     HCURSOR markerCursor_ = nullptr;
     bool alwaysOnTop_ = true;
     bool keyboardInputAlwaysEnabled_ = false;
+    bool framedEditor_ = false;
     AnnotationColor markerCursorColor_{};
     float markerCursorStrokeWidthDip_ = 0.0F;
     bool markerCursorIsMosaic_ = false;

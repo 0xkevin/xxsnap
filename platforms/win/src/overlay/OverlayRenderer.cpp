@@ -2857,7 +2857,8 @@ struct OverlayRenderer::Impl final {
 
         std::optional<OverlayLayout> chromeLayout;
         if (state.selection.has_value()) {
-            const auto label = sizeLabelText(*state.selection);
+            const auto label = state.sizeLabelText.value_or(
+                sizeLabelText(*state.selection));
             float labelWidth = 0.0F;
             if (const auto measureError = measureLabel(label, labelWidth)) {
                 return measureError;
@@ -2871,6 +2872,13 @@ struct OverlayRenderer::Impl final {
                 state.showActions,
                 state.toolbarActions,
             });
+            chromeLayout->sizeLabelText = label;
+            if (state.longImageEditor && chromeLayout->showActions) {
+                chromeLayout->sizeLabel.x
+                    = VisualStyleCatalog::layoutMarginDip;
+                chromeLayout->sizeLabel.y
+                    = VisualStyleCatalog::layoutMarginDip;
+            }
             if (state.teachingPenToolbar.has_value()) {
                 chromeLayout->toolbar = *state.teachingPenToolbar;
                 chromeLayout->toolbarItems.clear();
@@ -3004,7 +3012,8 @@ struct OverlayRenderer::Impl final {
             }
 
             if (layout.showActions) {
-                if (!state.pinnedImageEditor && !state.teachingPen) {
+                if ((!state.pinnedImageEditor || state.longImageEditor)
+                    && !state.teachingPen) {
                     const auto labelRounded = D2D1::RoundedRect(
                         d2dRect(layout.sizeLabel),
                         VisualStyleCatalog::sizeLabelCornerRadiusDip,

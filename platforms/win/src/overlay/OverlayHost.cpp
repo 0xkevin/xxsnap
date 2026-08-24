@@ -634,6 +634,13 @@ void OverlayInputRouter::setAnnotationViewport(
     }
 }
 
+void OverlayInputRouter::setSizeLabelText(std::wstring text)
+{
+    sizeLabelText_ = text.empty()
+        ? std::nullopt
+        : std::optional<std::wstring>(std::move(text));
+}
+
 std::vector<ToolbarAction> OverlayInputRouter::toolbarActions() const
 {
     if (mode_ == OverlayMode::textRecognition) {
@@ -736,6 +743,7 @@ void OverlayInputRouter::ensureEditor() noexcept
     if (!editor_) {
         try {
             editor_ = std::make_unique<ShapeEditorController>(bounds);
+            editor_->setCompletedAnnotationsLocked(true);
             editorOwnerIndex_ = owner;
         } catch (...) {
             editor_.reset();
@@ -1457,6 +1465,9 @@ std::vector<OverlayPresentation> OverlayInputRouter::presentations() const
         presentation.pinnedImageEditor
             = mode_ == OverlayMode::pinnedImageEditor
             || mode_ == OverlayMode::longImageEditor;
+        presentation.longImageEditor
+            = mode_ == OverlayMode::longImageEditor;
+        presentation.sizeLabelText = sizeLabelText_;
         presentation.textRecognition
             = mode_ == OverlayMode::textRecognition;
         presentation.teachingPen
@@ -3166,6 +3177,8 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
                 state.selection = current[index].selection;
                 state.showActions = current[index].showActions;
                 state.pinnedImageEditor = current[index].pinnedImageEditor;
+                state.longImageEditor = current[index].longImageEditor;
+                state.sizeLabelText = current[index].sizeLabelText;
                 state.textRecognition = current[index].textRecognition;
                 state.teachingPen = current[index].teachingPen;
                 state.teachingPenToolbar
@@ -3535,6 +3548,10 @@ OverlayHostCreateResult OverlayHost::createLongImageEditor(
         impl->longImageCanvasBounds = standardized(canvasBounds);
         const auto sourceWidth = dipLengthToPhysicalPixels(
             canvasBounds.width, desktop.displays.front().descriptor.dpiX);
+        const auto sourceHeight = dipLengthToPhysicalPixels(
+            canvasBounds.height, desktop.displays.front().descriptor.dpiY);
+        const auto sizeLabel = std::to_wstring(sourceWidth) + L" x "
+            + std::to_wstring(sourceHeight) + L"  px";
         impl->longImageDisplayScale = sourceWidth > 0
             ? static_cast<float>(
                 desktop.displays.front().descriptor.pixelBounds.width)
@@ -3544,8 +3561,9 @@ OverlayHostCreateResult OverlayHost::createLongImageEditor(
         impl->actionCallback = std::move(actionCallback);
         impl->platform = std::make_unique<SystemOverlayInputPlatform>();
         const std::weak_ptr<Impl> weak = impl;
-        auto created = OverlayWindow::create(
-            instance, desktop.displays.front(), [] {},
+        auto created = OverlayWindow::createEditor(
+            instance, desktop.displays.front(),
+            L"长截图编辑    " + sizeLabel, [] {},
             [weak](HWND source, const OverlayWindowInput& input) {
                 if (const auto locked = weak.lock()) {
                     locked->handleInput(source, input);
@@ -3559,6 +3577,7 @@ OverlayHostCreateResult OverlayHost::createLongImageEditor(
                 created.error}};
         }
         impl->windows.push_back(std::move(created.value));
+        impl->windows.front()->setAlwaysOnTop(false);
         impl->windows.front()->setKeyboardInputAlwaysEnabled(true);
         const auto& descriptor = desktop.displays.front().descriptor;
         std::vector<OverlaySurface> surfaces{{
@@ -3576,6 +3595,7 @@ OverlayHostCreateResult OverlayHost::createLongImageEditor(
         impl->router->lockSelection(descriptor.pixelBounds);
         impl->router->setAnnotationViewport(
             {}, impl->longImageDisplayScale, canvasBounds, &desktop);
+        impl->router->setSizeLabelText(sizeLabel);
         if (!impl->router->activateEscapeHotKey(
                 impl->windows.front()->handle())
             || !impl->refresh()) {

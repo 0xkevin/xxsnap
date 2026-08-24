@@ -98,12 +98,14 @@ OverlayWindow::OverlayWindow(
     HINSTANCE instance,
     const FrozenDisplay& display,
     RestartCallback restartCallback,
-    InputCallback inputCallback)
+    InputCallback inputCallback,
+    bool framedEditor)
     : instance_(instance)
     , display_(&display)
     , restartCallback_(std::move(restartCallback))
     , inputCallback_(std::move(inputCallback))
     , renderer_(instance)
+    , framedEditor_(framedEditor)
 {
 }
 
@@ -123,6 +125,29 @@ OverlayWindowCreateResult OverlayWindow::create(
     const FrozenDisplay& display,
     RestartCallback restartCallback,
     InputCallback inputCallback)
+{
+    return createWithChrome(instance, display, L"",
+        std::move(restartCallback), std::move(inputCallback), false);
+}
+
+OverlayWindowCreateResult OverlayWindow::createEditor(
+    HINSTANCE instance,
+    const FrozenDisplay& display,
+    std::wstring title,
+    RestartCallback restartCallback,
+    InputCallback inputCallback)
+{
+    return createWithChrome(instance, display, std::move(title),
+        std::move(restartCallback), std::move(inputCallback), true);
+}
+
+OverlayWindowCreateResult OverlayWindow::createWithChrome(
+    HINSTANCE instance,
+    const FrozenDisplay& display,
+    std::wstring title,
+    RestartCallback restartCallback,
+    InputCallback inputCallback,
+    bool framedEditor)
 {
     if (instance == nullptr) {
         instance = GetModuleHandleW(nullptr);
@@ -166,16 +191,38 @@ OverlayWindowCreateResult OverlayWindow::create(
             instance,
             display,
             std::move(restartCallback),
-            std::move(inputCallback)));
+            std::move(inputCallback),
+            framedEditor));
+        const auto style = framedEditor
+            ? editorWindowStyle() : overlayWindowStyle();
+        const auto extendedStyle = framedEditor
+            ? editorWindowExtendedStyle() : overlayWindowExtendedStyle();
+        RECT windowBounds{
+            static_cast<LONG>(bounds.x),
+            static_cast<LONG>(bounds.y),
+            static_cast<LONG>(bounds.x + bounds.width),
+            static_cast<LONG>(bounds.y + bounds.height),
+        };
+        if (framedEditor
+            && !AdjustWindowRectEx(&windowBounds, style, FALSE, extendedStyle)) {
+            return {
+                nullptr,
+                OverlayWindowError{
+                    OverlayWindowErrorCode::windowCreationFailed,
+                    GetLastError(),
+                    std::nullopt,
+                },
+            };
+        }
         const auto window = CreateWindowExW(
-            overlayWindowExtendedStyle(),
+            extendedStyle,
             overlayWindowClassName,
-            L"",
-            overlayWindowStyle(),
-            static_cast<int>(bounds.x),
-            static_cast<int>(bounds.y),
-            static_cast<int>(bounds.width),
-            static_cast<int>(bounds.height),
+            title.c_str(),
+            style,
+            windowBounds.left,
+            windowBounds.top,
+            windowBounds.right - windowBounds.left,
+            windowBounds.bottom - windowBounds.top,
             nullptr,
             nullptr,
             instance,
@@ -228,6 +275,17 @@ void OverlayWindow::show() noexcept
     }
     const auto bounds = snipory::core::portable::standardized(
         display_->descriptor.pixelBounds);
+    if (framedEditor_) {
+        ShowWindow(window_, SW_SHOWNORMAL);
+        SetWindowPos(
+            window_, alwaysOnTop_ ? HWND_TOPMOST : HWND_NOTOPMOST,
+            0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+        SetForegroundWindow(window_);
+        SetFocus(window_);
+        UpdateWindow(window_);
+        return;
+    }
     ShowWindow(window_, keyboardInputAlwaysEnabled_
         ? SW_SHOWNORMAL : SW_SHOWNOACTIVATE);
     SetWindowPos(
@@ -704,6 +762,9 @@ LRESULT OverlayWindow::handleMessage(
         }
     };
     switch (message) {
+    case WM_CLOSE:
+        dispatchInput({OverlayWindowInputKind::escape, {}});
+        return 0;
     case WM_SETCURSOR:
         if (LOWORD(lParam) == HTCLIENT) {
             SetCursor(cursor());

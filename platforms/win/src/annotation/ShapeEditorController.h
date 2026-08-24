@@ -80,6 +80,7 @@ public:
 
     void setCanvasBounds(AnnotationRect canvasBounds) noexcept;
     void setTeachingPenMode(bool enabled) noexcept;
+    void setCompletedAnnotationsLocked(bool enabled) noexcept;
     const ToolbarState& toolbarState() const noexcept;
     const ShapeOptionsState& options() const noexcept;
     const ArrowLineOptionsState& arrowLineOptions() const noexcept;
@@ -236,6 +237,7 @@ private:
     bool brushToolActive_ = false;
     bool markerToolActive_ = false;
     bool teachingPenMode_ = false;
+    bool completedAnnotationsLocked_ = false;
     bool strokePatternMenuVisible_ = false;
     bool cornerRadiusPanelVisible_ = false;
     std::uint64_t interactionRevision_ = 0;

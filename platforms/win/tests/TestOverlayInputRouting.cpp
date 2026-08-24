@@ -1026,7 +1026,7 @@ void testArrowToolUsesMacOptionsMenuAndCreatesEditableCurve()
     CHECK(created.style.strokePattern
         == xxsnap::win::AnnotationStrokePattern::sketchDashed);
     CHECK((created.style.strokeColor == AnnotationColor{1, 2, 3, 255}));
-    CHECK(router.presentations()[1].annotationPlan.lineHandles.size() == 3U);
+    CHECK(router.presentations()[1].annotationPlan.lineHandles.empty());
 }
 
 void testBrushToolUsesMacOptionsAndShiftStraightLine()
@@ -1195,8 +1195,8 @@ void testMarkerToolUsesMacOptionsAndShiftSnapping()
     CHECK(created.kind == xxsnap::win::AnnotationKind::marker);
     CHECK(created.markerLine.has_value());
     CHECK(created.style.strokeWidthDip == 14.0F);
-    CHECK(router.annotationDocument().selectedId() == created.id);
-    CHECK(router.presentations()[1].annotationPlan.lineHandles.size() == 2U);
+    CHECK(!router.annotationDocument().selectedId().has_value());
+    CHECK(router.presentations()[1].annotationPlan.lineHandles.empty());
 }
 
 void testEyedropperSamplesCopiesAndMeasuresLikeMac()
@@ -1422,13 +1422,10 @@ void testNumberToolbarCreatesSequenceAndSupportsDoubleClickEditing()
     CHECK(router.annotationDocument().annotations()[0].numberSequenceIndex == 1);
     CHECK(router.annotationDocument().annotations()[1].numberSequenceIndex == 2);
 
-    CHECK(router.pointerDown(rightWindow, PixelPoint{30, 100}, 2));
-    CHECK(router.isEditingInlineValue());
-    CHECK(router.keyPressed(ShapeEditorKey::backspace, false, false));
-    CHECK(router.textInput(L"9"));
-    CHECK(router.keyPressed(ShapeEditorKey::enter, false, false));
-    CHECK(router.annotationDocument().annotations()[0].numberSequenceIndex == 9);
-    CHECK(router.annotationDocument().annotations()[0].numberSequenceIsManual);
+    CHECK(!router.annotationDocument().selectedId().has_value());
+    CHECK(!router.isEditingInlineValue());
+    CHECK(router.annotationDocument().annotations()[0].numberSequenceIndex == 1);
+    CHECK(!router.annotationDocument().annotations()[0].numberSequenceIsManual);
 }
 
 void testSelectionResizeKeepsNumberAtItsScreenPosition()
@@ -1572,7 +1569,7 @@ void testMagnifierToolbarMatchesMacOptionsAndUsesComposite()
     owner = router.presentations()[1];
     CHECK(owner.annotationComposite == nullptr);
     CHECK(owner.annotationPlan.items.size() == 1U);
-    CHECK(!owner.annotationPlan.resizeHandles.empty());
+    CHECK(owner.annotationPlan.resizeHandles.empty());
     CHECK(!owner.annotationPlan.rotationHandle.has_value());
 }
 
@@ -1647,6 +1644,14 @@ void testRectangleEraserRoutesFromOutsideLockedSelection()
     CHECK(router.annotationDocument().eraserMasks().size() == 1U);
     CHECK((router.annotationDocument().eraserMasks()[0].affectedAnnotationIds
         == std::vector<xxsnap::win::AnnotationId>{annotationId}));
+
+    owner = router.presentations()[1];
+    CHECK(owner.eraserOptions.has_value());
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.eraserOptions->layout.pointMode)));
+    CHECK(router.pointerDown(rightWindow, PixelPoint{50, 140}));
+    router.pointerUp(rightWindow, PixelPoint{50, 140});
+    CHECK(router.annotationDocument().annotations().empty());
 }
 
 void testTextRecognitionAutoCompletesWithoutCaptureChrome()

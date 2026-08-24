@@ -137,6 +137,7 @@ struct OverlayRenderState {
     std::optional<PixelRect> selection;
     bool showActions = true;
     bool pinnedImageEditor = false;
+    bool longImageEditor = false;
     bool textRecognition = false;
     bool teachingPen = false;
     std::optional<MainToolbarLayout> teachingPenToolbar;
@@ -161,6 +162,7 @@ struct OverlayRenderState {
     std::optional<OverlayEraserOptionsRenderState> eraserOptions;
     std::optional<OverlayEyedropperRenderState> eyedropper;
     std::optional<OverlayToolbarTooltipRenderState> toolbarTooltip;
+    std::optional<std::wstring> sizeLabelText;
 };
 
 float physicalPixelsToDip(std::int64_t pixels, std::uint32_t dpi) noexcept;

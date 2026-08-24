@@ -295,6 +295,10 @@ void testWindowAndResourceContracts()
     CHECK(
         xxsnap::win::overlayWindowExtendedStyle()
         == (WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE));
+    CHECK((xxsnap::win::editorWindowStyle() & WS_CAPTION) != 0U);
+    CHECK((xxsnap::win::editorWindowStyle() & WS_SYSMENU) != 0U);
+    CHECK((xxsnap::win::editorWindowStyle() & WS_POPUP) == 0U);
+    CHECK(xxsnap::win::editorWindowExtendedStyle() == WS_EX_APPWINDOW);
 
     CHECK(xxsnap::win::toolbarResourceId(
         xxsnap::win::toolbarIcon(xxsnap::win::ToolbarAction::cancel), 96)

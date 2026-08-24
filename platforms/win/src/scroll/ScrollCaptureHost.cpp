@@ -478,20 +478,7 @@ struct ScrollCaptureHost::Impl final
                                                             toolbarHeight));
         toolbarBounds = {toolbarX, toolbarY, toolbarWidth, toolbarHeight};
 
-        const auto previewWidth = scaledDip(300.0F, dpiX);
-        const auto previewHeight = scaledDip(480.0F, dpiY);
-        auto previewX = selection.x + selection.width + scaledDip(8.0F, dpiX);
-        if (previewX + previewWidth > workArea.x + workArea.width) {
-            previewX = selection.x - scaledDip(8.0F, dpiX) - previewWidth;
-        }
-        previewX =
-            (std::max)(workArea.x, (std::min)(previewX, workArea.x + workArea.width -
-                                                            previewWidth));
-        auto previewY = selection.y + selection.height - previewHeight;
-        previewY =
-            (std::max)(workArea.y, (std::min)(previewY, workArea.y + workArea.height -
-                                                            previewHeight));
-        previewBounds = {previewX, previewY, previewWidth, previewHeight};
+        updatePreviewBounds();
 
         const auto common = WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
         borderWindow = createWindow(common | WS_EX_TRANSPARENT, selection);
@@ -518,6 +505,21 @@ struct ScrollCaptureHost::Impl final
                      FALSE);
         computeFinishButton();
         return true;
+    }
+
+    void updatePreviewBounds() noexcept
+    {
+        if (!preview.has_value() || !preview->isValid()) return;
+        previewBounds = longImagePreviewBounds(
+            workArea, selection, preview->width, preview->height, dpiX, dpiY);
+        if (previewWindow != nullptr) {
+            SetWindowPos(previewWindow, HWND_TOPMOST,
+                         static_cast<int>(previewBounds.x),
+                         static_cast<int>(previewBounds.y),
+                         static_cast<int>(previewBounds.width),
+                         static_cast<int>(previewBounds.height),
+                         SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        }
     }
 
     HWND createWindow(DWORD extendedStyle, PixelRect bounds) noexcept
@@ -620,7 +622,10 @@ struct ScrollCaptureHost::Impl final
             != snipory::core::scroll::ScrollDirection::Undetermined) {
             direction = update.append.direction;
         }
-        if (update.preview.has_value()) preview = std::move(update.preview);
+        if (update.preview.has_value()) {
+            preview = std::move(update.preview);
+            updatePreviewBounds();
+        }
         updateCaptureNotice();
         InvalidateRect(previewWindow, nullptr, FALSE);
     }
@@ -1018,15 +1023,15 @@ struct ScrollCaptureHost::Impl final
         FillRect(dc, &client, background);
         DeleteObject(background);
         if (!preview.has_value() || !preview->isValid()) return;
-        const auto availableWidth = (std::max)(1L, client.right - client.left - 16L);
-        const auto availableHeight = (std::max)(1L, client.bottom - client.top - 34L);
+        const auto availableWidth = (std::max)(1L, client.right - client.left);
+        const auto availableHeight = (std::max)(1L, client.bottom - client.top);
         const auto scale =
             (std::min)(static_cast<double>(availableWidth) / preview->width,
                        static_cast<double>(availableHeight) / preview->height);
         const auto width = (std::max)(1, static_cast<int>(preview->width * scale));
         const auto height = (std::max)(1, static_cast<int>(preview->height * scale));
         const auto x = (client.right - width) / 2;
-        const auto y = client.bottom - 26 - height;
+        const auto y = (client.bottom - height) / 2;
         BITMAPINFO info{};
         info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
         info.bmiHeader.biWidth = preview->width;
@@ -1047,6 +1052,31 @@ struct ScrollCaptureHost::Impl final
                                    : y + height - (std::min)(height, viewportHeight);
         const auto blue =
             CreatePen(PS_SOLID, (std::max)(1, scaledDip(2.0F, dpiX)), RGB(0, 122, 255));
+        const auto overlayDc = CreateCompatibleDC(dc);
+        BITMAPINFO overlayInfo{};
+        overlayInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        overlayInfo.bmiHeader.biWidth = 1;
+        overlayInfo.bmiHeader.biHeight = -1;
+        overlayInfo.bmiHeader.biPlanes = 1U;
+        overlayInfo.bmiHeader.biBitCount = 32U;
+        overlayInfo.bmiHeader.biCompression = BI_RGB;
+        void* overlayBits = nullptr;
+        const auto overlayBitmap = CreateDIBSection(
+            dc, &overlayInfo, DIB_RGB_COLORS, &overlayBits, nullptr, 0U);
+        if (overlayBits != nullptr) {
+            const std::array<std::byte, 4> overlayPixel{
+                std::byte{255}, std::byte{122}, std::byte{0}, std::byte{255}};
+            std::copy(overlayPixel.begin(), overlayPixel.end(),
+                      static_cast<std::byte*>(overlayBits));
+        }
+        const auto oldOverlayBitmap = SelectObject(overlayDc, overlayBitmap);
+        const BLENDFUNCTION viewportBlend{AC_SRC_OVER, 0, 26U, 0};
+        AlphaBlend(dc, x, viewportY, width,
+                   (std::min)(height, viewportHeight), overlayDc, 0, 0, 1, 1,
+                   viewportBlend);
+        SelectObject(overlayDc, oldOverlayBitmap);
+        DeleteObject(overlayBitmap);
+        DeleteDC(overlayDc);
         const auto oldPen = SelectObject(dc, blue);
         const auto oldBrush = SelectObject(dc, GetStockObject(HOLLOW_BRUSH));
         Rectangle(dc, x, viewportY, x + width,
@@ -1054,19 +1084,6 @@ struct ScrollCaptureHost::Impl final
         SelectObject(dc, oldBrush);
         SelectObject(dc, oldPen);
         DeleteObject(blue);
-        SetBkMode(dc, TRANSPARENT);
-        SetTextColor(dc, RGB(40, 40, 40));
-        const auto font =
-            CreateFontW(-scaledDip(12.0F, dpiY), 0, 0, 0, FW_MEDIUM, FALSE, FALSE,
-                        FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                        CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Microsoft YaHei");
-        const auto oldFont = SelectObject(dc, font);
-        const auto label = std::to_wstring(outputHeight) + L" px";
-        RECT labelRect{0, client.bottom - 24, client.right, client.bottom};
-        DrawTextW(dc, label.data(), static_cast<int>(label.size()), &labelRect,
-                  DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-        SelectObject(dc, oldFont);
-        DeleteObject(font);
         paintCaptureNotice(dc, client);
     }
 
