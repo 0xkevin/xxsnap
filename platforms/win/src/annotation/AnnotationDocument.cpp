@@ -16,6 +16,27 @@ bool hasUsableArrowLine(const ArrowLine& line) noexcept
         static_cast<double>(line.end.y - line.start.y)) >= 8.0;
 }
 
+void translateAnnotation(
+    ShapeAnnotation& annotation,
+    AnnotationPoint offset) noexcept
+{
+    annotation.rect = translated(annotation.rect, offset);
+    if (annotation.arrowLine.has_value()) {
+        annotation.arrowLine = translated(*annotation.arrowLine, offset);
+    }
+    if (annotation.brushPath.has_value()) {
+        annotation.brushPath = translated(
+            std::move(*annotation.brushPath), offset);
+    }
+    if (annotation.markerLine.has_value()) {
+        annotation.markerLine = translated(*annotation.markerLine, offset);
+    }
+    if (annotation.mosaicStroke.has_value()) {
+        annotation.mosaicStroke = translated(
+            std::move(*annotation.mosaicStroke), offset);
+    }
+}
+
 } // namespace
 
 AnnotationId AnnotationDocument::addShape(
@@ -652,6 +673,44 @@ bool AnnotationDocument::updateMagnifier(
     annotation->style = style;
     commit(std::move(before));
     return true;
+}
+
+void AnnotationDocument::rebaseCoordinateSpace(
+    AnnotationPoint offset) noexcept
+{
+    if (offset == AnnotationPoint{}) return;
+    const auto translateState = [offset](Snapshot& state) {
+        for (auto& annotation : state.annotations) {
+            translateAnnotation(annotation, offset);
+        }
+        for (auto& mask : state.eraserMasks) {
+            mask.rect = translated(mask.rect, offset);
+        }
+    };
+    for (auto& annotation : annotations_) {
+        translateAnnotation(annotation, offset);
+    }
+    for (auto& mask : eraserMasks_) {
+        mask.rect = translated(mask.rect, offset);
+    }
+    for (auto& entry : undoHistory_) {
+        translateState(entry.before);
+        translateState(entry.after);
+    }
+    for (auto& entry : redoHistory_) {
+        translateState(entry.before);
+        translateState(entry.after);
+    }
+    if (mosaicRedactionEditBefore_.has_value()) {
+        translateState(*mosaicRedactionEditBefore_);
+    }
+    if (textEditBefore_.has_value()) {
+        translateState(*textEditBefore_);
+    }
+    if (numberEditBefore_.has_value()) {
+        translateState(*numberEditBefore_);
+    }
+    ++revision_;
 }
 
 void AnnotationDocument::beginMosaicRedactionEdit()

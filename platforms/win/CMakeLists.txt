@@ -1373,6 +1373,15 @@ if(BUILD_TESTING)
     target_link_libraries(xxsnap_interactive_pin_verifier PRIVATE user32)
 
     add_executable(
+        xxsnap_interactive_scroll_verifier EXCLUDE_FROM_ALL
+        ${CMAKE_SOURCE_DIR}/tools/windows/verify-interactive-scroll.cpp
+    )
+    target_compile_features(
+        xxsnap_interactive_scroll_verifier PRIVATE cxx_std_17
+    )
+    target_link_libraries(xxsnap_interactive_scroll_verifier PRIVATE user32)
+
+    add_executable(
         xxsnap_interactive_fullscreen_verifier EXCLUDE_FROM_ALL
         ${CMAKE_SOURCE_DIR}/tools/windows/verify-interactive-fullscreen.cpp
     )
@@ -1524,6 +1533,7 @@ if(BUILD_TESTING)
     list(APPEND xxsnap_capture_session_targets xxsnap_interactive_session_launcher)
     list(APPEND xxsnap_capture_session_targets xxsnap_interactive_startup_verifier)
     list(APPEND xxsnap_capture_session_targets xxsnap_interactive_pin_verifier)
+    list(APPEND xxsnap_capture_session_targets xxsnap_interactive_scroll_verifier)
     list(APPEND xxsnap_capture_session_targets xxsnap_interactive_fullscreen_verifier)
     list(APPEND xxsnap_capture_session_targets xxsnap_interactive_ocr_verifier)
     list(APPEND xxsnap_capture_session_targets

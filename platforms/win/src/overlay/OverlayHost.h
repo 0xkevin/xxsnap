@@ -297,6 +297,7 @@ private:
     bool toolbarActionEnabled(ToolbarAction action) const noexcept;
     bool performToolbarAction(ToolbarAction action) noexcept;
     void ensureEditor() noexcept;
+    void updateSelectionInteraction(PixelPoint virtualPoint) noexcept;
     std::optional<AnnotationPoint> annotationPoint(
         PixelPoint virtualPoint) const noexcept;
     std::optional<ShapeOptionsLayout> currentShapeOptionsLayout(

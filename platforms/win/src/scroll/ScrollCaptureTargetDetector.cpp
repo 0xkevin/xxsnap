@@ -7,6 +7,8 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <memory>
+#include <thread>
 #include <utility>
 
 namespace xxsnap::win {
@@ -194,6 +196,49 @@ std::optional<PixelRect> bestScrollCaptureTarget(
     return best.has_value()
         ? std::optional<PixelRect>(best->bounds)
         : std::nullopt;
+}
+
+std::optional<PixelRect> waitForScrollCaptureTarget(
+    ScrollCaptureTargetResolver resolver,
+    DWORD timeoutMilliseconds) noexcept
+{
+    struct State final {
+        ~State()
+        {
+            if (completed != nullptr) CloseHandle(completed);
+        }
+
+        HANDLE completed = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        SRWLOCK lock = SRWLOCK_INIT;
+        std::optional<PixelRect> result;
+    };
+
+    if (!resolver) return std::nullopt;
+    try {
+        const auto state = std::make_shared<State>();
+        if (state->completed == nullptr) return std::nullopt;
+        std::thread([state, resolver = std::move(resolver)]() mutable {
+            std::optional<PixelRect> result;
+            try {
+                result = resolver();
+            } catch (...) {
+            }
+            AcquireSRWLockExclusive(&state->lock);
+            state->result = result;
+            ReleaseSRWLockExclusive(&state->lock);
+            SetEvent(state->completed);
+        }).detach();
+        if (WaitForSingleObject(state->completed, timeoutMilliseconds)
+            != WAIT_OBJECT_0) {
+            return std::nullopt;
+        }
+        AcquireSRWLockShared(&state->lock);
+        const auto result = state->result;
+        ReleaseSRWLockShared(&state->lock);
+        return result;
+    } catch (...) {
+        return std::nullopt;
+    }
 }
 
 std::optional<PixelRect> ScrollCaptureTargetDetector::detect(

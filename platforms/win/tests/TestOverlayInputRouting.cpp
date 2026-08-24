@@ -1431,6 +1431,44 @@ void testNumberToolbarCreatesSequenceAndSupportsDoubleClickEditing()
     CHECK(router.annotationDocument().annotations()[0].numberSequenceIsManual);
 }
 
+void testSelectionResizeKeepsNumberAtItsScreenPosition()
+{
+    FakePlatform platform;
+    const auto window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(7));
+    OverlayInputRouter router(
+        PixelRect{0, 0, 800, 600},
+        {{window, PixelRect{0, 0, 800, 600}, 96, 96}},
+        platform, {}, true);
+    CHECK(router.pointerDown(window, {100, 100}));
+    router.platformPointerMove({400, 300});
+    router.platformPointerUp({400, 300});
+    CHECK((router.selection() == PixelRect{100, 100, 300, 200}));
+
+    CHECK(router.keyPressed(ShapeEditorKey::number, false, false));
+    platform.cursor = PixelPoint{200, 180};
+    CHECK(router.pointerDown(window, {200, 180}));
+    router.pointerUp(window, {200, 180});
+    CHECK(router.annotationDocument().annotations().size() == 1U);
+    const auto before = router.presentations().front().annotationPlan.items.front()
+        .annotation.rect;
+    CHECK(router.keyPressed(ShapeEditorKey::number, false, false));
+
+    CHECK(router.pointerDown(window, {100, 100}));
+    CHECK(router.phase() == SelectionPhase::resizing);
+    router.platformPointerMove({50, 50});
+    router.platformPointerUp({50, 50});
+    CHECK((router.selection() == PixelRect{50, 50, 350, 250}));
+    const auto after = router.presentations().front().annotationPlan.items.front()
+        .annotation.rect;
+    CHECK(after == before);
+    CHECK((router.annotationDocument().annotations().front().rect
+        == AnnotationRect{
+            before.x - 50.0F,
+            before.y - 50.0F,
+            before.width,
+            before.height}));
+}
+
 void testMagnifierToolbarMatchesMacOptionsAndUsesComposite()
 {
     FakePlatform platform;
@@ -1844,6 +1882,7 @@ int main()
     testMosaicToolbarOptionsAndLiveComposite();
     testTextToolbarAcceptsUnicodeAndUsesRealPopupMenus();
     testNumberToolbarCreatesSequenceAndSupportsDoubleClickEditing();
+    testSelectionResizeKeepsNumberAtItsScreenPosition();
     testMagnifierToolbarMatchesMacOptionsAndUsesComposite();
     testEraserToolbarUsesMacLayoutAndModes();
     testRectangleEraserRoutesFromOutsideLockedSelection();

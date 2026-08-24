@@ -127,6 +127,35 @@ void testNewCommandInvalidatesRedoAndSelectionIsSafe()
     CHECK(!document.selectedId().has_value());
 }
 
+void testCoordinateSpaceRebasePreservesVisualHistory()
+{
+    AnnotationDocument document;
+    const auto number = document.addNumberMark(
+        {10, 20, 24, 24}, NumberMarkType::number, 1, false, 1);
+    const auto arrow = document.addArrowLine({
+        {40, 50}, {120, 90}, {75, 55},
+        ArrowType::none, ArrowType::normal});
+    CHECK(number != invalidAnnotationId);
+    CHECK(arrow != invalidAnnotationId);
+    CHECK(document.addEraserMask({5, 6, 20, 30}, {number}));
+    const auto revision = document.revision();
+
+    document.rebaseCoordinateSpace({30, -10});
+    CHECK(document.revision() == revision + 1U);
+    CHECK((document.find(number)->rect == AnnotationRect{40, 10, 24, 24}));
+    CHECK((document.find(arrow)->arrowLine->start == AnnotationPoint{70, 40}));
+    CHECK((document.find(arrow)->arrowLine->end == AnnotationPoint{150, 80}));
+    CHECK((document.eraserMasks().front().rect
+        == AnnotationRect{35, -4, 20, 30}));
+
+    CHECK(document.undo());
+    CHECK(document.eraserMasks().empty());
+    CHECK((document.find(number)->rect == AnnotationRect{40, 10, 24, 24}));
+    CHECK(document.redo());
+    CHECK((document.eraserMasks().front().rect
+        == AnnotationRect{35, -4, 20, 30}));
+}
+
 void testArrowLineCommandsPreserveCurveGeometryAndHistory()
 {
     AnnotationDocument document;
@@ -359,6 +388,7 @@ int main()
     testAllShapeEditsAreReversible();
     testInvalidAndNoOpEditsDoNotPolluteHistory();
     testNewCommandInvalidatesRedoAndSelectionIsSafe();
+    testCoordinateSpaceRebasePreservesVisualHistory();
     testArrowLineCommandsPreserveCurveGeometryAndHistory();
     testBrushPathHistoryAndBounds();
     testMarkerLineHistoryAndZeroLengthDot();

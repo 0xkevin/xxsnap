@@ -1,10 +1,13 @@
 #include "pin/PinnedImageGeometry.h"
 #include "pin/PinnedImageShadow.h"
+#include "pin/PinnedImageHost.h"
 #include "fullscreen/FullScreenCapturePreviewHost.h"
 
 #include <cstdlib>
 #include <iostream>
 #include <set>
+#include <cstring>
+#include <string_view>
 
 namespace {
 
@@ -27,6 +30,38 @@ void check(bool condition, const char* expression, int line)
 }
 
 #define CHECK(expression) check((expression), #expression, __LINE__)
+
+BOOL CALLBACK findCurrentProcessPinnedImage(HWND window, LPARAM result)
+{
+    DWORD processId = 0U;
+    GetWindowThreadProcessId(window, &processId);
+    if (processId != GetCurrentProcessId()) return TRUE;
+    wchar_t className[64]{};
+    if (GetClassNameW(window, className,
+            static_cast<int>(sizeof(className) / sizeof(className[0]))) > 0
+        && std::wstring_view(className) == L"XxSnapPinnedImageWindow") {
+        *reinterpret_cast<HWND*>(result) = window;
+        return FALSE;
+    }
+    return TRUE;
+}
+
+HWND currentProcessPinnedImageWindow()
+{
+    HWND result = nullptr;
+    EnumWindows(findCurrentProcessPinnedImage,
+        reinterpret_cast<LPARAM>(&result));
+    return result;
+}
+
+bool processWindowStationIsVisible()
+{
+    USEROBJECTFLAGS flags{};
+    DWORD length = 0U;
+    return GetUserObjectInformationW(GetProcessWindowStation(), UOI_FLAGS,
+               &flags, sizeof(flags), &length) != FALSE
+        && (flags.dwFlags & WSF_VISIBLE) != 0U;
+}
 
 void testMacSizingContract()
 {
@@ -97,6 +132,35 @@ void testPinnedImageShadowFadesSmoothlyWithoutBlueRings()
     CHECK(alphaValues.size() >= 12U);
 }
 
+void testPinnedImageCreatesAVisibleInteractiveWindow()
+{
+    snipory::core::portable::MemoryBudget budget(2U * 1024U * 1024U);
+    auto allocation = snipory::core::portable::PixelBuffer::allocate(
+        160, 90, budget);
+    CHECK(allocation.value != nullptr);
+    if (!allocation.value) return;
+    std::memset(allocation.value->data(), 0xFF, allocation.value->byteCount());
+
+    xxsnap::win::PinnedImageHost host(GetModuleHandleW(nullptr), nullptr);
+    CHECK(host.pin(std::move(*allocation.value), {120, 120, 160, 90}));
+    CHECK(host.count() == 1U);
+    const auto window = currentProcessPinnedImageWindow();
+    CHECK(window != nullptr);
+    if (window == nullptr) return;
+    if (processWindowStationIsVisible()) {
+        CHECK(IsWindowVisible(window) != FALSE);
+    }
+    RECT before{};
+    RECT after{};
+    CHECK(GetWindowRect(window, &before) != FALSE);
+    SendMessageW(window, WM_MOUSEWHEEL, MAKEWPARAM(0, WHEEL_DELTA), 0);
+    CHECK(GetWindowRect(window, &after) != FALSE);
+    CHECK(after.right - after.left > before.right - before.left);
+    CHECK(after.bottom - after.top > before.bottom - before.top);
+    DestroyWindow(window);
+    CHECK(host.count() == 0U);
+}
+
 } // namespace
 
 int main()
@@ -105,5 +169,6 @@ int main()
     testInitialPlacementUsesSourceOrCentersFittedLongImage();
     testFullScreenPreviewMatchesMacBottomRightPlacement();
     testPinnedImageShadowFadesSmoothlyWithoutBlueRings();
+    testPinnedImageCreatesAVisibleInteractiveWindow();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

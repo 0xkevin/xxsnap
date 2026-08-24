@@ -442,6 +442,14 @@ struct PreferencesWindow::Impl final {
         updateStatus = nullptr;
     }
 
+    void redrawNavigation() noexcept
+    {
+        for (const auto control : navigationControls) {
+            RedrawWindow(control, nullptr, nullptr,
+                RDW_INVALIDATE | RDW_UPDATENOW);
+        }
+    }
+
     void addRowLabels(
         const wchar_t* title, const wchar_t* detail, int row)
     {
@@ -599,6 +607,7 @@ struct PreferencesWindow::Impl final {
         case PreferencesSection::about: makeAboutPage(); break;
         }
         InvalidateRect(window, nullptr, TRUE);
+        redrawNavigation();
     }
 
     void setSelected(PreferencesSection section)
@@ -611,6 +620,7 @@ struct PreferencesWindow::Impl final {
             rebuildPage();
         } else {
             InvalidateRect(window, nullptr, TRUE);
+            redrawNavigation();
         }
     }
 

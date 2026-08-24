@@ -45,11 +45,34 @@ void testFilenameErrorsUseChineseUserFacingCopy()
         == L"不支持的变量：{date}");
 }
 
+void testNavigationButtonsSwitchTheVisiblePage()
+{
+    auto preferences = PreferencesWindow::create(GetModuleHandleW(nullptr), nullptr);
+    CHECK(preferences != nullptr);
+    if (!preferences) return;
+    const auto window = preferences->window();
+    CHECK(window != nullptr);
+    CHECK(GetDlgItem(window, 1100) != nullptr);
+
+    const auto shortcuts = GetDlgItem(window, 1001);
+    CHECK(shortcuts != nullptr);
+    if (shortcuts != nullptr) SendMessageW(shortcuts, BM_CLICK, 0, 0);
+    CHECK(GetDlgItem(window, 1100) == nullptr);
+    CHECK(GetDlgItem(window, 1200) != nullptr);
+
+    const auto save = GetDlgItem(window, 1002);
+    CHECK(save != nullptr);
+    if (save != nullptr) SendMessageW(save, BM_CLICK, 0, 0);
+    CHECK(GetDlgItem(window, 1200) == nullptr);
+    CHECK(GetDlgItem(window, 1300) != nullptr);
+}
+
 } // namespace
 
 int main()
 {
     testMacParitySectionOrderAndSizing();
     testFilenameErrorsUseChineseUserFacingCopy();
+    testNavigationButtonsSwitchTheVisiblePage();
     return failureCount == 0 ? 0 : 1;
 }

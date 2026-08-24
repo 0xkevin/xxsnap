@@ -2494,9 +2494,35 @@ void OverlayInputRouter::platformPointerMove(PixelPoint virtualPoint) noexcept
                 editor_->pointerMove(*local, platform_.shiftPressed());
             }
         } else {
-            model_.updateInteraction(virtualPoint);
+            updateSelectionInteraction(virtualPoint);
         }
     }
+}
+
+void OverlayInputRouter::updateSelectionInteraction(
+    PixelPoint virtualPoint) noexcept
+{
+    const auto rebasesAnnotations = model_.phase() == SelectionPhase::resizing
+        && editor_ != nullptr
+        && editorOwnerIndex_.has_value()
+        && *editorOwnerIndex_ < surfaces_.size()
+        && model_.selection().has_value();
+    const auto previous = rebasesAnnotations
+        ? std::optional<PixelRect>(snipory::core::portable::standardized(
+            *model_.selection()))
+        : std::nullopt;
+    model_.updateInteraction(virtualPoint);
+    if (!previous.has_value() || !model_.selection().has_value()) return;
+    const auto current = snipory::core::portable::standardized(
+        *model_.selection());
+    if (previous->x == current.x && previous->y == current.y) return;
+    const auto& owner = surfaces_[*editorOwnerIndex_];
+    editor_->document().rebaseCoordinateSpace({
+        physicalPixelsToDip(previous->x - current.x, owner.dpiX)
+            / annotationViewportScale_,
+        physicalPixelsToDip(previous->y - current.y, owner.dpiY)
+            / annotationViewportScale_,
+    });
 }
 
 void OverlayInputRouter::platformPointerUp(PixelPoint virtualPoint) noexcept
@@ -2516,7 +2542,7 @@ void OverlayInputRouter::platformPointerUp(PixelPoint virtualPoint) noexcept
             editor_->cancelInteraction();
         }
     } else {
-        model_.updateInteraction(virtualPoint);
+        updateSelectionInteraction(virtualPoint);
         model_.finishInteraction();
         ensureEditor();
     }

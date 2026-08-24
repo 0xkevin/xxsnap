@@ -89,6 +89,7 @@ public:
         MagnifierShape shape,
         float zoom,
         AnnotationStyle style);
+    void rebaseCoordinateSpace(AnnotationPoint offset) noexcept;
     void beginMosaicRedactionEdit();
     void endMosaicRedactionEdit();
     void beginTextEdit();

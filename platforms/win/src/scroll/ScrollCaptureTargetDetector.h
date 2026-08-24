@@ -8,6 +8,7 @@
 
 #include <Windows.h>
 
+#include <functional>
 #include <optional>
 #include <vector>
 
@@ -28,6 +29,13 @@ std::optional<PixelRect> bestScrollCaptureTarget(
     const std::vector<ScrollCaptureTargetCandidate>& candidates,
     std::int64_t minimumWidth,
     std::int64_t minimumHeight) noexcept;
+
+using ScrollCaptureTargetResolver =
+    std::function<std::optional<PixelRect>()>;
+
+std::optional<PixelRect> waitForScrollCaptureTarget(
+    ScrollCaptureTargetResolver resolver,
+    DWORD timeoutMilliseconds) noexcept;
 
 class ScrollCaptureTargetDetector final {
 public:

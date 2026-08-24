@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -11,6 +12,7 @@ using snipory::core::portable::PixelRect;
 using xxsnap::win::ScrollCaptureTargetCandidate;
 using xxsnap::win::bestScrollCaptureTarget;
 using xxsnap::win::scrollCaptureProbePoints;
+using xxsnap::win::waitForScrollCaptureTarget;
 
 int failureCount = 0;
 
@@ -65,11 +67,26 @@ void testMacClippingMinimumAndTieBreaks()
         == PixelRect{150, 100, 300, 400}));
 }
 
+void testTargetResolutionReturnsWithoutUsingConditionVariables()
+{
+    const PixelRect expected{10, 20, 300, 400};
+    CHECK(waitForScrollCaptureTarget(
+        [expected] { return std::optional<PixelRect>{expected}; }, 1'000U)
+        == expected);
+
+    CHECK(!waitForScrollCaptureTarget([] {
+        Sleep(40U);
+        return std::optional<PixelRect>{PixelRect{1, 2, 3, 4}};
+    }, 1U).has_value());
+    Sleep(50U);
+}
+
 } // namespace
 
 int main()
 {
     testMacProbeGridAndCandidateRanking();
     testMacClippingMinimumAndTieBreaks();
+    testTargetResolutionReturnsWithoutUsingConditionVariables();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

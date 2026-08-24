@@ -17,14 +17,10 @@
 
 #include <algorithm>
 #include <array>
-#include <chrono>
 #include <cmath>
-#include <condition_variable>
 #include <limits>
-#include <mutex>
 #include <new>
 #include <string>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -138,38 +134,12 @@ std::optional<PixelRect> detectTargetWithTimeout(PixelRect selection,
                                                  DWORD targetProcessId, UINT dpiX,
                                                  UINT dpiY) noexcept
 {
-    struct State final
-    {
-        std::mutex mutex;
-        std::condition_variable changed;
-        bool finished = false;
-        std::optional<PixelRect> result;
-    };
-    try {
-        const auto state = std::make_shared<State>();
-        std::thread([state, selection, targetProcessId, dpiX, dpiY] {
-            std::optional<PixelRect> result;
-            try {
-                result = ScrollCaptureTargetDetector{}.detect(
-                    selection, targetProcessId, dpiX, dpiY);
-            } catch (...) {
-            }
-            {
-                std::lock_guard<std::mutex> lock(state->mutex);
-                state->result = result;
-                state->finished = true;
-            }
-            state->changed.notify_one();
-        }).detach();
-        std::unique_lock<std::mutex> lock(state->mutex);
-        if (!state->changed.wait_for(lock, std::chrono::milliseconds(700),
-                                     [&state] { return state->finished; })) {
-            return std::nullopt;
-        }
-        return state->result;
-    } catch (...) {
-        return std::nullopt;
-    }
+    return waitForScrollCaptureTarget(
+        [selection, targetProcessId, dpiX, dpiY] {
+            return ScrollCaptureTargetDetector{}.detect(
+                selection, targetProcessId, dpiX, dpiY);
+        },
+        700U);
 }
 
 IconBitmap decodeResourcePng(HINSTANCE instance, int resourceId,
