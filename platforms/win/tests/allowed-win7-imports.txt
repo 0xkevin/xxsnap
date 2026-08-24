@@ -43,6 +43,7 @@ USER32.dll!EndPaint
 USER32.dll!EnumDisplayMonitors
 USER32.dll!FillRect
 USER32.dll!FrameRect
+USER32.dll!GetAsyncKeyState
 USER32.dll!GetCapture
 USER32.dll!GetClientRect
 USER32.dll!GetClipboardData
@@ -66,6 +67,7 @@ USER32.dll!InflateRect
 USER32.dll!InvalidateRect
 USER32.dll!IsWindow
 USER32.dll!KillTimer
+USER32.dll!LoadCursorA
 USER32.dll!LoadCursorW
 USER32.dll!LoadImageW
 USER32.dll!MessageBoxW
@@ -109,6 +111,7 @@ USER32.dll!UnregisterClassW
 USER32.dll!UnregisterHotKey
 USER32.dll!UpdateLayeredWindow
 USER32.dll!UpdateWindow
+USER32.dll!WindowFromPoint
 
 d2d1.dll!#1
 d2d1.dll!#2
