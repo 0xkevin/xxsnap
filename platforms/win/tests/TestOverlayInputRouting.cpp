@@ -1451,8 +1451,9 @@ void testSelectionResizeKeepsNumberAtItsScreenPosition()
     CHECK(router.annotationDocument().annotations().size() == 1U);
     const auto before = router.presentations().front().annotationPlan.items.front()
         .annotation.rect;
-    CHECK(router.keyPressed(ShapeEditorKey::number, false, false));
 
+    CHECK(router.cursorStyle(window, {100, 100})
+        == OverlayCursorStyle::resizeTopLeftBottomRight);
     CHECK(router.pointerDown(window, {100, 100}));
     CHECK(router.phase() == SelectionPhase::resizing);
     router.platformPointerMove({50, 50});
@@ -1467,6 +1468,44 @@ void testSelectionResizeKeepsNumberAtItsScreenPosition()
             before.y - 50.0F,
             before.width,
             before.height}));
+    CHECK(router.annotationDocument().annotations().size() == 1U);
+}
+
+void testSelectionResizeHandlesTakePriorityOverEveryAnnotationTool()
+{
+    constexpr std::array tools{
+        ShapeEditorKey::rectangle,
+        ShapeEditorKey::polyline,
+        ShapeEditorKey::pen,
+        ShapeEditorKey::marker,
+        ShapeEditorKey::eyedropper,
+        ShapeEditorKey::mosaic,
+        ShapeEditorKey::text,
+        ShapeEditorKey::number,
+        ShapeEditorKey::magnifier,
+        ShapeEditorKey::eraser,
+    };
+    for (const auto tool : tools) {
+        FakePlatform platform;
+        const auto window = reinterpret_cast<HWND>(
+            static_cast<std::uintptr_t>(20) + static_cast<std::uintptr_t>(tool));
+        OverlayInputRouter router(
+            PixelRect{0, 0, 800, 600},
+            {{window, PixelRect{0, 0, 800, 600}, 96, 96}},
+            platform, {}, true);
+        CHECK(router.pointerDown(window, {100, 100}));
+        router.platformPointerMove({400, 300});
+        router.platformPointerUp({400, 300});
+        CHECK(router.keyPressed(tool, false, false));
+
+        CHECK(router.cursorStyle(window, {100, 200})
+            == OverlayCursorStyle::resizeLeftRight);
+        CHECK(router.pointerDown(window, {100, 200}));
+        CHECK(router.phase() == SelectionPhase::resizing);
+        router.platformPointerMove({80, 200});
+        router.platformPointerUp({80, 200});
+        CHECK((router.selection() == PixelRect{80, 100, 320, 200}));
+    }
 }
 
 void testMagnifierToolbarMatchesMacOptionsAndUsesComposite()
@@ -1883,6 +1922,7 @@ int main()
     testTextToolbarAcceptsUnicodeAndUsesRealPopupMenus();
     testNumberToolbarCreatesSequenceAndSupportsDoubleClickEditing();
     testSelectionResizeKeepsNumberAtItsScreenPosition();
+    testSelectionResizeHandlesTakePriorityOverEveryAnnotationTool();
     testMagnifierToolbarMatchesMacOptionsAndUsesComposite();
     testEraserToolbarUsesMacLayoutAndModes();
     testRectangleEraserRoutesFromOutsideLockedSelection();

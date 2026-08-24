@@ -114,9 +114,15 @@ int wmain(int argc, wchar_t** argv)
             const auto x = (scrollBounds.left + scrollBounds.right) / 2;
             const auto y = (scrollBounds.top + scrollBounds.bottom) / 2;
             sendMouse(MOUSEEVENTF_MOVE, x, y);
-            sendMouse(MOUSEEVENTF_WHEEL, x, y,
-                static_cast<DWORD>(-WHEEL_DELTA));
-            Sleep(500U);
+            for (int attempt = 0; attempt < 5; ++attempt) {
+                sendMouse(MOUSEEVENTF_WHEEL, x, y,
+                    static_cast<DWORD>(-WHEEL_DELTA));
+                Sleep(300U);
+                if (WaitForSingleObject(process.hProcess, 0U) != WAIT_TIMEOUT) {
+                    break;
+                }
+            }
+            Sleep(2'000U);
             result = WaitForSingleObject(process.hProcess, 0U) == WAIT_TIMEOUT
                 ? ERROR_SUCCESS : ERROR_PROCESS_ABORTED;
         }

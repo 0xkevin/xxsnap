@@ -1394,6 +1394,21 @@ PixelPoint OverlayInputRouter::toVirtual(
     };
 }
 
+SelectionHandle OverlayInputRouter::selectionResizeHandleAt(
+    const OverlaySurface& surface, PixelPoint virtualPoint) const noexcept
+{
+    if (mode_ != OverlayMode::capture
+        || model_.phase() != SelectionPhase::ready) {
+        return SelectionHandle::none;
+    }
+    const auto radius = (std::max<std::int64_t>)(
+        1, dipLengthToPhysicalPixels(
+            VisualStyleCatalog::selectionHandleDiameterDip / 2.0F,
+            (std::max)(surface.dpiX, surface.dpiY)));
+    const auto hit = model_.hitTest(virtualPoint, radius);
+    return hit == SelectionHandle::body ? SelectionHandle::none : hit;
+}
+
 std::optional<std::size_t> OverlayInputRouter::actionOwner() const noexcept
 {
     if (status_ != OverlayInputStatus::active
@@ -2092,6 +2107,24 @@ bool OverlayInputRouter::pointerDown(
         if (editor_ != nullptr) editor_->dismissPopovers();
     }
     const auto virtualPoint = toVirtual(*surface, clientPoint);
+    if (const auto resizeHandle = selectionResizeHandleAt(
+            *surface, virtualPoint);
+        resizeHandle != SelectionHandle::none) {
+        if (!platform_.captureMouse(source)) {
+            lastError_ = OverlayInputErrorCode::mouseCaptureFailed;
+            cancelOnce();
+            return false;
+        }
+        if (!model_.beginResize(resizeHandle, virtualPoint)) {
+            platform_.releaseMouse();
+            return false;
+        }
+        if (editor_ != nullptr) editor_->dismissPopovers();
+        captureWindow_ = source;
+        dragging_ = true;
+        annotationDragging_ = false;
+        return true;
+    }
     if (editor_ != nullptr && editor_->isEyedropperToolActive()) {
         if (!eyedropperPointIsValid(virtualPoint)) {
             return true;
@@ -2259,6 +2292,14 @@ OverlayCursorStyle OverlayInputRouter::cursorStyle(
     }
 
     const auto virtualPoint = toVirtual(*surface, clientPoint);
+    if (model_.phase() == SelectionPhase::resizing) {
+        return cursorStyleForSelectionHandle(model_.activeHandle());
+    }
+    if (const auto resizeHandle = selectionResizeHandleAt(
+            *surface, virtualPoint);
+        resizeHandle != SelectionHandle::none) {
+        return cursorStyleForSelectionHandle(resizeHandle);
+    }
     if (editor_ != nullptr && editor_->isEyedropperToolActive()) {
         if (!eyedropperPointIsValid(virtualPoint)) {
             return OverlayCursorStyle::arrow;
@@ -2283,11 +2324,6 @@ OverlayCursorStyle OverlayInputRouter::cursorStyle(
     if (model_.phase() == SelectionPhase::moving) {
         return backgroundAwareCursorStyle(
             OverlayCursorStyle::move, virtualPoint, *surface);
-    }
-    if (model_.phase() == SelectionPhase::resizing) {
-        return backgroundAwareCursorStyle(
-            cursorStyleForSelectionHandle(model_.activeHandle()),
-            virtualPoint, *surface);
     }
     if (model_.phase() == SelectionPhase::ready) {
         const auto radius = (std::max<std::int64_t>)(

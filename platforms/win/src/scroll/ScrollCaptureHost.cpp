@@ -7,7 +7,6 @@
 #include "scroll/LongImageEditorGeometry.h"
 #include "scroll/ScrollCaptureSamplingState.h"
 #include "scroll/ScrollCaptureSession.h"
-#include "scroll/ScrollCaptureTargetDetector.h"
 #include "scroll/ScrollRegionCapturer.h"
 #include "toolbar/ToolbarCatalog.h"
 #include "toolbar/ToolbarLayout.h"
@@ -128,18 +127,6 @@ PixelRect monitorWorkArea(PixelRect selection) noexcept
         };
     }
     return selection;
-}
-
-std::optional<PixelRect> detectTargetWithTimeout(PixelRect selection,
-                                                 DWORD targetProcessId, UINT dpiX,
-                                                 UINT dpiY) noexcept
-{
-    return waitForScrollCaptureTarget(
-        [selection, targetProcessId, dpiX, dpiY] {
-            return ScrollCaptureTargetDetector{}.detect(
-                selection, targetProcessId, dpiX, dpiY);
-        },
-        700U);
 }
 
 IconBitmap decodeResourcePng(HINSTANCE instance, int resourceId,
@@ -263,7 +250,6 @@ struct ScrollCaptureHost::Impl final
     std::int64_t reviewOffset = 0;
     std::vector<IconBitmap> icons;
     IconBitmap finishIcon;
-    bool targetResolved = false;
     bool reviewing = false;
     bool terminal = false;
     bool captureTimerScheduled = false;
@@ -417,13 +403,7 @@ struct ScrollCaptureHost::Impl final
             active != nullptr) {
             return false;
         }
-        if (const auto detected = detectTargetWithTimeout(
-                originalSelection, targetProcessId, dpiX, dpiY)) {
-            selection = *detected;
-            targetResolved = true;
-        } else {
-            selection = originalSelection;
-        }
+        selection = originalSelection;
         workArea = monitorWorkArea(selection);
         auto seed = capturer.capture(selection);
         ScrollCaptureUpdate update;
@@ -939,8 +919,7 @@ struct ScrollCaptureHost::Impl final
         RECT client{};
         GetClientRect(window, &client);
         if (window == borderWindow) {
-            const auto color = targetResolved ? RGB(52, 199, 89) : RGB(83, 120, 232);
-            const auto brush = CreateSolidBrush(color);
+            const auto brush = CreateSolidBrush(RGB(83, 120, 232));
             FillRect(dc, &client, brush);
             DeleteObject(brush);
         } else if (window == toolbarWindow) {

@@ -286,6 +286,8 @@ private:
     const OverlaySurface* surfaceFor(HWND window) const noexcept;
     PixelPoint toVirtual(
         const OverlaySurface& surface, PixelPoint clientPoint) const noexcept;
+    SelectionHandle selectionResizeHandleAt(
+        const OverlaySurface& surface, PixelPoint virtualPoint) const noexcept;
     std::optional<std::size_t> actionOwner() const noexcept;
     std::optional<ToolbarAction> hitToolbarAction(
         const OverlaySurface& surface, PixelPoint clientPoint) const noexcept;

@@ -276,7 +276,6 @@ target_include_directories(
 target_link_libraries(
     xxsnap_scroll_capture_host
     PUBLIC xxsnap_scroll_capture_session
-           xxsnap_scroll_capture_target_detector
            xxsnap_scroll_region_capturer
            xxsnap_toolbar_layout
     PRIVATE xxsnap_annotation_composer xxsnap_display_topology
