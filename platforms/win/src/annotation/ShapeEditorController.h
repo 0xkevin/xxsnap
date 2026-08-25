@@ -195,6 +195,8 @@ private:
         AnnotationPoint point) const noexcept;
     std::optional<AnnotationId> numberAnnotationAt(
         AnnotationPoint point) const noexcept;
+    bool canEditCompletedAnnotation(
+        const ShapeAnnotation& annotation) const noexcept;
     bool beginTextEdit(AnnotationId id) noexcept;
     bool beginNumberEdit(AnnotationId id) noexcept;
     bool applyTextStyleToSelection();

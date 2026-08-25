@@ -1159,7 +1159,14 @@ bool ShapeEditorController::commitTextEdit()
     document_.endTextEdit(keep);
     editingTextId_.reset();
     textCaretPosition_ = 0U;
-    if (completedAnnotationsLocked_) document_.clearSelection();
+    const auto selected = document_.selectedId();
+    const auto* selectedAnnotation = selected.has_value()
+        ? document_.find(*selected) : nullptr;
+    if (completedAnnotationsLocked_
+        && (selectedAnnotation == nullptr
+            || !canEditCompletedAnnotation(*selectedAnnotation))) {
+        document_.clearSelection();
+    }
     ++interactionRevision_;
     syncHistory();
     return true;
@@ -1671,10 +1678,24 @@ void ShapeEditorController::dismissPopovers() noexcept
 void ShapeEditorController::setCompletedAnnotationsLocked(bool enabled) noexcept
 {
     completedAnnotationsLocked_ = enabled;
+    const auto selected = document_.selectedId();
+    const auto* annotation = selected.has_value()
+        ? document_.find(*selected) : nullptr;
     if (enabled && !editingTextId_.has_value()
-        && !editingNumberId_.has_value()) {
+        && !editingNumberId_.has_value()
+        && (annotation == nullptr
+            || !canEditCompletedAnnotation(*annotation))) {
         document_.clearSelection();
     }
+}
+
+bool ShapeEditorController::canEditCompletedAnnotation(
+    const ShapeAnnotation& annotation) const noexcept
+{
+    return !completedAnnotationsLocked_
+        || isArrowLineAnnotation(annotation)
+        || isShapeKind(annotation.kind)
+        || isTextAnnotation(annotation);
 }
 
 bool ShapeEditorController::pointerDown(
@@ -1745,10 +1766,11 @@ bool ShapeEditorController::pointerDown(
         }
         commitNumberEdit();
     }
-    if (!completedAnnotationsLocked_) {
-        if (const auto selected = document_.selectedId(); selected.has_value()) {
-            const auto* annotation = document_.find(*selected);
-            if (annotation != nullptr && isNumberAnnotation(*annotation)) {
+    if (const auto selected = document_.selectedId(); selected.has_value()) {
+        const auto* annotation = document_.find(*selected);
+        if (annotation != nullptr
+            && canEditCompletedAnnotation(*annotation)) {
+            if (isNumberAnnotation(*annotation)) {
                 for (const auto kind : {
                         NumberHandleKind::deleteHandle,
                         NumberHandleKind::resize,
@@ -1779,7 +1801,7 @@ bool ShapeEditorController::pointerDown(
                     return true;
                 }
             }
-            if (annotation != nullptr && isTextAnnotation(*annotation)) {
+            if (isTextAnnotation(*annotation)) {
                 if (const auto handle = textDeleteHandlePoint(*selected);
                     handle.has_value()
                     && annotationDistanceSquared(point, *handle) <= 100.0F) {
@@ -1788,33 +1810,31 @@ bool ShapeEditorController::pointerDown(
                     return removed;
                 }
             }
-            if (annotation != nullptr && annotation->arrowLine.has_value()) {
+            if (annotation->arrowLine.has_value()) {
                 if (const auto handle = arrowInteraction_.hitTestHandle(
                         *selected, point)) {
                     return arrowInteraction_.beginEdit(*selected, *handle);
                 }
-            } else if (annotation != nullptr && isBrushAnnotation(*annotation)) {
+            } else if (isBrushAnnotation(*annotation)) {
                 if (!brushToolActive_) {
                     if (const auto handle = brushInteraction_.hitTestHandle(
                             *selected, point)) {
                         return brushInteraction_.beginRotate(*selected, *handle);
                     }
                 }
-            } else if (annotation != nullptr && isMarkerAnnotation(*annotation)) {
+            } else if (isMarkerAnnotation(*annotation)) {
                 if (const auto handle = markerInteraction_.hitTestHandle(
                         *annotation, point)) {
                     return markerInteraction_.beginResize(*selected, *handle);
                 }
-            } else if (annotation != nullptr && isNumberAnnotation(*annotation)) {
+            } else if (isNumberAnnotation(*annotation)) {
                 // Number marks expose only the dedicated bottom-right size handle.
-            } else if (annotation != nullptr
-                && isMagnifierAnnotation(*annotation)) {
+            } else if (isMagnifierAnnotation(*annotation)) {
                 if (const auto handle = interaction_.hitTestResizeHandle(
                         *selected, point); handle.has_value()) {
                     return interaction_.beginResize(*selected, *handle);
                 }
-            } else if (annotation != nullptr
-                && !isMosaicStrokeAnnotation(*annotation)) {
+            } else if (!isMosaicStrokeAnnotation(*annotation)) {
                 if (interaction_.hitTestRotationHandle(*selected, point)) {
                     return interaction_.beginRotation(*selected, point);
                 }
@@ -1835,8 +1855,10 @@ bool ShapeEditorController::pointerDown(
         return brushInteraction_.begin(point, brushOptions_.style());
     }
     if (isTextToolActive()) {
-        if (!completedAnnotationsLocked_) {
-            if (const auto text = textAnnotationAt(point)) {
+        if (const auto text = textAnnotationAt(point)) {
+            const auto* existing = document_.find(*text);
+            if (existing != nullptr
+                && canEditCompletedAnnotation(*existing)) {
                 if (!beginTextEdit(*text)) return false;
                 const auto* annotation = document_.find(*text);
                 if (annotation != nullptr) {
@@ -1915,11 +1937,12 @@ bool ShapeEditorController::pointerDown(
         return mosaicInteraction_.beginDrawing(
             point, mosaicOptions_.style(), mosaicOptions_.redaction());
     }
-    if (!completedAnnotationsLocked_) {
-        if (const auto hit = annotationAtBorder(point); hit.has_value()) {
+    if (const auto hit = annotationAtBorder(point); hit.has_value()) {
+        const auto* annotation = document_.find(*hit);
+        if (annotation != nullptr
+            && canEditCompletedAnnotation(*annotation)) {
             document_.select(*hit);
-            const auto* annotation = document_.find(*hit);
-            if (annotation != nullptr && isMagnifierAnnotation(*annotation)) {
+            if (isMagnifierAnnotation(*annotation)) {
                 shapeToolActive_ = false;
                 arrowLineToolActive_ = false;
                 brushToolActive_ = false;
@@ -1928,16 +1951,16 @@ bool ShapeEditorController::pointerDown(
                 dismissPopovers();
             }
             loadSelectedOptions();
-            if (annotation != nullptr && annotation->arrowLine.has_value()) {
+            if (annotation->arrowLine.has_value()) {
                 return arrowInteraction_.beginMove(*hit, point);
             }
-            if (annotation != nullptr && isBrushAnnotation(*annotation)) {
+            if (isBrushAnnotation(*annotation)) {
                 return brushInteraction_.beginMove(*hit, point);
             }
-            if (annotation != nullptr && isMarkerAnnotation(*annotation)) {
+            if (isMarkerAnnotation(*annotation)) {
                 return markerInteraction_.beginMove(*hit, point);
             }
-            if (annotation != nullptr && isMosaicStrokeAnnotation(*annotation)) {
+            if (isMosaicStrokeAnnotation(*annotation)) {
                 return mosaicInteraction_.beginMove(*hit, point);
             }
             return interaction_.beginMove(*hit, point);
@@ -2056,10 +2079,14 @@ bool ShapeEditorController::pointerUp(
         interaction_.update(point, shift);
         interaction_.commit();
     }
-    if (completedAnnotationsLocked_) {
-        document_.clearSelection();
-    } else {
+    const auto selected = document_.selectedId();
+    const auto* annotation = selected.has_value()
+        ? document_.find(*selected) : nullptr;
+    if (annotation != nullptr
+        && canEditCompletedAnnotation(*annotation)) {
         loadSelectedOptions();
+    } else if (completedAnnotationsLocked_) {
+        document_.clearSelection();
     }
     syncHistory();
     return true;
@@ -2136,69 +2163,78 @@ ShapeCursorStyle ShapeEditorController::cursorStyleAt(
         return ShapeCursorStyle::marker;
     }
 
-    if (!completedAnnotationsLocked_) {
-      if (const auto selected = document_.selectedId(); selected.has_value()) {
+    if (const auto selected = document_.selectedId(); selected.has_value()) {
         const auto* annotation = document_.find(*selected);
-        if (annotation != nullptr && isNumberAnnotation(*annotation)) {
-            for (const auto kind : {
-                    NumberHandleKind::deleteHandle,
-                    NumberHandleKind::resize,
-                    NumberHandleKind::increment,
-                    NumberHandleKind::decrement,
-                    NumberHandleKind::reset}) {
-                const auto handle = numberHandleRect(*annotation, kind);
-                if (handle.has_value() && containsRect(*handle, point)) {
-                    return kind == NumberHandleKind::resize
-                        ? ShapeCursorStyle::resizeTopLeftBottomRight
-                        : ShapeCursorStyle::arrow;
+        if (annotation != nullptr
+            && canEditCompletedAnnotation(*annotation)) {
+            if (isNumberAnnotation(*annotation)) {
+                for (const auto kind : {
+                        NumberHandleKind::deleteHandle,
+                        NumberHandleKind::resize,
+                        NumberHandleKind::increment,
+                        NumberHandleKind::decrement,
+                        NumberHandleKind::reset}) {
+                    const auto handle = numberHandleRect(*annotation, kind);
+                    if (handle.has_value() && containsRect(*handle, point)) {
+                        return kind == NumberHandleKind::resize
+                            ? ShapeCursorStyle::resizeTopLeftBottomRight
+                            : ShapeCursorStyle::arrow;
+                    }
+                }
+            } else if (annotation->arrowLine.has_value()) {
+                if (arrowInteraction_.hitTestHandle(*selected, point)) {
+                    return ShapeCursorStyle::move;
+                }
+            } else if (isBrushAnnotation(*annotation)) {
+                if (brushInteraction_.hitTestHandle(*selected, point)) {
+                    return ShapeCursorStyle::rotation;
+                }
+            } else if (isMarkerAnnotation(*annotation)) {
+                if (markerInteraction_.hitTestHandle(*annotation, point)) {
+                    return ShapeCursorStyle::resizeUpDown;
+                }
+            } else if (isMagnifierAnnotation(*annotation)) {
+                if (const auto handle = interaction_.hitTestResizeHandle(
+                        *selected, point)) {
+                    return cursorStyleForResizeHandle(*handle);
+                }
+            } else if (!isMosaicStrokeAnnotation(*annotation)) {
+                if (interaction_.hitTestRotationHandle(*selected, point)) {
+                    return ShapeCursorStyle::rotation;
+                }
+                if (const auto handle = interaction_.hitTestResizeHandle(
+                        *selected, point)) {
+                    return cursorStyleForResizeHandle(*handle);
                 }
             }
-        } else if (annotation != nullptr && annotation->arrowLine.has_value()) {
-            if (arrowInteraction_.hitTestHandle(*selected, point)) {
-                return ShapeCursorStyle::move;
-            }
-        } else if (annotation != nullptr && isBrushAnnotation(*annotation)) {
-            if (brushInteraction_.hitTestHandle(*selected, point)) {
-                return ShapeCursorStyle::rotation;
-            }
-        } else if (annotation != nullptr && isMarkerAnnotation(*annotation)) {
-            if (markerInteraction_.hitTestHandle(*annotation, point)) {
-                return ShapeCursorStyle::resizeUpDown;
-            }
-        } else if (annotation != nullptr
-            && isMagnifierAnnotation(*annotation)) {
-            if (const auto handle = interaction_.hitTestResizeHandle(
-                    *selected, point)) {
-                return cursorStyleForResizeHandle(*handle);
-            }
-        } else if (annotation != nullptr
-            && !isMosaicStrokeAnnotation(*annotation)) {
-            if (interaction_.hitTestRotationHandle(*selected, point)) {
-                return ShapeCursorStyle::rotation;
-            }
-            if (const auto handle = interaction_.hitTestResizeHandle(
-                    *selected, point)) {
-                return cursorStyleForResizeHandle(*handle);
+        }
+    }
+    if (const auto hit = annotationAtBorder(point); hit.has_value()) {
+        const auto* annotation = document_.find(*hit);
+        if (annotation != nullptr
+            && canEditCompletedAnnotation(*annotation)) {
+            return ShapeCursorStyle::move;
+        }
+    }
+    if (const auto selected = document_.selectedId(); selected.has_value()) {
+        const auto* annotation = document_.find(*selected);
+        if (annotation != nullptr
+            && canEditCompletedAnnotation(*annotation)) {
+            if (const auto handle = textDeleteHandlePoint(*selected);
+                handle.has_value()
+                && annotationDistanceSquared(point, *handle) <= 100.0F) {
+                return ShapeCursorStyle::arrow;
             }
         }
-      }
     }
-    if (!completedAnnotationsLocked_
-        && annotationAtBorder(point).has_value()) {
-        return ShapeCursorStyle::move;
-    }
-    if (!completedAnnotationsLocked_) {
-      if (const auto selected = document_.selectedId(); selected.has_value()) {
-        if (const auto handle = textDeleteHandlePoint(*selected);
-            handle.has_value()
-            && annotationDistanceSquared(point, *handle) <= 100.0F) {
-            return ShapeCursorStyle::arrow;
+    if (isTextToolActive()) {
+        if (const auto text = textAnnotationAt(point); text.has_value()) {
+            const auto* annotation = document_.find(*text);
+            if (annotation != nullptr
+                && canEditCompletedAnnotation(*annotation)) {
+                return ShapeCursorStyle::textInput;
+            }
         }
-      }
-    }
-    if (!completedAnnotationsLocked_ && isTextToolActive()
-        && textAnnotationAt(point).has_value()) {
-        return ShapeCursorStyle::textInput;
     }
     if (isMosaicToolActive()) {
         return mosaicOptions_.kind() == AnnotationKind::mosaicStroke
@@ -2454,9 +2490,29 @@ AnnotationRenderPlan ShapeEditorController::renderPlan(
     AnnotationPoint selectionOriginDip,
     bool showEditingAffordances) const
 {
+    auto currentPreview = preview();
+    if (currentPreview.has_value()
+        && arrowInteraction_.mode() == ArrowLineInteractionMode::drawing
+        && currentPreview->arrowLine.has_value()
+        && annotationDistanceSquared(
+            currentPreview->arrowLine->start,
+            currentPreview->arrowLine->end)
+            < ArrowLineInteraction::minimumLineLengthDip
+                * ArrowLineInteraction::minimumLineLengthDip) {
+        currentPreview.reset();
+    }
+    const auto selected = document_.selectedId();
+    const auto* selectedAnnotation = selected.has_value()
+        ? document_.find(*selected) : nullptr;
+    const auto canShowEditingAffordances
+        = !completedAnnotationsLocked_
+        || (selectedAnnotation != nullptr
+            && canEditCompletedAnnotation(*selectedAnnotation))
+        || (currentPreview.has_value()
+            && canEditCompletedAnnotation(*currentPreview));
     auto plan = buildAnnotationRenderPlan(
-        document_, preview(), selectionOriginDip,
-        showEditingAffordances && !completedAnnotationsLocked_,
+        document_, currentPreview, selectionOriginDip,
+        showEditingAffordances && canShowEditingAffordances,
         editingTextId_.has_value()
             ? std::optional<AnnotationEditingState>{{
                 *editingTextId_, textCaretPosition_}}

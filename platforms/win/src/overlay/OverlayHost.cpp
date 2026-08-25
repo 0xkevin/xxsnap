@@ -1572,7 +1572,8 @@ std::vector<OverlayPresentation> OverlayInputRouter::presentations() const
                 presentation.annotationPlan.items.begin(),
                 presentation.annotationPlan.items.end(),
                 [](const auto& item) {
-                    return isMosaicAnnotation(item.annotation);
+                    return isMosaicAnnotation(item.annotation)
+                        || isMarkerAnnotation(item.annotation);
                 });
             if (requiresComposite && desktop_ != nullptr) {
                 const auto cachedSelectionMatches

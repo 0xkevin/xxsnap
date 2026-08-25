@@ -280,6 +280,20 @@ void testPinnedImageEditorLocksSelectionAndFinishesWithoutCaptureActions()
                 || item.action == xxsnap::win::ToolbarAction::cancel
                 || item.action == xxsnap::win::ToolbarAction::pin;
         }));
+    const auto rectangle = std::find_if(
+        presentation.toolbarItems.begin(), presentation.toolbarItems.end(),
+        [](const auto& item) {
+            return item.action == xxsnap::win::ToolbarAction::rectangle;
+        });
+    CHECK(rectangle != presentation.toolbarItems.end());
+    if (rectangle != presentation.toolbarItems.end()) {
+        CHECK(router.pointerDown(window, rectangle->centerPhysical));
+        CHECK(router.pointerDown(window, {100, 100}));
+        router.pointerMove(window, {180, 160});
+        router.pointerUp(window, {180, 160});
+        CHECK(router.presentations().front()
+            .annotationPlan.resizeHandles.size() == 8U);
+    }
     const auto finish = std::find_if(presentation.toolbarItems.begin(),
         presentation.toolbarItems.end(), [](const auto& item) {
             return item.action == xxsnap::win::ToolbarAction::finishEditing;
@@ -931,6 +945,7 @@ void testShapeToolIsNonTerminalAndEditsThroughSharedPresentation()
 
     owner = router.presentations()[1];
     CHECK(owner.annotationPlan.items.size() == 1U);
+    CHECK(owner.annotationPlan.resizeHandles.size() == 8U);
     const auto undo = std::find_if(owner.toolbarItems.begin(),
         owner.toolbarItems.end(), [](const auto& item) {
             return item.action == xxsnap::win::ToolbarAction::undo;
@@ -1030,6 +1045,9 @@ void testArrowToolUsesMacOptionsMenuAndCreatesEditableCurve()
         == AnnotationColor{1, 2, 3, 255}));
 
     CHECK(router.pointerDown(rightWindow, PixelPoint{40, 90}));
+    CHECK(router.presentations()[1].annotationPlan.items.empty());
+    router.pointerMove(rightWindow, PixelPoint{43, 93});
+    CHECK(router.presentations()[1].annotationPlan.items.empty());
     platform.cursor = PixelPoint{180, 190};
     router.pointerMove(rightWindow, PixelPoint{180, 190});
     CHECK(router.presentations()[1].annotationPlan.items.size() == 1U);
@@ -1043,7 +1061,7 @@ void testArrowToolUsesMacOptionsMenuAndCreatesEditableCurve()
     CHECK(created.style.strokePattern
         == xxsnap::win::AnnotationStrokePattern::sketchDashed);
     CHECK((created.style.strokeColor == AnnotationColor{1, 2, 3, 255}));
-    CHECK(router.presentations()[1].annotationPlan.lineHandles.empty());
+    CHECK(router.presentations()[1].annotationPlan.lineHandles.size() == 3U);
 }
 
 void testBrushToolUsesMacOptionsAndShiftStraightLine()
@@ -1229,6 +1247,32 @@ void testMarkerToolUsesMacOptionsAndShiftSnapping()
     CHECK(router.presentations()[1].annotationPlan.lineHandles.empty());
 }
 
+void testMarkerUsesMacBlendCompositeBeforeMosaic()
+{
+    FakePlatform platform;
+    auto desktop = solidDesktop({255, 255, 255, 255});
+    CHECK(desktop != nullptr);
+    if (!desktop) return;
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform, {}, true,
+        desktop.get());
+    createReadySelection(router);
+    CHECK(router.keyPressed(ShapeEditorKey::marker, false, false));
+    CHECK(router.pointerDown(rightWindow, PixelPoint{40, 120}));
+    router.pointerMove(rightWindow, PixelPoint{100, 120});
+    router.pointerUp(rightWindow, PixelPoint{100, 120});
+    CHECK(router.annotationDocument().annotations().size() == 1U);
+    const auto presentation = router.presentations()[1];
+    CHECK(presentation.annotationComposite != nullptr);
+    CHECK(presentation.annotationPlanOutsideSelectionOnly);
+    CHECK(std::none_of(
+        presentation.annotationPlan.items.begin(),
+        presentation.annotationPlan.items.end(),
+        [](const auto& item) {
+            return isMosaicAnnotation(item.annotation);
+        }));
+}
+
 void testEyedropperSamplesCopiesAndMeasuresLikeMac()
 {
     FakePlatform platform;
@@ -1405,6 +1449,12 @@ void testTextToolbarAcceptsUnicodeAndUsesRealPopupMenus()
 
     owner = router.presentations()[1];
     CHECK(router.keyPressed(ShapeEditorKey::text, false, false));
+    CHECK(router.pointerDown(rightWindow, PixelPoint{30, 100}));
+    router.pointerUp(rightWindow, PixelPoint{30, 100});
+    CHECK(router.isEditingInlineValue());
+    CHECK(router.textInput(L"改"));
+    CHECK(router.annotationDocument().annotations().size() == 1U);
+    CHECK(router.presentations()[1].annotationPlan.textCaret.has_value());
     owner = router.presentations()[1];
     CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
         owner.textOptions->layout.fontFamily)));
@@ -1835,6 +1885,8 @@ void testTeachingPenToolbarSelectionAndCanvasDrawingMatchMac()
         == xxsnap::win::AnnotationKind::rectangle);
     CHECK(router.annotationDocument().annotations().front()
         .style.cornerRadiusDip == 0.0F);
+    CHECK(router.presentations().front()
+        .annotationPlan.resizeHandles.size() == 8U);
 
     CHECK(router.rightPointerDown(window, {360, 420}));
     const auto clearToolbar = router.presentations().front();
@@ -1945,6 +1997,7 @@ void testLongImageViewportKeepsAnnotationsInFullImageCoordinates()
         == AnnotationRect{10.0F, 550.0F, 30.0F, 25.0F}));
     const auto first = router.presentations().front();
     CHECK(first.annotationPlan.items.size() == 1U);
+    CHECK(first.annotationPlan.resizeHandles.size() == 8U);
     if (!first.annotationPlan.items.empty()) {
         CHECK((first.annotationPlan.items.front().annotation.rect
             == AnnotationRect{20.0F, 100.0F, 60.0F, 50.0F}));
@@ -1993,6 +2046,7 @@ int main()
     testDarkSelectionUsesMacLightToolCursors();
     testBrightSelectionKeepsMacDarkToolCursors();
     testMarkerToolUsesMacOptionsAndShiftSnapping();
+    testMarkerUsesMacBlendCompositeBeforeMosaic();
     testEyedropperSamplesCopiesAndMeasuresLikeMac();
     testShapeCanBeCreatedOutsideLockedSelectionLikeMac();
     testMosaicToolbarOptionsAndLiveComposite();
