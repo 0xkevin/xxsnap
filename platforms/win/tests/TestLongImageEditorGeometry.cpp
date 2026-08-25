@@ -21,11 +21,20 @@ int failureCount = 0;
 void testNarrowCaptureUsesImageWidthWithoutBlankMargins()
 {
     const auto layout = longImageEditorLayout({0, 0, 1920, 1040}, 600, 5000, 96, 96);
-    CHECK(layout.bounds.width == 1000);
-    CHECK(layout.displayScale > 1.66 && layout.displayScale < 1.67);
+    CHECK(layout.bounds.width == 600);
+    CHECK(layout.displayScale == 1.0);
     CHECK(layout.bounds.height > 0);
-    CHECK(layout.visibleSourceHeight == 504);
+    CHECK(layout.visibleSourceHeight == 840);
     CHECK(layout.maximumSourceOffset == 5000 - layout.visibleSourceHeight);
+}
+
+void testWideCaptureScalesDownToAvailableWidth()
+{
+    const auto layout = longImageEditorLayout(
+        {0, 0, 1920, 1040}, 1600, 5000, 96, 96);
+    CHECK(layout.bounds.width == 1000);
+    CHECK(layout.displayScale == 0.625);
+    CHECK(layout.visibleSourceHeight == 1344);
 }
 
 void testScrollOffsetClampsAndMapsToFullImageCoordinates()
@@ -57,6 +66,7 @@ void testPreviewMatchesImageAspectRatioAndClampsBesideSelection()
 int main()
 {
     testNarrowCaptureUsesImageWidthWithoutBlankMargins();
+    testWideCaptureScalesDownToAvailableWidth();
     testScrollOffsetClampsAndMapsToFullImageCoordinates();
     testPreviewMatchesImageAspectRatioAndClampsBesideSelection();
     return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

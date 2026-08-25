@@ -77,9 +77,12 @@ inline LongImageEditorLayout longImageEditorLayout(PixelRect workArea,
         (std::max<std::int64_t>)(1, (std::min)(workArea.height,
                                                static_cast<std::int64_t>(
                                                    std::lround(840.0 * scaleY))));
-    const auto viewportWidth = maximumWidth;
-    const auto displayScale =
-        imageWidth > 0 ? static_cast<double>(viewportWidth) / imageWidth : 1.0;
+    const auto viewportWidth = imageWidth > 0
+        ? (std::max<std::int64_t>)(1, (std::min)(maximumWidth, imageWidth))
+        : maximumWidth;
+    const auto displayScale = imageWidth > 0
+        ? (std::min)(1.0, static_cast<double>(viewportWidth) / imageWidth)
+        : 1.0;
     const auto viewportHeight =
         (std::max<std::int64_t>)(1, (std::min)(maximumHeight,
                                                static_cast<std::int64_t>(std::ceil(

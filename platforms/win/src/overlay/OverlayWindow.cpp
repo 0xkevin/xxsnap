@@ -537,6 +537,11 @@ void OverlayWindow::setNumberCursor(
         markerCursorIsNumber_ = true;
         numberCursorType_ = type;
         numberCursorValue_ = value;
+        if (cursorStyle_ == OverlayCursorStyle::numberMark
+            || cursorStyle_ == OverlayCursorStyle::numberCheck
+            || cursorStyle_ == OverlayCursorStyle::numberCross) {
+            SetCursor(markerCursor_);
+        }
     }
 }
 

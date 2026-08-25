@@ -37,6 +37,8 @@ constexpr UINT scrollPointerMoveMessage = WM_APP + 0x45U;
 constexpr UINT scrollPointerUpMessage = WM_APP + 0x46U;
 constexpr UINT_PTR captureTimerIdentifier = 1U;
 constexpr UINT captureSettleMilliseconds = 110U;
+constexpr COLORREF captureBorderColor = RGB(83, 120, 232);
+constexpr COLORREF selectedToolbarIconColor = RGB(0, 122, 255);
 
 template <typename T> class ComPtr final
 {
@@ -130,7 +132,8 @@ PixelRect monitorWorkArea(PixelRect selection) noexcept
 }
 
 IconBitmap decodeResourcePng(HINSTANCE instance, int resourceId,
-                             int targetEdge) noexcept
+                             int targetEdge,
+                             COLORREF tint = CLR_INVALID) noexcept
 {
     IconBitmap result;
     const auto resource =
@@ -205,6 +208,20 @@ IconBitmap decodeResourcePng(HINSTANCE instance, int resourceId,
         DeleteObject(bitmap);
         return result;
     }
+    if (tint != CLR_INVALID) {
+        auto *pixels = static_cast<BYTE *>(dibBits);
+        const auto red = GetRValue(tint);
+        const auto green = GetGValue(tint);
+        const auto blue = GetBValue(tint);
+        for (std::uint64_t index = 0;
+             index < static_cast<std::uint64_t>(width) * height; ++index) {
+            auto *pixel = pixels + index * 4U;
+            const auto alpha = pixel[3];
+            pixel[0] = static_cast<BYTE>(blue * alpha / 255U);
+            pixel[1] = static_cast<BYTE>(green * alpha / 255U);
+            pixel[2] = static_cast<BYTE>(red * alpha / 255U);
+        }
+    }
     result.bitmap = bitmap;
     result.width = static_cast<int>(width);
     result.height = static_cast<int>(height);
@@ -250,6 +267,7 @@ struct ScrollCaptureHost::Impl final
     std::int64_t reviewOffset = 0;
     std::vector<IconBitmap> icons;
     IconBitmap finishIcon;
+    IconBitmap selectedScrollIcon;
     bool reviewing = false;
     bool terminal = false;
     bool captureTimerScheduled = false;
@@ -573,6 +591,10 @@ struct ScrollCaptureHost::Impl final
         }
         icons.push_back(loadIcon(dragHandleIcon()));
         finishIcon = loadIcon(toolbarIcon(ToolbarAction::finishEditing));
+        const auto &scrollIcon = toolbarIcon(ToolbarAction::scroll);
+        selectedScrollIcon = decodeResourcePng(
+            instance, toolbarResourceId(scrollIcon, dpiX),
+            toolbarIconPixelEdge(scrollIcon, dpiX), selectedToolbarIconColor);
     }
 
     void hideChrome() noexcept
@@ -964,7 +986,7 @@ struct ScrollCaptureHost::Impl final
         RECT client{};
         GetClientRect(window, &client);
         if (window == borderWindow) {
-            const auto brush = CreateSolidBrush(RGB(83, 120, 232));
+            const auto brush = CreateSolidBrush(captureBorderColor);
             FillRect(dc, &client, brush);
             DeleteObject(brush);
         } else if (window == toolbarWindow) {
@@ -1018,17 +1040,11 @@ struct ScrollCaptureHost::Impl final
         const auto separatorBrush = CreateSolidBrush(RGB(172, 172, 172));
         for (const auto action : fullToolbarActions()) {
             RECT button{x, y, x + side, y + side};
-            if (action == ToolbarAction::scroll) {
-                const auto selected = CreateSolidBrush(RGB(210, 228, 255));
-                const auto region = CreateRoundRectRgn(
-                    button.left, button.top, button.right, button.bottom,
-                    scaledDip(4.0F, dpiX), scaledDip(4.0F, dpiY));
-                FillRgn(dc, region, selected);
-                DeleteObject(region);
-                DeleteObject(selected);
-            }
             if (iconIndex < icons.size()) {
-                drawIcon(dc, icons[iconIndex], iconRect(button, icons[iconIndex]),
+                const auto &icon = action == ToolbarAction::scroll
+                    && selectedScrollIcon.bitmap != nullptr
+                    ? selectedScrollIcon : icons[iconIndex];
+                drawIcon(dc, icon, iconRect(button, icon),
                          action == ToolbarAction::scroll ? 255U : 64U);
             }
             ++iconIndex;
@@ -1135,7 +1151,7 @@ struct ScrollCaptureHost::Impl final
     {
         const auto frame = CreatePen(
             PS_SOLID, (std::max)(1, scaledDip(1.0F, dpiX)),
-            RGB(142, 142, 147));
+            captureBorderColor);
         const auto previousFrame = SelectObject(dc, frame);
         const auto previousFrameBrush = SelectObject(
             dc, GetStockObject(HOLLOW_BRUSH));

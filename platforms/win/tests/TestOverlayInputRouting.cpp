@@ -1414,8 +1414,34 @@ void testNumberToolbarCreatesSequenceAndSupportsDoubleClickEditing()
     CHECK(router.cursorStyle(rightWindow, dipCenterAt144Dpi(
         owner.numberOptions->popupMenu->menu))
         == OverlayCursorStyle::arrow);
+    CHECK(owner.numberOptions->popupMenu->items.size() == 3U);
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.numberOptions->popupMenu->items[1])));
+    cursor = router.numberCursorState();
+    CHECK(cursor.has_value());
+    CHECK(cursor->type == NumberMarkType::check);
+    CHECK(router.cursorStyle(rightWindow, PixelPoint{30, 100})
+        == OverlayCursorStyle::numberCheck);
+
+    owner = router.presentations()[1];
     CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
         owner.numberOptions->layout.markType)));
+    owner = router.presentations()[1];
+    CHECK(owner.numberOptions->popupMenu.has_value());
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.numberOptions->popupMenu->items[2])));
+    cursor = router.numberCursorState();
+    CHECK(cursor.has_value());
+    CHECK(cursor->type == NumberMarkType::cross);
+    CHECK(router.cursorStyle(rightWindow, PixelPoint{30, 100})
+        == OverlayCursorStyle::numberCross);
+
+    owner = router.presentations()[1];
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.numberOptions->layout.markType)));
+    owner = router.presentations()[1];
+    CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
+        owner.numberOptions->popupMenu->items[0])));
 
     platform.cursor = PixelPoint{30, 100};
     CHECK(router.pointerDown(rightWindow, PixelPoint{30, 100}));
