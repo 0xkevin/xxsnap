@@ -222,6 +222,7 @@ public:
         std::optional<PixelRect> selection,
         bool showActions = true) noexcept;
     void setRenderState(OverlayRenderState state) noexcept;
+    void presentPendingPaint() noexcept;
     void setCursorStyle(OverlayCursorStyle style) noexcept;
     void setMarkerCursor(AnnotationColor color, float strokeWidthDip) noexcept;
     void setMosaicCursor(float strokeWidthDip) noexcept;
@@ -257,6 +258,7 @@ private:
     HCURSOR cursor() const noexcept;
     void discardMarkerCursor() noexcept;
     void updateTextInputActivation(bool enabled) noexcept;
+    void updateImeCompositionPosition() noexcept;
     void setDotCursor(
         AnnotationColor color,
         float strokeWidthDip,

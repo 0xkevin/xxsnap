@@ -2976,7 +2976,8 @@ struct OverlayRenderer::Impl final {
             }
 
             if (!state.annotationPlan.items.empty()
-                || !state.annotationPlan.resizeHandles.empty()) {
+                || !state.annotationPlan.resizeHandles.empty()
+                || state.annotationPlan.mosaicPreviewOutline.has_value()) {
                 const auto annotationResult
                     = state.annotationPlanOutsideSelectionOnly
                     ? drawAnnotationPlanOutsideSelection(
@@ -3002,6 +3003,12 @@ struct OverlayRenderer::Impl final {
                         destination,
                         1.0F,
                         D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+                }
+                if (state.annotationPlan.mosaicPreviewOutline.has_value()) {
+                    renderTarget->DrawRectangle(
+                        d2dRect(*state.annotationPlan.mosaicPreviewOutline),
+                        selectionBrush.get(),
+                        VisualStyleCatalog::selectionBorderDip);
                 }
             }
 

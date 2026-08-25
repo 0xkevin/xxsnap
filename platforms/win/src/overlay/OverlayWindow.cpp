@@ -354,6 +354,7 @@ void OverlayWindow::setRenderState(OverlayRenderState state) noexcept
     updateTextInputActivation(
         state.selectedToolbarAction == ToolbarAction::text);
     renderState_ = std::move(state);
+    updateImeCompositionPosition();
     if (window_ != nullptr) {
         if (renderState_.eyedropper.has_value()
             && renderState_.eyedropper->copySuccessMillisecondsRemaining > 0) {
@@ -366,6 +367,11 @@ void OverlayWindow::setRenderState(OverlayRenderState state) noexcept
         }
         InvalidateRect(window_, nullptr, FALSE);
     }
+}
+
+void OverlayWindow::presentPendingPaint() noexcept
+{
+    if (window_ != nullptr) UpdateWindow(window_);
 }
 
 void OverlayWindow::updateTextInputActivation(bool enabled) noexcept
@@ -383,6 +389,36 @@ void OverlayWindow::updateTextInputActivation(bool enabled) noexcept
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER
                 | SWP_NOACTIVATE | SWP_FRAMECHANGED);
     }
+}
+
+void OverlayWindow::updateImeCompositionPosition() noexcept
+{
+    if (window_ == nullptr
+        || renderState_.selectedToolbarAction != ToolbarAction::text
+        || !renderState_.annotationPlan.textCaret.has_value()) {
+        return;
+    }
+    const auto& caret = *renderState_.annotationPlan.textCaret;
+    const auto dpiX = display_ != nullptr ? display_->descriptor.dpiX : 96U;
+    const auto dpiY = display_ != nullptr ? display_->descriptor.dpiY : 96U;
+    const POINT position{
+        static_cast<LONG>(std::lround(
+            caret.x * static_cast<float>(dpiX) / 96.0F)),
+        static_cast<LONG>(std::lround(
+            (caret.y + caret.height) * static_cast<float>(dpiY) / 96.0F)),
+    };
+    const auto context = ImmGetContext(window_);
+    if (context == nullptr) return;
+    COMPOSITIONFORM composition{};
+    composition.dwStyle = CFS_POINT;
+    composition.ptCurrentPos = position;
+    ImmSetCompositionWindow(context, &composition);
+    CANDIDATEFORM candidate{};
+    candidate.dwIndex = 0U;
+    candidate.dwStyle = CFS_CANDIDATEPOS;
+    candidate.ptCurrentPos = position;
+    ImmSetCandidateWindow(context, &candidate);
+    ImmReleaseContext(window_, context);
 }
 
 void OverlayWindow::setCursorStyle(OverlayCursorStyle style) noexcept
@@ -1033,6 +1069,9 @@ LRESULT OverlayWindow::handleMessage(
             }
             return 0;
         }
+        return DefWindowProcW(window_, message, wParam, lParam);
+    case WM_IME_STARTCOMPOSITION:
+        updateImeCompositionPosition();
         return DefWindowProcW(window_, message, wParam, lParam);
     case WM_DPICHANGED: {
         RestartCallback callback;

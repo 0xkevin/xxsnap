@@ -49,6 +49,9 @@ AnnotationRenderPlan scaledRenderPlan(
     for (auto& value : plan.numberHandles) value.second = rect(value.second);
     if (plan.numberCaret) plan.numberCaret = rect(*plan.numberCaret);
     if (plan.eraserPreview) plan.eraserPreview = rect(*plan.eraserPreview);
+    if (plan.mosaicPreviewOutline) {
+        plan.mosaicPreviewOutline = rect(*plan.mosaicPreviewOutline);
+    }
     return plan;
 }
 
@@ -2275,16 +2278,40 @@ OverlayCursorStyle OverlayInputRouter::cursorStyle(
     if (mode_ == OverlayMode::textRecognition) {
         return OverlayCursorStyle::crosshair;
     }
-    if (hitToolbarAction(*surface, clientPoint).has_value()) {
-        return OverlayCursorStyle::arrow;
-    }
-
     const AnnotationPoint surfacePoint{
         static_cast<float>(clientPoint.x) * 96.0F
             / static_cast<float>(surface->dpiX),
         static_cast<float>(clientPoint.y) * 96.0F
             / static_cast<float>(surface->dpiY),
     };
+    if (mode_ == OverlayMode::teachingPen) {
+        const auto toolbar = teachingPenToolbarLayout(*surface);
+        if (toolbar.has_value()
+            && contains(AnnotationRect{
+                toolbar->bounds.x, toolbar->bounds.y,
+                toolbar->bounds.width, toolbar->bounds.height,
+            }, surfacePoint)) {
+            return OverlayCursorStyle::arrow;
+        }
+    } else if (const auto owner = actionOwner();
+        owner.has_value() && &surfaces_[*owner] == surface
+        && model_.selection().has_value()) {
+        const auto chrome = computeOverlayLayout({
+            surface->physicalBounds,
+            *model_.selection(),
+            surface->dpiX,
+            surface->dpiY,
+            0.0F,
+            true,
+            toolbarActions(),
+        });
+        if (contains(AnnotationRect{
+                chrome.toolbar.bounds.x, chrome.toolbar.bounds.y,
+                chrome.toolbar.bounds.width, chrome.toolbar.bounds.height,
+            }, surfacePoint)) {
+            return OverlayCursorStyle::arrow;
+        }
+    }
     const auto safeHeight = physicalPixelsToDip(
         surface->physicalBounds.height, surface->dpiY);
     if (editorOwnerIndex_.has_value()
@@ -2578,7 +2605,10 @@ void OverlayInputRouter::pointerMove(HWND source, PixelPoint clientPoint) noexce
     if (!dragging_ || status_ != OverlayInputStatus::active) {
         return;
     }
-    const auto point = platform_.cursorPosition();
+    const auto* surface = surfaceFor(source);
+    const auto point = annotationDragging_ && surface != nullptr
+        ? std::optional<PixelPoint>{toVirtual(*surface, clientPoint)}
+        : platform_.cursorPosition();
     if (!point.has_value()) {
         lastError_ = OverlayInputErrorCode::cursorPositionFailed;
         cancelOnce();
@@ -2595,12 +2625,16 @@ void OverlayInputRouter::pointerLeave(HWND source) noexcept
     hoveredToolbarTooltipText_.clear();
 }
 
-void OverlayInputRouter::pointerUp(HWND, PixelPoint) noexcept
+void OverlayInputRouter::pointerUp(
+    HWND source, PixelPoint clientPoint) noexcept
 {
     if (!dragging_ || status_ != OverlayInputStatus::active) {
         return;
     }
-    const auto point = platform_.cursorPosition();
+    const auto* surface = surfaceFor(source);
+    const auto point = annotationDragging_ && surface != nullptr
+        ? std::optional<PixelPoint>{toVirtual(*surface, clientPoint)}
+        : platform_.cursorPosition();
     if (!point.has_value()) {
         lastError_ = OverlayInputErrorCode::cursorPositionFailed;
         cancelOnce();
@@ -3252,6 +3286,17 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
         }
         if (!refresh()) {
             router->cancelMode();
+        } else if (input.kind == OverlayWindowInputKind::pointerDown
+            || input.kind == OverlayWindowInputKind::pointerMove
+            || input.kind == OverlayWindowInputKind::pointerUp) {
+            const auto found = std::find_if(
+                windows.begin(), windows.end(),
+                [source](const auto& window) {
+                    return window != nullptr && window->handle() == source;
+                });
+            if (found != windows.end()) {
+                (*found)->presentPendingPaint();
+            }
         }
     }
 

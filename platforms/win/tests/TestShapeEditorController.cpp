@@ -477,6 +477,10 @@ void testMosaicCreatesStrokeAndRotatableRectangle()
     CHECK(editor.setMosaicRedactionValue(16));
     CHECK(editor.pointerDown({120, 60}));
     editor.pointerMove({220, 140});
+    const auto rectanglePreview = editor.renderPlan({}, true);
+    CHECK(rectanglePreview.mosaicPreviewOutline.has_value());
+    CHECK((rectanglePreview.mosaicPreviewOutline.value_or(AnnotationRect{})
+        == AnnotationRect{120, 60, 100, 80}));
     CHECK(editor.pointerUp({220, 140}));
     CHECK(editor.document().annotations().size() == 2U);
     const auto rectangleId = editor.document().annotations()[1].id;

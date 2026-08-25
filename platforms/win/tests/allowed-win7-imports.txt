@@ -165,6 +165,8 @@ SHELL32.dll!SHGetFolderPathW
 IMM32.dll!ImmGetCompositionStringW
 IMM32.dll!ImmGetContext
 IMM32.dll!ImmReleaseContext
+IMM32.dll!ImmSetCandidateWindow
+IMM32.dll!ImmSetCompositionWindow
 
 KERNEL32.dll!AcquireSRWLockExclusive
 KERNEL32.dll!CloseHandle

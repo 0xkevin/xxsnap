@@ -410,6 +410,9 @@ AnnotationRenderPlan buildAnnotationRenderPlan(
             annotation.mosaicStroke = translated(
                 *annotation.mosaicStroke, selectionOriginDip);
         }
+        if (isMosaicRectangleAnnotation(annotation)) {
+            plan.mosaicPreviewOutline = standardized(annotation.rect);
+        }
         plan.items.push_back({annotation, true, std::nullopt});
     }
 

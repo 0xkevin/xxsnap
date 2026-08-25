@@ -548,6 +548,23 @@ void testOnePixelOutsideToolbarItemsDoesNotFireAction()
     }
 }
 
+void testToolbarGapsAlwaysUseTheArrowCursor()
+{
+    FakePlatform platform;
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform, {}, true);
+    createReadySelection(router);
+    const auto owner = router.presentations()[1];
+    CHECK(owner.toolbarItems.size() > 2U);
+    if (owner.toolbarItems.size() <= 2U) return;
+    const auto& item = owner.toolbarItems[2].rectPhysical;
+    const PixelPoint gap{
+        item.x + item.width + 1,
+        item.y + item.height / 2,
+    };
+    CHECK(router.cursorStyle(rightWindow, gap) == OverlayCursorStyle::arrow);
+}
+
 void testCancelSourcesAreIdempotentAndCaptureFailureFailsClosed()
 {
     for (int source = 0; source < 4; ++source) {
@@ -1068,8 +1085,21 @@ void testBrushToolUsesMacOptionsAndShiftStraightLine()
 
     CHECK(router.pointerDown(rightWindow, PixelPoint{40, 90}));
     platform.shiftDown = true;
-    platform.cursor = PixelPoint{180, 190};
+    platform.cursor = PixelPoint{300, 250};
     router.pointerMove(rightWindow, PixelPoint{180, 190});
+    const auto live = router.presentations()[1];
+    CHECK(live.annotationPlan.items.size() == 1U);
+    if (!live.annotationPlan.items.empty()) {
+        const auto& preview = live.annotationPlan.items.front();
+        CHECK(preview.isPreview);
+        CHECK(preview.annotation.brushPath.has_value());
+        if (preview.annotation.brushPath.has_value()) {
+            CHECK(preview.annotation.brushPath->points.size() == 2U);
+            const auto last = preview.annotation.brushPath->points.back();
+            CHECK(last.x > 110.0F && last.x < 130.0F);
+            CHECK(last.y > 120.0F && last.y < 135.0F);
+        }
+    }
     router.pointerUp(rightWindow, PixelPoint{180, 190});
     CHECK(router.annotationDocument().annotations().size() == 1U);
     const auto& created = router.annotationDocument().annotations().front();
@@ -1339,6 +1369,13 @@ void testMosaicToolbarOptionsAndLiveComposite()
     owner = router.presentations()[1];
     CHECK(owner.mosaicOptions->state.kind()
         == xxsnap::win::AnnotationKind::mosaicRectangle);
+    CHECK(router.pointerDown(rightWindow, PixelPoint{30, 110}));
+    platform.cursor = PixelPoint{400, 300};
+    router.pointerMove(rightWindow, PixelPoint{90, 170});
+    owner = router.presentations()[1];
+    CHECK(owner.annotationComposite != nullptr);
+    CHECK(owner.annotationPlan.mosaicPreviewOutline.has_value());
+    router.pointerUp(rightWindow, PixelPoint{90, 170});
 }
 
 void testTextToolbarAcceptsUnicodeAndUsesRealPopupMenus()
@@ -1939,6 +1976,7 @@ int main()
     testPinnedImageEditorAlwaysOnTopShortcutIsNonTerminal();
     testToolbarPresentationUsesSharedPhysicalRects();
     testOnePixelOutsideToolbarItemsDoesNotFireAction();
+    testToolbarGapsAlwaysUseTheArrowCursor();
     testCancelSourcesAreIdempotentAndCaptureFailureFailsClosed();
     testEscapeRegistrationLifecycleIsExplicit();
     testEscapeUnregisterFailureIsObservableAndRetriedOnDestruction();
