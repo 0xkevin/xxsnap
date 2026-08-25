@@ -1354,6 +1354,8 @@ void testTextToolbarAcceptsUnicodeAndUsesRealPopupMenus()
     CHECK(owner.textOptions.has_value());
     CHECK(owner.textOptions->state.style().textFontFamily
         == L"Microsoft YaHei");
+    CHECK(router.cursorStyle(rightWindow, PixelPoint{30, 100})
+        == OverlayCursorStyle::textInput);
     CHECK(router.pointerDown(rightWindow, PixelPoint{30, 100}));
     router.pointerUp(rightWindow, PixelPoint{30, 100});
     CHECK(router.textInput(L"中文"));
@@ -1372,6 +1374,9 @@ void testTextToolbarAcceptsUnicodeAndUsesRealPopupMenus()
     owner = router.presentations()[1];
     CHECK(owner.textOptions->popupMenu.has_value());
     CHECK(!owner.textOptions->popupLabels.empty());
+    CHECK(router.cursorStyle(rightWindow, dipCenterAt144Dpi(
+        owner.textOptions->popupMenu->menu))
+        == OverlayCursorStyle::arrow);
     if (!owner.textOptions->popupLabels.empty()) {
         CHECK(owner.textOptions->popupLabels[0] == L"Microsoft YaHei");
     }
@@ -1406,6 +1411,9 @@ void testNumberToolbarCreatesSequenceAndSupportsDoubleClickEditing()
     owner = router.presentations()[1];
     CHECK(owner.numberOptions->popupMenu.has_value());
     CHECK(owner.numberOptions->popupLabels.size() == 3U);
+    CHECK(router.cursorStyle(rightWindow, dipCenterAt144Dpi(
+        owner.numberOptions->popupMenu->menu))
+        == OverlayCursorStyle::arrow);
     CHECK(router.pointerDown(rightWindow, dipCenterAt144Dpi(
         owner.numberOptions->layout.markType)));
 

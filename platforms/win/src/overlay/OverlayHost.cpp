@@ -158,6 +158,37 @@ struct TextPopupData {
     std::optional<std::size_t> selectedIndex;
 };
 
+PopupMenuLayout textPopupMenuLayoutFor(
+    TextPopupMenu menu,
+    const TextOptionsLayout& options,
+    float safeHeight)
+{
+    constexpr std::size_t visibleCount = 10U;
+    const auto field = menu == TextPopupMenu::fontFamily
+        ? options.fontFamily : options.textSize;
+    const auto totalCount = menu == TextPopupMenu::fontFamily
+        ? systemFontFamilies().size() : 70U;
+    const auto heightLimitedCount = static_cast<std::size_t>((std::max)(
+        1.0F, std::floor((safeHeight - 24.0F) / 24.0F)));
+    return popupMenuLayout(field, (std::min)(
+        (std::min)(visibleCount, heightLimitedCount), totalCount), safeHeight);
+}
+
+PopupMenuLayout numberPopupMenuLayoutFor(
+    NumberPopupMenu menu,
+    const NumberOptionsLayout& options,
+    float safeHeight) noexcept
+{
+    if (menu == NumberPopupMenu::markType) {
+        return numberTypeMenuLayout(options.markType, safeHeight);
+    }
+    constexpr std::size_t visibleCount = 10U;
+    const auto heightLimitedCount = static_cast<std::size_t>((std::max)(
+        1.0F, std::floor((safeHeight - 24.0F) / 24.0F)));
+    return popupMenuLayout(options.size, (std::min)(visibleCount,
+        (std::min)(heightLimitedCount, numberSizeValues.size())), safeHeight);
+}
+
 TextPopupData textPopupDataFor(
     TextPopupMenu menu,
     const TextOptionsLayout& options,
@@ -165,13 +196,10 @@ TextPopupData textPopupDataFor(
     float safeHeight,
     int scrollOffset)
 {
-    constexpr std::size_t visibleCount = 10U;
     TextPopupData data;
-    AnnotationRect field{};
     std::size_t totalCount = 0U;
     std::size_t selected = 0U;
     if (menu == TextPopupMenu::fontFamily) {
-        field = options.fontFamily;
         const auto& fonts = systemFontFamilies();
         totalCount = fonts.size();
         const auto found = std::find(fonts.begin(), fonts.end(),
@@ -179,15 +207,12 @@ TextPopupData textPopupDataFor(
         selected = found == fonts.end() ? 0U
             : static_cast<std::size_t>(std::distance(fonts.begin(), found));
     } else {
-        field = options.textSize;
         totalCount = 70U;
         selected = static_cast<std::size_t>(
             clampedTextSize(state.style().textSize) - textMinimumSize);
     }
-    const auto heightLimitedCount = static_cast<std::size_t>((std::max)(
-        1.0F, std::floor((safeHeight - 24.0F) / 24.0F)));
-    const auto count = (std::min)(
-        (std::min)(visibleCount, heightLimitedCount), totalCount);
+    data.layout = textPopupMenuLayoutFor(menu, options, safeHeight);
+    const auto count = data.layout.items.size();
     data.firstIndex = selected > count / 2U ? selected - count / 2U : 0U;
     if (scrollOffset < 0) {
         const auto amount = static_cast<std::size_t>(-scrollOffset);
@@ -199,7 +224,6 @@ TextPopupData textPopupDataFor(
     if (data.firstIndex + count > totalCount) {
         data.firstIndex = totalCount - count;
     }
-    data.layout = popupMenuLayout(field, count, safeHeight);
     data.labels.reserve(count);
     for (std::size_t offset = 0; offset < count; ++offset) {
         const auto index = data.firstIndex + offset;
@@ -223,7 +247,7 @@ TextPopupData numberPopupDataFor(
 {
     TextPopupData data;
     if (menu == NumberPopupMenu::markType) {
-        data.layout = numberTypeMenuLayout(options.markType, safeHeight);
+        data.layout = numberPopupMenuLayoutFor(menu, options, safeHeight);
         data.labels.reserve(numberMarkTypes.size());
         for (const auto& descriptor : numberMarkTypes) {
             data.labels.emplace_back(descriptor.glyph);
@@ -237,11 +261,8 @@ TextPopupData numberPopupDataFor(
     const auto selected = selectedIterator == numberSizeValues.end()
         ? 0U : static_cast<std::size_t>(std::distance(
             numberSizeValues.begin(), selectedIterator));
-    constexpr std::size_t visibleMaximum = 10U;
-    const auto heightLimitedCount = static_cast<std::size_t>((std::max)(
-        1.0F, std::floor((safeHeight - 24.0F) / 24.0F)));
-    const auto count = (std::min)(visibleMaximum,
-        (std::min)(heightLimitedCount, numberSizeValues.size()));
+    data.layout = numberPopupMenuLayoutFor(menu, options, safeHeight);
+    const auto count = data.layout.items.size();
     data.firstIndex = selected > count / 2U ? selected - count / 2U : 0U;
     if (scrollOffset < 0) {
         const auto amount = static_cast<std::size_t>(-scrollOffset);
@@ -253,7 +274,6 @@ TextPopupData numberPopupDataFor(
     if (data.firstIndex + count > numberSizeValues.size()) {
         data.firstIndex = numberSizeValues.size() - count;
     }
-    data.layout = popupMenuLayout(options.size, count, safeHeight);
     data.labels.reserve(count);
     for (std::size_t offset = 0; offset < count; ++offset) {
         const auto index = data.firstIndex + offset;
@@ -2265,20 +2285,63 @@ OverlayCursorStyle OverlayInputRouter::cursorStyle(
         static_cast<float>(clientPoint.y) * 96.0F
             / static_cast<float>(surface->dpiY),
     };
+    const auto safeHeight = physicalPixelsToDip(
+        surface->physicalBounds.height, surface->dpiY);
     if (editorOwnerIndex_.has_value()
         && (&surfaces_[*editorOwnerIndex_] == surface
             || mode_ == OverlayMode::teachingPen)) {
         if (const auto options = currentShapeOptionsLayout(*surface);
-            options.has_value() && contains(options->toolbar, surfacePoint)) {
-            return OverlayCursorStyle::arrow;
+            options.has_value()) {
+            if (contains(options->toolbar, surfacePoint)) {
+                return OverlayCursorStyle::arrow;
+            }
+            if (editor_->strokePatternMenuVisible()
+                && contains(strokePatternMenuFor(
+                    options->strokeStyle, safeHeight).menu, surfacePoint)) {
+                return OverlayCursorStyle::arrow;
+            }
+            if (editor_->cornerRadiusPanelVisible()) {
+                const AnnotationRect safe{
+                    0.0F,
+                    0.0F,
+                    physicalPixelsToDip(
+                        surface->physicalBounds.width, surface->dpiX),
+                    safeHeight,
+                };
+                if (contains(cornerRadiusPanelLayout(
+                        *options, safe).panel, surfacePoint)) {
+                    return OverlayCursorStyle::arrow;
+                }
+            }
         }
         if (const auto options = currentArrowLineOptionsLayout(*surface);
-            options.has_value() && contains(options->toolbar, surfacePoint)) {
-            return OverlayCursorStyle::arrow;
+            options.has_value()) {
+            if (contains(options->toolbar, surfacePoint)) {
+                return OverlayCursorStyle::arrow;
+            }
+            if (editor_->strokePatternMenuVisible()
+                && contains(strokePatternMenuFor(
+                    options->strokeStyle, safeHeight).menu, surfacePoint)) {
+                return OverlayCursorStyle::arrow;
+            }
+            if (const auto endpoint = editor_->arrowTypeMenuEndpoint();
+                endpoint.has_value()
+                && contains(arrowTypeMenuFor(
+                    *options, *endpoint, safeHeight).menu, surfacePoint)) {
+                return OverlayCursorStyle::arrow;
+            }
         }
         if (const auto options = currentBrushOptionsLayout(*surface);
-            options.has_value() && contains(options->toolbar, surfacePoint)) {
-            return OverlayCursorStyle::arrow;
+            options.has_value()) {
+            if (contains(options->toolbar, surfacePoint)) {
+                return OverlayCursorStyle::arrow;
+            }
+            if (editor_->strokePatternMenuVisible()
+                && contains(strokePatternMenuFor(options->strokeStyle,
+                    safeHeight, macBrushStrokePatterns().size()).menu,
+                    surfacePoint)) {
+                return OverlayCursorStyle::arrow;
+            }
         }
         if (const auto options = currentMarkerOptionsLayout(*surface);
             options.has_value() && contains(options->toolbar, surfacePoint)) {
@@ -2289,12 +2352,40 @@ OverlayCursorStyle OverlayInputRouter::cursorStyle(
             return OverlayCursorStyle::arrow;
         }
         if (const auto options = currentTextOptionsLayout(*surface);
-            options.has_value() && contains(options->toolbar, surfacePoint)) {
-            return OverlayCursorStyle::arrow;
+            options.has_value()) {
+            if (contains(options->toolbar, surfacePoint)) {
+                return OverlayCursorStyle::arrow;
+            }
+            if (const auto menu = editor_->textPopupMenu();
+                menu.has_value()
+                && contains(textPopupMenuLayoutFor(
+                    *menu, *options, safeHeight).menu, surfacePoint)) {
+                return OverlayCursorStyle::arrow;
+            }
         }
         if (const auto options = currentNumberOptionsLayout(*surface);
-            options.has_value() && contains(options->toolbar, surfacePoint)) {
-            return OverlayCursorStyle::arrow;
+            options.has_value()) {
+            if (contains(options->toolbar, surfacePoint)) {
+                return OverlayCursorStyle::arrow;
+            }
+            if (const auto menu = editor_->numberPopupMenu();
+                menu.has_value()
+                && contains(numberPopupMenuLayoutFor(
+                    *menu, *options, safeHeight).menu, surfacePoint)) {
+                return OverlayCursorStyle::arrow;
+            }
+        }
+        if (const auto options = currentMagnifierOptionsLayout(*surface);
+            options.has_value()) {
+            if (contains(options->toolbar, surfacePoint)) {
+                return OverlayCursorStyle::arrow;
+            }
+            if (editor_->magnifierZoomMenuVisible()
+                && contains(popupMenuLayout(options->zoom,
+                    magnifierZoomOptions.size(), safeHeight).menu,
+                    surfacePoint)) {
+                return OverlayCursorStyle::arrow;
+            }
         }
         if (const auto options = currentEraserOptionsLayout(*surface);
             options.has_value() && contains(options->toolbar, surfacePoint)) {

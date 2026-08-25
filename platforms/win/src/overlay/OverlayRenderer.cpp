@@ -1451,12 +1451,6 @@ struct OverlayRenderer::Impl final {
             for (std::size_t index = 0; index < count; ++index) {
                 auto item = options.popupMenu->items[index];
                 const auto selected = options.selectedPopupIndex == index;
-                if (selected) {
-                    const auto highlight = D2D1::RoundedRect(
-                        d2dRect(item), 4.0F, 4.0F);
-                    renderTarget->FillRoundedRectangle(
-                        &highlight, selectionBrush.get());
-                }
                 if (options.popupKind == NumberPopupMenu::markType) {
                     if (index < numberMarkTypes.size()) {
                         const auto& descriptor = numberMarkTypes[index];
@@ -1478,7 +1472,7 @@ struct OverlayRenderer::Impl final {
                     const auto& label = options.popupLabels[index];
                     renderTarget->DrawText(label.data(),
                         static_cast<UINT32>(label.size()), textFormat.get(),
-                        d2dRect(item), selected ? whiteBrush.get()
+                        d2dRect(item), selected ? selectionBrush.get()
                             : textBrush.get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
                 }
             }

@@ -1062,7 +1062,10 @@ struct ScrollCaptureHost::Impl final
         const auto background = CreateSolidBrush(RGB(246, 246, 246));
         FillRect(dc, &client, background);
         DeleteObject(background);
-        if (!preview.has_value() || !preview->isValid()) return;
+        if (!preview.has_value() || !preview->isValid()) {
+            paintPreviewFrame(dc, client);
+            return;
+        }
         const auto availableWidth = (std::max)(1L, client.right - client.left);
         const auto availableHeight = (std::max)(1L, client.bottom - client.top);
         const auto scale =
@@ -1125,6 +1128,21 @@ struct ScrollCaptureHost::Impl final
         SelectObject(dc, oldPen);
         DeleteObject(blue);
         paintCaptureNotice(dc, client);
+        paintPreviewFrame(dc, client);
+    }
+
+    void paintPreviewFrame(HDC dc, RECT client) noexcept
+    {
+        const auto frame = CreatePen(
+            PS_SOLID, (std::max)(1, scaledDip(1.0F, dpiX)),
+            RGB(142, 142, 147));
+        const auto previousFrame = SelectObject(dc, frame);
+        const auto previousFrameBrush = SelectObject(
+            dc, GetStockObject(HOLLOW_BRUSH));
+        Rectangle(dc, client.left, client.top, client.right, client.bottom);
+        SelectObject(dc, previousFrameBrush);
+        SelectObject(dc, previousFrame);
+        DeleteObject(frame);
     }
 
     void paintPreviewBuffered(HDC dc, RECT client) noexcept

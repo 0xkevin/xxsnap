@@ -2214,7 +2214,10 @@ ShapeCursorStyle ShapeEditorController::cursorStyleAt(
             return ShapeCursorStyle::numberCross;
         }
     }
-    return shapeToolActive_ || arrowLineToolActive_ || isTextToolActive()
+    if (isTextToolActive()) {
+        return ShapeCursorStyle::textInput;
+    }
+    return shapeToolActive_ || arrowLineToolActive_
         || isMagnifierToolActive()
         ? ShapeCursorStyle::crosshair : ShapeCursorStyle::arrow;
 }

@@ -520,6 +520,7 @@ void testTextCreatesUnicodeAndEditsAtCaret()
     CHECK(editor.handleKey(ShapeEditorKey::text, false, false)
         == ShapeEditorKeyResult::consumed);
     CHECK(editor.isTextToolActive());
+    CHECK(editor.cursorStyleAt({60, 80}) == ShapeCursorStyle::textInput);
     CHECK(editor.textOptions().style().textFontFamily
         == L"Microsoft YaHei");
     CHECK(editor.textOptions().style().textSize == 6.0F);
