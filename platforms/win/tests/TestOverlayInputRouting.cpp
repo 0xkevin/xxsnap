@@ -1599,6 +1599,40 @@ void testNumberToolbarCreatesSequenceAndSupportsDoubleClickEditing()
     CHECK(cursor->value == 2);
 }
 
+void testNumberResetControlDoesNotFallThroughToSelectionMoveCursor()
+{
+    FakePlatform platform;
+    OverlayInputRouter router(
+        PixelRect{-640, 0, 1280, 360}, surfaces(), platform, {}, true);
+    createReadySelection(router);
+    CHECK(router.keyPressed(ShapeEditorKey::number, false, false));
+    CHECK(router.pointerDown(rightWindow, PixelPoint{60, 100}));
+    router.pointerUp(rightWindow, PixelPoint{60, 100});
+    CHECK(router.pointerDown(rightWindow, PixelPoint{100, 100}));
+    router.pointerUp(rightWindow, PixelPoint{100, 100});
+
+    auto owner = router.presentations()[1];
+    const auto reset = std::find_if(
+        owner.annotationPlan.numberHandles.begin(),
+        owner.annotationPlan.numberHandles.end(),
+        [](const auto& handle) {
+            return handle.first == NumberHandleKind::reset;
+        });
+    CHECK(reset != owner.annotationPlan.numberHandles.end());
+    if (reset == owner.annotationPlan.numberHandles.end()) return;
+    const auto resetCenter = dipCenterAt144Dpi(reset->second);
+    CHECK(router.cursorStyle(rightWindow, resetCenter)
+        == OverlayCursorStyle::arrow);
+    CHECK(router.pointerDown(rightWindow, resetCenter));
+    CHECK(router.annotationDocument().annotations().back().numberSequenceIndex
+        == 1);
+    CHECK(router.cursorStyle(rightWindow, resetCenter)
+        == OverlayCursorStyle::numberMark);
+    const auto cursor = router.numberCursorState();
+    CHECK(cursor.has_value());
+    CHECK(cursor->value == 2);
+}
+
 void testSelectionResizeKeepsNumberAtItsScreenPosition()
 {
     FakePlatform platform;
@@ -2111,6 +2145,7 @@ int main()
     testMosaicToolbarOptionsAndLiveComposite();
     testTextToolbarAcceptsUnicodeAndUsesRealPopupMenus();
     testNumberToolbarCreatesSequenceAndSupportsDoubleClickEditing();
+    testNumberResetControlDoesNotFallThroughToSelectionMoveCursor();
     testSelectionResizeKeepsNumberAtItsScreenPosition();
     testSelectionResizeHandlesTakePriorityOverEveryAnnotationTool();
     testMagnifierToolbarMatchesMacOptionsAndUsesComposite();

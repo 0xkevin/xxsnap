@@ -165,6 +165,7 @@ public:
         bool shift = false);
     void cancelInteraction() noexcept;
     ShapeCursorStyle cursorStyleAt(AnnotationPoint point) const noexcept;
+    bool hasAnnotationControlAt(AnnotationPoint point) const noexcept;
 
     ShapeEditorKeyResult handleKey(
         ShapeEditorKey key,

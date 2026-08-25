@@ -2446,7 +2446,8 @@ OverlayCursorStyle OverlayInputRouter::cursorStyle(
     if (editor_ != nullptr) {
         if (const auto local = annotationPoint(virtualPoint)) {
             const auto shapeStyle = editor_->cursorStyleAt(*local);
-            if (shapeStyle != ShapeCursorStyle::arrow) {
+            if (shapeStyle != ShapeCursorStyle::arrow
+                || editor_->hasAnnotationControlAt(*local)) {
                 return backgroundAwareCursorStyle(
                     cursorStyleForShape(shapeStyle), virtualPoint, *surface);
             }

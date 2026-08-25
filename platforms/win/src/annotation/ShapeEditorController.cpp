@@ -2275,6 +2275,36 @@ ShapeCursorStyle ShapeEditorController::cursorStyleAt(
         ? ShapeCursorStyle::crosshair : ShapeCursorStyle::arrow;
 }
 
+bool ShapeEditorController::hasAnnotationControlAt(
+    AnnotationPoint point) const noexcept
+{
+    const auto selected = document_.selectedId();
+    const auto* annotation = selected.has_value()
+        ? document_.find(*selected) : nullptr;
+    if (annotation == nullptr || !canEditCompletedAnnotation(*annotation)) {
+        return false;
+    }
+    if (isNumberAnnotation(*annotation)) {
+        for (const auto kind : {
+                NumberHandleKind::deleteHandle,
+                NumberHandleKind::resize,
+                NumberHandleKind::increment,
+                NumberHandleKind::decrement,
+                NumberHandleKind::reset}) {
+            const auto handle = numberHandleRect(*annotation, kind);
+            if (handle.has_value() && containsRect(*handle, point)) {
+                return true;
+            }
+        }
+    }
+    if (isTextAnnotation(*annotation)) {
+        const auto handle = textDeleteHandlePoint(*selected);
+        return handle.has_value()
+            && annotationDistanceSquared(point, *handle) <= 100.0F;
+    }
+    return false;
+}
+
 ShapeEditorKeyResult ShapeEditorController::handleKey(
     ShapeEditorKey key,
     bool control,

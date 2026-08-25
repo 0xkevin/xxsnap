@@ -656,6 +656,9 @@ void testNumberToolMatchesMacSequenceEditingAndControls()
     const auto reset = editor.numberHandle(
         editor.document().selectedId().value(), NumberHandleKind::reset);
     CHECK(reset.has_value());
+    CHECK(editor.hasAnnotationControlAt({
+        reset->x + reset->width / 2.0F,
+        reset->y + reset->height / 2.0F}));
     CHECK(editor.pointerDown({reset->x + reset->width / 2.0F,
         reset->y + reset->height / 2.0F}));
     CHECK(editor.document().find(editor.document().selectedId().value())
