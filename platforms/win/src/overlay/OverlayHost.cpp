@@ -45,6 +45,9 @@ AnnotationRenderPlan scaledRenderPlan(
     if (plan.textDeleteHandle) {
         plan.textDeleteHandle = point(*plan.textDeleteHandle);
     }
+    if (plan.textEditingOutline) {
+        plan.textEditingOutline = rect(*plan.textEditingOutline);
+    }
     if (plan.numberOutline) plan.numberOutline = rect(*plan.numberOutline);
     for (auto& value : plan.numberHandles) value.second = rect(value.second);
     if (plan.numberCaret) plan.numberCaret = rect(*plan.numberCaret);

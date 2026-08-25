@@ -1046,9 +1046,9 @@ void testArrowToolUsesMacOptionsMenuAndCreatesEditableCurve()
 
     CHECK(router.pointerDown(rightWindow, PixelPoint{40, 90}));
     CHECK(router.presentations()[1].annotationPlan.items.empty());
-    router.pointerMove(rightWindow, PixelPoint{43, 93});
-    CHECK(router.presentations()[1].annotationPlan.items.empty());
     platform.cursor = PixelPoint{180, 190};
+    router.pointerMove(rightWindow, PixelPoint{180, 190});
+    CHECK(router.presentations()[1].annotationPlan.items.empty());
     router.pointerMove(rightWindow, PixelPoint{180, 190});
     CHECK(router.presentations()[1].annotationPlan.items.size() == 1U);
     router.pointerUp(rightWindow, PixelPoint{180, 190});
@@ -1690,8 +1690,17 @@ void testMagnifierToolbarMatchesMacOptionsAndUsesComposite()
     owner = router.presentations()[1];
     CHECK(owner.annotationComposite == nullptr);
     CHECK(owner.annotationPlan.items.size() == 1U);
-    CHECK(owner.annotationPlan.resizeHandles.empty());
+    CHECK(owner.annotationPlan.resizeHandles.size() == 8U);
     CHECK(!owner.annotationPlan.rotationHandle.has_value());
+
+    const auto beforeMove = annotation.rect;
+    const auto displayed = owner.annotationPlan.items.front().annotation.rect;
+    const auto center = dipCenterAt144Dpi(displayed);
+    CHECK(router.pointerDown(rightWindow, center));
+    router.pointerMove(rightWindow, {center.x + 12, center.y + 9});
+    router.pointerUp(rightWindow, {center.x + 12, center.y + 9});
+    CHECK(!(router.annotationDocument().annotations().front().rect
+        == beforeMove));
 }
 
 void testEraserToolbarUsesMacLayoutAndModes()

@@ -32,6 +32,8 @@ struct AnnotationRenderPlan {
     float textCaretRotationDegrees = 0.0F;
     std::optional<AnnotationPoint> textCaretRotationCenter;
     std::optional<AnnotationPoint> textDeleteHandle;
+    std::optional<AnnotationRect> textEditingOutline;
+    float textEditingOutlineRotationDegrees = 0.0F;
     std::optional<AnnotationRect> numberOutline;
     std::vector<std::pair<NumberHandleKind, AnnotationRect>> numberHandles;
     bool numberIncrementEnabled = false;

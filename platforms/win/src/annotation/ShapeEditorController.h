@@ -243,6 +243,7 @@ private:
     bool strokePatternMenuVisible_ = false;
     bool cornerRadiusPanelVisible_ = false;
     std::uint64_t interactionRevision_ = 0;
+    std::size_t arrowDrawingMoveCount_ = 0U;
     std::optional<ArrowEndpoint> arrowTypeMenuEndpoint_;
     std::optional<AnnotationId> editingTextId_;
     std::size_t textCaretPosition_ = 0U;

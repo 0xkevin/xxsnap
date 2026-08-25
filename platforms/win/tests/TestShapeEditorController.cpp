@@ -556,6 +556,8 @@ void testTextCreatesUnicodeAndEditsAtCaret()
     const auto plan = editor.renderPlan({0, 0});
     CHECK(plan.textCaret.has_value());
     CHECK(plan.textDeleteHandle.has_value());
+    CHECK(plan.textEditingOutline.has_value());
+    CHECK((plan.textEditingOutline.value() == standardized(text->rect)));
     CHECK(plan.resizeHandles.size() == 7U);
     CHECK(editor.toggleTextPopupMenu(TextPopupMenu::fontFamily));
     CHECK(editor.textPopupMenu() == TextPopupMenu::fontFamily);

@@ -572,6 +572,8 @@ AnnotationRenderPlan buildAnnotationRenderPlan(
 
     const auto handles = resizeHandlePoints(*editing);
     if (isTextAnnotation(*editing)) {
+        plan.textEditingOutline = standardized(editing->rect);
+        plan.textEditingOutlineRotationDegrees = editing->rotationDegrees;
         plan.resizeHandles.reserve(handles.size() - 1U);
         for (std::size_t index = 0; index < handles.size(); ++index) {
             if (index == 2U) {
@@ -913,6 +915,35 @@ HRESULT AnnotationRenderer::draw(
             brush.get(), 2.0F, stroke.get());
     }
 
+    if (plan.textEditingOutline.has_value()) {
+        ComPtr<ID2D1SolidColorBrush> blueBrush;
+        auto result = renderTarget->CreateSolidColorBrush(
+            D2D1::ColorF(0.0F, 0.48F, 1.0F, 1.0F), blueBrush.put());
+        if (FAILED(result)) return result;
+        const D2D1_STROKE_STYLE_PROPERTIES dashProperties{
+            D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT,
+            D2D1_CAP_STYLE_FLAT, D2D1_LINE_JOIN_MITER, 10.0F,
+            D2D1_DASH_STYLE_DASH, 0.0F};
+        ComPtr<ID2D1StrokeStyle> dashed;
+        result = factory_->CreateStrokeStyle(
+            dashProperties, nullptr, 0U, dashed.put());
+        if (FAILED(result)) return result;
+        const auto rect = standardized(*plan.textEditingOutline);
+        D2D1_MATRIX_3X2_F previousTransform{};
+        renderTarget->GetTransform(&previousTransform);
+        if (plan.textEditingOutlineRotationDegrees != 0.0F) {
+            renderTarget->SetTransform(
+                D2D1::Matrix3x2F::Rotation(
+                    plan.textEditingOutlineRotationDegrees,
+                    D2D1::Point2F(
+                        rect.x + rect.width / 2.0F,
+                        rect.y + rect.height / 2.0F))
+                * previousTransform);
+        }
+        renderTarget->DrawRectangle(
+            d2dRect(rect), blueBrush.get(), 1.5F, dashed.get());
+        renderTarget->SetTransform(previousTransform);
+    }
     if (!plan.resizeHandles.empty() || !plan.lineHandles.empty()) {
         ComPtr<ID2D1SolidColorBrush> blueBrush;
         auto result = renderTarget->CreateSolidColorBrush(

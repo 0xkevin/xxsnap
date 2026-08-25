@@ -57,6 +57,7 @@ void testPlanUsesSelectionLocalCoordinatesAndLivePreview()
     CHECK((plan.resizeHandles[7] == AnnotationPoint{290, 160}));
     CHECK(plan.rotationHandle.has_value());
     CHECK((plan.rotationHandle.value() == AnnotationPoint{250, 106}));
+    CHECK(!plan.textEditingOutline.has_value());
 }
 
 void testEditingPreviewReplacesCommittedShape()

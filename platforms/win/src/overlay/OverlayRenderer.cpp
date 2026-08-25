@@ -1516,14 +1516,6 @@ struct OverlayRenderer::Impl final {
         const auto drawShape = [&](AnnotationRect rect,
                                    MagnifierShape shape) {
             const auto selected = options.state.shape() == shape;
-            if (selected) {
-                const auto button = D2D1::RoundedRect(
-                    d2dRect(AnnotationRect{rect.x - 3.0F, rect.y - 4.0F,
-                        rect.width + 6.0F, rect.height + 8.0F}),
-                    4.0F, 4.0F);
-                renderTarget->DrawRoundedRectangle(
-                    &button, selectionBrush.get(), 1.5F);
-            }
             auto* brush = selected
                 ? selectionBrush.get() : foregroundBrush.get();
             const auto center = D2D1::Point2F(

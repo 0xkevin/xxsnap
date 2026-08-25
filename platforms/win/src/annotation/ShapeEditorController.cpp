@@ -1695,7 +1695,8 @@ bool ShapeEditorController::canEditCompletedAnnotation(
     return !completedAnnotationsLocked_
         || isArrowLineAnnotation(annotation)
         || isShapeKind(annotation.kind)
-        || isTextAnnotation(annotation);
+        || isTextAnnotation(annotation)
+        || isMagnifierAnnotation(annotation);
 }
 
 bool ShapeEditorController::pointerDown(
@@ -1976,11 +1977,13 @@ bool ShapeEditorController::pointerDown(
     }
     if (arrowLineToolActive_) {
         document_.clearSelection();
-        return arrowInteraction_.beginDrawing(
+        const auto started = arrowInteraction_.beginDrawing(
             point,
             arrowLineOptions_.style(),
             arrowLineOptions_.startArrowType(),
             arrowLineOptions_.endArrowType());
+        arrowDrawingMoveCount_ = 0U;
+        return started;
     }
     if (markerToolActive_) {
         document_.clearSelection();
@@ -2020,6 +2023,9 @@ void ShapeEditorController::pointerMove(
         ++interactionRevision_;
         markerInteraction_.update(point, shift);
     } else if (arrowInteraction_.mode() != ArrowLineInteractionMode::idle) {
+        if (arrowInteraction_.mode() == ArrowLineInteractionMode::drawing) {
+            ++arrowDrawingMoveCount_;
+        }
         ++interactionRevision_;
         arrowInteraction_.update(point);
     } else if (interaction_.mode() != ShapeInteractionMode::idle) {
@@ -2075,6 +2081,7 @@ bool ShapeEditorController::pointerUp(
     } else if (arrowInteraction_.mode() != ArrowLineInteractionMode::idle) {
         arrowInteraction_.update(point);
         arrowInteraction_.commit();
+        arrowDrawingMoveCount_ = 0U;
     } else {
         interaction_.update(point, shift);
         interaction_.commit();
@@ -2097,6 +2104,7 @@ void ShapeEditorController::cancelInteraction() noexcept
     ++interactionRevision_;
     interaction_.cancel();
     arrowInteraction_.cancel();
+    arrowDrawingMoveCount_ = 0U;
     brushInteraction_.cancel();
     markerInteraction_.cancel();
     mosaicInteraction_.cancel();
@@ -2494,11 +2502,12 @@ AnnotationRenderPlan ShapeEditorController::renderPlan(
     if (currentPreview.has_value()
         && arrowInteraction_.mode() == ArrowLineInteractionMode::drawing
         && currentPreview->arrowLine.has_value()
-        && annotationDistanceSquared(
-            currentPreview->arrowLine->start,
-            currentPreview->arrowLine->end)
-            < ArrowLineInteraction::minimumLineLengthDip
-                * ArrowLineInteraction::minimumLineLengthDip) {
+        && (arrowDrawingMoveCount_ < 2U
+            || annotationDistanceSquared(
+                currentPreview->arrowLine->start,
+                currentPreview->arrowLine->end)
+                < ArrowLineInteraction::minimumLineLengthDip
+                    * ArrowLineInteraction::minimumLineLengthDip)) {
         currentPreview.reset();
     }
     const auto selected = document_.selectedId();
