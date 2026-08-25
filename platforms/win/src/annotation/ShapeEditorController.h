@@ -109,6 +109,7 @@ public:
     std::optional<AnnotationRect> eraserRectanglePreview() const noexcept;
     int nextNumberSequenceValue() const noexcept;
     bool isEditingInlineValue() const noexcept;
+    bool hasActivePointerInteraction() const noexcept;
     bool isEditingNumber() const noexcept;
     std::optional<TextPopupMenu> textPopupMenu() const noexcept;
     int popupScrollOffset() const noexcept;

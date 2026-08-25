@@ -452,6 +452,17 @@ bool ShapeEditorController::isEditingInlineValue() const noexcept
     return editingTextId_.has_value() || editingNumberId_.has_value();
 }
 
+bool ShapeEditorController::hasActivePointerInteraction() const noexcept
+{
+    return interaction_.mode() != ShapeInteractionMode::idle
+        || arrowInteraction_.mode() != ArrowLineInteractionMode::idle
+        || brushInteraction_.active()
+        || markerInteraction_.mode() != MarkerInteractionMode::idle
+        || mosaicInteraction_.mode() != MosaicInteractionMode::idle
+        || eraserPointInteractionActive_
+        || eraserRectangleStart_.has_value();
+}
+
 bool ShapeEditorController::isEditingNumber() const noexcept
 {
     return editingNumberId_.has_value();

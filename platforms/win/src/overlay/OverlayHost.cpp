@@ -2194,6 +2194,9 @@ bool OverlayInputRouter::pointerDown(
             if (editor_->isEditingInlineValue()) {
                 return true;
             }
+            if (!editor_->hasActivePointerInteraction()) {
+                return true;
+            }
             if (!platform_.captureMouse(source)) {
                 editor_->cancelInteraction();
                 lastError_ = OverlayInputErrorCode::mouseCaptureFailed;

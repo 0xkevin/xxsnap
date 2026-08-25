@@ -26,6 +26,7 @@ using xxsnap::win::overlayActionPreservesWindows;
 using xxsnap::win::OverlayCursorStyle;
 using xxsnap::win::OverlaySurface;
 using xxsnap::win::NumberMarkType;
+using xxsnap::win::NumberHandleKind;
 using xxsnap::win::SelectionPhase;
 using xxsnap::win::ShapeEditorKey;
 using xxsnap::win::AnnotationColor;
@@ -1572,6 +1573,30 @@ void testNumberToolbarCreatesSequenceAndSupportsDoubleClickEditing()
     cursor = router.numberCursorState();
     CHECK(cursor.has_value());
     CHECK(cursor->value == 20);
+
+    CHECK(router.pointerDown(rightWindow, PixelPoint{200, 100}));
+    router.pointerUp(rightWindow, PixelPoint{200, 100});
+    owner = router.presentations()[1];
+    const auto reset = std::find_if(
+        owner.annotationPlan.numberHandles.begin(),
+        owner.annotationPlan.numberHandles.end(),
+        [](const auto& handle) {
+            return handle.first == NumberHandleKind::reset;
+        });
+    CHECK(reset != owner.annotationPlan.numberHandles.end());
+    if (reset == owner.annotationPlan.numberHandles.end()) return;
+    const auto resetCenter = dipCenterAt144Dpi(reset->second);
+    const auto captureCallsBeforeReset = platform.captureCalls;
+    CHECK(router.pointerDown(rightWindow, resetCenter));
+    CHECK(platform.captureCalls == captureCallsBeforeReset);
+    CHECK(router.cursorStyle(rightWindow, resetCenter)
+        == OverlayCursorStyle::numberMark);
+    router.pointerUp(rightWindow, resetCenter);
+    CHECK(router.cursorStyle(rightWindow, resetCenter)
+        == OverlayCursorStyle::numberMark);
+    cursor = router.numberCursorState();
+    CHECK(cursor.has_value());
+    CHECK(cursor->value == 2);
 }
 
 void testSelectionResizeKeepsNumberAtItsScreenPosition()

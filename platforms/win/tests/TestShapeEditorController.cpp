@@ -660,6 +660,8 @@ void testNumberToolMatchesMacSequenceEditingAndControls()
         reset->y + reset->height / 2.0F}));
     CHECK(editor.document().find(editor.document().selectedId().value())
         ->numberSequenceIndex == 1);
+    CHECK(editor.cursorStyleAt({reset->x + reset->width / 2.0F,
+        reset->y + reset->height / 2.0F}) == ShapeCursorStyle::numberMark);
     CHECK(editor.pointerDown({230, 80}));
     CHECK(editor.document().annotations().back().numberSequenceIndex == 2);
 
