@@ -1696,6 +1696,7 @@ bool ShapeEditorController::canEditCompletedAnnotation(
         || isArrowLineAnnotation(annotation)
         || isShapeKind(annotation.kind)
         || isTextAnnotation(annotation)
+        || isNumberAnnotation(annotation)
         || isMagnifierAnnotation(annotation);
 }
 
@@ -1886,16 +1887,14 @@ bool ShapeEditorController::pointerDown(
         return true;
     }
     if (isNumberToolActive()) {
-        if (!completedAnnotationsLocked_) {
-            if (const auto number = numberAnnotationAt(point)) {
-                document_.select(*number);
-                numberTypeFollowerId_ = *number;
-                loadSelectedOptions();
-                if (clickCount >= 2) {
-                    return beginNumberEdit(*number);
-                }
-                return interaction_.beginMove(*number, point);
+        if (const auto number = numberAnnotationAt(point)) {
+            document_.select(*number);
+            numberTypeFollowerId_ = *number;
+            loadSelectedOptions();
+            if (clickCount >= 2) {
+                return beginNumberEdit(*number);
             }
+            return interaction_.beginMove(*number, point);
         }
         document_.clearSelection();
         numberTypeFollowerId_.reset();
@@ -1914,7 +1913,6 @@ bool ShapeEditorController::pointerDown(
             type == NumberMarkType::number ? currentNumberGroupId_ : 0,
             numberOptions_.style());
         syncHistory();
-        if (completedAnnotationsLocked_) document_.clearSelection();
         return id != invalidAnnotationId;
     }
     if (isMosaicToolActive()) {

@@ -1543,10 +1543,35 @@ void testNumberToolbarCreatesSequenceAndSupportsDoubleClickEditing()
     CHECK(router.annotationDocument().annotations()[0].numberSequenceIndex == 1);
     CHECK(router.annotationDocument().annotations()[1].numberSequenceIndex == 2);
 
-    CHECK(!router.annotationDocument().selectedId().has_value());
+    CHECK(router.annotationDocument().selectedId()
+        == router.annotationDocument().annotations()[1].id);
     CHECK(!router.isEditingInlineValue());
+    owner = router.presentations()[1];
+    CHECK(owner.annotationPlan.numberOutline.has_value());
+    CHECK(owner.annotationPlan.numberHandles.size() == 5U);
     CHECK(router.annotationDocument().annotations()[0].numberSequenceIndex == 1);
     CHECK(!router.annotationDocument().annotations()[0].numberSequenceIsManual);
+
+    const auto firstRect = owner.annotationPlan.items[0].annotation.rect;
+    const auto firstCenter = dipCenterAt144Dpi(firstRect);
+    CHECK(router.pointerDown(rightWindow, firstCenter));
+    router.pointerMove(rightWindow, {firstCenter.x + 15, firstCenter.y + 9});
+    router.pointerUp(rightWindow, {firstCenter.x + 15, firstCenter.y + 9});
+    CHECK(router.annotationDocument().selectedId()
+        == router.annotationDocument().annotations()[0].id);
+    owner = router.presentations()[1];
+    CHECK(owner.annotationPlan.numberOutline.has_value());
+
+    const auto movedFirstCenter = dipCenterAt144Dpi(
+        owner.annotationPlan.items[0].annotation.rect);
+    CHECK(router.pointerDown(rightWindow, movedFirstCenter, 2));
+    CHECK(router.isEditingInlineValue());
+    CHECK(router.textInput(L"9"));
+    CHECK(router.keyPressed(ShapeEditorKey::enter, false, false));
+    CHECK(router.annotationDocument().annotations()[0].numberSequenceIndex == 19);
+    cursor = router.numberCursorState();
+    CHECK(cursor.has_value());
+    CHECK(cursor->value == 20);
 }
 
 void testSelectionResizeKeepsNumberAtItsScreenPosition()
