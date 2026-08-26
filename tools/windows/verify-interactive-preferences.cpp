@@ -177,6 +177,26 @@ bool labelUsesParentBackground(HWND label, COLORREF expected)
     return color == expected;
 }
 
+bool iconUsesNativeFrame(HWND control)
+{
+    if (control == nullptr) return false;
+    const auto icon = reinterpret_cast<HICON>(
+        SendMessageW(control, STM_GETICON, 0, 0));
+    if (icon == nullptr) return false;
+    ICONINFO info{};
+    if (!GetIconInfo(icon, &info)) return false;
+    BITMAP bitmap{};
+    const auto read = info.hbmColor != nullptr
+        && GetObjectW(info.hbmColor, sizeof(bitmap), &bitmap)
+            == sizeof(bitmap);
+    DeleteObject(info.hbmColor);
+    DeleteObject(info.hbmMask);
+    if (!read || bitmap.bmWidth != bitmap.bmHeight) return false;
+    return bitmap.bmWidth == 32 || bitmap.bmWidth == 48
+        || bitmap.bmWidth == 64 || bitmap.bmWidth == 96
+        || bitmap.bmWidth == 128;
+}
+
 bool hasDarkPixels(HWND window, int left, int top, int width, int height)
 {
     RedrawWindow(window, nullptr, nullptr,
@@ -301,6 +321,8 @@ int wmain(int argc, wchar_t** argv)
             require(labelUsesParentBackground(
                 staticChildWithType(preferences, SS_ICON),
                 RGB(246, 246, 246)), 75);
+            require(iconUsesNativeFrame(
+                staticChildWithType(preferences, SS_ICON)), 76);
             auto persistenceProbe = originalSettings;
             persistenceProbe.filenameTemplate = L"qa_{yyyyMMdd}";
             persistenceProbe.updateCheckIntervalHours = 6;

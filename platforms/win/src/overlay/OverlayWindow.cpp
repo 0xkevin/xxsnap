@@ -112,6 +112,7 @@ OverlayWindow::OverlayWindow(
 OverlayWindow::~OverlayWindow()
 {
     discardMarkerCursor();
+    discardPreviousNumberCursor();
     if (window_ != nullptr) {
         const auto window = std::exchange(window_, nullptr);
         KillTimer(window, colorSamplerCopySuccessTimerIdentifier);
@@ -455,6 +456,32 @@ void OverlayWindow::setNumberCursor(
         && markerCursorColor_ == color) {
         return;
     }
+    if (previousNumberCursor_ != nullptr
+        && previousNumberCursorType_ == type
+        && previousNumberCursorValue_ == value
+        && previousNumberCursorColor_ == color) {
+        if (markerCursorIsNumber_) {
+            std::swap(markerCursor_, previousNumberCursor_);
+            std::swap(markerCursorColor_, previousNumberCursorColor_);
+            std::swap(numberCursorType_, previousNumberCursorType_);
+            std::swap(numberCursorValue_, previousNumberCursorValue_);
+        } else {
+            discardMarkerCursor();
+            markerCursor_ = std::exchange(previousNumberCursor_, nullptr);
+            markerCursorColor_ = previousNumberCursorColor_;
+            numberCursorType_ = previousNumberCursorType_;
+            numberCursorValue_ = previousNumberCursorValue_;
+            markerCursorIsNumber_ = true;
+            markerCursorIsMosaic_ = false;
+            markerCursorStrokeWidthDip_ = 0.0F;
+        }
+        if (cursorStyle_ == OverlayCursorStyle::numberMark
+            || cursorStyle_ == OverlayCursorStyle::numberCheck
+            || cursorStyle_ == OverlayCursorStyle::numberCross) {
+            SetCursor(markerCursor_);
+        }
+        return;
+    }
     constexpr int side = 30;
     BITMAPV5HEADER header{};
     header.bV5Size = sizeof(header);
@@ -565,7 +592,15 @@ void OverlayWindow::setNumberCursor(
     DeleteObject(maskBitmap);
     DeleteObject(colorBitmap);
     if (cursor != nullptr) {
-        discardMarkerCursor();
+        if (markerCursor_ != nullptr && markerCursorIsNumber_) {
+            discardPreviousNumberCursor();
+            previousNumberCursor_ = std::exchange(markerCursor_, nullptr);
+            previousNumberCursorColor_ = markerCursorColor_;
+            previousNumberCursorType_ = numberCursorType_;
+            previousNumberCursorValue_ = numberCursorValue_;
+        } else {
+            discardMarkerCursor();
+        }
         markerCursor_ = cursor;
         markerCursorColor_ = color;
         markerCursorStrokeWidthDip_ = 0.0F;
@@ -667,6 +702,13 @@ void OverlayWindow::discardMarkerCursor() noexcept
 {
     if (markerCursor_ != nullptr) {
         DestroyIcon(std::exchange(markerCursor_, nullptr));
+    }
+}
+
+void OverlayWindow::discardPreviousNumberCursor() noexcept
+{
+    if (previousNumberCursor_ != nullptr) {
+        DestroyIcon(std::exchange(previousNumberCursor_, nullptr));
     }
 }
 

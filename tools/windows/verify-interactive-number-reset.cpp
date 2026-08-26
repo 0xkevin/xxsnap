@@ -86,6 +86,14 @@ void setLeftButton(bool down)
     Sleep(100);
 }
 
+void sendLeftButton(bool down)
+{
+    INPUT input{};
+    input.type = INPUT_MOUSE;
+    input.mi.dwFlags = down ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP;
+    SendInput(1, &input, sizeof(input));
+}
+
 void click(POINT point)
 {
     movePointer(point);
@@ -169,9 +177,18 @@ int wmain(int argc, wchar_t** argv)
                 second.x - MulDiv(21, dpi, 96),
                 second.y + MulDiv(13, dpi, 96),
             };
-            click(reset);
-            const auto afterReset = visibleCursor();
+            movePointer(reset);
             const auto arrow = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));
+            const auto resetStarted = GetTickCount64();
+            sendLeftButton(true);
+            while (visibleCursor() == arrow
+                && GetTickCount64() - resetStarted < 100U) {
+                Sleep(1);
+            }
+            const auto resetCursorLatency = GetTickCount64() - resetStarted;
+            sendLeftButton(false);
+            Sleep(100);
+            const auto afterReset = visibleCursor();
 
             const POINT empty{second.x + MulDiv(120, dpi, 96),
                 second.y + MulDiv(70, dpi, 96)};
@@ -181,6 +198,7 @@ int wmain(int argc, wchar_t** argv)
             const auto afterNextNumber = visibleCursor();
 
             if (afterReset != nullptr && afterReset != arrow
+                && resetCursorLatency <= 32U
                 && afterMove == afterReset
                 && afterNextNumber != nullptr
                 && afterNextNumber != arrow

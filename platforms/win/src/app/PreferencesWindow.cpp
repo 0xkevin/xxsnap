@@ -112,6 +112,16 @@ UINT windowDpi(HWND window) noexcept
     return value > 0 ? static_cast<UINT>(value) : 96;
 }
 
+int aboutIconPixelSize(UINT dpi) noexcept
+{
+    const auto desired = scaled(72, dpi);
+    if (desired >= 128) return 128;
+    if (desired >= 96) return 96;
+    if (desired >= 64) return 64;
+    if (desired >= 48) return 48;
+    return 32;
+}
+
 const wchar_t* sectionLabel(PreferencesSection section) noexcept
 {
     const auto index = static_cast<std::size_t>(section);
@@ -578,9 +588,10 @@ struct PreferencesWindow::Impl final {
         const auto icon = addControl(L"STATIC", L"", SS_ICON | SS_CENTERIMAGE,
             0, 296, 114, 88, 88, 0, regularFont);
         if (icon != nullptr) {
+            const auto iconSize = aboutIconPixelSize(dpi);
             const auto value = LoadImageW(instance,
                 MAKEINTRESOURCEW(IDI_XXSNAP), IMAGE_ICON,
-                scaled(72, dpi), scaled(72, dpi), LR_DEFAULTCOLOR);
+                iconSize, iconSize, LR_DEFAULTCOLOR);
             SendMessageW(icon, STM_SETICON, reinterpret_cast<WPARAM>(value), 0);
         }
         addLabel(L"XxSnap", 0, 213, 680, 34,
