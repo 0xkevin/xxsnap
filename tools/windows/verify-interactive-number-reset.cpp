@@ -7,7 +7,10 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <cwchar>
+#include <cstring>
+#include <iostream>
 
 namespace {
 
@@ -123,6 +126,62 @@ HCURSOR visibleCursor()
         ? info.hCursor : nullptr;
 }
 
+std::uint64_t cursorFingerprint(HCURSOR cursor)
+{
+    if (cursor == nullptr) return 0;
+    constexpr int side = 64;
+    BITMAPV5HEADER header{};
+    header.bV5Size = sizeof(header);
+    header.bV5Width = side;
+    header.bV5Height = -side;
+    header.bV5Planes = 1;
+    header.bV5BitCount = 32;
+    header.bV5Compression = BI_BITFIELDS;
+    header.bV5RedMask = 0x00FF0000;
+    header.bV5GreenMask = 0x0000FF00;
+    header.bV5BlueMask = 0x000000FF;
+    header.bV5AlphaMask = 0xFF000000;
+    void* bits = nullptr;
+    const auto screen = GetDC(nullptr);
+    const auto bitmap = CreateDIBSection(screen,
+        reinterpret_cast<BITMAPINFO*>(&header), DIB_RGB_COLORS,
+        &bits, nullptr, 0);
+    const auto dc = CreateCompatibleDC(screen);
+    ReleaseDC(nullptr, screen);
+    if (bitmap == nullptr || dc == nullptr || bits == nullptr) {
+        if (bitmap != nullptr) DeleteObject(bitmap);
+        if (dc != nullptr) DeleteDC(dc);
+        return 0;
+    }
+    std::memset(bits, 0, side * side * sizeof(std::uint32_t));
+    const auto previous = SelectObject(dc, bitmap);
+    const auto drawn = DrawIconEx(
+        dc, 0, 0, cursor, 0, 0, 0, nullptr, DI_NORMAL);
+    SelectObject(dc, previous);
+    DeleteDC(dc);
+    if (!drawn) {
+        DeleteObject(bitmap);
+        return 0;
+    }
+    std::uint64_t result = 1469598103934665603ULL;
+    const auto* bytes = static_cast<const unsigned char*>(bits);
+    for (std::size_t index = 0;
+         index < side * side * sizeof(std::uint32_t); ++index) {
+        result ^= bytes[index];
+        result *= 1099511628211ULL;
+    }
+    ICONINFO info{};
+    if (GetIconInfo(cursor, &info)) {
+        result ^= info.xHotspot;
+        result *= 1099511628211ULL;
+        result ^= info.yHotspot;
+        if (info.hbmMask != nullptr) DeleteObject(info.hbmMask);
+        if (info.hbmColor != nullptr) DeleteObject(info.hbmColor);
+    }
+    DeleteObject(bitmap);
+    return result;
+}
+
 } // namespace
 
 int wmain(int argc, wchar_t** argv)
@@ -167,7 +226,10 @@ int wmain(int argc, wchar_t** argv)
             const POINT first{selectionStart.x + width / 5,
                 selectionStart.y + height / 5};
             click(first);
+            movePointer({first.x, first.y + MulDiv(70, dpi, 96)});
             const auto expectedResetCursor = visibleCursor();
+            const auto expectedResetFingerprint = cursorFingerprint(
+                expectedResetCursor);
             POINT last = first;
             for (int index = 1; index < 5; ++index) {
                 last.x = first.x + index * MulDiv(70, dpi, 96);
@@ -198,6 +260,7 @@ int wmain(int argc, wchar_t** argv)
             sendLeftButton(false);
             Sleep(100);
             const auto afterReset = visibleCursor();
+            const auto afterResetFingerprint = cursorFingerprint(afterReset);
 
             const POINT empty{last.x + MulDiv(100, dpi, 96),
                 last.y + MulDiv(70, dpi, 96)};
@@ -205,17 +268,29 @@ int wmain(int argc, wchar_t** argv)
             const auto afterMove = visibleCursor();
             click(empty);
             const auto afterNextNumber = visibleCursor();
+            const auto afterNextFingerprint = cursorFingerprint(
+                afterNextNumber);
 
             if (expectedResetCursor != nullptr
                 && expectedResetCursor != arrow
-                && afterReset == expectedResetCursor
+                && expectedResetFingerprint != 0
+                && afterResetFingerprint == expectedResetFingerprint
                 && resetCursorLatency <= 32U
                 && afterMove == afterReset
                 && afterNextNumber != nullptr
                 && afterNextNumber != arrow
-                && afterNextNumber != afterReset) {
+                && afterNextFingerprint != afterResetFingerprint) {
                 result = ERROR_SUCCESS;
             } else {
+                std::wcerr << L"expected=" << expectedResetCursor
+                    << L" arrow=" << arrow
+                    << L" afterReset=" << afterReset
+                    << L" latency=" << resetCursorLatency
+                    << L" afterMove=" << afterMove
+                    << L" afterNext=" << afterNextNumber
+                    << L" expectedHash=" << expectedResetFingerprint
+                    << L" resetHash=" << afterResetFingerprint
+                    << L" nextHash=" << afterNextFingerprint << L'\n';
                 result = ERROR_INVALID_STATE;
             }
         } else {

@@ -1437,6 +1437,18 @@ if(BUILD_TESTING)
     )
 
     add_executable(
+        xxsnap_interactive_custom_color_verifier EXCLUDE_FROM_ALL
+        ${CMAKE_SOURCE_DIR}/tools/windows/verify-interactive-custom-color.cpp
+    )
+    target_compile_features(
+        xxsnap_interactive_custom_color_verifier PRIVATE cxx_std_17
+    )
+    target_link_libraries(
+        xxsnap_interactive_custom_color_verifier
+        PRIVATE xxsnap_overlay_renderer user32
+    )
+
+    add_executable(
         xxsnap_interactive_help_verifier EXCLUDE_FROM_ALL
         ${CMAKE_SOURCE_DIR}/tools/windows/verify-interactive-help.cpp
     )

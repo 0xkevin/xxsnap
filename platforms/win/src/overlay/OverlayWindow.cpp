@@ -19,6 +19,7 @@ namespace {
 
 constexpr wchar_t overlayWindowClassName[] = L"XxSnapCaptureOverlayWindow";
 constexpr UINT_PTR colorSamplerCopySuccessTimerIdentifier = 1U;
+constexpr UINT refreshCursorMessage = WM_APP + 0x39U;
 
 bool fitsWin32Coordinate(std::int64_t value) noexcept
 {
@@ -432,9 +433,7 @@ void OverlayWindow::setCursorStyle(OverlayCursorStyle style) noexcept
 void OverlayWindow::requestCursorRefresh() noexcept
 {
     if (window_ != nullptr) {
-        PostMessageW(window_, WM_SETCURSOR,
-            reinterpret_cast<WPARAM>(window_),
-            MAKELPARAM(HTCLIENT, WM_MOUSEMOVE));
+        PostMessageW(window_, refreshCursorMessage, 0, 0);
     }
 }
 
@@ -891,6 +890,23 @@ LRESULT OverlayWindow::handleMessage(
         }
     };
     switch (message) {
+    case refreshCursorMessage: {
+        const auto desired = cursor();
+        SetCursor(nullptr);
+        SetCursor(desired);
+        POINT position{};
+        if (GetCursorPos(&position)) {
+            const auto left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+            const auto width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+            const auto right = left + width - 1;
+            const auto nudgeX = position.x < right
+                ? position.x + 1 : position.x - 1;
+            SetCursorPos(nudgeX, position.y);
+            SetCursorPos(position.x, position.y);
+        }
+        SetCursor(desired);
+        return 0;
+    }
     case WM_CLOSE:
         dispatchInput({OverlayWindowInputKind::escape, {}});
         return 0;

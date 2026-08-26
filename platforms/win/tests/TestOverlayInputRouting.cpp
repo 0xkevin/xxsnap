@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <chrono>
 #include <cstring>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -100,6 +101,7 @@ public:
     {
         ++chooseColorCalls;
         chosenColorWindow = window;
+        if (chooseColorHook) chooseColorHook();
         return chosenColor;
     }
 
@@ -137,6 +139,7 @@ public:
     int copyTextCalls = 0;
     std::wstring copiedText;
     std::optional<AnnotationColor> chosenColor = AnnotationColor{1, 2, 3, 255};
+    std::function<void()> chooseColorHook;
 };
 
 std::unique_ptr<xxsnap::win::FrozenDesktop> solidDesktop(
@@ -2118,6 +2121,56 @@ void testLongImageViewportKeepsAnnotationsInFullImageCoordinates()
     }
 }
 
+void testCustomColorDialogKeepsEveryEditorModeActiveDuringModalMessages()
+{
+    constexpr std::array modes{
+        OverlayMode::capture,
+        OverlayMode::teachingPen,
+        OverlayMode::pinnedImageEditor,
+        OverlayMode::longImageEditor,
+    };
+    for (const auto mode : modes) {
+        FakePlatform platform;
+        std::vector<OverlayInputAction> actions;
+        const auto window = reinterpret_cast<HWND>(
+            static_cast<std::uintptr_t>(10 + static_cast<int>(mode)));
+        OverlayInputRouter router(
+            PixelRect{0, 0, 800, 600},
+            {{window, PixelRect{0, 0, 800, 600}, 96, 96}},
+            platform,
+            [&actions](OverlayInputAction action) {
+                actions.push_back(action);
+            },
+            true, nullptr, mode);
+        router.lockSelection({0, 0, 800, 600});
+        if (mode == OverlayMode::teachingPen) {
+            CHECK(router.rightPointerDown(window, {400, 420}));
+        }
+        CHECK(router.keyPressed(ShapeEditorKey::number, false, false));
+        const auto presentation = router.presentations().front();
+        CHECK(presentation.numberOptions.has_value());
+        if (!presentation.numberOptions.has_value()) continue;
+
+        platform.chooseColorHook = [&router] {
+            router.cancelMode();
+            router.escapePressed();
+        };
+        const auto custom = presentation.numberOptions->layout
+            .colorSwatches.back();
+        CHECK(router.pointerDown(window, {
+            static_cast<std::int64_t>(
+                custom.x + custom.width / 2.0F + 0.5F),
+            static_cast<std::int64_t>(
+                custom.y + custom.height / 2.0F + 0.5F),
+        }));
+        CHECK(platform.chooseColorCalls == 1);
+        CHECK(router.status() == OverlayInputStatus::active);
+        CHECK(actions.empty());
+        CHECK((router.presentations().front().numberOptions->state.style()
+            .strokeColor == AnnotationColor{1, 2, 3, 255}));
+    }
+}
+
 } // namespace
 
 int main()
@@ -2170,5 +2223,6 @@ int main()
     testTeachingPenTextDefaultsToNoOutline();
     testTeachingPenEscapeAndCopyUseMacCompletionSemantics();
     testLongImageViewportKeepsAnnotationsInFullImageCoordinates();
+    testCustomColorDialogKeepsEveryEditorModeActiveDuringModalMessages();
     return failureCount == 0 ? 0 : 1;
 }

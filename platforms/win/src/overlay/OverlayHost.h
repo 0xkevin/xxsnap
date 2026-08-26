@@ -326,6 +326,8 @@ private:
     bool handleCornerRadiusPanelPointer(
         const OverlaySurface& surface,
         PixelPoint clientPoint) noexcept;
+    void chooseCustomColor(
+        HWND owner, AnnotationColor current) noexcept;
     void cancelOnce() noexcept;
     void completeOnce(OverlayInputAction action) noexcept;
     void emitTerminal(OverlayInputAction action) noexcept;
@@ -387,6 +389,7 @@ private:
     std::optional<PixelPoint> eyedropperMeasurementEnd_;
     bool eyedropperMeasurementInProgress_ = false;
     bool pinnedImageShiftShortcutCandidate_ = false;
+    bool colorDialogActive_ = false;
     std::optional<PixelPoint> teachingPenToolbarAnchor_;
     HWND numberResetCursorWindow_ = nullptr;
     std::optional<PixelPoint> numberResetCursorPoint_;

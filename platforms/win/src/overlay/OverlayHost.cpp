@@ -1353,6 +1353,21 @@ bool OverlayInputRouter::handleCornerRadiusPanelPointer(
     return contains(panel.panel, point);
 }
 
+void OverlayInputRouter::chooseCustomColor(
+    HWND owner,
+    AnnotationColor current) noexcept
+{
+    if (editor_ == nullptr || colorDialogActive_) return;
+    colorDialogActive_ = true;
+    struct DialogGuard final {
+        bool& active;
+        ~DialogGuard() { active = false; }
+    } guard{colorDialogActive_};
+    if (const auto chosen = platform_.chooseColor(owner, current)) {
+        editor_->selectCustomColor(*chosen);
+    }
+}
+
 OverlayInputRouter::~OverlayInputRouter()
 {
     if (dragging_) {
@@ -1921,10 +1936,8 @@ bool OverlayInputRouter::pointerDown(
             if (const auto hit = shapeOptionHitTest(*options, {x, y});
                 hit.has_value()) {
                 if (hit->control == ShapeOptionControl::customColor) {
-                    if (const auto chosen = platform_.chooseColor(
-                            source, editor_->options().style().strokeColor)) {
-                        editor_->selectCustomColor(*chosen);
-                    }
+                    chooseCustomColor(
+                        source, editor_->options().style().strokeColor);
                     return true;
                 }
                 editor_->applyOptionHit(*hit);
@@ -1937,11 +1950,8 @@ bool OverlayInputRouter::pointerDown(
             const AnnotationPoint point{x, y};
             if (const auto hit = arrowLineOptionHitTest(*options, point)) {
                 if (hit->control == ArrowLineOptionControl::customColor) {
-                    if (const auto chosen = platform_.chooseColor(
-                            source,
-                            editor_->arrowLineOptions().style().strokeColor)) {
-                        editor_->selectCustomColor(*chosen);
-                    }
+                    chooseCustomColor(source,
+                        editor_->arrowLineOptions().style().strokeColor);
                     return true;
                 }
                 if (hit->control == ArrowLineOptionControl::startArrowType
@@ -1959,11 +1969,8 @@ bool OverlayInputRouter::pointerDown(
             const AnnotationPoint point{x, y};
             if (const auto hit = brushOptionHitTest(*options, point)) {
                 if (hit->control == BrushOptionControl::customColor) {
-                    if (const auto chosen = platform_.chooseColor(
-                            source,
-                            editor_->brushOptions().style().strokeColor)) {
-                        editor_->selectCustomColor(*chosen);
-                    }
+                    chooseCustomColor(source,
+                        editor_->brushOptions().style().strokeColor);
                     return true;
                 }
                 editor_->applyBrushOptionHit(*hit);
@@ -1976,11 +1983,8 @@ bool OverlayInputRouter::pointerDown(
             const AnnotationPoint point{x, y};
             if (const auto hit = markerOptionHitTest(*options, point)) {
                 if (hit->control == MarkerOptionControl::customColor) {
-                    if (const auto chosen = platform_.chooseColor(
-                            source,
-                            editor_->markerOptions().style().strokeColor)) {
-                        editor_->selectCustomColor(*chosen);
-                    }
+                    chooseCustomColor(source,
+                        editor_->markerOptions().style().strokeColor);
                     return true;
                 }
                 editor_->applyMarkerOptionHit(*hit);
@@ -2038,11 +2042,8 @@ bool OverlayInputRouter::pointerDown(
             }
             if (const auto hit = textOptionHitTest(*options, point)) {
                 if (hit->control == TextOptionControl::customColor) {
-                    if (const auto chosen = platform_.chooseColor(
-                            source,
-                            editor_->textOptions().style().strokeColor)) {
-                        editor_->selectCustomColor(*chosen);
-                    }
+                    chooseCustomColor(source,
+                        editor_->textOptions().style().strokeColor);
                 } else if (hit->control == TextOptionControl::fontFamily) {
                     editor_->toggleTextPopupMenu(
                         TextPopupMenu::fontFamily);
@@ -2082,10 +2083,8 @@ bool OverlayInputRouter::pointerDown(
             }
             if (const auto hit = numberOptionHitTest(*options, point)) {
                 if (hit->control == NumberOptionControl::customColor) {
-                    if (const auto chosen = platform_.chooseColor(source,
-                            editor_->numberOptions().style().strokeColor)) {
-                        editor_->selectCustomColor(*chosen);
-                    }
+                    chooseCustomColor(source,
+                        editor_->numberOptions().style().strokeColor);
                 } else if (hit->control == NumberOptionControl::markType) {
                     editor_->toggleNumberPopupMenu(
                         NumberPopupMenu::markType);
@@ -2120,10 +2119,8 @@ bool OverlayInputRouter::pointerDown(
             }
             if (const auto hit = magnifierOptionHitTest(*options, point)) {
                 if (hit->control == MagnifierOptionControl::customColor) {
-                    if (const auto chosen = platform_.chooseColor(source,
-                            editor_->magnifierOptions().style().strokeColor)) {
-                        editor_->selectCustomColor(*chosen);
-                    }
+                    chooseCustomColor(source,
+                        editor_->magnifierOptions().style().strokeColor);
                 } else {
                     editor_->applyMagnifierOptionHit(*hit);
                 }
@@ -2790,11 +2787,13 @@ void OverlayInputRouter::captureChanged() noexcept
 
 void OverlayInputRouter::cancelMode() noexcept
 {
+    if (colorDialogActive_) return;
     cancelOnce();
 }
 
 void OverlayInputRouter::escapePressed() noexcept
 {
+    if (colorDialogActive_) return;
     if (editor_ != nullptr) {
         const auto result = editor_->handleKey(
             ShapeEditorKey::escapeKey, false, false);
@@ -2815,6 +2814,7 @@ void OverlayInputRouter::escapePressed() noexcept
 
 void OverlayInputRouter::cancelPressed() noexcept
 {
+    if (colorDialogActive_) return;
     cancelOnce();
 }
 
@@ -3347,7 +3347,8 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
                 if (inputCursorWindow == found->get()
                     && inputCursorStyle.has_value()) {
                     (*found)->setCursorStyle(*inputCursorStyle);
-                    if (input.kind == OverlayWindowInputKind::pointerDown
+                    if ((input.kind == OverlayWindowInputKind::pointerDown
+                            || input.kind == OverlayWindowInputKind::pointerUp)
                         && (*inputCursorStyle == OverlayCursorStyle::numberMark
                             || *inputCursorStyle
                                 == OverlayCursorStyle::numberCheck
