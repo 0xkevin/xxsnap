@@ -3253,6 +3253,8 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
             break;
         }
         router->synchronizeToolbarHotKeys();
+        std::optional<OverlayCursorStyle> inputCursorStyle;
+        OverlayWindow* inputCursorWindow = nullptr;
         if (router
             && (input.kind == OverlayWindowInputKind::pointerDown
                 || input.kind == OverlayWindowInputKind::pointerMove
@@ -3264,6 +3266,8 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
                     return window != nullptr && window->handle() == source;
                 });
             if (found != windows.end()) {
+                inputCursorStyle = style;
+                inputCursorWindow = found->get();
                 if (style == OverlayCursorStyle::marker
                     || style == OverlayCursorStyle::markerLight
                     || style == OverlayCursorStyle::mosaic) {
@@ -3304,6 +3308,10 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
                 });
             if (found != windows.end()) {
                 (*found)->presentPendingPaint();
+                if (inputCursorWindow == found->get()
+                    && inputCursorStyle.has_value()) {
+                    (*found)->setCursorStyle(*inputCursorStyle);
+                }
             }
         }
     }

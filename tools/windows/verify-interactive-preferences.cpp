@@ -177,6 +177,21 @@ bool labelUsesParentBackground(HWND label, COLORREF expected)
     return color == expected;
 }
 
+bool checkboxUsesWhiteBackground(HWND checkbox)
+{
+    if (checkbox == nullptr) return false;
+    RedrawWindow(checkbox, nullptr, nullptr,
+        RDW_INVALIDATE | RDW_UPDATENOW);
+    const auto dc = GetDC(checkbox);
+    if (dc == nullptr) return false;
+    const auto color = GetPixel(dc, 1, 1);
+    ReleaseDC(checkbox, dc);
+    const auto extendedStyle = static_cast<DWORD>(
+        GetWindowLongPtrW(checkbox, GWL_EXSTYLE));
+    return color == RGB(255, 255, 255)
+        && (extendedStyle & WS_EX_TRANSPARENT) != 0U;
+}
+
 bool iconUsesNativeFrame(HWND control)
 {
     if (control == nullptr) return false;
@@ -276,6 +291,7 @@ int wmain(int argc, wchar_t** argv)
             require(std::abs((client.bottom - client.top) - expectedHeight) <= 2,
                 22);
             require(generalCheckbox != nullptr, 23);
+            require(checkboxUsesWhiteBackground(generalCheckbox), 27);
             require(usesMicrosoftYaHei(GetDlgItem(preferences, 1101)), 24);
             require(hasText(preferences, L"开机自启动"), 25);
             require(labelUsesParentBackground(

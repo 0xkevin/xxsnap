@@ -258,6 +258,7 @@ private:
     HCURSOR cursor() const noexcept;
     void discardMarkerCursor() noexcept;
     void discardPreviousNumberCursor() noexcept;
+    void discardResetNumberCursor() noexcept;
     void updateTextInputActivation(bool enabled) noexcept;
     void updateImeCompositionPosition() noexcept;
     void setDotCursor(
@@ -277,6 +278,7 @@ private:
     OverlayCursorStyle cursorStyle_ = OverlayCursorStyle::crosshair;
     HCURSOR markerCursor_ = nullptr;
     HCURSOR previousNumberCursor_ = nullptr;
+    HCURSOR resetNumberCursor_ = nullptr;
     bool alwaysOnTop_ = true;
     bool keyboardInputAlwaysEnabled_ = false;
     bool framedEditor_ = false;
@@ -290,6 +292,7 @@ private:
     AnnotationColor previousNumberCursorColor_{};
     NumberMarkType previousNumberCursorType_ = NumberMarkType::number;
     int previousNumberCursorValue_ = 1;
+    AnnotationColor resetNumberCursorColor_{};
     std::optional<OverlayRendererError> lastRendererError_;
 };
 

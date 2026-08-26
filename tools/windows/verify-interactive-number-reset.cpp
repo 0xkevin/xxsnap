@@ -166,16 +166,20 @@ int wmain(int argc, wchar_t** argv)
 
             const POINT first{selectionStart.x + width / 5,
                 selectionStart.y + height / 5};
-            const POINT second{first.x + MulDiv(90, dpi, 96), first.y};
             click(first);
-            click(second);
+            const auto expectedResetCursor = visibleCursor();
+            POINT last = first;
+            for (int index = 1; index < 6; ++index) {
+                last.x = first.x + index * MulDiv(70, dpi, 96);
+                click(last);
+            }
             sendKey('N');
             sendKey('N', true);
             Sleep(200);
 
             const POINT reset{
-                second.x - MulDiv(21, dpi, 96),
-                second.y + MulDiv(13, dpi, 96),
+                last.x - MulDiv(21, dpi, 96),
+                last.y + MulDiv(13, dpi, 96),
             };
             movePointer(reset);
             const auto arrow = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));
@@ -190,14 +194,16 @@ int wmain(int argc, wchar_t** argv)
             Sleep(100);
             const auto afterReset = visibleCursor();
 
-            const POINT empty{second.x + MulDiv(120, dpi, 96),
-                second.y + MulDiv(70, dpi, 96)};
+            const POINT empty{last.x + MulDiv(70, dpi, 96),
+                last.y + MulDiv(70, dpi, 96)};
             movePointer(empty);
             const auto afterMove = visibleCursor();
             click(empty);
             const auto afterNextNumber = visibleCursor();
 
-            if (afterReset != nullptr && afterReset != arrow
+            if (expectedResetCursor != nullptr
+                && expectedResetCursor != arrow
+                && afterReset == expectedResetCursor
                 && resetCursorLatency <= 32U
                 && afterMove == afterReset
                 && afterNextNumber != nullptr

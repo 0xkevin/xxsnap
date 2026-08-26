@@ -473,7 +473,7 @@ struct PreferencesWindow::Impl final {
     HWND addCheckbox(int identifier, int row, bool checked)
     {
         const auto control = addControl(L"BUTTON", L"",
-            BS_AUTOCHECKBOX | WS_TABSTOP, 0,
+            BS_AUTOCHECKBOX | WS_TABSTOP, WS_EX_TRANSPARENT,
             594, 105 + row * 62 + 20, 24, 24,
             identifier, regularFont);
         if (control != nullptr) {
@@ -972,6 +972,18 @@ struct PreferencesWindow::Impl final {
                 return reinterpret_cast<LRESULT>(backgroundBrush);
             }
             return reinterpret_cast<LRESULT>(GetStockObject(HOLLOW_BRUSH));
+        }
+        case WM_CTLCOLORBTN: {
+            const auto dc = reinterpret_cast<HDC>(wParam);
+            const auto control = reinterpret_cast<HWND>(lParam);
+            const auto identifier = GetDlgCtrlID(control);
+            if ((identifier >= launchAtLoginId
+                    && identifier <= showSystemShortcutFeedbackId)
+                || identifier == checkAtLaunchId) {
+                SetBkMode(dc, TRANSPARENT);
+                return reinterpret_cast<LRESULT>(GetStockObject(WHITE_BRUSH));
+            }
+            return DefWindowProcW(window, message, wParam, lParam);
         }
         case WM_PAINT:
             paint();
