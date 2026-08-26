@@ -429,6 +429,15 @@ void OverlayWindow::setCursorStyle(OverlayCursorStyle style) noexcept
     SetCursor(cursor());
 }
 
+void OverlayWindow::requestCursorRefresh() noexcept
+{
+    if (window_ != nullptr) {
+        PostMessageW(window_, WM_SETCURSOR,
+            reinterpret_cast<WPARAM>(window_),
+            MAKELPARAM(HTCLIENT, WM_MOUSEMOVE));
+    }
+}
+
 void OverlayWindow::setMarkerCursor(
     AnnotationColor color,
     float strokeWidthDip) noexcept

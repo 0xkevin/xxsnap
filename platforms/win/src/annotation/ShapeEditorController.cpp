@@ -2057,6 +2057,10 @@ void ShapeEditorController::pointerMove(
         const auto previous = interaction_.preview();
         interaction_.update(point, shift);
         if (interaction_.preview() != previous) {
+            const auto& preview = interaction_.preview();
+            if (preview.has_value() && isNumberAnnotation(*preview)) {
+                numberOptions_.load(*preview);
+            }
             ++interactionRevision_;
         }
     }
@@ -2136,6 +2140,7 @@ void ShapeEditorController::cancelInteraction() noexcept
     eraserPointInteractionActive_ = false;
     eraserRectangleStart_.reset();
     eraserRectangleCurrent_.reset();
+    loadSelectedOptions();
 }
 
 ShapeCursorStyle ShapeEditorController::cursorStyleAt(

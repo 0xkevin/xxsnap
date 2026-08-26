@@ -3347,6 +3347,14 @@ struct OverlayHost::Impl final : std::enable_shared_from_this<OverlayHost::Impl>
                 if (inputCursorWindow == found->get()
                     && inputCursorStyle.has_value()) {
                     (*found)->setCursorStyle(*inputCursorStyle);
+                    if (input.kind == OverlayWindowInputKind::pointerDown
+                        && (*inputCursorStyle == OverlayCursorStyle::numberMark
+                            || *inputCursorStyle
+                                == OverlayCursorStyle::numberCheck
+                            || *inputCursorStyle
+                                == OverlayCursorStyle::numberCross)) {
+                        (*found)->requestCursorRefresh();
+                    }
                 }
             }
         }

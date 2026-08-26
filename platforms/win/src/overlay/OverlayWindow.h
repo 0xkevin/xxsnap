@@ -224,6 +224,7 @@ public:
     void setRenderState(OverlayRenderState state) noexcept;
     void presentPendingPaint() noexcept;
     void setCursorStyle(OverlayCursorStyle style) noexcept;
+    void requestCursorRefresh() noexcept;
     void setMarkerCursor(AnnotationColor color, float strokeWidthDip) noexcept;
     void setMosaicCursor(float strokeWidthDip) noexcept;
     void setNumberCursor(

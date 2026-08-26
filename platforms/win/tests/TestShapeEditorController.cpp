@@ -788,6 +788,13 @@ void testNumberSequenceGroupsManualMarksResizeAndHistory()
     };
     CHECK(manualEditor.pointerDown(resizeCenter));
     manualEditor.pointerMove({resizeCenter.x + 60.0F, resizeCenter.y + 60.0F});
+    CHECK(manualEditor.preview().has_value());
+    CHECK(manualEditor.numberOptions().style().textSize
+        == manualEditor.preview()->style.textSize);
+    CHECK(manualEditor.numberOptions().style().textSize
+        >= numberSizeValues.front());
+    CHECK(manualEditor.numberOptions().style().textSize
+        <= numberSizeValues.back());
     CHECK(manualEditor.pointerUp(
         {resizeCenter.x + 60.0F, resizeCenter.y + 60.0F}));
     const auto after = standardized(manualEditor.document().find(nineteenId)->rect);
@@ -796,6 +803,45 @@ void testNumberSequenceGroupsManualMarksResizeAndHistory()
         - (before.x + before.width / 2.0F)) < 0.01F);
     CHECK(std::abs((after.y + after.height / 2.0F)
         - (before.y + before.height / 2.0F)) < 0.01F);
+
+    const auto shrink = manualEditor.numberHandle(
+        nineteenId, NumberHandleKind::resize);
+    CHECK(shrink.has_value());
+    const AnnotationPoint afterCenter{
+        after.x + after.width / 2.0F,
+        after.y + after.height / 2.0F,
+    };
+    CHECK(manualEditor.pointerDown({
+        shrink->x + shrink->width / 2.0F,
+        shrink->y + shrink->height / 2.0F,
+    }));
+    manualEditor.pointerMove(afterCenter);
+    CHECK(manualEditor.numberOptions().style().textSize
+        == numberSizeValues.front());
+    CHECK(manualEditor.pointerUp(afterCenter));
+
+    const auto grow = manualEditor.numberHandle(
+        nineteenId, NumberHandleKind::resize);
+    CHECK(grow.has_value());
+    CHECK(manualEditor.pointerDown({
+        grow->x + grow->width / 2.0F,
+        grow->y + grow->height / 2.0F,
+    }));
+    manualEditor.pointerMove({600.0F, 400.0F});
+    CHECK(manualEditor.numberOptions().style().textSize
+        <= numberSizeValues.back());
+    CHECK(manualEditor.pointerUp({600.0F, 400.0F}));
+    const auto growAgain = manualEditor.numberHandle(
+        nineteenId, NumberHandleKind::resize);
+    CHECK(growAgain.has_value());
+    CHECK(manualEditor.pointerDown({
+        growAgain->x + growAgain->width / 2.0F,
+        growAgain->y + growAgain->height / 2.0F,
+    }));
+    manualEditor.pointerMove({600.0F, 400.0F});
+    CHECK(manualEditor.numberOptions().style().textSize
+        == numberSizeValues.back());
+    CHECK(manualEditor.pointerUp({600.0F, 400.0F}));
 }
 
 void testMagnifierMatchesMacCreationOptionsAndEditing()
