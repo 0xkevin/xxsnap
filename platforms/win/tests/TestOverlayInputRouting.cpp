@@ -1634,20 +1634,11 @@ void testNumberResetControlDoesNotFallThroughToSelectionMoveCursor()
     const auto cursor = router.numberCursorState();
     CHECK(cursor.has_value());
     CHECK(cursor->value == 2);
-    owner = router.presentations()[1];
-    const auto decrement = std::find_if(
-        owner.annotationPlan.numberHandles.begin(),
-        owner.annotationPlan.numberHandles.end(),
-        [](const auto& handle) {
-            return handle.first == NumberHandleKind::decrement;
-        });
-    CHECK(decrement != owner.annotationPlan.numberHandles.end());
-    if (decrement != owner.annotationPlan.numberHandles.end()) {
-        const auto decrementCenter = dipCenterAt144Dpi(decrement->second);
-        router.pointerMove(rightWindow, decrementCenter);
-        CHECK(router.cursorStyle(rightWindow, decrementCenter)
-            == OverlayCursorStyle::arrow);
-    }
+    CHECK(!router.annotationDocument().selectedId().has_value());
+    const PixelPoint nextNumberPoint{resetCenter.x + 80, resetCenter.y + 40};
+    router.pointerMove(rightWindow, nextNumberPoint);
+    CHECK(router.cursorStyle(rightWindow, nextNumberPoint)
+        == OverlayCursorStyle::numberMark);
 }
 
 void testSelectionResizeKeepsNumberAtItsScreenPosition()

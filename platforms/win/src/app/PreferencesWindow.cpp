@@ -408,7 +408,7 @@ struct PreferencesWindow::Impl final {
         HFONT font, bool secondary = false, DWORD extraStyle = 0)
     {
         const auto label = addControl(L"STATIC", text,
-            SS_LEFT | SS_NOPREFIX | extraStyle, 0,
+            SS_LEFT | SS_NOPREFIX | extraStyle, WS_EX_TRANSPARENT,
             x, y, width, height, 0, font);
         if (secondary && label != nullptr) secondaryControls.push_back(label);
         return label;
@@ -955,7 +955,7 @@ struct PreferencesWindow::Impl final {
             } else {
                 SetTextColor(dc, textColor);
             }
-            return reinterpret_cast<LRESULT>(backgroundBrush);
+            return reinterpret_cast<LRESULT>(GetStockObject(HOLLOW_BRUSH));
         }
         case WM_PAINT:
             paint();

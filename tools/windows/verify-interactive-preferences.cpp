@@ -119,6 +119,41 @@ bool usesMicrosoftYaHei(HWND control)
         && std::wcscmp(description.lfFaceName, L"Microsoft YaHei") == 0;
 }
 
+HWND childWithText(HWND parent, const wchar_t* expected)
+{
+    struct Search {
+        const wchar_t* expected;
+        HWND result;
+    } search{expected, nullptr};
+    EnumChildWindows(parent, [](HWND window, LPARAM parameter) -> BOOL {
+        auto* current = reinterpret_cast<Search*>(parameter);
+        wchar_t text[256]{};
+        GetWindowTextW(window, text, static_cast<int>(std::size(text)));
+        if (std::wcscmp(text, current->expected) == 0) {
+            current->result = window;
+            return FALSE;
+        }
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&search));
+    return search.result;
+}
+
+bool labelUsesParentBackground(HWND label, COLORREF expected)
+{
+    if (label == nullptr) return false;
+    RedrawWindow(label, nullptr, nullptr,
+        RDW_INVALIDATE | RDW_UPDATENOW);
+    RECT client{};
+    GetClientRect(label, &client);
+    const auto dc = GetDC(label);
+    if (dc == nullptr) return false;
+    const auto color = GetPixel(dc,
+        (std::max)(0L, client.right - 5L),
+        (std::max)(0L, (client.bottom - client.top) / 2L));
+    ReleaseDC(label, dc);
+    return color == expected;
+}
+
 bool hasDarkPixels(HWND window, int left, int top, int width, int height)
 {
     RedrawWindow(window, nullptr, nullptr,
@@ -200,6 +235,9 @@ int wmain(int argc, wchar_t** argv)
             require(generalCheckbox != nullptr, 23);
             require(usesMicrosoftYaHei(GetDlgItem(preferences, 1101)), 24);
             require(hasText(preferences, L"开机自启动"), 25);
+            require(labelUsesParentBackground(
+                childWithText(preferences, L"开机自启动"),
+                RGB(255, 255, 255)), 26);
 
             SendMessageW(preferences, WM_COMMAND, 1001, 0);
             require(GetDlgItem(preferences, 1200) != nullptr, 30);

@@ -661,8 +661,8 @@ void testNumberToolMatchesMacSequenceEditingAndControls()
         reset->y + reset->height / 2.0F}));
     CHECK(editor.pointerDown({reset->x + reset->width / 2.0F,
         reset->y + reset->height / 2.0F}));
-    CHECK(editor.numberResetPerformedOnLastPointerDown());
-    CHECK(editor.document().find(editor.document().selectedId().value())
+    CHECK(!editor.document().selectedId().has_value());
+    CHECK(editor.document().find(editor.document().annotations().back().id)
         ->numberSequenceIndex == 1);
     CHECK(editor.cursorStyleAt({reset->x + reset->width / 2.0F,
         reset->y + reset->height / 2.0F}) == ShapeCursorStyle::numberMark);
