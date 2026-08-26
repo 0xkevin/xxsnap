@@ -663,6 +663,7 @@ void testNumberToolMatchesMacSequenceEditingAndControls()
     CHECK(!editor.isNumberToolActive());
     CHECK(editor.pointerDown({reset->x + reset->width / 2.0F,
         reset->y + reset->height / 2.0F}));
+    CHECK(editor.numberResetPerformedOnLastPointerDown());
     CHECK(editor.isNumberToolActive());
     CHECK(!editor.document().selectedId().has_value());
     CHECK(editor.document().find(editor.document().annotations().back().id)

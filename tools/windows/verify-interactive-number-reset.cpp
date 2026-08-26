@@ -169,10 +169,15 @@ int wmain(int argc, wchar_t** argv)
             click(first);
             const auto expectedResetCursor = visibleCursor();
             POINT last = first;
-            for (int index = 1; index < 6; ++index) {
+            for (int index = 1; index < 5; ++index) {
                 last.x = first.x + index * MulDiv(70, dpi, 96);
                 click(last);
             }
+            last = {
+                selectionStart.x + MulDiv(10, dpi, 96),
+                first.y,
+            };
+            click(last);
             sendKey('N');
             sendKey('N', true);
             Sleep(200);
@@ -194,7 +199,7 @@ int wmain(int argc, wchar_t** argv)
             Sleep(100);
             const auto afterReset = visibleCursor();
 
-            const POINT empty{last.x + MulDiv(70, dpi, 96),
+            const POINT empty{last.x + MulDiv(100, dpi, 96),
                 last.y + MulDiv(70, dpi, 96)};
             movePointer(empty);
             const auto afterMove = visibleCursor();

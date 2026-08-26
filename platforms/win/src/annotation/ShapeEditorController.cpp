@@ -463,6 +463,11 @@ bool ShapeEditorController::hasActivePointerInteraction() const noexcept
         || eraserRectangleStart_.has_value();
 }
 
+bool ShapeEditorController::numberResetPerformedOnLastPointerDown() const noexcept
+{
+    return numberResetPerformedOnLastPointerDown_;
+}
+
 bool ShapeEditorController::isEditingNumber() const noexcept
 {
     return editingNumberId_.has_value();
@@ -1725,6 +1730,7 @@ bool ShapeEditorController::pointerDown(
     bool shift,
     int clickCount) noexcept
 {
+    numberResetPerformedOnLastPointerDown_ = false;
     ++interactionRevision_;
     static_cast<void>(shift);
     if (interaction_.mode() != ShapeInteractionMode::idle
@@ -1819,7 +1825,9 @@ bool ShapeEditorController::pointerDown(
                         adjustSelectedNumber(-1);
                         return true;
                     }
-                    return resetSelectedNumber();
+                    numberResetPerformedOnLastPointerDown_
+                        = resetSelectedNumber();
+                    return true;
                 }
             }
             if (isTextAnnotation(*annotation)) {

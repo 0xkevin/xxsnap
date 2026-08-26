@@ -1628,6 +1628,11 @@ void testNumberResetControlDoesNotFallThroughToSelectionMoveCursor()
         == 1);
     CHECK(router.cursorStyle(rightWindow, resetCenter)
         == OverlayCursorStyle::numberMark);
+    const PixelPoint movedOutsideSelection{
+        resetCenter.x - 40, resetCenter.y};
+    router.pointerMove(rightWindow, movedOutsideSelection);
+    CHECK(router.cursorStyle(rightWindow, movedOutsideSelection)
+        == OverlayCursorStyle::numberMark);
     router.pointerMove(rightWindow, resetCenter);
     CHECK(router.cursorStyle(rightWindow, resetCenter)
         == OverlayCursorStyle::numberMark);

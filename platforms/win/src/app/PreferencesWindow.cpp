@@ -248,6 +248,7 @@ struct PreferencesWindow::Impl final {
     std::wstring executablePath;
     std::vector<HWND> navigationControls;
     std::vector<HWND> pageControls;
+    std::vector<std::pair<HWND, bool>> checkboxStates;
     std::vector<HWND> secondaryControls;
     HWND filenameEdit = nullptr;
     HWND filenamePreview = nullptr;
@@ -445,6 +446,7 @@ struct PreferencesWindow::Impl final {
     {
         for (auto control : pageControls) DestroyWindow(control);
         pageControls.clear();
+        checkboxStates.clear();
         secondaryControls.clear();
         filenameEdit = nullptr;
         filenamePreview = nullptr;
@@ -473,12 +475,12 @@ struct PreferencesWindow::Impl final {
     HWND addCheckbox(int identifier, int row, bool checked)
     {
         const auto control = addControl(L"BUTTON", L"",
-            BS_AUTOCHECKBOX | WS_TABSTOP, WS_EX_TRANSPARENT,
+            BS_OWNERDRAW | WS_TABSTOP, 0,
             594, 105 + row * 62 + 20, 24, 24,
             identifier, regularFont);
         if (control != nullptr) {
-            SendMessageW(control, BM_SETCHECK,
-                checked ? BST_CHECKED : BST_UNCHECKED, 0);
+            checkboxStates.emplace_back(control, checked);
+            InvalidateRect(control, nullptr, FALSE);
         }
         return control;
     }
@@ -638,8 +640,23 @@ struct PreferencesWindow::Impl final {
     bool checked(int identifier) const noexcept
     {
         const auto control = GetDlgItem(window, identifier);
-        return control != nullptr
-            && SendMessageW(control, BM_GETCHECK, 0, 0) == BST_CHECKED;
+        const auto found = std::find_if(checkboxStates.begin(),
+            checkboxStates.end(), [control](const auto& entry) {
+                return entry.first == control;
+            });
+        return found != checkboxStates.end() && found->second;
+    }
+
+    void toggleCheckbox(int identifier) noexcept
+    {
+        const auto control = GetDlgItem(window, identifier);
+        const auto found = std::find_if(checkboxStates.begin(),
+            checkboxStates.end(), [control](const auto& entry) {
+                return entry.first == control;
+            });
+        if (found == checkboxStates.end()) return;
+        found->second = !found->second;
+        InvalidateRect(control, nullptr, FALSE);
     }
 
     void reportSaveFailure()
@@ -740,6 +757,56 @@ struct PreferencesWindow::Impl final {
         }
     }
 
+    bool drawCheckbox(const DRAWITEMSTRUCT& item) noexcept
+    {
+        const auto found = std::find_if(checkboxStates.begin(),
+            checkboxStates.end(), [&item](const auto& entry) {
+                return entry.first == item.hwndItem;
+            });
+        if (found == checkboxStates.end()) return false;
+
+        FillRect(item.hDC, &item.rcItem,
+            reinterpret_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
+        const auto side = scaled(16, dpi);
+        const auto left = item.rcItem.left
+            + (item.rcItem.right - item.rcItem.left - side) / 2;
+        const auto top = item.rcItem.top
+            + (item.rcItem.bottom - item.rcItem.top - side) / 2;
+        const RECT box{left, top, left + side, top + side};
+        const auto fill = CreateSolidBrush(found->second
+            ? accentColor : RGB(255, 255, 255));
+        const auto border = CreatePen(PS_SOLID, scaled(1, dpi),
+            found->second ? accentColor : RGB(150, 150, 150));
+        const auto oldBrush = SelectObject(item.hDC, fill);
+        const auto oldPen = SelectObject(item.hDC, border);
+        RoundRect(item.hDC, box.left, box.top, box.right, box.bottom,
+            scaled(4, dpi), scaled(4, dpi));
+        SelectObject(item.hDC, oldBrush);
+        SelectObject(item.hDC, oldPen);
+        DeleteObject(fill);
+        DeleteObject(border);
+
+        if (found->second) {
+            const auto checkPen = CreatePen(
+                PS_SOLID, scaled(2, dpi), RGB(255, 255, 255));
+            const auto previous = SelectObject(item.hDC, checkPen);
+            MoveToEx(item.hDC,
+                left + scaled(4, dpi), top + scaled(8, dpi), nullptr);
+            LineTo(item.hDC,
+                left + scaled(7, dpi), top + scaled(11, dpi));
+            LineTo(item.hDC,
+                left + scaled(12, dpi), top + scaled(5, dpi));
+            SelectObject(item.hDC, previous);
+            DeleteObject(checkPen);
+        }
+        if ((item.itemState & ODS_FOCUS) != 0U) {
+            auto focus = item.rcItem;
+            InflateRect(&focus, -1, -1);
+            DrawFocusRect(item.hDC, &focus);
+        }
+        return true;
+    }
+
     void paint() noexcept
     {
         PAINTSTRUCT paint{};
@@ -807,6 +874,12 @@ struct PreferencesWindow::Impl final {
             setSelected(preferencesSections()[
                 static_cast<std::size_t>(identifier - navigationFirstId)]);
             return;
+        }
+        if (notification == BN_CLICKED
+            && ((identifier >= launchAtLoginId
+                    && identifier <= showSystemShortcutFeedbackId)
+                || identifier == checkAtLaunchId)) {
+            toggleCheckbox(identifier);
         }
         if (identifier == launchAtLoginId && notification == BN_CLICKED) {
             if (!launchManager.setEnabled(checked(identifier), executablePath)) {
@@ -947,6 +1020,7 @@ struct PreferencesWindow::Impl final {
             return 0;
         case WM_DRAWITEM:
             if (const auto* item = reinterpret_cast<DRAWITEMSTRUCT*>(lParam)) {
+                if (drawCheckbox(*item)) return TRUE;
                 drawNavigationButton(*item);
                 return TRUE;
             }
@@ -972,18 +1046,6 @@ struct PreferencesWindow::Impl final {
                 return reinterpret_cast<LRESULT>(backgroundBrush);
             }
             return reinterpret_cast<LRESULT>(GetStockObject(HOLLOW_BRUSH));
-        }
-        case WM_CTLCOLORBTN: {
-            const auto dc = reinterpret_cast<HDC>(wParam);
-            const auto control = reinterpret_cast<HWND>(lParam);
-            const auto identifier = GetDlgCtrlID(control);
-            if ((identifier >= launchAtLoginId
-                    && identifier <= showSystemShortcutFeedbackId)
-                || identifier == checkAtLaunchId) {
-                SetBkMode(dc, TRANSPARENT);
-                return reinterpret_cast<LRESULT>(GetStockObject(WHITE_BRUSH));
-            }
-            return DefWindowProcW(window, message, wParam, lParam);
         }
         case WM_PAINT:
             paint();

@@ -388,6 +388,8 @@ private:
     bool eyedropperMeasurementInProgress_ = false;
     bool pinnedImageShiftShortcutCandidate_ = false;
     std::optional<PixelPoint> teachingPenToolbarAnchor_;
+    HWND numberResetCursorWindow_ = nullptr;
+    std::optional<PixelPoint> numberResetCursorPoint_;
     EyedropperCopyMode eyedropperCopyMode_ = EyedropperCopyMode::hex;
     std::optional<std::chrono::steady_clock::time_point>
         eyedropperCopySuccessUntil_;

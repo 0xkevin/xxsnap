@@ -188,8 +188,11 @@ bool checkboxUsesWhiteBackground(HWND checkbox)
     ReleaseDC(checkbox, dc);
     const auto extendedStyle = static_cast<DWORD>(
         GetWindowLongPtrW(checkbox, GWL_EXSTYLE));
+    const auto style = static_cast<DWORD>(
+        GetWindowLongPtrW(checkbox, GWL_STYLE));
     return color == RGB(255, 255, 255)
-        && (extendedStyle & WS_EX_TRANSPARENT) != 0U;
+        && (style & BS_TYPEMASK) == BS_OWNERDRAW
+        && (extendedStyle & WS_EX_TRANSPARENT) == 0U;
 }
 
 bool iconUsesNativeFrame(HWND control)

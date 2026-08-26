@@ -110,6 +110,7 @@ public:
     int nextNumberSequenceValue() const noexcept;
     bool isEditingInlineValue() const noexcept;
     bool hasActivePointerInteraction() const noexcept;
+    bool numberResetPerformedOnLastPointerDown() const noexcept;
     bool isEditingNumber() const noexcept;
     std::optional<TextPopupMenu> textPopupMenu() const noexcept;
     int popupScrollOffset() const noexcept;
@@ -263,6 +264,7 @@ private:
     std::size_t numberCaretPosition_ = 0U;
     std::uint64_t currentNumberGroupId_ = 0;
     std::uint64_t nextNumberGroupId_ = 1;
+    bool numberResetPerformedOnLastPointerDown_ = false;
 };
 
 } // namespace xxsnap::win

@@ -1840,6 +1840,8 @@ bool OverlayInputRouter::pointerDown(
     PixelPoint clientPoint,
     int clickCount) noexcept
 {
+    numberResetCursorWindow_ = nullptr;
+    numberResetCursorPoint_.reset();
     cancelPinnedImageShiftShortcut();
     if (status_ != OverlayInputStatus::active || dragging_) {
         return false;
@@ -2191,6 +2193,10 @@ bool OverlayInputRouter::pointerDown(
             local.has_value()
                 && editor_->pointerDown(
                     *local, platform_.shiftPressed(), clickCount)) {
+            if (editor_->numberResetPerformedOnLastPointerDown()) {
+                numberResetCursorWindow_ = source;
+                numberResetCursorPoint_ = clientPoint;
+            }
             if (editor_->isEditingInlineValue()) {
                 return true;
             }
@@ -2427,6 +2433,19 @@ OverlayCursorStyle OverlayInputRouter::cursorStyle(
         }
     }
 
+    if (numberResetCursorWindow_ == source
+        && numberResetCursorPoint_.has_value()
+        && editor_ != nullptr && editor_->isNumberToolActive()) {
+        switch (editor_->numberOptions().type()) {
+        case NumberMarkType::number:
+            return OverlayCursorStyle::numberMark;
+        case NumberMarkType::check:
+            return OverlayCursorStyle::numberCheck;
+        case NumberMarkType::cross:
+            return OverlayCursorStyle::numberCross;
+        }
+    }
+
     const auto virtualPoint = toVirtual(*surface, clientPoint);
     if (model_.phase() == SelectionPhase::resizing) {
         return cursorStyleForSelectionHandle(model_.activeHandle());
@@ -2582,6 +2601,19 @@ OverlayCursorStyle OverlayInputRouter::backgroundAwareCursorStyle(
 
 void OverlayInputRouter::pointerMove(HWND source, PixelPoint clientPoint) noexcept
 {
+    if (numberResetCursorPoint_.has_value()) {
+        constexpr std::int64_t stationaryTolerance = 2;
+        const auto deltaX = clientPoint.x - numberResetCursorPoint_->x;
+        const auto deltaY = clientPoint.y - numberResetCursorPoint_->y;
+        if (source != numberResetCursorWindow_
+            || deltaX < -stationaryTolerance
+            || deltaX > stationaryTolerance
+            || deltaY < -stationaryTolerance
+            || deltaY > stationaryTolerance) {
+            numberResetCursorWindow_ = nullptr;
+            numberResetCursorPoint_.reset();
+        }
+    }
     if (dragging_) cancelPinnedImageShiftShortcut();
     if (!dragging_ && status_ == OverlayInputStatus::active) {
         if (const auto* surface = surfaceFor(source)) {
@@ -2627,6 +2659,10 @@ void OverlayInputRouter::pointerMove(HWND source, PixelPoint clientPoint) noexce
 
 void OverlayInputRouter::pointerLeave(HWND source) noexcept
 {
+    if (numberResetCursorWindow_ == source) {
+        numberResetCursorWindow_ = nullptr;
+        numberResetCursorPoint_.reset();
+    }
     if (hoveredToolbarWindow_ != source) return;
     hoveredToolbarWindow_ = nullptr;
     hoveredToolbarAction_.reset();
