@@ -1490,6 +1490,7 @@ bool ShapeEditorController::resetSelectedNumber()
         || annotation->numberSequenceIndex.value_or(1) <= 1) {
         return false;
     }
+    numberOptions_.load(*annotation);
     const auto oldGroup = annotation->numberSequenceGroupId;
     const auto automatic = !numberGroupIsManual(oldGroup);
     const auto newGroup = nextNumberGroupId_++;
@@ -1499,8 +1500,14 @@ bool ShapeEditorController::resetSelectedNumber()
     if (automatic) renumberAutomaticGroup(oldGroup);
     document_.endNumberEdit(true);
     currentNumberGroupId_ = newGroup;
+    shapeToolActive_ = false;
+    arrowLineToolActive_ = false;
+    brushToolActive_ = false;
+    markerToolActive_ = false;
+    toolbarState_.selectTool(ToolbarAction::number);
     numberTypeFollowerId_.reset();
     document_.clearSelection();
+    dismissPopovers();
     syncHistory();
     ++interactionRevision_;
     return true;

@@ -955,6 +955,11 @@ struct PreferencesWindow::Impl final {
             } else {
                 SetTextColor(dc, textColor);
             }
+            const auto style = static_cast<DWORD>(
+                GetWindowLongPtrW(control, GWL_STYLE));
+            if ((style & SS_TYPEMASK) == SS_ICON) {
+                return reinterpret_cast<LRESULT>(backgroundBrush);
+            }
             return reinterpret_cast<LRESULT>(GetStockObject(HOLLOW_BRUSH));
         }
         case WM_PAINT:

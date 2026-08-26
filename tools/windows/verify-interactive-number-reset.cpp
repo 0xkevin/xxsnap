@@ -161,7 +161,9 @@ int wmain(int argc, wchar_t** argv)
             const POINT second{first.x + MulDiv(90, dpi, 96), first.y};
             click(first);
             click(second);
-            const auto beforeReset = visibleCursor();
+            sendKey('N');
+            sendKey('N', true);
+            Sleep(200);
 
             const POINT reset{
                 second.x - MulDiv(21, dpi, 96),
@@ -178,8 +180,7 @@ int wmain(int argc, wchar_t** argv)
             click(empty);
             const auto afterNextNumber = visibleCursor();
 
-            if (beforeReset != nullptr && afterReset != nullptr
-                && afterReset != arrow && afterReset != beforeReset
+            if (afterReset != nullptr && afterReset != arrow
                 && afterMove == afterReset
                 && afterNextNumber != nullptr
                 && afterNextNumber != arrow

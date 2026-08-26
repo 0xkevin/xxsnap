@@ -138,6 +138,29 @@ HWND childWithText(HWND parent, const wchar_t* expected)
     return search.result;
 }
 
+HWND staticChildWithType(HWND parent, DWORD type)
+{
+    struct Search {
+        DWORD type;
+        HWND result;
+    } search{type, nullptr};
+    EnumChildWindows(parent, [](HWND window, LPARAM parameter) -> BOOL {
+        auto* current = reinterpret_cast<Search*>(parameter);
+        wchar_t className[32]{};
+        GetClassNameW(window, className,
+            static_cast<int>(std::size(className)));
+        const auto style = static_cast<DWORD>(
+            GetWindowLongPtrW(window, GWL_STYLE));
+        if (std::wcscmp(className, L"Static") == 0
+            && (style & SS_TYPEMASK) == current->type) {
+            current->result = window;
+            return FALSE;
+        }
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&search));
+    return search.result;
+}
+
 bool labelUsesParentBackground(HWND label, COLORREF expected)
 {
     if (label == nullptr) return false;
@@ -275,6 +298,9 @@ int wmain(int argc, wchar_t** argv)
             SendMessageW(preferences, WM_COMMAND, 1005, 0);
             require(hasText(preferences, L"XxSnap"), 70);
             require(hasPrefix(preferences, L"问题反馈或技术支持"), 71);
+            require(labelUsesParentBackground(
+                staticChildWithType(preferences, SS_ICON),
+                RGB(246, 246, 246)), 75);
             auto persistenceProbe = originalSettings;
             persistenceProbe.filenameTemplate = L"qa_{yyyyMMdd}";
             persistenceProbe.updateCheckIntervalHours = 6;
